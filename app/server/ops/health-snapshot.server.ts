@@ -12,6 +12,7 @@ import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.serv
 import { getBuildInfo, type BuildInfo } from "./build-info.server";
 import { cachedDataRootSpace, type DiskSpace } from "./disk-space.server";
 import { maintenanceState, type MaintenanceState } from "./maintenance.server";
+import { cachedToolchain, type Toolchain } from "./toolchain.server";
 
 /**
  * The instance's ops reading, assembled once (ruling 107).
@@ -78,6 +79,15 @@ export interface HealthSnapshot {
    * One store, every reader.
    */
   quota: BackendQuotaRow[];
+  /**
+   * Ruling 182 (pass 36, G36-4): what this host can run — the versions of the
+   * tools an agent's shell finds (null when absent), the pinned CLI packages,
+   * and whether a sandboxed Codex run can exec at all. Probed once per
+   * process; the same verdict `startRun` reads to refuse a sandboxed Codex
+   * dispatch with a named remedy. Informational here, like `browser`: a host
+   * that runs no Codex is a correct host, so it never degrades health.
+   */
+  toolchain: Toolchain;
 }
 
 /**
@@ -166,5 +176,8 @@ export function healthSnapshot(
     maintenance: maintenanceState(),
     build: getBuildInfo(),
     quota: opts.principal ? quota : stripQuotaPrincipals(quota),
+    // LAST, by the key-order contract above. Memoized: the first call (boot's
+    // integrity line, normally) pays the probe once.
+    toolchain: cachedToolchain(),
   };
 }

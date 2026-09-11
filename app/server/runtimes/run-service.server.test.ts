@@ -49,6 +49,11 @@ import {
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
+import {
+  HERMETIC_TOOLCHAIN,
+  primeHermeticToolchain,
+  primeToolchain,
+} from "../../../test-support/toolchain";
 
 // SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
 // mounting it assert how the service ROUTES the dictionary — key-derived
@@ -568,6 +573,111 @@ describe("a run with no credential principal (ruling 127)", () => {
     });
   });
 
+});
+
+describe("ruling 182: a sandboxed Codex run is refused while the host's sandbox cannot start", () => {
+  const BWRAP = "bwrap: No permissions to create a new namespace";
+  beforeEach(() => {
+    primeToolchain({ ...HERMETIC_TOOLCHAIN, codexSandbox: { ok: false, detail: BWRAP } });
+  });
+  afterEach(primeHermeticToolchain);
+
+  function codexRun(input: Partial<TestRunInput> & Pick<TestRunInput, "kind" | "role">) {
+    return startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      ...input,
+    });
+  }
+
+  it("a write-withheld run (read-only sandbox) is refused as run·unavailable, naming the sandbox's own words and the remedy", async () => {
+    // F36-1 / G36-4: without this the run started, bubblewrap refused its
+    // first shell command, and the model reported the environment failure as
+    // a verdict. Canary: skip the probe read in `startRun` and the run starts
+    // on the fake runtime instead of ending here.
+    const { runId } = await codexRun({
+      role: "Code reviewer",
+      kind: "reviewer",
+      disallowedTools: ["Bash", "Edit", "Write"],
+    });
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("error");
+    expect(run.credential_user_id).toBe(store.users.arda.id);
+    const lines = listRunLines(store.db, runId);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.display.ev).toBe("err");
+    expect(lines[0]!.display.tag).toBe("run·unavailable");
+    const text = lines[0]!.display.text ?? "";
+    expect(text).toContain(`Codex sandbox unavailable on this host: ${BWRAP}.`);
+    expect(text).toContain("Fix the deployment (see docs/operations/deployment.md, seccomp) or grant the run full access.");
+    expect(text).toContain("No agent process was started.");
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    expect(runFailureReason(store.db, runId)?.kind).toBe("unavailable");
+    // No process: the fake runtime saw no spec for this run.
+    expect(lastRunSpec()?.runId).not.toBe(runId);
+    // The audit row says so, permanently.
+    const started = listAuditEvents(store.db).find(
+      (e) => e.action === "runtime.run.started" && e.subjectId === runId,
+    );
+    expect(started?.details).toMatchObject({ failedUnavailable: true });
+  });
+
+  it("an operator turn (read-only) and a write-granted supporting run (workspace-write) are refused the same way", async () => {
+    const operator = await codexRun({ role: "Operator", kind: "operator", autonomous: true });
+    expect(getRun(store.db, operator.runId)!.state).toBe("error");
+    expect(listRunLines(store.db, operator.runId)[0]!.display.tag).toBe("run·unavailable");
+    const supporting = await codexRun({ role: "Tester", kind: "reviewer", autonomous: true });
+    expect(getRun(store.db, supporting.runId)!.state).toBe("error");
+    expect(listRunLines(store.db, supporting.runId)[0]!.display.text).toContain(
+      "Codex sandbox unavailable on this host",
+    );
+  });
+
+  it("a fully-autonomous deliverer with egress (danger-full-access) is not refused: it never touches the sandbox", async () => {
+    queueFakeRun(
+      instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }], "codex"),
+    );
+    const { runId } = await codexRun({ role: "Developer", kind: "primary", autonomous: true });
+    await settle();
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(lastRunSpec()?.runId).toBe(runId);
+  });
+
+  it("a Claude run is never asked about the Codex sandbox", async () => {
+    queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Code reviewer",
+      kind: "reviewer",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      disallowedTools: ["Bash", "Edit", "Write"],
+    });
+    await settle();
+    expect(getRun(store.db, runId)!.state).toBe("finished");
+  });
+
+  it("with the sandbox probe green, the same sandboxed run starts", async () => {
+    primeHermeticToolchain();
+    queueFakeRun(
+      instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }], "codex"),
+    );
+    const { runId } = await codexRun({
+      role: "Code reviewer",
+      kind: "reviewer",
+      disallowedTools: ["Bash", "Edit", "Write"],
+    });
+    await settle();
+    expect(getRun(store.db, runId)!.state).toBe("finished");
+  });
 });
 
 describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {

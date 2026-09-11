@@ -56,6 +56,7 @@ Key order is part of the contract:
 | `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1, pass 32) |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in the stock image |
+| `toolchain` | (last, ruling 182) `{ node, npm, git, python3, go, codexCli, claudeAgentSdk, codexSandbox: { ok, detail } }` — each version a string or `null` when that tool is not installed; `codexSandbox` is the once-per-process verdict of the CLI's own sandbox helper, with the sandbox's first stderr line as `detail` when it failed (`bwrap: No permissions to create a new namespace` under Docker's default seccomp profile). Never `degraded`: a host that runs no Codex is a correct host; a confined Codex run is refused with the remedy instead |
 
 Status codes: the bare URL is a **liveness** probe and returns `200` even when degraded;
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while
@@ -351,6 +352,34 @@ recommendation is open. Nothing is owed by anyone while it waits.
   (capped 3 per 30 min); finished runs whose completion never posted are replayed. This
   is why `task.agent.replied` and `runtime.operator.plan_executed` audit rows are exempt
   from retention.
+- **`bwrap: No permissions to create a new namespace`** (ruling 182) — in a Codex run's
+  console at its first shell command, in the boot log as the WARN `codex sandbox
+  unavailable on this host`, or as `toolchain.codexSandbox.ok: false` on
+  `/resources/health` and `instance_health`. The Codex CLI confines every run below full
+  access with bubblewrap, which needs an unprivileged user namespace, and Docker's default
+  seccomp profile refuses `unshare(CLONE_NEWUSER)` to the non-root app user. Symptoms
+  before the probe existed (F36-1): every Codex reviewer and supporting run recorded
+  `request-changes` for "missing evidence" on correct deliveries while fully-autonomous
+  deliverers (no sandbox) built fine. Since the probe, a confined Codex run is refused
+  before any process starts, as an honest `run·unavailable` error run whose text names
+  the sandbox's own words and the remedy: run the container with
+  `security_opt: [seccomp=unconfined]` as `compose.yml` does, recreate it (`docker compose
+  up -d`; a restart keeps the old profile), and confirm with `docker compose exec -T app
+  unshare -U true`. A host kernel that disables unprivileged user namespaces
+  (`kernel.unprivileged_userns_clone=0`, `user.max_user_namespaces=0`) fails the same way
+  and is fixed on the host, not in compose. The other remedy the message names — grant the
+  run full access — is a profile decision (a fully-autonomous deliverer with egress runs
+  unsandboxed), not an operator one. See
+  [deployment.md — Codex sandbox (seccomp)](deployment.md#codex-sandbox-seccomp).
+- **A Codex run says `codex-linux-sandbox` is missing or `launch rejected … No such file or
+  directory` mid-run** (F36-3) — the CLI's exec helpers live in ONE directory per
+  `CODEX_HOME` and every new process of that home replaces it. Ruling 181 gives every run
+  a private `CODEX_HOME` (`runtimes/users/<id>/codex-home/runs/<runId>/`, removed at
+  settle), so this cannot recur on the current image; on an older one it means two Codex
+  runs of one person overlapped. A `runs/` directory that survives with no live run is a
+  crash's leftover and is replaced the next time that run id is prepared; deleting it by
+  hand while the app is stopped is safe (the shared home's `auth.json` and `sessions/` are
+  never inside it, only a copy and links).
 - A settled run leaves no live process (ruling 174). Every agent child carries
   `VIBERR_RUN_ID=<runId>`, and when a run settles, or boot finalizes it as an orphan,
   Viberr SIGTERMs whatever still carries that id, waits 5 s and SIGKILLs the rest. The

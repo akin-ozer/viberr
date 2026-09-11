@@ -17,6 +17,9 @@ import {
   type CodexThread,
 } from "./codex-runtime.server";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { ensureUserBackendHome } from "./user-homes.server";
 import { insertRunLine, upsertRun } from "./run-store.server";
 import { runFailureReason } from "../tasks/agent-reply.server";
 import { resetEnvCacheForTests } from "../config/env.server";
@@ -1654,6 +1657,125 @@ describe("codex MCP write-tool denials (ruling 176)", () => {
  * started carries. The CLI inherits its full env; the model's shell and each
  * stdio server get only what is declared, so the marker is declared for both.
  */
+describe("per-run CODEX_HOME (ruling 181)", () => {
+  const homes = createTestDbContext();
+  afterEach(homes.cleanup);
+
+  /** A fake whose stream waits for `release()` before it completes, so a test
+   *  can look at the run home WHILE the CLI would be running. */
+  function gatedCodex() {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let factoryOpts: CodexOptions | undefined;
+    const thread: CodexThread = {
+      id: "0199a1f3-4c02-7d31",
+      async runStreamed() {
+        const gen = (async function* () {
+          await gate;
+          yield { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
+        })();
+        return { events: asSdkEvents(gen) };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    return {
+      factory: (options?: CodexOptions) => {
+        factoryOpts = options;
+        return client;
+      },
+      factoryOptions: () => factoryOpts,
+      release: () => release(),
+    };
+  }
+
+  it("spawns the CLI in a private run home seeded from the person's home, shares the state db, and carries the refreshed sign-in back when the run settles", async () => {
+    // F36-3 / Q36-11 (a): the person's shared codex-home is what
+    // `runCredentialFor` puts on spec.env; the adapter forks a per-run home
+    // off it so concurrent runs never share the CLI's `tmp/arg0` helper dir.
+    // Canary: hand the SDK `spec.env.CODEX_HOME` unchanged and the first
+    // expectation reads the shared home back.
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    writeFileSync(path.join(shared, "auth.json"), '{"tokens":"before"}');
+    const run = gatedCodex();
+    let exit: RunExit | undefined;
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      {
+        ...SPEC,
+        runId: "run_home1",
+        env: { CODEX_HOME: shared, VIBERR_RUN_ID: "run_home1" },
+      },
+      { onLine: () => {}, onExit: (e) => { exit = e; } },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const env = run.factoryOptions()?.env;
+    const runHome = path.join(shared, "runs", "run_home1");
+    expect(env?.CODEX_HOME).toBe(runHome);
+    // The CLI's thread/state db stays the person's, so resume and history
+    // keep working across runs.
+    expect(env?.CODEX_SQLITE_HOME).toBe(shared);
+    expect(env?.VIBERR_RUN_ID).toBe("run_home1");
+    expect(env?.PATH).toBe("/usr/bin");
+    // Live: the run home exists, seeded from the shared one.
+    expect(existsSync(runHome)).toBe(true);
+    expect(readFileSync(path.join(runHome, "auth.json"), "utf8")).toBe('{"tokens":"before"}');
+    // The CLI refreshes its token inside the run home…
+    writeFileSync(path.join(runHome, "auth.json"), '{"tokens":"after"}');
+
+    run.release();
+    await drain();
+    expect(exit?.outcome).toBe("finished");
+    // …and the settle carried it back and removed the run home.
+    expect(existsSync(runHome)).toBe(false);
+    expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"after"}');
+  });
+
+  it("removes the run home when the run is interrupted, too", async () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    const client: CodexClient = {
+      startThread: () => ({
+        id: "t",
+        async runStreamed(_input, turnOptions) {
+          return { events: stalledEvents(turnOptions?.signal) };
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not resumed");
+      },
+    };
+    let exit: RunExit | undefined;
+    const handle = createCodexAdapter({ codexFactory: () => client }).start(
+      { ...SPEC, runId: "run_home2", env: { CODEX_HOME: shared } },
+      { onLine: () => {}, onExit: (e) => { exit = e; } },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const runHome = path.join(shared, "runs", "run_home2");
+    expect(existsSync(runHome)).toBe(true);
+    handle.interrupt();
+    await drain();
+    expect(exit?.outcome).toBe("interrupted");
+    expect(existsSync(runHome)).toBe(false);
+  });
+
+  it("a run whose spec carries no home (no principal env) forks nothing", async () => {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    expect(run.factoryOptions()?.env?.CODEX_HOME).toBeUndefined();
+    expect(run.factoryOptions()?.env?.CODEX_SQLITE_HOME).toBeUndefined();
+  });
+});
+
 describe("codex run marker and settle sweep (ruling 174)", () => {
   const COMPLETED = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
   const MARKED: RunSpec = { ...SPEC, runId: "run_marked", env: { VIBERR_RUN_ID: "run_marked" } };

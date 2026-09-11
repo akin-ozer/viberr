@@ -225,6 +225,19 @@ const HEALTH_REPLY = z.object({
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
   // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
   browserDetail: z.string().optional(),
+  // Ruling 182: what this host can run — tool versions (null when absent) and
+  // whether a sandboxed Codex run can exec at all, with the CLI's own words
+  // when it cannot. Inherited from `healthSnapshot`, never a second probe.
+  toolchain: z.strictObject({
+    node: z.string().nullable(),
+    npm: z.string().nullable(),
+    git: z.string().nullable(),
+    python3: z.string().nullable(),
+    go: z.string().nullable(),
+    codexCli: z.string().nullable(),
+    claudeAgentSdk: z.string().nullable(),
+    codexSandbox: z.strictObject({ ok: z.boolean(), detail: z.string() }),
+  }),
   // F32-9 (pass 32): what each backend last told us — the reading the
   // Insights page shows, so the controller cannot answer "no quota exhaustion
   // flagged" from a poorer source than the admin's own page.
@@ -346,6 +359,10 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
     // F32-9: the quota/credential store rides along, one row per backend.
     expect(body.quota.map((q) => q.backend)).toEqual(["claude", "codex"]);
+    // Ruling 182: the toolchain and the Codex sandbox verdict, the same
+    // reading the health route serves — the controller answers "can a
+    // sandboxed Codex run exec here" from the probe, not from a guess.
+    expect(body.toolchain).toEqual(snapshot.toolchain);
   });
 
   it("ruling 130(d): instance_health carries the refusal's principal, which the unauthenticated body strips", async () => {

@@ -20,6 +20,7 @@ import {
   filteredSpawnEnv,
 } from "./runtime-registry.server";
 import { runCredentialFor } from "./backend-credentials.server";
+import { codexRunHomeDir } from "./user-homes.server";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -64,9 +65,12 @@ async function withAmbientHomes<T>(body: () => T | Promise<T>): Promise<T> {
   const previous = {
     CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
     CODEX_HOME: process.env.CODEX_HOME,
+    CODEX_SQLITE_HOME: process.env.CODEX_SQLITE_HOME,
   };
   process.env.CLAUDE_CONFIG_DIR = "/data/runtimes/claude-home";
   process.env.CODEX_HOME = "/data/runtimes/codex-home";
+  // Ruling 181: the CLI's state-db location is a home too.
+  process.env.CODEX_SQLITE_HOME = "/data/runtimes/codex-home";
   try {
     return await body();
   } finally {
@@ -348,12 +352,19 @@ describe("a run's child env carries exactly its principal's credential", () => {
     );
     expect(claudeRun.claude?.CLAUDE_CONFIG_DIR).toBe(claudeCredential.homeDir);
     expect(claudeRun.claude?.CODEX_HOME).toBeUndefined();
+    expect(claudeRun.claude?.CODEX_SQLITE_HOME).toBeUndefined();
 
     const codexCredential = runCredentialFor(db, "u_ambient", "codex", dataRoot);
     const codexRun = await withAmbientHomes(() =>
       startWithEnv(codexCredential.env),
     );
-    expect(codexRun.codex?.CODEX_HOME).toBe(codexCredential.homeDir);
+    // Ruling 181: the child's CODEX_HOME is the run's private fork UNDER the
+    // principal's home, and the state db stays the principal's — never the
+    // ambient `/data/runtimes/codex-home` planted on the server.
+    expect(codexRun.codex?.CODEX_HOME).toBe(
+      codexRunHomeDir(codexCredential.homeDir, "run_principal"),
+    );
+    expect(codexRun.codex?.CODEX_SQLITE_HOME).toBe(codexCredential.homeDir);
     expect(codexRun.codex?.CLAUDE_CONFIG_DIR).toBeUndefined();
   });
 
@@ -376,7 +387,9 @@ describe("a run's child env carries exactly its principal's credential", () => {
 
     const child = captured.codex;
     expect(child?.CODEX_API_KEY).toBe(credential.secrets[0]);
-    expect(child?.CODEX_HOME).toBe(credential.homeDir);
+    // Ruling 181: the run's fork of the principal's home, the state db shared.
+    expect(child?.CODEX_HOME).toBe(codexRunHomeDir(credential.homeDir, "run_principal"));
+    expect(child?.CODEX_SQLITE_HOME).toBe(credential.homeDir);
     expect(child?.OPENAI_API_KEY).toBeUndefined();
     expect(child?.CODEX_ACCESS_TOKEN).toBeUndefined();
     const credentialKeys = Object.keys(child ?? {}).filter((key) =>

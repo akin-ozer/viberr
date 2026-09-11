@@ -105,6 +105,28 @@ alike. There is no fallback engine and no other account to fall back to.
   (`user-homes.server.ts`); the user id is path-checked against
   `/^[A-Za-z0-9_-]{1,64}$/` first. The deployment-wide `runtimes/claude-home` /
   `runtimes/codex-home` and the host `~/.codex` mount are gone.
+- **Every Codex run gets a private `CODEX_HOME` (ruling 181).** The Codex CLI extracts
+  its exec helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into
+  ONE directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new
+  process of the same home replaces it; with one `codex-home` per person, concurrent
+  sandboxed runs of one person (a reviewer, the operator, a developer) deleted each
+  other's helper mid-run (F36-3). So the Codex adapter forks
+  `<codex-home>/runs/<runId>/` at spawn (`prepareCodexRunHome`, `user-homes.server.ts`)
+  and hands it to the CLI as `CODEX_HOME`: `auth.json` and `config.toml` are **copied**
+  in when present (a copy, so two runs never write one shared file through a link);
+  `sessions/`, `skills/` and `memories/` are **symlinks** to the shared home's
+  directories, created first, so a rollout the CLI writes lands where
+  `probeSessionContinuity`, the exporter and the retention sweep look; `CODEX_SQLITE_HOME`
+  is set to the shared home so the CLI's thread/state database stays the person's; `tmp/`
+  is whatever the CLI creates inside the run home, private by construction. When the run
+  settles — finished, failed, interrupted or crashed, the adapter's one `settle` — the
+  run's `auth.json` is copied back to the shared home only when its bytes changed, under a
+  per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s is
+  broken), only while the shared file still exists (a disconnect mid-run is not undone),
+  and the run directory is deleted. Resume is unchanged: the SDK reads the rollout through
+  the symlinked `sessions/`. `runCredentialFor` still names the SHARED home on
+  `spec.env.CODEX_HOME`; the fork is the adapter's, so every path that builds a Codex
+  spec (specialist, operator, controller, resume, scheduled, recovery) gets it.
 - `runCredentialFor(db, userId, backend)` builds what the run's child env carries: the
   home always; `ANTHROPIC_API_KEY` (claude), `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`
   (codex) only for a pasted credential. In both codex secret cases `OPENAI_API_KEY` is
@@ -114,7 +136,9 @@ alike. There is no fallback engine and no other account to fall back to.
   set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), **both vendor
   homes** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` — neither is credential-shaped, but a home
   is where a vendor binary keeps its credential, so an ambient one would let a run billed
-  to one person authenticate as whoever a leftover sign-in file names) **and every name
+  to one person authenticate as whoever a leftover sign-in file names — and, since ruling
+  181, `CODEX_SQLITE_HOME`, the CLI's state-db location, which the Codex adapter sets per
+  run to the principal's shared home) **and every name
   the app's own env schema declares** (`ENV_KEYS`: `NODE_ENV`, `PORT`, `VIBERR_DATA_ROOT`,
   `BETTER_AUTH_URL`, the OAuth client ids, every `VIBERR_*` knob; ruling 142 — an agent
   works in the project's repository, not in Viberr's process, and the container's
@@ -331,6 +355,10 @@ connecting a different account there (ruling 165).
 
 ### 2.5 Codex adapter
 
+- The CLI's `CODEX_HOME` is the run's private fork of the principal's home,
+  `<codex-home>/runs/<runId>/`, with `CODEX_SQLITE_HOME` pointed at the shared home
+  (ruling 181, §2.2); the adapter builds it right after the spawn env is merged and
+  removes it in `settle`, the one exit every outcome takes.
 - Per-run `config.toml` merged per leaf into `$CODEX_HOME`: `allow_login_shell: false`,
   `project_doc_max_bytes: 0`, bundled skills and skill instructions off, apps/plugins/hooks
   off, memories off, `developer_instructions = systemPrompt`, `mcp_servers`.
@@ -354,6 +382,25 @@ connecting a different account there (ruling 165).
   express read-only plus a writable attachments dir; revisit when the SDK surfaces it.
   `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
   off; withheld egress sets `webSearchMode: "disabled"`.
+- **The sandbox is probed once per process and a confined run is refused while it fails
+  (ruling 182).** Every mode but `danger-full-access` confines the agent's commands with
+  bubblewrap (Linux) or seatbelt (macOS), and bubblewrap needs an unprivileged user
+  namespace that Docker's default seccomp profile denies (F36-1: every reviewer failed at
+  its first command and reported the environment failure as a verdict). So
+  `app/server/ops/toolchain.server.ts` runs the CLI's own sandbox helper once — `codex
+  sandbox --permission-profile <probe> -C <work> -- /bin/echo <nonce>` in a throwaway home
+  under `runtimes/codex-sandbox-probe/` (not the OS temp dir, which the CLI refuses for
+  its helpers), with a profile that reads `/` and writes the workdir, network off — and
+  keeps the verdict beside the host's tool versions. `startRun` reads it after the
+  credential: a Codex spec whose `resolveCodexSandboxMode` is below `danger-full-access`
+  ends as a `run·unavailable` error run through `failRunUnavailable` — `Codex sandbox
+  unavailable on this host: <detail>. Fix the deployment (see
+  docs/operations/deployment.md, seccomp) or grant the run full access. No agent process
+  was started.` — with `failedUnavailable` on the audit row, exactly the credential
+  refusal's shape (§3.5 "unavailable"). A fully-autonomous deliverer with egress is never
+  asked; a Claude run never is. Boot resolves the reading first (its WARN names the
+  remedy), `healthSnapshot` appends it LAST as `toolchain`, and `instance_health` inherits
+  it. The unit suite never probes (`test-support/toolchain.ts`).
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
 - Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`
