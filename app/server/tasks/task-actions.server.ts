@@ -1957,6 +1957,7 @@ export async function commentToAgent(
       if (confinement.mcpToolDenials) resume.mcpToolDenials = confinement.mcpToolDenials;
       resume.env = confinement.env;
       if (confinement.skills) resume.skills = confinement.skills;
+      if (confinement.skillPlugin) resume.skillPlugin = confinement.skillPlugin;
       if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
       if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a

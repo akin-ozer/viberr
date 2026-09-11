@@ -618,7 +618,7 @@ describe("reconcileTask", () => {
     expect(first.map((n) => n.title)).toContain(
       "Branch name collision on VIB-301: PR #318 is not this task's",
     );
-    const notice = first.find((n) => n.title.startsWith("Branch name collision"))!;
+    const notice = first.find((n) => (n.title ?? "").startsWith("Branch name collision"))!;
     // The inbox text IS the collision note: whose PR it is not, and the remedy.
     expect(notice.text).toContain("is NOT VIB-301's review PR");
     expect(notice.text).toContain("`resolve_remote_collision`");
@@ -630,7 +630,7 @@ describe("reconcileTask", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
     );
-    expect(policyNotes().filter((n) => n.title.startsWith("Branch name collision"))).toHaveLength(1);
+    expect(policyNotes().filter((n) => (n.title ?? "").startsWith("Branch name collision"))).toHaveLength(1);
   });
 
   it("U36-7: clearing a collision writes ONE event that names the closed PR and the deleted branch — even when GitHub refused the explicit close", async () => {

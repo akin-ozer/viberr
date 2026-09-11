@@ -81,6 +81,7 @@ import {
   type RunPrincipalRefusal,
 } from "./run-principal.server";
 import { runMarkerEnv } from "./run-processes.server";
+import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
 import { newId } from "~/shared/ids/new-id.server";
@@ -394,9 +395,12 @@ export interface StartRunInput {
   /** Ruling 176: the org servers' marked write tools this run withholds (see
    *  `RunSpec.mcpToolDenials`), as the MCP resolver returned them. */
   mcpToolDenials?: McpToolDenial[];
-  /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
-   *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
+  /** Granted skills mounted for the run (`mountGrantedSkills`). Claude only —
+   *  the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
+  /** Ruling 180: the plugin directory carrying `skills`; removed when the run
+   *  settles. See RunSpec.skillPlugin. */
+  skillPlugin?: SkillPlugin;
   /** The run's `execute-code-or-write-repo` grant is withheld — enforced on
    *  BOTH backends (parity ruling 2026-08-31): Claude via the denylist, Codex
    *  via the read-only sandbox (resolveCodexSandboxMode). Omit to let
@@ -964,6 +968,7 @@ export async function startRun(
   if (denied.length) spec.disallowedTools = denied;
   if (mcpToolDenials.length) spec.mcpToolDenials = mcpToolDenials;
   if (input.skills && input.skills.length) spec.skills = input.skills;
+  if (input.skillPlugin) spec.skillPlugin = input.skillPlugin;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
   // it, and since ruling 101 the Codex read-only sandbox does too
   // (resolveCodexSandboxMode; the evidence carve-out is the disclosed
@@ -1016,6 +1021,8 @@ export async function startRun(
       drainRunQueue(db);
     }
     failRunUnavailable(db, spec, credential.message, reservation?.startedAt);
+    // Ruling 180: a refused run never spawns, so its plugin has no reader.
+    removeSkillPlugin(spec.skillPlugin);
     return { runId };
   }
 
@@ -1413,13 +1420,16 @@ export interface ResumeRunInput {
   /** Ruling 176: re-apply the org servers' withheld write tools on resume, or
    *  a resumed read-only agent would get back the tools its fresh run lacked. */
   mcpToolDenials?: McpToolDenial[];
-  /** Re-apply the granted skills mounted into the workspace on resume. The
-   *  workspace (and its mount) survives between runs, but the SDK options do
-   *  not: without this a resumed @mention run would enable NO skill while its
-   *  persona — built by the same `resolveResumeConfinement` — already left the
-   *  bodies out for native delivery, so the agent would silently lose its
-   *  granted craft mid-thread (the XS-1 fresh-vs-resume parity class). */
+  /** Re-apply the granted skills mounted for the resumed run. A resume
+   *  re-mounts (ruling 180: one plugin per run), but the SDK options do not
+   *  carry over: without this a resumed @mention run would enable NO skill
+   *  while its persona — built by the same `resolveResumeConfinement` —
+   *  already left the bodies out for native delivery, so the agent would
+   *  silently lose its granted craft mid-thread (the XS-1 fresh-vs-resume
+   *  parity class). */
   skills?: string[];
+  /** Ruling 180: the resumed run's own plugin directory (see `skills`). */
+  skillPlugin?: SkillPlugin;
   /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
    *  omit this while accepting every other half of the run's tool policy, so
    *  a caller that curated an allowlist (the operator does) silently lost it
@@ -1468,6 +1478,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.disallowedTools) target.disallowedTools = input.disallowedTools;
   if (input.mcpToolDenials) target.mcpToolDenials = input.mcpToolDenials;
   if (input.skills) target.skills = input.skills;
+  if (input.skillPlugin) target.skillPlugin = input.skillPlugin;
   if (input.allowedTools) target.allowedTools = input.allowedTools;
   if (input.env) target.env = input.env;
   if (input.mcpServers) target.mcpServers = input.mcpServers;
@@ -1833,6 +1844,9 @@ function launch(
         });
       }
       state.handles.delete(spec.runId);
+      // Ruling 180: the settled run's skill plugin goes with it — the CLI
+      // that read it has exited, and nothing else names the path.
+      removeSkillPlugin(spec.skillPlugin);
       // This run's slot is now free — promote the oldest queued run behind the
       // concurrency cap. Before the completion callback, so a chain of queued
       // runs keeps flowing even if the callback throws.

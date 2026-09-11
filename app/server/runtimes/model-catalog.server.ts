@@ -355,10 +355,18 @@ export function foreignModelBackend(
  * instead of pre-swapping, which is what used to hide the substitution from
  * run-service altogether.
  */
+export interface ModelSubstitution {
+  /** The model the run executes. */
+  model: string;
+  /** The backend that knows the requested id when THIS one does not; null
+   *  when no substitution happened. */
+  foreignBackend: RealBackend | null;
+}
+
 export function substituteRunModel(
   backend: RealBackend,
   model: string,
-): { model: string; foreignBackend: RealBackend | null } {
+): ModelSubstitution {
   const foreignBackend = foreignModelBackend(backend, model);
   return {
     model: foreignBackend ? defaultModelFor(backend) : model,

@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -58,6 +57,7 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
   lastRunSpec,
+  queueFakeRun,
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
 import {
@@ -3036,7 +3036,7 @@ describe("buildSpecialistPersona — attached resources", () => {
 
     // Mounted: announced (with its provenance, so the agent does not read its
     // own workspace files as an injection attempt) but NOT inlined.
-    expect(persona).toContain("Attached skills (trusted — installed in your workspace)");
+    expect(persona).toContain("Attached skills (trusted — attached to this run as the `viberr` plugin)");
     expect(persona).toContain("mounted-craft");
     expect(persona).not.toContain("SENTINEL-MOUNTED-BODY");
     expect(persona).not.toContain("mounted-craft (skill)");
@@ -3409,26 +3409,49 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     }
   }
 
-  it("mounts the grant into the workspace, passes it to the SDK, and stops injecting the body", async () => {
-    // End to end on the fresh-run path: store grant → workspace mount → RunSpec.
+  it("mounts the grant as the run's plugin beside the workspace, passes it to the SDK, stops injecting the body, and removes it when the run settles", async () => {
+    // End to end on the fresh-run path: store grant → plugin mount → RunSpec.
+    // Ruling 180 (F36-9): the plugin sits BESIDE the checkout, named by the
+    // run, and nothing of Viberr's lands inside the tree the project's own
+    // tools scan; run-service removes the plugin when the run settles.
     // Canary: drop `skills: skillMount.mounted` from the startRun call and the
     // spec assertion fails; drop `nativeSkills` from buildSpecialistPersona and
-    // the body reappears in the system prompt.
+    // the body reappears in the system prompt; drop `removeSkillPlugin` from
+    // the exit handler and the directory outlives the run.
     const ws = await workspaceCheckout();
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await runDev();
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    // A run that stays LIVE, so the plugin can be inspected while it exists.
+    queueFakeRun({ lines: [], keepRunning: true });
+    const run = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
 
-    expect(lastRunSpec()?.skills).toEqual(["conventional-commits"]);
-    const mounted = path.join(ws, ".claude", "skills", "conventional-commits", "SKILL.md");
-    expect(existsSync(mounted)).toBe(true);
+    const spec = lastRunSpec()!;
+    expect(spec.skills).toEqual(["conventional-commits"]);
+    const plugin = path.join(path.dirname(ws), ".viberr-plugins", run.runId);
+    expect(spec.skillPlugin).toEqual({ path: plugin, name: "viberr" });
+    const mounted = path.join(plugin, "skills", "conventional-commits", "SKILL.md");
     expect(readFileSync(mounted, "utf8")).toContain("SENTINEL-SKILL-BODY");
+    // Nothing under the checkout, no exclude entry, and git sees nothing.
+    expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+    expect(readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8")).not.toContain(".claude");
     // The body is NOT in the prompt any more — the SDK loads it on invocation.
-    const sys = lastRunSpec()?.systemPrompt ?? "";
+    const sys = spec.systemPrompt ?? "";
     expect(sys).not.toContain("SENTINEL-SKILL-BODY");
-    expect(sys).toContain("installed in your workspace");
+    expect(sys).toContain("attached to this run as the `viberr` plugin");
+    expect(sys).toContain("`viberr:<name>`");
     expect(sys).toContain("conventional-commits");
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda));
+    expect(existsSync(plugin)).toBe(false);
   });
 
   it("keeps the prompt-text injection on CODEX — its skills channel is severed (LV-13)", async () => {
@@ -3519,10 +3542,17 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
     expect(confinement.skills).toEqual(["conventional-commits"]);
     expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
-    expect(confinement.systemPrompt ?? "").toContain("installed in your workspace");
+    expect(confinement.systemPrompt ?? "").toContain("attached to this run as the `viberr` plugin");
+    // Ruling 180: the resumed run gets its OWN plugin beside the checkout
+    // (a fresh id: the resumed row does not exist yet) and nothing inside it.
+    expect(confinement.skillPlugin?.name).toBe("viberr");
+    expect(path.dirname(confinement.skillPlugin!.path)).toBe(
+      path.join(path.dirname(ws), ".viberr-plugins"),
+    );
     expect(
-      existsSync(path.join(ws, ".claude", "skills", "conventional-commits")),
+      existsSync(path.join(confinement.skillPlugin!.path, "skills", "conventional-commits", "SKILL.md")),
     ).toBe(true);
+    expect(existsSync(path.join(ws, ".claude"))).toBe(false);
   });
 
   it("C02-R3 (pass 32): a RESUMED evidence-granted run keeps its attachments drop — dir, spec field and persona section", async () => {
@@ -3677,29 +3707,40 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       }
     }
 
-    it("Claude: the grant mounts alone — the decoy is in no spec field, no prompt, no workspace", async () => {
+    it("Claude: the grant mounts alone — the decoy is in no spec field, no prompt, no plugin", async () => {
       // Canary: make `mountGrantedSkills` mount the whole store (the "load
       // every skill on disk" regression) and both the `skills` filter and the
-      // workspace-catalog assertions fail.
+      // plugin-catalog assertions fail.
       const ws = await workspaceCheckout();
       writeOrgSkills();
       deployWithSkills(["developer-expertise"]);
 
-      await runDev();
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      // A run that stays LIVE, so the plugin can be inspected while it exists
+      // (run-service removes it the moment the run settles, ruling 180).
+      queueFakeRun({ lines: [], keepRunning: true });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
 
       const spec = lastRunSpec()!;
       // (1) the native SDK channel (R18-5 / ruling 51) — exactly the grant.
       expect(spec.skills).toEqual(["developer-expertise"]);
-      // (2) the catalog the SDK resolves that filter against — exactly the grant.
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
-        "developer-expertise",
-      ]);
+      // (2) the plugin the SDK resolves that filter against — exactly the grant,
+      //     beside the checkout and never inside it (ruling 180).
+      const plugin = spec.skillPlugin!.path;
+      expect(path.dirname(plugin)).toBe(path.join(path.dirname(ws), ".viberr-plugins"));
+      expect(readdirSync(path.join(plugin, "skills"))).toEqual(["developer-expertise"]);
       expect(
-        readFileSync(
-          path.join(ws, ".claude", "skills", "developer-expertise", "SKILL.md"),
-          "utf8",
-        ),
+        readFileSync(path.join(plugin, "skills", "developer-expertise", "SKILL.md"), "utf8"),
       ).toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actor(store.users.arda));
       // (3) NOTHING the run is handed names the decoy or carries its body —
       // system prompt, turn prompt, tool policy, env, MCP config, all of it.
       const assembled = JSON.stringify(spec);
@@ -3782,31 +3823,22 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       await runDev();
 
-      // The repo's own catalog is gone from the working tree — F31-C4: the
-      // settings file that remains is VIBERR'S OWN (CLAUDE.md excludes only,
-      // never hooks), written by the mount after the strip.
-      const rewrittenSettings = z
-        .record(z.string(), z.unknown())
-        .parse(
-          JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")),
-        );
-      expect(Object.keys(rewrittenSettings)).toEqual(["claudeMdExcludes"]);
-      expect(existsSync(path.join(ws, ".claude", "skills", "repo-rogue"))).toBe(false);
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
-        "granted-craft",
-      ]);
+      // The repo's own catalog is gone from the working tree — whole (ruling
+      // 180): no settings file of anyone's remains, hooks included, and the
+      // grant lives in the run's plugin beside the checkout instead.
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(lastRunSpec()?.skills).toEqual(["granted-craft"]);
       // …and nothing of it reached the run.
       const assembled = JSON.stringify(lastRunSpec());
       expect(assembled).not.toContain("repo-rogue");
       expect(assembled).not.toContain("SENTINEL-REPO-ROGUE-SKILL");
       expect(assembled).not.toContain("SENTINEL-REPO-HOOK");
-      // R18-3's delivery half: git sees no change (skip-worktree) and the mount
-      // is excluded, so delivering from this workspace ships no catalog edit.
+      // R18-3's delivery half: git sees no change (skip-worktree), so
+      // delivering from this workspace ships no catalog edit — and no exclude
+      // entry is needed for a mount that never enters the tree.
       const status = await exec("git", ["-C", ws, "status", "--porcelain"]);
       expect(status.stdout).not.toContain(".claude");
-      expect(
-        readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8"),
-      ).toContain(".claude/");
+      expect(readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8")).not.toContain(".claude");
     });
 
     it("strips it even when the profile grants NO skills (the mount never runs)", async () => {
@@ -3860,17 +3892,11 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       );
 
       expect(confinement.skills).toEqual(["granted-craft"]);
-      // F31-C4: the agent-written hooks settings died with the strip; the file
-      // now present is viberr's excludes-only rewrite.
-      const resumedSettings = readFileSync(
-        path.join(ws, ".claude", "settings.json"),
-        "utf8",
-      );
-      expect(resumedSettings).not.toContain("SENTINEL-AGENT-HOOK");
-      expect(
-        Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(resumedSettings))),
-      ).toEqual(["claudeMdExcludes"]);
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+      // The agent-written hooks settings died with the strip, and nothing
+      // replaced them (ruling 180: no run reads the checkout as a settings
+      // source); the grant is in the resumed run's own plugin.
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(readdirSync(path.join(confinement.skillPlugin!.path, "skills"))).toEqual([
         "granted-craft",
       ]);
       expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SELF-WRITTEN");
@@ -3951,17 +3977,21 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(spec.skills).toEqual(["critic-craft"]);
       // P8 (pass 25): the reviewer runs in its OWN isolated checkout
       // (`workspace/support/<profileId>/<repo>`), not the delivering tree, so its
-      // skills mount THERE — and the delivering checkout stays untouched.
+      // plugin sits beside THAT checkout (ruling 180) — and the delivering
+      // checkout and its neighbourhood stay untouched.
       const criticWs = path.join(
         path.dirname(ws),
         "support",
         "critic",
         path.basename(ws),
       );
-      expect(readdirSync(path.join(criticWs, ".claude", "skills"))).toEqual([
-        "critic-craft",
-      ]);
-      expect(existsSync(path.join(ws, ".claude", "skills"))).toBe(false);
+      expect(spec.skillPlugin).toEqual({
+        path: path.join(path.dirname(criticWs), ".viberr-plugins", run.runId),
+        name: "viberr",
+      });
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(existsSync(path.join(criticWs, ".claude"))).toBe(false);
+      expect(existsSync(path.join(path.dirname(ws), ".viberr-plugins"))).toBe(false);
       const assembled = JSON.stringify(spec);
       expect(assembled).not.toContain("deliverer-craft");
       expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");

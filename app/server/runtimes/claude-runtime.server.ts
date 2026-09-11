@@ -20,7 +20,7 @@ import {
   type RuntimeAdapter,
 } from "./adapter.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
-import { ensureCatalogSettings, isSdkSkillName } from "./skill-mount.server";
+import { isSdkSkillName, skillPluginInPlace } from "./skill-mount.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
@@ -115,30 +115,30 @@ export interface ClaudeQueryOptions {
   /** Tool denylist — removes tools from the model's context entirely; binds
    *  even under bypassPermissions. */
   disallowedTools?: string[];
-  /** Which filesystem settings to load. `[]` = SDK isolation mode: none of the
-   *  host's `~/.claude` settings tiers leak in. `['project']` names the run's
-   *  own WORKSPACE (cwd = the task checkout, whose `.claude` Viberr strips and
-   *  rewrites) — the only project source a governed run may see. Never `'user'`
-   *  or `'local'`: those are the host machine's tiers (F13). */
+  /** Which filesystem settings to load. ALWAYS `[]` on a Viberr run (SDK
+   *  isolation mode): none of the host's `~/.claude` tiers leak in, and no
+   *  project source is opened over the checkout either — since ruling 180 the
+   *  granted skills arrive through `plugins`, so nothing under cwd needs
+   *  reading. Never `'user'` or `'local'` (the host machine's tiers, F13) and
+   *  never `'project'` (the repository under review's own `.claude` and
+   *  CLAUDE.md at system-prompt tier). */
   settingSources?: string[];
   /** Skills to enable — a CONTEXT FILTER, not a sandbox. `[]` = none listed, so
    *  the model sees no skill and the Skill tool rejects every one. A name list
-   *  enables exactly those (matched on the SKILL.md `name` / directory name) and
-   *  hides the rest, including the SDK's own bundled set. Setting this option
-   *  auto-adds the `Skill` tool to `allowedTools`. */
+   *  enables exactly those (a plugin's skills by their qualified
+   *  `<plugin>:<name>`) and hides the rest, including the SDK's own bundled
+   *  set. Setting this option auto-adds the `Skill` tool to `allowedTools`. */
   skills?: string[];
-  /** Local plugins to load for the session. `[]` = load NONE — closes the
-   *  plugin-marketplace leak channel that `settingSources`/`skills` don't cover
-   *  (F13), so a host-installed plugin's slash-commands/skills never reach a
-   *  Viberr run. */
-  plugins?: { type: "local"; path: string }[];
+  /** Local plugins to load for the session. Ruling 180: exactly the run's own
+   *  skill plugin when it mounted any (`RunSpec.skillPlugin`), else `[]` —
+   *  which also closes the plugin-marketplace leak channel (F13): a
+   *  host-installed plugin's slash-commands/skills never reach a Viberr run.
+   *  `skipMcpDiscovery` keeps a plugin from carrying MCP servers of its own. */
+  plugins?: { type: "local"; path: string; skipMcpDiscovery?: boolean }[];
   /** R18-3: `true` = ignore ambient MCP config (repo `.mcp.json`, user MCP,
    *  plugin MCP) — only the servers Viberr passes via `mcpServers` reach the run.
    *  Governance parity with `settingSources`, for the MCP catalog channel. */
   strictMcpConfig?: boolean;
-  /** Policy-tier settings enforced on the spawned process without writing
-   *  root-owned files. Viberr uses ONE key — see `MANAGED_SETTINGS` below. */
-  managedSettings?: { claudeMdExcludes?: string[] };
   /** Ruling 174: Viberr spawns the CLI itself, as the leader of its own
    *  process group (`claude-spawn.server.ts`), instead of the SDK's local
    *  spawn. */
@@ -463,34 +463,29 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
 
 /**
  * The skills THIS run enables natively — the names above, gated on the one
- * precondition the native channel cannot run without.
+ * precondition the native channel cannot run without: the run's plugin
+ * directory (ruling 180) still holds the manifest the CLI reads.
  *
- * V6 — `settingSources: ['project']` is a single decision with two effects: the
- * SDK discovers `<cwd>/.claude/skills`, and it reads the memory files of the
- * repository under review, at system-prompt tier, ungoverned. The only thing
- * that closes the second is the excludes file `mountGrantedSkills` writes into
- * the same catalog (`managedSettings` is dropped by the SDK — see
- * {@link MANAGED_SETTINGS}). That write used to be best effort: it warned and
- * the run started with the source open anyway.
- *
- * So the adapter never opens the source on faith. It re-checks the file at
- * start, repairs it when the catalog is there without it (the workspace is
- * shared by every engagement on the task, and each of their mounts strips this
- * catalog), and enables NO native skill when neither holds: the run keeps the
+ * The plugin is built beside the checkout by `mountGrantedSkills` moments
+ * before the spawn, and the checkout's neighbourhood is writable by the agent
+ * of any live run on the task. A plugin that went missing in between must not
+ * be handed to the SDK as if it loaded: the CLI would start with a
+ * `--plugin-dir` that resolves to nothing, the filter would list qualified
+ * names nothing provides, and the persona — written on the mount's word —
+ * would announce skills the model cannot invoke. So the adapter re-checks at
+ * start and enables NO native skill when the plugin is gone: the run keeps the
  * fully isolated shape and `Skill` stays denied.
  *
- * What that costs, stated rather than implied. When the MOUNT sees the failure
- * it reports no mounted skills, and the caller's persona then injects every
- * grant as prompt text — the same fallback a run with no checkout gets. When the
- * file goes missing AFTER the mount (this seam's own case, and only if the
- * repair also fails), the persona has already been written on the assumption the
- * skills mounted, so they are announced to the agent and not enabled. C02-R7
- * (pass 32) closes that last gap where it can be closed — in the adapter, at
- * start: the persona was written on the mount's word, so the adapter appends a
- * correction to the system prompt naming the skills it could not enable
+ * What that costs, stated rather than implied. When the MOUNT fails it reports
+ * no mounted skills, and the caller's persona then injects every grant as
+ * prompt text — the same fallback a run with no checkout gets. When the plugin
+ * goes missing AFTER the mount (this seam's own case), the persona has already
+ * been written on the assumption the skills mounted, so they are announced to
+ * the agent and not enabled. C02-R7 (pass 32) closes that last gap where it
+ * can be closed — in the adapter, at start: it appends a correction to the
+ * system prompt naming the skills it could not enable
  * (`droppedSkillsNotice`). The agent then treats them as unavailable instead
- * of invoking a name that never loads; losing craft stays the lesser harm
- * against the repository under review writing the system prompt.
+ * of invoking a name that never loads.
  */
 /** What the start could enable natively, and what it had to drop. */
 export interface NativeSkillsOutcome {
@@ -501,10 +496,10 @@ export interface NativeSkillsOutcome {
 export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   const granted = nativeSkillNames(spec.skills);
   if (granted.length === 0) return { native: [], dropped: [] };
-  if (ensureCatalogSettings(spec.workdir)) return { native: granted, dropped: [] };
+  if (skillPluginInPlace(spec.skillPlugin)) return { native: granted, dropped: [] };
   logger.warn(
-    "no CLAUDE.md excludes in the run workspace — starting with NO native skills so the project settings source stays closed",
-    { runId: spec.runId, workdir: spec.workdir, skills: granted },
+    "the run's skill plugin is missing — starting with NO native skills",
+    { runId: spec.runId, plugin: spec.skillPlugin?.path ?? null, skills: granted },
   );
   return { native: [], dropped: granted };
 }
@@ -513,42 +508,18 @@ export function nativeSkillsForRun(spec: RunSpec): string[] {
   return nativeSkillsOutcome(spec).native;
 }
 
-/** The system-prompt correction for skills the persona announced as installed
+/** The system-prompt correction for skills the persona announced as attached
  *  but the adapter could not enable (see `nativeSkillsOutcome`). */
 export function droppedSkillsNotice(dropped: readonly string[]): string {
   return (
     "\n\n---\n# Attached skills could NOT be enabled on this run\n\n" +
-    `The skills named above as installed in your workspace (${dropped.join(", ")}) ` +
-    "could NOT be enabled for this run: the workspace settings that keep the " +
-    "repository's own CLAUDE.md out of your context could not be established, " +
-    "and Viberr keeps that source closed rather than open it on faith. Treat " +
-    "them as unavailable — do not invoke them by name — and say so in your " +
-    "report if the work needed them."
+    `The skills named above as attached to this run (${dropped.join(", ")}) ` +
+    "could NOT be enabled: the plugin directory Viberr built for them was gone " +
+    "by the time this run started, and Viberr enables no skill it cannot " +
+    "account for. Treat them as unavailable — do not invoke them by name — " +
+    "and say so in your report if the work needed them."
   );
 }
-
-/**
- * Policy-tier settings for a run that opens `settingSources: ['project']`.
- *
- * F31-C4 — VERIFIED live (2026-08-31, in-container canary probe): this
- * channel DOES NOT deliver `claudeMdExcludes`. The SDK filters
- * `managedSettings` restrictive-only against an allowlist ("non-allowlisted
- * keys are dropped regardless", sdk.d.ts), the excludes key is not on it, and
- * the canary CLAUDE.md leaked into the run with exactly this option set. The
- * ingress is CLOSED elsewhere: `mountGrantedSkills` writes the same patterns
- * into `<workspace>/.claude/settings.json` (skill-mount.server.ts,
- * `writeCatalogSettings`), which the project settings source actually loads —
- * the probe's canary flipped to hidden through that file. This constant still
- * rides along as a belt: harmless while dropped, effective the day the SDK
- * allowlists it. The codex leg's equivalent stays `project_doc_max_bytes: 0`.
- *
- * Because this option is inert, it proves nothing about the run: the file is
- * the whole mitigation, and {@link nativeSkillsForRun} is what makes it a
- * precondition of opening the source rather than a hope about it.
- */
-const MANAGED_SETTINGS = {
-  claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
-} satisfies NonNullable<ClaudeQueryOptions["managedSettings"]>;
 
 /** One streaming-input user message (enables Query.interrupt()). */
 async function* singlePrompt(prompt: string): AsyncGenerator<unknown> {
@@ -1263,11 +1234,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         phase(RUN_PHASE.starting, null);
         const queryFn = deps.queryFn ?? (await realQuery());
         const resolvedModel = resolveClaudeModel(spec.model);
-        // The granted skills Viberr MOUNTED into this run's workspace (empty for
-        // a run with no grants, no checkout, or a Codex profile — see below —
-        // and for one whose workspace lost the CLAUDE.md excludes file; those
-        // are `dropped`, and the persona is corrected below).
+        // The granted skills Viberr MOUNTED as this run's plugin (empty for a
+        // run with no grants, no checkout, or a Codex profile — see below —
+        // and for one whose plugin went missing before the start; those are
+        // `dropped`, and the persona is corrected below).
         const { native: nativeSkills, dropped: droppedSkills } = nativeSkillsOutcome(spec);
+        // Set only when the outcome enabled something: `nativeSkillsOutcome`
+        // answers `native` only for a plugin it found in place.
+        const skillPlugin = nativeSkills.length ? spec.skillPlugin : undefined;
         const options: ClaudeQueryOptions = {
           cwd: spec.workdir,
           // Fully autonomous: bypass ALL permission prompts so a
@@ -1289,37 +1263,41 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // SDK isolation: never load the host machine's ~/.claude settings
           // tiers into a Viberr run — a run must see exactly the resources its
           // profile grants, not the operator-user's personal Claude Code
-          // settings/plugins/skills. `plugins: []` names ZERO local plugins
-          // (defense-in-depth for the plugin channel, F13) on EVERY run.
+          // settings/plugins/skills. `settingSources: []` on EVERY run: no host
+          // tier, and no project source over the checkout either (ruling 180),
+          // so the repository under review's `.claude` and CLAUDE.md never
+          // reach the model at system-prompt tier.
           //
           // Two shapes, decided by whether Viberr mounted any granted skill:
           //
           //  · NO granted skills (operator runs, Codex profiles, a run with no
-          //    checkout) — `settingSources: []` drops every filesystem settings
-          //    tier and `skills: []` lists none. HONEST LIMIT (docker-verified
-          //    2026-07-18): `skills: []` does NOT give an empty skill SET — the
-          //    SDK compiles ~16 first-party skills into its binary and a
-          //    standalone deployment (pristine CLAUDE_CONFIG_DIR, no host
-          //    ~/.claude) still lists all 16 in the run's init. That is why
-          //    `BASE_DENIED_BUILTINS` denies the `Skill` TOOL, making them
-          //    UNINVOKABLE.
+          //    checkout) — `skills: []` lists none and `plugins: []` names ZERO
+          //    local plugins (defense-in-depth for the plugin channel, F13).
+          //    HONEST LIMIT (docker-verified 2026-07-18): `skills: []` does NOT
+          //    give an empty skill SET — the SDK compiles ~16 first-party
+          //    skills into its binary and a standalone deployment (pristine
+          //    CLAUDE_CONFIG_DIR, no host ~/.claude) still lists all 16 in the
+          //    run's init. That is why `BASE_DENIED_BUILTINS` denies the
+          //    `Skill` TOOL, making them UNINVOKABLE.
           //
-          //  · GRANTED skills mounted — `settingSources: ['project']` so the SDK
-          //    discovers `<cwd>/.claude/skills/<name>`, and `skills: [<names>]`
-          //    enables exactly those. The filter is what replaces the blanket
-          //    `Skill` deny: an unlisted skill (every bundled one included) is
-          //    hidden from the model and REJECTED by the Skill tool. The project
-          //    source is the run's own workspace checkout, whose `.claude` was
-          //    stripped and rewritten by `mountGrantedSkills` moments earlier —
-          //    and cwd is the repo root, so the SDK's parent walk stops there and
-          //    can never reach the data root or a host `.claude` above it. Still
-          //    NEVER `'user'`/`'local'`: those are the host tiers F13 closed.
-          //    This source also carries the repo's CLAUDE.md: `nativeSkillsForRun`
-          //    is empty unless the excludes file that holds it out is verified in
-          //    place, so the two never come apart.
-          settingSources: nativeSkills.length ? ["project"] : [],
-          skills: nativeSkills,
-          plugins: [],
+          //  · GRANTED skills mounted — ruling 180 (F36-9): the run's plugin
+          //    directory (`<checkout>/../.viberr-plugins/<runId>/`, built by
+          //    `mountGrantedSkills` moments earlier) is the ONE local plugin,
+          //    and `skills: ["<plugin>:<name>", …]` enables exactly its skills
+          //    by their qualified names. The filter is what replaces the
+          //    blanket `Skill` deny: an unlisted skill (every bundled one
+          //    included) is hidden from the model and REJECTED by the Skill
+          //    tool. Nothing of Viberr's lives inside the checkout any more,
+          //    so the project's own tools (`prettier --check .`) see the tree
+          //    exactly as a clean clone. Canaried inside the image 2026-09-11:
+          //    the CLI's init lists `viberr:<name>` and the model invokes it.
+          settingSources: [],
+          skills: skillPlugin
+            ? nativeSkills.map((name) => `${skillPlugin.name}:${name}`)
+            : [],
+          plugins: skillPlugin
+            ? [{ type: "local", path: skillPlugin.path, skipMcpDiscovery: true }]
+            : [],
           // R18-3 (governance parity with settingSources): only Viberr-granted
           // MCP servers reach a run — ignore a repo `.mcp.json`, user MCP config,
           // and plugin MCP. Viberr passes its granted external MCPs + the
@@ -1349,9 +1327,6 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         // Claude union (P13-RT-08).
         const effort = resolveClaudeEffort(spec.effort);
         if (effort) options.effort = effort;
-        // Only for the run that opened `settingSources: ['project']` — see the
-        // MANAGED_SETTINGS docstring for the ingress this closes.
-        if (nativeSkills.length) options.managedSettings = MANAGED_SETTINGS;
         if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
         // Base adapter env, overlaid with any per-run env (e.g. the specialist's
         // GIT_CEILING_DIRECTORIES workspace confinement).
