@@ -164,6 +164,26 @@ export const guardrailSchema = z
   .loose();
 export type Guardrail = z.infer<typeof guardrailSchema>;
 
+/**
+ * Ruling 178 (pass 36, G36-3): one project-level REQUIRED-reviewer rule —
+ * "profile X reviews at stage Y". Before this rule, required-ness was emergent:
+ * a reviewer was required on a task only once the operator engaged it there,
+ * so a task whose operator never engaged the reviewer was acceptable with no
+ * verdict at all. The acceptance gate, the review queue, the operator snapshot
+ * and the controller all read this list; `stageId` names where the review is
+ * run (a non-terminal stage), `profileId` a deployed verdict-capable
+ * specialist. Both are checked by the writers (Settings, the controller tool);
+ * the parser keeps whatever the file says so a stale id is visible, never
+ * silently dropped.
+ */
+export const requiredReviewerSchema = z
+  .object({
+    stageId: z.string().min(1),
+    profileId: z.string().min(1),
+  })
+  .loose();
+export type RequiredReviewerRule = z.infer<typeof requiredReviewerSchema>;
+
 // -------------------------------------------------------- frontmatter
 
 /* Each frontmatter field gets its own named schema. The tolerant parse below
@@ -238,6 +258,7 @@ function cleanAgentGrants(
 }
 const projectCredentialPolicySchema = credentialPolicySchema.nullable();
 const guardrailsSchema = z.array(guardrailSchema);
+const requiredReviewersSchema = z.array(requiredReviewerSchema);
 
 export const projectFrontmatterSchema = z.object({
   name: projectNameSchema,
@@ -253,6 +274,7 @@ export const projectFrontmatterSchema = z.object({
   agents: agentsSchema,
   credentialPolicy: projectCredentialPolicySchema,
   guardrails: guardrailsSchema,
+  requiredReviewers: requiredReviewersSchema,
 });
 export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 
@@ -270,6 +292,7 @@ export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "agents",
   "credentialPolicy",
   "guardrails",
+  "requiredReviewers",
 ];
 
 /** Widened to `string` so the raw-key scan below can test membership without
@@ -482,6 +505,14 @@ export function parseProjectFrontmatter(
     // and an explicitly disabled `delete-branch-after-merge` flipped back to
     // its ON default. The next project write then persisted the empty list.
     guardrails: tolerantArray(diagnostics, data, "guardrails", guardrailsSchema),
+    // Ruling 178: per row for the same reason — an emptied list reads as "no
+    // required reviewer", which silently reopens the acceptance gate.
+    requiredReviewers: tolerantArray(
+      diagnostics,
+      data,
+      "requiredReviewers",
+      requiredReviewersSchema,
+    ),
   };
 
   if (frontmatter.stages.length === 0) {

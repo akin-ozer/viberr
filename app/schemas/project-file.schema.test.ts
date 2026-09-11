@@ -128,3 +128,38 @@ describe("parseProjectFrontmatter — one bad capability grant costs only itself
     ).toBe(false);
   });
 });
+
+/**
+ * Ruling 178 (pass 36, G36-3): `requiredReviewers` is a project rule whose loss
+ * would silently reopen the acceptance gate, so it is parsed per row like the
+ * other lists and defaults to an empty list when the file predates it.
+ */
+describe("parseProjectFrontmatter — requiredReviewers (ruling 178)", () => {
+  it("keeps valid rules, drops only a malformed row, and defaults to [] when absent", () => {
+    const { frontmatter, diagnostics } = parseProjectFrontmatter(
+      {
+        slug: "proj",
+        requiredReviewers: [
+          { stageId: "review", profileId: "reviewer" },
+          { stageId: "review" }, // malformed: no profileId
+          { stageId: "qa", profileId: "qa-bot" },
+        ],
+      },
+      { fallbackSlug: "proj" },
+    );
+    expect(frontmatter.requiredReviewers).toEqual([
+      { stageId: "review", profileId: "reviewer" },
+      { stageId: "qa", profileId: "qa-bot" },
+    ]);
+    expect(diagnostics.some((d) => d.path === "requiredReviewers[1]")).toBe(true);
+
+    const absent = parseProjectFrontmatter({ slug: "proj" }, { fallbackSlug: "proj" });
+    expect(absent.frontmatter.requiredReviewers).toEqual([]);
+    // The key is a known field: it is never round-tripped as unknown frontmatter.
+    const raw = parseProjectFrontmatter(
+      { slug: "proj", requiredReviewers: [{ stageId: "review", profileId: "reviewer" }] },
+      { fallbackSlug: "proj" },
+    );
+    expect(Object.keys(raw.unknown)).not.toContain("requiredReviewers");
+  });
+});

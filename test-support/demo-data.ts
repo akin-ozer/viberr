@@ -182,6 +182,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         // The one canonical list — a hand-copy here diverged from
         // DEFAULT_GUARDRAILS every time the set changed (ruling-104 review).
         guardrails: DEFAULT_GUARDRAILS,
+        requiredReviewers: [],
       },
       description:
         "Viberr Core is the canonical delivery workspace: agents do the stage work, humans govern flow, review and acceptance. Tasks live as markdown files in this store — the board, timelines and packets you see in the app are projections of these files.",
@@ -203,6 +204,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         agents: baseAgentDeployments(),
         credentialPolicy: null,
         guardrails: DEFAULT_GUARDRAILS,
+        requiredReviewers: [],
       },
       description:
         "Continuous delivery pipeline for the Viberr platform. A stub project with one live task so cross-project notifications navigate for real.",
@@ -224,6 +226,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         agents: baseAgentDeployments(),
         credentialPolicy: null,
         guardrails: DEFAULT_GUARDRAILS,
+        requiredReviewers: [],
       },
       description:
         "Strict human-gate billing service. A stub project with one live task so cross-project notifications navigate for real (custom 3-stage board).",

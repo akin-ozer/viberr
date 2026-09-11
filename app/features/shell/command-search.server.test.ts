@@ -95,6 +95,7 @@ function deploySpecialist(store: TestStore, id: string, name: string): void {
     agents: [{ profileId: id, capabilities: [], extras: [] }],
     credentialPolicy: null,
     guardrails: [],
+    requiredReviewers: [],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
@@ -186,6 +187,7 @@ describe("searchWorkspace", () => {
       agents: [],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
       archived: true,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });

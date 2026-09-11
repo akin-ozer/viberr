@@ -130,6 +130,7 @@ function writeProbeProject(
     agents: [],
     credentialPolicy: null,
     guardrails: [],
+    requiredReviewers: [],
     ...patch,
   });
 }
