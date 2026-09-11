@@ -84,8 +84,10 @@ import {
   removeStage,
   renameStage,
   reorderStages,
+  setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
+import { resolveRequiredReviewers } from "~/server/tasks/required-reviewers.server";
 import {
   setMemberRole,
   setTransitionBoundary,
@@ -1023,6 +1025,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           repo: project.repo,
           archived: project.archived,
           description: project.description,
+          // Ruling 178: the reviewers the project REQUIRES per review stage,
+          // resolved to the names the acceptance gate prints; set with
+          // set_required_reviewers.
+          requiredReviewers: resolveRequiredReviewers(fm, dataRoot),
           stages: project.stages.map((s) => ({
             id: s.id,
             name: s.name,
@@ -1799,6 +1805,33 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "update_project_settings",
+  );
+
+  add(
+    tool(
+      "set_required_reviewers",
+      "Declare the project's REQUIRED reviewers per review stage (ruling 178): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict — get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Project admin (edit-policy).",
+      {
+        projectSlug: z.string().optional(),
+        rules: z
+          .array(z.object({ stageId: z.string(), profileId: z.string() }))
+          .describe("The full list; [] clears every rule."),
+      },
+      runWith(
+        async (args: { projectSlug?: string; rules: { stageId: string; profileId: string }[] }) => {
+          const slug = slugOf(args.projectSlug);
+          requireVisible(slug, "edit this project's policy");
+          const result = await setRequiredReviewers(
+            db,
+            { projectSlug: slug, rules: args.rules },
+            actor,
+            { dataRoot },
+          );
+          return result.changed ? `[done] ${result.toast}.` : `[noop] ${result.toast}; nothing was written.`;
+        },
+      ),
+    ),
+    "set_required_reviewers",
   );
 
   add(

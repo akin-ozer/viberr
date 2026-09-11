@@ -1826,3 +1826,79 @@ describe("update_agent_deployment refuses a setting the deployment cannot hold",
     expect(readFileSync(path, "utf8")).toBe(before);
   });
 });
+
+/**
+ * Ruling 178 (pass 36, G36-3): the controller could not declare a REQUIRED
+ * reviewer — it could only state the rule in prompts. `set_required_reviewers`
+ * replaces the project's whole list through the same writer the Settings form
+ * uses, and `get_project` reports it beside the stages it names.
+ */
+describe("set_required_reviewers (ruling 178)", () => {
+  async function rulesInFile() {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.requiredReviewers;
+  }
+  afterAll(async () => {
+    await call(ids.projectAdmin, "set_required_reviewers", { rules: [] });
+  });
+
+  it("round-trips the list into project.md, get_project lists it, and [] clears it", async () => {
+    // Canary: remove the `add(` registration.
+    const reply = await call(ids.projectAdmin, "set_required_reviewers", {
+      rules: [{ stageId: "review", profileId: "reviewer" }],
+    });
+    expect(reply).toBe("[done] Required reviewers saved: Reviewer at Review.");
+    expect(await rulesInFile()).toEqual([{ stageId: "review", profileId: "reviewer" }]);
+    const project = JSON.parse(await call(ids.projectAdmin, "get_project")) as {
+      requiredReviewers: unknown;
+    };
+    expect(project.requiredReviewers).toEqual([
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Reviewer" },
+    ]);
+    // Unchanged is said, not claimed as a write.
+    expect(
+      await call(ids.projectAdmin, "set_required_reviewers", {
+        rules: [{ stageId: "review", profileId: "reviewer" }],
+      }),
+    ).toContain("[noop]");
+    expect(await call(ids.projectAdmin, "set_required_reviewers", { rules: [] })).toBe(
+      "[done] Required reviewers cleared.",
+    );
+    expect(await rulesInFile()).toEqual([]);
+  });
+
+  it("refuses an unknown stage or profile by name with nothing written", async () => {
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const path = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
+    const before = readFileSync(path, "utf8");
+    const audits = listAuditEvents(app.db, { action: "project.required_reviewers.updated" }).length;
+    const stage = await call(ids.projectAdmin, "set_required_reviewers", {
+      rules: [{ stageId: "qa", profileId: "reviewer" }],
+    });
+    expect(stage).toContain('[error] "qa" is not a stage of viberr-core. Nothing was written.');
+    const profile = await call(ids.projectAdmin, "set_required_reviewers", {
+      rules: [{ stageId: "review", profileId: "ghost" }],
+    });
+    expect(profile).toContain('[error] No agent "ghost" is deployed on viberr-core. Nothing was written.');
+    expect(profile).toContain("Verdict-capable agents here: Reviewer (reviewer)");
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(listAuditEvents(app.db, { action: "project.required_reviewers.updated" })).toHaveLength(audits);
+  });
+
+  it("is edit-policy tier: MAINTAINER refused, project ADMIN granted, and the audit row discloses the instrument", async () => {
+    const denied = await call(ids.maintainer, "set_required_reviewers", {
+      rules: [{ stageId: "review", profileId: "reviewer" }],
+    });
+    expect(denied).toContain("[denied]");
+    const granted = await call(ids.projectAdmin, "set_required_reviewers", {
+      rules: [{ stageId: "review", profileId: "reviewer" }],
+    });
+    expect(granted).toContain("[done]");
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const row = listAuditLog(app.db, SLUG, { limit: 20 }).find((r) =>
+      r.text.includes("required reviewers"),
+    );
+    expect(row?.kind).toBe("change");
+    expect(row?.text).toContain("(via the controller) set the required reviewers to **Reviewer at Review**.");
+  });
+});

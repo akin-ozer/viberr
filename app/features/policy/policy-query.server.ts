@@ -75,6 +75,8 @@ export const POLICY_AUDIT_ACTIONS = [
   "project.member.role_changed",
   "project.policy.boundary_changed",
   "project.policy.guardrail_changed",
+  // Ruling 178: the required-reviewer rule is acceptance policy.
+  "project.required_reviewers.updated",
   "project.agent_profile.created",
   "project.agent_profile.updated",
   "project.agent_profile.deleted",

@@ -679,4 +679,34 @@ describe("the audit column discloses the controller instrument (C5)", () => {
     const row = listAuditLog(store.db, store.slug, { limit: 5 })[0]!;
     expect(row.text).toContain("gone@viberr.dev (via the controller)");
   });
+
+  it("ruling 178: a required-reviewer change reads as a policy change naming each rule, and a clear says so", () => {
+    // Canary: leave `project.required_reviewers.updated` out of AUDIT_ACTION_KINDS.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    recordAudit(store.db, {
+      action: "project.required_reviewers.updated",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: {
+        count: 2,
+        rules: [
+          { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
+          { stageId: "qa", stageName: "QA", profileId: "qa-bot", agentName: "QA Bot" },
+        ],
+      },
+    });
+    recordAudit(store.db, {
+      action: "project.required_reviewers.updated",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { count: 0, rules: [] },
+    });
+    const rows = listAuditLog(store.db, store.slug, { limit: 5 });
+    expect(rows.map((r) => r.kind)).toEqual(["change", "change"]);
+    expect(rows[0]!.text).toBe(`${arda.name} cleared the required reviewers.`);
+    expect(rows[1]!.text).toBe(
+      `${arda.name} set the required reviewers to **Code Reviewer at Review**, **QA Bot at QA**.`,
+    );
+  });
 });

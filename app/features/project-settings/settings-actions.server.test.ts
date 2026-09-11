@@ -4,6 +4,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -32,6 +33,7 @@ import {
   repairProjectRepo,
   repoFootprintTasks,
   setBranchCleanup,
+  setRequiredReviewers,
   updateProjectIdentity,
   NEW_STAGE_COLORS,
 } from "./settings-actions.server";
@@ -980,5 +982,119 @@ describe("removeMember clears the notifications they can no longer open", () => 
     // …and the removal says how many it dropped, rather than doing it quietly.
     const audit = listAuditEvents(store.db, { action: "project.member.removed" });
     expect((audit[0]?.details ?? {}).notificationsDropped).toBe(1);
+  });
+});
+
+/**
+ * Ruling 178 (pass 36, G36-3): the project's required-reviewer rule has ONE
+ * writer, shared by the Settings form and the controller tool — same
+ * validation (ids checked by name, nothing written on a refusal), same audit
+ * row, same tier (`edit-policy`: a required reviewer is acceptance policy).
+ */
+describe("setRequiredReviewers (ruling 178)", () => {
+  function withReviewers(): TestStore {
+    const store = setupTestStore(ctx);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Code Reviewer", role: "Review", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+        {
+          profileId: "developer",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Dev", role: "Implementation", backends: ["claude"], model: "sonnet", stages: ["impl"] },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return store;
+  }
+  const rulesOf = (store: TestStore) =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.requiredReviewers;
+
+  it("writes the WHOLE list to project.md, reprojects it, audits with the resolved names, and [] clears it", async () => {
+    // Canary: skip `recordAudit` in the writer.
+    const store = withReviewers();
+    const saved = await setRequiredReviewers(
+      store.db,
+      { projectSlug: store.slug, rules: [{ stageId: "review", profileId: "reviewer" }] },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(saved.changed).toBe(true);
+    expect(saved.toast).toBe("Required reviewers saved: Code Reviewer at Review");
+    expect(rulesOf(store)).toEqual([{ stageId: "review", profileId: "reviewer" }]);
+    // The projection row carries the resolved rule (the queue reads it).
+    const { getProject } = await import("~/server/projections/board-query.server");
+    expect(getProject(store.db, store.slug)!.requiredReviewers).toEqual([
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
+    ]);
+    const audits = listAuditEvents(store.db, { action: "project.required_reviewers.updated" });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.details).toMatchObject({
+      count: 1,
+      rules: [{ stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" }],
+    });
+
+    // The same list again is a no-op: nothing audited twice.
+    const same = await setRequiredReviewers(
+      store.db,
+      { projectSlug: store.slug, rules: [{ stageId: "review", profileId: "reviewer" }] },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(same.changed).toBe(false);
+    expect(listAuditEvents(store.db, { action: "project.required_reviewers.updated" })).toHaveLength(1);
+
+    const cleared = await setRequiredReviewers(
+      store.db,
+      { projectSlug: store.slug, rules: [] },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(cleared.toast).toBe("Required reviewers cleared");
+    expect(rulesOf(store)).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "project.required_reviewers.updated" })).toHaveLength(2);
+  });
+
+  it("refuses an unknown stage, the terminal stage, an unknown profile and a profile that cannot report a verdict — by name, writing nothing", async () => {
+    const store = withReviewers();
+    const attempt = (rules: { stageId: string; profileId: string }[]) =>
+      setRequiredReviewers(store.db, { projectSlug: store.slug, rules }, admin(store), { dataRoot: store.dataRoot });
+    await expect(attempt([{ stageId: "qa", profileId: "reviewer" }])).rejects.toThrow(
+      '"qa" is not a stage of viberr-core. Nothing was written. The project\'s stage ids are: triage, ready, impl, review, done.',
+    );
+    await expect(attempt([{ stageId: "done", profileId: "reviewer" }])).rejects.toThrow(
+      "Done is the terminal stage; a review runs before it. Nothing was written.",
+    );
+    await expect(attempt([{ stageId: "review", profileId: "ghost" }])).rejects.toThrow(
+      'No agent "ghost" is deployed on viberr-core. Nothing was written. Verdict-capable agents here: Code Reviewer (reviewer).',
+    );
+    await expect(attempt([{ stageId: "review", profileId: "developer" }])).rejects.toThrow(
+      'Dev (developer) cannot report a validation verdict, so it cannot be a required reviewer. Nothing was written. Verdict-capable agents here: Code Reviewer (reviewer).',
+    );
+    expect(rulesOf(store)).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "project.required_reviewers.updated" })).toHaveLength(0);
+  });
+
+  it("is edit-policy tier: a maintainer, a contributor and a viewer are refused", async () => {
+    const store = withReviewers();
+    for (const user of [store.users.murat, store.users.selin, store.users.elif]) {
+      await expect(
+        setRequiredReviewers(
+          store.db,
+          { projectSlug: store.slug, rules: [{ stageId: "review", profileId: "reviewer" }] },
+          { userId: user.id, label: user.email },
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    }
+    expect(rulesOf(store)).toEqual([]);
   });
 });
