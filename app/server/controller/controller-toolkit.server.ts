@@ -4,6 +4,7 @@ import {
   assertModelForBackend,
   defaultEffortFor,
   defaultModelFor,
+  effortsFor,
 } from "~/server/runtimes/model-catalog.server";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
@@ -193,6 +194,16 @@ export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "task, the task tools default to that task as well.";
 
 const prose = normalizeEscapedNewlines;
+
+/**
+ * U36-5 (pass 36): the tier lists the three effort descriptions carry come
+ * from the catalog, so a tier the catalog gains (Codex `max`, CLI 0.153) is
+ * offered here the day it lands instead of being typed by hand three times.
+ * Live, the descriptions still said Codex stops at `xhigh`; the write
+ * succeeded and the controller told the owner it could not confirm `max` is
+ * real.
+ */
+const EFFORT_TIERS_SENTENCE = `Claude ${effortsFor("claude").join("|")}, Codex ${effortsFor("codex").join("|")}`;
 
 /**
  * Ruling 156: "1 project copy does not carry this change: k9c-k9s-clone is
@@ -770,7 +781,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Default effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh. Omit to keep the stored tier; \"\" clears it.",
+            `Default effort tier the backend offers: ${EFFORT_TIERS_SENTENCE}. Omit to keep the stored tier; "" clears it.`,
           ),
         propagate: z
           .boolean()
@@ -1989,7 +2000,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         projectSlug: z.string().optional(),
         profileId: z.string(),
         model: z.string().optional().describe("Model id for the template's backend (see the profile's backend in list_global_agents)."),
-        effort: z.string().optional().describe("Effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh."),
+        effort: z
+          .string()
+          .optional()
+          .describe(`Effort tier the backend offers: ${EFFORT_TIERS_SENTENCE}.`),
       },
       runWith(async (args: { projectSlug?: string; profileId: string; model?: string; effort?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -2026,7 +2040,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Effort tier the deployment's backend offers (Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh); refused by name otherwise. A backend switch with no effort resets to that backend's default.",
+            `Effort tier the deployment's backend offers (${EFFORT_TIERS_SENTENCE}); refused by name otherwise. A backend switch with no effort resets to that backend's default.`,
           ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
