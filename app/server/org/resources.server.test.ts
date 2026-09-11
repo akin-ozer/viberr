@@ -337,6 +337,35 @@ describe("knowledge bases", () => {
     expect(orphan.folderExists).toBe(false);
     expect(orphan.injectableCount).toBe(0); // indistinguishable from empty WITHOUT the flag
   });
+
+  it("U36-4: a disk:<dir> id whose folder already has a row updates THAT row instead of clashing on the folder", async () => {
+    // Canary: skip the by-dir lookup — the id matches no row, `existing` stays
+    // undefined and the create arm throws "already exists" on the KB's own
+    // folder. Live, the controller took `disk:<dir>` from the shape shipped KBs
+    // carry and was refused on a KB it had created one call earlier.
+    const { db, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(
+      db,
+      { name: "Headlamp Spec", refresh: "on change" },
+      ACTOR,
+      ctx,
+    );
+    const again = await saveKnowledgeBase(
+      db,
+      { id: "disk:headlamp-spec", name: "Headlamp Spec", refresh: "manual" },
+      ACTOR,
+      ctx,
+    );
+    expect(again.kb.id).toBe(kb.id);
+    expect(again.kb.refresh).toBe("manual");
+    expect(again.toast).toBe("Headlamp Spec updated");
+    expect(listKnowledgeBases(db, ctx)).toHaveLength(1);
+    // The clash still fires for its real case: ANOTHER row holding the folder.
+    await saveKnowledgeBase(db, { name: "Other", refresh: "manual" }, ACTOR, ctx);
+    await expect(
+      saveKnowledgeBase(db, { id: kb.id, name: "Other", refresh: "manual" }, ACTOR, ctx),
+    ).rejects.toThrowError(/already exists/);
+  });
 });
 
 describe("skills", () => {
@@ -366,6 +395,98 @@ describe("skills", () => {
     );
     expect(updated.toast).toBe("Skill terraform-review updated. SKILL.md rewritten");
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
+  });
+
+  it("U36-4: a disk:<name> id whose folder already has a row updates THAT row instead of clashing", async () => {
+    // Canary: skip the by-name lookup — SKILL.md is written, THEN the create
+    // arm throws "already exists" on the skill's own folder (the KB defect,
+    // one resource over, with a write landing before the refusal).
+    const { db, ctx } = setup();
+    const { skill } = await saveSkill(
+      db,
+      { name: "headlamp-craft", summary: "Craft notes.", body: "# v1" },
+      ACTOR,
+      ctx,
+    );
+    const again = await saveSkill(
+      db,
+      {
+        id: "disk:headlamp-craft",
+        name: "headlamp-craft",
+        summary: "Craft notes, revised.",
+        body: "# v2",
+      },
+      ACTOR,
+      ctx,
+    );
+    expect(again.skill.id).toBe(skill.id);
+    expect(again.skill.summary).toBe("Craft notes, revised.");
+    expect(again.skill.body).toBe("# v2");
+    expect(listSkills(db, ctx)).toHaveLength(1);
+  });
+
+  // Ruling 183 (pass 36, F36-2): every SKILL.md writer refuses a body that is
+  // not a skill, by name, and never rewrites it. Live, the controller sent the
+  // body JSON-escaped twice and two skills landed on disk as ONE line of
+  // literal `\n`; the mount then took the whole escaped text as the
+  // description and Codex agents read it as-is.
+  describe("ruling 183: a SKILL.md body is validated before it is written", () => {
+    it("refuses a body with no real newline and literal \\n sequences, naming the remedy, and writes nothing", async () => {
+      // Canary: drop the escaped-newline branch of assertSkillBodyWellFormed.
+      const { db, dataRoot, ctx } = setup();
+      const escaped =
+        "---\\nname: escaped\\ndescription: Arrived escaped.\\n---\\n# Escaped\\n- step one";
+      expect(escaped).not.toContain("\n");
+      await expect(
+        saveSkill(db, { name: "escaped", summary: "Escaped body.", body: escaped }, ACTOR, ctx),
+      ).rejects.toThrowError(/JSON-escaped.*real newlines/);
+      expect(existsSync(skillDirPath("escaped", dataRoot))).toBe(false);
+      expect(listSkills(db, ctx)).toHaveLength(0);
+    });
+
+    it("refuses a frontmatter block that does not parse; the existing SKILL.md is left as it was", async () => {
+      // Canary: drop the frontmatter branch.
+      const { db, dataRoot, ctx } = setup();
+      const { skill } = await saveSkill(
+        db,
+        {
+          name: "fenced",
+          summary: "Fenced body.",
+          body: "---\nname: fenced\ndescription: Fine.\n---\n# Fenced",
+        },
+        ACTOR,
+        ctx,
+      );
+      const onDisk = path.join(skillDirPath("fenced", dataRoot), "SKILL.md");
+      for (const bad of [
+        "---\nname: fenced\ndescription: [unclosed\n---\n# Body",
+        "---\nname: fenced\n# never closed",
+        "---\n- not\n- a mapping\n---\n# Body",
+      ]) {
+        await expect(
+          saveSkill(db, { id: skill.id, name: "fenced", summary: "Fenced body.", body: bad }, ACTOR, ctx),
+        ).rejects.toThrowError(/frontmatter/);
+      }
+      expect(readFileSync(onDisk, "utf8")).toContain("# Fenced");
+      // Plain markdown with no block stays a skill: the mount adds the
+      // frontmatter, and the editor and the seeds never wrote one.
+      const plain = await saveSkill(
+        db,
+        { id: skill.id, name: "fenced", summary: "Fenced body.", body: "# Plain\n- still a skill" },
+        ACTOR,
+        ctx,
+      );
+      expect(plain.skill.body).toBe("# Plain\n- still a skill");
+    });
+
+    it("refuses an empty body on a write: a create with nothing in it lands no folder", async () => {
+      // Canary: let `writeFileSync(SKILL.md, "")` through.
+      const { db, dataRoot, ctx } = setup();
+      await expect(
+        saveSkill(db, { name: "hollow", summary: "Nothing inside.", body: "   \n" }, ACTOR, ctx),
+      ).rejects.toThrowError(/empty/);
+      expect(existsSync(skillDirPath("hollow", dataRoot))).toBe(false);
+    });
   });
 
   it("files-mode create: folder only, no SKILL.md, empty summary allowed (unified New-skill flow)", async () => {

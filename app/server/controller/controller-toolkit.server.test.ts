@@ -1826,3 +1826,305 @@ describe("update_agent_deployment refuses a setting the deployment cannot hold",
     expect(readFileSync(path, "utf8")).toBe(before);
   });
 });
+
+/**
+ * Ruling 183 (pass 36, F36-2): the controller's `save_skill` is one of the
+ * SKILL.md writers `assertSkillBodyWellFormed` guards. Live, the model sent
+ * the body JSON-escaped twice and the tool answered "[done] … SKILL.md
+ * written." for a one-line file of literal `\n`.
+ */
+describe("save_skill refuses a body that is not a skill (ruling 183)", () => {
+  it("an escaped body is refused by name and no skill lands", async () => {
+    // Canary: drop the assert from saveSkill.
+    const reply = await call(ids.orgAdmin, "save_skill", {
+      name: "escaped-probe",
+      summary: "A probe the escaped-body test sends.",
+      body: "---\\nname: escaped-probe\\ndescription: Escaped.\\n---\\n# Escaped\\n- one",
+    });
+    expect(reply.startsWith("[error] ")).toBe(true);
+    expect(reply).toContain("JSON-escaped");
+    expect(reply).toContain("real newlines");
+    // SAFETY: list_skills answers `json()` over rows carrying `name`.
+    const skills = JSON.parse(await call(ids.orgAdmin, "list_skills")) as { name: string }[];
+    expect(skills.map((s) => s.name)).not.toContain("escaped-probe");
+  });
+
+  it("a create with no body is refused instead of writing an empty SKILL.md", async () => {
+    const reply = await call(ids.orgAdmin, "save_skill", {
+      name: "bodiless-probe",
+      summary: "A probe with no body at all.",
+    });
+    expect(reply.startsWith("[error] ")).toBe(true);
+    expect(reply).toContain("empty");
+  });
+});
+
+/**
+ * U36-4 (pass 36): the create reply named the folder and hid the id, so the
+ * controller guessed `disk:<dir>` — the one shape a folder with a row no
+ * longer answered to — and was refused "already exists".
+ */
+describe("save_knowledge_base's reply carries the id the next call needs (U36-4)", () => {
+  it("the create reply names the KB id and grant key, and both id shapes re-enter as an update", async () => {
+    // Canary: render `saved.toast` alone again.
+    const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "Reply Probe Spec" });
+    expect(created).toContain("[done]");
+    const id = /id (kb_[A-Za-z0-9_-]+)/.exec(created)?.[1];
+    expect(id, created).toBeDefined();
+    expect(created).toContain("grantKey reply-probe-spec");
+    const byId = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: id!,
+      name: "Reply Probe Spec",
+      refresh: "manual",
+    });
+    expect(byId).toContain("[done] Reply Probe Spec updated");
+    expect(byId).toContain(`id ${id}`);
+    // The shape shipped KBs carry, on a folder that already has a row.
+    const byDisk = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: "disk:reply-probe-spec",
+      name: "Reply Probe Spec",
+      refresh: "on change",
+    });
+    expect(byDisk).toContain("[done] Reply Probe Spec updated");
+    expect(byDisk).toContain(`id ${id}`);
+    // SAFETY: list_knowledge_bases answers `json()` over rows carrying `id`,
+    // `dir` and `refresh`.
+    const kbs = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as {
+      id: string;
+      dir: string;
+      refresh: string;
+    }[];
+    const rows = kbs.filter((k) => k.dir === "reply-probe-spec");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id, refresh: "on change" });
+  });
+
+  it("save_skill's reply carries the skill id and grant key the same way", async () => {
+    const created = await call(ids.orgAdmin, "save_skill", {
+      name: "reply-probe-craft",
+      summary: "A probe the reply test creates.",
+      body: "# Craft\n\nBody.",
+    });
+    expect(created).toContain("[done]");
+    expect(created).toMatch(/id sk_[A-Za-z0-9_-]+/);
+    expect(created).toContain("grantKey reply-probe-craft");
+  });
+});
+
+/**
+ * U36-3 (pass 36): one call switched backend, model, effort, stages and grants
+ * and answered "Effort is now max." — the reply and the audit row under-reported
+ * what changed. The reply lists every changed field old → new, and the
+ * `project.agent_profile.updated` row carries model + effort (ruling 139 parity
+ * with `deployed`).
+ */
+describe("update_agent_deployment reports every field it changed, old → new (U36-3)", () => {
+  interface ProjectRead {
+    stages: { id: string }[];
+    agents: {
+      profileId: string;
+      backends: string[];
+      model: string;
+      effort: string;
+      stages: string[];
+    }[];
+  }
+  async function read(): Promise<ProjectRead> {
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    return JSON.parse(await call(ids.projectAdmin, "get_project")) as ProjectRead;
+  }
+
+  it("names backend, model, effort, stages and each capability with the value it replaced; the audit row carries model and effort", async () => {
+    // Canary: answer `[done] ${name} updated on ${slug}.` again.
+    const { defaultModelFor } = await import("~/server/runtimes/model-catalog.server");
+    const snapshot = await read();
+    const before = snapshot.agents.find((a) => a.profileId === "developer")!;
+    const stageIds = snapshot.stages.map((s) => s.id);
+    // A known starting point, whichever earlier case left the developer on.
+    const first = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      backend: "claude",
+      model: "sonnet",
+      effort: "high",
+      stages: [stageIds[0]!],
+      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
+    });
+    expect(first).toContain("[done]");
+    const codexModel = defaultModelFor("codex");
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      backend: "codex",
+      effort: "max",
+      stages: [stageIds[0]!, stageIds[1]!],
+      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+    });
+    expect(reply).toContain("[done] Developer updated on viberr-core");
+    expect(reply).toContain("backend Claude → Codex");
+    expect(reply).toContain(`model sonnet → ${codexModel}`);
+    expect(reply).toContain("effort high → max");
+    expect(reply).toContain(`stages ${stageIds[0]} → ${stageIds[0]}, ${stageIds[1]}`);
+    expect(reply).toContain("comment-on-task off → direct");
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.updated" })[0]!;
+    expect(row.details).toMatchObject({
+      name: "Developer",
+      backend: "codex",
+      model: codexModel,
+      effort: "max",
+    });
+    // The same call again changes nothing, and says so instead of restating
+    // the request.
+    const again = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      backend: "codex",
+      effort: "max",
+      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
+    });
+    expect(again).toContain("[done]");
+    expect(again).toContain("No field changed");
+    expect(again).not.toContain("→");
+    // Restore the fixture for the cases after this one.
+    await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      backend: before.backends[0] === "codex" ? "codex" : "claude",
+      model: before.model,
+      effort: before.effort || "high",
+      stages: before.stages,
+    });
+  });
+});
+
+/**
+ * U36-5 (pass 36): three descriptions said Codex effort is `low|medium|high|xhigh`
+ * while the catalog offers `max`; the write succeeded and the controller told
+ * the owner it could not confirm `max` is real. The tiers are read from the
+ * catalog now.
+ */
+describe("the effort descriptions are generated from the catalog (U36-5)", () => {
+  it("every tier each backend offers appears in save_global_agent, deploy_agent and update_agent_deployment", async () => {
+    // Canary: type the Codex list by hand again.
+    const { effortsFor } = await import("~/server/runtimes/model-catalog.server");
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    for (const name of ["save_global_agent", "deploy_agent", "update_agent_deployment"]) {
+      const def = toolkit.tools.find((t) => t.name === name)!;
+      // SAFETY: `tool()` keeps the raw zod shape it was given, and `effort` is
+      // the `z.string().optional().describe(…)` field each of the three declares.
+      const shape = def.inputSchema as Record<string, { description?: string }>;
+      const description = shape.effort?.description ?? "";
+      for (const backend of ["claude", "codex"] as const) {
+        const label = backend === "codex" ? "Codex" : "Claude";
+        expect(description, `${name}.effort names the ${label} tiers`).toContain(
+          `${label} ${effortsFor(backend).join("|")}`,
+        );
+      }
+    }
+  });
+});
+
+/**
+ * G36-1 (pass 36, owner Q36-7): the Agents page grants context resources to
+ * every kind, the operator included; the controller could not ("it's a system
+ * profile I can't give resources to"). `update_agent_deployment` takes
+ * `skills` / `mcps` / `kbs` with `save_global_agent`'s semantics for every kind.
+ */
+describe("update_agent_deployment grants resources to every kind, the operator included (G36-1)", () => {
+  interface Resources {
+    skills: string[];
+    mcps: string[];
+    kb: string[];
+  }
+  interface RosterRead {
+    agents: { profileId: string; kind: string; resources: Resources }[];
+  }
+  let operatorId = "";
+  let before: Resources = { skills: [], mcps: [], kb: [] };
+
+  /** The reply's rendering of one list: the keys, or "(none)". */
+  const listed = (keys: string[]) => (keys.length ? keys.join(", ") : "(none)");
+
+  async function operatorResources(): Promise<Resources> {
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const read = JSON.parse(await call(ids.projectAdmin, "get_project")) as RosterRead;
+    return read.agents.find((a) => a.profileId === operatorId)!.resources;
+  }
+
+  beforeAll(async () => {
+    // SAFETY: as above.
+    const read = JSON.parse(await call(ids.projectAdmin, "get_project")) as RosterRead;
+    const operator = read.agents.find((a) => a.kind === "operator")!;
+    operatorId = operator.profileId;
+    before = operator.resources;
+    await call(ids.orgAdmin, "save_knowledge_base", { name: "Operator Grant Handbook" });
+    await call(ids.orgAdmin, "save_skill", {
+      name: "operator-grant-craft",
+      summary: "A probe skill the operator grant test grants.",
+      body: "# Craft\n\nBody.",
+    });
+  });
+
+  afterAll(async () => {
+    await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: operatorId,
+      skills: before.skills,
+      mcps: before.mcps,
+      kbs: before.kb,
+    });
+  });
+
+  it("grants by grantKey land on the operator's deployment, the reply names them old → new, an omitted list is left alone and [] clears", async () => {
+    // Canary: drop `skills`/`mcps`/`kbs` from the tool (the handler ignores them).
+    const granted = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: operatorId,
+      kbs: ["operator-grant-handbook"],
+      skills: ["operator-grant-craft"],
+    });
+    expect(granted).toContain("[done]");
+    expect(granted).toContain(`kb ${listed(before.kb)} → operator-grant-handbook`);
+    expect(granted).toContain(`skills ${listed(before.skills)} → operator-grant-craft`);
+    expect(await operatorResources()).toMatchObject({
+      kb: ["operator-grant-handbook"],
+      skills: ["operator-grant-craft"],
+      mcps: before.mcps,
+    });
+    // project.md carries the copy a run mounts (ruling 156), on the operator.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const stored = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === operatorId)!.definition?.resources;
+    expect(stored).toMatchObject({ kb: ["operator-grant-handbook"], skills: ["operator-grant-craft"] });
+    // An unrelated patch leaves every list alone.
+    const unrelated = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: operatorId,
+      mcps: before.mcps,
+    });
+    expect(unrelated).toContain("[done]");
+    expect(await operatorResources()).toMatchObject({
+      kb: ["operator-grant-handbook"],
+      skills: ["operator-grant-craft"],
+    });
+    const cleared = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: operatorId,
+      kbs: [],
+    });
+    expect(cleared).toContain("kb operator-grant-handbook → (none)");
+    expect(await operatorResources()).toMatchObject({ kb: [], skills: ["operator-grant-craft"] });
+  });
+
+  it("an unknown key is refused by name and nothing is written", async () => {
+    // Canary: skip resolveResourceGrants and merge the raw list.
+    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const file = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
+    const was = readFileSync(file, "utf8");
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: operatorId,
+      kbs: ["no-such-handbook"],
+    });
+    expect(reply.startsWith("[error] ")).toBe(true);
+    expect(reply).toContain("Nothing in the store answers to no-such-handbook");
+    expect(readFileSync(file, "utf8")).toBe(was);
+  });
+});
