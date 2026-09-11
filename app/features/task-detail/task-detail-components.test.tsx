@@ -466,6 +466,7 @@ function taskFixture(ownerId: string, ownerName: string): TaskSummary {
     prChecks: null,
     prReview: null,
     commits: [],
+    otherCommits: [],
     changed: null,
     unownedPr: null,
     foreignHead: null,
@@ -1172,7 +1173,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(operatorRunBtn(missing.container).disabled).toBe(false);
   });
 
-  it("a closed task disables the operator run and names the @operator comment path (N20-17)", () => {
+  it("a closed task disables the operator run and no longer advertises an @operator side door (N20-17 → ruling 177)", () => {
     const { container, onRunOperator } = renderExec(
       execTask({ operator: attachedOperator, displayReadiness: "accepted" }),
     );
@@ -1183,9 +1184,9 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain(
       "Task closed. Reopen it to run the operator.",
     );
-    // The two run paths must not read as silently inconsistent: an @operator
-    // comment still starts a full run on a closed task, and the copy says so.
-    expect(container.textContent).toContain("still runs it");
+    // Ruling 177 (pass 36): every door refuses a closed task, so the N20-17
+    // disclosure that an @operator comment "still runs it" would now lie.
+    expect(container.textContent).not.toContain("still runs it");
   });
 
   it("P11-41 without a picker: an operator backend the owner cannot run disables Run and says so", () => {

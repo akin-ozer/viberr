@@ -3313,10 +3313,16 @@ export async function recordAgentCompletion(
         // recommendation stale (the acceptance gate would 409), so drop it: the
         // UI must not show a misleading "Accept completion" card. The operator
         // re-recommends the right next step on its next turn.
+        // F36-6 (pass 36): a FAILING verdict also voids any pending
+        // "move to <review/acceptance stage>" card — Viberr's own delivery
+        // next-step or the operator's — since applying it would carry a
+        // rejected revision across the approval boundary.
         if (validation !== "healthy") {
           parsed.frontmatter.recommendations =
             parsed.frontmatter.recommendations.filter(
-              (r) => r.kind !== "accept_completion",
+              (r) =>
+                r.kind !== "accept_completion" &&
+                !(validation === "failing" && r.kind === "transition"),
             );
         }
       }
@@ -6635,13 +6641,17 @@ async function recordPushedHead(
  * row `via: delivery`. A task at or before the review stage, a healthy or
  * unreviewed revision, and a terminal task are left alone.
  */
-async function returnChangedRevisionToReview(
+export async function returnChangedRevisionToReview(
   db: DatabaseSync,
   ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
   headSha: string | null,
   actor: TaskActor,
+  /** Ruling 179 (pass 36): the reconciler's authored-drift door — the head
+   *  moved by a push Viberr did not make; the audit names it and the event is
+   *  the policy engine's. Absent = a delivery moved the head (ruling 163). */
+  opts: { via?: "delivery" | "authored-drift" } = {},
 ): Promise<void> {
   const project = loadProjectContext(ctx, projectSlug);
   const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -6652,11 +6662,15 @@ async function returnChangedRevisionToReview(
   const reviewId = await verdictStageOf(ctx, projectSlug, project, fm);
   if (reviewId === null) return;
   const fromStageId = fm.stage;
-  const actorRef: FileActorRef = ctx.operatorAuthorized
-    ? { kind: "operator" }
-    : actor.userId
-      ? humanActorRef(db, actor)
-      : { kind: "system", systemId: "delivery" };
+  const via = opts.via ?? "delivery";
+  const actorRef: FileActorRef =
+    via === "authored-drift"
+      ? { kind: "system", systemId: "policy-engine" }
+      : ctx.operatorAuthorized
+        ? { kind: "operator" }
+        : actor.userId
+          ? humanActorRef(db, actor)
+          : { kind: "system", systemId: "delivery" };
   const rev = headSha ? `\`${headSha.slice(0, 7)}\`` : "the delivered revision";
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     if (parsed.frontmatter.stage !== fromStageId) return;
@@ -6668,23 +6682,30 @@ async function returnChangedRevisionToReview(
       actor: actorRef,
       title: null,
       text:
-        `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
-        `${stageName(project, reviewId)}: ${rev} changed after the last verdict, so the ` +
-        `reviewers judge it there.`,
+        via === "authored-drift"
+          ? `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
+            `${stageName(project, reviewId)}: the pull request's head moved to ${rev} after the ` +
+            `last verdict by commits Viberr did not deliver (ruling 179), so the reviewers judge it there.`
+          : `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
+            `${stageName(project, reviewId)}: ${rev} changed after the last verdict, so the ` +
+            `reviewers judge it there.`,
       toAgent: false,
       evidence: null,
     });
   });
   recordAudit(db, {
     action: "task.transition",
-    actor: ctx.operatorAuthorized
-      ? OPERATOR_AUDIT_ACTOR
-      : { userId: actor.userId, label: actor.label },
+    actor:
+      via === "authored-drift"
+        ? SYSTEM_ACTOR
+        : ctx.operatorAuthorized
+          ? OPERATOR_AUDIT_ACTOR
+          : { userId: actor.userId, label: actor.label },
     subjectKind: "task",
     subjectId: taskKey,
     projectSlug,
     taskKey,
-    details: { from: fromStageId, to: reviewId, boundary: "rework", via: "delivery" },
+    details: { from: fromStageId, to: reviewId, boundary: "rework", via },
   });
   reprojectTask(db, ctx, projectSlug, taskKey);
 }
@@ -6791,6 +6812,42 @@ async function recordDeliveredNextStep(
     const stageIdx = project.stages.findIndex((s) => s.id === fm.stage);
     const reviewIdx = project.stages.findIndex((s) => s.id === reviewStageId);
     if (stageIdx < 0 || reviewIdx < 0 || stageIdx >= reviewIdx) return;
+    // F36-6 (pass 36): the card is a VERDICT-AWARE offer. "Review stage" here
+    // is the stage with an edge into the terminal one (Merge Approval on a
+    // board with a verdict stage before it), so a task sitting AT its verdict
+    // stage was "strictly before" it — and this writer, which never read the
+    // verdict, invited a human to carry a task whose required review had just
+    // FAILED (HLC-8, HLC-14) or was still pending (HLC-3) across the approval
+    // boundary; the transition landed because nothing below reads validation
+    // either. The card is written only when the delivered revision is
+    // verdict-clean, or when the project has no verdict-capable specialist at
+    // all (a board that never reviews). Withheld cards leave an audit row that
+    // says why, so the silence is explainable.
+    const validation = deriveValidation(fm);
+    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const specialistCtx: TaskMutationContext = {};
+    if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
+    const reviewsExist = listDeployedSpecialists(projectSlug, specialistCtx).some(
+      (d) => d.capabilities.verdict,
+    );
+    const withheld: "verdict-failing" | "verdict-pending" | null =
+      validation === "failing"
+        ? "verdict-failing"
+        : validation !== "healthy" && validation !== "bypassed" && reviewsExist
+          ? "verdict-pending"
+          : null;
+    if (withheld) {
+      recordAudit(db, {
+        action: DELIVERY_NEXT_STEP_AUDIT_ACTION,
+        actor: { userId: null, label: "delivery" },
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: { kind: "transition", toStageId: reviewStageId, prNumber, withheld, validation },
+      });
+      return;
+    }
     // Folded in from A's `ensureDeliveredNextStep`: only ever propose a move the
     // project's OWN workflow declares — a custom board with no `stage → review`
     // edge must not be handed a card for a transition it would refuse.

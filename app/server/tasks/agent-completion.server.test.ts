@@ -353,6 +353,50 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(taskFile().parsed.timeline.some((e) => e.type === "comment")).toBe(true);
   });
 
+  it("F36-6 (pass 36): a request-changes verdict voids a pending 'move to <stage>' card", async () => {
+    // Live (HLC-14 17:43Z): Viberr's delivery card "Move the task to Merge
+    // Approval" stayed on the page with Apply next to `validation failing`.
+    // Canary: drop the `validation === "failing" && r.kind === "transition"`
+    // clause from the verdict block's recommendation filter.
+    writeReviewTask({
+      recommendations: [
+        {
+          id: "rec_move",
+          kind: "transition",
+          toStageId: "done",
+          label: "Move the task to Done",
+          detail: "Recorded by Viberr when the delivery landed.",
+        },
+        {
+          id: "rec_run",
+          kind: "run_agent",
+          profileId: "developer",
+          label: "Run Developer",
+          detail: "Keep going.",
+        },
+      ],
+    });
+    const runId = await finishedRunWith("Verdict: request changes — the tests are missing.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+    expect(fm.recommendations.map((r) => r.id)).toEqual(["rec_run"]);
+  });
+
   it("records a reviewer verdict from the FULL reply even when the verdict sits past the 1200-char comment cut (X9)", async () => {
     // A delivered revision under review + a verdict-capable reviewer, so the
     // reviewer's verdict binds to the current revision and derives validation.

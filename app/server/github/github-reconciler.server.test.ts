@@ -3313,6 +3313,156 @@ describe("ruling 132: drift is classified, not counted", () => {
 });
 
 /**
+ * Ruling 179 (pass 36, F36-7): authored drift after a verdict VOIDS it. Live:
+ * an observer commit on hlc-7 at Merge Approval — `pr.revisionDrift
+ * {authored: 1}` was written, nothing woke, nothing notified, the accept card
+ * stayed applicable and the Commits card (prefix-filtered) hid the commit.
+ */
+describe("ruling 179: a PR head moved after the verdict voids it", () => {
+  const REV = "rev0delivered";
+  const HEAD = "headsha318";
+  const A0 = "a0".padEnd(40, "0");
+  const X1 = "x1".padEnd(40, "0");
+  const commit = (sha: string, message: string, parents: string[] = ["p".repeat(40)]) => ({
+    sha,
+    commit: { message },
+    parents: parents.map((p) => ({ sha: p })),
+  });
+  const baseRoute = `GET ${REPO_PATH}/compare/main...vib-301-workspace`;
+  const sinceRoute = `GET ${REPO_PATH}/compare/${REV}...${HEAD}`;
+
+  function seedApproved(opts: { stage?: string; deployReviewerAt?: string[]; recs?: boolean } = {}) {
+    const store = setupTestStore(ctx);
+    if (opts.deployReviewerAt) {
+      const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...pf.parsed.frontmatter,
+        agents: [
+          ...pf.parsed.frontmatter.agents,
+          {
+            profileId: "reviewer",
+            capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "Reviewer",
+              role: "Review",
+              backends: ["claude"],
+              model: "sonnet",
+              stages: opts.deployReviewerAt,
+            },
+          },
+        ],
+      });
+    }
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: opts.stage ?? "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        pr: { number: 318, state: "review", title: "Attach execution workspace", headSha: REV },
+        workRevision: {
+          id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer", kind: "delivered",
+        },
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z" },
+        ],
+        validation: "healthy",
+        recommendations: opts.recs
+          ? [
+              { id: "rec_accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "for revision rev0del", forHeadSha: REV },
+            ]
+          : [],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler179" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const wakes: string[] = [];
+    const run = async () => {
+      const routes = happyRoutes();
+      routes[baseRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(A0, "[VIB-301] the work"), commit(X1, "observer fixture: drift after review")] } };
+      routes[sinceRoute] = { body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [commit(X1, "observer fixture: drift after review")] } };
+      await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+        wakeOperator: async (_db: DatabaseSync, _ctx: { dataRoot?: string }, _slug: string, _key: string, trigger: string) => {
+          wakes.push(trigger);
+        },
+      });
+      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    };
+    return { store, run, wakes };
+  }
+
+  it("mints an external revision from the moved head, voids the verdict, withdraws the accept card, notes, notifies and wakes", async () => {
+    // Canary: delete the `authoredDriftVoidsVerdict` block in reconcileTask —
+    // validation stays `healthy`, the accept card survives, nothing wakes.
+    const { store, run, wakes } = seedApproved({ recs: true });
+    const parsed = await run();
+    const fm = parsed.frontmatter;
+    expect(fm.workRevision).toMatchObject({ headSha: HEAD, kind: "external", sourceProfileId: null });
+    expect(fm.workRevision!.id).not.toBe("rev_1");
+    expect(fm.validation).toBe("changed");
+    expect(fm.pr?.revisionDrift).toMatchObject({ headSha: HEAD, authored: 1 });
+    expect(fm.recommendations).toEqual([]);
+    // The foreign commit is on the record beside the task's own.
+    expect(fm.github?.commits).toEqual([{ sha: A0.slice(0, 7), msg: "[VIB-301] the work" }]);
+    expect(fm.github?.otherCommits).toEqual([{ sha: X1.slice(0, 7), msg: "observer fixture: drift after review" }]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Revision moved after review")!;
+    expect(note).toBeDefined();
+    expect(note.text).toContain("ruling 179");
+    expect(note.text).toContain("no longer binds");
+    expect(note.text).toContain("“Accept completion and move VIB-301 to Done”");
+    const inbox = listNotifications(store.db, store.users.arda.id).filter((n) => n.taskKey === "VIB-301");
+    expect(inbox.some((n) => n.title === "PR #318 moved after review: VIB-301 needs a fresh verdict")).toBe(true);
+    expect(wakes).toEqual(["pr-diverged"]);
+    // The same head on the next pass is old news: nothing fires twice.
+    const again = await run();
+    expect(again.frontmatter.workRevision!.id).toBe(fm.workRevision!.id);
+    expect(again.timeline.filter((e) => e.title === "Revision moved after review")).toHaveLength(1);
+    expect(wakes).toEqual(["pr-diverged"]);
+  });
+
+  it("returns a task that sits past its verdict stage to the stage where the reviewer works", async () => {
+    // The reviewer is eligible at `impl`; the task sits at `review` (the
+    // acceptance boundary on the GOVERNED template). The moved head sends it
+    // back to `impl` through the rework route, audited `via: authored-drift`.
+    const { store, run } = seedApproved({ stage: "review", deployReviewerAt: ["impl"] });
+    const parsed = await run();
+    expect(parsed.frontmatter.stage).toBe("impl");
+    const move = parsed.timeline.find((e) => e.type === "transition")!;
+    expect(move.text).toContain("ruling 179");
+    expect(move.actor).toMatchObject({ kind: "system", systemId: "policy-engine" });
+    const rows = listAuditEvents(store.db, { action: "task.transition" }).filter((r) => r.taskKey === "VIB-301");
+    expect(rows.at(-1)!.details).toMatchObject({ from: "review", to: "impl", boundary: "rework", via: "authored-drift" });
+  });
+
+  it("drift before any verdict is plain delivery news: no revision minted, nothing voided", async () => {
+    const { store, run, wakes } = seedApproved();
+    // Strip the verdict: a head that moves before anyone judged it is not a
+    // voided review, it is the branch growing.
+    const ref = { projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot };
+    const before = readTaskFile(ref)!.parsed;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...before.frontmatter, verdicts: [], validation: "changed" },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const parsed = await run();
+    expect(parsed.frontmatter.workRevision!.id).toBe("rev_1");
+    expect(parsed.frontmatter.pr?.revisionDrift).toMatchObject({ headSha: HEAD, authored: 1 });
+    expect(parsed.timeline.some((e) => e.title === "Revision moved after review")).toBe(false);
+    expect(wakes).toEqual([]);
+  });
+});
+
+/**
  * Pass 35 S15: ruling 162 (F35-12 (a0) and (d)). The conflict the acceptance
  * gate refuses on reaches the file from BOTH GitHub answers (the detail read
  * and the merge refusal), and a flip to conflicting withdraws the acceptance

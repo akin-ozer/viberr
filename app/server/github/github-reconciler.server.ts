@@ -4,11 +4,16 @@ import { classifyRevisionDrift } from "~/shared/revision-drift";
 import {
   activeWorkRevision,
   conflictingPrBlockedReason,
+  currentVerdicts,
+  deriveValidation,
   type GithubCache,
   type PrMergeable,
   type PrRef,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
+import { describeRevisionDrift } from "~/shared/revision-drift";
+import { newId } from "~/shared/ids/new-id.server";
+import { taskClosure } from "~/server/tasks/task-closure.server";
 import {
   recordAudit,
   type AuditActor,
@@ -718,6 +723,15 @@ async function reconcileTaskUnlocked(
   // "not derived this pass", which leaves the cache below standing.
   const prefixCommits =
     compare && provenBranchHead ? taskCommits(compare.commits, fm.key) : null;
+  // Ruling 179 (pass 36, F36-7): the commits the prefix filter drops are the
+  // ones that move a reviewed head from outside — kept apart so the card can
+  // show them as "not this task's" instead of hiding them.
+  const otherCommits =
+    compare && provenBranchHead
+      ? compare.commits
+          .filter((c) => !c.msg.toLowerCase().startsWith(`[${fm.key.toLowerCase()}]`))
+          .map((c) => ({ sha: c.sha, msg: c.msg }))
+      : null;
   const existingCommits = existingGithub?.commits ?? [];
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
@@ -744,6 +758,7 @@ async function reconcileTaskUnlocked(
   // The key is present only while a foreign head stands (an absent key and a
   // null one would otherwise alternate in the compared snapshot).
   if (newGithub && foreignHead) newGithub.foreignHead = foreignHead;
+  if (newGithub && otherCommits !== null) newGithub.otherCommits = otherCommits;
   const unownedPrIsNew =
     !!unownedPr && existingGithub?.unownedPr !== unownedPr.number;
   // The collision is not a divergence and must not read like one: nothing about
@@ -832,9 +847,47 @@ async function reconcileTaskUnlocked(
       : `**Note:** PR #${newPr!.number} now tracks ${fm.key}'s branch on GitHub, replacing closed PR #${fm.pr!.number}, so the closed-PR block is lifted.`
     : null;
 
+  // Ruling 179 (pass 36, F36-7): AUTHORED drift after a verdict voids it. The
+  // verdicts bind to the WORK revision, and a foreign push moves the PR head
+  // without touching it — so `validation` stayed healthy, the accept card
+  // stayed applicable and nobody was told (live: an observer commit on hlc-7
+  // at Merge Approval). The pull request's head is what merges; a head that
+  // moved past the last verdict by commits Viberr did not deliver becomes the
+  // revision under review (`kind: external`), the verdicts on the old one no
+  // longer bind, the task returns to its verdict stage, and the watchers and
+  // the operator hear about it. Fires on the tick the moved head is FIRST
+  // recorded (the cached drift names the previous head), never again for the
+  // same head.
+  const authoredDriftNow = newPr?.revisionDrift ?? null;
+  const reviewedByVerdict = currentVerdicts(fm).length > 0;
+  const authoredDriftVoidsVerdict =
+    authoredDriftNow !== null &&
+    authoredDriftNow.authored > 0 &&
+    cachedPr?.revisionDrift?.headSha !== authoredDriftNow.headSha &&
+    reviewedByVerdict &&
+    !taskClosure(fm, project?.stages ?? []).closed;
+  const externalRevision = authoredDriftVoidsVerdict
+    ? {
+        id: newId("rev"),
+        headSha: authoredDriftNow.headSha,
+        treeSha: null,
+        branch,
+        createdAt: new Date().toISOString(),
+        sourceProfileId: null,
+        kind: "external" as const,
+      }
+    : null;
+  const voidedRevisionSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
+  const driftVoidText = authoredDriftVoidsVerdict
+    ? `**Revision moved after review (ruling 179):** PR #${newPr!.number}'s head is now \`${authoredDriftNow.headSha.slice(0, 7)}\`, ` +
+      `${describeRevisionDrift(authoredDriftNow).sentence} The verdict on \`${(voidedRevisionSha ?? "").slice(0, 7)}\` no longer binds: ` +
+      `the new head is the revision under review and needs a fresh verdict before ${fm.key} can be accepted.`
+    : null;
+
   const changed =
+    authoredDriftVoidsVerdict ||
     JSON.stringify({ pr: fm.pr, github: fm.github }) !==
-    JSON.stringify({ pr: newPr, github: newGithub });
+      JSON.stringify({ pr: newPr, github: newGithub });
 
   if (changed) {
     const patch: Partial<TaskFrontmatter> = { pr: newPr, github: newGithub };
@@ -867,11 +920,12 @@ async function reconcileTaskUnlocked(
       ? conflictingPrBlockedReason({ pr: newPr }, fm.key)
       : null;
     const supersededRecs =
-      divergenceText || conflictText
+      divergenceText || conflictText || authoredDriftVoidsVerdict
         ? fm.recommendations.filter(
             (r) =>
-              (divergenceText !== null && r.kind === "transition") ||
-              (r.kind === "accept_completion" && (closedButActive || conflictText !== null)),
+              ((divergenceText !== null || authoredDriftVoidsVerdict) && r.kind === "transition") ||
+              (r.kind === "accept_completion" &&
+                (closedButActive || conflictText !== null || authoredDriftVoidsVerdict)),
           )
         : [];
     const supersededIds = new Set(supersededRecs.map((r) => r.id));
@@ -924,6 +978,16 @@ async function reconcileTaskUnlocked(
         );
       }
       Object.assign(parsed.frontmatter, applied);
+      // Ruling 179: re-checked under the lock — a delivery landing during
+      // this pass's round trips replaces the revision itself, and then the
+      // moved head is that delivery's, not a stranger's.
+      if (
+        externalRevision &&
+        activeWorkRevision(parsed.frontmatter.workRevision)?.headSha === voidedRevisionSha
+      ) {
+        parsed.frontmatter.workRevision = externalRevision;
+        parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
+      }
     });
     if (unownedPrIsNew && collisionNote) {
       await appendTimelineEvent(ref, {
@@ -994,9 +1058,56 @@ async function reconcileTaskUnlocked(
         evidence: null,
       });
     }
+    if (driftVoidText) {
+      const withdrawnNames = supersededRecs.map((r) => `“${r.label}”`);
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: POLICY_ENGINE_ACTOR,
+        title: "Revision moved after review",
+        text:
+          driftVoidText +
+          (withdrawnNames.length > 0
+            ? ` The now-moot ${withdrawnNames.join(", ")} recommendation${withdrawnNames.length === 1 ? " was" : "s were"} withdrawn.`
+            : ""),
+        toAgent: false,
+        evidence: null,
+      });
+    }
     rebuildPath(db, resolveTaskFilePath(ref), {
       dataRoot: ctx.dataRoot,
     });
+    if (authoredDriftVoidsVerdict) {
+      // The task returns to the stage where a verdict can be given (ruling
+      // 163's rework route, the authored-drift door), notifies the watchers
+      // and wakes the operator below.
+      const { returnChangedRevisionToReview, notifyTaskWatchers } = await import(
+        "~/server/tasks/task-actions.server"
+      );
+      await returnChangedRevisionToReview(
+        db,
+        { dataRoot: ctx.dataRoot },
+        input.projectSlug,
+        input.taskKey,
+        authoredDriftNow.headSha,
+        { userId: actor.userId ?? "", label: actor.label ?? "system" },
+        { via: "authored-drift" },
+      );
+      if (!ctx.suppressDivergenceNotice && driftVoidText) {
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            kind: "policy",
+            title: `PR #${newPr!.number} moved after review: ${fm.key} needs a fresh verdict`,
+            text: driftVoidText,
+            from: POLICY_ENGINE_NOTIFY_FROM,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
+    }
     if (adoptionInput) {
       await recordPrAdoption(db, ref, adoptionInput, actor);
       if (!prJustReopened) {
@@ -1066,7 +1177,8 @@ async function reconcileTaskUnlocked(
       closedButActive ||
       acceptedClosedExternally ||
       prJustReopened ||
-      prReplacedLive
+      prReplacedLive ||
+      authoredDriftVoidsVerdict
     ) {
       const wake =
         ctx.wakeOperator ??

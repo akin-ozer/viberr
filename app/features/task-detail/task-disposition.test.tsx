@@ -88,6 +88,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     prChecks: null,
     prReview: null,
     commits: [],
+    otherCommits: [],
     changed: null,
     unownedPr: null,
     foreignHead: null,

@@ -14,6 +14,7 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { listNotifications } from "~/server/projections/notifications.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
   ParsedTaskFile,
   Recommendation,
@@ -515,6 +516,102 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     expect(pending[0]!.detail).toBe(
       "The implementation is complete and the tests pass.",
     );
+  });
+
+  /** F36-6 (pass 36): a verdict-capable reviewer deployed on the project. */
+  function deployReviewerToo(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        ...file.parsed.frontmatter.agents,
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Reviewer",
+            role: "Review",
+            backends: ["claude"],
+            model: "sonnet",
+            stages: ["review"],
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const REVIEWED = "a".repeat(40);
+  const reviewerEngagement = {
+    profileId: "reviewer",
+    backend: "claude" as const,
+    role: "Review",
+    delivers: false,
+    verdictCapable: true,
+  };
+  function seedReviewed(verdict: "request_changes" | "approve" | null): void {
+    const frontmatter = baseTaskFrontmatter("VIB-1", {
+      stage: "impl",
+      readiness: "ready",
+      ownerUserId: store.users.arda.id,
+      engagements: [reviewerEngagement],
+      branch: "vib-1",
+      workRevision: {
+        id: "rev_1",
+        headSha: REVIEWED,
+        treeSha: null,
+        branch: "vib-1",
+        createdAt: "2026-09-11T14:00:00.000Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
+      verdicts: verdict
+        ? [{ profileId: "reviewer", revisionId: "rev_1", headSha: REVIEWED, result: verdict, reason: "…", at: "2026-09-11T14:05:00.000Z" }]
+        : [],
+    });
+    writeTask(store.dataRoot, store.slug, { frontmatter, goal: "F36-6 probe." });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("F36-6 (pass 36): a delivery whose required reviewer REQUESTED CHANGES records no card, and audits why", async () => {
+    // Live: HLC-8 and HLC-14 sat at Agent Review with `validation: failing`
+    // and Viberr's own card offered "Move the task to Merge Approval" — and
+    // the move landed. Canary: delete the `withheld` block in
+    // `recordDeliveredNextStep`.
+    deployOperator("supervised");
+    deployReviewerToo();
+    seedReviewed("request_changes");
+    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: REVIEWED });
+    expect(await deliver()).toBe("delivered");
+    expect(recs()).toHaveLength(0);
+    const rows = listAuditEvents(store.db, { action: "github.delivery.next_step" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ withheld: "verdict-failing", validation: "failing" });
+    expect(listNotifications(store.db, store.users.arda.id).filter((n) => n.taskKey === "VIB-1")).toHaveLength(0);
+  });
+
+  it("F36-6 (pass 36): a delivery whose review is still PENDING records no card either", async () => {
+    // Live: HLC-3 17:34Z and HLC-14 17:36Z — the reviewer had just been
+    // engaged, the verdict was pending, and the card was written anyway.
+    deployOperator("supervised");
+    deployReviewerToo();
+    seedReviewed(null);
+    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: REVIEWED });
+    expect(await deliver()).toBe("delivered");
+    expect(recs()).toHaveLength(0);
+    const rows = listAuditEvents(store.db, { action: "github.delivery.next_step" });
+    expect(rows[0]!.details).toMatchObject({ withheld: "verdict-pending" });
+  });
+
+  it("F36-6 (pass 36): an APPROVED revision still gets the card", async () => {
+    deployOperator("supervised");
+    deployReviewerToo();
+    seedReviewed("approve");
+    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: REVIEWED });
+    expect(await deliver()).toBe("delivered");
+    expect(recs()).toHaveLength(1);
+    expect(recs()[0]).toMatchObject({ kind: "transition", toStageId: "review" });
   });
 
   it("C. a FAILED delivery records nothing", async () => {

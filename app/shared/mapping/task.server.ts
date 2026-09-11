@@ -264,6 +264,10 @@ export interface TaskSummary {
    *  Null = no PR / settled PR / never read / nothing outstanding. */
   prReview: PrReviewState | null;
   commits: { sha: string; msg: string }[];
+  /** Ruling 179 (pass 36, F36-7): commits on the branch that are NOT this
+   *  task's (no `[KEY]` prefix) — the moved head a person must see where the
+   *  acceptance decision is made. Empty when none were recorded. */
+  otherCommits: { sha: string; msg: string }[];
   changed: { files: number; add: number; del: number } | null;
   /** R15-15 / F31-6: a PR found on this task's branch that this task did NOT
    *  open — the branch-collision signature. Null = no collision recorded. */
@@ -743,6 +747,7 @@ export function mapTaskProjectionRow(
     prChecks: mapPrChecks(pr),
     prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
+    otherCommits: github?.otherCommits ?? [],
     changed: github?.changed ?? null,
     unownedPr: github?.unownedPr ?? null,
     foreignHead: github?.foreignHead ?? null,
