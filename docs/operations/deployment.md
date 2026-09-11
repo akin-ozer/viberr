@@ -182,6 +182,50 @@ into a shared `runtimes/codex-home` and set `VIBERR_CODEX_USE_CLI_AUTH=1`. All n
 variables, the shared homes, the `/host-codex` mount and the entrypoint that seeded it are
 deleted; the health example returned `{"claude":"real","codex":"unavailable"}`.)*
 
+## Codex sandbox (seccomp)
+
+`compose.yml` runs the app container with `security_opt: [seccomp=unconfined]`
+(ruling 182, pass 36). Why: the Codex CLI confines every run below full access — the
+operator's `read-only`, every write-withheld run, every supporting run's `workspace-write`
+(see [agents-and-runtime.md §2.5](../domain/agents-and-runtime.md#25-codex-adapter)) — with
+**bubblewrap**, and bubblewrap builds its sandbox from an *unprivileged user namespace*
+(`unshare(CLONE_NEWUSER)`). Docker's builtin seccomp profile refuses that syscall to a
+non-root process, and the app runs as the non-root `node` user, so the sandbox never
+starts: the first shell command a confined Codex run tries fails with
+`bwrap: No permissions to create a new namespace`. Chromium's own namespace sandbox hits
+the same wall, which is why the browser mount passes `--no-sandbox`; Codex has no such
+flag, so the profile is lifted for the container instead. It stays non-root, cap-dropped
+and init-reaped; `seccomp=unconfined` widens only the syscall filter, and the Codex
+sandbox is what then confines the agent's commands.
+
+**What breaks without it.** Fully-autonomous delivering runs with egress
+(`danger-full-access`, no sandbox) build and ship as before, so the failure hides in the
+governance around them: every Codex *reviewer* and *supporting* run fails at its first
+command, and the model reports the environment failure as a verdict — live (F36-1),
+`request-changes` for "missing evidence" on correct deliveries, with nothing in the run row,
+the timeline or a packet naming the sandbox. Since ruling 182 the sandbox is **probed once
+at boot** (`codex sandbox` on a trivial command under a workspace-write-shaped profile,
+`app/server/ops/toolchain.server.ts`); the verdict is on the boot integrity line, on
+`/resources/health` and `instance_health` as `toolchain.codexSandbox`, and a confined Codex
+run is **refused before any process starts** with
+`Codex sandbox unavailable on this host: <the sandbox's own words>. Fix the deployment (see
+docs/operations/deployment.md, seccomp) or grant the run full access.` A failed probe is
+informational, never `degraded`: a host that runs no Codex is a correct host.
+
+Check it on a running container:
+
+```bash
+curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain.codexSandbox
+# {"ok":true,"detail":"codex sandbox ran /bin/echo under a workspace-write profile"}
+docker compose exec -T app unshare -U true && echo "user namespaces: ok"
+```
+
+If `ok` is false with `bwrap: No permissions to create a new namespace`, the container is
+running without the `security_opt` (an older `compose.yml`, a platform that overrides it, or
+a host kernel with `kernel.unprivileged_userns_clone=0` / `user.max_user_namespaces=0`,
+which no seccomp setting can fix). Recreate the container after changing `compose.yml`
+(`docker compose up -d` — a restart alone keeps the old profile).
+
 ## First run
 
 ```bash

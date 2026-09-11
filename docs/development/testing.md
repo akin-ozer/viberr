@@ -41,7 +41,15 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
   `loadEnvFile()` runs later and would refill a deleted key from someone's `.env`. This is
   belt and braces: `filteredSpawnEnv()` strips every one of them by regex anyway, and the
   risk it guards against is a paid provider call from `npm test`. Then
-  `GIT_ALLOW_PROTOCOL=file` so nothing can clone over the network. It does **not** set
+  `GIT_ALLOW_PROTOCOL=file` so nothing can clone over the network. Last it **primes the
+  toolchain** (ruling 182): `cachedToolchain()` would otherwise spawn `npm`, `git`,
+  `python3`, `go` and the Codex CLI's sandbox helper once per process, so
+  `test-support/toolchain.ts` writes a fixed reading (`HERMETIC_TOOLCHAIN`) into the
+  override slot the server module reads — the same shape as `setBackendBinariesForTests` —
+  before any app module loads; a test that needs a different verdict (the ruling-182
+  refusal) sets its own with `primeToolchain` and restores with
+  `primeHermeticToolchain`, and `toolchain.server.test.ts` clears it to drive the resolver
+  with fakes. It does **not** set
   `VIBERR_DATA_ROOT`; every harness below uses its own `mkdtemp` root, so `VIBERR_DATA_ROOT=$(mktemp -d) npm test` is unnecessary unless you write a harness-less test that calls `getEnv()`.
   *(Corrected 2026-09-02, ruling 127 — the file used to blank `VIBERR_CLAUDE_USE_CLI_AUTH`
   / `VIBERR_CODEX_USE_CLI_AUTH` and point `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at empty temp

@@ -70,6 +70,19 @@ drift notes corrected. Ruling 93's drift note now says R22 and ruling 101 both s
 Codex `read-only` sandbox is a live seam), ruling 109 carries the `permissions.rs` watch
 item, and `domain/agents-and-runtime.md` §2.5 and gotcha 6 match.
 
+Updated 2026-09-11 for rulings 181 and 182 (pass 36, branch `pass36/headlamp-clone-fixes`,
+Cluster 3): every Codex run gets a private `CODEX_HOME` forked from the person's home
+(`runs/<runId>/`: sign-in and config copied, sessions/skills/memories linked,
+`CODEX_SQLITE_HOME` shared, the refreshed sign-in carried back under a per-person lock);
+the Codex sandbox is probed once per process with the CLI's own sandbox helper, reported
+as `toolchain` — appended LAST — on `/resources/health`, `instance_health` and the boot
+integrity line, and a confined Codex run is refused with a named remedy while the probe
+fails; `compose.yml` lifts Docker's seccomp profile for bubblewrap. Pages:
+`domain/agents-and-runtime.md` (§2.2, §2.5), `operations/deployment.md` (new "Codex
+sandbox (seccomp)"), `operations/runbook.md` (Agent runtimes: the `bwrap` and
+`codex-linux-sandbox` symptoms), `architecture/data-model.md` (data-root layout) and
+`development/testing.md` (§2, the hermetic toolchain).
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
