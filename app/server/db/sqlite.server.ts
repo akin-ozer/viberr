@@ -415,6 +415,16 @@ const BASELINE_COLUMNS: readonly {
     table: "controller_conversations",
     columns: [{ name: "task_key", ddl: "task_key TEXT" }],
   },
+  // Ruling 176: an org MCP server's marked write tools and its discovered tool
+  // names. `listMcpServers` names both on every Settings render and every run
+  // mount, so a root that predates them would fail both.
+  {
+    table: "org_mcp_servers",
+    columns: [
+      { name: "tool_policy_json", ddl: "tool_policy_json TEXT" },
+      { name: "tool_names_json", ddl: "tool_names_json TEXT" },
+    ],
+  },
   {
     table: "controller_messages",
     columns: [{ name: "surface", ddl: "surface TEXT" }],

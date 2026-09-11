@@ -11,7 +11,8 @@
 > `/resources/backend-login` is a new fetcher target that answers the CALLER's own
 > hosted sign-in session. Agent backends are connected per person there, never per
 > deployment. Updated 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`):
-> Org settings gains the `set-run-spend-cap` intent.
+> Org settings gains the `set-run-spend-cap` intent. Updated 2026-09-11 for ruling 176
+> (branch `option-d/pr2-mcp-tool-gating`): `mcp-save` carries the editor's `writeTools`.
 
 ## 1. Route table
 
@@ -197,6 +198,10 @@ Intents behind `project.task.tsx` are explained in
 `store-delete`, `store-import-github`), agent templates (`agent-save`, `agent-delete`),
 controller (`controller-save`), audit (`audit-export-s3`, `s3-config-save`,
 `s3-config-clear`), runtime (`set-concurrency`, `set-run-spend-cap`, ruling 175).
+`mcp-save` carries the MCP editor's `writeTools`, a JSON array of tool names (ruling 176):
+absent keeps the stored marks, a malformed list or a name outside the MCP alphabet is
+refused. The editor's "Write tools" section lists the probe's tool names as chips and
+takes a typed name; the registry row counts the marked tools.
 
 The **Controller settings** tab is the one org-settings surface whose controls are not
 all live (rulings 106, 107, 108): model and effort use the agent profile editor's own

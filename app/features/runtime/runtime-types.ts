@@ -12,6 +12,7 @@
  */
 
 import type { RunFailureFacts, RunFailureKind } from "~/shared/run-failure";
+import type { McpToolDenial } from "~/shared/mcp-tools";
 
 /** Lifecycle stored in agent_runs.state (orchestrator ruling 11). */
 export type RunState =
@@ -174,6 +175,10 @@ export interface RunInputs {
     unresolved: string[];
     /** Mounted, but the last connection check failed. */
     unhealthy: string[];
+    /** Ruling 176: per mounted org server, the tools an admin marked as write
+     *  tools and this run withholds (its repo-write grant is withheld). Absent
+     *  on lines written before the ruling. */
+    writeToolsDenied?: McpToolDenial[];
   };
   /** Skill / knowledge-base grants whose CONTENT never reached the run. */
   unresolvedResources: { name: string; reason: string }[];

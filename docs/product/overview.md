@@ -72,7 +72,7 @@ and governed AI delivery through a familiar board/task surface.
 - **Notifications page caps at the newest 200 rows**; the table keeps 500 per user.
 - **Plain HTTP.** TLS termination is the deployment's job; set `BETTER_AUTH_URL` behind the proxy.
 - **Fine-grained PAT validation is partly probe-based**; some scopes read "unproven" until first use.
-- **MCP grants sit outside the capability matrix.** Granting a server authorizes all of its tools (ruling 39).
+- **MCP grants sit outside the capability matrix.** Granting a server authorizes its tools (ruling 39), except the ones an admin marks as write tools, which a run that withholds repo write does not get (ruling 176). Viberr makes no claim about unmarked tools.
 - **Single node.** SQLite plus local file authority plus an in-process SSE bus; one instance per data root.
 - **Pre-production.** Migrations are squashed into one baseline; schema changes reach fresh databases only; there is no backwards compatibility promise for file formats (owner rulings 98 and 99 were explicitly no-back-compat).
 

@@ -270,6 +270,27 @@ describe("runInputRows (P19-G11)", () => {
     expect(byTag.mcp).toContain("last connection check failed: broken-mcp");
     expect(byTag.missing).toContain("house-style (no such knowledge base)");
   });
+
+  it("ruling 176: names the org servers' write tools the run withheld", () => {
+    const rows = runInputRows({
+      ...emptyInputs,
+      mcp: {
+        mounted: ["github", "docs"],
+        unresolved: [],
+        unhealthy: [],
+        writeToolsDenied: [
+          { server: "github", tools: ["create_pull_request", "merge_pull_request"] },
+        ],
+      },
+    });
+    const mcp = rows.find((r) => r.tag === "mcp")!.text;
+    expect(mcp).toContain(
+      "write tools withheld (repo write is withheld): github (create_pull_request, merge_pull_request)",
+    );
+    // A line written before the ruling carries no field and says nothing.
+    const old = runInputRows({ ...emptyInputs, mcp: { mounted: ["github"], unresolved: [], unhealthy: [] } });
+    expect(old.find((r) => r.tag === "mcp")!.text).not.toContain("write tools withheld");
+  });
 });
 
 

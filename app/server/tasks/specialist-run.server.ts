@@ -124,6 +124,7 @@ import {
   nextSeq,
 } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
+import type { McpToolDenial } from "~/shared/mcp-tools";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
   type DeliveryPermissions,
@@ -282,6 +283,8 @@ interface RunMcpMounts {
   unresolved: string[];
   /** Grants that mounted but whose last health probe failed. */
   unhealthy: string[];
+  /** Ruling 176: the mounted servers' marked write tools this run withholds. */
+  toolDenials: McpToolDenial[];
 }
 
 /**
@@ -295,6 +298,8 @@ async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
   backend: RealBackend,
+  /** Ruling 176: the run withholds repo write, so marked write tools go. */
+  withholdWriteTools: boolean,
 ): Promise<RunMcpMounts> {
   // F20-10: a declared stdio server that fails to START (a half-installed npx
   // tree crashing in <1s) used to be mounted anyway — the run was told it had
@@ -303,7 +308,7 @@ async function mcpServersFor(
   // one is DROPPED from the run, disclosed by name, and its row is corrected.
   const resolution = await verifyStdioMcpMountsForRun(
     db,
-    resolveSpecialistMcpServersDetailed(db, names),
+    resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools }),
     { backend },
   );
   const { servers, unresolved } = resolution;
@@ -312,6 +317,7 @@ async function mcpServersFor(
     // reported separately so the prompt can say which is which (P14-LV-09b).
     unresolved: unresolved.filter((u) => !u.mounted).map((u) => u.name),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
+    toolDenials: resolution.toolDenials,
   };
   // Absent rather than empty: callers read the key's PRESENCE as "this run has
   // MCP mounts at all" before they build the prompt or the run spec.
@@ -522,6 +528,8 @@ export function resolvedResourceInputs(input: {
   mountedMcps: string[];
   unresolvedMcps: string[];
   unhealthyMcps: string[];
+  /** Ruling 176: the org servers' marked write tools this run withholds. */
+  mcpWriteToolsDenied: McpToolDenial[];
   unresolvedResources: { name: string; reason: string }[];
   deniedTools: string[];
   /** The collaboration tools actually mounted (null → none). */
@@ -545,6 +553,7 @@ export function resolvedResourceInputs(input: {
       mounted: input.mountedMcps,
       unresolved: input.unresolvedMcps,
       unhealthy: input.unhealthyMcps,
+      writeToolsDenied: input.mcpWriteToolsDenied,
     },
     unresolvedResources: input.unresolvedResources,
     tools: {
@@ -1593,9 +1602,18 @@ async function dispatchAgentRun(
   // handshake it (F20-10) and corrects its registry row from what happened —
   // vendor/org child processes and org-level writes for a run the next line is
   // about to refuse. A refused run mounts nothing, so it resolves nothing.
+  //
+  // Ruling 176: the same denylist that withholds the file tools decides
+  // whether the admin's marked MCP write tools go too — one predicate, the one
+  // the Codex sandbox reads.
   const resolvedMcps: RunMcpMounts = realBackend
-    ? await mcpServersFor(db, mcpNames, backend)
-    : { unresolved: [], unhealthy: [] };
+    ? await mcpServersFor(
+        db,
+        mcpNames,
+        backend,
+        repoWriteWithheldFromDenylist(disallowedTools),
+      )
+    : { unresolved: [], unhealthy: [], toolDenials: [] };
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1797,6 +1815,7 @@ async function dispatchAgentRun(
     ],
     unresolvedMcps: resolvedMcps.unresolved,
     unhealthyMcps: resolvedMcps.unhealthy,
+    mcpWriteToolsDenied: resolvedMcps.toolDenials,
     // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
     // container `/data/...` is real; on bare metal it is the data root's own
     // absolute path). The store-relative form is a display form for humans.
@@ -2056,6 +2075,7 @@ async function dispatchAgentRun(
   if (effort) runInput.effort = effort;
   if (persona) runInput.systemPrompt = persona;
   if (disallowedTools.length) runInput.disallowedTools = disallowedTools;
+  if (resolvedMcps.toolDenials.length) runInput.mcpToolDenials = resolvedMcps.toolDenials;
   // The SDK's native skills filter (Claude): exactly what mounted, nothing else.
   // Empty ⇒ the adapter keeps the fully-isolated defaults and the `Skill` tool
   // stays denied.
@@ -2105,6 +2125,7 @@ async function dispatchAgentRun(
         mountedMcps: Object.keys(mergedMcpServers),
         unresolvedMcps: resolvedMcps.unresolved,
         unhealthyMcps: resolvedMcps.unhealthy,
+        mcpWriteToolsDenied: resolvedMcps.toolDenials,
         unresolvedResources,
         deniedTools: disallowedTools,
         toolkit: toolkit ? collab : null,
@@ -2570,6 +2591,10 @@ export interface SpecialistPersonaInput {
   unresolvedMcps?: string[];
   /** Mounted, but the last health check failed (P14-LV-09b). */
   unhealthyMcps?: string[];
+  /** Ruling 176: the mounted org servers whose marked write tools this run
+   *  withholds. Their tools are ENFORCED, so the governance paragraph below
+   *  names only the servers without marks. */
+  mcpWriteToolsDenied?: McpToolDenial[];
   /** R19-19: browser state — mounted (with the ABSOLUTE attachments dir for
    *  the guardrail text, ruling 159) or granted-but-refused (with the reason).
    *  The section renders only when the server actually mounted, so prompt and
@@ -2719,16 +2744,42 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // always-human invariant. The tool layer can't decide this, so the rule is
   // stated where BOTH backends honour rules: the system prompt. (The remaining
   // gap is documented in the capability matrix rather than hidden.)
+  //
+  // Ruling 176: where an admin marked a server's write tools and this run
+  // withholds repo write, those tools are removed from the run on both
+  // backends, so that server leaves the paragraph and a plain statement of
+  // what was removed replaces it. A server with no marks keeps the rule.
+  const gatedServers = new Set((input.mcpWriteToolsDenied ?? []).map((d) => d.server));
+  const ungatedMcps = (input.mcps ?? []).filter((name) => !gatedServers.has(name));
   if ((input.mcps ?? []).length > 0) {
-    parts.push(
-      "\n\n---\n# MCP tools are governed too\n\n" +
-        `You have tools from these attached MCP servers: ${(input.mcps ?? []).join(", ")}. ` +
-        "They are yours to read with and query with. They do NOT widen your " +
-        "authority: never use an MCP tool to merge a pull request, move a task " +
-        "to Done, change project policy, or perform any action your capability " +
-        "policy withholds. Viberr owns delivery and merging — if a tool would " +
-        "do one of those, stop and report instead.",
-    );
+    if (ungatedMcps.length > 0) {
+      parts.push(
+        "\n\n---\n# MCP tools are governed too\n\n" +
+          `You have tools from these attached MCP servers: ${ungatedMcps.join(", ")}. ` +
+          "They are yours to read with and query with. They do NOT widen your " +
+          "authority: never use an MCP tool to merge a pull request, move a task " +
+          "to Done, change project policy, or perform any action your capability " +
+          "policy withholds. Viberr owns delivery and merging — if a tool would " +
+          "do one of those, stop and report instead.",
+      );
+    }
+    if (gatedServers.size > 0) {
+      // Live (ruling 176 canary): a Codex model read "removed from this run:
+      // gh (create_pull_request)" as the whole server being gone and never
+      // called the tools it still had. So the server is named as attached, and
+      // the removed tools are named as tools.
+      parts.push(
+        "\n\n---\n# MCP write tools withheld\n\n" +
+          `These attached MCP servers stay mounted: ${[...gatedServers].join(", ")}. ` +
+          "Your capability policy withholds writing to the repository, so the tools on " +
+          "them that an administrator marked as write tools are removed from this run: " +
+          (input.mcpWriteToolsDenied ?? [])
+            .map((d) => `${d.tools.join(", ")} (on ${d.server})`)
+            .join("; ") +
+          ". Their other tools are available to you. If your task needs a removed tool, " +
+          "say so in your report.",
+      );
+    }
     // F27-P2: an org MCP server's stored credential is honored on CLAUDE runs
     // but NEVER forwarded to a Codex process (it would be visible in the process
     // arguments — specialist-mcp BACKEND SCOPE / F7-MCP1). Admin surfaces disclose
@@ -3216,6 +3267,9 @@ function supportCheckoutDir(
  *  never silently carry less policy than the fresh run did (the XS-1 class). */
 export interface ResumeConfinement {
   disallowedTools: string[];
+  /** Ruling 176: the org servers' marked write tools the resumed run
+   *  withholds, re-derived like the rest of its policy. */
+  mcpToolDenials?: McpToolDenial[];
   env: Record<string, string>;
   mcpServers?: RunMcpServers;
   systemPrompt?: string;
@@ -3280,12 +3334,16 @@ export async function resolveResumeConfinement(
       input.projectSlug,
       input.profileId,
     );
+    const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     // P14-LV-09: resolve first, then describe what MOUNTED — the resumed run
     // gets the same honest prompt as a fresh one. F20-10: pre-flight the stdio
     // mounts so a server that fails to start is dropped + disclosed here too.
+    // Ruling 176: with the same write-tool withholding the fresh run derives.
     const resumeMcps = await verifyStdioMcpMountsForRun(
       db,
-      resolveSpecialistMcpServersDetailed(db, resolved.mcps),
+      resolveSpecialistMcpServersDetailed(db, resolved.mcps, {
+        withholdWriteTools: repoWriteWithheldFromDenylist(disallowedTools),
+      }),
       { backend: input.backend },
     );
     const mcpServers = resumeMcps.servers;
@@ -3355,6 +3413,7 @@ export async function resolveResumeConfinement(
       ],
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
+      mcpWriteToolsDenied: resumeMcps.toolDenials,
       // Ruling 159: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {
@@ -3428,7 +3487,6 @@ export async function resolveResumeConfinement(
     }
     const merged = { ...grantedServers, ...toolkit?.mcpServers };
     const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey, support);
-    const disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     // C02-R3: the fresh path creates the drop BEFORE the run so a plain `cp`
     // cannot fail on a missing path; a resume is a real backend by
     // construction, so the same holds here.
@@ -3457,6 +3515,7 @@ export async function resolveResumeConfinement(
         mountedMcps: Object.keys(merged),
         unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
         unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
+        mcpWriteToolsDenied: resumeMcps.toolDenials,
         unresolvedResources: resumeUnresolved,
         deniedTools: disallowedTools,
         toolkit: toolkit ? collab : null,
@@ -3471,6 +3530,7 @@ export async function resolveResumeConfinement(
       }),
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
+    if (resumeMcps.toolDenials.length) confinement.mcpToolDenials = resumeMcps.toolDenials;
     // Each key is set only when this resume really has that policy: the caller
     // spreads the result into the resume spec, where an ABSENT key means "keep
     // the adapter's default" and a present-but-undefined one would not.
@@ -3505,6 +3565,7 @@ export async function resolveResumeConfinement(
         mountedMcps: [],
         unresolvedMcps: [],
         unhealthyMcps: [],
+        mcpWriteToolsDenied: [],
         unresolvedResources: [
           {
             name: input.profileId,

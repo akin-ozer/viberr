@@ -300,15 +300,19 @@ export function CapabilityMatrixModal({
                     named only the actions an MCP tool must not take, which read
                     as if the matrix still bounded its powers. It does not, and
                     the consequence belongs in the disclosure: a granted server
-                    is its own grant. Pinned by specialist-tool-policy.test.ts. */}
-                <b>MCP tools are not gated by this matrix.</b> Viberr can't know what a
-                third-party tool does, so nothing here restricts one. A server whose
-                tools write files or run commands gives an agent those powers even
-                when <b>Execute code / write to the repo</b> is withheld. Granting a
-                server IS the grant. The only rule Viberr can enforce is stated in
-                every run's system prompt: an MCP tool may never merge, close a task,
-                or change policy. Grant MCP servers as deliberately as you grant a
-                capability.
+                    is its own grant. Pinned by specialist-tool-policy.test.ts.
+                    Ruling 176 amends it: the tools an admin MARKS are the one
+                    exception, and the copy says which tools that covers. */}
+                <b>MCP tools sit outside this matrix, with one exception.</b> Viberr
+                can't know what a third-party tool does, so a granted server's tools are
+                not restricted by any row here: granting a server IS the grant. The
+                exception is the tools an admin marks as <b>write tools</b> on the
+                server (Settings → MCP servers). Those are removed from every run whose
+                agent withholds <b>Execute code / write to the repo</b>, and from every
+                operator run, on Claude and Codex. A server's unmarked tools keep the
+                rule stated in the run's system prompt: an MCP tool may never merge,
+                close a task, or change policy. Grant MCP servers as deliberately as
+                you grant a capability.
               </li>
               <li>
                 Both operators can reach the web (WebFetch/WebSearch) when

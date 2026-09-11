@@ -1099,6 +1099,29 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     // derives the missing entries upstream; the caller-named one is preserved.
     expect(captured.allowedTools).toContain("mcp__viberr_agent");
   });
+
+  it("ruling 176: an HTTP server's per-tool deny policy and the denied names reach the SDK unchanged", async () => {
+    // The resolver puts `always_deny` on the HTTP config and `startRun` adds the
+    // `mcp__<server>__<tool>` names to the denylist; the adapter must forward
+    // both as they are, beside the base denies.
+    const servers = {
+      "gh-http": {
+        type: "http",
+        url: "https://mcp.example.test/gh",
+        tools: [{ name: "merge_pull_request", permission_policy: "always_deny" }],
+      },
+    };
+    const captured = await optionsFor({
+      ...SPEC,
+      kind: "reviewer",
+      mcpServers: servers,
+      disallowedTools: ["Edit", "mcp__gh-http__merge_pull_request"],
+    });
+    expect(captured.mcpServers).toEqual(servers);
+    expect(captured.disallowedTools).toEqual(
+      expect.arrayContaining(["Edit", "mcp__gh-http__merge_pull_request"]),
+    );
+  });
 });
 
 /**

@@ -6,7 +6,9 @@
 > working tree on 2026-09-03. Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): **Backend** rewritten, **Agent account** and
 > **Credential principal** added. Updated 2026-09-11 for ruling 175 (branch
-> `option-d/pr3-cost-cap-usage`): **Run failure kind** and **Spending cap** added.
+> `option-d/pr3-cost-cap-usage`): **Run failure kind** and **Spending cap** added. Updated
+> 2026-09-11 for ruling 176 (branch `option-d/pr2-mcp-tool-gating`): **MCP server** amended
+> and **Write tool** added.
 
 **Acceptance** — the human act that closes a task into the terminal stage. Verdict-gated (ruling 20), requires the review PR head to contain the delivered revision, refuses while the PR is closed unmerged (ruling 37), and must carry the disclosure echo the human was shown (ruling 88). Two other endings exist: **force-accept** (admin-only override of the verdict gate, audited `task.acceptance.forced`, recorded as `acceptance: forced` and rendered `bypassed`) and **Completed, no changes** (a verified empty diff or no branch; still verdict-gated, merges nothing).
 
@@ -60,7 +62,7 @@
 
 **Knowledge base (KB)** — a folder under `kb/<dir>/` whose text documents are injected into granted runs. Grants reference the **directory**, never the display name. Repo-documented conventions outrank KB guidance (ruling 56).
 
-**MCP server** — an org-registered Model Context Protocol server (`HTTP` or `stdio`) a profile may be granted. Granting a server is the whole authorization for its tools (ruling 39). Names in `RESERVED_MCP_NAMES` (`viberr`, `viberr_agent`, `viberr_browser`, `viberr_controller`, `viberr_ops` and their hyphen forms) belong to Viberr's in-process servers.
+**MCP server** — an org-registered Model Context Protocol server (`HTTP` or `stdio`) a profile may be granted. Granting a server is the whole authorization for its tools (ruling 39), except its **write tools** (ruling 176). Names in `RESERVED_MCP_NAMES` (`viberr`, `viberr_agent`, `viberr_browser`, `viberr_controller`, `viberr_ops` and their hyphen forms) belong to Viberr's in-process servers.
 
 **Operator** — the per-task coordination agent (`kind: operator`, one deployment per project, attached to a task when it leaves the entry stage). It triages, dispatches agents, opens packets, recommends or performs transitions, and decides delivery. It never writes code.
 
@@ -115,3 +117,5 @@
 **Waiting** — `human | agent | none`: whose turn it is. Forced to `none` in the terminal stage; `none` while a task waits on other work with no packet or recommendation open (ruling 131).
 
 **Workspace** — the delivering engagement's git clone under `tasks/<KEY>/workspace/<repo>`; supporting runs get `workspace/support/<profileId>/<repo>`. Cut from a per-project mirror; reclaimed once the task is terminal.
+
+**Write tool** — a tool on an org MCP server that an org admin marked in the server's editor (ruling 176). A run that withholds `execute-code-or-write-repo`, and every operator run, does not get it: Claude denies it by name, Codex lists it in the server's `disabled_tools`. The editor suggests names holding create, delete, merge, push, update, write or remove, and stores only what the admin saves; Viberr makes no claim about the tools left unmarked.

@@ -731,7 +731,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // F21-3: prefer the caller's ALREADY PRE-FLIGHTED resolution. Resolving again
   // here would undo the pre-flight — a stdio server that failed to start was
   // dropped from the prompt but would be mounted anyway by this second resolve.
-  const orgServers = deps.orgMcpServers ?? resolveSpecialistMcpServers(db, authority.mcps);
+  // Ruling 176: the operator never writes, so a server's marked write tools
+  // are withheld here as on the run path (which hands its own resolution in).
+  const orgServers =
+    deps.orgMcpServers ??
+    resolveSpecialistMcpServers(db, authority.mcps, { withholdWriteTools: true });
   for (const name of Object.keys(orgServers)) {
     allowed.push(`mcp__${name}`);
   }

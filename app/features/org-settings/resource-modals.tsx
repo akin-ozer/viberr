@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FolderIco } from "~/features/kb-browser/icons";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { slugify } from "~/shared/ids/slugify";
+import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
 import { Icon } from "~/ui/icon";
 import { EditIco, MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
@@ -174,6 +175,28 @@ export function McpModal({
   // P13-KM-06: blank means "keep the stored secret", so removing one needs an
   // explicit intent — without it a repointed server kept sending the old token.
   const [clearCred, setClearCred] = useState(false);
+  // Ruling 176: the write-tool marks. The editor proposes and the admin
+  // decides: a server nobody has reviewed opens with the discovery suggestion
+  // selected; a reviewed one opens with exactly what was saved.
+  const discovered = initial?.discoveredTools ?? [];
+  const reviewed = initial?.writeToolsReviewed ?? false;
+  const [marked, setMarked] = useState<string[]>(() =>
+    reviewed ? (initial?.writeTools ?? []) : discovered.filter(looksLikeWriteTool),
+  );
+  const [typed, setTyped] = useState<string[]>([]);
+  const [draftTool, setDraftTool] = useState("");
+  const toolChoices = [
+    ...new Set([...discovered, ...(initial?.writeTools ?? []), ...typed]),
+  ];
+  const suggested = !reviewed && marked.length > 0;
+  const draftValid = MCP_TOOL_NAME_RE.test(draftTool.trim());
+  const addDraftTool = () => {
+    const tool = draftTool.trim();
+    if (!MCP_TOOL_NAME_RE.test(tool)) return;
+    if (!toolChoices.includes(tool)) setTyped((list) => [...list, tool]);
+    if (!marked.includes(tool)) setMarked((list) => [...list, tool]);
+    setDraftTool("");
+  };
   const { action, err, setErr } = useModalAction(() => onClose());
   const canSave = slugify(name).length > 1 && target.trim().length > 3;
   return (
@@ -207,6 +230,10 @@ export function McpModal({
         fields.target = target.trim();
         fields.cred = cred.trim();
         if (clearCred) fields.clearCred = "1";
+        // Sent once the admin has seen a list (or had one saved): an add with
+        // nothing to show yet stays unreviewed, so the names its first probe
+        // discovers still arrive as a suggestion.
+        if (reviewed || toolChoices.length > 0) fields.writeTools = JSON.stringify(marked);
         action.submit(fields);
       }}
     >
@@ -340,6 +367,81 @@ export function McpModal({
             or MCP_CREDENTIAL env). Never shown again, and never in task timelines,
             comments, or audit records. On a Codex-backend agent this credential is not
             sent: Codex mounts the server unauthenticated.
+          </span>
+        </div>
+      </div>
+      <div className="field">
+        <span className="flabel" id="mcp-write-tools-label">
+          Write tools{" "}
+          <span className="fhint">
+            removed from agents that may not write to the repo, and from every operator
+          </span>
+        </span>
+        {toolChoices.length > 0 ? (
+          <div className="pick-chips" role="group" aria-labelledby="mcp-write-tools-label">
+            {toolChoices.map((tool) => (
+              <button
+                type="button"
+                key={tool}
+                className={"pick-chip mono" + (marked.includes(tool) ? " on" : "")}
+                aria-pressed={marked.includes(tool)}
+                onClick={() =>
+                  setMarked((list) =>
+                    list.includes(tool) ? list.filter((t) => t !== tool) : [...list, tool],
+                  )
+                }
+              >
+                {tool}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="ctx-none">
+            {initial
+              ? "No tool names discovered yet. Re-test the server, or add a name below."
+              : "Its tools are listed here once the connection test answers. You can also add a name below."}
+          </span>
+        )}
+        {suggested && (
+          <span className="fhint">
+            Selected because their names hold create, delete, merge, push, update, write or
+            remove. Review them before you save.
+          </span>
+        )}
+        <div className="tool-add">
+          <input
+            type="text"
+            className="mono"
+            aria-label="Add a write tool by name"
+            placeholder="tool_name"
+            value={draftTool}
+            aria-invalid={draftTool.trim() !== "" && !draftValid}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => setDraftTool(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addDraftTool();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="btn sm ghost"
+            disabled={!draftValid}
+            onClick={addDraftTool}
+          >
+            Add tool
+          </button>
+        </div>
+        <div className="def-note">
+          <Icon name="lock" />
+          <span>
+            A selected tool is removed from every run whose agent withholds{" "}
+            <strong>Execute code or write to the repo</strong>, and from every operator
+            run, on Claude and Codex. Viberr makes no claim about the tools you leave
+            unselected.
           </span>
         </div>
       </div>

@@ -426,6 +426,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     deliberate honesty boundary, not a gap. Pinned by the ABSENCE of any `mcp__*` deny rule
     (`app/server/tasks/specialist-tool-policy.test.ts`) and disclosed in the capability-matrix
     UI (`capability-matrix-modal.tsx`). See the PRD/NFR8 amendment note.
+    *(Amended 2026-09-11 by ruling 176: an admin may mark a server's write tools, and those
+    are denied on every run whose repo-write grant is withheld. The rest stands: no
+    capability denies the `mcp__*` channel, and Viberr makes no claim about a tool the admin
+    has not marked.)*
 40. **R16-6 (2026-08-04): merge stays human-only — "Done" has two meanings.**
     `merge-pull-request` is and stays `ALWAYS_HUMAN`. So a full-autonomy operator that accepts
     completion CANNOT merge: it records the PR `pr.state: "accepted"` — **merge pending** —
@@ -3688,6 +3692,52 @@ by rewriting those paragraphs:*
     `max_budget` in `app/shared/run-failure.ts`, `run-failure-remedy.server.ts`,
     `task-actions.server.ts`, `controller-run.server.ts` and `runs-helpers.ts`; the
     `set-run-spend-cap` intent in `app/routes/org.settings.tsx`.)
+
+176. **An admin may mark an org MCP server's write tools, and a run that withholds repo write
+    does not get them (owner, 2026-09-11; amends 39).** Ruling 39 kept MCP grants outside the
+    capability matrix, so the only guard between a read-only reviewer holding a GitHub MCP
+    and the always-human merge was a paragraph in its prompt (P13-KM-04). Both pinned SDKs
+    can now remove a named tool on every transport (ruling 173(b)). Owner decisions D2 (the
+    probe proposes, the admin decides) and D3 (close P13-KM-04 now).
+    (a) *The admin marks them.* `org_mcp_servers.tool_policy_json` holds the marks as
+    `{ name, gate: "repo-write" }`, one gate kind for now, named for the grant it rides on.
+    It is NULL until an admin first saves the MCP editor's "Write tools" section, and `[]`
+    is a reviewed "none". Every successful probe (save, re-test, warm-up) stores the names
+    its `tools/list` carried in `tool_names_json`. The editor shows them as chips and
+    pre-selects the ones with `create`, `delete`, `merge`, `push`, `update`, `write` or
+    `remove` as a word of the name, only for a server nobody has reviewed; nothing is
+    stored without a save, and a name the probe cannot list can be typed. Names must fit
+    the MCP alphabet (1 to 128 of `A-Za-z0-9_.-`). Each change is audited as
+    `org.mcp.tool_policy.changed` {name, before, after}. A save that does not carry the list
+    (the controller's `save_mcp_server`) keeps it.
+    (b) *A run that withholds repo write does not get them.* When the run's denylist withholds
+    `execute-code-or-write-repo` (`repoWriteWithheldFromDenylist`, the predicate the Codex
+    sandbox reads), and on every operator run, which never writes, the resolver returns each
+    mounted server's marks as `mcpToolDenials`. `startRun` adds `mcp__<server>__<tool>`
+    (normalized the way the CLI names tools) to `disallowedTools` after the D4
+    auto-approval, which a deny rule outranks even under bypass, and an HTTP config also
+    carries the SDK's per-tool `always_deny` policy. Codex has no denylist channel; the
+    same denials become each server's `disabled_tools`, which the pinned 0.153.4 CLI reads
+    per `mcp_servers.<name>`. The resume path re-derives them, and a server the stdio
+    pre-flight drops takes its denials with it.
+    (c) *The prompt paragraph retires where the list is enforced.* The P13-KM-04 paragraph
+    names only the mounted servers that have no marks on that run. For the others, a short
+    section names each server as still mounted and lists the removed tools as tools: live,
+    a Codex model read "removed from this run: gh (create_pull_request)" as the whole server
+    gone and called nothing. The run-inputs `mcp` row lists the withheld tools, the registry
+    row counts them, and the capability matrix's MCP note says which tools this covers.
+    (d) *Measured* by this ruling's canary on 2026-09-11: a reviewer with a stdio GitHub-style
+    server whose `create_pull_request` is marked, on both backends. Withheld, Claude's
+    `system/init` offered `mcp__gh__get_issue` alone and the server never received a
+    `create_pull_request` call; Codex listed and called `get_issue` alone (3 of 3 runs after
+    the wording in (c)). With the grant, both backends called both tools.
+    Viberr still makes no claim about a tool the admin has not marked. The controller's MCP
+    mounts are unchanged: it holds no repo-write grant to withhold.
+    (`app/shared/mcp-tools.ts`; `checkedWriteTools`, `storedWriteTools` and the probe's
+    `toolNames` in `app/server/org/resources.server.ts`; `resolveSpecialistMcpServersDetailed`
+    in `specialist-mcp.server.ts`; the fold in `run-service.server.ts` `startRun`;
+    `codexMcpServers` in `codex-runtime.server.ts`; `buildSpecialistPersona` and
+    `buildOperatorSystemPrompt`; `McpModal` in `app/features/org-settings/resource-modals.tsx`.)
 
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is

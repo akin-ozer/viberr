@@ -41,6 +41,7 @@ import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { isReservedMcpName } from "~/shared/mcp-reserved";
+import { MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/shared/mcp-tools";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
 
@@ -622,6 +623,20 @@ export interface McpView {
    * forever. Optional for the same fixture reason as `firstSuccessAt`.
    */
   heuristicWarmups?: number;
+  /**
+   * Ruling 176: the tools an admin marked as WRITE tools. Each is denied on
+   * every run whose `execute-code-or-write-repo` grant is withheld, and on
+   * every operator run. Empty when none are marked; Viberr makes no claim about
+   * the tools left unmarked.
+   */
+  writeTools: string[];
+  /** Ruling 176: whether an admin has saved this server's write-tool list at
+   *  all, so an empty list saved on purpose reads `true`. The editor pre-ticks
+   *  the discovery suggestion only while this is false. */
+  writeToolsReviewed: boolean;
+  /** Ruling 176: the tool names the last successful probe listed, offered in
+   *  the editor. Null before any probe answered with a list. */
+  discoveredTools: string[] | null;
 }
 
 type McpRow = {
@@ -637,9 +652,75 @@ type McpRow = {
   warming_since: string | null;
   first_success_at: string | null;
   heuristic_warmups: number | null;
+  tool_policy_json: string | null;
+  tool_names_json: string | null;
 };
 
+/** Ruling 176: the stored write-tool policy, `{ name, gate }` per marked tool.
+ *  One gate kind for now: the repo-write grant it rides on. */
+const storedToolPolicySchema = z.array(
+  z.object({ name: z.string(), gate: z.literal("repo-write") }),
+);
+const storedToolNamesSchema = z.array(z.string());
+
+/** The marked write tools, or null when none were ever saved. A value that no
+ *  longer parses reads as never reviewed rather than failing every Settings
+ *  render and every run mount. */
+function storedWriteTools(raw: string | null): string[] | null {
+  if (raw === null) return null;
+  try {
+    const parsed = storedToolPolicySchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data.map((entry) => entry.name) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The discovered tool names, or null when no probe has listed any. */
+function storedToolNames(raw: string | null): string[] | null {
+  if (raw === null) return null;
+  try {
+    const parsed = storedToolNamesSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The JSON a write-tool list is stored as. */
+function toolPolicyJson(names: readonly string[]): string {
+  return JSON.stringify(names.map((name) => ({ name, gate: "repo-write" as const })));
+}
+
+/**
+ * Ruling 176: an admin's write-tool list, checked and de-duplicated before it
+ * can become a deny rule. A name outside the MCP spec's alphabet would be a
+ * rule that matches nothing, so it is refused rather than stored.
+ */
+function checkedWriteTools(names: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name) continue;
+    if (!MCP_TOOL_NAME_RE.test(name)) {
+      throw AppError.validation(
+        `"${name.slice(0, 60)}" is not an MCP tool name. Use letters, digits, _, - and . only, up to 128 characters.`,
+      );
+    }
+    if (!out.includes(name)) out.push(name);
+  }
+  if (out.length > MCP_WRITE_TOOLS_MAX) {
+    throw AppError.validation(`Mark at most ${MCP_WRITE_TOOLS_MAX} write tools on one server.`);
+  }
+  return out;
+}
+
+function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name) => b.includes(name));
+}
+
 function mapMcp(row: McpRow): McpView {
+  const writeTools = storedWriteTools(row.tool_policy_json);
   return {
     id: row.id,
     name: row.name,
@@ -658,6 +739,9 @@ function mapMcp(row: McpRow): McpView {
     warmingSince: row.warming_since,
     firstSuccessAt: row.first_success_at,
     heuristicWarmups: row.heuristic_warmups ?? 0,
+    writeTools: writeTools ?? [],
+    writeToolsReviewed: writeTools !== null,
+    discoveredTools: storedToolNames(row.tool_names_json),
   };
 }
 
@@ -799,11 +883,12 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
 
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                         up, last_checked_at, last_error, warming_since,
-                        first_success_at, heuristic_warmups
+                        first_success_at, heuristic_warmups,
+                        tool_policy_json, tool_names_json
                  FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
-  // SAFETY: `MCP_SQL` selects exactly the twelve `org_mcp_servers` columns
+  // SAFETY: `MCP_SQL` selects exactly the fourteen `org_mcp_servers` columns
   // `McpRow` declares; the baseline DDL types each one as the column this row
   // reads (0001_baseline.sql), NOT NULL on id/name/transport/target.
   const rows = db
@@ -981,7 +1066,10 @@ interface StdioDiscoveryFailure {
 }
 
 export type StdioDiscovery =
-  | { kind: "up"; latencyMs: number; tools: number }
+  /** `toolNames` (ruling 176): the names the listing carried, for the editor's
+   *  write-tool suggestions; an entry without a string name is counted in
+   *  `tools` and left out here. */
+  | { kind: "up"; latencyMs: number; tools: number; toolNames: string[] }
   | StdioDiscoveryFailure;
 
 /**
@@ -1193,9 +1281,14 @@ export async function discoverStdioMcpTools(
       } else if (msg.id === 1 && msg.error) {
         finish({ kind: "down", reason: "initialize rejected" });
       } else if (msg.id === 2) {
-        const tools = msg.result?.tools;
-        if (Array.isArray(tools)) {
-          finish({ kind: "up", latencyMs: Date.now() - started, tools: tools.length });
+        const listed = mcpToolListSchema.safeParse(msg.result);
+        if (listed.success) {
+          finish({
+            kind: "up",
+            latencyMs: Date.now() - started,
+            tools: listed.data.tools.length,
+            toolNames: listed.data.tools.filter((name) => name !== null),
+          });
         } else {
           finish({ kind: "down", reason: "no tools in response" });
         }
@@ -1269,8 +1362,16 @@ type McpHandshakeRequest =
   | { jsonrpc: "2.0"; method: "notifications/initialized" }
   | { jsonrpc: "2.0"; id: number; method: "tools/list"; params: Record<string, never> };
 
-/** The `tools/list` result envelope, read only for how many tools it listed. */
-const mcpToolListSchema = z.object({ tools: z.array(z.unknown()) });
+/** One `tools/list` entry, read only for its name. */
+const mcpToolEntrySchema = z.object({ name: z.string() });
+
+/** The `tools/list` result envelope: every entry counts as a tool, and each
+ *  reads as its name, or null when it carries no string name (ruling 176). */
+const mcpToolListSchema = z.object({
+  tools: z.array(
+    z.unknown().transform((entry) => mcpToolEntrySchema.safeParse(entry).data?.name ?? null),
+  ),
+});
 
 /**
  * One JSON-RPC message off an MCP endpoint, decoded at the wire into the only
@@ -1284,12 +1385,16 @@ const mcpToolListSchema = z.object({ tools: z.array(z.unknown()) });
  */
 const mcpMessageSchema = z
   .object({ result: z.unknown().optional() })
-  .transform((message) => ({
-    // JSON never yields `undefined`, so this is exactly "the body has a
-    // `result` member".
-    answered: message.result !== undefined,
-    tools: mcpToolListSchema.safeParse(message.result).data?.tools.length ?? null,
-  }));
+  .transform((message) => {
+    const listed = mcpToolListSchema.safeParse(message.result).data;
+    return {
+      // JSON never yields `undefined`, so this is exactly "the body has a
+      // `result` member".
+      answered: message.result !== undefined,
+      tools: listed ? listed.tools.length : null,
+      toolNames: listed ? listed.tools.filter((name) => name !== null) : [],
+    };
+  });
 
 type McpMessage = z.infer<typeof mcpMessageSchema>;
 
@@ -1450,7 +1555,12 @@ export async function discoverHttpMcpTools(
     if (tools === null) {
       return { kind: "down", reason: "no tools in response" };
     }
-    return { kind: "up", latencyMs: Date.now() - started, tools };
+    return {
+      kind: "up",
+      latencyMs: Date.now() - started,
+      tools,
+      toolNames: listMsg?.toolNames ?? [],
+    };
   } catch (error) {
     const reason =
       error instanceof Error && error.name === "TimeoutError"
@@ -1472,6 +1582,10 @@ export async function saveMcpServer(
      *  `cred` still means "keep what is stored" — the UI never round-trips the
      *  sealed secret, so blank cannot mean "clear". */
     clearCred?: boolean;
+    /** Ruling 176: the tools to mark as write tools, the whole list. Absent
+     *  keeps what is stored (the controller's tool and any other caller that
+     *  does not edit the list); an empty array is a reviewed "none". */
+    writeTools?: readonly string[];
   },
   actor: AuditActor,
   options: McpProbeOptions = {},
@@ -1529,6 +1643,9 @@ export async function saveMcpServer(
       transport === "stdio" ? "Enter the command." : "Enter the endpoint.",
     );
   }
+  // Checked before the probe, so a bad name is refused without spawning anything.
+  const writeTools =
+    input.writeTools === undefined ? undefined : checkedWriteTools(input.writeTools);
 
   // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
   // (0001_baseline.sql), so a matching row hands back a string.
@@ -1585,6 +1702,9 @@ export async function saveMcpServer(
   const warmable =
     disc.kind === "down" && (disc.installing === true || heuristicWarmable);
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
+  const writeNote = writeTools?.length
+    ? ` · ${writeTools.length} marked as write tool${writeTools.length === 1 ? "" : "s"}`
+    : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
     : "";
@@ -1600,12 +1720,23 @@ export async function saveMcpServer(
           ? `${name} saved. It is installing in the background; this page updates when it finishes`
           : `${name} saved, but it did not answer: ${disc.reason}`
         : `${name} saved, but the endpoint didn't answer as an MCP server (${disc.reason})`) +
+    writeNote +
     credNote;
 
   let id = input.id ?? null;
   if (id) {
     const existing = getMcpServer(db, id);
     if (!existing) throw AppError.notFound("No such MCP server.");
+    // Ruling 176: a probe that listed tools replaces the discovered names; one
+    // that failed keeps the last list (still the right thing to mark from),
+    // unless the server was re-pointed, when the old command's list would
+    // describe a server this row no longer is.
+    const toolNames =
+      disc.kind === "up"
+        ? disc.toolNames
+        : existing.target === target
+          ? existing.discoveredTools
+          : null;
     // Both transports now carry a REAL discovered count (null when the probe
     // failed), so there is one write path and no stale count can survive an edit.
     db.prepare(
@@ -1613,13 +1744,19 @@ export async function saveMcpServer(
        SET name = ?, transport = ?, target = ?, cred_ref = ?,
            tools_count = ?, up = ?, last_checked_at = ?, last_error = ?,
            first_success_at = COALESCE(first_success_at, ?),
+           tool_names_json = ?,
+           tool_policy_json = COALESCE(?, tool_policy_json),
            updated_at = ?
        WHERE id = ?`,
       // R20-4: stamp the first-ever success idempotently — COALESCE keeps an
-      // earlier stamp, and a `down` write passes NULL (a no-op).
+      // earlier stamp, and a `down` write passes NULL (a no-op). The policy
+      // COALESCE is the same shape: an absent list keeps what is stored.
     ).run(
       name, transport, target, cred, tools, up, checkedAt, lastError,
-      up === 1 ? now : null, now, id,
+      up === 1 ? now : null,
+      toolNames === null ? null : JSON.stringify(toolNames),
+      writeTools === undefined ? null : toolPolicyJson(writeTools),
+      now, id,
     );
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
     // leg that never rewrote it — KB and skill renames did, every delete dropped
@@ -1637,19 +1774,32 @@ export async function saveMcpServer(
       subjectId: id,
       details: { name, transport, renamed: existing.name !== name },
     });
+    if (writeTools !== undefined && !sameNameSet(existing.writeTools, writeTools)) {
+      recordAudit(db, {
+        action: "org.mcp.tool_policy.changed",
+        actor,
+        subjectKind: "org_mcp",
+        subjectId: id,
+        details: { name, before: existing.writeTools, after: writeTools },
+      });
+    }
     publishResourceUpdated("mcp", id);
   } else {
     id = newId("mcp");
     db.prepare(
       `INSERT INTO org_mcp_servers
          (id, name, transport, target, cred_ref, tools_count, up,
-          last_checked_at, last_error, first_success_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          last_checked_at, last_error, first_success_at,
+          tool_names_json, tool_policy_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // R20-4: a brand-new row records its first success immediately when the
       // save probe already answered up; otherwise NULL (never worked here yet).
     ).run(
       id, name, transport, target, cred, tools, up, checkedAt, lastError,
-      up === 1 ? now : null, now, now,
+      up === 1 ? now : null,
+      disc.kind === "up" ? JSON.stringify(disc.toolNames) : null,
+      writeTools === undefined ? null : toolPolicyJson(writeTools),
+      now, now,
     );
     recordAudit(db, {
       action: "org.mcp.added",
@@ -1658,6 +1808,15 @@ export async function saveMcpServer(
       subjectId: id,
       details: { name, transport },
     });
+    if (writeTools?.length) {
+      recordAudit(db, {
+        action: "org.mcp.tool_policy.changed",
+        actor,
+        subjectKind: "org_mcp",
+        subjectId: id,
+        details: { name, before: [], after: writeTools },
+      });
+    }
     publishResourceUpdated("mcp", id);
   }
 
@@ -1709,11 +1868,12 @@ export async function testMcpServer(
     db.prepare(
       `UPDATE org_mcp_servers
        SET up = 1, tools_count = ?, last_checked_at = ?, last_error = NULL,
-           first_success_at = COALESCE(first_success_at, ?), updated_at = ?
+           first_success_at = COALESCE(first_success_at, ?),
+           tool_names_json = ?, updated_at = ?
        WHERE id = ?`,
       // R20-4: a passing retest is a first-ever success too — stamp it so a
       // later cold probe of a working server is never mistaken for a first run.
-    ).run(disc.tools, now, now, now, id);
+    ).run(disc.tools, now, now, JSON.stringify(disc.toolNames), now, id);
     const fresh = getMcpServer(db, id)!;
     return {
       mcp: fresh,

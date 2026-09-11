@@ -239,6 +239,13 @@ export function runInputRows(
       inputs.mcp.unhealthy.length
         ? `mounted but its last connection check failed: ${inputs.mcp.unhealthy.join(", ")}`
         : null,
+      // Ruling 176: the admin-marked write tools this run withheld.
+      inputs.mcp.writeToolsDenied?.length
+        ? "write tools withheld (repo write is withheld): " +
+          inputs.mcp.writeToolsDenied
+            .map((denial) => `${denial.server} (${denial.tools.join(", ")})`)
+            .join("; ")
+        : null,
     ]
       .filter(Boolean)
       .join(" · "),

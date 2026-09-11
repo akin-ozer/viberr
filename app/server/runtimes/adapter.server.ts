@@ -6,6 +6,7 @@ import type {
   RunKind,
 } from "~/features/runtime/runtime-types";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
+import type { McpToolDenial } from "~/shared/mcp-tools";
 import type { EnvelopeFacts } from "./wire-format.server";
 
 /**
@@ -90,6 +91,12 @@ export interface RunSpec {
    *  specialist without push rights cannot run `git push`). Deny rules bind
    *  even under bypassPermissions. Claude only. */
   disallowedTools?: string[];
+  /** Ruling 176: per mounted org server, the admin-marked write tools this
+   *  run withholds, by the server's own tool names. `startRun` has already
+   *  added the Claude `mcp__<server>__<tool>` names to `disallowedTools`;
+   *  Codex, which has no denylist channel, sends them as that server's
+   *  `disabled_tools`. */
+  mcpToolDenials?: McpToolDenial[];
   /** The task's attachments directory, when this run's profile holds
    *  `attach-evidence-references` — Codex `workspace-write` sandboxes add it as
    *  an additional writable directory so the agent can copy files there ("post

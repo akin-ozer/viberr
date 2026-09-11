@@ -82,6 +82,7 @@ import {
   type RunPrincipalRefusal,
 } from "./run-principal.server";
 import { runMarkerEnv } from "./run-processes.server";
+import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
 import { newId } from "~/shared/ids/new-id.server";
 
@@ -391,6 +392,9 @@ export interface StartRunInput {
   /** Tool denylist confining a specialist run to its granted capabilities.
    *  Claude only (Codex has no denylist channel — see codex-runtime). */
   disallowedTools?: string[];
+  /** Ruling 176: the org servers' marked write tools this run withholds (see
+   *  `RunSpec.mcpToolDenials`), as the MCP resolver returned them. */
+  mcpToolDenials?: McpToolDenial[];
   /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
    *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
@@ -942,9 +946,21 @@ export async function startRun(
   }
   if (input.mcpServers) spec.mcpServers = input.mcpServers;
   if (allowedTools) spec.allowedTools = allowedTools;
-  if (input.disallowedTools && input.disallowedTools.length) {
-    spec.disallowedTools = input.disallowedTools;
-  }
+  // Ruling 176: a marked write tool is denied by name AFTER the auto-approval
+  // above, which keeps its `mcp__<server>` allow entry (D4) — a deny rule wins
+  // over it, even under bypassPermissions. Only servers this run mounts: a
+  // denial for a server that never started names nothing.
+  const mcpToolDenials = (input.mcpToolDenials ?? []).filter(
+    (denial) => denial.tools.length > 0 && Object.hasOwn(input.mcpServers ?? {}, denial.server),
+  );
+  const denied = [
+    ...(input.disallowedTools ?? []),
+    ...mcpToolDenials.flatMap((denial) =>
+      denial.tools.map((tool) => claudeMcpToolName(denial.server, tool)),
+    ),
+  ];
+  if (denied.length) spec.disallowedTools = denied;
+  if (mcpToolDenials.length) spec.mcpToolDenials = mcpToolDenials;
   if (input.skills && input.skills.length) spec.skills = input.skills;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
   // it, and since ruling 101 the Codex read-only sandbox does too
@@ -1392,6 +1408,9 @@ export interface ResumeRunInput {
    *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
    *  confinement the fresh-run path establishes is silently dropped (XS-1). */
   disallowedTools?: string[];
+  /** Ruling 176: re-apply the org servers' withheld write tools on resume, or
+   *  a resumed read-only agent would get back the tools its fresh run lacked. */
+  mcpToolDenials?: McpToolDenial[];
   /** Re-apply the granted skills mounted into the workspace on resume. The
    *  workspace (and its mount) survives between runs, but the SDK options do
    *  not: without this a resumed @mention run would enable NO skill while its
@@ -1445,6 +1464,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.dataRoot) target.dataRoot = input.dataRoot;
   if (input.actor) target.actor = input.actor;
   if (input.disallowedTools) target.disallowedTools = input.disallowedTools;
+  if (input.mcpToolDenials) target.mcpToolDenials = input.mcpToolDenials;
   if (input.skills) target.skills = input.skills;
   if (input.allowedTools) target.allowedTools = input.allowedTools;
   if (input.env) target.env = input.env;

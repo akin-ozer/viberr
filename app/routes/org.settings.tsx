@@ -5,6 +5,7 @@ import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
 import { assertCsrf } from "~/server/auth/csrf.server";
 import { appErrorResponse } from "~/server/auth/form-action.server";
+import { AppError } from "~/server/errors/app-error.server";
 import {
   requireRole,
   requireRoleAuth,
@@ -194,6 +195,22 @@ const storePath = z
   .array(z.string().nullable().catch(null))
   .transform((segments) => segments.filter((seg) => seg !== null))
   .catch([]);
+
+/** Ruling 176: the MCP editor's write-tool list, a JSON array of names. */
+const writeToolNames = z.array(z.string());
+
+/** The list, or undefined when the form carries no "Write tools" section. A
+ *  malformed value is refused: reading it as "none" would lift every mark. */
+function parseWriteTools(raw: FormDataEntryValue | null): string[] | undefined {
+  if (raw === null) return undefined;
+  try {
+    const parsed = writeToolNames.safeParse(JSON.parse(String(raw)));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Not JSON: refused below with the same sentence.
+  }
+  throw AppError.validation("The write-tool list did not arrive as a list of tool names.");
+}
 
 function parseJsonStringArray(raw: string): string[] {
   try {
@@ -511,18 +528,18 @@ export async function action({ request }: Route.ActionArgs) {
       case "kb-reindex":
         return ok(reindexKnowledgeBase(db, field("kbId"), actor).toast);
       case "mcp-save": {
-        const result = await saveMcpServer(
-          db,
-          {
-            id: field("mcpId") || null,
-            name: field("name"),
-            transport: field("transport"),
-            target: field("target"),
-            cred: field("cred"),
-            clearCred: field("clearCred") === "1",
-          },
-          actor,
-        );
+        const input: Parameters<typeof saveMcpServer>[1] = {
+          id: field("mcpId") || null,
+          name: field("name"),
+          transport: field("transport"),
+          target: field("target"),
+          cred: field("cred"),
+          clearCred: field("clearCred") === "1",
+        };
+        // Absent keeps the stored marks; only the editor sends the section.
+        const writeTools = parseWriteTools(formData.get("writeTools"));
+        if (writeTools !== undefined) input.writeTools = writeTools;
+        const result = await saveMcpServer(db, input, actor);
         return ok(result.toast);
       }
       // ---- R19-16: sign-in providers, configured in the app ----

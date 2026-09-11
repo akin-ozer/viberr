@@ -2852,6 +2852,34 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(none).not.toContain("MCP tools are governed too");
   });
 
+  it("ruling 176: a server whose marked write tools are withheld leaves the governance paragraph", () => {
+    // Canary: drop the `gatedServers` filter and `github-mcp` is named in the
+    // paragraph again although its write tools are gone from the run.
+    const dataRoot = tempRoot();
+    const mixed = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["github-mcp", "docs-mcp"],
+      mcpWriteToolsDenied: [{ server: "github-mcp", tools: ["merge_pull_request"] }],
+      dataRoot,
+    });
+    expect(mixed).toContain("You have tools from these attached MCP servers: docs-mcp.");
+    expect(mixed).toContain("MCP write tools withheld");
+    expect(mixed).toContain("These attached MCP servers stay mounted: github-mcp.");
+    expect(mixed).toContain("merge_pull_request (on github-mcp)");
+
+    const gatedOnly = buildSpecialistPersona({
+      profileId: "scout",
+      skills: [],
+      mcps: ["github-mcp"],
+      mcpWriteToolsDenied: [{ server: "github-mcp", tools: ["merge_pull_request"] }],
+      dataRoot,
+    });
+    expect(gatedOnly).not.toContain("MCP tools are governed too");
+    // The server is still mounted, so the "no MCP servers" note stays away.
+    expect(gatedOnly).not.toContain("No external MCP servers on this run");
+  });
+
   it("F27-P2: a Codex run discloses that an MCP server's stored credential was NOT forwarded", () => {
     const dataRoot = tempRoot();
     const codex = buildSpecialistPersona({
@@ -4329,6 +4357,85 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputs!.unresolvedResources.map((r) => r.name)).toContain("house-style");
     // The persona still tells the agent too — both audiences, one resolution.
     expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT reach this run");
+  });
+
+  it("ruling 176: a read-only agent's run withholds the org server's marked write tools, on the spec, the prompt and the record", async () => {
+    // `dev` holds no grants, so its repo-write grant is withheld. The org row is
+    // HTTP so no stdio pre-flight spawns anything.
+    // Canary: pass `withholdWriteTools: false` in startAgentRun's mcpServersFor
+    // call and all three halves below go empty.
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, tool_policy_json, created_at, updated_at)
+         VALUES (?, ?, 'HTTP', ?, ?, ?, ?)`,
+      )
+      .run(
+        "mcp_gh",
+        "gh",
+        "https://mcp.example.test/gh",
+        JSON.stringify([{ name: "merge_pull_request", gate: "repo-write" }]),
+        now,
+        now,
+      );
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    const deployWith = (capabilities: { capabilityId: string; mode: "direct" }[]) => {
+      writeProject(store.dataRoot, {
+        ...fm,
+        agents: [
+          {
+            profileId: "dev",
+            capabilities,
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "dev",
+              role: "developer",
+              backends: ["claude"],
+              model: "sonnet",
+              resources: { skills: [], mcps: ["gh"], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+
+    deployWith([]);
+    const runId = await assignAndRun();
+    const spec = lastRunSpec()!;
+    expect(spec.disallowedTools).toContain("mcp__gh__merge_pull_request");
+    expect(spec.mcpServers?.gh).toEqual({
+      type: "http",
+      url: "https://mcp.example.test/gh",
+      tools: [{ name: "merge_pull_request", permission_policy: "always_deny" }],
+    });
+    expect(spec.systemPrompt ?? "").toContain("MCP write tools withheld");
+    expect(spec.systemPrompt ?? "").not.toContain("You have tools from these attached MCP servers: gh");
+    expect(inputsLine(runId)!.mcp.writeToolsDenied).toEqual([
+      { server: "gh", tools: ["merge_pull_request"] },
+    ]);
+
+    // The resumed turn re-derives the same withholding (XS-1 parity).
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend: "claude", delivers: true },
+    );
+    expect(confinement.mcpToolDenials).toEqual([{ server: "gh", tools: ["merge_pull_request"] }]);
+    expect(confinement.runInputs.mcp.writeToolsDenied).toEqual([
+      { server: "gh", tools: ["merge_pull_request"] },
+    ]);
+
+    // An agent that holds the grant keeps every tool, and the rule paragraph.
+    deployWith([{ capabilityId: "execute-code-or-write-repo", mode: "direct" }]);
+    const grantedRun = await assignAndRun();
+    const granted = lastRunSpec()!;
+    expect(granted.disallowedTools ?? []).not.toContain("mcp__gh__merge_pull_request");
+    expect(granted.mcpServers?.gh).toEqual({ type: "http", url: "https://mcp.example.test/gh" });
+    expect(granted.systemPrompt ?? "").toContain("You have tools from these attached MCP servers: gh");
+    expect(inputsLine(grantedRun)!.mcp.writeToolsDenied).toEqual([]);
   });
 
   it("resolveResumeConfinement returns the SAME resolved-resource record for a resumed turn", async () => {

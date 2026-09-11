@@ -303,6 +303,21 @@ lists tools); the prompt paragraph is gone on that run; a run with the grant see
 **Canary.** A reviewer profile with a GitHub-style stdio MCP whose `create_pull_request` is marked; the run's init
 line omits it.
 
+*(As implemented 2026-09-11, ruling 176, branch `option-d/pr2-mcp-tool-gating`. Where it departs from the text above:
+(1) `tool_policy_json` is nullable, NULL meaning "never reviewed", so the editor pre-selects the suggestion only then
+and a reviewed "none" is not re-suggested; a second column, `tool_names_json`, keeps the probe's tool names for the
+editor (the probe used to keep only a count). (2) The denials travel as a structured `mcpToolDenials` list
+(`{server, tools}`) on the start and resume inputs and the `RunSpec`; `startRun` folds the Claude names into
+`disallowedTools`, and Codex reads the raw names, which a normalized `mcp__` name cannot give back. (3) An HTTP server
+gets the name deny as well as `always_deny`: the pinned CLI applies the per-tool policy only to dynamic-scope servers,
+and the name rule binds on every transport. (4) Codex supports per-server `disabled_tools` on the 0.153.4 pin
+(checked in its config parser and live), so Codex is enforced too and the prompt paragraph retires on both backends
+where a list is enforced. (5) After the first Codex canary the gated-server section was reworded to name the server
+as still mounted: a model had read "removed: gh (create_pull_request)" as the whole server gone. (6) The capability
+catalog has no per-capability description, so the copy lives in the matrix's MCP note and the catalog comment.
+(7) The controller's MCP mounts are unchanged. Canary: on both backends, withheld runs never received a
+`create_pull_request` call; Claude's `system/init` offered only `get_issue`; granted runs called both.)*
+
 **Effort.** 3 to 5 days (the editor is most of it).
 
 ## 7. PR 3: per-run cost cap and exact usage

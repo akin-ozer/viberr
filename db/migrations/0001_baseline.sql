@@ -435,6 +435,16 @@ CREATE TABLE org_mcp_servers (
   -- still settles to `unreachable` instead of re-downloading forever — the
   -- terminal condition R19-17c's honesty depends on.
   heuristic_warmups INTEGER NOT NULL DEFAULT 0,
+  -- Ruling 176: the tools an admin marked as WRITE tools, a JSON array of
+  -- { name, gate: "repo-write" }, denied on runs whose repo-write grant is
+  -- withheld. NULL until an admin first saves the editor's "Write tools"
+  -- section; '[]' is a reviewed "none". The editor pre-ticks the discovery
+  -- suggestion only while it is NULL.
+  tool_policy_json TEXT,
+  -- Ruling 176: the tool names the last successful probe listed (a JSON array),
+  -- offered in the editor. An observation like tools_count, but kept across a
+  -- failed probe: a stale list is still the right thing to mark from.
+  tool_names_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

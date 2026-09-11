@@ -17,8 +17,9 @@ import type { UnresolvedMcpGrant } from "./specialist-mcp.server";
  * transport shape the org-registry servers use, on BOTH backends.
  *
  * Why it is NOT an org-registry row: registry MCPs sit outside the capability
- * policy (P13-KM-04 — governance by instruction only), and a browser is exactly
- * the tool that must not ride that gap. It IS network egress, it executes page
+ * policy (P13-KM-04 — governance by instruction only, save the write tools an
+ * admin marks, ruling 176), and a browser is exactly the tool that must not ride
+ * that gap. It IS network egress, it executes page
  * JavaScript, and it feeds page content back into an agent that may hold
  * repo-write. So the mount is capability-enforced:
  *

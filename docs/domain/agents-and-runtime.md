@@ -27,7 +27,11 @@
 > kind). Updated 2026-09-11 for Option D PR 4 (branch `option-d/pr4-alwaysload-once-only`;
 > no ruling, the plan assigns none): §2.4 (the `viberr` and `viberr_agent` servers load
 > their tools up front, the controller's stay deferred, with the measurement) and §§3.1, 4.2
-> (`report_outcome` stages once; a second call is refused and audited). The operator's own behaviour is in
+> (`report_outcome` stages once; a second call is refused and audited). Updated 2026-09-11
+> for ruling 176 (branch `option-d/pr2-mcp-tool-gating`): §§2.4, 2.5, 4.3 and 6 (an org MCP
+> server's admin-marked write tools are denied on runs that withhold repo write: by name on
+> Claude, as `disabled_tools` on Codex; the P13-KM-04 prompt paragraph names only unmarked
+> servers). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -238,6 +242,14 @@ connecting a different account there (ruling 165).
   but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost ($0.05 to
   $0.21). Org MCP servers are never loaded up front. Pinned per server by the
   `toolLoading` tests (`test-support/mcp-tool-meta.ts`).
+- Org MCP write tools (ruling 176). A run that withholds `execute-code-or-write-repo`, and
+  every operator run, carries `spec.mcpToolDenials`: each mounted server's admin-marked
+  write tools. `startRun` has already added `mcp__<server>__<tool>` (anything outside
+  `[A-Za-z0-9_-]` becomes `_`, as the CLI names tools) to `disallowedTools`, after the
+  server's `mcp__<server>` auto-approval, which a deny rule outranks. An HTTP config also
+  carries `tools: [{ name, permission_policy: "always_deny" }]`, the SDK's own per-tool
+  channel for remote servers. The adapter forwards both unchanged. Live (2026-09-11), the
+  run's `system/init` tool list no longer offers a marked tool.
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
@@ -313,6 +325,10 @@ connecting a different account there (ruling 165).
   off; withheld egress sets `webSearchMode: "disabled"`.
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
+- Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`
+  (the pinned 0.153.4 CLI reads it per `mcp_servers.<name>`, beside `enabled_tools`), by
+  the server's own tool names. Live (2026-09-11), a withheld run listed and called only the
+  unmarked tools.
 - No `maxTurns` and no budget option: the instance's spending cap (ruling 175) does not bind
   a Codex run, and its run-inputs disclosure says so ("Codex has no budget option: this run
   is bounded by its idle timer only"). Idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`);
@@ -717,10 +733,15 @@ description already said "exactly once".)*
 Claude: `CAP_DENY_RULES` turn withheld grants into `disallowedTools`. Codex: the same
 markers become `repoWriteWithheld` (`Edit|Write|NotebookEdit` denied) and
 `webSearchWithheld` (`WebFetch|WebSearch` denied) and drive the sandbox mode (§2.5).
+Ruling 176 adds one row that does not come from `CAP_DENY_RULES`: a withheld
+`execute-code-or-write-repo` also removes the org MCP tools an admin marked as write
+tools on the server (Org settings, MCP server editor), per mounted server, derived from
+the same denylist (`repoWriteWithheldFromDenylist`).
 
 | Withheld capability | Claude denies | Codex |
 |---|---|---|
 | `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | read-only sandbox — **except** the ruling-109 carve-out below |
+| `execute-code-or-write-repo`, org MCP write tools (ruling 176) | `mcp__<server>__<tool>` for each marked tool; an HTTP config also carries `always_deny` | that server's `disabled_tools` (binds; no carve-out) |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
 | `commit-push-branch` | `Bash(git push:*) Bash(git commit:*)` | advisory |
 | `open-review-pr` | `Bash(gh pr create:*)` | advisory |
@@ -843,7 +864,8 @@ Couplings applied on save: `repairDeliveryGrants` (the headline is materialised 
 direct only when absent; an explicit off/human is respected with a "withheld" notice),
 `repairBrowserEgressGrants`. `withheldAgentGrants()` (human kept, everything else off)
 is what an undeployed or grant-less specialist runs with. MCP grants are outside the
-matrix (ruling 39).
+matrix (ruling 39), except the tools an admin marks as write tools, which a withheld
+repo-write grant denies (ruling 176).
 
 Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
 `use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
@@ -899,7 +921,11 @@ above is the create-seed value and never the runtime's answer for a missing gran
   {MCP_CREDENTIAL}}` or http `{url, headers: {Authorization: Bearer}}`; reserved names
   are skipped; a missing row is reported "unresolved"; an unhealthy row is still
   mounted but flagged; stdio mounts get a real discovery handshake before the run and
-  are dropped (and marked unreachable) on failure. Precedence when names collide:
+  are dropped (and marked unreachable) on failure. On a run that withholds repo write,
+  and on every operator run, a server's marked write tools are withheld (ruling 176,
+  §2.4, §2.5): the persona's MCP governance paragraph then names only the servers with no
+  marks, a short section names the gated servers as mounted and lists the removed tools,
+  and the run-inputs `mcp` row lists them too. Precedence when names collide:
   org < browser < toolkit. Reserved names: `viberr`, `viberr_agent`, `viberr-agent`,
   `viberr_browser`, `viberr-browser`, `viberr_controller`, `viberr-controller`,
   `viberr_ops`, `viberr-ops`.

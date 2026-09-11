@@ -1603,6 +1603,52 @@ describe("ruling 130(a): failure record parity", () => {
 });
 
 /**
+ * Ruling 176: Codex has no denylist channel, so an org server's marked write
+ * tools travel as that server's own `disabled_tools` (the pinned CLI reads it
+ * per `mcp_servers.<name>`, beside `enabled_tools`), by the server's raw names.
+ */
+describe("codex MCP write-tool denials (ruling 176)", () => {
+  const COMPLETED = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
+  const serversSchema = z.record(
+    z.string(),
+    z.looseObject({ disabled_tools: z.array(z.string()).optional() }),
+  );
+
+  it("sends each server's denials as its disabled_tools, on stdio and HTTP alike", async () => {
+    // Canary: drop the `disabled_tools` writes in codexMcpServers.
+    const run = fakeCodex([COMPLETED]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      {
+        ...SPEC,
+        mcpServers: {
+          github: { command: "npx", args: ["-y", "gh-mcp"] },
+          "gh-http": {
+            type: "http",
+            url: "https://mcp.example.test/gh",
+            // The Claude per-tool policy rides the portable config; Codex's
+            // schema drops it and reads the denials instead.
+            tools: [{ name: "merge_pull_request", permission_policy: "always_deny" }],
+          },
+          docs: { command: "npx", args: ["-y", "docs-mcp"] },
+        },
+        mcpToolDenials: [
+          { server: "github", tools: ["create_pull_request", "repo.merge"] },
+          { server: "gh-http", tools: ["merge_pull_request"] },
+        ],
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const servers = serversSchema.parse(run.factoryOptions()?.config?.mcp_servers);
+    expect(servers.github?.disabled_tools).toEqual(["create_pull_request", "repo.merge"]);
+    expect(servers["gh-http"]?.disabled_tools).toEqual(["merge_pull_request"]);
+    expect(servers["gh-http"]).not.toHaveProperty("tools");
+    // A server with no marks is translated exactly as before.
+    expect(servers.docs).not.toHaveProperty("disabled_tools");
+  });
+});
+
+/**
  * Ruling 174: the Codex SDK spawns the CLI itself and signals only it, SIGTERM
  * and never SIGKILL, so a settled run is swept by the marker every process it
  * started carries. The CLI inherits its full env; the model's shell and each

@@ -10,7 +10,8 @@
 > @ `478bed0`. Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): per-person agent-backend credentials and
 > runtime homes. Updated 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`):
-> the `maxRunSpendUsd` key in `instance_settings`.
+> the `maxRunSpendUsd` key in `instance_settings`. Updated 2026-09-11 for ruling 176 (branch
+> `option-d/pr2-mcp-tool-gating`): `org_mcp_servers.tool_policy_json` and `tool_names_json`.
 
 ## 1. The two stores and the rule that separates them
 
@@ -136,7 +137,7 @@ files) · **C** cache/operational (safe to lose).
 |---|---|---|
 | `org_knowledge_bases` | P (metadata) | `name`, `dir` (the grant key), `refresh` (`manual \| on change`; the CHECK still admits `nightly`, which is coerced away), `last_indexed_at`. Content is the folder on disk. |
 | `org_skills` | P (metadata) | `name` (slug and folder), `summary`. Content is `skills/<name>/SKILL.md`. |
-| `org_mcp_servers` | P | `name`, `transport` (`HTTP \| stdio`), `target`, optional `cred_ref`, probe results (`tools_count`, `up`, `last_checked_at`, `last_error`), warm-up bookkeeping (`warming_since`, `first_success_at`, `heuristic_warmups`). |
+| `org_mcp_servers` | P | `name`, `transport` (`HTTP \| stdio`), `target`, optional `cred_ref`, probe results (`tools_count`, `up`, `last_checked_at`, `last_error`), warm-up bookkeeping (`warming_since`, `first_success_at`, `heuristic_warmups`). Ruling 176: `tool_policy_json` (the admin-marked write tools as `{ name, gate: "repo-write" }`; NULL until first reviewed, `[]` a reviewed none) and `tool_names_json` (the names the last successful probe listed, kept across a failed one and cleared when the target changes). Both reach an older root through `ensureBaselineColumns`. |
 | `model_availability` | C | Models the provider refused for this account, learned only from real run failures; presence = unavailable. |
 | `controller_conversations` / `controller_messages` | P | The controller's transcripts, owned by the asking user. Scope (ruling 121): `project_slug` + `task_key` (both null = instance, slug alone = board, slug + key = one task; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`), indexed per user and scope. `controller_messages.surface` is the in-app path a user message was sent from (null on controller rows). |
 

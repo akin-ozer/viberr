@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
+import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
   discoverStdioMcpTools,
   getMcpCredentialState,
@@ -52,8 +53,16 @@ import {
 export function resolveSpecialistMcpServers(
   db: DatabaseSync,
   mcpNames: readonly string[],
+  options: McpResolveOptions = {},
 ): Record<string, SpecialistMcpServerConfig> {
-  return resolveSpecialistMcpServersDetailed(db, mcpNames).servers;
+  return resolveSpecialistMcpServersDetailed(db, mcpNames, options).servers;
+}
+
+/** How a run's grants shape what its org servers expose (ruling 176). */
+export interface McpResolveOptions {
+  /** The run withholds `execute-code-or-write-repo` (every operator run does):
+   *  each server's marked write tools are denied on it. */
+  withholdWriteTools?: boolean;
 }
 
 /** A stdio mount: the registered command, its parsed argv, and — Claude only,
@@ -69,6 +78,11 @@ export interface HttpMcpServerConfig {
   type: "http";
   url: string;
   headers?: { Authorization: string };
+  /** Ruling 176: the Claude SDK's per-tool policy for a remote server, set to
+   *  `always_deny` for each marked write tool on a run that withholds repo
+   *  write. The `disallowedTools` name `startRun` adds is what binds on every
+   *  transport; this is the SDK's own channel for HTTP, carried as well. */
+  tools?: { name: string; permission_policy: "always_deny" }[];
 }
 
 /** The portable per-server config both adapters accept; the Codex adapter
@@ -110,21 +124,31 @@ export interface SpecialistMcpResolution {
    * against the run.
    */
   unresolved: UnresolvedMcpGrant[];
+  /**
+   * Ruling 176: per mounted server, the marked write tools this run withholds.
+   * Empty unless the caller withheld write tools AND a mounted server has
+   * marks. The caller hands it to `startRun`, which denies each by name on
+   * Claude and as `disabled_tools` on Codex.
+   */
+  toolDenials: McpToolDenial[];
 }
 
 export function resolveSpecialistMcpServersDetailed(
   db: DatabaseSync,
   mcpNames: readonly string[],
+  options: McpResolveOptions = {},
 ): SpecialistMcpResolution {
   const servers: Record<string, SpecialistMcpServerConfig> = {};
   const unresolved: UnresolvedMcpGrant[] = [];
-  if (mcpNames.length === 0) return { servers, unresolved };
+  const toolDenials: McpToolDenial[] = [];
+  if (mcpNames.length === 0) return { servers, unresolved, toolDenials };
   let registry: {
     name: string;
     transport: "HTTP" | "stdio";
     target: string;
     up: boolean | null;
     lastCheckedAt: string | null;
+    writeTools: string[];
   }[];
   try {
     registry = listMcpServers(db);
@@ -145,7 +169,7 @@ export function resolveSpecialistMcpServersDetailed(
         reason: "the org MCP registry could not be read — it exposes no tools",
       });
     }
-    return { servers, unresolved };
+    return { servers, unresolved, toolDenials };
   }
   const byName = new Map(registry.map((m) => [m.name, m]));
 
@@ -195,6 +219,10 @@ export function resolveSpecialistMcpServersDetailed(
       continue;
     }
     const token = credential.state === "ok" ? credential.token : null;
+    // Ruling 176: the admin's marks bind only on a run that withholds repo
+    // write; a server with none marked is mounted exactly as before.
+    const denied = options.withholdWriteTools ? row.writeTools : [];
+    if (denied.length) toolDenials.push({ server: name, tools: [...denied] });
     if (row.transport === "stdio") {
       const parts = splitMcpCommand(row.target);
       const command = parts[0];
@@ -208,6 +236,9 @@ export function resolveSpecialistMcpServersDetailed(
     } else {
       const http: HttpMcpServerConfig = { type: "http", url: row.target };
       if (token) http.headers = { Authorization: `Bearer ${token}` };
+      if (denied.length) {
+        http.tools = denied.map((tool) => ({ name: tool, permission_policy: "always_deny" }));
+      }
       servers[name] = http;
     }
     // P14-LV-09b: a REGISTERED but known-down server resolves to a config, so it
@@ -216,7 +247,7 @@ export function resolveSpecialistMcpServersDetailed(
     // attached MCP server" with "no callable tools ever surfaced for it".
     if (row.up === false) flagDown(name, row.lastCheckedAt ?? null);
   }
-  return { servers, unresolved };
+  return { servers, unresolved, toolDenials };
 }
 
 /**
@@ -329,5 +360,7 @@ export async function verifyStdioMcpMountsForRun(
       sharedHealthDowngraded: corruptsSharedHealth,
     });
   }
-  return { servers, unresolved };
+  // A dropped server exposes nothing, so it has nothing left to deny.
+  const toolDenials = resolution.toolDenials.filter((d) => d.server in servers);
+  return { servers, unresolved, toolDenials };
 }

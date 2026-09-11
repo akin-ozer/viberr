@@ -1003,6 +1003,81 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
   });
 });
 
+/* ----------- ruling 176: an org server's marked write tools, denied --------- */
+
+describe("ruling 176 — marked MCP write tools reach the denylist", () => {
+  function captureAdapter(specs: RunSpec[]): RuntimeAdapter {
+    return {
+      backend: "claude",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: "sess-a" });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+  }
+
+  it("denies each marked tool by its Claude name AFTER the server's auto-approval", async () => {
+    // Canary: drop the `mcpToolDenials` fold in startRun and the names never
+    // reach `disallowedTools`.
+    const specs: RunSpec[] = [];
+    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Reviewer", kind: "reviewer",
+      backend: "claude", model: "m", prompt: "go",
+      mcpServers: { github: stdioServerStub },
+      disallowedTools: ["Edit", "Write"],
+      mcpToolDenials: [
+        { server: "github", tools: ["create_pull_request", "repo.merge"] },
+        // A server this run does not mount names nothing, so it is not carried.
+        { server: "dropped", tools: ["push_files"] },
+      ],
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const spec = specs[0]!;
+    // The D4 approval entry stays: a deny rule wins over it.
+    expect(spec.allowedTools).toEqual(["mcp__github"]);
+    expect(spec.disallowedTools).toEqual([
+      "Edit",
+      "Write",
+      "mcp__github__create_pull_request",
+      // The CLI's own normalization: outside [A-Za-z0-9_-] becomes `_`.
+      "mcp__github__repo_merge",
+    ]);
+    // Codex reads the raw names off the spec (`disabled_tools`).
+    expect(spec.mcpToolDenials).toEqual([
+      { server: "github", tools: ["create_pull_request", "repo.merge"] },
+    ]);
+  });
+
+  it("carries the denials onto a resumed run", async () => {
+    const specs: RunSpec[] = [];
+    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Reviewer", kind: "reviewer",
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      credentialUserId: store.users.arda.id,
+      mcpServers: { github: stdioServerStub },
+      mcpToolDenials: [{ server: "github", tools: ["merge_pull_request"] }],
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    const spec = specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.disallowedTools).toEqual(["mcp__github__merge_pull_request"]);
+    expect(spec.mcpToolDenials).toEqual([{ server: "github", tools: ["merge_pull_request"] }]);
+  });
+});
+
 /* ---------------- runtime continuity recovery (P13-D-2 / FR22) ------------- */
 
 describe("resumeRun — continuity recovery", () => {
