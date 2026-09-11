@@ -451,7 +451,10 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
       // mode, or a prompt nobody was there to answer. The run went on, but a
       // human reading the console must see the attempt and the refusal (a
       // supporting agent reaching for `git push` is the VIB-30 class), so it is
-      // an error-class line named after the tool, never a dim meta row.
+      // an error-class line named after the tool, never a dim meta row. The
+      // Claude adapter writes one in this shape itself (`source: "viberr"`,
+      // `decision_reason_type: "hook"`) for its PreToolUse capability hook,
+      // whose denies the SDK reports as a tool result only (Option D PR 5).
       if (e.subtype === "permission_denied") {
         const reason = e.decision_reason || e.message.text;
         const by = e.decision_reason_type ? ` by ${e.decision_reason_type}` : "";

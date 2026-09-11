@@ -460,6 +460,16 @@ normaliser has cases for `cd`, `git -C`, `sh -c`, `&&` and `;` chains.
 
 **Effort.** 0.5 day spike; 1 to 2.5 days PR.
 
+*(Spike run 2026-09-11, passed; shipped as the ruling 101(e) amendment, branch `option-d/pr5-pretooluse-deny`. (1) The
+hook binds under Viberr's options and its reason comes back as the tool result. (2) Ordering is the reverse of the
+expectation: the hook saw, and answered, the plain `git push` the rule also denies, so the hook runs first; it only
+ever denies, so the rules still decide anything it lets through. (3) A hook deny has no `permission_denied` frame and
+arrives as an error `tool_result`; the adapter writes a `permission_denied` frame of its own (`source: "viberr"`,
+`decision_reason_type: "hook"`) instead of a new `hook_denied` tag, so the console reads it as it reads a rule's
+deny. The premise needed a correction: without the hook the pinned CLI already refused `cd . && git push` and `true;
+git push` (it checks each part of a chain), and what slipped past was `git -C . push` and `sh -c 'git push'`, both of
+which landed on a local remote. With the hook all five shapes were refused and nothing landed.)*
+
 ## 10. PR 6: hygiene
 
 Exact replacements:

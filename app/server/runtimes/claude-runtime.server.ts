@@ -38,6 +38,8 @@ import {
   type ReapTargets,
   type SignalProcess,
 } from "./run-processes.server";
+import { bashDenyPrefixes, deniedPrefixFor } from "./bash-policy.server";
+import { bashDenyReason } from "~/server/tasks/specialist-tool-policy";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -141,7 +143,32 @@ export interface ClaudeQueryOptions {
    *  process group (`claude-spawn.server.ts`), instead of the SDK's local
    *  spawn. */
   spawnClaudeCodeProcess?: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
+  /** Ruling 101(e), amended (Option D PR 5): the PreToolUse hook that refuses a
+   *  Bash command reaching one of the run's argument-level denies, however it
+   *  is wrapped, with a reason the model reads. It only ever denies. */
+  hooks?: { PreToolUse: { matcher: string; hooks: ClaudePreToolUseHook[] }[] };
 }
+
+/** The SDK's `PreToolUse` callback, narrowed to the fields Viberr's hook reads
+ *  and the one answer it gives. */
+export type ClaudePreToolUseHook = (
+  input: { hook_event_name: string; tool_input?: unknown },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<ClaudeHookAnswer>;
+
+/** No decision (`{}`) leaves the call to the mode and the deny rules; a deny
+ *  stops it and hands the model the reason as the tool's result. */
+export interface ClaudeHookAnswer {
+  hookSpecificOutput?: {
+    hookEventName: "PreToolUse";
+    permissionDecision: "deny";
+    permissionDecisionReason: string;
+  };
+}
+
+/** The Bash tool's input, read only for the command line. */
+const bashCommandSchema = z.object({ command: z.string() });
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
   interrupt(): Promise<void>;
@@ -1105,6 +1132,29 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         return enriched;
       };
 
+      /**
+       * The console's record of a PreToolUse deny (Option D PR 5). The SDK
+       * sends no `system/permission_denied` frame for a hook's decision, so
+       * Viberr writes one in that frame's shape, marked as its own, and it
+       * projects exactly as a rule's deny does: an error line naming the tool.
+       */
+      const emitPolicyDenied = (command: string, reason: string, toolUseId: string | undefined) => {
+        const occurredAt = new Date().toISOString();
+        const envelope = {
+          type: "system",
+          subtype: "permission_denied",
+          source: "viberr",
+          tool_name: "Bash",
+          tool_use_id: toolUseId ?? "",
+          // The SDK's own word for a hook's decision; the reason names the policy.
+          decision_reason_type: "hook",
+          decision_reason: reason,
+          message: `Permission to use Bash with command ${command} has been denied.`,
+        };
+        const { display, facts } = projectEnvelope("claude", envelope, occurredAt);
+        cb.onLine({ raw: JSON.stringify(envelope), display, facts, occurredAt });
+      };
+
       /** Persist a redaction-safe classified reason line, then settle error. */
       const settleError = (cause: unknown) => {
         if (settled) return;
@@ -1373,6 +1423,32 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           ...(spec.disallowedTools ?? []),
         ];
         if (denied.length) options.disallowedTools = denied;
+        // Ruling 101(e), amended (Option D PR 5): the prefix rules above match a
+        // command by its leading words, and the pinned CLI, which already splits
+        // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
+        // through (measured 2026-09-11: both refs landed on a local remote). A
+        // run with argument-level denies gets a PreToolUse hook that refuses a
+        // command reaching one, however wrapped, with a reason the model reads.
+        // It runs before the rules and only ever denies, so the rules stay the
+        // fence; a run whose Bash is denied outright needs none.
+        const bashPrefixes = denied.includes("Bash") ? [] : bashDenyPrefixes(denied);
+        if (bashPrefixes.length) {
+          const policyHook: ClaudePreToolUseHook = async (input, toolUseId) => {
+            const command = bashCommandSchema.safeParse(input.tool_input).data?.command ?? "";
+            const prefix = deniedPrefixFor(command, bashPrefixes);
+            if (!prefix) return {};
+            const reason = bashDenyReason(prefix, denied, spec.kind === "reviewer");
+            emitPolicyDenied(command, reason, toolUseId);
+            return {
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: reason,
+              },
+            };
+          };
+          options.hooks = { PreToolUse: [{ matcher: "Bash", hooks: [policyHook] }] };
+        }
         // The subprocess kill switch: the interrupt/idle watchdogs abort this
         // when the cooperative `interrupt()` goes unanswered (see `armForcedStop`).
         options.abortController = abortController;

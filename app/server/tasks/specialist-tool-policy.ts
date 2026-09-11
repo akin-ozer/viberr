@@ -1,6 +1,7 @@
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
+  capabilityById,
   GRANT_REQUIRED_CAPABILITY_IDS,
   SCOPED_DELIVERY_CAPABILITY_IDS,
 } from "~/shared/capabilities";
@@ -174,6 +175,50 @@ export function resolveSpecialistDisallowedTools(
 export function resolveUndeployedDisallowedTools(): string[] {
   return resolveSpecialistDisallowedTools(
     CAP_DENY_RULES.map((r) => ({ capabilityId: r.capabilityId, mode: "off" })),
+  );
+}
+
+/**
+ * Ruling 101(e), amended (Option D PR 5): the sentence the Claude PreToolUse
+ * hook hands the model when a Bash command reaches a denied prefix.
+ *
+ * Named from the run's final denylist alone, the way
+ * `repoWriteWithheldFromDenylist` derives the write posture: a capability is
+ * withheld on this run when EVERY rule it contributes is in the list (the
+ * resolver adds a withheld capability's whole set). `git commit` belongs to
+ * two capabilities, so the sentence names whichever this run withholds. A
+ * prefix no capability explains on a supporting run is the kind-based
+ * delivery deny (VIB-30): supporting engagements never deliver.
+ */
+export function bashDenyReason(
+  prefix: string,
+  denied: readonly string[],
+  supporting: boolean,
+): string {
+  const rule = `Bash(${prefix}:*)`;
+  const deniedSet = new Set(denied);
+  const withheld = CAP_DENY_RULES.filter(
+    (r) => r.deny.includes(rule) && r.deny.every((d) => deniedSet.has(d)),
+  );
+  if (withheld.length) {
+    const names = withheld.map(
+      (r) => `"${capabilityById(r.capabilityId)?.label ?? r.capabilityId}" (${r.capabilityId})`,
+    );
+    return (
+      `Withheld by capability policy: ${names.join(" and ")} ` +
+      `${withheld.length === 1 ? "is" : "are"} not granted on this run, so \`${prefix}\` is ` +
+      "refused however it is wrapped. Say what you needed in your report instead."
+    );
+  }
+  if (supporting) {
+    return (
+      `A supporting engagement never delivers: \`${prefix}\` belongs to the delivering ` +
+      "agent and Viberr's server. Say what should be delivered in your report instead."
+    );
+  }
+  return (
+    `\`${prefix}\` is denied on this run by its capability policy, however it is wrapped. ` +
+    "Say what you needed in your report instead."
   );
 }
 

@@ -58,6 +58,13 @@ operator run among them) does not get them, on Claude by name and on Codex as
 `domain/agents-and-runtime.md` (§§2.4, 2.5, 4.3, 6), `domain/auth-and-rbac.md` (§4),
 `ui/surfaces.md` (§3), `product/glossary.md` and `product/overview.md`.
 
+Updated 2026-09-11 for the ruling 101(e) amendment (Option D PR 5, branch
+`option-d/pr5-pretooluse-deny`): a Claude run with command-level denies carries a PreToolUse
+hook that refuses a denied command however it is wrapped (`git -C . push`, `sh -c 'git
+push'`), with a reason naming the withheld capability that the model reads and the console
+shows. Pages: `architecture/decisions.md` (the note under ruling 101) and
+`domain/agents-and-runtime.md` (§2.4, §4.3).
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating

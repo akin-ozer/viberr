@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
+  bashDenyReason,
   codexRepoWriteAdvisory,
   resolveDeliveryPermissions,
   resolveSpecialistDisallowedTools,
@@ -399,5 +400,40 @@ describe("MCP tools are deliberately NOT capability-gated (R16-5)", () => {
     // you grant it". Pinned so the two stay distinguishable.
     const denied = resolveUndeployedDisallowedTools();
     expect(denied.length).toBeGreaterThan(0);
+  });
+});
+
+/* ------------- the hook's sentence (ruling 101(e), Option D PR 5) ---------- */
+
+describe("bashDenyReason — named from the run's denylist alone", () => {
+  it("names each capability whose whole rule set the denylist carries", () => {
+    // `git commit` belongs to two capabilities; the run withholds both.
+    const both = resolveSpecialistDisallowedTools([
+      grant("execute-code-or-write-repo", "off"),
+      grant("commit-push-branch", "off"),
+    ]);
+    expect(bashDenyReason("git commit", both, false)).toContain(
+      '"Commit & push to the branch" (commit-push-branch) and "Execute code or write to the repo" (execute-code-or-write-repo) are not granted on this run',
+    );
+    // Only the push family withheld: only it is named.
+    const pushOnly = resolveSpecialistDisallowedTools([
+      grant("execute-code-or-write-repo", "direct"),
+      grant("create-task-branch", "direct"),
+      grant("commit-push-branch", "off"),
+      grant("open-review-pr", "direct"),
+    ]);
+    expect(bashDenyReason("git commit", pushOnly, false)).toContain(
+      '"Commit & push to the branch" (commit-push-branch) is not granted on this run',
+    );
+    expect(bashDenyReason("git commit", pushOnly, false)).not.toContain("execute-code-or-write-repo");
+  });
+
+  it("falls back to the supporting-run sentence, then a plain one", () => {
+    expect(bashDenyReason("git push", ["Bash(git push:*)"], true)).toContain(
+      "A supporting engagement never delivers",
+    );
+    expect(bashDenyReason("git push", ["Bash(git push:*)"], false)).toBe(
+      "`git push` is denied on this run by its capability policy, however it is wrapped. Say what you needed in your report instead.",
+    );
   });
 });
