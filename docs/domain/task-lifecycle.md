@@ -9,7 +9,8 @@
 > `claude/per-user-codex-auth-difdnn`): §3 (creation seats the creator as owner)
 > and §7 (whose accounts a task's agent runs bill, and what an unowned task
 > refuses). Updated 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`): §7's
-> wording for a run the spending cap cut off.
+> wording for a run the spending cap cut off. Updated 2026-09-11 for ruling 178 (pass 36,
+> G36-3): §6 (a project-level required reviewer beside the engaged one) and §11 gate 4a.
 
 ## 1. The shape of every governed mutation
 
@@ -332,6 +333,14 @@ profile holds repo-write (`execute-code-or-write-repo` granted), **supporting**
 otherwise. At most one engagement delivers; it owns the workspace, branch and PR.
 A supporting engagement snapshotted with `verdictCapable: true` (an explicit
 `report-validation-verdict: direct` grant at engage time) is a **required reviewer**.
+Since ruling 178 (pass 36, G36-3) a project can also declare required reviewers
+**per review stage** in `project.md` (`requiredReviewers: [{stageId, profileId}]`,
+edited on Settings → Required reviewers or through the controller's
+`set_required_reviewers`, read on Policy): such a reviewer is required on every task
+whether or not the operator engaged it, so a task whose operator never ran it is not
+acceptable on another agent's verdict (§11 gate 4a). The engaged set stays as it was;
+the project rule adds to it. The operator's `get_task` names the rule as
+`requiredReviewers` and its turn prompt tells it to engage each one at its stage.
 `release-agent` removes a supporting engagement; a delivery hand-off routes through
 `assignSpecialist`. **A closed task's seats are frozen** (pass 33, F33-10): `removeReviewer`
 refuses on a terminal or archived task and both panels withhold the ✕. Ruling 118 froze the
@@ -533,7 +542,26 @@ Every writer to the terminal stage goes through one contract:
    override as a `force_accept` option: the resolution calls `forceAcceptCompletion`
    itself, so the tier, the ceremony, the irreducible gate and the audit record are the
    button's, and a non-admin resolver hears the button's own refusal instead of a
-   decision that records nothing. Its sibling `move_stage` performs a manual board move
+   decision that records nothing.
+4a. **Project-declared required reviewers** (ruling 178, pass 36, G36-3): for every rule
+   in `project.md` `requiredReviewers`, the named agent must hold an `approve` verdict
+   bound to the task's active work revision (an approval of a replaced revision is
+   history, ruling 163), whether or not anyone engaged it; otherwise the refusal reads
+   "Required reviewer <Agent> (project rule at <Stage>) has not approved revision
+   <sha7>. Run the review at <Stage>, or an admin can force-accept." A task with no
+   active work revision and no pull request (planning work, or a discarded revision)
+   is not held. ONE pure gate, `requiredReviewerRefusals`
+   (`app/server/tasks/required-reviewers.server.ts`), is read by the acceptance refusal
+   stack (so the task page, the operator's `notAcceptableReason` and every writer agree),
+   by the projection's `validation_block_reason` (so the review queue lists the task as
+   review work and never offers it for acceptance; the `projects` row carries the rules
+   resolved to names, `required_reviewers_json`, and a project.md change cascades into
+   every task row) and by the force-accept disclosure, which lists the sentence among
+   the gates the override bypassed. The task hero's validation pill is unchanged by the
+   rule: `validation` is derived from the ENGAGED required reviewers alone, so a task
+   whose declared reviewer never ran can read `healthy` (another reviewer approved) or
+   `changed` while the acceptance box beside it prints the rule's sentence.
+   Its sibling `move_stage` performs a manual board move
    on the stage picker's path; the terminal stage is refused there, because a move to it
    is this contract, not a move. Resolving a `move_stage` option lifts a stored
    `blocked` the packet was holding down, as every other resolution arm does: a

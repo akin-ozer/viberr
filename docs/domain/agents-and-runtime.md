@@ -241,7 +241,7 @@ connecting a different account there (ruling 165).
   to 2 and 7-10 s to 4 s, $0.03-0.04 to $0.02 warm, for a turn-1 prompt of 12.9k tokens
   instead of 5.3k (cached after the first run; a cold first run pays the cache write
   once); a reviewer went from 4 turns to 3 at the same cost. The controller's
-  `viberr_controller` (41 tools) and `viberr_ops` stay deferred: loading them saved a turn
+  `viberr_controller` (41 tools when measured; 42 since ruling 178) and `viberr_ops` stay deferred: loading them saved a turn
   but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost ($0.05 to
   $0.21). Org MCP servers are never loaded up front. Pinned per server by the
   `toolLoading` tests (`test-support/mcp-tool-meta.ts`).
