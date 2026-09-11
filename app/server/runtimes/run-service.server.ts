@@ -82,6 +82,8 @@ import {
   type RunPrincipalRefusal,
 } from "./run-principal.server";
 import { runMarkerEnv } from "./run-processes.server";
+import { resolveCodexSandboxMode } from "./codex-runtime.server";
+import { cachedToolchain } from "~/server/ops/toolchain.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
 import { newId } from "~/shared/ids/new-id.server";
@@ -887,28 +889,6 @@ export async function startRun(
     throw err;
   }
 
-  const details: RunStartedAudit = {
-    threadId,
-    backend: input.backend,
-    role: input.role,
-    kind: input.kind,
-    resumed: Boolean(input.resumeSessionId),
-    credentialUserId: input.credentialUserId,
-  };
-  if (!credential.ok) details.failedUnavailable = true;
-
-  // Governed action: opening a runtime session is audited (BUILD-PLAN
-  // Phase 10 / contracts — run start + interrupt both leave audit rows).
-  recordAudit(db, {
-    action: "runtime.run.started",
-    actor: input.actor ?? OPERATOR_ACTOR,
-    subjectKind: "run",
-    subjectId: runId,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details,
-  });
-
   // D4: every mounted MCP server is auto-approved here, not per caller.
   const allowedTools = withMcpAutoApproval(
     input.allowedTools,
@@ -1006,16 +986,48 @@ export async function startRun(
   if (credential.ok) Object.assign(runEnv, runMarkerEnv(runId));
   if (Object.keys(runEnv).length) spec.env = runEnv;
 
-  if (!credential.ok) {
+  // The two reasons no process may start, decided on the finished spec: the
+  // credential (ruling 127) and, for a Codex run the OS sandbox would
+  // confine, a host whose sandbox cannot start (ruling 182). Either one is
+  // the run's whole outcome — an honest `run·unavailable` error row.
+  const refusal: string | null = credential.ok
+    ? codexSandboxRefusal(spec)
+    : credential.message;
+
+  const details: RunStartedAudit = {
+    threadId,
+    backend: input.backend,
+    role: input.role,
+    kind: input.kind,
+    resumed: Boolean(input.resumeSessionId),
+    credentialUserId: input.credentialUserId,
+  };
+  if (refusal !== null) details.failedUnavailable = true;
+
+  // Governed action: opening a runtime session is audited (BUILD-PLAN
+  // Phase 10 / contracts — run start + interrupt both leave audit rows).
+  recordAudit(db, {
+    action: "runtime.run.started",
+    actor: input.actor ?? OPERATOR_ACTOR,
+    subjectKind: "run",
+    subjectId: runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details,
+  });
+
+  const refuse = (message: string): { runId: string } => {
     // F26-1: a reserved run that fails here never launches — release its slot
     // and let a run parked behind the cap take it.
     if (reservation) {
       state.reserved.delete(reservation.runId);
       drainRunQueue(db);
     }
-    failRunUnavailable(db, spec, credential.message, reservation?.startedAt);
+    failRunUnavailable(db, spec, message, reservation?.startedAt);
     return { runId };
-  }
+  };
+  if (!credential.ok) return refuse(credential.message);
+  if (refusal !== null) return refuse(refusal);
 
   const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
@@ -1198,6 +1210,38 @@ export function backendUnavailableMessage(
   return cause.kind === "refusal"
     ? principalRefusalMessage(cause.refusal, backend)
     : `${cause.detail} ${NO_PROCESS}`;
+}
+
+/**
+ * Ruling 182 (pass 36, F36-1 / G36-4): the sentence a Codex run refused for a
+ * sandbox that cannot start records — the probe's own words (bubblewrap's
+ * `No permissions to create a new namespace` under Docker's default seccomp
+ * profile) and the two remedies, in the same `run·unavailable` shape as a
+ * credential refusal, so the error run, the blocked packet and the timeline
+ * read it the way they read every other "no process was started".
+ */
+export function codexSandboxUnavailableMessage(detail: string): string {
+  return backendUnavailableMessage("codex", {
+    kind: "detail",
+    detail:
+      `Codex sandbox unavailable on this host: ${detail.replace(/\.+$/, "")}. ` +
+      "Fix the deployment (see docs/operations/deployment.md, seccomp) or grant the run full access.",
+  });
+}
+
+/**
+ * Whether THIS spec's Codex run would be confined by the OS sandbox on a host
+ * whose sandbox cannot start — null when it may proceed. Only a run below
+ * `danger-full-access` (the operator's `read-only`, every write-withheld run,
+ * every supporting run's `workspace-write`) touches bubblewrap; a fully
+ * autonomous deliverer with egress never does, which is why the F36-1
+ * developers built fine while every reviewer failed at its first command.
+ */
+function codexSandboxRefusal(spec: RunSpec): string | null {
+  if (spec.backend !== "codex") return null;
+  if (resolveCodexSandboxMode(spec) === "danger-full-access") return null;
+  const probe = cachedToolchain().codexSandbox;
+  return probe.ok ? null : codexSandboxUnavailableMessage(probe.detail);
 }
 
 // ------------------------------------------- continuity recovery (P13-D-2)
