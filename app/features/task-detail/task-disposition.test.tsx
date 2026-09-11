@@ -1255,15 +1255,18 @@ describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
     );
   });
 
-  it("N20-17: a closed task's disabled button notes that @operator still runs it", () => {
+  it("ruling 177 (was N20-17): a closed task's disabled button no longer advertises the @operator side door", () => {
+    // N20-17 disclosed that an @operator comment still ran the operator on a
+    // closed task; ruling 177 closed that door, so the disclosure would lie.
+    // Canary: put the "Mentioning @operator … still runs it" sentence back.
     const { container } = renderPage({
       myRole: "admin",
       task: { displayReadiness: "accepted", stage: "done" },
     });
     const runOperator = findButton(container, "Run operator")!;
     expect(runOperator.disabled).toBe(true);
-    expect(container.textContent).toContain("Mentioning");
-    expect(container.textContent).toContain("still runs it");
+    expect(container.textContent).toContain("Task closed. Reopen it to run the operator.");
+    expect(container.textContent).not.toContain("still runs it");
   });
 });
 
@@ -1349,6 +1352,30 @@ describe("R14-3: the task archive", () => {
     fireEvent.click(findButton(container, "Archive VIB-151")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("archive-task");
+  });
+
+  it("U36-1 (pass 36): with something to withdraw, the Withdrawn row says restore brings a human back, not the question", () => {
+    // Canary: put "Restoring the task reopens the question" back in
+    // archive-confirm.tsx.
+    const { container } = renderPage({
+      myRole: "maintainer",
+      recommendations: [
+        {
+          id: "rec_1",
+          kind: "transition",
+          label: "Move the task to Review",
+          detail: "Clean review.",
+          toStageId: "review",
+        },
+      ],
+    });
+    fireEvent.click(findButton(container, "Archive task")!);
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Archive task dialog"]',
+    )!;
+    expect(dialog.textContent).toContain("1 pending operator recommendation");
+    expect(dialog.textContent).not.toContain("reopens the question");
+    expect(dialog.textContent).toContain("Restoring brings the task back to a human");
   });
 
   it("C14: the Withdrawn row names its scope, not a blanket 'nothing is pending'", () => {
@@ -1721,6 +1748,20 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     expect(submitted).toHaveLength(0);
     expect(archiveDialog(container)).toBeTruthy();
     expect(findButton(container, "Not yet")).toBeDefined();
+  });
+
+  it("U36-1 (pass 36): the Withdrawn row promises what restore does — a human, not a reopened question", () => {
+    // Restore sets `waiting: human` and writes "run the operator to reopen the
+    // decision"; the packet's options are gone with the archive, so nothing
+    // can reopen the SAME question. The dialog said "Restoring the task
+    // reopens the question" — the server and the dialog made opposite
+    // promises. Canary: put the old sentence back.
+    const { container } = renderPacket(true, ARCHIVE_DISCLOSURE, () => {});
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    const text = archiveDialog(container)!.textContent!;
+    expect(text).not.toContain("reopens the question");
+    expect(text).toContain("Restoring brings the task back to a human");
+    expect(text).toContain("run the operator to reopen the decision");
   });
 
   it("names the branch, says the deletion cannot be undone, and lists what the archive withdraws", () => {

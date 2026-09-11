@@ -489,13 +489,11 @@ function OperatorRunControl({
       {blockedReason ? (
         <span className="sub">{blockedReason}</span>
       ) : disabled ? (
-        // N20-17: the explicit Run-operator button is off on a closed task, but
-        // an @operator comment still starts a full operator run — say so, or
-        // the two run paths read as silently inconsistent.
-        <span className="sub">
-          Task closed. Reopen it to run the operator. Mentioning{" "}
-          <code>@operator</code> in a comment still runs it.
-        </span>
+        // Ruling 177 (pass 36): every door refuses a closed task — the button,
+        // an @operator comment, a schedule, an agent's completion. N20-17's
+        // "mentioning @operator still runs it" disclosure described the F36-4
+        // hole and is gone with it.
+        <span className="sub">Task closed. Reopen it to run the operator.</span>
       ) : holdNote ? (
         <span className="sub" data-hold-note>{holdNote}</span>
       ) : null}

@@ -2819,6 +2819,72 @@ describe("runOperator — authority, ordering, orphans", () => {
    * recommended title and `ev`; (2) restore the generic body sentence and
    * every case fails on the body.
    */
+  describe("ruling 177: a closed task refuses every operator trigger at no cost", () => {
+    const seedClosed = (over: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): void => {
+      writeTask(store5.dataRoot, store5.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "done",
+          readiness: "ready",
+          waiting: "none",
+          ownerUserId: store5.users.arda.id,
+          ...over,
+        }),
+        goal: "Ship the parser.",
+      });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    };
+    const EVERY_TRIGGER = [
+      "create",
+      "transition",
+      "agent-reply",
+      "goal-updated",
+      "pr-diverged",
+      "delivered",
+      "packet-resolved",
+      "dependencies-released",
+      "scheduled",
+      "manual",
+    ] as const;
+
+    it("a task at the terminal stage refuses every trigger with `closed` and starts no run", async () => {
+      // Canary: scope the closure check back to `trigger === "scheduled"`
+      // (the pre-177 shape): `agent-reply` and `manual` then start a run on a
+      // shipped task — the F36-5 / F36-4 doors.
+      deployAgents([operatorAgent()]);
+      seedClosed();
+      for (const trigger of EVERY_TRIGGER) {
+        const result = await drive({ trigger });
+        expect(result.refused, trigger).toBe("closed");
+        expect(result.runId, trigger).toBeNull();
+        expect(adapter5.pending, trigger).toBeNull();
+      }
+      expect(operatorRuns()).toHaveLength(0);
+    });
+
+    it("an archived task at an open stage refuses the same way", async () => {
+      // Canary: drop the `archived` half of `taskClosure` — the mention door
+      // (`manual`) then runs the operator on an archived task (F36-4).
+      deployAgents([operatorAgent()]);
+      seedClosed({ stage: "impl", archived: true });
+      const manual = await drive({ trigger: "manual" });
+      expect(manual.refused).toBe("closed");
+      const reply = await drive({ trigger: "agent-reply" });
+      expect(reply.refused).toBe("closed");
+      expect(operatorRuns()).toHaveLength(0);
+    });
+
+    it("a refused trigger on a closed task settles waiting to `none`, never `agent`", async () => {
+      // Canary: delete the settle from the `closed` branch.
+      deployAgents([operatorAgent()]);
+      seedClosed({ waiting: "agent" });
+      await drive({ trigger: "agent-reply" });
+      await vi.waitFor(() => {
+        const fm = readTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot })!.parsed.frontmatter;
+        expect(fm.waiting).toBe("none");
+      });
+    });
+  });
+
   describe("ruling 131(d): a held task refuses the coordinating triggers at no cost", () => {
     const seedHeld = (over: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): void => {
       writeTask(store5.dataRoot, store5.slug, {
@@ -3100,24 +3166,30 @@ describe("runOperator — authority, ordering, orphans", () => {
 
     const result = await drive({ trigger: "scheduled" });
 
-    expect(result.refused).toBe("terminal-stage");
+    // Ruling 177 (pass 36): the refusal is the one closed-task refusal every
+    // trigger gets, no longer a scheduled-only `terminal-stage`.
+    expect(result.refused).toBe("closed");
+    expect(result.refusalReason).toMatch(/VIB-1 is closed \(Done is the terminal stage\)/);
     expect(result.runId).toBeNull();
     expect(result.queued).toBe(false);
     expect(adapter5.pending).toBeNull();
     expect(operatorRuns()).toHaveLength(0);
   });
 
-  it("F19-20: the guard is scoped to `scheduled` — a human trigger on a Done task still drives", async () => {
-    // Every other trigger on a terminal task is legitimate (a `pr-diverged`
-    // recovery, an `@operator` question about finished work). FR39 singles out
-    // the scheduled one because it is the capability that acts unwatched.
+  it("ruling 177 (was F19-20's scope): a human trigger on a Done task is refused too", async () => {
+    // FR39 scoped the terminal refusal to `scheduled` ("every other trigger on
+    // a terminal task is legitimate — an @operator question about finished
+    // work"). Pass 36 watched that legitimacy start paid runs on shipped and
+    // archived tasks (F36-4, F36-5); ruling 177 closes every door. A person
+    // with a question about finished work reopens the task (a stage move) or
+    // asks in a comment nobody is dispatched for.
     deployAgents([operatorAgent()]);
     seed("done");
 
     const result = await drive({ trigger: "manual" });
 
-    expect(result.refused).toBeUndefined();
-    expect(adapter5.pending).not.toBeNull();
+    expect(result.refused).toBe("closed");
+    expect(adapter5.pending).toBeNull();
   });
 
   /**

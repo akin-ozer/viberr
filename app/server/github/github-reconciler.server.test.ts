@@ -2690,6 +2690,30 @@ describe("reconcileProject fan-out control", () => {
     expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-800`)).toHaveLength(0);
   });
 
+  it("ruling 177: a budgeted pass skips a task at the terminal stage even when its PR never merged", async () => {
+    // F36-5 sub-item: a force-accepted task (Shipped, PR-less or PR open) kept
+    // polling its deleted branch every 5 minutes forever because "terminal"
+    // was spelled archived-OR-merged. Canary: put `archived = 1 OR merged` back
+    // as the whole predicate.
+    const { store, actor } = zombieBoard(0, 1);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-700", {
+        stage: "done",
+        branch: "vib-700",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch(boardRoutes(store));
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+      taskBudget: 4,
+    });
+    expect(reconciledKeys(summary).sort()).toEqual(["VIB-301", "VIB-900"]);
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-700`)).toHaveLength(0);
+  });
+
   it("a budgeted pass still visits a CLOSED PR — it can be reopened", async () => {
     // A closed PR is not terminal: GitHub allows reopening, and this
     // reconciler is the only thing that notices — it writes the "PR live

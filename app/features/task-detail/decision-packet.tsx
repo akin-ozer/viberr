@@ -410,7 +410,7 @@ function PacketArchiveConfirm({
       <div className="obs">
         <span className="k">Withdrawn</span>
         <span>
-          {withdrawn.join(" and ")}. Restoring the task reopens the question.
+          {withdrawn.join(" and ")}. Restoring brings the task back to a human; run the operator to reopen the decision.
         </span>
       </div>
     </PacketDestructiveConfirm>

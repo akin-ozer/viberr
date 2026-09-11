@@ -1225,7 +1225,7 @@ export function resetReconcileCursorsForTests(): void {
 /** One branched task the pass may visit. `terminal` is sqlite's 0/1 answer to
  *  the archived-or-merged test the SELECT computes. */
 const reconcileQueueRows = z
-  .object({ task_key: z.string(), terminal: z.number() })
+  .object({ task_key: z.string(), stage: z.string(), terminal: z.number() })
   .array();
 
 /**
@@ -1251,10 +1251,11 @@ export async function reconcileProject(
     };
   }
 
-  const rows = reconcileQueueRows.parse(
+  const rawRows = reconcileQueueRows.parse(
     db
       .prepare(
         `SELECT task_key,
+              stage,
               (archived = 1
                OR COALESCE(json_extract(pr_json, '$.state'), '') = 'merged')
               AS terminal
@@ -1264,6 +1265,19 @@ export async function reconcileProject(
       )
       .all(projectSlug),
   );
+  // Ruling 177 (pass 36, F36-5): a task at the board's terminal stage is
+  // closed whether or not a PR merged — a force-accepted task with no PR, or
+  // one accepted as "merge pending", kept buying a compare of its deleted
+  // branch every five minutes forever under the archived-OR-merged spelling.
+  const queueProject = getProject(db, projectSlug);
+  const rows = rawRows.map((row) => ({
+    task_key: row.task_key,
+    terminal:
+      row.terminal === 1 ||
+      (queueProject !== null && isTerminalStage(row.stage, queueProject.stages))
+        ? 1
+        : 0,
+  }));
 
   const budget = ctx.taskBudget ?? 0;
   // R15-6 + B-GH5: cleanup deletes the remote ref but `branch:` stays in the

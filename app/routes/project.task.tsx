@@ -487,7 +487,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             ? `Comment posted · @${result.agent.name} is picking it up`
             : result.operatorRefused === "open-packet"
               ? "Comment posted · resolve the open decision to continue"
-              : result.operatorRefused === "terminal-stage"
+              : result.operatorRefused === "closed"
                 ? "Comment posted · reopen the task to run the operator"
                 : result.runNotStarted && result.agent
                   ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
@@ -1075,8 +1075,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast:
             started.refused === "open-packet"
               ? "Operator not started · resolve the open decision to continue"
-              : started.refused === "terminal-stage"
-                ? "Operator not started · reopen the task to run the operator"
+              : started.refused === "closed"
+                ? `Operator not started · ${started.refusalReason ?? "reopen the task to run the operator"}`
                 : started.queued
                   ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
                   : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,

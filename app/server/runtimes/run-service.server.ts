@@ -8,6 +8,7 @@ import type {
 } from "~/features/runtime/runtime-types";
 import {
   recordAudit,
+  SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -1882,6 +1883,80 @@ export interface InterruptResult {
 }
 
 /**
+ * The interrupt itself — the live-handle arm and the no-handle arm — shared by
+ * the human interrupt (`interruptRun`) and the closure interrupt
+ * (`interruptRunOnClosure`, ruling 177). `actorUserId` is stamped into
+ * `interrupted_by`; `auditActor`/`auditDetails` shape the audit row.
+ */
+function stopRunProcess(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  input: { projectSlug: string; taskKey: string; runId: string },
+  actorUserId: string,
+  auditActor: { userId: string; label: string } | typeof SYSTEM_ACTOR,
+  auditDetails: { reason?: "task-closed"; cause?: "accept" | "force-accept" | "archive"; closedBy?: string } = {},
+): void {
+  const state = getState();
+  const slot = state.handles.get(input.runId);
+  if (slot) {
+    slot.handle.interrupt();
+    state.handles.delete(input.runId);
+    // The adapter's onExit → sink.finalize sets the interrupted state; stamp
+    // the interrupter here so it lands regardless of the adapter's timing.
+    patchRun(db, input.runId, { interruptedBy: actorUserId });
+  } else {
+    // No live process (e.g. after a restart, or a seeded run) — write the
+    // terminal state directly.
+    patchRun(db, input.runId, {
+      state: "interrupted",
+      finishedAt: new Date().toISOString(),
+      interruptedBy: actorUserId,
+      phase: null,
+      step: null,
+    });
+    publishRunStateChanged({
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: input.runId,
+      threadId: run.thread_id,
+      state: "interrupted",
+      controller: controllerRunRoute(db, run),
+    });
+    // The run reached its terminal state with no adapter to report it, so the
+    // completion callback the starter registered would never fire: `launch`'s
+    // onExit is its only other trigger, and there is no process to exit. A
+    // reserved specialist run's completion effects, and a queued controller
+    // turn's settle (which releases the conversation's lease and records that
+    // the turn was stopped), were both lost that way — the page then read
+    // "working" until a restart replayed recovery. Same precondition as the
+    // spawn-crash race: terminal state, no live handle, so fire it now.
+    fireIfAlreadyTerminal(db, input.runId);
+    // F28-R1: a run interrupted while still RESERVED (its workspace clone is in
+    // flight, so no live handle exists yet) must release its committed
+    // concurrency slot NOW. Otherwise the slot stays counted against the cap —
+    // starving every other dispatch — until the ABANDONED clone finishes on its
+    // own, up to CLONE_TIMEOUT (~15 min). The reserve→clone path still aborts
+    // cleanly at its post-clone `assertRunReservationLive` check, and the later
+    // `reservation.abandon()` finds the row already `interrupted` (its
+    // precedence guard won't demote it) and the slot already freed (the delete
+    // is idempotent) — so no double-release and no launch-after-interrupt.
+    if (state.reserved.delete(input.runId)) {
+      drainRunQueue(db);
+    }
+  }
+
+  recordAudit(db, {
+    action: "runtime.run.interrupted",
+    actor: auditActor,
+    subjectKind: "run",
+    subjectId: input.runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { threadId: run.thread_id, backend: run.backend, role: run.role, ...auditDetails },
+  });
+}
+
+/**
  * Interrupt a run. RBAC: admin|maintainer (contracts §3.2 — opening /
  * interrupting runtime sessions). Writes `interrupted` state + an audit
  * event. Idempotent-safe: interrupting a non-running run returns a friendly
@@ -1939,64 +2014,7 @@ export async function interruptRun(
     return { outcome: "already-terminal", run: projectOne(db, run) };
   }
 
-  const state = getState();
-  const slot = state.handles.get(input.runId);
-  if (slot) {
-    slot.handle.interrupt();
-    state.handles.delete(input.runId);
-    // The adapter's onExit → sink.finalize sets the interrupted state; stamp
-    // the interrupter here so it lands regardless of the adapter's timing.
-    patchRun(db, input.runId, { interruptedBy: actor.userId });
-  } else {
-    // No live process (e.g. after a restart, or a seeded run) — write the
-    // terminal state directly.
-    patchRun(db, input.runId, {
-      state: "interrupted",
-      finishedAt: new Date().toISOString(),
-      interruptedBy: actor.userId,
-      phase: null,
-      step: null,
-    });
-    publishRunStateChanged({
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      runId: input.runId,
-      threadId: run.thread_id,
-      state: "interrupted",
-      controller: controllerRunRoute(db, run),
-    });
-    // The run reached its terminal state with no adapter to report it, so the
-    // completion callback the starter registered would never fire: `launch`'s
-    // onExit is its only other trigger, and there is no process to exit. A
-    // reserved specialist run's completion effects, and a queued controller
-    // turn's settle (which releases the conversation's lease and records that
-    // the turn was stopped), were both lost that way — the page then read
-    // "working" until a restart replayed recovery. Same precondition as the
-    // spawn-crash race: terminal state, no live handle, so fire it now.
-    fireIfAlreadyTerminal(db, input.runId);
-    // F28-R1: a run interrupted while still RESERVED (its workspace clone is in
-    // flight, so no live handle exists yet) must release its committed
-    // concurrency slot NOW. Otherwise the slot stays counted against the cap —
-    // starving every other dispatch — until the ABANDONED clone finishes on its
-    // own, up to CLONE_TIMEOUT (~15 min). The reserve→clone path still aborts
-    // cleanly at its post-clone `assertRunReservationLive` check, and the later
-    // `reservation.abandon()` finds the row already `interrupted` (its
-    // precedence guard won't demote it) and the slot already freed (the delete
-    // is idempotent) — so no double-release and no launch-after-interrupt.
-    if (state.reserved.delete(input.runId)) {
-      drainRunQueue(db);
-    }
-  }
-
-  recordAudit(db, {
-    action: "runtime.run.interrupted",
-    actor,
-    subjectKind: "run",
-    subjectId: input.runId,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: { threadId: run.thread_id, backend: run.backend, role: run.role },
-  });
+  stopRunProcess(db, run, input, actor.userId, actor);
   logger.info("run interrupted", { runId: input.runId, by: actor.userId });
 
   // The response is complete BEFORE the best-effort note: every DB read for the
@@ -2010,6 +2028,40 @@ export async function interruptRun(
   };
   await noteInterrupt(db, run, actor, input.dataRoot);
   return result;
+}
+
+/**
+ * Ruling 177 (pass 36, F36-5): a task that closes — accepted, force-accepted or
+ * archived — ends its live runs. No RBAC: the person's authority was spent on
+ * the closure itself (acceptance is owner-or-maintainer, archive is
+ * maintainer+), and the interrupt is that act's consequence, audited under the
+ * SYSTEM actor with the cause and the person who closed the task in the
+ * details. The caller writes the one timeline note naming every run; this
+ * function writes none. Idempotent like `interruptRun`.
+ */
+export function interruptRunOnClosure(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; runId: string },
+  closure: { cause: "accept" | "force-accept" | "archive"; byUserId: string },
+): "interrupted" | "already-terminal" | "not-found" {
+  const run = getRun(db, input.runId);
+  if (!run || run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) {
+    return "not-found";
+  }
+  if (run.kind === "controller") return "not-found";
+  if (run.state !== "running" && run.state !== "queued") return "already-terminal";
+  if (run.interrupted_by) return "already-terminal";
+  stopRunProcess(db, run, input, closure.byUserId, SYSTEM_ACTOR, {
+    reason: "task-closed",
+    cause: closure.cause,
+    closedBy: closure.byUserId,
+  });
+  logger.info("run interrupted — the task closed", {
+    runId: input.runId,
+    cause: closure.cause,
+    by: closure.byUserId,
+  });
+  return "interrupted";
 }
 
 /**

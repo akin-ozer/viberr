@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { closureRefusal, taskClosure } from "./task-closure.server";
 import {
   describeWorkspaceRefresh,
   refreshWorkspaceFromMirror,
@@ -1243,10 +1244,19 @@ async function dispatchAgentRun(
   // way back was to restore the task. Note this is deliberately the ARCHIVED
   // gate only — ruling 133 licenses engaging an eligible profile at any STAGE,
   // terminal included, so a closed-but-not-archived task is untouched here.
-  if (existing.parsed.frontmatter.archived) {
-    throw AppError.validation(
-      `${input.taskKey} is archived — restore it before running an agent on it.`,
-    );
+  // Ruling 177 (pass 36): the gate is CLOSED (terminal stage or archived), one
+  // spelling for every door — ruling 133's "an eligible profile at any stage,
+  // terminal included" ended with the terminal stage.
+  {
+    const dispatchBoard = projectBoard(ctx, input.projectSlug);
+    const closure = dispatchBoard
+      ? taskClosure(existing.parsed.frontmatter, dispatchBoard.stages)
+      : ({ closed: false } as const);
+    if (closure.closed && dispatchBoard) {
+      throw AppError.validation(
+        closureRefusal(input.taskKey, closure, dispatchBoard.stages, "running an agent on it"),
+      );
+    }
   }
 
   let engagement = input.profileId

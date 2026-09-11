@@ -277,6 +277,8 @@ const AUDIT_ACTION_KINDS = {
   // nowhere — reconstructing "who bypassed the required reviewer" used to need
   // raw SQLite access, the exact thing this panel exists to make unnecessary.
   "task.acceptance.forced": "audit",
+  // Ruling 177 (pass 36): acceptance ended the task's live runs.
+  "task.acceptance.interrupted_runs": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",

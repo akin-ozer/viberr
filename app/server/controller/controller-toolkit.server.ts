@@ -1556,8 +1556,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (result.refused === "open-packet") {
               return "[denied] The operator is not run while a decision packet is open. Answer the packet first.";
             }
-            if (result.refused === "terminal-stage") {
-              return `[denied] ${key} is already Done; there is nothing for the operator to coordinate.`;
+            if (result.refused === "closed") {
+              return `[denied] ${result.refusalReason ?? `${key} is closed`} There is nothing for the operator to coordinate on a closed task.`;
             }
             if (result.queued) {
               return `[done] The operator is already working ${key}; your directive was queued for it.`;

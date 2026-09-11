@@ -55,6 +55,7 @@ const finalizeOrphanedRuns = vi.fn(() => {
     capped: 0,
     reinvokes: orphanReinvokes,
     reaped: orphanReaped,
+    notes: Promise.resolve(),
   };
 });
 /** Runs queued or running when the chain reaches its reclaim. Zero by default;

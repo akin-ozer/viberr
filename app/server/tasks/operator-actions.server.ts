@@ -2,6 +2,7 @@ import {
   describeRevisionDrift,
   type RevisionDrift,
 } from "~/shared/revision-drift";
+import { closureRefusal, taskClosure } from "./task-closure.server";
 import { resolveDependencies } from "~/server/projections/dependencies.server";
 import {
   misdirectedOptionPromise,
@@ -1104,6 +1105,28 @@ export async function operatorOpenPacket(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
+  }
+  // Ruling 177 (pass 36, F36-5): no decision packet on a closed task. The
+  // operator that outlives an acceptance (its turn started before the human
+  // accepted) reaches this writer with a plan authored for an open task; the
+  // packet it wants would ask a person to decide something about a task that
+  // is already Shipped or archived.
+  {
+    const packetProject = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+    const closure = packetProject
+      ? taskClosure(existing.parsed.frontmatter, packetProject.parsed.frontmatter.stages)
+      : ({ closed: false } as const);
+    if (closure.closed && packetProject) {
+      return {
+        outcome: "noop",
+        message: closureRefusal(
+          input.taskKey,
+          closure,
+          packetProject.parsed.frontmatter.stages,
+          "opening a decision packet on it",
+        ),
+      };
+    }
   }
   // F31-6: option/semantics coherence, checked where the option is AUTHORED.
   // `discard_branch` deletes the LOCAL, never-pushed branch and destroys its

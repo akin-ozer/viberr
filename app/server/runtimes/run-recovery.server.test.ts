@@ -128,6 +128,25 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(row.interrupted_reason).toBe("restart");
   });
 
+  it("ruling 177 / U36-8: an interrupted task run leaves a note on the task's timeline", async () => {
+    // Pass 36 U36-8: four runs were cut by a restart and the task files said
+    // nothing — the re-fired operator's directive was the first trace. Canary:
+    // delete the `appendTimelineEvent` call from the orphan loop.
+    seedRun("run_dev_orphan", { state: "running", kind: "primary", role: "Implementation", agentProfileId: "developer" });
+    seedRun("run_op_orphan", { state: "queued", startedAt: null });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Interrupted by a restart");
+    expect(note).toBeDefined();
+    expect(note!.text).toMatch(/still running when the server stopped/);
+    expect(note!.text).toContain("run_dev_orphan");
+    expect(note!.text).toContain("run_op_orphan");
+    expect(note!.text).toMatch(/the operator is re-invoked/);
+    // One note per task, not one per run.
+    expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
+  });
+
   it("re-invokes the operator for an orphan under the crash-loop cap", () => {
     seedRun("run_orphan", { state: "running" });
     const res = finalizeOrphanedRuns(store.db);

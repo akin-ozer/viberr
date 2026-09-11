@@ -1,4 +1,5 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import { closureRefusal, taskClosure } from "./task-closure.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd } from "~/shared/run-failure";
 import type {
@@ -131,6 +132,7 @@ import {
   notifyOwnerSeatChange,
 } from "./task-mutation.server";
 import {
+  appendTimelineEvent,
   createTaskFile,
   readTaskFile,
   updateTaskFile,
@@ -1364,7 +1366,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * operator branch reported `triggered: "started"` on a refused run, so the route
    * toasted "@Operator is picking it up" while nothing ran (the reply never came).
    */
-  operatorRefused: "open-packet" | "terminal-stage" | "blocked-by" | null;
+  operatorRefused: "open-packet" | "closed" | "blocked-by" | null;
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
    * run-start failure (single-flight conflict, a backend the task owner has not
@@ -1746,6 +1748,20 @@ export async function commentToAgent(
     // is picking the comment up (the reply would never come). The comment is
     // already recorded via `base`.
     if (result.refused) {
+      // Ruling 177 (pass 36, F36-4): a closed task refuses the mention's run;
+      // the comment stays on the record and the F35-5 note says the mention
+      // went nowhere, with the same sentence the Run buttons show.
+      if (result.refused === "closed") {
+        await noteMentionNotStarted(
+          db,
+          ctx,
+          input,
+          actor,
+          "operator",
+          "operator",
+          result.refusalReason ?? `${input.taskKey} is closed`,
+        );
+      }
       return {
         ...base,
         agent: agentIdentity,
@@ -4340,6 +4356,47 @@ export async function applyAgentCompletionEffects(
   // was dispatched and one was not — a looping agent then bought an extra
   // operator react per source change. Strip the appended line from BOTH sides
   // of the comparison; it is bookkeeping, not progress.
+  // Ruling 177 (pass 36, F36-5): a run that finishes after its task CLOSED
+  // (accepted, force-accepted or archived while it was live) has its report
+  // recorded above — evidence is evidence — but wakes no operator, however it
+  // was dispatched: the dispatch-completion contract's forced react is what
+  // re-invoked the operator on a shipped HLC-9 and opened a decision packet
+  // there. One note says why nothing follows; waiting settles to `none`.
+  {
+    const closedFile = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    const closedProject = closedFile ? loadProjectContext(ctx, input.projectSlug) : null;
+    const closure =
+      closedFile && closedProject
+        ? taskClosure(closedFile.parsed.frontmatter, closedProject.stages)
+        : ({ closed: false } as const);
+    if (closure.closed && closedProject) {
+      const reason = closureRefusal(
+        input.taskKey,
+        closure,
+        closedProject.stages,
+        "coordinating it again",
+      );
+      await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Completed after the task closed",
+        text:
+          `**Closed task:** the ${input.role} run \`${finished.id}\` finished after ${reason.replace(/ — .*$/, "")}. ` +
+          `Its report is on the record; no coordination follows (the operator is not re-invoked and nothing is dispatched).`,
+        toAgent: false,
+        evidence: null,
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      logger.info("operator react skipped — the task is closed", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        why: closure.why,
+      });
+      await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
+      return;
+    }
+  }
   const shouldReact = operatorShouldReactToReply(
     finished.state,
     stripCcLine(replyForCompare),
@@ -7301,6 +7358,12 @@ export async function setTaskArchived(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  // Ruling 177 (pass 36): archiving closes the task — its live runs end too.
+  if (input.archived) {
+    await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, {
+      cause: "archive",
+    });
+  }
 
   recordAudit(db, {
     action: input.archived ? "task.archived" : "task.unarchived",
@@ -10067,6 +10130,80 @@ export async function applyAcceptanceWrite(
 }
 
 /**
+ * Ruling 177 (pass 36, F36-5): a task that closes ends its live runs. Called
+ * after the closing write (acceptance, force-accept) so the runs are stopped
+ * on a task that IS closed; the interrupt itself is the run-service's, audited
+ * under the system actor with the cause and the person. Writes ONE policy note
+ * naming every run it stopped and one audit row for the task; nothing when no
+ * run was live. Best-effort: a failure here never masks the acceptance.
+ */
+async function interruptLiveRunsOnClosure(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+  closure: { cause: "accept" | "force-accept" | "archive" },
+): Promise<string[]> {
+  try {
+    const { interruptRunOnClosure } = await import("~/server/runtimes/run-service.server");
+    const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
+    const live = listRunsForTaskRows(db, projectSlug, taskKey).filter(
+      (r) => (r.state === "running" || r.state === "queued") && r.kind !== "controller",
+    );
+    const stopped: { id: string; label: string }[] = [];
+    for (const run of live) {
+      const outcome = interruptRunOnClosure(
+        db,
+        { projectSlug, taskKey, runId: run.id },
+        { cause: closure.cause, byUserId: actor.userId },
+      );
+      if (outcome === "interrupted") {
+        stopped.push({ id: run.id, label: run.agent_name ?? run.role });
+      }
+    }
+    if (stopped.length === 0) return [];
+    const verb =
+      closure.cause === "archive"
+        ? "archived"
+        : closure.cause === "force-accept"
+          ? "force-accepted"
+          : "accepted";
+    const list = stopped.map((r) => `\`${r.id}\` (${r.label})`).join(", ");
+    await appendTimelineEvent(taskRef(ctx, projectSlug, taskKey), {
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: "Interrupted by acceptance",
+      text:
+        `**Closed task:** ${stopped.length === 1 ? "the run" : `${stopped.length} runs`} ${list} ` +
+        `${stopped.length === 1 ? "was" : "were"} still live when ${taskKey} was ${verb}; ` +
+        `${stopped.length === 1 ? "it was" : "they were"} interrupted so a closed task spends nothing more, ` +
+        `and no completion of ${stopped.length === 1 ? "it" : "them"} will re-invoke the operator here.`,
+      toAgent: false,
+      evidence: null,
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.acceptance.interrupted_runs",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { cause: closure.cause, runIds: stopped.map((r) => r.id) },
+    });
+    return stopped.map((r) => r.id);
+  } catch (error) {
+    logger.warn("closure interrupt failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return [];
+  }
+}
+
+/**
  * Apply human acceptance through the shared Done transition and merge path.
  *
  * Returns whether THIS call performed the acceptance: `false` means the task
@@ -10314,6 +10451,14 @@ async function acceptCompletion(
     acceptance.forced = true;
   }
   const { accepted } = await applyAcceptanceWrite(db, ctx, acceptance);
+  // Ruling 177 (pass 36, F36-5): the task just closed — end its live runs so a
+  // Shipped task spends nothing more and no completion re-invokes the operator
+  // on it. One note names every run; each run's own audit row carries the cause.
+  if (accepted) {
+    await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, {
+      cause: input.force ? "force-accept" : "accept",
+    });
+  }
   // U3: a concurrent acceptance closed this task first — its write carries the
   // completion event and the audit row. Recording a second row here is exactly
   // the "two audit rows for one human act" NFR18 forbids.

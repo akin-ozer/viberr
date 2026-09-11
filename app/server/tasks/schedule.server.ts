@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { taskClosure } from "./task-closure.server";
 import { z } from "zod";
 import {
   recordAudit,
@@ -453,10 +454,12 @@ export async function fireDueSchedules(
             // row only FOUND the candidate; an acceptance (or archive) landing
             // between the SELECT and this locked read never rides a stale
             // snapshot into a real, unwatched operator turn.
-            const mootNow =
-              projectFrozen ||
-              parsed.frontmatter.archived === true ||
-              (terminal !== null && parsed.frontmatter.stage === terminal);
+            // Ruling 177 (pass 36): the one closed-task predicate.
+            const closure = taskClosure(
+              parsed.frontmatter,
+              terminal !== null ? [{ id: terminal }] : [],
+            );
+            const mootNow = projectFrozen || closure.closed;
             if (mootNow) {
               target.status = "fired";
               target.firedAt = new Date().toISOString();
@@ -659,7 +662,7 @@ export async function fireDueSchedules(
             // the turn instruction as a stated reason.
             if (t.prompt) runInput.scheduleNote = t.prompt;
             const result = await runOperator(db, runInput);
-            refusedTerminal = result.refused === "terminal-stage";
+            refusedTerminal = result.refused === "closed";
             refusedHeld = result.refused === "blocked-by";
             refusedPacket = result.refused === "open-packet";
             queuedBehindDrive = result.queued;
