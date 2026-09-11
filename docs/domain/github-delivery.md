@@ -358,6 +358,19 @@ and the note itself, used to assert the reused-key origin alone.)*
   writes `accepted` and never merges; "Complete merge" finishes it later after
   re-running the head check. Audit `github.pr.merged` / `github.pr.merge_refused`.
 
+**Ruling 179 (pass 36): a PR head that moves after the verdict voids it.** Verdicts bind
+to the work revision; a push Viberr did not make moves `pr.headSha` without touching it.
+On the pass that first records such a head carrying authored commits (ruling 132's
+`authored > 0`) on an open task whose current revision has a verdict, the reconciler
+mints the head as the revision under review (`workRevision.kind: "external"`), so
+`validation` re-derives to `changed`; withdraws the moot accept and transition offers;
+writes a "Revision moved after review" note with the drift sentence; notifies the
+watchers; wakes the operator (`pr-diverged`); and returns a task that sits past its
+verdict stage to the stage where the reviewer works (`task.transition {boundary:
+"rework", via: "authored-drift"}`). Drift before any verdict is the branch growing:
+nothing is minted. The commits without the task's `[KEY]` prefix are kept as
+`github.otherCommits` and the Commits card lists them apart as "not this task's".
+
 ## 6. Reconciliation and freshness
 
 `reconcileTask` (serialized per task) fetches the branch compare

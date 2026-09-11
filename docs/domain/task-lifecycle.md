@@ -512,6 +512,12 @@ Every writer to the terminal stage goes through one contract:
    branch is brought up to date once, at acceptance time, and merged in the same
    ceremony"), except on a PR GitHub already reports conflicting, where its job is to
    record the conflict list and open the packet.
+   Ruling 177 (pass 36): the acceptance (plain or forced) and an archive end the task's
+   live runs through the run-service's closure interrupt, note them once on the timeline
+   ("Interrupted by acceptance", every run named) and audit
+   `task.acceptance.interrupted_runs`; a closed task refuses every coordination door
+   afterwards, and a run that finishes after the closure records its report with a
+   "Completed after the task closed" note and wakes no operator.
 4. **Verdict gate**: every required reviewer must have approved the current revision
    and none may request changes (ruling 20). Force-accept bypasses this and is
    audited `task.acceptance.forced` with EVERY gate it bypassed (U35-3, pass 35:
