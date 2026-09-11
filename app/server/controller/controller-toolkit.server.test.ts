@@ -5,6 +5,7 @@ import {
 } from "../../../test-support/test-app";
 import { readFileSync } from "node:fs";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
@@ -137,6 +138,21 @@ describe("the tool surface itself encodes the invariants", () => {
     // up. Canary: remove either `add(` registration.
     expect(names).toContain("schedule_task_action");
     expect(names).toContain("cancel_task_schedule");
+  });
+
+  it("stays deferred behind ToolSearch: loading 40+ tools up front costs more than the hop (Option D PR 4(a))", async () => {
+    // Measured 2026-09-11 on the pinned SDK: alwaysLoad saved the controller a
+    // turn but tripled turn 1's prompt and quadrupled a cold turn's cost.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const loading = toolLoading(toolkit.mcpServers.viberr_controller);
+    expect(loading.loaded).toEqual([]);
+    expect(loading.deferred).toHaveLength(toolkit.tools.length);
   });
 });
 

@@ -707,6 +707,15 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     version: "1.0.0",
     instructions: OPERATOR_TOOLKIT_INSTRUCTIONS,
     tools,
+    // Option D PR 4(a): the SDK defers MCP tools behind ToolSearch, so every
+    // operator run's FIRST call was a ToolSearch for these (16 of 16 stored
+    // runs, 2026-09-11). Loaded up front they are called directly: measured on
+    // the pinned SDK with this toolkit, 2 turns instead of 3, 4 s instead of
+    // 7-10 s, $0.02 instead of $0.03-0.04 warm, for ~7.6k more cached prompt
+    // tokens on turn 1 (a cold first run pays the cache write once). The
+    // controller's 44-tool servers stay deferred: there the same change tripled
+    // turn 1 and quadrupled a cold turn's cost.
+    alwaysLoad: true,
   });
 
   // P13-KM-03: the operator's DECLARED org MCP servers now actually mount. They

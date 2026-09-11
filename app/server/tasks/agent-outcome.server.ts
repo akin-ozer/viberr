@@ -253,6 +253,9 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
  */
 const staged = new Map<string, AgentOutcome>();
 const STAGED_MAX = 500;
+/** Option D PR 4(b): per run, how many `report_outcome` calls were refused
+ *  after the first staged. Bounded and consumed like `staged`. */
+const duplicateCalls = new Map<string, number>();
 
 /** Orphan prune horizon: a staged outcome whose run never completed. */
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000;
@@ -283,25 +286,73 @@ const stagedOutcomeSchema = z.object({
     .optional(),
 });
 
+const runIdRowSchema = z.object({ id: z.string() });
+
+/** The run an outcome key belongs to. `registerAgentCompletion` stamps the key
+ *  on the run row as the run starts, so a mid-run tool call finds it; null
+ *  before that, or when the lookup fails (an audit detail, never a gate). */
+export function runIdForOutcomeKey(db: DatabaseSync, outcomeKey: string): string | null {
+  try {
+    const row = runIdRowSchema.safeParse(
+      db.prepare(`SELECT id FROM agent_runs WHERE outcome_key = ?`).get(outcomeKey),
+    );
+    return row.success ? row.data.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What one `report_outcome` call did: staged the run's envelope, or found one
+ *  already staged and changed nothing (the count is this run's refusals so far). */
+export type StageOutcomeResult =
+  | { staged: true }
+  | { staged: false; duplicates: number };
+
+/** An envelope is staged for this run, in memory or persisted by a process
+ *  that restarted since. */
+function alreadyStaged(db: DatabaseSync, outcomeKey: string): boolean {
+  if (staged.has(outcomeKey)) return true;
+  try {
+    return stagedRowSchema.safeParse(
+      db.prepare(`SELECT outcome_json FROM staged_outcomes WHERE outcome_key = ?`).get(outcomeKey),
+    ).success;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stage a run's outcome ONCE (Option D PR 4(b)). `report_outcome` tells the
+ * model to call it exactly once, and a second call used to replace the first
+ * without a word, so whichever envelope came last became the run's verdict,
+ * including one sent after the agent had moved on. The first envelope now
+ * stands; a later call changes nothing and is counted, and the tool tells the
+ * model so and audits it.
+ */
 export function stageOutcome(
   db: DatabaseSync,
   outcomeKey: string,
   outcome: AgentOutcome,
-): void {
-  if (staged.size >= STAGED_MAX && !staged.has(outcomeKey)) {
+): StageOutcomeResult {
+  if (alreadyStaged(db, outcomeKey)) {
+    const duplicates = (duplicateCalls.get(outcomeKey) ?? 0) + 1;
+    if (duplicateCalls.size >= STAGED_MAX && !duplicateCalls.has(outcomeKey)) {
+      const oldest = duplicateCalls.keys().next().value;
+      if (oldest !== undefined) duplicateCalls.delete(oldest);
+    }
+    duplicateCalls.set(outcomeKey, duplicates);
+    return { staged: false, duplicates };
+  }
+  if (staged.size >= STAGED_MAX) {
     const oldest = staged.keys().next().value;
     if (oldest !== undefined) staged.delete(oldest);
   }
-  // Last write wins within a run — an agent revising its verdict mid-run is
-  // reporting a newer judgment.
-  staged.delete(outcomeKey);
   staged.set(outcomeKey, outcome);
   try {
     db.prepare(
       `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at)
        VALUES (?, ?, ?)
-       ON CONFLICT(outcome_key) DO UPDATE SET
-         outcome_json = excluded.outcome_json, created_at = excluded.created_at`,
+       ON CONFLICT(outcome_key) DO NOTHING`,
     ).run(outcomeKey, JSON.stringify(outcome), new Date().toISOString());
     // Cheap orphan prune (runs that staged but never completed).
     db.prepare(`DELETE FROM staged_outcomes WHERE created_at < ?`).run(
@@ -311,6 +362,7 @@ export function stageOutcome(
     // Persistence is best-effort — the in-process map still serves the common
     // (no-restart) path; a DB failure must never break a live run.
   }
+  return { staged: true };
 }
 
 export function takeStagedOutcome(
@@ -319,6 +371,7 @@ export function takeStagedOutcome(
 ): AgentOutcome | null {
   const inMemory = staged.get(outcomeKey);
   staged.delete(outcomeKey);
+  duplicateCalls.delete(outcomeKey);
   // Always clear the persisted row too (it is consumed exactly once).
   let persisted: AgentOutcome | null = null;
   try {

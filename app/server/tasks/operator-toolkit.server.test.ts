@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import { saveMcpServer } from "~/server/org/resources.server";
 import {
   buildOperatorToolkit,
@@ -425,6 +426,22 @@ describe("OPERATOR_TOOLKIT_INSTRUCTIONS — reading is expected, writing is not 
     // and fails the assertion below instead of passing on `undefined`.
     const wired = wiredInstructions.parse(toolkit.mcpServers.viberr);
     expect(wired).toBe(OPERATOR_TOOLKIT_INSTRUCTIONS);
+  });
+
+  it("loads every viberr tool up front, so the run's first call is not a ToolSearch (Option D PR 4(a))", () => {
+    // Canary: drop `alwaysLoad: true` from the viberr server and every tool
+    // lands in `deferred`.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: authority([]),
+    });
+    const loading = toolLoading(toolkit.mcpServers.viberr);
+    expect(loading.deferred).toEqual([]);
+    expect(loading.loaded).toContain("get_task");
+    expect(loading.loaded).toHaveLength(toolkit.tools.length);
   });
 });
 

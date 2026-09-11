@@ -215,6 +215,37 @@ describe("staged outcomes — restart persistence (P11-28)", () => {
     expect(takeStagedOutcome(db, "oc_1")).toBeNull();
   });
 
+  it("stages once per run: a later envelope changes nothing and is counted (Option D PR 4(b))", () => {
+    const db = ctx.makeDb();
+    expect(stageOutcome(db, "oc_once_a", { verdict: "approve" })).toEqual({ staged: true });
+    expect(stageOutcome(db, "oc_once_a", { verdict: "request_changes" })).toEqual({
+      staged: false,
+      duplicates: 1,
+    });
+    expect(
+      stageOutcome(db, "oc_once_a", { summary: "again" }),
+    ).toEqual({ staged: false, duplicates: 2 });
+    expect(
+      countRowSchema.parse(db.prepare(`SELECT count(*) c FROM staged_outcomes`).get()).c,
+    ).toBe(1);
+    expect(takeStagedOutcome(db, "oc_once_a")).toEqual({ verdict: "approve" });
+    // Consuming the envelope clears the count with it.
+    expect(stageOutcome(db, "oc_once_a", { verdict: "approve" })).toEqual({ staged: true });
+    takeStagedOutcome(db, "oc_once_a");
+  });
+
+  it("an envelope a prior process persisted still stands against a new call after a restart", () => {
+    const db = ctx.makeDb();
+    db.prepare(
+      `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at) VALUES (?, ?, ?)`,
+    ).run("oc_once_restart", JSON.stringify({ verdict: "approve" }), new Date().toISOString());
+    expect(stageOutcome(db, "oc_once_restart", { verdict: "request_changes" })).toEqual({
+      staged: false,
+      duplicates: 1,
+    });
+    expect(takeStagedOutcome(db, "oc_once_restart")).toEqual({ verdict: "approve" });
+  });
+
   it("recovers a persisted outcome when the in-process map lost it (simulated restart)", () => {
     const db = ctx.makeDb();
     // A row that a PRIOR process staged but this process's memory never held.

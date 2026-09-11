@@ -43,6 +43,13 @@ call a run made (`modelUsage`). Pages: `architecture/decisions.md` (ruling 175),
 `domain/auth-and-rbac.md` (§4, §5), `domain/task-lifecycle.md` (§7), `product/glossary.md`,
 `operations/configuration.md` (§4), `operations/runbook.md` and `ui/surfaces.md`.
 
+Updated 2026-09-11 for Option D PR 4 (branch `option-d/pr4-alwaysload-once-only`; no ruling):
+the operator's and the specialists' in-process tools load up front instead of behind
+ToolSearch (the controller's stay deferred: measured, it cost more than it saved), and a
+Claude specialist's outcome is the first `report_outcome` it sends; a second is refused and
+audited as `task.agent.outcome_duplicate`. Pages: `domain/agents-and-runtime.md` (§§2.4, 3.1,
+4.2) and `architecture/data-model.md`.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating

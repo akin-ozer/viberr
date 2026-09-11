@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import {
   baseTaskFrontmatter,
@@ -10,6 +11,7 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { insertUser } from "~/server/auth/user-store.server";
+import { patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import {
@@ -287,6 +289,25 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
 
   const BASE = { comment: false, ask: false, verdict: true };
 
+  it("loads every collaboration tool up front (Option D PR 4(a))", () => {
+    // Canary: drop `alwaysLoad: true` from the viberr_agent server.
+    const store = setupTestStore(ctx);
+    const built = buildAgentToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      actorRef: AGENT_REF,
+      outcomeKey: "oc_load",
+      collab: { comment: true, ask: true, verdict: true, evidence: true, githubRead: true },
+    })!;
+    const loading = toolLoading(built.mcpServers.viberr_agent);
+    expect(loading.deferred).toEqual([]);
+    expect(loading.loaded).toEqual(
+      expect.arrayContaining(["report_outcome", "post_comment", "github_read"]),
+    );
+  });
+
   it("declares `evidence` only when the profile holds attach-evidence-references", () => {
     const granted = toolkitTools({ ...BASE, evidence: true }, "oc_a").report_outcome!;
     const withheld = toolkitTools({ ...BASE, evidence: false }, "oc_b").report_outcome!;
@@ -323,6 +344,64 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(staged.evidence![1]!.label).not.toContain("\n");
     // A missing column becomes the placeholder, never an empty segment.
     expect(staged.evidence![1]!.del).toBe("—");
+  });
+
+  /**
+   * Option D PR 4(b): the tool says "exactly once", and a second call used to
+   * replace the first without a word, so whichever envelope came LAST was the
+   * run's verdict. The first now stands; the model is told, and it is audited.
+   * Canary: restore `ON CONFLICT DO UPDATE` and drop the `alreadyStaged` check
+   * in stageOutcome, and the staged verdict flips to request_changes.
+   */
+  it("stages the FIRST envelope once; a second call is refused, told so, and audited", async () => {
+    const textOf = z.object({ content: z.array(z.object({ text: z.string() })).min(1) });
+    const tools = toolkitTools({ ...BASE, evidence: false }, "oc_once");
+    // The run row as registerAgentCompletion leaves it: stamped with the key.
+    upsertRun(lastStore.db, {
+      id: "run_once",
+      projectSlug: lastStore.slug,
+      taskKey: "VIB-3",
+      threadId: "thread_once",
+      role: "Security review",
+      kind: "primary",
+      agentProfileId: "security-reviewer",
+      backend: "claude",
+      model: "claude-opus-5",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    patchRun(lastStore.db, "run_once", { outcomeKey: "oc_once" });
+    const first = textOf.parse(
+      await tools.report_outcome!.handler({ verdict: "approve", summary: "LGTM." }, {}),
+    );
+    expect(first.content[0]!.text).toMatch(/^\[staged\]/);
+    const second = textOf.parse(
+      await tools.report_outcome!.handler(
+        { verdict: "request_changes", summary: "Changed my mind." },
+        {},
+      ),
+    );
+    expect(second.content[0]!.text).toBe(
+      "[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.",
+    );
+    await tools.report_outcome!.handler({ verdict: "request_changes" }, {});
+
+    const rows = listAuditEvents(lastStore.db, { action: "task.agent.outcome_duplicate" });
+    // Both refusals, counted per run (two rows can share a timestamp, so the
+    // set is compared, not the order).
+    expect(rows.map((r) => r.details)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ runId: "run_once", outcomeKey: "oc_once", count: 1 }),
+        expect.objectContaining({ runId: "run_once", outcomeKey: "oc_once", count: 2 }),
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
+
+    expect(takeStagedOutcome(lastStore.db, "oc_once")).toEqual({
+      verdict: "approve",
+      summary: "LGTM.",
+    });
   });
 
   it("stages no evidence when the grant is withheld, even if the model sends some", async () => {
