@@ -3793,8 +3793,37 @@ by rewriting those paragraphs:*
     (d) N20-17's disclosure ("mentioning @operator still runs it") is gone with the door,
     and the archive dialogs promise what restore does — a human, not a reopened question
     (U36-1). Rulings 131(d) and 141 keep their own refusals beside this one.
-178. **A project declares its required reviewers (owner, 2026-09-11, pass 36; Q36-5).**
-    _(text supplied by the ruling-178 implementation; see the required-reviewers commit)_
+178. **A project declares its required reviewers (owner, 2026-09-11, pass 36; Q36-5;
+    G36-3).** Required-ness was emergent: the task-level set (`requiredReviewers(fm)` on
+    the task file) is the engaged, non-delivering, verdict-capable engagements, so a
+    reviewer gated a task only once the operator had engaged it there. Live, a task whose
+    operator never engaged the project's Code Reviewer reached the acceptance boundary
+    `healthy` on whichever other verdict-capable agent had run, and nothing named the
+    reviewer the project meant.
+    (a) *The rule.* `project.md` gains `requiredReviewers: [{ stageId, profileId }]` —
+    "profile X reviews at stage Y", per review stage, `[]` by default (only the engaged
+    reviewers are required). Every stage id must be a non-terminal stage and every profile
+    id a deployed agent holding `report-validation-verdict`; a writer refuses anything else
+    by name and writes nothing. The task-level emergent set stays: the project rule ADDS
+    a reviewer the task must hear from whether or not anyone engaged it.
+    (b) *One gate.* `requiredReviewerRefusals` (`required-reviewers.server.ts`) is pure:
+    for every rule, the named agent must hold an `approve` verdict bound to the task's
+    ACTIVE work revision (an approval of a replaced revision is history, ruling 163);
+    otherwise "Required reviewer <Agent> (project rule at <Stage>) has not approved
+    revision <sha7>. Run the review at <Stage>, or an admin can force-accept." A task with
+    no active revision and no pull request is not held. The acceptance refusal stack (task
+    page, `notAcceptableReason`, every writer), the projection's `validation_block_reason`
+    (so the review queue lists the task as review work and never offers acceptance; the
+    `projects` row carries the resolved rules for the rebuilder's task walk), the operator
+    snapshot (`requiredReviewers`, and the turn prompt says to engage each one at its
+    stage) and the controller's `get_project` read that one function. Force-accept
+    bypasses it and the audit row names the bypassed rule.
+    (c) *One writer.* Settings → Required reviewers (stage and agent pickers, the WHOLE
+    list saved, `edit-policy` tier) and the controller's `set_required_reviewers` (the
+    whole list, `[]` clearing it, `[noop]` when unchanged) go through `setRequiredReviewers`,
+    audited as `project.required_reviewers.updated` with the resolved stage and agent
+    names ("set the required reviewers to **Reviewer at Review**"); the Policy page reads
+    the rules as agent → stage and points a manager at Settings.
 179. **Ruling 163 applies to the pull-request head (owner, 2026-09-11, pass 36; Q36-9).**
     Verdicts bind to the WORK revision, and a foreign push moves the review PR's head
     without touching it — so after an observer commit landed on an approved PR at Merge
