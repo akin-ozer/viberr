@@ -9,7 +9,8 @@
 > [data-model.md](data-model.md); for the binding rulings see
 > [decisions.md](decisions.md). Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): the data-root subdirectory list and the security
-> posture, both of which described deployment-wide agent credentials.
+> posture, both of which described deployment-wide agent credentials. Updated 2026-09-11
+> for ruling 174 (branch `option-d/pr1-permissions-and-kill`): the shutdown paragraph in §6.
 
 ## 1. One process, one data root
 
@@ -171,7 +172,10 @@ exception. Everything else is best-effort and logged.
 
 Shutdown (SIGINT/SIGTERM, or the `exit` event): close SSE connections, stop watchers and
 the lock guard, WAL `TRUNCATE` checkpoint and close, release the lock, re-raise the
-signal. The container runs node as pid 1 through `exec` so the signal arrives.
+signal. The container runs node as pid 1 through `exec` so the signal arrives. A live
+Claude run's CLI leads its own process group (ruling 174), so a terminal's Ctrl+C no longer
+reaches it directly. The Agent SDK's own exit hook SIGTERMs each one's group as node
+exits, and whatever a crash left alive is swept by run id at the next boot.
 
 ## 7. The storage model in one paragraph
 

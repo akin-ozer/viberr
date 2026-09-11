@@ -80,6 +80,7 @@ import {
   principalRefusalMessage,
   type RunPrincipalRefusal,
 } from "./run-principal.server";
+import { runMarkerEnv } from "./run-processes.server";
 
 import { newId } from "~/shared/ids/new-id.server";
 
@@ -975,6 +976,11 @@ export async function startRun(
     ? { ...credential.credential.env }
     : {};
   Object.assign(runEnv, input.env);
+  // Ruling 174: every process the run starts carries its id, so the settle
+  // sweep can find what it left behind (`run-processes.server.ts`). Set last:
+  // no caller overlay may rename a run's processes. A refused run spawns
+  // nothing and carries none.
+  if (credential.ok) Object.assign(runEnv, runMarkerEnv(runId));
   if (Object.keys(runEnv).length) spec.env = runEnv;
 
   if (!credential.ok) {

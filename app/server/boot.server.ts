@@ -473,8 +473,14 @@ export async function reconcileRestartedWork(
   // which is exactly what step 3 deletes — so the chain keeps the handle and
   // joins it there. `reinvokes` never rejects, so the await needs no catch.
   let orphanReinvokes: Promise<void> = Promise.resolve();
+  // Ruling 174: the orphans' surviving processes are swept alongside, and the
+  // reclaim waits for that too — a CLI the dead server left running could still
+  // be writing a tree the reclaim deletes. Never rejects either.
+  let orphanReaped: Promise<void> = Promise.resolve();
   try {
-    orphanReinvokes = deps.finalizeOrphanedRuns(db).reinvokes;
+    const finalization = deps.finalizeOrphanedRuns(db);
+    orphanReinvokes = finalization.reinvokes;
+    orphanReaped = finalization.reaped;
   } catch (error) {
     logger.error("orphaned-run finalize failed", {
       err: error instanceof Error ? error : new Error(String(error)),
@@ -495,6 +501,7 @@ export async function reconcileRestartedWork(
     });
   }
   await orphanReinvokes;
+  await orphanReaped;
   try {
     // The reclaim's precondition is that NO run of this process holds a working
     // tree: it rmSyncs `<taskDir>/workspace` for every terminal-stage task, and

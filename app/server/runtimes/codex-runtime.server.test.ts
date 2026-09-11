@@ -20,6 +20,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, upsertRun } from "./run-store.server";
 import { runFailureReason } from "../tasks/agent-reply.server";
 import { resetEnvCacheForTests } from "../config/env.server";
+import type { ReapTargets } from "./run-processes.server";
 
 /**
  * The seam that lets a fake stream carry events the SDK's own type forbids.
@@ -1598,5 +1599,137 @@ describe("ruling 130(a): failure record parity", () => {
     expect(terminal?.display?.failure).toEqual({
       kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null,
     });
+  });
+});
+
+/**
+ * Ruling 174: the Codex SDK spawns the CLI itself and signals only it, SIGTERM
+ * and never SIGKILL, so a settled run is swept by the marker every process it
+ * started carries. The CLI inherits its full env; the model's shell and each
+ * stdio server get only what is declared, so the marker is declared for both.
+ */
+describe("codex run marker and settle sweep (ruling 174)", () => {
+  const COMPLETED = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
+  const MARKED: RunSpec = { ...SPEC, runId: "run_marked", env: { VIBERR_RUN_ID: "run_marked" } };
+  /** The two config leaves the adapter writes, read back through their shape. */
+  const shellPolicySchema = z.object({ set: z.record(z.string(), z.string()).optional() });
+  const mcpServersSchema = z.record(
+    z.string(),
+    z.object({
+      command: z.string().optional(),
+      args: z.array(z.string()).optional(),
+      url: z.string().optional(),
+      default_tools_approval_mode: z.string(),
+      env: z.record(z.string(), z.string()).optional(),
+    }),
+  );
+
+  function recordReaps() {
+    const reaped: ReapTargets[] = [];
+    const reapProcesses = async (targets: ReapTargets) => {
+      reaped.push(targets);
+      return { terminated: 0, killed: 0 };
+    };
+    return { reaped, reapProcesses };
+  }
+
+  it("declares the marker for the model's shell and every stdio MCP server, and nowhere it has no job", async () => {
+    const run = fakeCodex([COMPLETED]);
+    createCodexAdapter({ codexFactory: run.factory, ...recordReaps() }).start(
+      {
+        ...MARKED,
+        mcpServers: {
+          files: { command: "npx", args: ["-y", "@example/files"] },
+          docs: { type: "http", url: "https://docs.example.test/mcp" },
+        },
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const options = run.factoryOptions();
+    // The CLI's own process env: the SDK passes it whole.
+    expect(options?.env?.VIBERR_RUN_ID).toBe("run_marked");
+    const policy = shellPolicySchema.parse(options?.config?.shell_environment_policy);
+    expect(policy.set).toEqual({ VIBERR_RUN_ID: "run_marked" });
+    const servers = mcpServersSchema.parse(options?.config?.mcp_servers);
+    expect(servers.files).toEqual({
+      command: "npx",
+      args: ["-y", "@example/files"],
+      default_tools_approval_mode: "approve",
+      env: { VIBERR_RUN_ID: "run_marked" },
+    });
+    // An HTTP server is no process of the run's: nothing to mark.
+    expect(servers.docs).not.toHaveProperty("env");
+  });
+
+  it("a run the service did not mark declares no marker", async () => {
+    const run = fakeCodex([COMPLETED]);
+    createCodexAdapter({ codexFactory: run.factory, ...recordReaps() }).start(
+      { ...SPEC, mcpServers: { files: { command: "npx", args: [] } } },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const config = run.factoryOptions()?.config;
+    expect(shellPolicySchema.parse(config?.shell_environment_policy).set).toBeUndefined();
+    expect(mcpServersSchema.parse(config?.mcp_servers).files).not.toHaveProperty("env");
+  });
+
+  it("sweeps the run's marked processes once it settles — finished, failed or stopped", async () => {
+    // Finished.
+    const finished = recordReaps();
+    createCodexAdapter({ codexFactory: fakeCodex([COMPLETED]).factory, ...finished }).start(
+      MARKED,
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(finished.reaped).toEqual([{ runIds: ["run_marked"] }]);
+
+    // Failed: the stream rejects before a single event.
+    const failed = recordReaps();
+    const failingClient: CodexClient = {
+      startThread: () => ({
+        id: null,
+        runStreamed: async () => ({ events: failingEvents(new Error("Codex Exec exited with code 1")) }),
+      }),
+      resumeThread: () => ({ id: null, runStreamed: async () => ({ events: failingEvents(new Error("x")) }) }),
+    };
+    createCodexAdapter({ codexFactory: () => failingClient, ...failed }).start(MARKED, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    expect(failed.reaped).toEqual([{ runIds: ["run_marked"] }]);
+
+    // Stopped: the abort ends the stream, and the settle sweeps what the
+    // SDK's lone SIGTERM did not reach.
+    const stopped = recordReaps();
+    let exit: RunExit | null = null;
+    const stalledClient: CodexClient = {
+      startThread: () => ({
+        id: null,
+        runStreamed: async (_input, turnOptions) => ({ events: stalledEvents(turnOptions?.signal) }),
+      }),
+      resumeThread: () => ({ id: null, runStreamed: async () => ({ events: stalledEvents() }) }),
+    };
+    const handle = createCodexAdapter({ codexFactory: () => stalledClient, ...stopped }).start(
+      MARKED,
+      { onLine: () => {}, onExit: (e) => (exit = e) },
+    );
+    await drain();
+    expect(stopped.reaped).toEqual([]);
+    handle.interrupt();
+    await drain();
+    expect(exit).toMatchObject({ outcome: "interrupted" });
+    expect(stopped.reaped).toEqual([{ runIds: ["run_marked"] }]);
+  });
+
+  it("sweeps nothing for a run the service did not mark — it started nothing that could be found", async () => {
+    const { reaped, reapProcesses } = recordReaps();
+    createCodexAdapter({ codexFactory: fakeCodex([COMPLETED]).factory, reapProcesses }).start(
+      SPEC,
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(reaped).toEqual([]);
   });
 });

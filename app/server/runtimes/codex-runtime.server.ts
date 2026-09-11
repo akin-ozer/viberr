@@ -30,6 +30,11 @@ import { withProviderText } from "~/shared/provider-marker";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
+import {
+  reapRunProcesses,
+  RUN_MARKER_ENV,
+  type ReapRunProcesses,
+} from "./run-processes.server";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
@@ -108,6 +113,9 @@ interface CodexAdapterDeps {
   env?: Record<string, string>;
   /** Extra supported CLI config overrides, primarily for test/deployment seams. */
   config?: CodexOptions["config"];
+  /** Ruling 174: the sweep that runs once a marked run has settled (default:
+   *  the real one). */
+  reapProcesses?: ReapRunProcesses;
 }
 
 type CodexConfig = NonNullable<CodexOptions["config"]>;
@@ -179,8 +187,16 @@ const codexMcpServerSchema = z.union([
  *
  * NOTE also that this config does not REMOVE servers the run home declares —
  * the CLI merges `--config` per dotted leaf key. That is why runs get an
- * a per-person CODEX_HOME (`user-homes.server.ts`) instead of the host's. */
-function codexMcpServers(servers: RunSpec["mcpServers"]): CodexConfig {
+ * a per-person CODEX_HOME (`user-homes.server.ts`) instead of the host's.
+ *
+ * Ruling 174: a stdio server is started with the CLI's short default
+ * environment plus its declared `env`, so the run marker is declared there —
+ * it is an id, not a secret, and argv is a fine place for it — and whatever
+ * the server launches (a browser, a language server) inherits it. */
+function codexMcpServers(
+  servers: RunSpec["mcpServers"],
+  runMarker: string | undefined,
+): CodexConfig {
   const translated: CodexConfig = {};
   for (const [name, value] of Object.entries(servers ?? {})) {
     if (!name) continue;
@@ -210,6 +226,7 @@ function codexMcpServers(servers: RunSpec["mcpServers"]): CodexConfig {
     };
     // An empty `args` is not the same declaration as none at all.
     if (declaration.data.args.length) stdio.args = declaration.data.args;
+    if (runMarker) stdio.env = { [RUN_MARKER_ENV]: runMarker };
     translated[name] = stdio;
   }
   return translated;
@@ -258,6 +275,10 @@ export function resolveCodexReasoningEffort(
  * agent ran, leaving the repo-local `git config user.*` written at clone as the
  * only mechanism — a weaker guarantee than the docstring claims, and none at
  * all when `setIdentity` failed.
+ *
+ * Ruling 174: the run marker crosses too, so a command the model backgrounds
+ * (`npm run dev &`) carries it and the settle sweep can find it after the CLI
+ * is gone.
  */
 const SHELL_EXPORTED_ENV_KEYS = [
   "GIT_CEILING_DIRECTORIES",
@@ -265,6 +286,7 @@ const SHELL_EXPORTED_ENV_KEYS = [
   "GIT_AUTHOR_EMAIL",
   "GIT_COMMITTER_NAME",
   "GIT_COMMITTER_EMAIL",
+  RUN_MARKER_ENV,
 ] as const;
 
 /** The `shell_environment_policy.set` table — closed over the keys above, so a
@@ -375,7 +397,7 @@ function codexConfigForRun(
     // run sees only the MCPs its profile selected. NOTE: the CLI merges this
     // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
     // home declares — the app-owned run home is what makes this exhaustive.
-    mcp_servers: codexMcpServers(spec.mcpServers),
+    mcp_servers: codexMcpServers(spec.mcpServers, spec.env?.[RUN_MARKER_ENV]),
     shell_environment_policy: shellEnvironmentPolicy,
   };
   // The persona/expertise prompt, when the run carries one. Set after the
@@ -498,7 +520,9 @@ export function codexIdleTimeoutMs(): number {
  * adapter's cooperative `interrupt()` — but a child that survives SIGTERM (a
  * trapped signal, or a grandchild holding the stdout pipe open) never ends the
  * iterator, so without this the row sits `running` until the next restart's
- * orphan sweep: the Stop-did-nothing defect, on the other backend.
+ * orphan sweep: the Stop-did-nothing defect, on the other backend. The settle
+ * that follows sweeps that child and the grandchild by the run marker (ruling
+ * 174), so the row and the processes end together.
  */
 export const INTERRUPT_SETTLE_GRACE_MS = 20_000;
 
@@ -772,6 +796,25 @@ export function createCodexAdapter(
         }
       };
 
+      /**
+       * Ruling 174: a settled run leaves no live process. The Codex SDK spawns
+       * the CLI itself and signals only it (SIGTERM, never SIGKILL), so the
+       * sweep is what reaches a CLI that outlived its abort and everything the
+       * model's shell backgrounded — all of it carries this run's marker
+       * (`shell_environment_policy.set`, each stdio server's `env`). A run the
+       * service did not mark started nothing that could be found.
+       */
+      const reap = () => {
+        if (!spec.env?.[RUN_MARKER_ENV]) return;
+        const reapProcesses = deps.reapProcesses ?? reapRunProcesses;
+        void reapProcesses({ runIds: [spec.runId] }).catch((error) => {
+          logger.warn("codex run reap failed", {
+            runId: spec.runId,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        });
+      };
+
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
         settled = true;
@@ -785,6 +828,7 @@ export function createCodexAdapter(
           effectiveBackend: "codex",
           sessionId,
         });
+        reap();
       };
 
       /** Persist a canonical, deliberately detail-free fatal event. Raw

@@ -44,9 +44,18 @@ const recoverStrandedOperatorPlans = vi.fn(async () => {
 /** The re-invokes boot's orphan sweep LAUNCHED — still cloning a task
  *  workspace when the chain reaches its reclaim. Reassigned per test. */
 let orphanReinvokes: Promise<void> = Promise.resolve();
+/** The sweep of the orphans' surviving processes (ruling 174) — still
+ *  signalling when the chain reaches its reclaim. Reassigned per test. */
+let orphanReaped: Promise<void> = Promise.resolve();
 const finalizeOrphanedRuns = vi.fn(() => {
   calls.push("orphan-finalize");
-  return { finalized: 0, reinvoked: 0, capped: 0, reinvokes: orphanReinvokes };
+  return {
+    finalized: 0,
+    reinvoked: 0,
+    capped: 0,
+    reinvokes: orphanReinvokes,
+    reaped: orphanReaped,
+  };
 });
 /** Runs queued or running when the chain reaches its reclaim. Zero by default;
  *  a test that wants the guard to bite returns one. */
@@ -100,6 +109,7 @@ beforeEach(() => {
   calls.length = 0;
   // A pending re-invoke promise left by one test must not steer the next.
   orphanReinvokes = Promise.resolve();
+  orphanReaped = Promise.resolve();
   finalizeOrphanedRuns.mockClear();
   recoverUnreactedAgentRuns.mockClear();
   activeRunCount.mockClear();
@@ -249,6 +259,23 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
     expect(calls).toContain("reinvoke:end");
     expect(calls).toContain("reclaim");
     expect(calls.indexOf("reinvoke:end")).toBeLessThan(calls.indexOf("reclaim"));
+  });
+
+  it("reclaims only after the orphans' surviving processes have been swept (ruling 174)", async () => {
+    // A CLI the dead server left running could still be writing the tree the
+    // reclaim deletes; its sweep is mid-grace (SIGTERM sent, SIGKILL pending).
+    orphanReaped = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        calls.push("reap:end");
+        resolve();
+      }, 20);
+    });
+
+    await reconcileRestartedWork(db, reconcileDeps);
+
+    expect(calls).toContain("reap:end");
+    expect(calls).toContain("reclaim");
+    expect(calls.indexOf("reap:end")).toBeLessThan(calls.indexOf("reclaim"));
   });
 
   it("skips the reclaim while a run is in flight", async () => {

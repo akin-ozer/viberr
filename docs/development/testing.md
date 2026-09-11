@@ -7,7 +7,8 @@
 > against `pass32/implementation` @ `478bed0`. Requires Node 26+ and `npm ci`.
 > Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the
 > `setup-env.ts` list, the `backend-credentials` harness and the fake-binary sign-in
-> harness.
+> harness. Updated 2026-09-11 for ruling 174 (branch `option-d/pr1-permissions-and-kill`):
+> §2's real-process teardown tests.
 
 ## 1. The five gates
 
@@ -149,6 +150,14 @@ ctx.cleanup();
   home that call named, and saw no credential of the server's — one fake vendor in the
   repo, not two. `no-module-mocking` is a lint rule (no `vi.mock`), and a mocked spawn
   would prove nothing about the parsing this module exists to do.
+- **Process teardown is tested on REAL processes (ruling 174).** `run-processes.server.test.ts`
+  and `claude-spawn.server.test.ts` spawn held `node` children, a SIGTERM-ignoring one, a
+  shell whose `&` child is orphaned to init, and a two-member group, then assert the
+  kernel's answer (`/proc` on Linux, `ps -E` on macOS): the right pids die, another run's and
+  an unmarked process live. Each carries a run id no real run can have, and `afterEach`
+  SIGKILLs whatever a failed assertion left. The adapters' own tests drive the SDK's side
+  of `spawnClaudeCodeProcess` with a stand-in child through the `spawnCli`,
+  `signalProcess` and `reapProcesses` deps.
 - Never mutate `node_modules` while `vitest run` is in flight (it once produced 688
   phantom failures).
 

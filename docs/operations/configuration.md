@@ -7,7 +7,9 @@
 > §2 and §3 re-verified 2026-09-02 against `pass32/implementation` @ `478bed0`.
 > Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
 > the nine deployment-wide agent-backend variables are gone; agent backends are
-> connected per person and appear in §4, not here.
+> connected per person and appear in §4, not here. Updated 2026-09-11 for ruling 174
+> (branch `option-d/pr1-permissions-and-kill`): §3's spawn-env paragraph names the run
+> marker `VIBERR_RUN_ID` every agent child carries. No new variable.
 
 Viberr is configured almost entirely through environment variables, validated
 once at boot by `parseEnv` in `app/server/config/env.server.ts`. The process
@@ -197,6 +199,11 @@ section's table are either credential-shaped and stripped by the regex
 `--executable-path`. Git is invoked with `GIT_ASKPASS` carrying the PAT,
 `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL` pointed away from the host config,
 `GIT_ALLOW_PROTOCOL` restricted, and `GIT_CEILING_DIRECTORIES` set to the task directory.
+An agent run's child env also carries `VIBERR_RUN_ID=<runId>` (ruling 174, updated
+2026-09-11). It is not a knob and is not in the schema; the run service sets it per run,
+last, and nothing reads it but the settle sweep, which finds the run's leftover processes
+by it (`app/server/runtimes/run-processes.server.ts`). There is no environment variable for
+the sweep or its 5 s grace.
 *(Corrected 2026-09-04, pass 34 — U34-7 / ruling 142: this paragraph used to say the
 runtime "never inherits its own environment" while only the credential-shaped and
 private-runtime names were stripped; the container's `NODE_ENV=production` and `PORT`

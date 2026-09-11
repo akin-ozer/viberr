@@ -1,6 +1,8 @@
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { resetEnvCacheForTests } from "../config/env.server";
@@ -15,6 +17,7 @@ import {
   type ClaudeQueryFn,
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
+import type { ReapTargets } from "./run-processes.server";
 
 describe("resolveClaudeModel", () => {
   it("maps friendly family labels to CLI aliases", () => {
@@ -1034,6 +1037,30 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     }
   });
 
+  it("acknowledges bypass exactly where it is asked for, and spawns the CLI itself on every run (ruling 174)", async () => {
+    // The SDK: `allowDangerouslySkipPermissions` "must be set to `true` when
+    // using `permissionMode: 'bypassPermissions'`", defaulting to false. The
+    // pinned CLI does not enforce it; one that does would drop every run to
+    // `default` + `permissionPrompts: 'none'` and deny every tool. Canary:
+    // drop the line from `start` and the autonomous specs read undefined.
+    for (const spec of [
+      { ...SPEC, kind: "primary" as const },
+      { ...SPEC, kind: "operator" as const },
+      { ...SPEC, kind: "controller" as const },
+      { ...SPEC, autonomous: false },
+      { ...SPEC, resumeSessionId: "sess-9" },
+    ]) {
+      const options = await optionsFor(spec);
+      const label = JSON.stringify({ kind: spec.kind, autonomous: spec.autonomous });
+      if (spec.autonomous) {
+        expect(options.allowDangerouslySkipPermissions, label).toBe(true);
+      } else {
+        expect(options, label).not.toHaveProperty("allowDangerouslySkipPermissions");
+      }
+      expect(options.spawnClaudeCodeProcess, label).toBeInstanceOf(Function);
+    }
+  });
+
   it("hands the SDK the granted servers verbatim — credentials and the in-process toolkit included", async () => {
     // The exact shapes `resolveSpecialistMcpServers` builds: an HTTP server with
     // the decrypted org credential as an Authorization header, a stdio server
@@ -1360,5 +1387,183 @@ describe("ruling 130(a): structured classification", () => {
     expect(terminal?.display?.text).toContain("(403 account_on_hold): the account itself is on hold");
     expect(terminal?.display?.text).toContain("Profile → Agent accounts");
     expect(terminal?.display?.failure).toMatchObject({ kind: "auth", apiError: "account_on_hold", apiErrorStatus: 403 });
+  });
+});
+
+/**
+ * Ruling 174: the CLI leads its own process group, and a settled run leaves no
+ * live process. A fake `queryFn` never spawns anything, so these drive the SDK's
+ * side of the contract themselves: they call `options.spawnClaudeCodeProcess`
+ * the way the SDK does, with a stand-in child the adapter's seam accepts.
+ */
+describe("claude CLI process lifecycle (ruling 174)", () => {
+  const CLI_PID = 4242;
+
+  function standInChild() {
+    return Object.assign(new EventEmitter(), {
+      pid: CLI_PID,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      killed: false,
+      exitCode: null,
+      signalCode: null,
+      kill: () => true,
+    });
+  }
+
+  function harness() {
+    const child = standInChild();
+    const signals: [number, NodeJS.Signals | 0][] = [];
+    const reaped: ReapTargets[] = [];
+    const deps = {
+      spawnCli: () => child,
+      signalProcess: (pid: number, signal: NodeJS.Signals | 0) => {
+        signals.push([pid, signal]);
+      },
+      reapProcesses: async (targets: ReapTargets) => {
+        reaped.push(targets);
+        return { terminated: 0, killed: 0 };
+      },
+    };
+    /** What the SDK does first: spawn the CLI through the custom function. */
+    const spawnThrough = (options: ClaudeQueryOptions | undefined) =>
+      options?.spawnClaudeCodeProcess?.({ command: "claude", args: [], env: {} });
+    /** The CLI exits and its stderr closes, as a real one does after the result. */
+    const exitCli = (code = 0) => {
+      child.stderr.end();
+      child.emit("exit", code, null);
+    };
+    return { child, signals, reaped, deps, spawnThrough, exitCli };
+  }
+
+  const SUCCESS = { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} };
+
+  it("once the run settles and the CLI has exited, sweeps its group and every process carrying the run's marker", async () => {
+    const h = harness();
+    const adapter = createClaudeAdapter({
+      ...h.deps,
+      queryFn: ({ options }) => {
+        h.spawnThrough(options);
+        return fakeQuery([SUCCESS]).q;
+      },
+    });
+    let exit: RunExit | null = null;
+    adapter.start(
+      { ...SPEC, runId: "run_marked", env: { VIBERR_RUN_ID: "run_marked" } },
+      { onLine: () => {}, onExit: (e) => (exit = e) },
+    );
+    await drain();
+    expect(exit).toMatchObject({ outcome: "finished" });
+    // Settled, but the CLI is still closing: the sweep waits for its own exit
+    // first, so its shutdown gets to stop what it tracks.
+    expect(h.reaped).toEqual([]);
+
+    h.exitCli();
+    await drain();
+    expect(h.reaped).toEqual([{ runIds: ["run_marked"], groupLeader: CLI_PID }]);
+  });
+
+  it("a run the service did not mark still has its group swept, and sweeps by no marker", async () => {
+    const h = harness();
+    const adapter = createClaudeAdapter({
+      ...h.deps,
+      queryFn: ({ options }) => {
+        h.spawnThrough(options);
+        return fakeQuery([SUCCESS]).q;
+      },
+    });
+    adapter.start(SPEC, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    h.exitCli();
+    await drain();
+    expect(h.reaped).toEqual([{ runIds: [], groupLeader: CLI_PID }]);
+  });
+
+  it("sweeps nothing when the SDK never spawned a CLI", async () => {
+    const h = harness();
+    const adapter = createClaudeAdapter({ ...h.deps, queryFn: () => fakeQuery([SUCCESS]).q });
+    adapter.start(
+      { ...SPEC, env: { VIBERR_RUN_ID: "r1" } },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(h.reaped).toEqual([]);
+  });
+
+  it("a stop the CLI never answers SIGTERMs the CLI's whole group as it aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let captured: AbortController | undefined;
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          h.spawnThrough(options);
+          captured = options?.abortController;
+          const gen = (async function* () {
+            await new Promise<void>((_resolve, reject) => {
+              captured?.signal.addEventListener("abort", () =>
+                reject(new Error("Claude Code process aborted by user")),
+              );
+            });
+            const none: never[] = [];
+            yield* none;
+          })();
+          return Object.assign(gen, { interrupt: async () => new Promise<void>(() => {}) });
+        },
+      });
+      const handle = adapter.start(SPEC, { onLine: () => {}, onExit: () => {} });
+      await vi.advanceTimersByTimeAsync(0);
+
+      handle.interrupt();
+      expect(h.signals).toEqual([]); // the cooperative window comes first
+
+      await vi.advanceTimersByTimeAsync(INTERRUPT_GRACE_MS + 1);
+      expect(captured?.signal.aborted).toBe(true);
+      expect(h.signals).toContainEqual([-CLI_PID, "SIGTERM"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("classifies a CLI exit by the stderr the SDK no longer sees: a vanished resume session is `session_missing`", async () => {
+    // With the SDK's own spawn, the exit error read "…exited with code 1.
+    // stderr: No conversation found…", and the classifier routed it to
+    // session_missing. A custom spawn leaves the SDK blind to stderr; the
+    // adapter restores the same sentence from the tail it kept.
+    const classify = async (stderr: string | null) => {
+      const h = harness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          h.spawnThrough(options);
+          const gen = (async function* () {
+            if (stderr) h.child.stderr.write(stderr);
+            await new Promise((r) => setImmediate(r));
+            h.exitCli(1);
+            // A stream that fails without a message: it yields nothing.
+            const none: never[] = [];
+            yield* none;
+            throw new Error("Claude Code process exited with code 1");
+          })();
+          return Object.assign(gen, { interrupt: async () => {} });
+        },
+      });
+      const lines: EmittedLine[] = [];
+      adapter.start(
+        { ...SPEC, resumeSessionId: "s-gone" },
+        { onLine: (l) => lines.push(l), onExit: () => {} },
+      );
+      await drain();
+      await drain();
+      return lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"))?.display?.tag;
+    };
+
+    expect(await classify("No conversation found with session ID: s-gone\n")).toBe(
+      "run·error·session_missing",
+    );
+    // Control: the same exit with nothing on stderr is not a missing session.
+    expect(await classify(null)).not.toBe("run·error·session_missing");
   });
 });

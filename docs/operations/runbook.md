@@ -10,6 +10,8 @@ Rewritten 2026-09-01 against `main` @ `68b5480` and re-verified 2026-09-02 again
 listed in [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-01-doc-validation.md).
 Every environment variable named here is documented in
 [`configuration.md`](configuration.md).
+Updated 2026-09-11 for ruling 174 (branch `option-d/pr1-permissions-and-kill`): the
+restart bullet under "Agent runtimes" gains the settle sweep and how to read it.
 Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the health
 `backends` row, the whole "Agent runtimes" section, the session-home retention row and the
 backup note were rewritten for per-person agent accounts.
@@ -342,6 +344,14 @@ recommendation is open. Nothing is owed by anyone while it waits.
   (capped 3 per 30 min); finished runs whose completion never posted are replayed. This
   is why `task.agent.replied` and `runtime.operator.plan_executed` audit rows are exempt
   from retention.
+- A settled run leaves no live process (ruling 174). Every agent child carries
+  `VIBERR_RUN_ID=<runId>`, and when a run settles, or boot finalizes it as an orphan,
+  Viberr SIGTERMs whatever still carries that id, waits 5 s and SIGKILLs the rest. The
+  `info` line `reaped the processes a settled run left behind` gives the run ids and how
+  many were terminated and killed. A non-zero `killed` means something ignored SIGTERM. A
+  process the run started that is still alive after its row settled is a bug. To list a
+  run's processes by hand inside the container, run
+  `docker compose exec -T app sh -c 'grep -l "VIBERR_RUN_ID=<runId>" /proc/[0-9]*/environ'`.
 
 *(Rewritten 2026-09-02 for ruling 127. The old section listed "seven credential paths"
 across `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `VIBERR_CLAUDE_USE_CLI_AUTH` and

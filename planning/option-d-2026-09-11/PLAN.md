@@ -45,7 +45,10 @@ wrapper runs the real binary as its own process group and, on SIGTERM, signals t
 after a grace; (b) discover the child with `pgrep -P <app pid>` and `killpg`, which cannot tell two concurrent Codex
 runs apart; (c) accept the direct-child SIGTERM and document the residual. **Recommendation: (a).** Viberr already
 owns the image and the child env; the wrapper is 20 lines of shell and is the only option that reaches the tree.
-**Decided: (a).**
+**Decided: (a).** *(Superseded 2026-09-11 before it shipped, owner: the PR 1 spike showed
+the Claude CLI starts every Bash command in a session of its own, so no group kill reaches
+it. The owner chose a per-run environment marker and a settle sweep on both backends
+instead, which also makes the Codex wrapper unnecessary. See ruling 174 and the note on §5.)*
 
 **D2. Org MCP tool gating: where does the per-tool policy come from?** Background: ruling 39 says Viberr does not
 pretend to bound a third-party tool, which is why P13-KM-04 is closed by a prompt paragraph today
@@ -117,6 +120,20 @@ rulings 174 to 176 (PR 1 to PR 3 below) as they land." `docs/README.md`: same da
 **Effort.** 0.5 day.
 
 ## 5. PR 1: `allowDangerouslySkipPermissions` and process-group kill
+
+*(Implemented 2026-09-11 as ruling 174, with a changed mechanism the owner chose after a
+spike of seven live Haiku runs on the pinned CLI. Claude Code runs each Bash command
+`detached` (its own session), so a `&` child survives a normal finish, and a SIGKILLed CLI
+leaves its running command and its stdio MCP servers alive. The group kill below reaches
+only the MCP servers and would have failed this section's canary. Shipped instead: the
+detached spawn and group kill as written, plus a `VIBERR_RUN_ID` marker on every run's
+child env (Codex: `shell_environment_policy.set` and each stdio server's `env`), a sweep
+by that marker when every run settles and at boot, and no Codex wrapper (no
+`VIBERR_CODEX_WRAPPER`, no image change). The test for the option assertion lives in
+`claude-runtime.server.test.ts` beside the `permissionPrompts` test, not in
+`harness-hermeticity.server.test.ts`, which has no option assertion. The sketch's
+`killProcessGroup` cleared its SIGKILL timer on the leader's exit, which would have spared
+exactly the children the escalation exists for; the sweep re-scans instead.)*
 
 **Why.** Two defects the assessment found on the way, independent of Cognipeer. First, the typings say
 `allowDangerouslySkipPermissions` "must be set to `true` when using `permissionMode: 'bypassPermissions'`"
