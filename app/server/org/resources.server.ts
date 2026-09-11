@@ -290,13 +290,32 @@ export function listKnowledgeBaseNames(
   return dirs.map((dir) => rowByDir.get(dir)?.name ?? dir);
 }
 
+/**
+ * The metadata row an id names: a real `kb_…` id, or a `disk:<dir>` id whose
+ * folder already has a row. U36-4 (pass 36): the `disk:` shape was designed to
+ * ADOPT a row-less folder, so a folder that had since gained a row fell into
+ * the create arm and clashed on its own `dir` — the controller, told only the
+ * folder by the create reply, guessed `disk:<dir>` and was refused "already
+ * exists" on a KB it had made one call earlier. A folder with a row IS that
+ * row, whichever id shape names it. Null for a brand-new create or a row-less
+ * folder.
+ */
+function kbRowForId(db: DatabaseSync, id: string | null | undefined): KbRow | null {
+  if (!id) return null;
+  // SAFETY: same `KB_SQL` column guarantee as `listKnowledgeBases`.
+  const byId = db.prepare(`${KB_SQL} WHERE id = ?`).get(id) as KbRow | undefined;
+  if (byId) return byId;
+  const dir = diskNameFromId(id);
+  if (!dir) return null;
+  return (db.prepare(`${KB_SQL} WHERE dir = ?`).get(dir) as KbRow | undefined) ?? null;
+}
+
 export function getKnowledgeBase(
   db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},
 ): KbView | null {
-  // SAFETY: same `KB_SQL` column guarantee as `listKnowledgeBases`.
-  const row = db.prepare(`${KB_SQL} WHERE id = ?`).get(id) as KbRow | undefined;
+  const row = kbRowForId(db, id);
   if (row) return buildKb(row.dir, row, ctx);
   const dir = diskNameFromId(id);
   if (dir && existsSync(kbDirPath(dir, ctx.dataRoot))) {
@@ -327,12 +346,10 @@ export async function saveKnowledgeBase(
   const refresh = isKbRefreshMode(input.refresh) ? input.refresh : "on change";
   const now = new Date().toISOString();
 
-  // Resolve the edit subject: a metadata row (by id) OR a disk-only folder
-  // (synthetic id). A brand-new create has neither.
-  // SAFETY: same `KB_SQL` column guarantee as `listKnowledgeBases`.
-  const existing = input.id
-    ? (db.prepare(`${KB_SQL} WHERE id = ?`).get(input.id) as KbRow | undefined)
-    : undefined;
+  // Resolve the edit subject: a metadata row (by id, or by the folder a
+  // `disk:<dir>` id names — U36-4), else a row-less disk folder (synthetic
+  // id). A brand-new create has neither.
+  const existing = kbRowForId(db, input.id);
   const oldDir = existing
     ? existing.dir
     : input.id
@@ -2168,15 +2185,35 @@ export function listSkillNames(
   );
 }
 
+/**
+ * The metadata row an id names: a real `sk_…` id, or a `disk:<name>` id whose
+ * folder already has a row — the KB rule (`kbRowForId`, U36-4) one resource
+ * over, where the create arm's clash landed AFTER SKILL.md had been written.
+ */
+function skillRowForId(
+  db: DatabaseSync,
+  id: string | null | undefined,
+): SkillRow | null {
+  if (!id) return null;
+  // SAFETY: same `SKILL_SQL` column guarantee as `listSkills`.
+  const byId = db.prepare(`${SKILL_SQL} WHERE id = ?`).get(id) as
+    | SkillRow
+    | undefined;
+  if (byId) return byId;
+  const name = diskNameFromId(id);
+  if (!name) return null;
+  return (
+    (db.prepare(`${SKILL_SQL} WHERE name = ?`).get(name) as SkillRow | undefined) ??
+    null
+  );
+}
+
 export function getSkill(
   db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},
 ): SkillView | null {
-  // SAFETY: same `SKILL_SQL` column guarantee as `listSkills`.
-  const row = db.prepare(`${SKILL_SQL} WHERE id = ?`).get(id) as
-    | SkillRow
-    | undefined;
+  const row = skillRowForId(db, id);
   if (row) return buildSkill(row.name, row, ctx);
   const name = diskNameFromId(id);
   if (name && existsSync(skillDirPath(name, ctx.dataRoot))) {
@@ -2221,14 +2258,10 @@ export async function saveSkill(
     throw AppError.validation("Add a one-line summary.");
   const now = new Date().toISOString();
 
-  // Resolve the edit subject: a metadata row (by id) OR a disk-only folder
-  // (synthetic id). A brand-new create has neither.
-  // SAFETY: same `SKILL_SQL` column guarantee as `listSkills`.
-  const existing = input.id
-    ? (db.prepare(`${SKILL_SQL} WHERE id = ?`).get(input.id) as
-        | SkillRow
-        | undefined)
-    : undefined;
+  // Resolve the edit subject: a metadata row (by id, or by the folder a
+  // `disk:<name>` id names — U36-4), else a row-less disk folder (synthetic
+  // id). A brand-new create has neither.
+  const existing = skillRowForId(db, input.id);
   const oldName = existing
     ? existing.name
     : input.id

@@ -514,9 +514,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. No delete exists here.",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. No delete exists here. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes).",
       {
-        id: z.string().optional().describe("Existing KB id to update; omit to create."),
+        id: z
+          .string()
+          .optional()
+          .describe(
+            "Existing KB id to update — from list_knowledge_bases or this tool's own reply; omit to create.",
+          ),
         name: z.string(),
         // The shared constant, not a hand-copied list: "nightly" was retired
         // when it turned out nothing ever scheduled it (see KB_REFRESH_MODES),
@@ -545,18 +550,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             auditActor,
             { dataRoot },
           );
+          // U36-4 (pass 36): the reply carries what the next call needs — the
+          // id for a save, the grantKey for a grant. The toast alone named the
+          // folder, and the controller then guessed `disk:<dir>`.
+          const head = `[done] ${saved.toast} (id ${saved.kb.id}, grantKey ${saved.kb.dir}).`;
           let docNote = "";
           if (args.doc) {
             const target = resolveStoreTarget(db, "kb", saved.kb.id, { dataRoot });
             if (!target) {
-              return `[done] ${saved.toast}. The document could not be written: the KB folder did not resolve.`;
+              return `${head} The document could not be written: the KB folder did not resolve.`;
             }
             writeStoreDoc(db, target, [], args.doc.path, args.doc.content, auditActor, {
               overwrite: true,
             });
             docNote = ` Document ${args.doc.path} written.`;
           }
-          return `[done] ${saved.toast}.${docNote}`;
+          return `${head}${docNote}`;
         },
       ),
     ),
@@ -589,9 +598,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_skill",
-      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only.",
+      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only. The reply names the skill's id (what the next save takes) and its grantKey (what a grant takes).",
       {
-        id: z.string().optional().describe("Existing skill id to update; omit to create."),
+        id: z
+          .string()
+          .optional()
+          .describe(
+            "Existing skill id to update — from list_skills or this tool's own reply; omit to create.",
+          ),
         name: z.string(),
         summary: z.string(),
         body: z
@@ -614,7 +628,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           auditActor,
           { dataRoot },
         );
-        return `[done] ${saved.toast}.`;
+        // U36-4: the same re-enterable reply as save_knowledge_base.
+        return `[done] ${saved.toast} (id ${saved.skill.id}, grantKey ${saved.skill.name}).`;
       }),
     ),
     "save_skill",
