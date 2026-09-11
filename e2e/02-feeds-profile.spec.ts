@@ -141,14 +141,23 @@ test("profile shows Agent accounts with both backends unconnected", async ({
   await expect(cards.nth(0).locator(".cred-name")).toHaveText("Claude");
   await expect(cards.nth(1).locator(".cred-name")).toHaveText("Codex");
 
-  // Both read "Not connected", and each names the vendor whose account a run
-  // would bill.
-  await expect(
-    cards.nth(0).getByText(/Not connected\. Runs on tasks you own/),
-  ).toBeVisible();
-  await expect(
-    cards.nth(1).getByText(/Not connected\. Runs on tasks you own/),
-  ).toBeVisible();
+  // Both read "not connected" — the badge says it in words (ruling 148) — and
+  // each names the vendor whose account a run would bill. Not connected is a
+  // fresh account's resting state, so that sentence is the card's quiet note,
+  // no longer a "Not connected." warning box (design pass, 2026-09-08).
+  for (const [i, label] of [
+    [0, "Claude"],
+    [1, "Codex"],
+  ] as const) {
+    await expect(cards.nth(i).locator(".cred-top")).toContainText("not connected");
+    await expect(
+      cards
+        .nth(i)
+        .getByText(
+          `Tasks you own and your controller conversations run on your own ${label} account.`,
+        ),
+    ).toBeVisible();
+  }
 
   // The vendors' own flows, not a Viberr-implemented OAuth and never a
   // setup-token field.

@@ -9,7 +9,10 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
  * down, stepped moves (crossing the activation distance), up. The server
  * stays authoritative, so every assertion is on the submitted governed
  * request, the settled toast, and the revalidated column — never on
- * optimistic client order.
+ * optimistic client order. Between a cross-lane drop and the server's answer
+ * a landing preview stands in the requested slot, drawn with the card's own
+ * face; it is a `div.card`, the real card an `a.card`, so a column read after
+ * a drop counts `a.card` only.
  */
 
 function column(page: Page, name: string): Locator {
@@ -95,11 +98,28 @@ test("same-stage pointer reorder submits a non-append slot and the server order 
   const to = (await target.boundingBox())!;
   await page.mouse.move(to.x + to.width / 2, to.y + 8, { steps: 12 });
 
-  // Mid-drag: the insertion preview renders, and the ghost model holds — the
-  // pointer-following clone plus the inert in-place placeholder both carry
-  // the `.dragging` fade.
-  await expect(page.locator(".card-drop-preview")).toBeVisible();
-  await expect(page.locator(".card-wrap.dragging")).toHaveCount(2);
+  // Mid-drag (owner, 2026-09-08: the faded ghost the card used to leave read
+  // as "a shadow of itself as if it were another task"). The card in hand is
+  // the source element, solid; the slot it left is a hole — the same box with
+  // its face hidden; and the one preview stands in the slot the drop will
+  // submit, right before VIB-151. The hole is dnd-kit's clone of the card, so
+  // the two are told apart by dnd-kit's attributes, never by a class.
+  const preview = page.locator(".card-drop-preview");
+  await expect(preview).toHaveCount(1);
+  await expect(preview).toBeVisible();
+  await expect(page.locator(".drop-preview + .card-wrap")).toHaveAttribute(
+    "data-card-key",
+    "VIB-151",
+  );
+  const lifted = page.locator(".card-wrap[data-dnd-dragging]");
+  await expect(lifted).toHaveCount(1);
+  await expect(lifted).toHaveAttribute("data-card-key", "VIB-153");
+  await expect(lifted.locator(".card")).toHaveCSS("opacity", "1");
+  await expect(lifted.locator(".key")).toBeVisible();
+  const hole = page.locator(".card-wrap[data-dnd-placeholder]");
+  await expect(hole).toHaveCount(1);
+  await expect(hole).toHaveAttribute("data-card-key", "VIB-153");
+  await expect(hole.locator(".key")).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath("a2-mid-drag.png") });
 
   const request = reorderPost(
@@ -115,10 +135,11 @@ test("same-stage pointer reorder submits a non-append slot and the server order 
   // A drop is not a click: releasing over a card must not navigate.
   await expect(page).toHaveURL(/\/projects\/viberr-core\/board/);
 
-  // The revalidated column carries the server's order: VIB-153 above VIB-151.
+  // The revalidated column carries the server's order: VIB-153 above VIB-151
+  // (real cards only, per the note at the top of this file).
   await expect
     .poll(async () =>
-      (await column(page, "In Progress").locator(".card .key").allTextContents()).slice(0, 2),
+      (await column(page, "In Progress").locator("a.card .key").allTextContents()).slice(0, 2),
     )
     .toEqual(["VIB-153", "VIB-151"]);
 });
@@ -130,26 +151,33 @@ test("cross-stage drop onto a column body appends and the card changes column", 
   const triage = column(page, "Triage");
   await expect(triage).toBeVisible();
 
-  // Two-phase approach to the APPEND slot. The column's empty tail is
-  // layout-dependent (due-date chips push the seeded cards past the fold as
-  // the wall clock moves), and a single move onto the last card's bottom half
-  // is unstable: the insert-preview shifts the card downward under the
-  // pointer, putting the same screen point back in its TOP half. So: hover
-  // the last card (preview opens above it, layout settles), then a second,
-  // corrective move to just BELOW the card's settled rect — inside the
-  // column droppable, below every card rect — which is the append slot
-  // however the cards shifted.
+  // The APPEND slot, by the board's slot rule (board-dnd.ts `slotInLane`):
+  // the pointer over the LAST card's bottom half asks for the card after it —
+  // none, so the lane's end — and the preview drawn there moves nothing above
+  // it, so the slot holds under the pointer. The approach decides it: crossing
+  // an earlier card's bottom half on the way in opens the preview ABOVE the
+  // last card and pushes that card down, and a preview keeps its slot while
+  // the pointer is over it (the fix for the drop preview that traded places
+  // with a card ten times a second). So VIB-148 is carried down its own lane
+  // first — nothing there touches Triage — and then straight across into the
+  // last Triage card's bottom half.
   const lastTriageCard = triage.locator(".card-wrap").last();
   await lastTriageCard.scrollIntoViewIfNeeded();
-  await liftOver(page, "VIB-148", lastTriageCard);
+  const last = (await lastTriageCard.boundingBox())!;
+  const y = last.y + last.height * 0.75;
+  const card = page.locator(".card-wrap", { hasText: "VIB-148" }).first();
+  const from = (await card.boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2, y, { steps: 8 });
+  await page.mouse.move(last.x + last.width / 2, y, { steps: 12 });
+
+  // The preview stands after every card in the lane: the slot the drop is
+  // about to submit.
   await expect(page.locator(".card-drop-preview")).toBeVisible();
-  const settled = (await lastTriageCard.boundingBox())!;
-  await page.mouse.move(
-    settled.x + settled.width / 2,
-    Math.min(settled.y + settled.height + 10, 715),
-    { steps: 4 },
+  await expect(triage.locator(".col-body > .card-wrap").last()).toHaveClass(
+    /\bdrop-preview\b/,
   );
-  await expect(page.locator(".card-drop-preview")).toBeVisible();
 
   const request = reorderPost(
     page,
@@ -161,7 +189,10 @@ test("cross-stage drop onto a column body appends and the card changes column", 
   expect(submitted.postData()).toContain("beforeKey=");
   expect(submitted.postData()).not.toContain("beforeKey=VIB");
 
-  await expect(triage.locator(".card", { hasText: "VIB-148" })).toBeVisible();
+  // The server's answer, not the landing preview: the real card is in Triage,
+  // last, and gone from Ready.
+  await expect(triage.locator("a.card", { hasText: "VIB-148" })).toBeVisible();
+  await expect(triage.locator("a.card").last()).toContainText("VIB-148");
   await expect(
     column(page, "Ready").locator(".card", { hasText: "VIB-148" }),
   ).toHaveCount(0);
@@ -185,11 +216,16 @@ test("Escape cancels a lifted drag — no request, visuals cleared, card unmoved
   await page.keyboard.press("Escape");
   await page.mouse.up();
 
+  // Visuals cleared: no preview, and once the cancelled card has flown home,
+  // neither dnd-kit's lifted card nor the hole it left. Until then the hole —
+  // dnd-kit's clone of the card, its face in the DOM though never drawn —
+  // stands in Triage beside it, so the lane holds two VIB-166 `.card`s.
   await expect(page.locator(".card-drop-preview")).toHaveCount(0);
-  await expect(page.locator(".card-wrap.dragging")).toHaveCount(0);
-  await expect(
-    column(page, "Triage").locator(".card", { hasText: "VIB-166" }),
-  ).toBeVisible();
+  await expect(page.locator(".card-wrap[data-dnd-dragging]")).toHaveCount(0);
+  await expect(page.locator(".card-wrap[data-dnd-placeholder]")).toHaveCount(0);
+  const home = column(page, "Triage").locator(".card", { hasText: "VIB-166" });
+  await expect(home).toHaveCount(1);
+  await expect(home).toBeVisible();
   expect(reorders).toBe(0);
 });
 
