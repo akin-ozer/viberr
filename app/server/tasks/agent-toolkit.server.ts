@@ -20,6 +20,7 @@ import {
 import { logger } from "~/server/logging/logger.server";
 import {
   buildAgentQuestionPacket,
+  runIdForOutcomeKey,
   stageOutcome,
   type AgentCollab,
   type AgentOutcome,
@@ -436,7 +437,28 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       if (collab.verdict && args.verdict) outcome.verdict = args.verdict;
       if (args.summary) outcome.summary = prose(args.summary);
       if (evidence) outcome.evidence = evidence;
-      stageOutcome(db, outcomeKey, outcome);
+      const result = stageOutcome(db, outcomeKey, outcome);
+      if (!result.staged) {
+        // Option D PR 4(b): the first envelope stands. Audited so a person can
+        // see an agent that tried to change its verdict after reporting it.
+        recordAudit(db, {
+          action: "task.agent.outcome_duplicate",
+          actor: { userId: null, label: encodeActorRef(actorRef) },
+          subjectKind: "task",
+          subjectId: taskKey,
+          projectSlug,
+          taskKey,
+          details: {
+            actorRef: encodeActorRef(actorRef),
+            runId: runIdForOutcomeKey(db, outcomeKey),
+            outcomeKey,
+            count: result.duplicates,
+          },
+        });
+        return textResult(
+          "[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.",
+        );
+      }
       const staged = [
         outcome.verdict ? `Verdict '${outcome.verdict}'` : null,
         evidence ? `${evidence.length} evidence reference(s)` : null,
@@ -538,6 +560,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   const server = createSdkMcpServer({
     name: "viberr_agent",
     version: "1.0.0",
+    // Option D PR 4(a): a handful of small tools, loaded up front so the run
+    // never spends a ToolSearch round trip to find `report_outcome` (both stored
+    // specialist runs did, 2026-09-11). See the operator toolkit for the
+    // measurement and why the controller's servers stay deferred.
+    alwaysLoad: true,
     instructions:
       "Viberr collaboration tools for this engaged agent. Post material progress, raise blocking questions, and report your structured outcome through these; your final message is still your full report.",
     tools,

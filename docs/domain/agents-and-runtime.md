@@ -24,7 +24,10 @@
 > 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`): §2.4 and §2.5 (the
 > instance's spending cap, `maxBudgetUsd` on Claude, none on Codex), §3.1 (token and cost
 > columns folded from `modelUsage`, with a dated correction) and §3.5 (the `max_budget`
-> kind). The operator's own behaviour is in
+> kind). Updated 2026-09-11 for Option D PR 4 (branch `option-d/pr4-alwaysload-once-only`;
+> no ruling, the plan assigns none): §2.4 (the `viberr` and `viberr_agent` servers load
+> their tools up front, the controller's stay deferred, with the measurement) and §§3.1, 4.2
+> (`report_outcome` stages once; a second call is refused and audited). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -222,6 +225,19 @@ connecting a different account there (ruling 165).
   closed; the adapter adds that tail back onto the SDK's `Claude Code process exited with
   code N` error, which is how a resumed session the CLI cannot find still classifies as
   `session_missing`.
+- MCP tool loading (Option D PR 4(a), 2026-09-11). The SDK defers MCP tools behind
+  ToolSearch, so a run searches for a tool before it can call it; every stored operator
+  run (16 of 16) opened with that search. The operator's `viberr` server and the
+  specialists' `viberr_agent` server are created with `alwaysLoad: true` (the SDK stamps
+  `anthropic/alwaysLoad` on each tool), which puts their tools in the first prompt.
+  Measured in the image on `claude-opus-5[1m]`: an operator turn went from 3 model turns
+  to 2 and 7-10 s to 4 s, $0.03-0.04 to $0.02 warm, for a turn-1 prompt of 12.9k tokens
+  instead of 5.3k (cached after the first run; a cold first run pays the cache write
+  once); a reviewer went from 4 turns to 3 at the same cost. The controller's
+  `viberr_controller` (41 tools) and `viberr_ops` stay deferred: loading them saved a turn
+  but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost ($0.05 to
+  $0.21). Org MCP servers are never loaded up front. Pinned per server by the
+  `toolLoading` tests (`test-support/mcp-tool-meta.ts`).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
@@ -384,8 +400,9 @@ connecting a different account there (ruling 165).
   per task) and `idx_agent_runs__one_live_per_support` (one per task and profile among
   `reviewer` rows); the latter is re-created at every DB open for older roots. A
   constraint hit becomes a 409 naming which index refused.
-- `staged_outcomes(outcome_key)` holds a specialist's `report_outcome` until completion
-  consumes it once (24 h TTL, in-memory cap 500).
+- `staged_outcomes(outcome_key)` holds a specialist's first `report_outcome` until
+  completion consumes it once (24 h TTL, in-memory cap 500); a later call in the same run
+  changes nothing (§4.2).
 
 ### 3.2 Reservation and admission
 
@@ -684,8 +701,16 @@ envelope instead.
 |---|---|---|
 | `post_comment` | `comment-on-task` | timeline comment, audit `task.agent.commented` |
 | `ask_human {title, body?, options?}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId` (≤ 4 custom options); refused while a packet is open; the resolution resumes this agent (ruling 33) |
-| `report_outcome {summary, verdict?, evidence?}` | `report-validation-verdict` for `verdict`, `attach-evidence-references` for `evidence` | staged under the run's `outcome_key`, consumed once at completion |
+| `report_outcome {summary, verdict?, evidence?}` | `report-validation-verdict` for `verdict`, `attach-evidence-references` for `evidence` | staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`} |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
+
+The outcome is the first envelope a run reports. The already-staged check reads the
+in-process map and the persisted row, so an envelope staged before a restart still stands
+against a later call. The `count` is the run's refusals so far; it is cleared when
+completion consumes the envelope. *(Changed 2026-09-11, Option D PR 4(b): a second call
+used to replace the first without a word, "last write wins", so the verdict that counted
+was whichever came last, even one sent after the agent had moved on. The tool's own
+description already said "exactly once".)*
 
 ### 4.3 Capability → enforcement
 

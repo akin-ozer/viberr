@@ -382,6 +382,10 @@ Measure first: on one operator turn and one controller turn, count `tool_use` en
 `run_log_lines` before and after; keep the change only if the count drops and turn-1 prompt size does not grow past
 what the run strip shows as acceptable. Test: option assertion that the SDK server config carries `alwaysLoad`.
 Docs: `agents-and-runtime.md` §2.4.
+*(As measured 2026-09-11, in the image on `claude-opus-5[1m]`: kept on the operator's `viberr` and the specialists'
+`viberr_agent` servers, dropped on the controller's two. Operator: 3 turns to 2, 7-10 s to 4 s, $0.03-0.04 to $0.02
+warm, turn 1 at 12.9k tokens instead of 5.3k. Controller: 3 turns to 2, but turn 1 at 18.0k tokens instead of 6.0k
+and a cold turn at $0.21 instead of $0.05. The option test asserts both halves.)*
 
 **(b) Once-only `report_outcome`.** Why: `stageOutcome` stores the envelope verbatim and a second call silently
 replaces the first (`app/server/tasks/agent-outcome.server.ts:286`; `agent-toolkit.server.ts`, the `[staged]`

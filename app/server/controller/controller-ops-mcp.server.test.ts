@@ -5,6 +5,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import { runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -302,6 +303,8 @@ describe("the diagnostics surface is read-only and named for the mount", () => {
       "mcp__viberr_ops__read_store_doc",
     ]);
     expect(Object.keys(ops.mcpServers)).toEqual([CONTROLLER_OPS_MCP_NAME]);
+    // Option D PR 4(a): deferred like the controller's own toolkit.
+    expect(toolLoading(ops.mcpServers[CONTROLLER_OPS_MCP_NAME]).loaded).toEqual([]);
     // Nothing here may write, start or destroy: the toolkit is the only
     // surface where a controller action is audited. Matched per NAME SEGMENT,
     // so the check reads verbs and not substrings (`read_run_log` is a read).

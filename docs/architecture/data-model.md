@@ -146,7 +146,7 @@ files) · **C** cache/operational (safe to lose).
 |---|---|---|
 | `agent_runs` | P | One row per run: `kind` (`operator \| primary \| reviewer \| controller`, a **delivery axis**: `primary` = delivering, `reviewer` = any supporting run), `backend`, `model`, `session_id`, `state` (`queued \| running \| finished \| error \| interrupted`), `phase`/`step`, token and cost counters, `usage_final` (F35-1: 1 once a provider usage figure landed; 0 while the token columns hold the Claude adapter's live estimate or nothing, which the Live run panel prints as an estimate and Insights leaves out of its token sums and counts on the card. A stopped or errored run never gets a provider figure, so its 0 is permanent; the boot healer backfills 1 on the `finished` rows a root held before the column existed), `interrupted_by` (the person, or null) and `interrupted_reason` (`restart` when boot recovery stopped it, else null), `agent_profile_id`, `outcome_key`, `credential_user_id`. Controller turns use `project_slug = ''` and `task_key = <conversation id>`. |
 | `run_log_lines` | C | Projected console lines per run (`raw_json`, `display_json`, `seq`). Retained 30 days; the `.jsonl` file is the truth. |
-| `staged_outcomes` | C | A Claude `report_outcome` envelope staged mid-run until the completion callback consumes it; orphans pruned after 24 h. |
+| `staged_outcomes` | C | A Claude `report_outcome` envelope staged mid-run (the run's first; a later call is refused, Option D PR 4(b)) until the completion callback consumes it; orphans pruned after 24 h. |
 
 `agent_runs.credential_user_id` is the run's **credential principal** (ruling 127):
 whose connected backend account it billed, and therefore whose runtime home holds
