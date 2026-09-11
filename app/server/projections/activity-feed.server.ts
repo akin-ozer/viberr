@@ -245,6 +245,9 @@ export const AUDIT_LOG_LIMIT = 60;
 const AUDIT_ACTION_KINDS = {
   "project.policy.boundary_changed": "change",
   "project.policy.guardrail_changed": "change",
+  // Ruling 178: the required-reviewer rule (Settings → Required reviewers,
+  // or the controller's set_required_reviewers) — acceptance policy.
+  "project.required_reviewers.updated": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
   "project.member.removed": "change",
@@ -346,6 +349,10 @@ const auditDetailsSchema = z.object({
   label: detailText,
   op: detailText,
   value: z.number().optional().catch(undefined),
+  // Ruling 178: the required-reviewer list as written, resolved to names.
+  rules: z
+    .array(z.object({ stageName: z.string().catch("?"), agentName: z.string().catch("?") }))
+    .catch([]),
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -377,6 +384,12 @@ function auditText(
       if (d.op === "remove") return `${actor} removed the **${label}** guardrail.`;
       if (d.op === "value") return `${actor} set **${label}** to ${d.value ?? "?"}.`;
       return `${actor} turned **${label}** ${d.op === "on" ? "on" : "off"}.`;
+    }
+    case "project.required_reviewers.updated": {
+      // Ruling 178: the whole list as it now stands; a clear says so.
+      if (d.rules.length === 0) return `${actor} cleared the required reviewers.`;
+      const named = d.rules.map((r) => `**${r.agentName} at ${r.stageName}**`).join(", ");
+      return `${actor} set the required reviewers to ${named}.`;
     }
     case "project.member.role_changed": {
       const target = resolveUserName(d.targetUserId) ?? "a member";

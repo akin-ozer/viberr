@@ -4770,3 +4770,32 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.message).toContain("stage picker on the task page");
   });
 });
+
+/**
+ * Ruling 178 (pass 36, G36-3): the project's declared required reviewers ride
+ * the snapshot, resolved to the stage and agent names the acceptance gate
+ * prints, so the operator engages them instead of learning the rule from a
+ * refusal at the boundary.
+ */
+describe("ruling 178: the snapshot carries the project's required reviewers", () => {
+  it("lists each rule with its stage and agent names; an empty rule set is an empty list", async () => {
+    // Canary: drop `requiredReviewers` from `operatorSnapshot`'s return.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    expect(
+      operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"))
+        .requiredReviewers,
+    ).toEqual([]);
+
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(snap.requiredReviewers).toEqual([
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Rev" },
+    ]);
+  });
+});

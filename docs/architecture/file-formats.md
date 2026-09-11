@@ -10,6 +10,9 @@ never the mock's `.viberr/…` (orchestrator ruling 3).
 *Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the
 data-root layout below. No canonical FILE FORMAT changed.*
 
+*Updated 2026-09-11 for ruling 178 (pass 36, G36-3): `project.md` gains
+`requiredReviewers` (§1), parsed per row and defaulting to an empty list.*
+
 Data-root layout (created at boot by `app/server/files/file-store-root.server.ts`):
 
 ```
@@ -137,6 +140,14 @@ guardrails:                       # four defaults (shared/workflow/templates.ts)
     on: true
     value: 40
     unit: events
+requiredReviewers:                # ruling 178: reviewers the project REQUIRES per review
+                                  # stage — a non-terminal stage id and a deployed
+                                  # verdict-capable profile id; `[]` (the default) means
+                                  # only the reviewers an operator engages are required.
+                                  # Edited on Settings → Required reviewers or by the
+                                  # controller's set_required_reviewers; read on Policy.
+  - stageId: review
+    profileId: reviewer
 ---
 
 Project description prose (markdown body).

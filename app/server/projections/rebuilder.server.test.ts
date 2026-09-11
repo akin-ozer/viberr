@@ -43,6 +43,7 @@ function writeSecondProject(store: ReturnType<typeof setupTestStore>, slug: stri
     agents: [],
     credentialPolicy: null,
     guardrails: [],
+    requiredReviewers: [],
   });
 }
 
@@ -583,6 +584,7 @@ describe("rebuilder", () => {
       agents: [],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
     });
     rebuildPath(store.db, projectFilePath(slug, store.dataRoot), {
       dataRoot: store.dataRoot,

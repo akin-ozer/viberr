@@ -188,8 +188,15 @@ the current unpushed-revision record with the acceptance gate's own sentence (ru
 does not re-propose a just-dismissed move), `blockedBy` (ruling 131: each entry with
 its resolved state), `deployedSpecialists[].eligibleForCurrentStage` meaning "may RUN
 here" (declared stages, or the engaged deliverer, ruling 133) beside
-`engagedAsDeliverer`, and its own `operatorPolicy` labelled with scope so it cannot
-mistake its own web grant for a specialist's.
+`engagedAsDeliverer`, its own `operatorPolicy` labelled with scope so it cannot
+mistake its own web grant for a specialist's, and `requiredReviewers` (ruling 178, pass
+36): the reviewers the PROJECT requires per review stage, resolved to stage and agent
+names, each of which must hold an approve verdict on the delivered revision before
+acceptance whether or not anyone engaged it — `reviewers` lists only who the operator
+has engaged. Every ordinary turn and the post-delivery turn open with "Required
+reviewers (project rule): <Agent> at <Stage>" and tell the operator to engage each
+one with `run_agent` (`delivers: false`) at its stage before offering or performing
+`accept_completion`.
 
 Before triage the operator gets a **full read-only clone** of the project repository
 (ruling 55), the same per-task checkout a specialist run reuses; on the shared

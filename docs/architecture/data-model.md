@@ -116,7 +116,7 @@ files) · **C** cache/operational (safe to lose).
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `projects` | D | One row per `project.md`: name, `archived`, `repo`, `default_branch`, `task_prefix`, JSON copies of stages/workflow/agent policy/credential policy/guardrails, `content_hash`. |
+| `projects` | D | One row per `project.md`: name, `archived`, `repo`, `default_branch`, `task_prefix`, JSON copies of stages/workflow/agent policy/credential policy/guardrails, `required_reviewers_json` (ruling 178: the required-reviewer rules RESOLVED to stage and agent names at project-rebuild time, so the task walk prints the acceptance gate's sentence from the row; a self-healing baseline column), `content_hash`. |
 | `project_members` | D | `members[]` from `project.md` (`admin \| maintainer \| contributor \| viewer`). |
 | `task_projections` | D | One row per `task.md`: stage, **derived** `readiness` plus `stored_readiness`, `waiting`, `priority`/`labels_json`/`due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; resolved to per-entry states at read time, never cached), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), owner, engagement snapshots, `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count`, `schedules_json`, counts, `goal_id`/`goal_link_index`, `board_rank`, `content_hash`. |
 | `task_events` | D | The task timeline, one row per entry, `position` 0 = newest, with a denormalized `actor_json` snapshot, `title`, `text`, `to_agent`, `evidence_json`, `attachments_json`. Replaced wholesale per task on every re-project. |

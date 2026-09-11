@@ -708,4 +708,52 @@ describe("E9: repair-repo + set-branch-cleanup authority gates", () => {
     );
     expect(denied.status).toBe(403);
   });
-})
+});
+
+/**
+ * Ruling 178 (pass 36, G36-3): the Settings table posts its rules as one JSON
+ * field; the route decodes it, the shared writer validates and audits, and
+ * the loader hands the resolved rules (and the agents a rule may name) back.
+ */
+describe("set-required-reviewers (ruling 178)", () => {
+  it("round-trips the table through the action into project.md and the loader; a maintainer is refused", async () => {
+    const saved = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-required-reviewers",
+        rules: JSON.stringify([{ stageId: "review", profileId: "reviewer" }]),
+      }),
+    );
+    expect(saved.ok).toBe(true);
+    expect(saved.toast).toBe("Required reviewers saved: Reviewer at Review");
+    expect(projectMd()).toContain("requiredReviewers:");
+    const { loader } = await import("~/routes/project.settings");
+    const { cookie } = await app.cookieFor(ids.arda);
+    // SAFETY: as in the loader cases above — the loader reads `request` and
+    // `params` only; the framework's `context` is never touched.
+    const { view } = await loader({
+      request: app.request("/projects/viberr-core/settings", { cookie }),
+      params: { slug: "viberr-core" },
+      context: {},
+    } as never);
+    expect(view.requiredReviewers).toEqual([
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Reviewer" },
+    ]);
+    expect(view.reviewerCandidates.map((c) => c.id)).toContain("reviewer");
+
+    const denied = actionOutcome(
+      await postAction(ids.murat, { intent: "set-required-reviewers", rules: "[]" }),
+    );
+    expect(denied.status).toBe(403);
+
+    const unreadable = actionOutcome(
+      await postAction(ids.arda, { intent: "set-required-reviewers", rules: "not json" }),
+    );
+    expect(unreadable.status).toBe(400);
+    expect(unreadable.error).toContain("could not be read");
+
+    const cleared = actionOutcome(
+      await postAction(ids.arda, { intent: "set-required-reviewers", rules: "[]" }),
+    );
+    expect(cleared.toast).toBe("Required reviewers cleared");
+  });
+});

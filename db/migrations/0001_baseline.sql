@@ -59,6 +59,7 @@ CREATE TABLE projects (
   agent_policy_json TEXT NOT NULL DEFAULT '[]',
   credential_policy_json TEXT,
   guardrails_json TEXT NOT NULL DEFAULT '[]',
+  required_reviewers_json TEXT NOT NULL DEFAULT '[]',
   source_path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   parsed_at TEXT NOT NULL

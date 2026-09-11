@@ -9,6 +9,7 @@ import {
   MembersPanel,
   ProjectPanel,
   RepoPanel,
+  RequiredReviewersPanel,
   SettingsPage,
   StagesPanel,
   resolveStageOrder,
@@ -16,6 +17,7 @@ import {
   type ProjectActionGate,
 } from "./settings-page";
 import { roleCan, type ProjectRole, type RbacAction } from "~/shared/rbac";
+import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 
 /**
  * E3: `edit-policy`, `manage-members` and `grant-github-scope` are three
@@ -1317,6 +1319,8 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     credential: CREDENTIAL,
     repoFootprintTasks: 0,
     branchCleanupOnMerge: true,
+    requiredReviewers: [],
+    reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
   };
 
   /** Always an admin — the ROLE is held constant on purpose, so what the page
@@ -1363,6 +1367,13 @@ describe("SettingsPage — each panel gates on the action its own server guard c
           (b) => b.textContent?.trim() === "Grant scope",
         ),
       ),
+      // Ruling 178: the required-reviewer table rides `edit-policy`
+      // (setRequiredReviewers checks it) — its Add rule button is the affordance.
+      requiredReviewers: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add rule",
+        ),
+      ),
     };
   }
 
@@ -1392,6 +1403,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       members: false,
       repoRepair: true,
       credential: false,
+      requiredReviewers: true,
     });
   });
 
@@ -1403,6 +1415,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       members: true,
       repoRepair: false,
       credential: false,
+      requiredReviewers: false,
     });
   });
 
@@ -1414,6 +1427,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       members: false,
       repoRepair: false,
       credential: true,
+      requiredReviewers: false,
     });
   });
 
@@ -1461,6 +1475,8 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     credential: CREDENTIAL,
     repoFootprintTasks: 0,
     branchCleanupOnMerge: true,
+    requiredReviewers: [],
+    reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
   };
 
   function renderPageAs(myRole: ProjectRole) {
@@ -1499,6 +1515,8 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(pageRendered(container)).toEqual([
       "Project",
       "Workflow stages",
+      // Ruling 178: rendered read-only for a viewer (the rules as text).
+      "Required reviewers",
       "Members",
       "Repository & credentials",
     ]);
@@ -1615,5 +1633,101 @@ describe("RepairRepoDialog refuses instead of disabling", () => {
     fireEvent.click(ack);
     fireEvent.click(primary);
     expect(onRepair).toHaveBeenCalledWith("akin-ozer/other", true);
+  });
+});
+
+/**
+ * Ruling 178 (pass 36, G36-3): the project's required reviewers are edited on
+ * Settings as a small table — a non-terminal stage and a deployed
+ * verdict-capable agent per row — and saved WHOLE through one intent, the
+ * same writer and validation the controller's `set_required_reviewers` uses.
+ */
+describe("RequiredReviewersPanel (ruling 178)", () => {
+  const RULES: RequiredReviewerView[] = [
+    { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
+  ];
+  const CANDIDATES = [
+    { id: "reviewer", name: "Code Reviewer" },
+    { id: "qa-bot", name: "QA Bot" },
+  ];
+
+  it("adds a rule from the stage and agent pickers and saves the whole list; Save is inert until something changed", () => {
+    const onSave = vi.fn();
+    const { container, getByText, getByLabelText } = render(
+      <RequiredReviewersPanel
+        rules={RULES}
+        stages={STAGES}
+        candidates={CANDIDATES}
+        canManage
+        busy={false}
+        onSave={onSave}
+      />,
+    );
+    expect(getByText("Required reviewers")).toBeTruthy();
+    const save = getByText("Save").closest("button")!;
+    expect(save.disabled).toBe(true);
+    // The existing rule renders as pickers holding its values.
+    // SAFETY: the panel renders each rule's stage and reviewer pickers as
+    // <select> elements carrying exactly these aria-labels.
+    const [stagePicker, reviewerPicker] = [
+      getByLabelText("Rule 1 stage") as HTMLSelectElement,
+      getByLabelText("Rule 1 reviewer") as HTMLSelectElement,
+    ];
+    expect(stagePicker.value).toBe("review");
+    expect(reviewerPicker.value).toBe("reviewer");
+    // The terminal stage is never offered.
+    const stageOptions = Array.from(stagePicker.options).map((o) => o.value);
+    expect(stageOptions).toEqual(["triage", "ready", "impl", "review"]);
+
+    fireEvent.click(getByText("Add rule"));
+    fireEvent.change(getByLabelText("Rule 2 stage"), { target: { value: "impl" } });
+    fireEvent.change(getByLabelText("Rule 2 reviewer"), { target: { value: "qa-bot" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledWith([
+      { stageId: "review", profileId: "reviewer" },
+      { stageId: "impl", profileId: "qa-bot" },
+    ]);
+    // Removing the only original row and saving sends the empty list (a clear).
+    fireEvent.click(container.querySelectorAll('button[aria-label^="Remove rule"]')[0]!);
+    fireEvent.click(container.querySelectorAll('button[aria-label^="Remove rule"]')[0]!);
+    fireEvent.click(getByText("Save").closest("button")!);
+    expect(onSave).toHaveBeenLastCalledWith([]);
+  });
+
+  it("reads only for a role without edit-policy: the rules as text, no pickers, no Save", () => {
+    const { container, getByText } = render(
+      <RequiredReviewersPanel
+        rules={RULES}
+        stages={STAGES}
+        candidates={CANDIDATES}
+        canManage={false}
+        busy={false}
+        onSave={() => {}}
+      />,
+    );
+    expect(getByText("Code Reviewer")).toBeTruthy();
+    expect(getByText("Reviews at Review")).toBeTruthy();
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.textContent).toContain("Read-only");
+  });
+
+  it("says when no deployed agent can report a verdict, and offers no Add rule then", () => {
+    const { container } = render(
+      <RequiredReviewersPanel
+        rules={[]}
+        stages={STAGES}
+        candidates={[]}
+        canManage
+        busy={false}
+        onSave={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("No deployed agent can report a validation verdict");
+    const add = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Add rule",
+    );
+    expect(add).toBeUndefined();
   });
 });

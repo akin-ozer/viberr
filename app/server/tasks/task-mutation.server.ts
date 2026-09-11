@@ -22,6 +22,10 @@ import type { ActorRender } from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { ProjectRole } from "~/shared/rbac";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import {
+  resolveRequiredReviewers,
+  type RequiredReviewerView,
+} from "./required-reviewers.server";
 
 /**
  * The task-mutation SUBSTRATE: the context shape every governed write threads,
@@ -92,6 +96,9 @@ export interface ProjectContext {
   /** Archived projects are read-only (owner ruling R6-3): every governed
    *  mutation is refused until the project is restored. */
   archived: boolean;
+  /** Ruling 178: the project's declared required reviewers, resolved to the
+   *  names the acceptance gate prints. Empty when the project declares none. */
+  requiredReviewers: RequiredReviewerView[];
 }
 
 export function loadProjectContext(
@@ -114,6 +121,7 @@ export function loadProjectContext(
     })),
     memberRoles: new Map(fm.members.map((m) => [m.userId, m.role])),
     archived: fm.archived === true,
+    requiredReviewers: resolveRequiredReviewers(fm, ctx.dataRoot),
   };
 }
 

@@ -24,12 +24,14 @@ import {
   deleteProject,
   setProjectArchived,
   inviteMember,
+  parseRequiredReviewerRulesField,
   removeMember,
   removeStage,
   renameStage,
   reorderStages,
   repairProjectRepo,
   setBranchCleanup,
+  setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
 import { getSettingsViewData } from "~/features/project-settings/settings-query.server";
@@ -191,6 +193,15 @@ export async function action({ request, params }: Route.ActionArgs) {
         const result = await setBranchCleanup(
           db,
           { projectSlug: slug, enabled: field("enabled") === "1" },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      // Ruling 178: the required-reviewer table, posted whole as one JSON field.
+      case "set-required-reviewers": {
+        const result = await setRequiredReviewers(
+          db,
+          { projectSlug: slug, rules: parseRequiredReviewerRulesField(field("rules")) },
           actor,
         );
         return { ok: true as const, toast: result.toast };

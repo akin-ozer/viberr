@@ -3865,7 +3865,11 @@ function operatorTurnDoctrine(
       "verdict-capable profile with a review prompt (`delivers: false`); if a review has " +
       "already passed, `accept_completion` per policy; if a stage move is needed to reach " +
       "review, `transition_stage`. If the reviewer's run is already IN FLIGHT (`liveRuns`), " +
-      "do nothing and stop — you are re-invoked when it reports."
+      "do nothing and stop — you are re-invoked when it reports. " +
+      // Ruling 178: this arm returns before the stage rule, so the project's
+      // required reviewers are named here too — the review this turn should
+      // dispatch is theirs.
+      requiredReviewersRule(snapshot)
     );
   }
 
@@ -3896,9 +3900,33 @@ function operatorTurnDoctrine(
   );
 }
 
+/**
+ * Ruling 178 (pass 36, G36-3): the reviewers the PROJECT requires, as a rule
+ * the operator acts on rather than a refusal it meets at the boundary. Live,
+ * a task reached Merge Approval with `validation: healthy` from whichever
+ * verdict-capable agent had run while the project's reviewer never ran, and
+ * the snapshot's `reviewers` (who is ENGAGED) could not tell the operator who
+ * was still owed. Empty when the project declares no rule.
+ */
+function requiredReviewersRule(snapshot: OperatorTaskSnapshot): string {
+  const rules = snapshot.requiredReviewers ?? [];
+  if (rules.length === 0) return "";
+  const named = rules.map((r) => `${r.agentName} at ${r.stageName}`).join(", ");
+  return (
+    `Required reviewers (project rule): ${named}. ` +
+    "Acceptance is refused until each of them holds an `approve` verdict on the delivered revision " +
+    "(`notAcceptableReason` names the one still owed), whether or not anyone engaged them. When the " +
+    "task stands at that reviewer's stage with delivered work, the stage's own work IS that review: " +
+    "engage the named profile with `run_agent` (`delivers: false`) and a review prompt before offering " +
+    "or performing `accept_completion`. Another reviewer's approval never stands in for it, and a " +
+    "reviewer's earlier verdict on a replaced revision does not count. "
+  );
+}
+
 /** The ordinary stage rule: what THIS stage calls for, from the live snapshot. */
 function stageRule(snapshot: OperatorTaskSnapshot): string {
   return (
+    requiredReviewersRule(snapshot) +
     `You are at stage "${snapshot.stageName}"` +
     (snapshot.previousStage
       ? `, arrived from "${snapshot.previousStage.name}"`

@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { TransitionView } from "./policy-query.server";
-import { AgentCapability, Guardrails, HumanAccess, WorkflowRules, type PcapProfile } from "./policy-page";
+import { AgentCapability, Guardrails, HumanAccess, RequiredReviewers, WorkflowRules, type PcapProfile } from "./policy-page";
 import type { GuardrailView } from "./policy-query.server";
+import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { ROLE_IDS, operatorAutonomyState } from "./policy-data";
 
 afterEach(cleanup);
@@ -841,5 +842,47 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     expect(getByText("Apply")).toBeTruthy();
     expect(getByText("Remove")).toBeTruthy();
     expect(container.textContent).not.toContain("Read-only:");
+  });
+});
+
+/**
+ * Ruling 178 (pass 36, G36-3): the Policy page READS the project's required
+ * reviewers (stage → agent) beside the other acceptance rules; the list is
+ * edited on Settings, where the stage and agent pickers live.
+ */
+describe("Required reviewers card (ruling 178)", () => {
+  const rules: RequiredReviewerView[] = [
+    { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
+    { stageId: "qa", stageName: "QA", profileId: "qa-bot", agentName: "QA Bot" },
+  ];
+
+  it("renders one row per rule as agent → stage, counts them, and points a manager at Settings", () => {
+    const onOpenSettings = vi.fn();
+    const { container, getByText } = render(
+      <RequiredReviewers rules={rules} canManage onOpenSettings={onOpenSettings} />,
+    );
+    expect(getByText("Required reviewers")).toBeTruthy();
+    expect(getByText("2 rules")).toBeTruthy();
+    const rows = Array.from(container.querySelectorAll(".guard-row")).map((r) => [
+      r.querySelector(".guard-name")!.textContent,
+      r.querySelector(".guard-desc")!.textContent,
+    ]);
+    expect(rows).toEqual([
+      ["Code Reviewer", "Reviews at Review"],
+      ["QA Bot", "Reviews at QA"],
+    ]);
+    fireEvent.click(getByText("Settings → Required reviewers"));
+    expect(onOpenSettings).toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Read-only");
+  });
+
+  it("says when no rule is declared, and reads only for a role without edit-policy", () => {
+    const { container, getByText } = render(
+      <RequiredReviewers rules={[]} canManage={false} onOpenSettings={() => {}} />,
+    );
+    expect(getByText("0 rules")).toBeTruthy();
+    expect(container.textContent).toContain("No required reviewers declared");
+    expect(container.textContent).toContain("Read-only");
+    expect(container.querySelector("button")).toBeNull();
   });
 });

@@ -457,6 +457,10 @@ async function createProjectImpl(
     // Ship the anti-noise guardrails ON — timeline compaction + chatter
     // rejection are product defaults (PRD's #1 risk), not opt-in.
     guardrails: DEFAULT_GUARDRAILS,
+    // Ruling 178: no required reviewer until a person or the controller
+    // declares one; required-ness stays emergent (engaged verdict-capable
+    // agents) until then.
+    requiredReviewers: [],
   };
 
   await (ctx.createProjectFileImpl ?? createProjectFile)(

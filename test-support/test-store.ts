@@ -94,6 +94,7 @@ export function setupTestStore(ctx: TestDbContext): TestStore {
     agents: [],
     credentialPolicy: null,
     guardrails: [],
+    requiredReviewers: [],
   });
 
   return { db, dataRoot, slug, users };

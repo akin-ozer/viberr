@@ -225,6 +225,7 @@ describe("getReviewQueue", () => {
       agents: [],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
     });
     writeTask(store.dataRoot, "lite", {
       frontmatter: baseTaskFrontmatter("LP-1", {
@@ -984,6 +985,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
       agents: [],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
     });
     const write = (key: string, patch: Partial<TaskFrontmatter>) =>
       writeTask(store.dataRoot, "k9c", {

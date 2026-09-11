@@ -104,6 +104,15 @@ sandbox (seccomp)"), `operations/runbook.md` (Agent runtimes: the `bwrap` and
 `codex-linux-sandbox` symptoms), `architecture/data-model.md` (data-root layout) and
 `development/testing.md` (§2, the hermetic toolchain).
 
+Updated 2026-09-11 for ruling 178 (pass 36, G36-3): a project declares required reviewers
+per review stage in `project.md` (`requiredReviewers`); the acceptance gate, the review
+queue, the operator snapshot and the controller read the same rule, and a task is not
+acceptable while a required reviewer has no current verdict on the delivered revision.
+Pages: `architecture/decisions.md` (ruling 178), `architecture/file-formats.md` (§1),
+`architecture/data-model.md` (§3), `domain/task-lifecycle.md` (§6, §11 gate 4a),
+`domain/operator.md` (§4), `domain/controller-and-goals.md` (§4), `product/glossary.md`
+and `ui/surfaces.md`.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -146,7 +155,7 @@ sandbox (seccomp)"), `operations/runbook.md` (Agent runtimes: the `bwrap` and
 | [domain/task-lifecycle.md](domain/task-lifecycle.md) | Governed mutation shape, RBAC matrix, creation, stages and boundaries, transitions, readiness/waiting/validation, ownership, engagements, packets, recommendations, schedules, delivery, the acceptance endings, archive, timeline, notifications |
 | [domain/operator.md](domain/operator.md) | The per-task coordinator: authority and gates, triggers, the turn, the 12 `viberr` tools, packets, guardrails |
 | [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends, the credential principal and per-person runtime homes (ruling 127), models, a run's life (persistence, admission, streaming, failure kinds, resume), specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
-| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the asker's own Claude account (ruling 127), the 41 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
+| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the asker's own Claude account (ruling 127), the 42 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
 | [domain/github-delivery.md](domain/github-delivery.md) | PATs and connections, repo attach, the delivery pipeline, PR adoption and collisions, revisions and verdicts, the reconciler, scope violations |
 | [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, org settings, audit, insights, profile (incl. Agent accounts) |
 
