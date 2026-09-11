@@ -3818,15 +3818,106 @@ by rewriting those paragraphs:*
     (c) *The foreign commits are visible.* `github.otherCommits` keeps the branch commits
     without the task's `[KEY]` prefix, and the Commits card lists them apart as "Also on
     the branch · not this task's".
-180. **Claude skills mount outside the task checkout (owner, 2026-09-11, pass 36).**
-    _(text supplied by the ruling-180 implementation; see the skill-mount commit)_
-181. **Every Codex run gets a private CODEX_HOME (owner, 2026-09-11, pass 36; Q36-11).**
-    _(text supplied by the ruling-181 implementation; see the per-run home commit)_
-182. **The Codex sandbox is probed and reported, and a sandboxed dispatch refuses when it
-    cannot start (owner, 2026-09-11, pass 36; Q36-1).**
-    _(text supplied by the ruling-182 implementation; see the toolchain commit)_
-183. **A SKILL.md body is judged before any writer writes it (owner, 2026-09-11, pass 36).**
-    _(text supplied by the ruling-183 implementation; see the skill-body commit)_
+180. **Claude skills mount outside the task checkout (owner, 2026-09-11, pass 36; F36-9).**
+    A Claude run's granted skills are handed to the SDK as one LOCAL PLUGIN built for that
+    run at `<checkout>/../.viberr-plugins/<runId>/` (`.claude-plugin/plugin.json`, name
+    `viberr`, plus `skills/<name>/` copied from the store with normalized frontmatter),
+    passed as `plugins: [{ type: "local", path, skipMcpDiscovery: true }]` and filtered as
+    `skills: ["viberr:<name>", …]`; `settingSources` is `[]` on every run, so nothing under
+    the checkout is ever a settings source and the repository's own `.claude`/CLAUDE.md
+    never reach the model at system-prompt tier. Nothing Viberr writes for a run lives
+    inside the tree the project's tools scan (live, the mounted `.claude/skills` broke the
+    clone's own `npm run check` in the reviewer's workspace three times): the in-checkout
+    `.claude/skills` + `settings.json` mount, the `.git/info/exclude` entry, the CLAUDE.md
+    excludes and the per-process mount marker are retired. One plugin per run: run-service
+    removes it when the run settles, the dispatch removes one a refused run never adopted,
+    and a run whose plugin is gone at start enables no skill and corrects its persona.
+    Verified in the image on 2026-09-11 (SDK 0.3.261 / CLI 2.1.261): the init lists
+    `viberr:<name>` and the model invokes it. Codex is unchanged (skills as prompt text; it
+    writes no files). (`mountGrantedSkills`, `removeSkillPlugin` in `skill-mount.server.ts`;
+    `RunSpec.skillPlugin`; the adapter in `claude-runtime.server.ts`.)
+181. **Every Codex run gets a private `CODEX_HOME` forked from the person's home (owner,
+    2026-09-11, pass 36; Q36-11 (a); extends 127).** The Codex CLI extracts its exec
+    helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into one
+    directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new process of
+    the same home replaces it; ruling 127's one `codex-home` per person let concurrent
+    sandboxed runs of one person delete each other's helper mid-run (F36-3, live 14:53Z).
+    The binary offers no override for that path.
+    (a) *The fork.* The Codex adapter hands the CLI `<codex-home>/runs/<runId>/` as
+    `CODEX_HOME`: `auth.json` and `config.toml` copied in when present; `sessions/`,
+    `skills/` and `memories/` symlinked to the shared home (created first) so rollouts land
+    where resume, export and retention look; `CODEX_SQLITE_HOME` set to the shared home so
+    the CLI's state database stays the person's; `tmp/` whatever the CLI creates, private
+    by construction. `runCredentialFor` still names the shared home; the fork is the
+    adapter's, so every path that builds a Codex spec gets it.
+    (b) *The settle.* When the run settles — finished, failed, interrupted or crashed, the
+    adapter's one `settle`, before the completion callback — the run's `auth.json` is copied
+    back only when its bytes changed, under a per-person lockfile (`O_EXCL` with retry; a
+    holder older than 30 s is broken; last writer wins), and only while the shared file
+    still exists (a disconnect during the run is not undone); the run directory is then
+    deleted.
+    (c) *Hygiene.* `filteredSpawnEnv` strips an ambient `CODEX_SQLITE_HOME` as it strips
+    the two vendor homes.
+    (d) *Measured* in the image on 2026-09-11: two `codex exec` in fresh homes wrote all
+    five state databases into the shared `CODEX_SQLITE_HOME`, each kept its own
+    `tmp/arg0`, and rollouts went through the `sessions` link.
+    (`prepareCodexRunHome` / `finishCodexRunHome` in `user-homes.server.ts`; the fork and
+    settle in `codex-runtime.server.ts`; `RUNTIME_HOME_ENV_RE` in `runtime-registry.server.ts`.)
+182. **The Codex sandbox is probed once per process, reported with the host toolchain, and
+    a confined Codex run is refused with a named remedy while the probe fails (owner,
+    2026-09-11, pass 36; Q36-1 (a); deployment: seccomp).** Every Codex mode below
+    `danger-full-access` confines the agent's commands with bubblewrap, which needs an
+    unprivileged user namespace; Docker's builtin seccomp profile refuses
+    `unshare(CLONE_NEWUSER)` to the non-root app user, so on the compose deployment every
+    reviewer and supporting run failed at its first command and the model reported the
+    environment failure as a verdict (F36-1: `request-changes`, "missing evidence", on
+    correct deliveries; G36-4: nothing named the sandbox).
+    (a) *Deployment.* `compose.yml` runs the app with `security_opt: [seccomp=unconfined]`;
+    the container stays non-root, cap-dropped and init-reaped, and the Codex sandbox is
+    what then confines the agent. Chromium already needed `--no-sandbox` for the same
+    wall; Codex has no such flag.
+    (b) *The probe.* `app/server/ops/toolchain.server.ts` resolves once per process the
+    versions of node, npm, git, python3 and go (null when absent), the pinned
+    `@openai/codex` and `@anthropic-ai/claude-agent-sdk`, and `codexSandbox: { ok, detail }`
+    from the CLI's own sandbox helper — `codex sandbox --permission-profile <probe> -C
+    <work> -- /bin/echo <nonce>` in a throwaway home under `runtimes/codex-sandbox-probe/`
+    (not the OS temp dir, which the CLI refuses for its helpers), a profile that reads `/`
+    and writes the workdir, network off, no sign-in; `detail` is the sandbox's own first
+    line when it fails.
+    (c) *Where it is read.* Boot resolves it on the integrity line and WARNs separately when
+    it failed; `healthSnapshot` appends it LAST as `toolchain`, so `/resources/health` and
+    `instance_health` carry it; it never sets `degraded` (a host that runs no Codex is a
+    correct host).
+    (d) *The refusal.* `startRun`, after the credential, ends a Codex spec whose
+    `resolveCodexSandboxMode` is below `danger-full-access` as a `run·unavailable` error run
+    through `failRunUnavailable` — `Codex sandbox unavailable on this host: <detail>. Fix
+    the deployment (see docs/operations/deployment.md, seccomp) or grant the run full
+    access. No agent process was started.` — with `failedUnavailable` on the audit row; a
+    fully autonomous deliverer with egress is never asked, nor is a Claude run.
+    (e) *Tests never probe:* `test-support/toolchain.ts` primes a hermetic reading in
+    `setup-env.ts`, the same override-slot shape as the sign-in binaries.
+    (`cachedToolchain`, `probeCodexSandbox` in `toolchain.server.ts`;
+    `codexSandboxUnavailableMessage`, `codexSandboxRefusal` in `run-service.server.ts`;
+    `logBootIntegrity` in `boot.server.ts`; `compose.yml`; `docs/operations/deployment.md`
+    "Codex sandbox (seccomp)".)
+183. **A SKILL.md body is judged before any writer writes it (owner, 2026-09-11, pass 36;
+    F36-2).** Live, the controller sent `body` JSON-escaped twice and two skills landed on
+    disk as ONE line of literal `\n`; nothing judged the body, the mount took the escaped
+    text as the description and Codex agents read it as-is. `assertSkillBodyWellFormed`
+    lives beside the containment reader in `skill-body.server.ts` and runs from EVERY
+    writer — `saveSkill` (the org-settings editor and the controller's `save_skill`),
+    `writeStoreFiles` in its pre-flight loop (a refusal writes nothing of the batch) and
+    `writeStoreDoc` (the store browser). Three shapes are refused BY NAME and never
+    rewritten: an empty body ("SKILL.md is empty. Send the skill's markdown body."); a
+    body with no real newline but literal `\n` sequences ("The SKILL.md body arrived
+    JSON-escaped … Send real newlines." — a writer that unescaped would also unescape a
+    one-line body that means `\n` literally); a frontmatter block that does not parse or
+    is not a mapping. Plain markdown with no block stays valid: the mount adds the block,
+    the editor never wrote one. An empty body refused on every write retires the E4
+    `clearBody` flag (writer, org-settings action and modal): an empty SKILL.md is not a
+    skill, and an empty submission on an existing skill keeps the file. The mount's
+    frontmatter schema (`skillFrontmatterSchema`) moves to the same home so there is ONE
+    definition.
 
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a

@@ -10,7 +10,6 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { z } from "zod";
 import {
   serializeFrontmatterFile,
   splitFrontmatter,
