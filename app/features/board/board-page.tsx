@@ -188,8 +188,10 @@ const BOARD_PLUGINS = defaultPreset.plugins.filter(
  * state), so instead the card flies to the slot it asked for, where the
  * landing preview already stands as the request, and the source stays hidden
  * (`.in-flight`) until the server's answer renders the real card there — or
- * refuses, and the card comes back with the toast. A cancelled drag, or a drop
- * that changes nothing, has no landing preview and flies home as before.
+ * refuses, and the card comes back with the toast. A reorder within one lane
+ * lands the same way (2026-09-11: it had no landing preview, so the card flew
+ * home and then vanished for the whole round trip). A cancelled drag, or a
+ * drop that changes nothing, has no landing preview and flies home as before.
  */
 const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, placeholder }) => {
   // Only the card that was lifted flies. When the server's answer re-renders
@@ -199,13 +201,29 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
   // origin (observed: the landed card shot 400px up and snapped back). A
   // detached placeholder means the flight already happened.
   if (!placeholder?.isConnected) return;
-  const target = document.querySelector(".drop-preview.landing") ?? placeholder;
-  if (!target || !(feedbackElement instanceof HTMLElement)) return;
+  const landing = document.querySelector(".drop-preview.landing");
+  const target = landing ?? placeholder;
+  if (!(feedbackElement instanceof HTMLElement)) return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const from = feedbackElement.getBoundingClientRect();
   const to = target.getBoundingClientRect();
+  // A reorder leaves its hole in the landing's own lane, and dnd-kit takes the
+  // hole out once this resolves: every block after it moves up by the hole's
+  // share of the flow (its height and the gap after it) — the landing too, when
+  // the card moves down its lane. So the hole closes while the card flies, and
+  // the card flies to where the landing will stand once it has. The hole keeps
+  // its box while it closes (a negative margin, not a height): a ResizeObserver
+  // sizes the flying card from it.
+  const closes = landing !== null && landing.parentElement === placeholder.parentElement;
+  const next = closes ? placeholder.nextElementSibling : null;
+  const share = next
+    ? next.getBoundingClientRect().top - placeholder.getBoundingClientRect().top
+    : 0;
+  const landsBelow =
+    closes && (placeholder.compareDocumentPosition(landing) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  const rise = landsBelow ? share : 0;
   const dx = to.left - from.left;
-  const dy = to.top - from.top;
+  const dy = to.top - rise - from.top;
   if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
   // dnd-kit positions the lifted card with `translate: var(--dnd-translate)
   // !important`, which no animation can override — its own drop animation
@@ -215,23 +233,33 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
   const tx = m ? Number(m[1]) : 0;
   const ty = m ? Number(m[2]) : 0;
   feedbackElement.setAttribute("data-dnd-dropping", "");
+  const timing: KeyframeAnimationOptions = {
+    duration: 180,
+    easing: "cubic-bezier(.23, 1, .32, 1)",
+    fill: "forwards",
+  };
   const flight = feedbackElement.animate(
     { translate: [`${tx}px ${ty}px 0`, `${tx + dx}px ${ty + dy}px 0`] },
-    { duration: 180, easing: "cubic-bezier(.23, 1, .32, 1)", fill: "forwards" },
+    timing,
   );
+  const closing = closes
+    ? placeholder.animate({ marginBlockEnd: ["0px", `${-share}px`], opacity: [1, 0] }, timing)
+    : null;
   try {
     await flight.finished;
   } catch {
     /* cancelled mid-flight: nothing to hold */
   }
-  // dnd-kit's cleanup runs in the microtask after this resolves and restores
-  // the card to its DOM slot; the forward fill is released a frame later, when
-  // the in-flight card is already hidden (or, cancelled, already home). The
-  // dropping mark goes with it: dnd-kit's own path removes it, and a card that
-  // kept it would not follow the pointer on its next lift (the translate lock
-  // is `:not([data-dnd-dropping])`).
+  // dnd-kit's cleanup runs in the microtask after this resolves: it restores
+  // the card to its DOM slot and removes the hole, already closed, so nothing
+  // after it moves. The forward fills are released a frame later, when the
+  // in-flight card is already hidden (or, cancelled, already home). The
+  // dropping mark goes with them: dnd-kit's own path removes it, and a card
+  // that kept it would not follow the pointer on its next lift (the translate
+  // lock is `:not([data-dnd-dropping])`).
   requestAnimationFrame(() => {
     flight.cancel();
+    closing?.cancel();
     feedbackElement.removeAttribute("data-dnd-dropping");
   });
 };
@@ -816,6 +844,20 @@ function laneBlocks(body: Element): LaneBlock[] {
     blocks.push({ key: el.dataset.cardKey ?? null, top: r.top, bottom: r.bottom });
   }
   return blocks;
+}
+
+/** Where a move's landing preview stands in a lane drawn as `keys`: before the
+ *  card the drop asked for — or at the lane's end once that card has left the
+ *  lane, which is where the server appends the move then (`reorderTask`). */
+function landingSlot(keys: readonly string[], beforeKey: string | null): string | null {
+  return beforeKey !== null && keys.includes(beforeKey) ? beforeKey : null;
+}
+
+/** A reorder within one lane has landed once the lane, drawn as `keys`, holds
+ *  the card right before the slot it asked for (last, for the lane's end). */
+function reorderLanded(keys: readonly string[], key: string, beforeKey: string | null): boolean {
+  const at = keys.indexOf(key);
+  return at >= 0 && (keys[at + 1] ?? null) === landingSlot(keys, beforeKey);
 }
 
 function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boolean }) {
@@ -1911,7 +1953,9 @@ function RepoAccessBanner({
   );
 }
 
-function StageBoard({
+/** The board by stage. Exported for its render test: a move in flight within
+ *  one lane starts from a pointer drag, which jsdom has no layout to run. */
+export function StageBoard({
   columns,
   visible,
   doneStageId,
@@ -1979,16 +2023,32 @@ function StageBoard({
         })
       : null;
   // Read against the DATA, not the request: once the server's answer has
-  // revalidated the columns the card is already in its new lane, so nothing is
-  // left to hide in the old one and the landing preview has nothing to stand
-  // in for — the real card takes its place in the same render, no blank frame
-  // and no doubled card while the fetcher settles.
-  const flightFrom =
+  // revalidated the columns the card stands where it asked to be, so nothing is
+  // left to hide and the landing preview has nothing to stand in for — the
+  // real card takes its place in the same render, no blank frame and no
+  // doubled card while the fetcher settles. A move to another lane is read per
+  // lane below: its old lane no longer holds the card, its new one does. A
+  // reorder keeps the card in its own lane before and after, so there the
+  // ORDER is the answer (`reorderLanded`); until the lane has it, the card
+  // hides in its old slot and the landing stands in the slot it asked for.
+  const flight =
     inFlight &&
-    columns.some(
-      (c) => c.stage.id === inFlight.from && c.tasks.some((t) => t.key === inFlight.key),
+    !(
+      inFlight.from === inFlight.to &&
+      reorderLanded(
+        visible(columns.find((c) => c.stage.id === inFlight.to)?.tasks ?? []).map((t) => t.key),
+        inFlight.key,
+        inFlight.beforeKey,
+      )
     )
-      ? inFlight.from
+      ? inFlight
+      : null;
+  const flightFrom =
+    flight &&
+    columns.some(
+      (c) => c.stage.id === flight.from && c.tasks.some((t) => t.key === flight.key),
+    )
+      ? flight.from
       : null;
   if (columns.length === 0) {
     // A project whose project.md `stages:` was emptied by an external edit
@@ -2018,21 +2078,29 @@ function StageBoard({
         const isTarget = crossDrag && c.stage.id === overStage;
         // A move in flight shifts the counts the same way a cross-lane hover
         // does: the card has left its lane for the requested one.
-        const crossFlight = !!inFlight && flightFrom !== null && inFlight.to !== flightFrom;
+        const crossFlight = !!flight && flightFrom !== null && flight.to !== flightFrom;
         const flightSource = crossFlight && c.stage.id === flightFrom;
-        const flightTarget = crossFlight && c.stage.id === inFlight!.to;
+        const flightTarget = crossFlight && c.stage.id === flight!.to;
         const count =
           base.length +
           (isTarget ? 1 : 0) -
           (isSource ? 1 : 0) +
           (flightTarget ? 1 : 0) -
           (flightSource ? 1 : 0);
+        // A reorder's landing stands in the lane the card never left; a move
+        // across lanes lands until the new lane holds the card.
         const landing =
-          inFlight &&
+          flight &&
           inFlightTask &&
-          inFlight.to === c.stage.id &&
-          !c.tasks.some((t) => t.key === inFlight.key)
-            ? { task: inFlightTask, beforeKey: inFlight.beforeKey }
+          flight.to === c.stage.id &&
+          (flight.from === flight.to || !c.tasks.some((t) => t.key === flight.key))
+            ? {
+                task: inFlightTask,
+                beforeKey: landingSlot(
+                  base.map((t) => t.key),
+                  flight.beforeKey,
+                ),
+              }
             : null;
         return (
           <Column
@@ -2052,7 +2120,7 @@ function StageBoard({
             previewTask={hovered && slot ? draggedTask : null}
             beforeKey={slot?.beforeKey ?? null}
             landing={landing}
-            inFlightKey={inFlight && flightFrom === c.stage.id ? inFlight.key : null}
+            inFlightKey={flight && flightFrom === c.stage.id ? flight.key : null}
             allStages={allStages}
             onMoveTask={onMoveTask}
             rovingKey={rovingKey}
