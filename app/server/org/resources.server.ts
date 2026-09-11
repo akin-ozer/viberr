@@ -307,6 +307,7 @@ function kbRowForId(db: DatabaseSync, id: string | null | undefined): KbRow | nu
   if (byId) return byId;
   const dir = diskNameFromId(id);
   if (!dir) return null;
+  // SAFETY: the same `KB_SQL` column guarantee, keyed on the UNIQUE `dir`.
   return (db.prepare(`${KB_SQL} WHERE dir = ?`).get(dir) as KbRow | undefined) ?? null;
 }
 
@@ -2202,6 +2203,7 @@ function skillRowForId(
   if (byId) return byId;
   const name = diskNameFromId(id);
   if (!name) return null;
+  // SAFETY: the same `SKILL_SQL` column guarantee, keyed on the UNIQUE `name`.
   return (
     (db.prepare(`${SKILL_SQL} WHERE name = ?`).get(name) as SkillRow | undefined) ??
     null

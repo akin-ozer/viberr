@@ -2015,8 +2015,8 @@ describe("the effort descriptions are generated from the catalog (U36-5)", () =>
       const def = toolkit.tools.find((t) => t.name === name)!;
       // SAFETY: `tool()` keeps the raw zod shape it was given, and `effort` is
       // the `z.string().optional().describe(…)` field each of the three declares.
-      const shape = def.inputSchema as Record<string, { description?: string }>;
-      const description = shape.effort?.description ?? "";
+      const declared = def.inputSchema as Record<string, { description?: string }>;
+      const description = declared.effort?.description ?? "";
       for (const backend of ["claude", "codex"] as const) {
         const label = backend === "codex" ? "Codex" : "Claude";
         expect(description, `${name}.effort names the ${label} tiers`).toContain(
@@ -2125,7 +2125,7 @@ describe("update_agent_deployment grants resources to every kind, the operator i
       kbs: ["no-such-handbook"],
     });
     expect(reply.startsWith("[error] ")).toBe(true);
-    expect(reply).toContain("Nothing in the store answers to no-such-handbook");
+    expect(reply).toContain('Nothing in the store answers to knowledge base "no-such-handbook"');
     expect(readFileSync(file, "utf8")).toBe(was);
   });
 });

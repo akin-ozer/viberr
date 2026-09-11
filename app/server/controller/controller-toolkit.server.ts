@@ -2028,7 +2028,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, and every stage id must be one of the project's stages. The reply lists every field the call changed, old → new; a call that changes nothing says so.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, or the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -2045,6 +2045,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
+        skills: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Skill grants by grantKey — the skill FOLDER NAME from list_skills, never its id. Omit to keep the deployment's grants; [] clears them. Every kind, the operator included.",
+          ),
+        mcps: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "MCP grants by grantKey — the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the deployment's grants; [] clears them.",
+          ),
+        kbs: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Knowledge-base grants by grantKey — the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the deployment's grants; [] clears them.",
+          ),
       },
       runWith(
         async (args: {
@@ -2056,6 +2074,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           effort?: string;
           stages?: string[];
           autonomy?: "supervised" | "full";
+          skills?: string[];
+          mcps?: string[];
+          kbs?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "manage this project's agents");
@@ -2091,6 +2112,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               `${unknownStages.map((id) => `"${id}"`).join(", ")} ${unknownStages.length === 1 ? "is not a stage" : "are not stages"} of ${slug}. Nothing was written. The project's stage ids are: ${stageIds.join(", ")}.`,
             );
           }
+          // G36-1 (pass 36, owner Q36-7): the deployment's own copy of the
+          // grants (ruling 156) is editable here for EVERY kind, the operator
+          // included — the Agents page renders the picker for all of them,
+          // while the controller answered "a system profile I can't give
+          // resources to". Keys resolve exactly as save_global_agent's do
+          // (F33-8): a recognised id is normalised to its key, an unknown key
+          // is refused by name, and (ruling 139) this runs BEFORE the write.
+          // An omitted list keeps the deployment's copy; [] clears it.
+          const grants = resolveResourceGrants(
+            db,
+            { skills: args.skills, mcps: args.mcps, kbs: args.kbs },
+            { dataRoot },
+          );
+          const resources = {
+            skills: grants.skills ?? view.resources.skills,
+            mcps: grants.mcps ?? view.resources.mcps,
+            kb: grants.kbs ?? view.resources.kb,
+          };
           // Seed from the RESOLVED grants — the same view `get_project`
           // reports and the same one the agents-page modal seeds from
           // (`seedCaps`). Seeding from the RAW stored record instead let
@@ -2124,7 +2163,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // sends none.
           const autonomy =
             view.kind === "operator" ? (args.autonomy ?? view.autonomy ?? "supervised") : undefined;
-          const resources = view.resources;
           const baseForm = {
             name: view.name,
             role: view.role,
@@ -2169,7 +2207,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (result.applied) {
             // A backend switch with no value given resets to that backend's
             // default; the entry says so rather than reading as a choice.
-            const fromSwitch = (given: unknown) =>
+            const fromSwitch = (given: string | undefined) =>
               switched && given === undefined ? ` (${BACKEND_LABEL[backend]} default: none given)` : "";
             changed("model", view.model, result.applied.model, fromSwitch(args.model));
             changed("effort", view.effort, result.applied.effort, fromSwitch(args.effort));
