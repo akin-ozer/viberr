@@ -70,6 +70,16 @@ drift notes corrected. Ruling 93's drift note now says R22 and ruling 101 both s
 Codex `read-only` sandbox is a live seam), ruling 109 carries the `permissions.rs` watch
 item, and `domain/agents-and-runtime.md` §2.5 and gotcha 6 match.
 
+Updated 2026-09-11 for pass 36 cluster 4 (ruling 183; U36-3, U36-4, U36-5, G36-1): a
+SKILL.md body is validated at every writer and a JSON-escaped, empty or unparseable one is
+refused by name, never rewritten; `save_knowledge_base` and `save_skill` answer with the
+id and grantKey and a `disk:<dir>` id whose folder has a row updates that row;
+`update_agent_deployment` takes `skills` / `mcps` / `kbs` for every kind (the operator
+included), lists every changed field old → new, audits model and effort on the `updated`
+row, and the three effort descriptions read the catalog. Pages:
+`domain/controller-and-goals.md` (§3, §4.1, §4.2), `domain/auth-and-rbac.md` (§4),
+`domain/agents-and-runtime.md` (§6) and `architecture/data-model.md` (`org_skills`).
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
