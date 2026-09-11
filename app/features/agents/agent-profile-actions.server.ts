@@ -147,6 +147,10 @@ type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
   role: string;
   backend: "codex" | "claude";
+  /** Ruling 139 parity with `deployed` (U36-3): the model and effort the
+   *  update wrote — the row used to carry neither. */
+  model?: string;
+  effort?: string;
   operatorAutonomy?: "supervised" | "full";
   acceptCompletionIntoDone?: "direct" | "off";
   acceptCompletionActsDirectly?: boolean;
@@ -865,6 +869,10 @@ export async function updateAgentProfile(
     role: form.role,
     backend: form.backend,
   };
+  if (appliedUpdate) {
+    details.model = appliedUpdate.model;
+    details.effort = appliedUpdate.effort;
+  }
   if (gov.isOperator) {
     details.operatorAutonomy = gov.newAutonomy;
     details.acceptCompletionIntoDone = gov.newDirectAccept ? "direct" : "off";

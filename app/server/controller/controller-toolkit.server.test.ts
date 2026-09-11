@@ -1507,7 +1507,7 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
     const top = "max";
     const set = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: top });
     expect(set).toContain("[done]");
-    expect(set).toContain(`Effort is now ${top}`);
+    expect(set).toMatch(new RegExp(`effort (\\S+|\\(none\\)) → ${top}`));
     expect((await developer()).effort).toBe(top);
 
     const refused = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", effort: "ultra" });
@@ -1523,7 +1523,8 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
 
     const otherDefault = other === "codex" ? "medium" : "high";
     const switched = await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", backend: other });
-    expect(switched).toContain(`Backend switched to ${label[other]}: effort reset to its default (${otherDefault})`);
+    expect(switched).toContain(`backend ${label[current]} → ${label[other]}`);
+    expect(switched).toContain(`effort ${top} → ${otherDefault} (${label[other]} default: none given)`);
     const after = await developer();
     expect(after.backends).toEqual([other]);
     expect(after.effort).toBe(otherDefault);

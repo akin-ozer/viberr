@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  BACKEND_LABEL,
   assertEffortForBackend,
   assertModelForBackend,
   defaultEffortFor,
@@ -2027,7 +2028,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, and every stage id must be one of the project's stages.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, and every stage id must be one of the project's stages. The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -2105,6 +2106,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           for (const grant of resolved?.capabilities ?? deployment.capabilities) {
             caps[grant.capabilityId] = grant.mode;
           }
+          const capsBefore = { ...caps };
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
           // Ruling 139: effort is settable wherever model is, judged by name
           // against the backend the deployment will run on, BEFORE the write.
@@ -2116,6 +2118,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.effort !== undefined) assertEffortForBackend(backend, args.effort);
           if (args.model !== undefined) assertModelForBackend(backend, args.model);
           const effort = args.effort ?? (switched ? defaultEffortFor(backend) : view.effort);
+          const stages = args.stages ?? view.stages;
+          // The downstream form schema reads autonomy as optional, so an
+          // undefined value and an absent key parse identically; a specialist
+          // sends none.
+          const autonomy =
+            view.kind === "operator" ? (args.autonomy ?? view.autonomy ?? "supervised") : undefined;
+          const resources = view.resources;
           const baseForm = {
             name: view.name,
             role: view.role,
@@ -2124,21 +2133,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // hand-save landing between the read and the write is.
             fingerprint: deploymentFingerprint(deployment),
             backend,
-            stages: args.stages ?? view.stages,
+            stages,
             definition: "",
             persona: "",
             model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
             effort,
             caps,
-            resources: view.resources,
+            resources,
           };
-          // The downstream form schema reads autonomy as optional, so an
-          // undefined value and an absent key parse identically.
-          let form: SubmittedProfileForm = baseForm;
-          if (view.kind === "operator") {
-            const autonomy = args.autonomy ?? view.autonomy;
-            if (autonomy) form = { ...baseForm, autonomy };
-          }
+          const form: SubmittedProfileForm = autonomy ? { ...baseForm, autonomy } : baseForm;
           const result = await updateAgentProfile(
             db,
             { projectSlug: slug, profileId: args.profileId, form },
@@ -2151,13 +2154,36 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const governance = result.governanceNotice
             ? ` ${result.governanceNotice.message}`
             : "";
-          const reset =
-            switched && args.effort === undefined && result.applied
-              ? ` Backend switched to ${backend === "codex" ? "Codex" : "Claude"}: effort reset to its default (${result.applied.effort})${args.model === undefined ? ` and model to ${result.applied.model}` : ""}.`
-              : "";
-          const stored =
-            args.effort !== undefined && result.applied ? ` Effort is now ${result.applied.effort}.` : "";
-          return `[done] ${result.name} updated on ${slug}.${reset}${stored}${governance}${notices}`;
+          // U36-3 (pass 36): the reply lists EVERY field the call changed, old
+          // → new, built from the record this tool read and the result the
+          // writer returned — never from the request. One call that switched
+          // backend, model, effort, stages and grants used to answer "Effort
+          // is now max." and name the model only when the backend switched.
+          const changes: string[] = [];
+          const changed = (field: string, before: string, after: string, note = "") => {
+            if (before !== after) {
+              changes.push(`${field} ${before || "(none)"} → ${after || "(none)"}${note}`);
+            }
+          };
+          changed("backend", BACKEND_LABEL[currentBackend], BACKEND_LABEL[backend]);
+          if (result.applied) {
+            // A backend switch with no value given resets to that backend's
+            // default; the entry says so rather than reading as a choice.
+            const fromSwitch = (given: unknown) =>
+              switched && given === undefined ? ` (${BACKEND_LABEL[backend]} default: none given)` : "";
+            changed("model", view.model, result.applied.model, fromSwitch(args.model));
+            changed("effort", view.effort, result.applied.effort, fromSwitch(args.effort));
+          }
+          changed("stages", view.stages.join(", "), stages.join(", "));
+          if (autonomy) changed("autonomy", view.autonomy ?? "supervised", autonomy);
+          for (const patch of args.capabilities ?? []) {
+            changed(`capability ${patch.capabilityId}`, capsBefore[patch.capabilityId] ?? "", patch.mode);
+          }
+          changed("skills", view.resources.skills.join(", "), resources.skills.join(", "));
+          changed("mcps", view.resources.mcps.join(", "), resources.mcps.join(", "));
+          changed("kb", view.resources.kb.join(", "), resources.kb.join(", "));
+          const summary = changes.length ? `: ${changes.join("; ")}.` : ". No field changed.";
+          return `[done] ${result.name} updated on ${slug}${summary}${governance}${notices}`;
         },
       ),
     ),
