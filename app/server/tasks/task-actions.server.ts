@@ -1,4 +1,5 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd } from "~/shared/run-failure";
 import type {
@@ -9063,6 +9064,12 @@ function acceptanceRefusalReasons(
     acceptanceStageBlockedReason(project, fm.stage, taskKey),
     // F10-15: every required reviewer must have approved the CURRENT revision.
     acceptanceBlockedReason(fm),
+    // Ruling 178 (pass 36, G36-3): the reviewers the PROJECT declares must have
+    // approved it too, engaged or not. F10-15's set is emergent (whoever the
+    // operator engaged), so a task whose operator never ran the project's
+    // reviewer was acceptable on another agent's verdict. Same order in the
+    // projection's `acceptanceBlockReason`.
+    ...requiredReviewerRefusals(project.requiredReviewers, fm),
     // R20-2 / F20-6: when the live probe already looked at the branch and found
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
