@@ -885,7 +885,7 @@ async function reconcileTaskUnlocked(
   const voidedRevisionSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
   const driftVoidText = authoredDriftVoidsVerdict
     ? `**Revision moved after review (ruling 179):** PR #${newPr!.number}'s head is now \`${authoredDriftNow.headSha.slice(0, 7)}\`, ` +
-      `${describeRevisionDrift(authoredDriftNow).sentence} The verdict on \`${(voidedRevisionSha ?? "").slice(0, 7)}\` no longer binds: ` +
+      `${describeRevisionDrift(authoredDriftNow).sentence}. The verdict on \`${(voidedRevisionSha ?? "").slice(0, 7)}\` no longer binds: ` +
       `the new head is the revision under review and needs a fresh verdict before ${fm.key} can be accepted.`
     : null;
 

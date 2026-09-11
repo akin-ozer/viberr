@@ -367,12 +367,28 @@ describe("scheduleTaskAction", () => {
     ).rejects.toThrow(/future/i);
   });
 
-  it("rejects scheduling on a Done (terminal) task", async () => {
+  it("ruling 177 / U36-9 (pass 36): a closed task refuses the schedule with the closure sentence, naming the terminal stage as the board calls it", async () => {
+    // Live 19:37Z: the controller's schedule_task_action on shipped HLC-15 was
+    // refused "That task is already Done — nothing to schedule." on a board
+    // whose last stage is Shipped. Canary: put the literal sentence back.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...project,
+      stages: project.stages.map((s) => (s.id === terminalStage() ? { ...s, name: "Shipped" } : s)),
+    });
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { ownerUserId: store.users.arda.id, stage: terminalStage() }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-4", { ownerUserId: store.users.arda.id, stage: "impl", archived: true }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const due = new Date(Date.now() + 3_600_000).toISOString();
     await expect(
-      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-2", dueAt: new Date(Date.now() + 3_600_000).toISOString() }, actor(), dctx()),
-    ).rejects.toThrow(/Done/i);
+      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-2", dueAt: due }, actor(), dctx()),
+    ).rejects.toThrow("VIB-2 is closed (Shipped is the terminal stage) — move it back to an open stage before scheduling a run on it.");
+    // Archived is closed too — the old guard read the stage only.
+    await expect(
+      scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-4", dueAt: due }, actor(), dctx()),
+    ).rejects.toThrow("VIB-4 is archived — restore it before scheduling a run on it.");
+    expect(schedules("VIB-2")).toHaveLength(0);
+    expect(schedules("VIB-4")).toHaveLength(0);
   });
 });
 

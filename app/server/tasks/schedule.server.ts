@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { taskClosure } from "./task-closure.server";
+import { closureRefusal, taskClosure } from "./task-closure.server";
 import { z } from "zod";
 import {
   recordAudit,
@@ -162,9 +162,16 @@ export async function scheduleTaskAction(
   const ref = taskFileRef(ctx, input.projectSlug, input.taskKey);
   const existing = readTaskFile(ref);
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
-  const terminal = terminalStageId(db, input.projectSlug);
-  if (terminal && existing.parsed.frontmatter.stage === terminal) {
-    throw AppError.validation("That task is already Done — nothing to schedule.");
+  // Ruling 177 (pass 36): a closed task — archived, or at the board's terminal
+  // stage whatever it is named — refuses the schedule with the one closure
+  // sentence every door uses. Live (U36-9, 19:37Z): "That task is already
+  // Done — nothing to schedule." on a board whose last stage is Shipped.
+  const stages = getProject(db, input.projectSlug)?.stages ?? [];
+  const closure = taskClosure(existing.parsed.frontmatter, stages);
+  if (closure.closed) {
+    throw AppError.validation(
+      closureRefusal(input.taskKey, closure, stages, "scheduling a run on it"),
+    );
   }
 
   // R22: the entry pins no backend/autonomy — the fired run resolves the LIVE

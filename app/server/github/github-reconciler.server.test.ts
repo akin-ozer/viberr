@@ -3520,6 +3520,9 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     expect(note).toBeDefined();
     expect(note.text).toContain("ruling 179");
     expect(note.text).toContain("no longer binds");
+    // Live 19:45Z: the drift sentence carries no terminal punctuation, so the
+    // note read "…merges unreviewed The verdict on…". Canary: drop the period.
+    expect(note.text).toMatch(/unreviewed\. The verdict on `[^`]+` no longer binds/);
     expect(note.text).toContain("“Accept completion and move VIB-301 to Done”");
     const inbox = listNotifications(store.db, store.users.arda.id).filter((n) => n.taskKey === "VIB-301");
     expect(inbox.some((n) => n.title === "PR #318 moved after review: VIB-301 needs a fresh verdict")).toBe(true);

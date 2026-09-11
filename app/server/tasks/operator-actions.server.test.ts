@@ -1991,6 +1991,47 @@ describe("operatorAcceptCompletion", () => {
     expect(audits).toContain("task.operator.accepted_completion");
   });
 
+  it("U36-9 (pass 36): the full-autonomy acceptance names the terminal stage as the board calls it", async () => {
+    // Live: every completion sentence said "moved to **Done**" on a board whose
+    // last stage is Shipped. Canary: put the literal back into the message or
+    // the completion event.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      stages: project.parsed.frontmatter.stages.map((s) =>
+        s.id === "done" ? { ...s, name: "Shipped" } : s,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Accepted completion: VIB-1 moved to Shipped.");
+    // This fixture has no repository, so the completion event takes the
+    // verified no-change arm (R17-2); the two merge arms share the sentence the
+    // message above was built from, and none of the three may say "Done".
+    const completion = task().timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain("**VIB-1 completed with no changes**");
+    expect(completion?.text).not.toContain("moved to Done");
+    // The idempotent second call names the stage the same way.
+    const again = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(again).toEqual({ outcome: "noop", message: "VIB-1 is already Shipped." });
+  });
+
   it("reports validation HEALTHY when a required reviewer really approved the revision", async () => {
     // The other half of the derivation: real review evidence still reads healthy,
     // so the honest version is not just "always none".

@@ -3524,7 +3524,11 @@ export async function operatorAcceptCompletion(
     "done";
 
   if (file.parsed.frontmatter.stage === doneStageId) {
-    return { outcome: "noop", message: `${input.taskKey} is already Done.` };
+    // U36-9 (pass 36): the terminal stage by the board's own name.
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is already ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+    };
   }
 
   // P14-LV-02/B-WF6: ONE shared gate — `acceptanceRefusalFor` reads the same
@@ -3653,9 +3657,10 @@ export async function operatorAcceptCompletion(
           actor: { kind: "operator" },
           title: "Completion accepted",
           text:
+            // U36-9 (pass 36): the terminal stage by the board's own name.
             (hasPr
-              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to Done.`) +
+              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}; the review PR is **accepted, merge pending** (a human merges it).`
+              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`) +
             driftNote,
           toAgent: false,
           evidence: null,
@@ -3671,7 +3676,10 @@ export async function operatorAcceptCompletion(
   // this is the decision. Same shape as `forceAcceptCompletion`, which has
   // followed the write rather than preceding it since U3.
   if (!accepted) {
-    return { outcome: "noop", message: `${input.taskKey} is already Done.` };
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is already ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+    };
   }
   recordAudit(db, {
     action: "task.operator.accepted_completion",
@@ -3682,5 +3690,8 @@ export async function operatorAcceptCompletion(
     taskKey: input.taskKey,
     details: { autonomy: "full", toStage: doneStageId },
   });
-  return { outcome: "done", message: `Accepted completion: ${input.taskKey} moved to Done.` };
+  return {
+    outcome: "done",
+    message: `Accepted completion: ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+  };
 }
