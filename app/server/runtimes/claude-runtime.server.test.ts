@@ -13,11 +13,13 @@ import {
   INTERRUPT_GRACE_MS,
   resolveClaudeEffort,
   resolveClaudeModel,
+  type ClaudePreToolUseHook,
   type ClaudeQuery,
   type ClaudeQueryFn,
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
+import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 describe("resolveClaudeModel", () => {
@@ -1721,5 +1723,92 @@ describe("a cut-off result followed by the SDK's throw stays a cut-off", () => {
       ),
     );
     expect(line?.display?.tag).toBe("run·error·overloaded");
+  });
+});
+
+/**
+ * Ruling 101(e), amended by Option D PR 5: argument-level denies carry a
+ * model-visible reason and cover wrapped command shapes; the denylist remains
+ * the fence. Measured live on 2026-09-11 (the PR's spike): the hook ran before
+ * the rules, its reason came back as the tool result, and every wrapped push
+ * shape was refused, where without it `git -C . push` and `sh -c 'git push'`
+ * both landed on a local remote.
+ */
+describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => {
+  const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+  /** A Developer whose commit-push grant is withheld, as the resolver denies it. */
+  const PUSH_WITHHELD = resolveSpecialistDisallowedTools([
+    { capabilityId: "execute-code-or-write-repo", mode: "direct" },
+    { capabilityId: "create-task-branch", mode: "direct" },
+    { capabilityId: "commit-push-branch", mode: "off" },
+    { capabilityId: "open-review-pr", mode: "off" },
+  ]);
+
+  async function started(spec: RunSpec) {
+    const lines: EmittedLine[] = [];
+    let options: ClaudeQueryOptions = {};
+    const queryFn: ClaudeQueryFn = (params) => {
+      options = params.options ?? {};
+      return fakeQuery(RESULT).q;
+    };
+    createClaudeAdapter({ queryFn }).start(spec, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    return { options, lines };
+  }
+
+  const hookOf = (options: ClaudeQueryOptions): ClaudePreToolUseHook | undefined =>
+    options.hooks?.PreToolUse.find((m) => m.matcher === "Bash")?.hooks[0];
+
+  const bash = (hook: ClaudePreToolUseHook, command: string) =>
+    hook({ hook_event_name: "PreToolUse", tool_input: { command } }, "toolu_1", {
+      signal: new AbortController().signal,
+    });
+
+  it("is installed only on a run with argument-level denies whose Bash is not denied outright", async () => {
+    // Canary: drop the `bashPrefixes.length` guard and the plain run grows a hook.
+    expect(hookOf((await started({ ...SPEC, disallowedTools: PUSH_WITHHELD })).options)).toBeDefined();
+    expect((await started(SPEC)).options.hooks).toBeUndefined();
+    // The operator's Bash is denied outright: nothing for a hook to add.
+    expect((await started({ ...SPEC, kind: "operator" })).options.hooks).toBeUndefined();
+    // A supporting run carries the kind-based delivery denies even with no grant denies.
+    expect(hookOf((await started({ ...SPEC, kind: "reviewer" })).options)).toBeDefined();
+  });
+
+  it("refuses the wrapped shapes with a reason naming the capability, and writes the console line", async () => {
+    // Canary: return `{}` from the hook and both expectations on the answer fail.
+    const { options, lines } = await started({ ...SPEC, disallowedTools: PUSH_WITHHELD });
+    const hook = hookOf(options)!;
+    for (const command of [
+      "git -C . push origin HEAD:refs/heads/x",
+      "sh -c 'git push origin main'",
+      "cd repo && git push",
+    ]) {
+      const answer = await bash(hook, command);
+      expect(answer.hookSpecificOutput?.permissionDecision, command).toBe("deny");
+      expect(answer.hookSpecificOutput?.permissionDecisionReason, command).toBe(
+        'Withheld by capability policy: "Commit & push to the branch" (commit-push-branch) is not granted on this run, so `git push` is refused however it is wrapped. Say what you needed in your report instead.',
+      );
+    }
+    const denials = lines.filter((l) => l.display?.tag === "permission_denied");
+    expect(denials).toHaveLength(3);
+    expect(denials[0]!.display).toMatchObject({
+      ev: "err",
+      name: "Bash",
+      text: expect.stringMatching(/^denied by hook: Withheld by capability policy/),
+    });
+    // Viberr's own frame, told apart from the SDK's.
+    expect(JSON.parse(denials[0]!.raw)).toMatchObject({ source: "viberr", subtype: "permission_denied" });
+
+    // A command that reaches no denied prefix is left to the mode and the rules.
+    expect(await bash(hook, "npm test && git status")).toEqual({});
+    expect(lines.filter((l) => l.display?.tag === "permission_denied")).toHaveLength(3);
+  });
+
+  it("names the supporting-run delivery deny when no capability explains it", async () => {
+    const { options } = await started({ ...SPEC, kind: "reviewer" });
+    const answer = await bash(hookOf(options)!, "git -C . push");
+    expect(answer.hookSpecificOutput?.permissionDecisionReason).toBe(
+      "A supporting engagement never delivers: `git push` belongs to the delivering agent and Viberr's server. Say what should be delivered in your report instead.",
+    );
   });
 });

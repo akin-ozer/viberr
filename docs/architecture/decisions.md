@@ -1592,6 +1592,23 @@ the quieter packet or the bare owner cell as drift.)*
     all-or-nothing); their Codex boundary remains credential-less agents + the
     server-owned delivery gate. Shipped without live Codex validation (provider quota
     blocked until Sep 18 2026) — envelope/unit tests pin the contract.
+    *(Amended 2026-09-11, Option D PR 5: argument-level denies carry a model-visible reason
+    and cover wrapped command shapes; the denylist remains the fence. Measured on the pinned
+    CLI against a local remote, the `Bash(<prefix>:*)` rules already refused `cd . && git
+    push` and `true; git push` (the CLI checks each part of a chain) but let `git -C . push`
+    and `sh -c 'git push'` through, and both refs landed. Every Claude run whose Bash is not
+    denied outright and whose denylist names a `Bash(<prefix>:*)` rule now carries a
+    PreToolUse hook: it reads the command as a shell would, unwraps `git -C`/`-c`/`--git-dir`,
+    `sh -c`/`bash -lc`, `eval`, `env`, `xargs`, `timeout`, `$(…)` and backticks, and refuses a
+    command that reaches a denied prefix. The reason names the capability the run withholds,
+    derived from the denylist alone, or the supporting-run delivery deny, and it comes back
+    as the tool's result. The hook runs before the rules and only ever denies. Its decision
+    has no SDK `permission_denied` frame, so the adapter writes one marked as Viberr's
+    (`decision_reason_type: "hook"`). Live, all five shapes were refused with the reason
+    and nothing landed. A script that pushes still runs: the container and the server-owned
+    delivery gate stay the boundary (ruling 93). `app/server/runtimes/bash-policy.server.ts`,
+    `bashDenyReason` in `app/server/tasks/specialist-tool-policy.ts`, the hook in
+    `claude-runtime.server.ts`.)*
 
 102. **FR33 audit purge exports before it deletes (owner, 2026-08-31).** The 90-day
     hard-delete of `audit_events` first appends the expiring rows, verbatim, to a

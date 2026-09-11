@@ -31,7 +31,9 @@
 > for ruling 176 (branch `option-d/pr2-mcp-tool-gating`): §§2.4, 2.5, 4.3 and 6 (an org MCP
 > server's admin-marked write tools are denied on runs that withhold repo write: by name on
 > Claude, as `disabled_tools` on Codex; the P13-KM-04 prompt paragraph names only unmarked
-> servers). The operator's own behaviour is in
+> servers). Updated 2026-09-11 for the ruling 101(e) amendment (Option D PR 5, branch
+> `option-d/pr5-pretooluse-deny`): §2.4 and §4.3 (the PreToolUse hook that refuses wrapped
+> shapes of a denied command, with a reason the model reads). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -250,6 +252,21 @@ connecting a different account there (ruling 165).
   carries `tools: [{ name, permission_policy: "always_deny" }]`, the SDK's own per-tool
   channel for remote servers. The adapter forwards both unchanged. Live (2026-09-11), the
   run's `system/init` tool list no longer offers a marked tool.
+- PreToolUse capability hook (ruling 101(e), amended by Option D PR 5). A run whose
+  denylist names a `Bash(<prefix>:*)` rule, and whose Bash is not denied outright, carries
+  one `PreToolUse` hook on `Bash`. `bash-policy.server.ts` reads the command as a shell
+  would: it splits `&&`, `||`, `;`, `|` and newlines; unwraps `git -C`/`-c`/`--git-dir`,
+  `sh -c`/`bash -lc`, `eval`, `env`, `xargs`, `timeout`, `$(…)` and backticks; and
+  ignores quoted text (`echo "git push"` is not a push). A command that reaches a denied
+  prefix is refused. The reason (`bashDenyReason`) names the capability the run withholds,
+  read off the denylist, or says a supporting engagement never delivers, and comes back
+  as the tool's result. The SDK reports a hook's decision in the tool result only, so the
+  adapter writes a `system/permission_denied` frame of its own (`source: "viberr"`,
+  `decision_reason_type: "hook"`), which the console shows as a rule's deny. Measured
+  2026-09-11: the CLI's own rules already refused `cd . && git push` and `true; git push`
+  and let `git -C . push` and `sh -c 'git push'` land. With the hook, all five were refused
+  and nothing landed. The hook runs before the rules and only ever denies; the rules stay
+  the fence.
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
@@ -748,6 +765,10 @@ the same denylist (`repoWriteWithheldFromDenylist`).
 | `merge-pull-request` (always human) | `Bash(gh pr merge:*)` | advisory |
 | `use-web-search-fetch` | `WebFetch WebSearch` | `webSearchMode: disabled` |
 | `comment-on-task`, `ask-human`, `report-validation-verdict`, `read-github-api` | the toolkit tool is not built | envelope field ignored / not requested |
+
+On Claude every command-level row above also binds through the PreToolUse capability hook
+(§2.4): `git -C . push`, `sh -c 'git push'` and the like are refused with a reason naming
+the withheld capability, not only the command's plain form.
 
 **The write family binds on BOTH backends** (ruling 101): Claude through the tool
 denylist, Codex through the read-only sandbox. There is exactly ONE disclosed exception,
