@@ -125,6 +125,11 @@ export interface RunSpec {
    *  decision plan the caller parses + executes) AND every generic specialist/
    *  reviewer run (the report_outcome envelope — verdict/questions). */
   outputSchema?: unknown;
+  /** Ruling 175: the instance's spending cap for this run in USD, when one is
+   *  set (Org settings → Max spend per Claude run). Claude hands it to the SDK
+   *  as `maxBudgetUsd`; Codex has no budget option and ignores it, which the
+   *  run-inputs disclosure states. */
+  maxSpendUsd?: number;
   /** Per-run environment overlay, merged ON TOP of the adapter's base env for
    *  THIS run only. `GIT_CEILING_DIRECTORIES` prevents accidental parent-repo
    *  discovery; it is not a filesystem or process isolation boundary. */

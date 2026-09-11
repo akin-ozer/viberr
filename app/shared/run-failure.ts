@@ -27,6 +27,12 @@ export type RunFailureKind =
    *  from that fact first and from prose ("overloaded", "503") second. */
   | "overloaded"
   | "max_turns"
+  /** Ruling 175: the run reached the instance's spending cap (Org settings →
+   *  Max spend per Claude run) and the SDK ended it with
+   *  `error_max_budget_usd`. Cut off, like `max_turns`, not failed by the task:
+   *  the remedy is to continue it or raise the cap. Claude only; Codex has no
+   *  budget option. */
+  | "max_budget"
   /** The stream produced nothing for the whole idle window — the run was HUNG,
    *  not failed by the task. Both adapters emit it (P13-RT-11). */
   | "idle_timeout"
@@ -48,6 +54,7 @@ export const TAGGED_FAILURE_KINDS = [
   "unavailable",
   "overloaded",
   "max_turns",
+  "max_budget",
   "idle_timeout",
   "session_missing",
   "unknown",
@@ -93,6 +100,12 @@ export interface RunFailureFacts {
    * attribution is not. Null for every other kind (nothing to attribute).
    */
   origin: "provider" | "local" | null;
+  /** Ruling 175: for a `max_budget` cut-off, the cap the run carried (USD).
+   *  Absent on every other kind, and on lines written before the ruling. */
+  spendCapUsd?: number;
+  /** Ruling 175: for a `max_budget` cut-off, what the run had spent when the
+   *  SDK stopped it (USD, the result's cost). Absent otherwise. */
+  spentUsd?: number;
 }
 
 /**
@@ -129,4 +142,15 @@ export function emptyRunFailureFacts(kind: RunFailureKind): RunFailureFacts {
     terminalReason: null,
     origin: null,
   };
+}
+
+/**
+ * Ruling 175: a dollar amount as a run's lines, packets and notes print it.
+ * Cents from a dollar up; below a dollar up to four decimals, so a spend just
+ * past a small cap does not print as equal to it ("reached its $0.01 cap after
+ * spending $0.0106", not "…after spending $0.01"). Never fewer than two.
+ */
+export function formatUsd(amount: number): string {
+  if (amount >= 1) return `$${amount.toFixed(2)}`;
+  return `$${amount.toFixed(4).replace(/0{1,2}$/, "")}`;
 }

@@ -11,7 +11,9 @@ listed in [`../validation/2026-09-01-doc-validation.md`](../validation/2026-09-0
 Every environment variable named here is documented in
 [`configuration.md`](configuration.md).
 Updated 2026-09-11 for ruling 174 (branch `option-d/pr1-permissions-and-kill`): the
-restart bullet under "Agent runtimes" gains the settle sweep and how to read it.
+restart bullet under "Agent runtimes" gains the settle sweep and how to read it. Updated
+2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`): the spending-cap bullet
+and the `max_budget` tag.
 Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): the health
 `backends` row, the whole "Agent runtimes" section, the session-home retention row and the
 backup note were rewritten for per-person agent accounts.
@@ -141,8 +143,8 @@ a readiness downgrade (tolerant parsing):
   run kind (ruling 130(a)): "refused this run: the account's usage window is spent" or
   "the account was rejected by the provider"; `continuity error` is now only an
   unclassified failure. The terminal line in the log console carries the kind on its
-  tag (`quota`, `auth`, `overloaded`, `idle_timeout`, `max_turns`, `session_missing`,
-  `unavailable`), the typed facts (the window, the absolute reset, the API status and
+  tag (`quota`, `auth`, `overloaded`, `idle_timeout`, `max_turns`, `max_budget`,
+  `session_missing`, `unavailable`), the typed facts (the window, the absolute reset, the API status and
   code) and the provider's own words (`The provider reported: …`). A 403
   `oauth_org_not_allowed` means the connected Claude account's organization does not allow
   it: the remedy is on that person's Profile → Agent accounts, never a retry. A 403
@@ -330,6 +332,11 @@ recommendation is open. Nothing is owed by anyone while it waits.
   has the other backend connected, and the switch sticks on the engagement
   (`pinnedBackend`). The Agent-logs "Retry on <other>" button passes the same test, so a
   task never offers in one surface what the other withholds.
+- Spending cap (ruling 175): Org settings → the spending-cap row sets `maxRunSpendUsd`,
+  what one Claude run may spend (none by default). A run that reaches it ends
+  `run·error·max_budget`, pill `cut off · spending cap`, and its line and packet name the
+  cap and the spend. It is a cut-off, not a failure: re-run to continue, or raise the cap.
+  Codex runs are not capped (no budget option in its SDK).
 - Concurrency: Org settings → runtime sets `maxConcurrentRuns` (0 = unlimited, ceiling
   64); excess runs wait in a `pending` queue that drains on every completion. Operator
   and controller turns have a lane of `max(1, ceil(cap / 4))` extra slots beyond the cap

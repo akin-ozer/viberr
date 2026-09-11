@@ -18,6 +18,7 @@ import {
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
+import type { JsonValue } from "~/features/runtime/runtime-types";
 
 describe("resolveClaudeModel", () => {
   it("maps friendly family labels to CLI aliases", () => {
@@ -1565,5 +1566,137 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
     );
     // Control: the same exit with nothing on stderr is not a missing session.
     expect(await classify(null)).not.toBe("run·error·session_missing");
+  });
+});
+
+/**
+ * Ruling 175: the instance's spending cap reaches the SDK as `maxBudgetUsd`,
+ * and the SDK's `error_max_budget_usd` result is the `max_budget` cut-off —
+ * a typed record carrying the cap and the spend, so the packet names both.
+ */
+describe("claude spending cap (ruling 175)", () => {
+  async function optionsFor(spec: RunSpec): Promise<ClaudeQueryOptions> {
+    let captured: ClaudeQueryOptions | undefined;
+    const adapter = createClaudeAdapter({
+      queryFn: ({ options }) => {
+        captured = options;
+        return fakeQuery([{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }]).q;
+      },
+    });
+    adapter.start(spec, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    return captured ?? {};
+  }
+
+  it("passes the cap as maxBudgetUsd when the run carries one, and names none otherwise", async () => {
+    expect((await optionsFor({ ...SPEC, maxSpendUsd: 2.5 })).maxBudgetUsd).toBe(2.5);
+    expect(await optionsFor(SPEC)).not.toHaveProperty("maxBudgetUsd");
+  });
+
+  it("an `error_max_budget_usd` result is the `max_budget` cut-off, carrying the cap and the spend", async () => {
+    // Canary: drop the branch and the run ends `run·error·unknown` with the
+    // generic "review the runtime" copy — a cap reads as a broken setup.
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    const adapter = createClaudeAdapter({
+      queryFn: () =>
+        fakeQuery([
+          { type: "system", subtype: "init", session_id: "s-b", model: "claude-opus-4-8", tools: [], mcp_servers: [] },
+          {
+            type: "result",
+            subtype: "error_max_budget_usd",
+            is_error: true,
+            num_turns: 7,
+            usage: { input_tokens: 5, output_tokens: 10 },
+            total_cost_usd: 0.51,
+            modelUsage: {
+              "claude-opus-4-8": { inputTokens: 5, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.51 },
+            },
+          },
+        ]).q,
+    });
+    adapter.start({ ...SPEC, maxSpendUsd: 0.5 }, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
+    await drain();
+
+    const terminal = lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
+    expect(terminal?.display?.tag).toBe("run·error·max_budget");
+    expect(terminal?.display?.failure).toMatchObject({ kind: "max_budget", spendCapUsd: 0.5, spentUsd: 0.51 });
+    expect(terminal?.display?.text).toContain("its $0.50 spending cap after spending $0.51");
+    expect(terminal?.display?.text).toContain("Org settings (Max spend per Claude run)");
+    expect(exit).toMatchObject({ outcome: "error", sessionId: "s-b" });
+  });
+});
+
+/**
+ * Measured live (2026-09-11, the ruling-175 canary): the pinned SDK yields an
+ * error result and THEN throws — the CLI exits non-zero after it, and
+ * `readMessages` swaps that exit error for "Claude Code returned an error
+ * result: <text>". The catch used to classify the throw, so a spending-cap
+ * cut-off ended `run·error·unknown` ("review the runtime configuration"), and
+ * so did the turn cap. The result is the truth for a cut-off.
+ */
+describe("a cut-off result followed by the SDK's throw stays a cut-off", () => {
+  function resultThenThrow(result: Record<string, JsonValue>, thrown: string): ClaudeQuery {
+    const gen = (async function* () {
+      yield { type: "system", subtype: "init", session_id: "s-t", model: "claude-haiku-4-5", tools: [], mcp_servers: [] };
+      yield result;
+      throw new Error(`Claude Code returned an error result: ${thrown}`);
+    })();
+    return Object.assign(gen, { interrupt: async () => {} });
+  }
+
+  async function terminalTag(spec: RunSpec, q: ClaudeQuery): Promise<EmittedLine | undefined> {
+    const lines: EmittedLine[] = [];
+    createClaudeAdapter({ queryFn: () => q }).start(spec, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    await drain();
+    return lines.find((l) => (l.display?.tag ?? "").startsWith("run·error·"));
+  }
+
+  it("the spending cap: `max_budget` with the cap and the spend, as the live run produced it", async () => {
+    // Canary: drop the `emitCutOff` arm from the catch and this reads
+    // `run·error·unknown` — exactly what the live canary showed.
+    const line = await terminalTag(
+      { ...SPEC, maxSpendUsd: 0.01 },
+      resultThenThrow(
+        {
+          type: "result",
+          subtype: "error_max_budget_usd",
+          is_error: true,
+          num_turns: 1,
+          usage: { input_tokens: 5160, output_tokens: 148 },
+          total_cost_usd: 0.010119,
+          terminal_reason: "budget_exhausted",
+          modelUsage: {
+            "claude-haiku-4-5-20251001": { inputTokens: 5160, outputTokens: 148, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.010119 },
+          },
+        },
+        "Reached maximum budget ($0.01)",
+      ),
+    );
+    expect(line?.display?.tag).toBe("run·error·max_budget");
+    expect(line?.display?.failure).toMatchObject({ kind: "max_budget", spendCapUsd: 0.01, spentUsd: 0.010119 });
+  });
+
+  it("the turn cap: `max_turns`, not `unknown`", async () => {
+    const line = await terminalTag(
+      SPEC,
+      resultThenThrow(
+        { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 2000, usage: {} },
+        "Reached maximum number of turns (2000)",
+      ),
+    );
+    expect(line?.display?.tag).toBe("run·error·max_turns");
+  });
+
+  it("any other error result that ends in a throw is still classified from the throw", async () => {
+    const line = await terminalTag(
+      SPEC,
+      resultThenThrow(
+        { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1, usage: {} },
+        "API Error: 529 Overloaded",
+      ),
+    );
+    expect(line?.display?.tag).toBe("run·error·overloaded");
   });
 });

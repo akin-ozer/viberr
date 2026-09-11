@@ -351,3 +351,84 @@ describe("ruling 130(a): structured refusal facts", () => {
     expect(allowed.display?.text).toBe("rate limit · five_hour · allowed · 40%");
   });
 });
+
+/**
+ * Ruling 175: a Claude result's tokens and cost come from `modelUsage`, which
+ * covers every call the query made (subagents, sidechains, compaction), with
+ * `usage` — the main loop only — as the fallback. Column semantics do not move:
+ * input is the whole prompt, cached its cache-read subset.
+ */
+describe("ruling 175: the result fold reads modelUsage", () => {
+  const RESULT = {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    num_turns: 3,
+    duration_ms: 12_000,
+    duration_api_ms: 9_000,
+    // The main loop alone: what the row used to store.
+    usage: { input_tokens: 10, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 20_000, output_tokens: 500 },
+    total_cost_usd: 0.4,
+  };
+
+  it("sums every model's whole prompt, cache reads, output and cost", () => {
+    const { display, facts } = projectEnvelope("claude", {
+      ...RESULT,
+      modelUsage: {
+        "claude-opus-4-8": { inputTokens: 10, outputTokens: 500, cacheReadInputTokens: 20_000, cacheCreationInputTokens: 1_000, webSearchRequests: 0, costUSD: 0.3, contextWindow: 200_000, maxOutputTokens: 32_000 },
+        // A subagent on another model — invisible to `usage`.
+        "claude-haiku-4-5": { inputTokens: 40, outputTokens: 900, cacheReadInputTokens: 5_000, cacheCreationInputTokens: 2_000, webSearchRequests: 0, costUSD: 0.1, contextWindow: 200_000, maxOutputTokens: 8_000 },
+      },
+    });
+    expect(facts.usage).toEqual({
+      input_tokens: 10 + 1_000 + 20_000 + 40 + 2_000 + 5_000,
+      cached_input_tokens: 25_000,
+      output_tokens: 1_400,
+      outputEstimated: false,
+    });
+    expect(facts.costUsd).toBeCloseTo(0.4, 10);
+    expect(display?.text).toContain("$0.40");
+    expect(display?.text).toContain("· 2 models");
+    expect(display?.stats?.models).toEqual([
+      { model: "claude-opus-4-8", in: 21_010, cached: 20_000, out: 500, cost: 0.3 },
+      { model: "claude-haiku-4-5", in: 7_040, cached: 5_000, out: 900, cost: 0.1 },
+    ]);
+  });
+
+  it("falls back to usage and total_cost_usd when modelUsage is absent, empty or zeroed", () => {
+    const expected = { input_tokens: 21_010, cached_input_tokens: 20_000, output_tokens: 500, outputEstimated: false };
+    for (const modelUsage of [undefined, {}, { "claude-opus-4-8": { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } }]) {
+      const { display, facts } = projectEnvelope("claude", { ...RESULT, modelUsage });
+      expect(facts.usage, JSON.stringify(modelUsage)).toEqual(expected);
+      expect(facts.costUsd).toBe(0.4);
+      expect(display?.stats).not.toHaveProperty("models");
+      expect(display?.text).not.toContain("models");
+    }
+  });
+
+  it("a malformed model entry costs that entry, not the others", () => {
+    const { facts } = projectEnvelope("claude", {
+      ...RESULT,
+      modelUsage: {
+        "claude-opus-4-8": { inputTokens: 10, outputTokens: 500, cacheReadInputTokens: 20_000, cacheCreationInputTokens: 1_000, costUSD: 0.3 },
+        broken: "not an entry",
+      },
+    });
+    expect(facts.usage?.input_tokens).toBe(21_010);
+    expect(facts.costUsd).toBeCloseTo(0.3, 10);
+  });
+
+  it("the budget cut-off result carries its spend like any other result", () => {
+    const { display, facts } = projectEnvelope("claude", {
+      ...RESULT,
+      subtype: "error_max_budget_usd",
+      is_error: true,
+      modelUsage: {
+        "claude-opus-4-8": { inputTokens: 10, outputTokens: 500, cacheReadInputTokens: 20_000, cacheCreationInputTokens: 1_000, costUSD: 0.52 },
+      },
+    });
+    expect(display?.text).toContain("error_max_budget_usd");
+    expect(facts.isError).toBe(true);
+    expect(facts.costUsd).toBe(0.52);
+  });
+});

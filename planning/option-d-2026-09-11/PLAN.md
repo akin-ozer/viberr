@@ -292,7 +292,8 @@ option test that `mcpServers.<name>.tools` survives to the SDK options unchanged
 `docs/domain/auth-and-rbac.md` or the org-settings page for the editor field; `docs/architecture/decisions.md`
 ruling 39 amendment.
 
-**Ruling (amend 39, new 175).** "MCP grants stay outside the capability matrix, but an admin may mark a server's
+**Ruling (amend 39, new 176** — renumbered from 175 on 2026-09-11: PR 3 landed first and took 175, owner: next free
+number). "MCP grants stay outside the capability matrix, but an admin may mark a server's
 write tools; those names are denied on runs whose repo-write grant is withheld, through the SDK's per-tool policy on
 HTTP servers and by name on stdio servers. Viberr still makes no claim about tools the admin has not marked."
 
@@ -353,7 +354,7 @@ the spec on every run builder when the setting is set and is absent when it is n
 `docs/domain/auth-and-rbac.md` (the org-settings field); `docs/domain/task-lifecycle.md` packet copy;
 `docs/product/glossary.md` (failure kinds).
 
-**Ruling (new, 176, extending 130(a)).** "A Claude run carries the instance's spending cap when one is set; the SDK's `error_max_budget_usd` result is the `max_budget` failure kind and its packet names
+**Ruling (new, 175, extending 130(a)** — renumbered from 176 on 2026-09-11: this PR landed before PR 2). "A Claude run carries the instance's spending cap when one is set; the SDK's `error_max_budget_usd` result is the `max_budget` failure kind and its packet names
 the cap and the spend. Token and cost columns are folded from `modelUsage`, which covers subagent and compaction
 calls, with `usage` as the fallback for results that lack it."
 

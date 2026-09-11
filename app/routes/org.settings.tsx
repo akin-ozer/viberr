@@ -37,7 +37,12 @@ import {
   drainRunQueue,
   runConcurrencySnapshot,
 } from "~/server/runtimes/run-service.server";
-import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
+import {
+  getMaxRunSpendUsd,
+  isRunSpendAmount,
+  setMaxRunSpendUsd,
+  setMaxConcurrentRuns,
+} from "~/server/settings/instance-settings.server";
 import {
   clearS3AuditConfig,
   getS3AuditConfigForUse,
@@ -119,6 +124,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Instance run-concurrency: the configured cap and the live/queued counts,
     // for the admin control below StorageLine.
     runConcurrency: runConcurrencySnapshot(getDb()),
+    // Ruling 175: the instance's spending cap per Claude run (null = none).
+    runSpendCapUsd: getMaxRunSpendUsd(getDb()),
     // The S3 audit-export target (never carries the secret key).
     s3Audit: getS3AuditConfigView(getDb()),
     // PG26-A: the recent audit events for the in-app browse panel — the only way
@@ -262,6 +269,25 @@ export async function action({ request }: Route.ActionArgs) {
             ? "Run concurrency is now unlimited."
             : `Agent runs are now capped at ${applied} at a time.`,
         );
+      }
+      // ------------------------------------------------- run spending cap
+      case "set-run-spend-cap": {
+        // Ruling 175: blank clears the cap; otherwise dollars above zero with
+        // at most two decimals. Read as text first, so "1e3" or "0x10" is an
+        // amount nobody typed rather than one `Number` made up.
+        const raw = field("maxRunSpendUsd").trim();
+        if (raw === "") {
+          setMaxRunSpendUsd(db, null, actor);
+          return ok("Claude runs no longer have a spending cap.");
+        }
+        const amount = /^\d+(?:\.\d{1,2})?$/.test(raw) ? Number(raw) : Number.NaN;
+        if (!isRunSpendAmount(amount)) {
+          return fail(
+            "Enter a dollar amount above zero with at most two decimals, or leave it blank for no cap.",
+          );
+        }
+        setMaxRunSpendUsd(db, amount, actor);
+        return ok(`Claude runs now stop when they have spent $${amount.toFixed(2)}.`);
       }
       // ------------------------------------------------- audit S3 export
       case "s3-config-save": {
@@ -747,6 +773,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       meId={loaderData.meId}
       callbackOrigin={loaderData.callbackOrigin}
       runConcurrency={loaderData.runConcurrency}
+      runSpendCapUsd={loaderData.runSpendCapUsd}
       s3Audit={loaderData.s3Audit}
       auditEvents={loaderData.auditEvents}
       controllerConfig={loaderData.controllerConfig}

@@ -10,7 +10,8 @@
 > `/profile` gained the **Agent accounts** panel and its five intents, and
 > `/resources/backend-login` is a new fetcher target that answers the CALLER's own
 > hosted sign-in session. Agent backends are connected per person there, never per
-> deployment.
+> deployment. Updated 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`):
+> Org settings gains the `set-run-spend-cap` intent.
 
 ## 1. Route table
 
@@ -195,7 +196,7 @@ Intents behind `project.task.tsx` are explained in
 `mcp-delete`, `store-mkdir`, `store-upload`, `store-read-doc`, `store-write-doc`,
 `store-delete`, `store-import-github`), agent templates (`agent-save`, `agent-delete`),
 controller (`controller-save`), audit (`audit-export-s3`, `s3-config-save`,
-`s3-config-clear`), runtime (`set-concurrency`).
+`s3-config-clear`), runtime (`set-concurrency`, `set-run-spend-cap`, ruling 175).
 
 The **Controller settings** tab is the one org-settings surface whose controls are not
 all live (rulings 106, 107, 108): model and effort use the agent profile editor's own

@@ -35,6 +35,14 @@ it when a run settles and boot sweeps orphans, and the Claude CLI is spawned det
 `operations/configuration.md` (§3), `operations/runbook.md` (Agent runtimes),
 `architecture/overview.md` (§6 shutdown) and `development/testing.md` (§2).
 
+Updated 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`): an org admin may
+cap what one Claude run spends (Org settings, none by default; Codex has no budget option);
+a run the cap stops is the `max_budget` cut-off; Claude's token and cost columns count every
+call a run made (`modelUsage`). Pages: `architecture/decisions.md` (ruling 175),
+`architecture/data-model.md`, `domain/agents-and-runtime.md` (§§2.4, 2.5, 3.1, 3.5),
+`domain/auth-and-rbac.md` (§4, §5), `domain/task-lifecycle.md` (§7), `product/glossary.md`,
+`operations/configuration.md` (§4), `operations/runbook.md` and `ui/surfaces.md`.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -68,7 +76,7 @@ it when a run settles and boot sweeps orphans, and the Claude CLI is spawned det
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 174 numbered owner rulings (1–174; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 175 numbered owner rulings (1–175; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 

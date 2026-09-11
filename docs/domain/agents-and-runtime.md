@@ -20,7 +20,11 @@
 > each lands. Updated 2026-09-11 for ruling 174 (branch `option-d/pr1-permissions-and-kill`):
 > §2.2 (the run marker every child carries), §2.4 (`allowDangerouslySkipPermissions`, the
 > detached CLI, the stop ladder), §2.5 (the marker's two Codex channels), §3.4 (what a
-> settled run leaves alive: nothing) and §8 (boot sweeps the orphans' processes). The operator's own behaviour is in
+> settled run leaves alive: nothing) and §8 (boot sweeps the orphans' processes). Updated
+> 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`): §2.4 and §2.5 (the
+> instance's spending cap, `maxBudgetUsd` on Claude, none on Codex), §3.1 (token and cost
+> columns folded from `modelUsage`, with a dated correction) and §3.5 (the `max_budget`
+> kind). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -193,7 +197,9 @@ connecting a different account there (ruling 165).
   every tool), `permissionPrompts: "none"` on every run (SDK ≥ 0.3.259: nobody answers a prompt in a
   server-spawned run, so a tool the mode would ask about is denied at once with a reason
   the model can act on; binds only on the `default` seam, bypass never prompts),
-  `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `strictMcpConfig: true`,
+  `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `maxBudgetUsd` when the instance
+  has a spending cap (ruling 175: Org settings → Max spend per Claude run, stamped on every
+  run by `startRun` as `RunSpec.maxSpendUsd`; none by default), `strictMcpConfig: true`,
   `plugins: []`, `settingSources: ["project"]` only when native skills are mounted
   (else `[]`), `disallowedTools` (binds even under bypass), `allowedTools` for the
   toolkit and mounted MCP names. `systemPrompt` **replaces** the preset for operator and
@@ -223,7 +229,16 @@ connecting a different account there (ruling 165).
   the effective CLAUDE.md exclusion is the `settings.json` written by skill-mount.
 - Success = a `result` envelope with `!is_error`. Failures tag `run·error·<kind>` with
   `kind ∈ quota | auth | overloaded | session_missing | unknown`; idle → `run·error·idle_timeout`;
-  `error_max_turns` → `run·error·max_turns`. Provider text follows
+  `error_max_turns` → `run·error·max_turns`; `error_max_budget_usd` → `run·error·max_budget`
+  with a typed record carrying the cap (`spendCapUsd`) and the spend at cut-off (`spentUsd`,
+  the result's cost), and a line saying it was cut off, not failed, and where the cap is
+  raised (ruling 175). The pinned SDK yields an error result and then THROWS: when the CLI
+  exits non-zero after it, `readMessages` replaces the exit error with "Claude Code
+  returned an error result: <text>". So a cut-off is classified from the result even when
+  the stream throws afterwards (`emitCutOff`, both paths); any other error result that
+  ends in a throw is classified from the throw as before. *(Found by the ruling-175 live
+  canary, 2026-09-11: the spending cap, and the turn cap with it, had been ending as
+  `run·error·unknown` since the SDK began throwing.)* Provider text follows
   `"\n\nThe provider reported: "`.
 - Ruling 130(a) (pass 34): refusals are classified from the STRUCTURED envelope first
   and from prose second, in the order spawn codes → `session_missing` → `quota` (a
@@ -282,7 +297,10 @@ connecting a different account there (ruling 165).
   off; withheld egress sets `webSearchMode: "disabled"`.
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
-- No `maxTurns`; idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s. The
+- No `maxTurns` and no budget option: the instance's spending cap (ruling 175) does not bind
+  a Codex run, and its run-inputs disclosure says so ("Codex has no budget option: this run
+  is bounded by its idle timer only"). Idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`);
+  interrupt settle 20 s. The
   SDK spawns the CLI itself with a plain `spawn()` and only ever SIGTERMs it, so the settle
   sweep (§3.4) is what reaches a CLI that outlived its abort and everything its shell
   started. There is no wrapper around the Codex binary: the owner's decision D1 (a wrapper
@@ -310,9 +328,15 @@ connecting a different account there (ruling 165).
 - **Token columns mean the same thing on both backends.** `input_tokens` is the total
   input the provider processed for the run, cache reads and cache writes included: Codex
   `usage.input_tokens` verbatim (its cache figures are subsets of it); Claude
-  `result.usage.input_tokens + cache_creation_input_tokens + cache_read_input_tokens`,
-  normalized in `wire-format.server.ts` (Claude reports the three as disjoint figures,
-  and the uncached slice alone is two tokens per call). `cached_input_tokens` is the
+  Σ over `result.modelUsage` of `inputTokens + cacheCreationInputTokens +
+  cacheReadInputTokens` (ruling 175), normalized in `wire-format.server.ts` (Claude
+  reports the three as disjoint figures, and the uncached slice alone is two tokens per
+  call). `modelUsage` covers every call the query made — the main loop, subagents,
+  sidechains, compaction — per model; `result.usage` (the same sum over the main loop only)
+  and `total_cost_usd` are the fallback for a result whose `modelUsage` is absent, empty or
+  zeroed (an older CLI, a crash result). The cost column is Σ `costUSD` on the same basis,
+  and the result line keeps the per-model breakdown in its `stats.models` (and says "N
+  models" when more than one ran); there is no per-model column. `cached_input_tokens` is the
   subset of `input_tokens` served from the prompt cache (Codex `cached_input_tokens`,
   Claude `cache_read_input_tokens`) and is never larger than `input_tokens`.
   `output_tokens` is the provider's figure. `turns` is Claude's `result.num_turns` (one
@@ -338,11 +362,14 @@ connecting a different account there (ruling 165).
   quietly understating its sums. Adding the column to a root that predates it heals the
   rows it already holds: a `finished` row's token columns were the provider's own
   figures before the estimate existed, so the boot healer stamps those 1; a stopped or
-  errored row held the old placeholder and stays 0. Claude `result.usage`
-  covers the main loop only while `total_cost_usd` also covers side-model calls, so
-  tokens and cost sit on slightly different bases; a resumed Codex thread reports the
+  errored row held the old placeholder and stays 0. A resumed Codex thread reports the
   thread's cumulative total. Claude rows written before this normalization hold the
-  uncached slice only.
+  uncached slice only. *(Corrected 2026-09-11, ruling 175: this paragraph said Claude's
+  tokens came from `result.usage`, which covers the main loop only, while the cost covered
+  side-model calls too, so the two sat on different bases. Rows written before ruling 175
+  folded `usage`, and a run that delegated to subagents or compacted stored fewer tokens
+  than it processed; rows written after fold `modelUsage` and match the cost's basis.
+  Insights sums the rows as stored, so old rows are unchanged.)*
 - `credential_user_id` (ruling 127) is the run's **credential principal**: whose account
   it billed. It is written on the reserved row and on the started row, carried in the
   `runtime.run.started` audit, and read back by the transcript locator and the run
@@ -441,14 +468,22 @@ line is `reaped the processes a settled run left behind`, with the counts.
 
 ### 3.5 Failure kinds
 
-`RunFailureKind = quota | auth | unavailable | overloaded | max_turns | idle_timeout |
-session_missing | unknown`, read from the terminal line's typed `failure` record first,
+`RunFailureKind = quota | auth | unavailable | overloaded | max_turns | max_budget |
+idle_timeout | session_missing | unknown`, read from the terminal line's typed `failure` record first,
 the tag suffix second and regexes last (ruling 130(a)). `runFailureReason` returns the
 record as `facts`; `projectRunsForTask` sets `failureKind` on every errored run's view
 (operator runs included) and flags `failedBackendUnavailable` from the class before the
 raw scan; the controller's turn note (ruling 130(b)) names a quota window's reset and
 the account switch, or an auth refusal's organization restriction, instead of "Say it
 again to retry", which stays only for an unclassified failure.
+`max_budget` (ruling 175) is a cut-off like `max_turns`: the instance's spending cap, not
+the task, ended a Claude run. Its record carries the cap and the spend; the specialist's
+blocked event reads "the Claude run reached the instance's spending cap of $X after
+spending $Y and was CUT OFF mid-work, which is not a task failure" and says no "No changes
+were delivered"; the remedy (operator and specialist alike, `describeRunFailure`) is to
+re-run it or have an org admin raise the cap in Org settings; the operator's options are
+the ordinary re-run set, never another-backend retry; the pill reads `cut off · spending
+cap`; the controller's turn note names the cap and the spend.
 `overloaded` (added with the Agent SDK 0.3.261 upgrade) is the provider's side, not the
 account's: the Claude adapter reads it from `api_error_status: 529`/5xx or the `overloaded`
 / `server_error` banner codes, the Codex adapter from the same prose signatures the raw

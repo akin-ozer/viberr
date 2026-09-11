@@ -882,6 +882,17 @@ describe("runFailureReason (F7-RUN1)", () => {
     ).toMatchObject({ kind: "session_missing" });
   });
 
+  it("ruling 175: a spending-cap cut-off is its own kind, by record or by tag", () => {
+    expect(
+      classify([
+        errLine({
+          tag: "run·error·max_budget",
+          text: "The run reached its $0.50 spending cap after spending $0.52 and was cut off.",
+        }),
+      ]),
+    ).toMatchObject({ kind: "max_budget" });
+  });
+
   it("returns the last err line and null when no failure line exists", () => {
     expect(
       classify([

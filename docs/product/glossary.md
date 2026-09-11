@@ -5,7 +5,8 @@
 > @ `68b5480` (2026-09-01); the ruling-121 terms re-verified against the
 > working tree on 2026-09-03. Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): **Backend** rewritten, **Agent account** and
-> **Credential principal** added.
+> **Credential principal** added. Updated 2026-09-11 for ruling 175 (branch
+> `option-d/pr3-cost-cap-usage`): **Run failure kind** and **Spending cap** added.
 
 **Acceptance** — the human act that closes a task into the terminal stage. Verdict-gated (ruling 20), requires the review PR head to contain the delivered revision, refuses while the PR is closed unmerged (ruling 37), and must carry the disclosure echo the human was shown (ruling 88). Two other endings exist: **force-accept** (admin-only override of the verdict gate, audited `task.acceptance.forced`, recorded as `acceptance: forced` and rendered `bypassed`) and **Completed, no changes** (a verified empty diff or no branch; still verdict-gated, merges nothing).
 
@@ -89,6 +90,8 @@
 
 **Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`); `state` is `queued | running | finished | error | interrupted`. An `interrupted` run names who stopped it (`interrupted_by`, a person) or why (`interrupted_reason: restart`, boot recovery); a restart is never an error.
 
+**Run failure kind** — why an errored run ended, the `RunFailureKind` enum in `app/shared/run-failure.ts`: `quota | auth | unavailable | overloaded | max_turns | max_budget | idle_timeout | session_missing | unknown`. Read from the terminal line's typed `failure` record first (ruling 130(a)), then the `run·error·<kind>` tag suffix, then prose. `quota` and `auth` are the account's (remedy on Profile → Agent accounts), `unavailable` means no credential (no process started), `overloaded` the provider's side (retry), `max_turns` and `max_budget` are cut-offs by the turn cap and the spending cap (not task failures), `idle_timeout` a hang, `session_missing` a resume whose transcript is gone.
+
 **Schedule** — a future run recorded in `task.md` `schedules[]`: `run-operator` (optional steer) or `run-agent` (a profile id + prompt). Statuses `pending | claimed | fired | failed | cancelled`. Resolves the live deployment at fire time; never fires on a terminal task.
 
 **Scope violation** — a recorded PAT permission gap (`scope_violations`), opened by the reconciler or a refused push, resolved by re-validating the credential. The rail Settings badge is the open count.
@@ -96,6 +99,8 @@
 **Session export** — `/resources/session-export?run=<id>`: a bash installer carrying the provider transcript so a run can be resumed locally with `claude --resume` / `codex resume`.
 
 **Skill** — a folder `skills/<name>/SKILL.md` (plus supporting files). Claude runs load granted skills through the SDK's native skills mechanism; Codex runs get the body injected as prompt text (ruling 51).
+
+**Spending cap** — `maxRunSpendUsd`, the instance's cap on what one Claude run may spend, in USD (ruling 175; Org settings, org admins only, none by default). Every run carries it as `RunSpec.maxSpendUsd`; the Claude SDK stops a run past it (`error_max_budget_usd` → failure kind `max_budget`). Codex has no budget option, so it does not bind Codex runs.
 
 **Stage roles** — `entry`, `ready`, `work`, `review`, `terminal`, derived from the per-project stage list and workflow graph (`resolveStageRoles`). Stage ids are never hard-coded.
 

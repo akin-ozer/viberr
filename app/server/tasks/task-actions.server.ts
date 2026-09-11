@@ -1,5 +1,6 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { findUserById } from "~/server/auth/user-store.server";
+import { formatUsd } from "~/shared/run-failure";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -4107,6 +4108,14 @@ export async function applyAgentCompletionEffects(
         ? failText || `${backendLabel} could not run for this task's owner`
         : failure?.kind === "max_turns"
           ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
+          // Ruling 175: the leaf words the cap and the spend from the typed
+          // record; the cut-off is not a task failure either.
+          : failure?.kind === "max_budget"
+            ? `the ${backendLabel} run reached the instance's spending cap${
+                failure.facts?.spendCapUsd !== undefined ? ` of ${formatUsd(failure.facts.spendCapUsd)}` : ""
+              }${
+                failure.facts?.spentUsd !== undefined ? ` after spending ${formatUsd(failure.facts.spentUsd)}` : ""
+              } and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
           // P13-D-2: a dead provider transcript is its own class. It used to
           // fall through to the generic branch below, which reads like a
           // runtime error and sent people to check a credential that was
@@ -4126,10 +4135,12 @@ export async function applyAgentCompletionEffects(
     const failureText = classified
       ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason} No changes were delivered. ${described.remedy}${providerBlock}`
       : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${
-          failure?.kind === "max_turns" ? "" : " No changes were delivered."
+          failure?.kind === "max_turns" || failure?.kind === "max_budget" ? "" : " No changes were delivered."
         }${
           failure?.kind === "max_turns"
             ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
+            : failure?.kind === "max_budget"
+              ? ` ${described.remedy}`
             : failure?.kind === "session_missing"
               ? " Re-prompt the agent: it will start a fresh run and re-anchor on this task file. Provider transcripts expire, and wiping the data root removes them too."
               // The refusal sentence already says who must do what and where;

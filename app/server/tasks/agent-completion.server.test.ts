@@ -1314,6 +1314,87 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     for (const o of packet.options) expect(o.t).not.toMatch(/[–—]/);
   });
 
+  it("ruling 175: a specialist the spending cap cut off names the cap and the spend, is not a task failure, and names who raises the cap", async () => {
+    // Canary: drop the `max_budget` arm and the event reads "Claude run failed:
+    // …" followed by "No changes were delivered." — a cap reads as a failure.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = "run_175_budget";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-175",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "claude",
+      model: "opus",
+      sdk: "claude",
+      state: "error",
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-09-11T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "run·error·max_budget" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "run·error·max_budget",
+        text: "The run reached its $0.50 spending cap after spending $0.52 and was cut off.",
+        failure: { ...emptyRunFailureFacts("max_budget"), spendCapUsd: 0.5, spentUsd: 0.52 },
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    const event = taskFile().parsed.timeline.find(
+      (e) => e.type === "blocked" && /did not complete/.test(e.text),
+    )!;
+    expect(event.text).toContain(
+      "the Claude run reached the instance's spending cap of $0.50 after spending $0.52 and was CUT OFF mid-work, which is not a task failure",
+    );
+    expect(event.text).toContain("raise the cap in Org settings (Max spend per Claude run)");
+    expect(event.text).not.toContain("No changes were delivered.");
+    expect(event.text).not.toMatch(/\.\./);
+  });
+
   /**
    * T13's other half: the dedupe must not become silence. When no packet
    * notification goes out — here because no operator is deployed, so the

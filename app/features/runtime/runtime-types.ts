@@ -95,6 +95,10 @@ export interface LogLine {
     in: number;
     cached: number;
     out: number;
+    /** Ruling 175: each model's share, from the result's `modelUsage` (the
+     *  main loop, subagents and compaction can each run on another model).
+     *  Absent when the result carried none, and on older lines. */
+    models?: { model: string; in: number; cached: number; out: number; cost: number }[];
   } | null;
   /** Codex turn.completed usage → raw `turn.completed.usage`. */
   usage?: {
@@ -191,6 +195,10 @@ export interface RunInputs {
     mode: "read-only" | "workspace-write" | "danger-full-access";
     note: string | null;
   } | null;
+  /** Ruling 175: the instance's spending cap per run when this run started
+   *  (USD), null when none was set. Claude enforces it; Codex has no budget
+   *  option, and the row says so. Absent on lines written before the ruling. */
+  spendCapUsd?: number | null;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
@@ -788,6 +789,44 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   // between runs but the SDK options do not, and the persona built by the same
   // call already leaves a mounted skill's body out — so dropping it here would
   // strip the agent's granted craft mid-thread with nothing in its place.
+  it("ruling 175: the instance's spending cap rides every run, fresh and resumed, and is absent when none is set", async () => {
+    // Canary: drop the `getMaxRunSpendUsd` stamp from `startRun` and the
+    // capped specs read undefined — every builder funnels through it, so no
+    // path can start a run without the cap.
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    const run = (threadId: string) =>
+      startTestRun(store.db, {
+        projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+        backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot, threadId,
+      });
+
+    const uncapped = await run("t-uncapped");
+    await settle();
+    expect(specs.find((s) => s.runId === uncapped.runId)).not.toHaveProperty("maxSpendUsd");
+
+    setMaxRunSpendUsd(store.db, 1.25, { userId: null, label: "test" });
+    const capped = await run("t-capped");
+    await settle();
+    expect(specs.find((s) => s.runId === capped.runId)?.maxSpendUsd).toBe(1.25);
+    const resumed = await resumeRun(store.db, {
+      runId: capped.runId,
+      prompt: "follow up",
+      credentialUserId: store.users.arda.id,
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs.find((s) => s.runId === resumed.runId)?.maxSpendUsd).toBe(1.25);
+  });
+
   it("resumeRun forwards the run confinement (skills included) onto the resumed RunSpec", async () => {
     const specs: RunSpec[] = [];
     const capture: RuntimeAdapter = {

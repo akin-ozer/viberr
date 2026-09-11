@@ -1,6 +1,7 @@
 import path from "node:path";
 import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+import { formatUsd } from "~/shared/run-failure";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { KB_INJECTION_BUDGET, KB_PRECEDENCE_NOTE, readKbBodies } from "~/server/files/kb-injection.server";
@@ -551,6 +552,15 @@ function failedTurnNote(failure: RunFailure | null): string {
       `I could not finish this turn: Claude was overloaded or failed on its side${status}. ` +
       "Nothing about your account is wrong. Say it again in a few minutes." +
       (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
+    );
+  }
+  if (failure?.kind === "max_budget") {
+    // Ruling 175: the instance's spending cap stopped the turn, not the ask.
+    const cap = facts?.spendCapUsd !== undefined ? ` of ${formatUsd(facts.spendCapUsd)}` : "";
+    const spent = facts?.spentUsd !== undefined ? ` after spending ${formatUsd(facts.spentUsd)}` : "";
+    return (
+      `I could not finish this turn: the instance's spending cap${cap} stopped it${spent}. ` +
+      "Say it again to continue, or ask an org admin to raise the cap in Org settings (Max spend per Claude run)."
     );
   }
   const detail = "the run did not complete";

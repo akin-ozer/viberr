@@ -23,6 +23,7 @@ import {
 import {
   coordinationLane,
   getMaxConcurrentRuns,
+  getMaxRunSpendUsd,
 } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
@@ -964,6 +965,12 @@ export async function startRun(
     spec.webSearchWithheld = true;
   }
   if (input.outputSchema) spec.outputSchema = input.outputSchema;
+  // Ruling 175: the instance's spending cap rides every run from here, the one
+  // funnel every builder goes through (specialist, operator, controller,
+  // resume, scheduled, recovery), so no path can start a run without it.
+  // Codex ignores it: its SDK has no budget option.
+  const spendCap = getMaxRunSpendUsd(db);
+  if (spendCap !== null) spec.maxSpendUsd = spendCap;
   // Ruling 127: the credential's env (the principal's home, plus their pasted
   // key when they have one) is the BASE; the caller's per-run overlay (the
   // specialist's GIT_* workspace confinement) goes on top. `resolveRunCredential`

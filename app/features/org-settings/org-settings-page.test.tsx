@@ -1235,6 +1235,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
           meId={ME.id}
           callbackOrigin="http://localhost:5173"
           runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+          runSpendCapUsd={null}
           s3Audit={null}
           controllerConfig={CONTROLLER_CONFIG}
           controllerLocks={CONTROLLER_LOCKS}
@@ -1272,6 +1273,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1328,6 +1330,7 @@ describe("C9: instance storage line", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1358,6 +1361,7 @@ describe("C9: instance storage line", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1392,6 +1396,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, lane: 1, live: 2, queued: 1 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1414,6 +1419,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, lane: 1, live: 3, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1439,6 +1445,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 5, lane: 2, live: 5, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1457,6 +1464,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 1, lane: 1, live: 1, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1473,6 +1481,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1489,6 +1498,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1511,6 +1521,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1522,10 +1533,12 @@ describe("run concurrency control", () => {
     const row = input.closest(".guard-row")!;
     expect(row.querySelector(".guard-name")?.textContent).toBe("Run concurrency");
     expect(input.closest(".pol-note")).toBeNull();
-    // The well is the group, named by the row's own name.
+    // Ruling 175 put a second limit in the well, so the ROW is the group now,
+    // named by its own name, and the well is the ground both rows stand on.
     const group = getByRole("group", { name: "Run concurrency" });
-    expect(group.className).toBe("conc-well");
+    expect(group.className).toBe("guard-row");
     expect(group.contains(input)).toBe(true);
+    expect(group.closest(".conc-well")).not.toBeNull();
   });
 
   // PG26-A: the in-app audit browse + the Org-scoped toggle that isolates the
@@ -1537,6 +1550,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1584,6 +1598,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1609,6 +1624,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1653,6 +1669,7 @@ describe("run concurrency control", () => {
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1673,6 +1690,95 @@ describe("run concurrency control", () => {
  * for ANY record past the window, which is now false, so the disclosure has to
  * name where the rows actually land and when.
  */
+/**
+ * Ruling 175: the instance's spending cap per Claude run, the second row in the
+ * run-limits well. Blank means no cap; the action refuses what it cannot store,
+ * and the row says plainly that Codex has no budget option.
+ */
+describe("spending cap control (ruling 175)", () => {
+  const view: OrgSettingsView = {
+    connections: CONNECTIONS,
+    users: [ME],
+    domains: DOMAINS,
+    kbs: KBS,
+    mcps: MCPS,
+    skills: SKILLS,
+    gagents: GAGENTS,
+    projectGrants: { kbs: {}, mcps: {}, skills: {} },
+    templateGrants: { kbs: {}, mcps: {}, skills: {} },
+    stages: STAGES,
+    providers: { github: false, google: false },
+    authProviders: AUTH_PROVIDERS,
+    storage: STORAGE,
+  };
+  const page = (runSpendCapUsd: number | null) => (
+    <OrgSettingsPage
+      view={view}
+      meId={ME.id}
+      callbackOrigin="http://localhost:5173"
+      runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+      runSpendCapUsd={runSpendCapUsd}
+      s3Audit={null}
+      controllerConfig={CONTROLLER_CONFIG}
+      controllerLocks={CONTROLLER_LOCKS}
+      auditEvents={[]}
+    />
+  );
+
+  it("is its own row in the same well as run concurrency, and says Codex has no budget option", () => {
+    const { getByRole, getByText, getByLabelText } = renderPanel(page(null));
+    const row = getByRole("group", { name: "Spending cap" });
+    expect(row.className).toBe("guard-row");
+    expect(row.closest(".conc-well")).toBe(
+      getByRole("group", { name: "Run concurrency" }).closest(".conc-well"),
+    );
+    expect(getByText("No cap")).toBeTruthy();
+    expect(getByText(/Codex has no budget option, so a Codex run is bounded by its idle timer only/)).toBeTruthy();
+    expect(getByLabelText("Max spend per Claude run, USD")).toHaveProperty("value", "");
+  });
+
+  it("reads a set cap back in dollars", () => {
+    const { getByText, getByLabelText } = renderPanel(page(5));
+    expect(getByText("$5.00 per Claude run")).toBeTruthy();
+    expect(getByLabelText("Max spend per Claude run, USD")).toHaveProperty("value", "5.00");
+  });
+
+  it("submits a new cap, and a cleared field submits blank to lift it", async () => {
+    const set = renderPanel(page(null));
+    fireEvent.change(set.getByLabelText("Max spend per Claude run, USD"), { target: { value: "2.5" } });
+    fireEvent.click(set.getByRole("button", { name: "Save spending cap" }));
+    await waitFor(() => {
+      expect(lastForm?.intent).toBe("set-run-spend-cap");
+      expect(lastForm?.maxRunSpendUsd).toBe("2.5");
+    });
+    set.unmount();
+
+    lastForm = null;
+    const clear = renderPanel(page(5));
+    fireEvent.change(clear.getByLabelText("Max spend per Claude run, USD"), { target: { value: "" } });
+    fireEvent.click(clear.getByRole("button", { name: "Save spending cap" }));
+    await waitFor(() => {
+      expect(lastForm?.intent).toBe("set-run-spend-cap");
+      expect(lastForm?.maxRunSpendUsd).toBe("");
+    });
+  });
+
+  it("ruling 147: zero or a third decimal is refused on the click, not by a dead Save", () => {
+    const { getByLabelText, getByRole, queryByRole } = renderPanel(page(null));
+    const input = getByLabelText("Max spend per Claude run, USD");
+    const save = getByRole("button", { name: "Save spending cap" });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    for (const bad of ["0", "1.234"]) {
+      fireEvent.change(input, { target: { value: bad } });
+      expect(save.hasAttribute("disabled"), bad).toBe(false);
+      fireEvent.click(save);
+      expect(lastForm, bad).toBeNull();
+      expect(queryByRole("alert")?.textContent, bad).toContain("at most two decimals");
+      expect(input.getAttribute("aria-invalid"), bad).toBe("true");
+    }
+  });
+});
+
 describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", () => {
   const S3 = {
     bucket: "audit-bkt",
@@ -1702,6 +1808,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
       meId={ME.id}
       callbackOrigin="http://localhost:5173"
       runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+      runSpendCapUsd={null}
       s3Audit={s3Audit}
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
@@ -1848,6 +1955,7 @@ describe("FR33: the audit card discloses the export-before-purge record", () => 
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
@@ -1894,6 +2002,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         meId={ME.id}
         callbackOrigin="http://localhost:5173"
         runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+        runSpendCapUsd={null}
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
