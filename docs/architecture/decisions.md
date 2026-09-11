@@ -3762,6 +3762,79 @@ by rewriting those paragraphs:*
     `codexMcpServers` in `codex-runtime.server.ts`; `buildSpecialistPersona` and
     `buildOperatorSystemPrompt`; `McpModal` in `app/features/org-settings/resource-modals.tsx`.)
 
+177. **A closed task refuses every coordination door, and closing it ends its live runs
+    (owner, 2026-09-11, pass 36; Q36-8).** A task at its terminal stage or archived is
+    CLOSED. Before this ruling "closed" had three spellings and several doors read none of
+    them: the schedule runner's `mootNow`, the specialist dispatch's archived-only gate, and
+    `runOperator`'s terminal-stage refusal scoped to the `scheduled` trigger (FR39 / F19-20:
+    "every other trigger on a terminal task is legitimate"). Live (F36-4, F36-5): an
+    `@operator` mention started a paid run on an archived task behind a page whose own
+    button refused it, and a developer run that outlived a force-accept re-invoked the
+    operator on the shipped task, whose plan then opened a decision packet there.
+    (a) *One predicate.* `taskClosure(fm, stages)` (`app/server/tasks/task-closure.server.ts`)
+    is the only spelling — `archived`, or the stage is the board's last — and
+    `closureRefusal` the only sentence ("<KEY> is archived — restore it before <verb>." /
+    "<KEY> is closed (<Stage> is the terminal stage) — move it back to an open stage before
+    <verb>."). `runOperator` refuses EVERY trigger with `refused: "closed"` and the sentence
+    in `refusalReason`, settling `waiting` to `none`; the mention door writes the F35-5
+    "Mention not started" note; the specialist dispatch, the packet writer, the schedule
+    runner and the reconciler's budgeted queue read it too. A run's completion on a closed
+    task records its report with a "Completed after the task closed" note and wakes no
+    operator, however it was dispatched. Reopening is a human stage move, and the
+    transition that reopens the task is the trigger that coordinates again.
+    (b) *Closing ends live runs.* Acceptance, force-accept and archive interrupt the task's
+    running and queued runs through `interruptRunOnClosure` (run-service; audited
+    `runtime.run.interrupted {reason: "task-closed", cause, closedBy}` under the system
+    actor, no RBAC — the person's authority was spent on the closure), write one
+    "Interrupted by acceptance" note naming every run and one
+    `task.acceptance.interrupted_runs` row. A closed task spends nothing more.
+    (c) *A restart says so on the task.* Boot recovery leaves one "Interrupted by a restart"
+    note per task whose runs it finalized (U36-8), before the operator it re-invokes.
+    (d) N20-17's disclosure ("mentioning @operator still runs it") is gone with the door,
+    and the archive dialogs promise what restore does — a human, not a reopened question
+    (U36-1). Rulings 131(d) and 141 keep their own refusals beside this one.
+178. **A project declares its required reviewers (owner, 2026-09-11, pass 36; Q36-5).**
+    _(text supplied by the ruling-178 implementation; see the required-reviewers commit)_
+179. **Ruling 163 applies to the pull-request head (owner, 2026-09-11, pass 36; Q36-9).**
+    Verdicts bind to the WORK revision, and a foreign push moves the review PR's head
+    without touching it — so after an observer commit landed on an approved PR at Merge
+    Approval, `validation` stayed healthy, the accept card stayed applicable, nothing
+    woke or notified, the Commits card (prefix-filtered) hid the commit, and no re-review
+    path existed because the reviewer is scoped to the verdict stage (F36-7). The merge is
+    what a verdict protects, and the merge takes the head.
+    (a) *Authored drift after a verdict voids it.* On the pass that first records a moved
+    head carrying authored commits (ruling 132's classification: `authored > 0`, the cached
+    drift names a different head) on a task that is not closed and whose current revision
+    carries a verdict, the reconciler mints the head as the revision under review
+    (`workRevision.kind: "external"`, `sourceProfileId: null`), re-derives `validation`
+    (→ `changed`), withdraws the moot accept and transition offers, writes a "Revision
+    moved after review" note carrying ruling 132's drift sentence, notifies the watchers
+    (`policy`), wakes the operator (`pr-diverged`) and — when the task sits past its
+    verdict stage — returns it there through the rework route (`task.transition
+    {boundary: "rework", via: "authored-drift"}`, actor the system). The same head on a
+    later pass is old news; a delivery that replaces the revision in the window wins.
+    (b) *Drift before any verdict is the branch growing.* Nothing is minted or voided; the
+    drift record is written as before.
+    (c) *The foreign commits are visible.* `github.otherCommits` keeps the branch commits
+    without the task's `[KEY]` prefix, and the Commits card lists them apart as "Also on
+    the branch · not this task's".
+180. **Claude skills mount outside the task checkout (owner, 2026-09-11, pass 36).**
+    _(text supplied by the ruling-180 implementation; see the skill-mount commit)_
+181. **Every Codex run gets a private CODEX_HOME (owner, 2026-09-11, pass 36; Q36-11).**
+    _(text supplied by the ruling-181 implementation; see the per-run home commit)_
+182. **The Codex sandbox is probed and reported, and a sandboxed dispatch refuses when it
+    cannot start (owner, 2026-09-11, pass 36; Q36-1).**
+    _(text supplied by the ruling-182 implementation; see the toolchain commit)_
+183. **A SKILL.md body is judged before any writer writes it (owner, 2026-09-11, pass 36).**
+    _(text supplied by the ruling-183 implementation; see the skill-body commit)_
+
+F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
+a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
+`failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
+audit row, and a request-changes verdict drops any pending transition card the same way
+it already dropped the accept offer. "Review stage" in that writer is the stage with an
+edge into the terminal one, so a task AT its verdict stage was "strictly before" it.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

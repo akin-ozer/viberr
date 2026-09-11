@@ -117,8 +117,14 @@ list keeps ruling 131's floor. Every dispatch lifts the same way (§4.1 of
 agents-and-runtime). The lift is not a claim that the cause is fixed: the operator
 re-checks and opens a new packet when the block stands.
 
-Fire-time refusals from `runOperator`: `terminal-stage` (a scheduled re-run never
-fires on a terminal task), `open-packet` (a **human-pressed** Run operator, or the same turn a person
+Fire-time refusals from `runOperator`: `closed` (ruling 177, pass 36: a task at its
+terminal stage or archived refuses EVERY trigger — `create`, `transition`, `agent-reply`,
+`goal-updated`, `pr-diverged`, `delivered`, `packet-resolved`, `dependencies-released`,
+`scheduled`, `manual` — before any run row exists; the refusal carries `refusalReason`,
+the one closed-task sentence `closureRefusal` builds, and an `@operator` mention that
+meets it leaves the F35-5 "Mention not started" note; reopening a closed task is a
+human stage move, and the transition that reopens it is the trigger that coordinates
+again), `open-packet` (a **human-pressed** Run operator, or the same turn a person
 **scheduled**, while a packet is open is a paid no-op, rulings 76 and 141; machine
 reaction triggers such as `pr-diverged` and `agent-reply` are not refused; a scheduled
 occurrence is retired `fired` with a "Scheduled action skipped" note and outcome

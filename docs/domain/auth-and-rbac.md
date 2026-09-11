@@ -254,6 +254,17 @@ the session rows and `backend_credential` for the stored ones. The `reason` is t
 same already-redacted sentence the person sees; a key, a token, a one-time code and a
 raw vendor line never reach an audit row.
 
+**Pass-36 rows.** `task.engagement.added {posture: "reviewer" | "supporting", profileId,
+backend, role}` replaces `task.reviewer.assigned` (U36-11: a supporting engagement is not a
+reviewer). `task.acceptance.interrupted_runs {cause: "accept" | "force-accept" | "archive",
+runIds}` is written by the closure interrupt (ruling 177) beside one
+`runtime.run.interrupted {reason: "task-closed", cause, closedBy}` row per run, actor the
+system. `github.delivery.next_step` gains `{withheld: "verdict-pending" | "verdict-failing",
+validation}` when the delivery card is not written (F36-6). `task.transition {boundary:
+"rework", via: "authored-drift"}` is the reconciler's ruling-179 move, actor the system.
+`project.required_reviewers.updated` records the ruling-178 rule (via the controller or the
+project settings form).
+
 **Pass-35 rows.** `task.acceptance.forced` carries `bypassed` (the gate sentences
 joined with " | "), `bypassedGates` (the same list), `skippedStages`, `validation` and
 `withdrawnPacket` (U35-3). `task.hold.lifted {cause: "operator-run" | "dispatch",
