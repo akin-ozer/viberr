@@ -22,6 +22,21 @@ import { SESSION_MISSING_RE } from "./session-export.server";
 import { ensureCatalogSettings, isSdkSkillName } from "./skill-mount.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
+import {
+  spawnClaudeCli,
+  type ClaudeCli,
+  type ClaudeSpawnedProcess,
+  type ClaudeSpawnRequest,
+  type SpawnCli,
+} from "./claude-spawn.server";
+import {
+  reapRunProcesses,
+  RUN_MARKER_ENV,
+  RUN_REAP_GRACE_MS,
+  type ReapRunProcesses,
+  type ReapTargets,
+  type SignalProcess,
+} from "./run-processes.server";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -55,6 +70,11 @@ export interface ClaudeQueryOptions {
   effort?: string;
   maxTurns?: number;
   permissionMode?: string;
+  /** Ruling 174: the SDK declares this "must be set to `true` when using
+   *  `permissionMode: 'bypassPermissions'`" (sdk.d.ts), defaults it to false
+   *  and forwards it to the CLI. The pinned CLI does not enforce it yet; the
+   *  day one does, a run without it would lose bypass and every tool with it. */
+  allowDangerouslySkipPermissions?: boolean;
   /** Who answers a permission prompt (SDK ≥ 0.3.259). `"none"` declares what
    *  is true of every Viberr run: it is server-spawned with no human at the
    *  CLI and no `canUseTool` callback, so anything the permission mode would
@@ -113,6 +133,10 @@ export interface ClaudeQueryOptions {
   /** Policy-tier settings enforced on the spawned process without writing
    *  root-owned files. Viberr uses ONE key — see `MANAGED_SETTINGS` below. */
   managedSettings?: { claudeMdExcludes?: string[] };
+  /** Ruling 174: Viberr spawns the CLI itself, as the leader of its own
+   *  process group (`claude-spawn.server.ts`), instead of the SDK's local
+   *  spawn. */
+  spawnClaudeCodeProcess?: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
 }
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
@@ -128,7 +152,19 @@ interface ClaudeAdapterDeps {
   /** Injected `query` (default: the real SDK, imported lazily). */
   queryFn?: ClaudeQueryFn;
   env?: Record<string, string>;
+  /** Ruling 174 seams: the spawn under the detached CLI, the signal it sends
+   *  its group, and the sweep that runs once the run has settled. Default: the
+   *  real ones. A fake `queryFn` never calls `spawnClaudeCodeProcess`, so
+   *  without a test driving it none of these is reached. */
+  spawnCli?: SpawnCli;
+  signalProcess?: SignalProcess;
+  reapProcesses?: ReapRunProcesses;
 }
+
+/** The two exit errors the SDK builds from the CLI's exit (sdk.mjs
+ *  `getProcessExitError`), which carry a `. stderr: <tail>` suffix only when
+ *  the SDK spawned the CLI itself. */
+const CLI_EXIT_ERROR_RE = /^Claude Code process (?:exited with code|terminated by signal)/;
 
 /**
  * Resolve the app's model label to something the SDK/CLI accepts. Agent
@@ -229,12 +265,14 @@ export const INTERRUPT_GRACE_MS = 20_000;
 
 /**
  * After the cooperative grace elapses the adapter aborts the SDK's
- * AbortController, which tears the child down (SIGTERM, then SIGKILL ~5s later).
- * That abort ends the stream, and the loop's own catch settles the run once the
- * process is actually gone — the point being that a settled run no longer
- * leaves a live process writing the workspace. This second window is only a
- * backstop for the case the aborted generator never unblocks; it must outlast
- * the SDK's SIGTERM→SIGKILL escalation.
+ * AbortController, which tears the child down (SIGTERM, then SIGKILL ~5s later,
+ * to the CLI's whole process group since ruling 174). That abort ends the
+ * stream, and the loop's own catch settles the run once the process is
+ * actually gone — the point being that a settled run no longer leaves a live
+ * process writing the workspace (the settle sweep, `reapRunProcesses`, takes
+ * what the group signal cannot name). This second window is only a backstop
+ * for the case the aborted generator never unblocks; it must outlast the SDK's
+ * SIGTERM→SIGKILL escalation.
  */
 export const INTERRUPT_ABORT_GRACE_MS = 10_000;
 
@@ -950,9 +988,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let idleTimedOut = false;
       let queryHandle: ClaudeQuery | null = null;
       // Wired into the SDK query options below. Aborting it tears down the
-      // spawned CLI subprocess (SIGTERM→SIGKILL) — the real stop lever behind
-      // the cooperative `interrupt()`, which a wedged CLI never answers.
+      // spawned CLI subprocess (SIGTERM→SIGKILL, to its whole group since
+      // ruling 174) — the real stop lever behind the cooperative
+      // `interrupt()`, which a wedged CLI never answers.
       const abortController = new AbortController();
+      // This run's CLI once the SDK has spawned it through
+      // `spawnClaudeCodeProcess` (ruling 174). Per run, never module state, so
+      // two concurrent runs cannot signal each other's group.
+      let cli: ClaudeCli | null = null;
 
       // R21-4 / G5 (FR28): the live phase/step the run strip renders. `lastStep`
       // sticks so a stretch of model thinking still shows the tool the run is
@@ -998,6 +1041,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           } catch {
             // Already aborted / nothing to tear down.
           }
+          // Ruling 174: the abort ends the SDK's stdin and SIGTERMs the CLI
+          // after its own grace; the group hears it now, so the stdio MCP
+          // servers the CLI started stop with it rather than outliving a CLI
+          // that is past answering. The SDK's SIGKILL, and the settle sweep,
+          // reach the same group.
+          cli?.signalGroup("SIGTERM");
           interruptTimer = setTimeout(() => {
             if (settled) return;
             logger.warn(
@@ -1031,11 +1080,32 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         }, idleMs);
       };
 
+      /**
+       * The SDK appends the CLI's stderr tail to its exit error only when it
+       * spawned the CLI itself. Viberr's spawn keeps the same tail, so the
+       * classifier reads the sentence it always read — a resume whose session
+       * is gone is named on stderr, and without it `session_missing` would fall
+       * to `unknown`. The error's own properties ride along unchanged.
+       */
+      const withCliStderr = (cause: Error): Error => {
+        const tail = cli?.stderrTail();
+        if (!tail) return cause;
+        if (!CLI_EXIT_ERROR_RE.test(cause.message) || cause.message.includes(". stderr: ")) {
+          return cause;
+        }
+        const enriched = Object.assign(new Error(`${cause.message}. stderr: ${tail}`), cause);
+        enriched.name = cause.name;
+        return enriched;
+      };
+
       /** Persist a redaction-safe classified reason line, then settle error. */
       const settleError = (cause: unknown) => {
         if (settled) return;
         try {
-          const failure = classifyClaudeError(cause, evidence);
+          const failure = classifyClaudeError(
+            cause instanceof Error ? withCliStderr(cause) : cause,
+            evidence,
+          );
           cb.onLine({
             raw: "",
             display: {
@@ -1060,6 +1130,37 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         settle("error");
       };
 
+      /**
+       * Ruling 174: a settled run leaves no live process. The CLI gets its own
+       * exit first (the SDK closes it after the result, and its shutdown stops
+       * the commands it tracks), bounded by the reap grace; then the sweep
+       * signals its group and every process carrying this run's marker —
+       * the `&` a finished command left, the command a SIGKILLed CLI was still
+       * running, the Chromium a browser MCP launched. Nothing was spawned when
+       * the SDK never called `spawnClaudeCodeProcess`, so there is nothing to
+       * sweep.
+       */
+      const reap = () => {
+        const spawned = cli;
+        if (!spawned) return;
+        const reapProcesses =
+          deps.reapProcesses ??
+          ((targets: ReapTargets) =>
+            reapRunProcesses(targets, deps.signalProcess ? { signal: deps.signalProcess } : {}));
+        void (async () => {
+          await spawned.exited(RUN_REAP_GRACE_MS);
+          await reapProcesses({
+            runIds: spec.env?.[RUN_MARKER_ENV] ? [spec.runId] : [],
+            groupLeader: spawned.pid,
+          });
+        })().catch((error) => {
+          logger.warn("claude run reap failed", {
+            runId: spec.runId,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        });
+      };
+
       const settle = (outcome: "finished" | "error" | "interrupted") => {
         if (settled) return;
         settled = true;
@@ -1069,6 +1170,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           interruptTimer = null;
         }
         cb.onExit({ outcome, effectiveBackend: "claude", sessionId });
+        reap();
       };
 
       /** A hung stream: one classified terminal line, then settle `error` so the
@@ -1166,6 +1268,17 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // and plugin MCP. Viberr passes its granted external MCPs + the
           // in-process toolkit via `mcpServers`; nothing ambient should widen it.
           strictMcpConfig: true,
+        };
+        // Ruling 174: the SDK requires this beside `bypassPermissions`
+        // (sdk.d.ts) and defaults it to false. Only the autonomous run asks
+        // for bypass, so only it carries the acknowledgement.
+        if (spec.autonomous) options.allowDangerouslySkipPermissions = true;
+        // Ruling 174: the CLI leads its own process group, so every signal the
+        // SDK sends it reaches the MCP servers it starts, and the settle sweep
+        // can name the group. The handle is this run's alone.
+        options.spawnClaudeCodeProcess = (request) => {
+          cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess);
+          return cli.process;
         };
         // Only NAME a model when we have a real id/alias; otherwise let the SDK
         // (and the subscription) pick its default.

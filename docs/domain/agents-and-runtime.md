@@ -17,7 +17,10 @@
 > Updated 2026-09-11 for ruling 173: the Cognipeer Agent SDK was evaluated and not adopted,
 > so both backends stay on the vendor SDKs this page describes; rulings 174 to 176 (the
 > Option D plan, `planning/option-d-2026-09-11/PLAN.md`) update the sections they touch as
-> each lands. The operator's own behaviour is in
+> each lands. Updated 2026-09-11 for ruling 174 (branch `option-d/pr1-permissions-and-kill`):
+> §2.2 (the run marker every child carries), §2.4 (`allowDangerouslySkipPermissions`, the
+> detached CLI, the stop ladder), §2.5 (the marker's two Codex channels), §3.4 (what a
+> settled run leaves alive: nothing) and §8 (boot sweeps the orphans' processes). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -103,7 +106,11 @@ alike. There is no fallback engine and no other account to fall back to.
   browser MCP as argv from the server, never from the env. The same base serves every
   spawned stdio MCP child (`mcpSpawnEnv`), the hosted sign-in driver and the vendor
   sign-out. The run service then adds exactly one principal's credential on top, and
-  `startRun` throws if the caller's own `env` overlay names a key the credential owns. The run sink redacts those
+  `startRun` throws if the caller's own `env` overlay names a key the credential owns.
+  Last it adds the **run marker** `VIBERR_RUN_ID=<runId>` (ruling 174): not configuration
+  and not a secret, but the one name every process the run starts inherits, so the settle
+  sweep can find them (§3.4). It is set after the caller's overlay, so nothing renames a
+  run's processes, and a refused run, which spawns nothing, carries none. The run sink redacts those
   plaintext values from every persisted line (`createRunSink(db, spec, { secrets })`) —
   the key belongs to one person and the run console is visible to every project member.
 
@@ -179,8 +186,11 @@ connecting a different account there (ruling 165).
 
 ### 2.4 Claude adapter
 
-- Query options: `permissionMode: autonomous ? "bypassPermissions" : "default"`,
-  `permissionPrompts: "none"` on every run (SDK ≥ 0.3.259: nobody answers a prompt in a
+- Query options: `permissionMode: autonomous ? "bypassPermissions" : "default"`, with
+  `allowDangerouslySkipPermissions: true` beside bypass on the autonomous run only (ruling
+  174: the SDK declares it required with bypass and defaults it to false; the pinned CLI
+  does not enforce it yet, and one that does would drop every run to `default` and deny
+  every tool), `permissionPrompts: "none"` on every run (SDK ≥ 0.3.259: nobody answers a prompt in a
   server-spawned run, so a tool the mode would ask about is denied at once with a reason
   the model can act on; binds only on the `default` seam, bypass never prompts),
   `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `strictMcpConfig: true`,
@@ -197,8 +207,18 @@ connecting a different account there (ruling 165).
   `Bash Edit MultiEdit Write NotebookEdit`; supporting runs additionally lose `Bash(git
   push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr merge:*)`; capability-derived denies in
   §4.3.
+- The CLI is spawned by Viberr, not the SDK (`spawnClaudeCodeProcess` →
+  `spawnClaudeCli`, `claude-spawn.server.ts`; ruling 174): `detached`, so its pid is its
+  process group and the stdio MCP servers it starts share that group. Every signal the
+  SDK sends it — its close ladder and its kill-all when the server exits — goes to the
+  whole group. The SDK reads only stdin and stdout from a custom spawn, so Viberr drains
+  stderr itself, keeps the SDK's 2 KB tail and delivers `exit` only once stderr has
+  closed; the adapter adds that tail back onto the SDK's `Claude Code process exited with
+  code N` error, which is how a resumed session the CLI cannot find still classifies as
+  `session_missing`.
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
-  then abort grace 10 s.
+  then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
+  SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
 - `MANAGED_SETTINGS.claudeMdExcludes` is passed but the SDK drops it (documented inert);
   the effective CLAUDE.md exclusion is the `settings.json` written by skill-mount.
 - Success = a `result` envelope with `!is_error`. Failures tag `run·error·<kind>` with
@@ -243,8 +263,12 @@ connecting a different account there (ruling 165).
 - Per-run `config.toml` merged per leaf into `$CODEX_HOME`: `allow_login_shell: false`,
   `project_doc_max_bytes: 0`, bundled skills and skill instructions off, apps/plugins/hooks
   off, memories off, `developer_instructions = systemPrompt`, `mcp_servers`.
-- Only five env keys are re-exported through `shell_environment_policy`:
-  `GIT_CEILING_DIRECTORIES`, `GIT_AUTHOR_NAME/EMAIL`, `GIT_COMMITTER_NAME/EMAIL`.
+- Only six env keys are re-exported through `shell_environment_policy`:
+  `GIT_CEILING_DIRECTORIES`, `GIT_AUTHOR_NAME/EMAIL`, `GIT_COMMITTER_NAME/EMAIL` and, since
+  ruling 174, the run marker `VIBERR_RUN_ID`, so a command the model backgrounds carries
+  it. Each stdio MCP server is declared with `env = { VIBERR_RUN_ID = <runId> }` too: the
+  CLI starts a server with its own short default environment plus the declared `env`, and
+  the marker is an id, not a secret, so argv is a fine place for it.
 - **Sandbox mode** (`resolveCodexSandboxMode`), in order: operator → `read-only`;
   repo-write withheld → `workspace-write` if an attachments dir exists else `read-only`;
   autonomous deliverer with egress → `danger-full-access`; otherwise `workspace-write`.
@@ -258,7 +282,11 @@ connecting a different account there (ruling 165).
   off; withheld egress sets `webSearchMode: "disabled"`.
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
-- No `maxTurns`; idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s.
+- No `maxTurns`; idle 15 min (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s. The
+  SDK spawns the CLI itself with a plain `spawn()` and only ever SIGTERMs it, so the settle
+  sweep (§3.4) is what reaches a CLI that outlived its abort and everything its shell
+  started. There is no wrapper around the Codex binary: the owner's decision D1 (a wrapper
+  pointed at by `codexPathOverride`) was replaced by the sweep before it shipped, ruling 174.
 - Success requires `turn.completed` with no top-level `turn.failed`/`error`; item-level
   errors are non-fatal. Same failure kinds as Claude on the tag suffix; `overloaded` is
   prose-only here (Codex streams no status): `overloaded | 500/502/503/529 | temporarily
@@ -394,6 +422,22 @@ terminal writer win, sets `finishedAt`, clears the backend's quota-exhaustion re
 `finished`, drains the pending queue, then fires the registered completion callback. A
 callback that throws goes through `noteCompletionEffectsLost`: waiting flips to human
 and a `continuity` timeline event is written, so a lost effect is visible.
+
+**A settled run leaves no live process (ruling 174).** Neither vendor CLI keeps its
+children in one group: Claude Code starts every Bash command in a session of its own, so
+a `sleep 600 &` a finished command left behind, or the command a SIGKILLed CLI was still
+running, belongs to no group Viberr can name (measured on the pinned CLI, 2026-09-11: the
+`&` survived a normal finish, and both survived a SIGKILL; a SIGTERMed CLI does clean up
+the command it is running). So once a run settles, on every outcome, the adapter sweeps:
+Claude waits (at most 5 s) for the CLI's own exit, then `reapRunProcesses`
+(`run-processes.server.ts`) SIGTERMs the CLI's group and every process of this user whose
+environment carries the run's `VIBERR_RUN_ID`, waits 5 s, re-scans, and SIGKILLs what is
+still there. The scan reads `/proc/<pid>/environ` on Linux (the image) and `ps -E` on a
+macOS development host; the re-scan means a pid the kernel recycled in the grace is never
+signalled. Codex sweeps the same way without the group, since its SDK owns the spawn. It
+is cleanup, not containment: a process that clears its own environment escapes it, and
+the container plus the server-owned delivery gate stay the boundary (ruling 93). The log
+line is `reaped the processes a settled run left behind`, with the counts.
 
 ### 3.5 Failure kinds
 
@@ -836,15 +880,17 @@ above is the create-seed value and never the runtime's answer for a missing gran
    pill and footer say "interrupted by a restart", Insights counts the run as stopped and
    leaves a never-started one out of the completion rate); one `runOperator({ trigger:
    "manual" })` per affected task (controller turns get a conversation note instead),
-   capped at 3 per task per 30 min via `run.recovery.reinvoked` audit rows.
+   capped at 3 per task per 30 min via `run.recovery.reinvoked` audit rows. The orphans'
+   run ids are swept too (ruling 174, §3.4): a Claude CLI leads its own group, so a
+   server that died without shutting down did not take it along.
 1. `recoverUnreactedAgentRuns`: finished specialist runs on tasks still `waiting: agent`
    with no `task.agent.replied` audit row carrying their run id are replayed through the
    completion pipeline using the persisted `outcome_key` (audit
    `run.recovery.reply_replayed`).
 2. `recoverStrandedOperatorPlans`: finished Codex operator runs younger than 1 h with no
    `runtime.operator.plan_executed` audit row are executed.
-3. After the re-invokes settle, terminal workspaces are reclaimed only if no run is
-   active.
+3. After the re-invokes settle and the orphans' sweep has finished, terminal workspaces
+   are reclaimed only if no run is active.
 
 Both marker actions are exempt from the 90-day audit purge for exactly this reason.
 Every mutating request is also bounded by a 30 s action watchdog (503 on an async hang).

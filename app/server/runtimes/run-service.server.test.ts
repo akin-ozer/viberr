@@ -508,6 +508,30 @@ describe("a run with no credential principal (ruling 127)", () => {
     ).toBe(true);
   });
 
+  it("marks every process the run starts with the run's own id, over any caller overlay (ruling 174)", async () => {
+    // The settle sweep finds what a run left behind by this one variable, so
+    // it must name THIS run: a caller overlay cannot rename the processes, and
+    // the credential and the workspace overlay still land beside it.
+    queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "claude",
+      model: "claude-sonnet-4-5",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      env: { GIT_CEILING_DIRECTORIES: "/tmp/ceiling", VIBERR_RUN_ID: "run_someone-else" },
+    });
+    await settle();
+    const spec = lastRunSpec()!;
+    expect(spec.runId).toBe(runId);
+    expect(spec.env?.VIBERR_RUN_ID).toBe(runId);
+    expect(spec.env?.GIT_CEILING_DIRECTORIES).toBe("/tmp/ceiling");
+    expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.arda.id);
+  });
+
   it("refuses a per-run env overlay that would decide whose account pays", async () => {
     // A caller bug, not a user error: silently letting either side win would
     // let a workspace overlay swap the credential of the person being billed.

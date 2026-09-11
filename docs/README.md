@@ -27,6 +27,14 @@ SDK was evaluated and not adopted. Rulings 174 to 176 port the gains it demonstr
 two vendor SDKs, per `planning/option-d-2026-09-11/PLAN.md`; each updates the pages it
 touches, starting with `domain/agents-and-runtime.md`, as it lands.
 
+Updated 2026-09-11 for ruling 174 (branch `option-d/pr1-permissions-and-kill`): a settled
+run leaves no live process. Every agent child carries `VIBERR_RUN_ID`, the adapters sweep by
+it when a run settles and boot sweeps orphans, and the Claude CLI is spawned detached with
+`allowDangerouslySkipPermissions` beside bypass. Pages: `architecture/decisions.md` (ruling
+174, a note under 142), `domain/agents-and-runtime.md` (§§2.2, 2.4, 2.5, 3.4, 8),
+`operations/configuration.md` (§3), `operations/runbook.md` (Agent runtimes),
+`architecture/overview.md` (§6 shutdown) and `development/testing.md` (§2).
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -60,7 +68,7 @@ touches, starting with `domain/agents-and-runtime.md`, as it lands.
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 173 numbered owner rulings (1–173; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 174 numbered owner rulings (1–174; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 

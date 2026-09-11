@@ -2731,6 +2731,11 @@ by rewriting those paragraphs:*
     unchanged. Extends ruling 127. (`APP_CONFIG_ENV` / `filteredSpawnEnv` in
     `app/server/runtimes/runtime-registry.server.ts`; `ENV_KEYS` in
     `app/server/config/env.server.ts`.)
+    *(Amended 2026-09-11 by ruling 174: one name is added back to every agent run's child
+    env on purpose, `VIBERR_RUN_ID=<runId>`, the marker the settle sweep finds a run's
+    processes by. It is not configuration, is not in `ENV_KEYS`, and `startRun` sets it
+    after the caller's overlay. Stdio MCP children spawned outside a run (the registry
+    probe, the warm-up) do not carry it.)*
 
 143. **An allocated branch is not a delivery (2026-09-04, pass 34 U34-9).** Ruling 122
     moved branch naming to allocation time, at first dispatch, before an agent has
@@ -3593,6 +3598,55 @@ by rewriting those paragraphs:*
     `alwaysLoad` exist on the pinned Claude SDK and were never used; nor were `maxBudgetUsd`,
     `result.modelUsage`, `allowDangerouslySkipPermissions` or `spawnClaudeCodeProcess`, which
     the rulings that follow take up.
+
+174. **A settled run leaves no live process, on either backend (owner, 2026-09-11).** Stop
+    used to end the run's row and not always what the run had started. Measured on the
+    pinned Claude CLI (0.3.261) with seven small live runs: Claude Code starts every Bash
+    command in a session of its own (`detached`), so a `sleep 600 &` left by a finished
+    command survived a normal finish, reparented to init; a SIGTERMed CLI does kill the
+    command it is running; a SIGKILLed one (the SDK's escalation for a CLI past answering)
+    leaves that command alive, and also leaves the stdio MCP servers it started in its own
+    process group. A process-group kill, which is what the Option D plan proposed, therefore
+    reaches the MCP servers and nothing Bash started, and would have failed the plan's own
+    canary. The owner chose among four designs:
+    (a) *Every process a run starts carries its id.* `startRun` sets `VIBERR_RUN_ID=<runId>`
+    on the run's child env last, after the caller's overlay, and a refused run carries
+    none. Claude hands its env to its shells and, merged under each declaration's own `env`,
+    to every stdio MCP server, and a child inherits it, so the Chromium a browser MCP
+    launches in a group of its own carries it too. The Codex adapter declares it in
+    `shell_environment_policy.set` and in each stdio server's `env`, because that CLI passes
+    only "core" names to the model's shell and a short default set to a server.
+    (b) *Settle sweeps.* On every outcome the adapter reaps: Claude waits up to 5 s for the
+    CLI's own exit, then `reapRunProcesses` SIGTERMs every process of this user whose
+    environment carries the marker (and, on Claude, the CLI's group), waits 5 s, re-scans
+    and SIGKILLs whatever is still there. The re-scan means a pid recycled during the grace
+    is never signalled. Linux reads `/proc/<pid>/environ` (the image); a macOS development
+    host reads `ps -E`.
+    (c) *Boot sweeps the orphans.* `finalizeOrphanedRuns` reaps the run ids it finalizes,
+    and the boot workspace reclaim waits for that sweep as it waits for the re-invokes,
+    because a CLI a dead server left running could still be writing the tree it deletes.
+    (d) *The Claude CLI leads its own group.* Viberr spawns it through
+    `spawnClaudeCodeProcess`, detached, so every signal the SDK sends it (its close ladder,
+    its kill-all when this server exits) reaches the MCP servers in the group, and the
+    forced stop SIGTERMs the group as it aborts. The SDK reads only stdin and stdout from a
+    custom spawn, so Viberr drains stderr itself and puts the SDK's 2 KB tail back on its
+    exit error, which keeps a vanished resume session classified `session_missing`.
+    (e) `allowDangerouslySkipPermissions: true` accompanies `bypassPermissions` on every
+    autonomous Claude run, because the SDK declares it required and defaults it to false.
+    The pinned CLI does not enforce it yet; one that did would drop every run to `default`
+    mode and deny every tool.
+    The plan's decision D1 (a wrapper script in the image, pointed at by
+    `codexPathOverride`) was replaced by (a) and (b) before it shipped: the sweep reaches
+    Codex's descendants from the server, and an override would also have stopped the SDK
+    prepending the CLI's helper `PATH` directory. So there is no `VIBERR_CODEX_WRAPPER` and
+    no image change. This is cleanup, not containment: a process that clears its own
+    environment escapes the sweep, and the container plus the server-owned delivery gate
+    remain the boundary (ruling 93). Amends ruling 142 (one name is added back to a run's
+    child env on purpose). Extends the stop ladders ruling A8 set.
+    (`app/server/runtimes/run-processes.server.ts`, `claude-spawn.server.ts`; the reap in
+    `claude-runtime.server.ts` and `codex-runtime.server.ts`; `runMarkerEnv` in
+    `run-service.server.ts` `startRun`; `finalizeOrphanedRuns` and boot's
+    `reconcileRestartedWork`.)
 
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is

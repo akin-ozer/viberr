@@ -181,6 +181,40 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     // Second boot finds nothing running.
     expect(finalizeOrphanedRuns(store.db).finalized).toBe(0);
   });
+
+  it("sweeps the processes of exactly the orphans it finalizes (ruling 174)", async () => {
+    // The dead server's CLIs led their own groups and did not die with it; a
+    // survivor could still be writing the tree boot reclaims. Terminal runs
+    // settled in their own process and were swept there.
+    seedRun("run_done", { state: "finished", finishedAt: new Date().toISOString() });
+    seedRun("run_running", { state: "running" });
+    seedRun("run_waiting", { state: "queued", startedAt: null });
+    const asked: string[][] = [];
+    const reapProcesses = async (targets: { runIds: readonly string[] }) => {
+      asked.push([...targets.runIds].sort());
+      return { terminated: 0, killed: 0 };
+    };
+
+    const res = finalizeOrphanedRuns(store.db, { reapProcesses });
+    await res.reaped;
+    expect(asked).toEqual([["run_running", "run_waiting"]]);
+
+    // Nothing orphaned, nothing to sweep.
+    asked.length = 0;
+    await finalizeOrphanedRuns(store.db, { reapProcesses }).reaped;
+    expect(asked).toEqual([]);
+  });
+
+  it("a failing sweep never rejects the boot chain that joins it", async () => {
+    seedRun("run_running", { state: "running" });
+    const res = finalizeOrphanedRuns(store.db, {
+      reapProcesses: async () => {
+        throw new Error("no /proc here");
+      },
+    });
+    await expect(res.reaped).resolves.toBeUndefined();
+    expect(res.finalized).toBe(1);
+  });
 });
 
 describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {

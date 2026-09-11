@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
+import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
 import { patchRun } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
 
@@ -53,6 +54,20 @@ export interface OrphanFinalization {
    * it never rejects: each re-invoke is caught per task.
    */
   reinvokes: Promise<void>;
+  /**
+   * Ruling 174: the sweep of whatever the orphans' processes left alive,
+   * joinable for the same reason. A run's Claude CLI leads its own process
+   * group, so a server that died without shutting down does not take it along,
+   * and a survivor could still be writing the working tree the reclaim
+   * deletes. Never rejects.
+   */
+  reaped: Promise<void>;
+}
+
+export interface FinalizeOrphanedRunsDeps {
+  /** The sweep (default: the real one), injectable so a test can see which
+   *  runs it was asked to reap. */
+  reapProcesses?: ReapRunProcesses;
 }
 
 /**
@@ -72,8 +87,16 @@ export interface OrphanFinalization {
  * executed a turn out of the completion denominator.
  *
  * Idempotent: a second boot finds nothing non-terminal.
+ *
+ * "No process behind it" is made true rather than assumed (ruling 174): every
+ * process an orphan started carries its run id, and the sweep signals what is
+ * still alive, so a CLI the dead server left running stops before its row is
+ * reported interrupted and its workspace reclaimed.
  */
-export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
+export function finalizeOrphanedRuns(
+  db: DatabaseSync,
+  deps: FinalizeOrphanedRunsDeps = {},
+): OrphanFinalization {
   // SAFETY: every column named here is declared NOT NULL TEXT on `agent_runs`
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
@@ -89,8 +112,25 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
     task_key: string;
     kind: string;
   }[];
-  if (orphans.length === 0)
-    return { finalized: 0, reinvoked: 0, capped: 0, reinvokes: Promise.resolve() };
+  if (orphans.length === 0) {
+    return {
+      finalized: 0,
+      reinvoked: 0,
+      capped: 0,
+      reinvokes: Promise.resolve(),
+      reaped: Promise.resolve(),
+    };
+  }
+
+  const reapProcesses = deps.reapProcesses ?? reapRunProcesses;
+  const reaped = reapProcesses({ runIds: orphans.map((run) => run.id) }).then(
+    () => {},
+    (error) => {
+      logger.warn("reaping the orphaned runs' processes failed", {
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    },
+  );
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
@@ -191,6 +231,7 @@ export function finalizeOrphanedRuns(db: DatabaseSync): OrphanFinalization {
     reinvoked: toReinvoke.length,
     capped,
     reinvokes,
+    reaped,
   };
 }
 
