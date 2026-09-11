@@ -36,7 +36,12 @@ import {
   type BranchCompare,
   type BranchSyncState,
 } from "./branch-sync.server";
-import { encodeRefPath, GITHUB_API_BASE, isMissingRefAnswer } from "./github-client.server";
+import {
+  encodeRefPath,
+  GITHUB_API_BASE,
+  githubFailureMessage,
+  isMissingRefAnswer,
+} from "./github-client.server";
 import {
   prAdoptionText,
   recordPrAdoption,
@@ -935,6 +940,29 @@ async function reconcileTaskUnlocked(
         toAgent: false,
         evidence: null,
       });
+      // U36-7 (pass 36): a NEW collision reaches the watchers' inbox like an
+      // adoption or a divergence does — live (HLC-10) the note above was the
+      // only trace, and the owner learned of the block by visiting the page.
+      // Same transition edge as the note, so a persisting collision never
+      // re-notifies; suppressed on the branch-cleanup re-confirm pass (ruling
+      // 136(c)) like the divergence notices.
+      if (!ctx.suppressDivergenceNotice) {
+        const { notifyTaskWatchers } = await import(
+          "~/server/tasks/task-actions.server"
+        );
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            kind: "policy",
+            title: `Branch name collision on ${fm.key}: PR #${unownedPr!.number} is not this task's`,
+            text: collisionNote,
+            from: POLICY_ENGINE_NOTIFY_FROM,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
     }
     if (acceptedClosedText) {
       await appendTimelineEvent(ref, {
@@ -1061,12 +1089,17 @@ async function reconcileTaskUnlocked(
     // withdraws the now-moot recovery packet. Fire-and-forget on the same
     // transition edge as the notes — a persistent divergence never re-fires,
     // and a project with no operator deployed is a no-op inside.
+    // U36-7 (pass 36): a NEW branch collision is a coordination event too —
+    // the ruling-50 `resolve_remote_collision` packet is operator-authored, and
+    // nothing scheduled the turn that authors it (live it waited on an
+    // unrelated completion wake).
     if (
       mergedButNotDone ||
       closedButActive ||
       acceptedClosedExternally ||
       prJustReopened ||
-      prReplacedLive
+      prReplacedLive ||
+      (unownedPrIsNew && !!collisionNote)
     ) {
       const wake =
         ctx.wakeOperator ??
@@ -1991,18 +2024,17 @@ export async function resolveRemoteBranchCollision(
         { body: { state: "closed" } },
       );
       // Best-effort by design: a PR that is already closed (which the ref
-      // delete just did) answers 200. Only a SUCCESS is recorded.
+      // delete just did) answers 200. Only a SUCCESS is Viberr's close.
+      //
+      // U36-7 (pass 36): the ceremony writes ONE `github` event naming the
+      // PR's fate in EVERY arm. Live (HLC-10) the close came back non-200 —
+      // the ref delete had already taken the head — so the timeline said only
+      // "Deleted branch", and never that PR #7 was closed. A refused close is
+      // followed by a re-read, so the record says what GitHub shows, not what
+      // Viberr assumes.
+      let fate: string;
       if (close.ok) {
         closedUnownedPr = unowned;
-        await appendTimelineEvent(ref, {
-          occurredAt: new Date().toISOString(),
-          type: "github",
-          actor: { kind: "human", userId, nameHint: userName(db, userId) },
-          title: null,
-          text: `Closed unrelated PR #${unowned} that stood on branch \`${branch}\` (it was not ${input.taskKey}'s review PR).`,
-          toAgent: false,
-          evidence: null,
-        });
         recordAudit(db, {
           action: "github.pr.closed_unowned",
           actor,
@@ -2012,27 +2044,52 @@ export async function resolveRemoteBranchCollision(
           taskKey: input.taskKey,
           details: { repo: gh.repo, branch, prNumber: unowned },
         });
-      } else if (close.kind === "http" && close.status === 403) {
-        // C05-D (pass 32): a 403 here is the SAME fact `openTaskPr` and
-        // `mergeTaskPr` flag — the credential lacks pull_request:write — and
-        // it used to vanish into the best-effort silence. The half-remedy
-        // (ref gone, PR left to GitHub's auto-close) is honest; the missing
-        // scope is what the human has to fix, so it gets its chip.
-        await flagScopeViolation(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            scope: "pull_request:write",
-            detail: policyViolationText(
-              "pull_request:write",
-              `closing the unrelated pull request #${unowned} that stood on branch \`${branch}\``,
-            ),
-            actor,
-          },
-          { dataRoot: ctx.dataRoot },
+        fate = `closed PR #${unowned} and deleted branch \`${branch}\``;
+      } else {
+        if (close.kind === "http" && close.status === 403) {
+          // C05-D (pass 32): a 403 here is the SAME fact `openTaskPr` and
+          // `mergeTaskPr` flag — the credential lacks pull_request:write — and
+          // it used to vanish into the best-effort silence. The half-remedy
+          // (ref gone, PR left to GitHub's auto-close) is honest; the missing
+          // scope is what the human has to fix, so it gets its chip.
+          await flagScopeViolation(
+            db,
+            {
+              projectSlug: input.projectSlug,
+              taskKey: input.taskKey,
+              scope: "pull_request:write",
+              detail: policyViolationText(
+                "pull_request:write",
+                `closing the unrelated pull request #${unowned} that stood on branch \`${branch}\``,
+              ),
+              actor,
+            },
+            { dataRoot: ctx.dataRoot },
+          );
+        }
+        const reread = await gh.client.request(
+          "GET",
+          `/repos/${gh.repo}/pulls/${unowned}`,
+          z.object({ state: z.string() }),
         );
+        const shows = reread.ok
+          ? reread.data.state === "closed"
+            ? "is closed on GitHub with its head"
+            : "still shows open on GitHub — close it there"
+          : "could not be re-read on GitHub";
+        fate =
+          `deleted branch \`${branch}\`; PR #${unowned}, which stood on the name, ${shows} ` +
+          `(Viberr's own close request was refused: ${githubFailureMessage(close)})`;
       }
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "human", userId, nameHint: userName(db, userId) },
+        title: null,
+        text: `Branch collision cleared: ${fate}. PR #${unowned} was not ${input.taskKey}'s review PR; it only stood on the name.`,
+        toAgent: false,
+        evidence: null,
+      });
     }
     // The R15-15 record is stale the moment the ref is gone — clear it so the
     // GitHub card and the policy engine stop reporting a collision that no

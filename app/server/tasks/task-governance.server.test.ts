@@ -1675,7 +1675,12 @@ describe("resolvePacket kind matrix", () => {
 
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     const texts = detail!.timeline.map((e) => e.text);
-    expect(texts.some((t) => t.includes("Closed unrelated PR #232"))).toBe(true);
+    // U36-7 (pass 36): the ceremony's own event names BOTH facts.
+    expect(
+      texts.some((t) =>
+        t.includes("Branch collision cleared: closed PR #232 and deleted branch `vib-1-work`"),
+      ),
+    ).toBe(true);
     expect(texts.some((t) => t.includes("Deleted branch `vib-1-work`"))).toBe(true);
     // No workspace exists in this fixture, so the redelivery degrades honestly
     // — cleared, but the push did not complete, with the next step named.
