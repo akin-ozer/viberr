@@ -213,7 +213,7 @@ the whole declared browser matrix (ruling 103).
 
 | Spec | Tests | Covers |
 |---|---|---|
-| `01-home-board.spec.ts` | 7 | seeded projects, board columns, drag-and-drop reorder and cross-stage moves (the solid lifted card, the hole it leaves and the one preview, told apart by dnd-kit's `data-dnd-*` attributes; the column read after a drop counts real `a.card`s, never the landing preview), Escape cancels, Done-drop shows the accept dialog and still fails the verdict gate |
+| `01-home-board.spec.ts` | 7 | seeded projects, board columns, drag-and-drop reorder and cross-stage moves (the solid lifted card, the hole it leaves and the one preview, told apart by dnd-kit's `data-dnd-*` attributes; the column read after a drop counts real `a.card`s, never the landing preview; a same-lane reorder held in flight with `page.route` draws its landing preview in the requested slot, and every commit until the answer draws the card exactly once), Escape cancels, Done-drop shows the accept dialog and still fails the verdict gate |
 | `02-feeds-profile.spec.ts` | 6 | review-queue partitions and row labels, activity day groups, mark-all-read, theme cookie, Agent accounts with both backends unconnected |
 | `03-org-settings-store.spec.ts` | 4 | org settings tabs, heading scope, the instance pages under the app header (ruling 145), store browser creates a folder |
 | `04-palette-mobile.spec.ts` | 6 | ⌘K palette, board `?q=`, 375 px rail collapse, non-member 404 copy, touch targets |

@@ -1148,11 +1148,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .card-wrap[data-dnd-placeholder] .card > *,
 .card-wrap[data-dnd-placeholder] .card-move { visibility: hidden; }
-/* A move awaiting the server: the card has left its lane (once dnd-kit has
-   released it) and the landing preview stands in the requested slot. Neither
-   the card still in flight nor its placeholder may collapse before then — a
-   ResizeObserver sizes the card in flight from its placeholder, so hiding the
-   placeholder squished the flying card to a sliver. */
+/* A move awaiting the server: the card has left its slot (once dnd-kit has
+   released it) and the landing preview stands in the requested one — in
+   another lane, or in the same lane for a reorder. Neither the card still in
+   flight nor its placeholder may be hidden before then — a ResizeObserver
+   sizes the card in flight from its placeholder, so hiding the placeholder
+   squished the flying card to a sliver. (A reorder's flight closes the hole
+   with a negative margin, which keeps its box.) */
 .card-wrap.in-flight:not([data-dnd-dragging]):not([data-dnd-placeholder]) { display: none; }
 /* The column under the cursor lifts and outlines to invite the drop. */
 .column { transition: background .15s ease, box-shadow .15s ease; }

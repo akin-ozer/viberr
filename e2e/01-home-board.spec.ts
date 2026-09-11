@@ -9,10 +9,10 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
  * down, stepped moves (crossing the activation distance), up. The server
  * stays authoritative, so every assertion is on the submitted governed
  * request, the settled toast, and the revalidated column — never on
- * optimistic client order. Between a cross-lane drop and the server's answer
- * a landing preview stands in the requested slot, drawn with the card's own
- * face; it is a `div.card`, the real card an `a.card`, so a column read after
- * a drop counts `a.card` only.
+ * optimistic client order. Between a drop and the server's answer — across
+ * lanes or within one — a landing preview stands in the requested slot, drawn
+ * with the card's own face; it is a `div.card`, the real card an `a.card`, so
+ * a column read after a drop counts `a.card` only.
  */
 
 function column(page: Page, name: string): Locator {
@@ -122,6 +122,14 @@ test("same-stage pointer reorder submits a non-append slot and the server order 
   await expect(hole.locator(".key")).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath("a2-mid-drag.png") });
 
+  // The server's answer is held, so the round trip can be looked at.
+  let answer!: () => void;
+  const held = new Promise<void>((resolve) => (answer = resolve));
+  await page.route("**/projects/viberr-core/board**", async (route) => {
+    const r = route.request();
+    if (r.method() === "POST" && (r.postData() ?? "").includes("intent=reorder")) await held;
+    await route.continue();
+  });
   const request = reorderPost(
     page,
     (body) =>
@@ -135,13 +143,61 @@ test("same-stage pointer reorder submits a non-append slot and the server order 
   // A drop is not a click: releasing over a card must not navigate.
   await expect(page).toHaveURL(/\/projects\/viberr-core\/board/);
 
+  // In flight (2026-09-11: the card used to be simply gone until the answer):
+  // the card has flown to the slot it asked for and hides in its old one, and
+  // the landing preview — the card's face — stands right before VIB-151 in
+  // the lane the card never left. Nothing is committed: the landing is the
+  // request, and VIB-151 is still the lane's first real card.
+  const inProgress = column(page, "In Progress");
+  const landing = inProgress.locator(".drop-preview.landing");
+  await expect(page.locator(".card-wrap[data-dnd-placeholder]")).toHaveCount(0);
+  await expect(landing).toBeVisible();
+  await expect(landing).toContainText("VIB-153");
+  await expect(inProgress.locator(".drop-preview.landing + .card-wrap")).toHaveAttribute(
+    "data-card-key",
+    "VIB-151",
+  );
+  await expect(inProgress.locator('.card-wrap[data-card-key="VIB-153"]')).toBeHidden();
+  await expect(inProgress.locator("a.card:visible .key").first()).toHaveText("VIB-151");
+  await page.screenshot({ path: testInfo.outputPath("a2-in-flight.png") });
+
+  // From here to the answer every commit draws VIB-153 exactly once: the
+  // landing, or the real card in its slot — never both, never neither.
+  const drawn = await page.evaluateHandle(() => {
+    const body = [...document.querySelectorAll("section.column")]
+      .find((s) => s.querySelector(".col-head .nm")?.textContent === "In Progress")
+      ?.querySelector(".col-body");
+    if (!body) throw new Error("no In Progress lane");
+    const seen: string[] = [];
+    const record = () => {
+      const landings = body.querySelectorAll(".drop-preview.landing").length;
+      const cards = [...body.querySelectorAll('.card-wrap[data-card-key="VIB-153"] a.card')]
+        .filter((card) => card.getClientRects().length > 0).length;
+      seen.push(`${landings} landing, ${cards} card`);
+    };
+    record();
+    new MutationObserver(record).observe(body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+    });
+    return seen;
+  });
+  answer();
+
   // The revalidated column carries the server's order: VIB-153 above VIB-151
   // (real cards only, per the note at the top of this file).
   await expect
     .poll(async () =>
-      (await column(page, "In Progress").locator("a.card .key").allTextContents()).slice(0, 2),
+      (await inProgress.locator("a.card .key").allTextContents()).slice(0, 2),
     )
     .toEqual(["VIB-153", "VIB-151"]);
+  await expect(landing).toHaveCount(0);
+  await expect(inProgress.locator('.card-wrap[data-card-key="VIB-153"]')).toBeVisible();
+  const frames = await drawn.jsonValue();
+  expect(frames[0]).toBe("1 landing, 0 card");
+  expect(frames.at(-1)).toBe("0 landing, 1 card");
+  expect(frames.filter((f) => f !== "1 landing, 0 card" && f !== "0 landing, 1 card")).toEqual([]);
 });
 
 test("cross-stage drop onto a column body appends and the card changes column", async ({

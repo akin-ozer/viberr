@@ -2,9 +2,10 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { DragDropProvider } from "@dnd-kit/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { BoardPage, type BoardColumnData, type BoardTask } from "./board-page";
+import { BoardPage, StageBoard, type BoardColumnData, type BoardTask } from "./board-page";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 
 /**
@@ -2768,5 +2769,182 @@ describe("ruling 168: the board card states each fact once", () => {
     expect(row.textContent).not.toContain("Claude");
     expect(row.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
     expect(row.querySelector(".card-owner")!.textContent).toBe("Developer");
+  });
+});
+
+/**
+ * 2026-09-11: a reorder within one lane made the dragged card vanish for the
+ * whole round trip. Between a drop and the server's answer the card hides in
+ * its old slot and a landing preview (the card's face) stands in the slot it
+ * asked for — but the landing was drawn only while the target lane did not
+ * hold the card yet, which is never true of the lane the card never left. The
+ * rule is read against the DATA: a move across lanes has landed once the new
+ * lane holds the card, a reorder once the lane's order does. StageBoard
+ * renders directly because the move starts from a pointer drag, which jsdom
+ * has no layout for (e2e/01-home-board.spec.ts drives the real one).
+ */
+describe("a move in flight draws its request until the columns show the answer", () => {
+  interface Flight {
+    key: string;
+    from: string;
+    to: string;
+    beforeKey: string | null;
+  }
+
+  const inProgress = (...keys: string[]) => keys.map((key) => task({ key, stage: "impl" }));
+
+  /** `update` re-renders with new columns (and, optionally, the move cleared):
+   *  `update(next, flight)` is the render in which the fetcher settles, before
+   *  BoardPage's effect clears the move. */
+  function renderFlight(tasks: BoardTask[], flight: Flight) {
+    let set!: (next: { tasks: BoardTask[]; flight: Flight | null }) => void;
+    function Harness() {
+      const [state, setState] = useState<{ tasks: BoardTask[]; flight: Flight | null }>({
+        tasks,
+        flight,
+      });
+      set = setState;
+      return (
+        <DragDropProvider>
+          <StageBoard
+            columns={columns(state.tasks)}
+            visible={(ts) => ts}
+            emptyCopyFor={() => "No tasks in this stage."}
+            doneStageId="done"
+            canCreate={false}
+            createCta={false}
+            canTransition
+            onNew={() => {}}
+            drag={null}
+            overStage={null}
+            beforeKey={null}
+            arrivedKey={null}
+            draggedTask={null}
+            inFlight={state.flight}
+            inFlightTask={state.tasks.find((t) => t.key === state.flight?.key) ?? null}
+            onMoveTask={() => {}}
+            rovingKey={null}
+            onCardKeyDown={() => {}}
+          />
+        </DragDropProvider>
+      );
+    }
+    const Stub = createRoutesStub([{ path: "/projects/:slug/board", Component: Harness }]);
+    const view = render(<Stub initialEntries={["/projects/viberr-core/board"]} />);
+    return {
+      ...view,
+      update: (next: BoardTask[], still: Flight | null) =>
+        act(() => set({ tasks: next, flight: still })),
+    };
+  }
+
+  function lane(container: HTMLElement, name: string) {
+    return [...container.querySelectorAll("section.column")].find(
+      (s) => s.querySelector(".col-head .nm")!.textContent === name,
+    )!;
+  }
+
+  /** A lane's flow as drawn: each card by key — "hidden" while its move is in
+   *  flight (the class `.in-flight` is what app.css draws as `display: none`) —
+   *  and the landing preview by the key on its face. */
+  function flow(container: HTMLElement, name: string): string[] {
+    return [...lane(container, name).querySelectorAll(".col-body > .card-wrap")].map((el) =>
+      el.classList.contains("landing")
+        ? `landing ${el.querySelector(".key")!.textContent}`
+        : el.getAttribute("data-card-key")! + (el.classList.contains("in-flight") ? " hidden" : ""),
+    );
+  }
+
+  const count = (container: HTMLElement, name: string) =>
+    lane(container, name).querySelector(".col-head .ct")!.textContent;
+
+  it("a card moved up its lane lands in the slot it asked for, and the server's order retires the landing in the same render", () => {
+    const flight = { key: "VIB-153", from: "impl", to: "impl", beforeKey: "VIB-151" };
+    const { container, update } = renderFlight(inProgress("VIB-151", "VIB-153", "VIB-160"), flight);
+    // The request, drawn — where the card used to be simply gone.
+    expect(flow(container, "In Progress")).toEqual([
+      "landing VIB-153",
+      "VIB-151",
+      "VIB-153 hidden",
+      "VIB-160",
+    ]);
+    expect(container.querySelectorAll(".drop-preview.landing")).toHaveLength(1);
+    // A reorder moves nothing between lanes: the count is the lane's own.
+    expect(count(container, "In Progress")).toBe("3");
+
+    // The answer, with the move still in flight: the real card stands in the
+    // slot, and the landing is gone in the same render — no doubled card, no
+    // blank frame.
+    update(inProgress("VIB-153", "VIB-151", "VIB-160"), flight);
+    expect(flow(container, "In Progress")).toEqual(["VIB-153", "VIB-151", "VIB-160"]);
+    expect(container.querySelector(".drop-preview")).toBeNull();
+  });
+
+  it("a card moved down to the lane's end lands last", () => {
+    const flight = { key: "VIB-151", from: "impl", to: "impl", beforeKey: null };
+    const { container, update } = renderFlight(inProgress("VIB-151", "VIB-153", "VIB-160"), flight);
+    expect(flow(container, "In Progress")).toEqual([
+      "VIB-151 hidden",
+      "VIB-153",
+      "VIB-160",
+      "landing VIB-151",
+    ]);
+    update(inProgress("VIB-153", "VIB-160", "VIB-151"), flight);
+    expect(flow(container, "In Progress")).toEqual(["VIB-153", "VIB-160", "VIB-151"]);
+  });
+
+  it("an order that does not answer the request keeps the request drawn until the move clears", () => {
+    const flight = { key: "VIB-153", from: "impl", to: "impl", beforeKey: "VIB-151" };
+    const { container, update } = renderFlight(inProgress("VIB-151", "VIB-153", "VIB-160"), flight);
+    // Someone else's reorder revalidates first: VIB-160 went to the top, and
+    // VIB-153 still stands after VIB-151 — the landing holds, the card stays
+    // hidden, never both.
+    update(inProgress("VIB-160", "VIB-151", "VIB-153"), flight);
+    expect(flow(container, "In Progress")).toEqual([
+      "VIB-160",
+      "landing VIB-153",
+      "VIB-151",
+      "VIB-153 hidden",
+    ]);
+    // The move clears (a refusal, say): the card is back where the data has it.
+    update(inProgress("VIB-160", "VIB-151", "VIB-153"), null);
+    expect(flow(container, "In Progress")).toEqual(["VIB-160", "VIB-151", "VIB-153"]);
+  });
+
+  it("a slot whose card left the lane lands at the end, where the server appends the move", () => {
+    const flight = { key: "VIB-153", from: "impl", to: "impl", beforeKey: "VIB-151" };
+    const { container, update } = renderFlight(inProgress("VIB-151", "VIB-153", "VIB-160"), flight);
+    // VIB-151 is moved to Triage under the reorder: the landing does not vanish
+    // with it (the card is still hidden — that would be a blank lane slot).
+    update(
+      [task({ key: "VIB-151", stage: "triage" }), ...inProgress("VIB-153", "VIB-160")],
+      flight,
+    );
+    expect(flow(container, "In Progress")).toEqual([
+      "VIB-153 hidden",
+      "VIB-160",
+      "landing VIB-153",
+    ]);
+    update(
+      [task({ key: "VIB-151", stage: "triage" }), ...inProgress("VIB-160", "VIB-153")],
+      flight,
+    );
+    expect(flow(container, "In Progress")).toEqual(["VIB-160", "VIB-153"]);
+  });
+
+  it("a move across lanes still lands until the new lane holds the card", () => {
+    const flight = { key: "VIB-148", from: "triage", to: "impl", beforeKey: "VIB-153" };
+    const { container, update } = renderFlight(
+      [task({ key: "VIB-148", stage: "triage" }), ...inProgress("VIB-151", "VIB-153")],
+      flight,
+    );
+    expect(flow(container, "Triage")).toEqual(["VIB-148 hidden"]);
+    expect(flow(container, "In Progress")).toEqual(["VIB-151", "landing VIB-148", "VIB-153"]);
+    expect([count(container, "Triage"), count(container, "In Progress")]).toEqual(["0", "3"]);
+
+    update(inProgress("VIB-151", "VIB-148", "VIB-153"), flight);
+    expect(flow(container, "Triage")).toEqual([]);
+    expect(flow(container, "In Progress")).toEqual(["VIB-151", "VIB-148", "VIB-153"]);
+    expect([count(container, "Triage"), count(container, "In Progress")]).toEqual(["0", "3"]);
   });
 });
