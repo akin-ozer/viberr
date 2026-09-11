@@ -555,22 +555,8 @@ describe("skills", () => {
     const onDisk = path.join(skillDirPath("api-design", dataRoot), "SKILL.md");
     expect(readFileSync(onDisk, "utf8")).toBe("# precious content");
     expect(updated.skill.summary).toBe("Updated summary.");
-
-    // The explicit clear flag is the ONLY way to blank it.
-    const cleared = await saveSkill(
-      db,
-      {
-        id: skill.id,
-        name: "api-design",
-        summary: "Updated summary.",
-        body: "",
-        clearBody: true,
-      },
-      ACTOR,
-      ctx,
-    );
-    expect(cleared.toast).toBe("Skill api-design updated. SKILL.md rewritten");
-    expect(readFileSync(onDisk, "utf8")).toBe("");
+    // Ruling 183 retired the explicit clear flag that used to blank the file
+    // here: an empty SKILL.md is not a skill, and no writer produces one.
   });
 
   it("refuses to write a body when the on-disk SKILL.md exceeds the read cap (E4)", async () => {

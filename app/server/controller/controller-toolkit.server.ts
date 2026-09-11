@@ -594,7 +594,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         id: z.string().optional().describe("Existing skill id to update; omit to create."),
         name: z.string(),
         summary: z.string(),
-        body: z.string().optional().describe("SKILL.md content; omit to keep what is on disk."),
+        body: z
+          .string()
+          .optional()
+          .describe(
+            "SKILL.md content with REAL newlines: a --- frontmatter block (name, description) followed by markdown, or plain markdown. Required on a create; omit on an update to keep what is on disk. An empty, JSON-escaped (literal \\n and no newline) or unparseable body is refused, never rewritten (ruling 183).",
+          ),
       },
       runWith(async (args: { id?: string; name: string; summary: string; body?: string }) => {
         requireOrgAdmin("manage skills");

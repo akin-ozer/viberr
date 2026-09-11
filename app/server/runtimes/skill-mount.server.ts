@@ -18,7 +18,10 @@ import {
   serializeFrontmatterFile,
   splitFrontmatter,
 } from "~/server/files/frontmatter.server";
-import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
+import {
+  resolveContainedSkillFile,
+  skillFrontmatterSchema,
+} from "~/server/files/skill-body.server";
 import { logger } from "~/server/logging/logger.server";
 
 /**
@@ -654,15 +657,6 @@ function copyableEntry(src: string): boolean {
     return false;
   }
 }
-
-/**
- * The only frontmatter key a store file gets to keep (see the NORMALIZE note in
- * `mountOneSkill`). `.catch(undefined)` so a non-string `description` falls back
- * to the body's first line instead of failing the whole parse.
- */
-const skillFrontmatterSchema = z.object({
-  description: z.string().optional().catch(undefined),
-});
 
 /** The one-line description the model reads when deciding to invoke a skill. */
 function skillDescription(

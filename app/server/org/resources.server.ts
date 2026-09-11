@@ -37,7 +37,10 @@ import {
   skillsRootDir,
 } from "~/server/files/file-store-root.server";
 import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
-import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
+import {
+  assertSkillBodyWellFormed,
+  resolveContainedSkillFile,
+} from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { isReservedMcpName } from "~/shared/mcp-reserved";
@@ -2195,11 +2198,12 @@ export async function saveSkill(
     id?: string | null;
     name: string;
     summary: string;
+    /** The SKILL.md text. On an EXISTING skill an empty body keeps the on-disk
+     * content (E4: the modal round-trips a possibly-truncated read — empty
+     * must never blank); a body that will be written is judged by
+     * `assertSkillBodyWellFormed` first (ruling 183), so a SKILL.md is never
+     * blanked either. */
     body: string;
-    /** Explicit "blank the SKILL.md" intent. Without it, an EMPTY submitted
-     * body on an EXISTING skill keeps the on-disk content (E4: the modal
-     * round-trips a possibly-truncated read — empty must never blank). */
-    clearBody?: boolean;
     /** "files" (NEW creates only): the unified New-skill flow — register the
      * skill by name alone and hand off to the store browser for content
      * (upload / GitHub import / New document). No SKILL.md is written and the
@@ -2241,12 +2245,17 @@ export async function saveSkill(
   }
 
   // E4 write policy for EXISTING skills, decided BEFORE the folder moves:
-  // - empty body without the explicit clear flag → keep the on-disk SKILL.md;
+  // - empty body → keep the on-disk SKILL.md (ruling 183 retired the explicit
+  //   clear flag: an empty SKILL.md is not a skill, so nothing may write one);
   // - non-empty body while the on-disk file exceeds the editor read cap →
   //   the submitted text is a truncated round-trip; refuse instead of
   //   silently destroying the tail of the file.
   const body = input.body ?? "";
-  const keepExistingBody = Boolean(oldName) && body === "" && !input.clearBody;
+  const keepExistingBody = Boolean(oldName) && body === "";
+  // Ruling 183 (pass 36, F36-2): a body that WILL be written is judged first —
+  // before the truncation check, the containment check and the rename — so a
+  // refusal moves nothing and names the remedy.
+  if (!keepExistingBody && !filesMode) assertSkillBodyWellFormed(body);
   if (
     oldName &&
     !keepExistingBody &&
