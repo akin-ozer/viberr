@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   HERMETIC_TOOLCHAIN,
@@ -107,9 +108,11 @@ describe("resolveToolchain", () => {
       run: scriptedRunner({}),
       probeCodexSandbox: () => ({ ok: true, detail: "faked" }),
     });
-    const codexSdk = JSON.parse(
-      readFileSync(path.join(process.cwd(), "node_modules", "@openai", "codex-sdk", "package.json"), "utf8"),
-    ) as { version: string };
+    const codexSdk = z.object({ version: z.string() }).parse(
+      JSON.parse(
+        readFileSync(path.join(process.cwd(), "node_modules", "@openai", "codex-sdk", "package.json"), "utf8"),
+      ),
+    );
     expect(reading.codexCli).toBe(codexSdk.version);
   });
 });

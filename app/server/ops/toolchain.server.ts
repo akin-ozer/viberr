@@ -36,13 +36,16 @@ import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
  */
 
 /** The once-per-process sandbox verdict. `detail` is the CLI's own first
- *  line when it failed (`bwrap: …`), a sentence about what ran when it did. */
-export interface CodexSandboxProbe {
+ *  line when it failed (`bwrap: …`), a sentence about what ran when it did.
+ *  A type alias, like `BuildInfo`: only an alias gets the implicit index
+ *  signature that lets the boot integrity line carry it as a log field. */
+export type CodexSandboxProbe = {
   ok: boolean;
   detail: string;
-}
+};
 
-export interface Toolchain {
+/** A type alias, not an interface, for the same reason as `BuildInfo`. */
+export type Toolchain = {
   /** The running process's own version; never null. */
   node: string | null;
   /** Each null when the tool is not installed (or answered nothing usable). */
@@ -56,7 +59,7 @@ export interface Toolchain {
    *  Claude CLI it spawns. */
   claudeAgentSdk: string | null;
   codexSandbox: CodexSandboxProbe;
-}
+};
 
 /** One command's outcome, as the two probes read it. */
 export type CommandOutcome =
@@ -101,13 +104,15 @@ const execFailureSchema = z
 /** The env a probe child gets: the process's PATH, HOME, locale and temp
  *  settings and nothing else — credential-free by construction rather than by
  *  filtering, because a probe has no principal. */
-function probeBaseEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const name of ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP"]) {
+const PROBE_ENV_NAMES = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP"] as const;
+
+function probeBaseEnv() {
+  const env = new Map<string, string>();
+  for (const name of PROBE_ENV_NAMES) {
     const value = process.env[name];
-    if (value !== undefined) env[name] = value;
+    if (value !== undefined) env.set(name, value);
   }
-  return env;
+  return Object.fromEntries(env);
 }
 
 /** The real runner. A non-zero exit, a signal, a timeout and a missing

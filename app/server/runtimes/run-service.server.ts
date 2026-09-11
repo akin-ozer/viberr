@@ -1016,7 +1016,7 @@ export async function startRun(
     details,
   });
 
-  const refuse = (message: string): { runId: string } => {
+  const refuse = (message: string) => {
     // F26-1: a reserved run that fails here never launches — release its slot
     // and let a run parked behind the cap take it.
     if (reservation) {
