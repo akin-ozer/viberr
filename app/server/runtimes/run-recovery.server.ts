@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
@@ -5,6 +6,11 @@ import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
 import { patchRun } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
+import {
+  codexRunHomeDir,
+  finishCodexRunHome,
+  userBackendHome,
+} from "./user-homes.server";
 
 /**
  * Crash-loop backstop for the boot recovery re-invoke (F7-BOOT1). A boot that
@@ -109,9 +115,11 @@ export function finalizeOrphanedRuns(
   // SAFETY: every column named here is declared NOT NULL TEXT on `agent_runs`
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
+  // (`backend` is NOT NULL too; `credential_user_id` is nullable — a row
+  // written before ruling 127 carries none.)
   const orphans = db
     .prepare(
-      `SELECT id, project_slug, task_key, kind
+      `SELECT id, project_slug, task_key, kind, backend, credential_user_id
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
@@ -120,6 +128,8 @@ export function finalizeOrphanedRuns(
     project_slug: string;
     task_key: string;
     kind: string;
+    backend: string;
+    credential_user_id: string | null;
   }[];
   if (orphans.length === 0) {
     return {
@@ -146,6 +156,17 @@ export function finalizeOrphanedRuns(
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
   const runsByTask = new Map<string, { id: string; kind: string }[]>();
   for (const run of orphans) {
+    // Ruling 181 (pass 36): a Codex run's private CODEX_HOME is finished by the
+    // adapter's settle — which a process that died never reached. Live
+    // 19:48Z: two restart-orphaned developer runs still owned
+    // `codex-home/runs/<runId>/`, each with a copy of the person's sign-in.
+    // Finish them here exactly as the settle would: the refreshed `auth.json`
+    // written back when its bytes changed, the directory removed.
+    if (run.backend === "codex" && run.credential_user_id) {
+      const sharedHome = userBackendHome(run.credential_user_id, "codex", deps.dataRoot);
+      const dir = codexRunHomeDir(sharedHome, run.id);
+      if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, runId: run.id });
+    }
     patchRun(db, run.id, {
       state: "interrupted",
       finishedAt: now,

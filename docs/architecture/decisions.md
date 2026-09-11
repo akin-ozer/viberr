@@ -3884,7 +3884,10 @@ by rewriting those paragraphs:*
     back only when its bytes changed, under a per-person lockfile (`O_EXCL` with retry; a
     holder older than 30 s is broken; last writer wins), and only while the shared file
     still exists (a disconnect during the run is not undone); the run directory is then
-    deleted.
+    deleted. A run a restart orphaned never reaches its settle, so boot recovery
+    (`finalizeOrphanedRuns`) finishes its home the same way before it re-invokes the
+    operator (live 19:48Z: two restart-cut developer runs still owned their `runs/<id>/`
+    copies of the sign-in).
     (c) *Hygiene.* `filteredSpawnEnv` strips an ambient `CODEX_SQLITE_HOME` as it strips
     the two vendor homes.
     (d) *Measured* in the image on 2026-09-11: two `codex exec` in fresh homes wrote all

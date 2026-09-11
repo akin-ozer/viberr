@@ -21,6 +21,9 @@ import {
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
+import { ensureUserBackendHome, prepareCodexRunHome } from "./user-homes.server";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -145,6 +148,37 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).toMatch(/the operator is re-invoked/);
     // One note per task, not one per run.
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
+  });
+
+  it("ruling 181: a Codex run the restart orphaned gets its private home finished at boot — sign-in written back, directory gone", () => {
+    // Live 19:48Z: `codex-home/runs/` still held the two developer runs a
+    // restart had cut, each with its copy of the sign-in — the adapter's settle
+    // never ran for a process that died. Canary: drop the `finishCodexRunHome`
+    // call from the orphan loop.
+    const sharedHome = ensureUserBackendHome("u-arda", "codex", store.dataRoot);
+    writeFileSync(path.join(sharedHome, "auth.json"), '{"token":"old"}', { mode: 0o600 });
+    const home = prepareCodexRunHome(sharedHome, "run_codex_orphan");
+    // The CLI refreshed the token inside the run home before the process died.
+    writeFileSync(path.join(home.dir, "auth.json"), '{"token":"refreshed"}', { mode: 0o600 });
+    seedRun("run_codex_orphan", {
+      state: "running",
+      kind: "primary",
+      role: "Implementation",
+      agentProfileId: "developer",
+      backend: "codex",
+      model: "gpt-5.6-luna",
+      sdk: "Codex SDK",
+      credentialUserId: "u-arda",
+    });
+    // A run whose row predates ruling 127 (no credential principal) is left to
+    // the retention sweep — nothing to resolve a home from.
+    seedRun("run_codex_nobody", { state: "running", backend: "codex", credentialUserId: null });
+    expect(finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).finalized).toBe(2);
+    expect(existsSync(home.dir)).toBe(false);
+    expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"refreshed"}');
+    // The shared directories behind the links survive the removal.
+    expect(existsSync(path.join(sharedHome, "sessions"))).toBe(true);
+    expect(getRun(store.db, "run_codex_orphan")!.state).toBe("interrupted");
   });
 
   it("re-invokes the operator for an orphan under the crash-loop cap", () => {

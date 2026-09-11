@@ -123,7 +123,8 @@ alike. There is no fallback engine and no other account to fall back to.
   run's `auth.json` is copied back to the shared home only when its bytes changed, under a
   per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s is
   broken), only while the shared file still exists (a disconnect mid-run is not undone),
-  and the run directory is deleted. Resume is unchanged: the SDK reads the rollout through
+  and the run directory is deleted; a run a restart orphaned is finished the same way by
+  boot recovery before the operator is re-invoked. Resume is unchanged: the SDK reads the rollout through
   the symlinked `sessions/`. `runCredentialFor` still names the SHARED home on
   `spec.env.CODEX_HOME`; the fork is the adapter's, so every path that builds a Codex
   spec (specialist, operator, controller, resume, scheduled, recovery) gets it.
