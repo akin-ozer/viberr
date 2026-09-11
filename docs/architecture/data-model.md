@@ -64,6 +64,7 @@ Created lazily by the code that needs them:
   projects/<slug>/tasks/<KEY>/attachments/          files agents post on the task thread (member-only served)
   projects/<slug>/tasks/<KEY>/workspace/<repo>       the delivering engagement's git clone (cache, not canonical)
   projects/<slug>/tasks/<KEY>/workspace/support/<profileId>/<repo>   a supporting engagement's isolated clone
+  projects/<slug>/tasks/<KEY>/workspace/.viberr-plugins/<runId>/     a Claude run's skill plugin (ruling 180; beside the checkout it serves, removed when the run settles; a supporting run's sits beside its own clone under support/<profileId>/)
   projects/<slug>/goals/<goal-id>.md                chained goals (ruling 99)
   projects/<slug>/.mirror or equivalent             per-project git mirror cache (repo-mirror.server.ts)
   agents/definitions/operator.md, controller.md     system-profile doctrine files shipped by boot

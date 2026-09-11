@@ -80,6 +80,17 @@ row, and the three effort descriptions read the catalog. Pages:
 `domain/controller-and-goals.md` (§3, §4.1, §4.2), `domain/auth-and-rbac.md` (§4),
 `domain/agents-and-runtime.md` (§6) and `architecture/data-model.md` (`org_skills`).
 
+Updated 2026-09-11 for pass 36 cluster 5 (ruling 180, F36-8, U36-6, U36-7): a Claude run's
+granted skills mount as a local plugin BESIDE the task checkout (`<checkout>/../.viberr-plugins/<runId>/`),
+never inside it, and the run's `settingSources` stays `[]`; a run that switches backend
+names the model it ran on (the F21-13 log line, the timeline event, the retry option); a
+suffixed branch allocation records the taken canonical name and writes the ruling-122
+note; a new branch collision notifies the task watchers and wakes the operator, and
+clearing one names the closed PR. Pages: `domain/agents-and-runtime.md` (§§2.3, 2.4, 3.2,
+4.1, 6, gotchas 4 and 7), `domain/github-delivery.md` (§§3, 4, 5),
+`architecture/data-model.md` (the data-root layout). Ruling 180's text is proposed in the
+cluster's report and lands in `architecture/decisions.md` with the pass-36 PR.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating

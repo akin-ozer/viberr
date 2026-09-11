@@ -1973,6 +1973,7 @@ export async function commentToAgent(
       if (confinement.mcpToolDenials) resume.mcpToolDenials = confinement.mcpToolDenials;
       resume.env = confinement.env;
       if (confinement.skills) resume.skills = confinement.skills;
+      if (confinement.skillPlugin) resume.skillPlugin = confinement.skillPlugin;
       if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
       if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
@@ -4117,6 +4118,21 @@ export async function applyAgentCompletionEffects(
       profileId: input.profileId,
     };
     if (ctx.dataRoot) describeInput.dataRoot = ctx.dataRoot;
+    // F36-8: the profile's own model, so the `retry_other_backend` option can
+    // name what the other backend will run. A profile undeployed since the run
+    // started resolves to nothing, and the option names the default alone.
+    if (input.profileId) {
+      try {
+        const { resolveDeployedSpecialist } = await import("./specialist-run.server");
+        describeInput.profileModel = resolveDeployedSpecialist(
+          ctx,
+          input.projectSlug,
+          input.profileId,
+        ).model;
+      } catch {
+        // Not a current deployment — nothing to name.
+      }
+    }
     const described = describeRunFailure(db, describeInput);
     // Ruling 130(b): a classified refusal is worded ONCE, by the leaf. The
     // other kinds keep their own sentences below; `unavailable` is ruling

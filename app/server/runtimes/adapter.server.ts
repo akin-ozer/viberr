@@ -7,6 +7,7 @@ import type {
 } from "~/features/runtime/runtime-types";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
+import type { SkillPlugin } from "./skill-mount.server";
 import type { EnvelopeFacts } from "./wire-format.server";
 
 /**
@@ -105,15 +106,21 @@ export interface RunSpec {
    *  grant is withheld; the attachments dir is the one carve-out (ruling 109)
    *  and rides `workspace-write`. */
   attachmentsWritableDir?: string | null;
-  /** The GRANTED skills Viberr mounted into this run's workspace
-   *  (`mountGrantedSkills`), by exact name. Claude only: the adapter turns these
-   *  into the SDK's native skills context filter, so the model gets each skill's
-   *  metadata up front and its full body only when it invokes the Skill tool.
-   *  Empty/absent ⇒ the run enables NO skill and the `Skill` tool stays denied.
-   *  Codex has no native equivalent (its skills channel is severed outright —
-   *  codex-runtime LV-13), so a Codex run's granted skills ride the system
-   *  prompt as text and this stays empty. */
+  /** The GRANTED skills Viberr mounted for this run (`mountGrantedSkills`),
+   *  by exact name. Claude only: the adapter turns these into the SDK's native
+   *  skills context filter (qualified by the plugin below), so the model gets
+   *  each skill's metadata up front and its full body only when it invokes the
+   *  Skill tool. Empty/absent ⇒ the run enables NO skill and the `Skill` tool
+   *  stays denied. Codex has no native equivalent (its skills channel is
+   *  severed outright — codex-runtime LV-13), so a Codex run's granted skills
+   *  ride the system prompt as text and this stays empty. */
   skills?: string[];
+  /** Ruling 180 (pass 36): the LOCAL PLUGIN that carries `skills`, built
+   *  beside the checkout (`<checkout>/../.viberr-plugins/<runId>/`). The
+   *  Claude adapter passes it as `plugins: [{ type: "local", path }]` and
+   *  qualifies each skill as `<name>:<skill>` for the filter; run-service
+   *  removes the directory when the run settles. Absent whenever `skills` is. */
+  skillPlugin?: SkillPlugin;
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
    *  `human`). Claude enforces it via the tool denylist; Codex through the
    *  read-only sandbox `resolveCodexSandboxMode` derives from this flag

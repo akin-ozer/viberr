@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -83,7 +83,6 @@ interface CapturedOptions {
   plugins?: unknown[];
   strictMcpConfig?: boolean;
   disallowedTools?: string[];
-  managedSettings?: { claudeMdExcludes?: string[] };
   /** The system prompt as the adapter handed it over (preset+append for a
    *  specialist) — read through a zod parse where a test needs its text. */
   systemPrompt?: unknown;
@@ -92,45 +91,24 @@ interface CapturedOptions {
 }
 
 /**
- * A run workspace as `mountGrantedSkills` leaves it: the granted skill folders
- * plus the `settings.json` whose excludes keep the checked-out repository's
- * CLAUDE.md out of the run.
- *
- * V6 — the adapter treats that file as the PRECONDITION for opening
- * `settingSources: ['project']` (the option that discovers the skills is the
- * option that reads the repo's memory files), so a spec carrying skills has to
- * point at a real one. `excludes: false` is the workspace a failed settings
- * write leaves behind.
+ * A run's skill plugin as `mountGrantedSkills` builds it beside the checkout
+ * (ruling 180): the manifest the CLI reads plus one folder per granted skill.
  */
-function mountedWorkspace(
-  skills: string[],
-  opts: { excludes?: boolean } = {},
-): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "viberr-claude-ws-"));
-  mkdirSync(path.join(dir, ".claude", "skills"), { recursive: true });
+function pluginDir(skills: string[]): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "viberr-claude-plugin-"));
+  mkdirSync(path.join(dir, ".claude-plugin"), { recursive: true });
+  writeFileSync(
+    path.join(dir, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "viberr", description: "test", version: "1.0.0" }),
+  );
   for (const name of skills) {
-    mkdirSync(path.join(dir, ".claude", "skills", name), { recursive: true });
-  }
-  if (opts.excludes !== false) {
+    mkdirSync(path.join(dir, "skills", name), { recursive: true });
     writeFileSync(
-      path.join(dir, ".claude", "settings.json"),
-      JSON.stringify({
-        claudeMdExcludes: ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**"],
-      }),
+      path.join(dir, "skills", name, "SKILL.md"),
+      `---\nname: ${name}\ndescription: ${name}\n---\n\nbody\n`,
     );
   }
   return dir;
-}
-
-/** The excludes the workspace catalog carries, read back off disk. */
-function catalogExcludes(workspaceDir: string): string[] {
-  return z
-    .object({ claudeMdExcludes: z.array(z.string()) })
-    .parse(
-      JSON.parse(
-        readFileSync(path.join(workspaceDir, ".claude", "settings.json"), "utf8"),
-      ),
-    ).claudeMdExcludes;
 }
 
 const SPEC: RunSpec = {
@@ -515,62 +493,52 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured.strictMcpConfig).toBe(true);
   });
 
-  it("enables the SDK's NATIVE skills for a run whose granted skills Viberr mounted", async () => {
-    // The pass-18 change: granted skills arrive as real
-    // `<workspace>/.claude/skills/<name>` folders (mountGrantedSkills) instead
-    // of as system-prompt text, so the model gets metadata up front and the full
-    // body only when it invokes one. Three things must move together, or the
-    // skills are listed and uninvokable / invokable and unlisted:
-    //
-    // Canary: drop any one of the three lines in the adapter (settingSources,
-    // skills, the `Skill` filter on BASE_DENIED_BUILTINS) and one assertion
-    // below fails.
+  it("ruling 180: a run whose skills Viberr mounted as a plugin gets `plugins` + `plugin:`-qualified skill names, and NO settings source", async () => {
+    // F36-9 (pass 36): the skills used to ride `<cwd>/.claude/skills` behind
+    // `settingSources: ['project']`, which put Viberr files inside the tree the
+    // project's own tools scan. They now ride a local plugin OUTSIDE cwd —
+    // canaried inside the image 2026-09-11: the CLI lists `viberr:<name>` and
+    // the model invokes it. Three things move together, or the skills are
+    // listed and uninvokable: the plugin, the qualified filter, and the
+    // `Skill` deny lifting.
+    // Canary: drop any one of `plugins`, the `${name}:` prefix, or the Skill
+    // filter on BASE_DENIED_BUILTINS and one assertion below fails.
+    const plugin = pluginDir(["conventional-commits", "terraform-review"]);
     const captured = await optionsFor({
       ...SPEC,
-      workdir: mountedWorkspace(["conventional-commits", "terraform-review"]),
       skills: ["conventional-commits", "terraform-review"],
+      skillPlugin: { path: plugin, name: "viberr" },
     });
 
-    // 'project' = the run's own workspace checkout, whose `.claude` Viberr
-    // stripped and rewrote moments earlier. NEVER 'user'/'local' (F13).
-    expect(captured.settingSources).toEqual(["project"]);
-    expect(captured.skills).toEqual(["conventional-commits", "terraform-review"]);
-    // The context filter REPLACES the blanket deny: an unlisted skill (every
-    // bundled one included) is hidden from the model and rejected by the tool.
+    expect(captured.plugins).toEqual([{ type: "local", path: plugin, skipMcpDiscovery: true }]);
+    expect(captured.skills).toEqual(["viberr:conventional-commits", "viberr:terraform-review"]);
+    // No project source, ever: cwd's `.claude` and CLAUDE.md stay unread.
+    expect(captured.settingSources).toEqual([]);
     expect(captured.disallowedTools).not.toContain("Skill");
-    // Everything else about the fence is unchanged.
-    expect(captured.plugins).toEqual([]);
     expect(captured.strictMcpConfig).toBe(true);
-    expect(captured.disallowedTools).toEqual(expect.arrayContaining(["Task", "Workflow"]));
-    // The CLAUDE.md ingress `settingSources: ['project']` opens — see
-    // MANAGED_SETTINGS. Asserted so the mitigation cannot be dropped silently;
-    // it is NOT proof the ingress is closed (the SDK drops this key: the
-    // workspace file the next two tests are about is the real mitigation).
-    expect(captured.managedSettings?.claudeMdExcludes).toContain("**/CLAUDE.md");
   });
 
-  it("V6: keeps the project source CLOSED when the workspace has no CLAUDE.md excludes", async () => {
-    // The workspace of a run whose mount could not write the excludes file (its
-    // strip then took the catalog with it), or whose file a co-engaged run
-    // removed. Opening `settingSources: ['project']` here would hand the model
-    // the checked-out repository's own CLAUDE.md at system-prompt tier — the
-    // ingress this adapter is supposed to be closing, on the exact path where
-    // nothing else is watching. The run keeps the fully isolated shape instead
-    // and its grants ride the system prompt as text.
+  it("ruling 180: a plugin that went missing before the start enables NO skill and corrects the persona", async () => {
+    // The plugin is built beside the checkout moments before the spawn, and
+    // that neighbourhood is writable by any live run's agent. A spec whose
+    // plugin is gone must not hand the SDK a `--plugin-dir` that resolves to
+    // nothing while the persona announces skills the model cannot invoke: the
+    // run keeps the fully isolated shape and the persona is corrected.
     //
-    // Canary: drop the `ensureCatalogSettings` gate from `nativeSkillsForRun`
-    // and settingSources is ['project'] again, over an open ingress.
-    const bare = mkdtempSync(path.join(tmpdir(), "viberr-claude-bare-"));
+    // Canary: drop the `skillPluginInPlace` gate from `nativeSkillsOutcome`
+    // and `plugins` names the dead directory with its skills listed.
+    const gone = path.join(mkdtempSync(path.join(tmpdir(), "viberr-claude-gone-")), "run_x");
 
     const captured = await optionsFor({
       ...SPEC,
-      workdir: bare,
       skills: ["conventional-commits"],
+      skillPlugin: { path: gone, name: "viberr" },
       systemPrompt: "You are the Developer. Attached skills: conventional-commits.",
     });
 
     expect(captured.settingSources).toEqual([]);
     expect(captured.skills).toEqual([]);
+    expect(captured.plugins).toEqual([]);
     // …and the fence that replaces the `skills` filter comes back with it: a
     // run listing no skill of its own must not keep the `Skill` tool, or the
     // SDK's ~16 bundled skills are invokable.
@@ -580,30 +548,8 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // skills are NOT available instead of invoking a name that never loads.
     // Canary: drop the `droppedSkillsNotice` append.
     const persona = z.object({ append: z.string() }).parse(captured.systemPrompt).append;
-    expect(persona).toContain("could NOT be enabled for this run");
+    expect(persona).toContain("could NOT be enabled");
     expect(persona).toContain("conventional-commits");
-  });
-
-  it("V6: re-writes the excludes file when the mounted catalog is there without it", async () => {
-    // One workspace, MANY engagements: every mount strips this catalog, and any
-    // live agent can delete inside its own checkout, so the file can go missing
-    // between this run's mount and its start. Losing the run's granted craft
-    // over that would be a silent capability loss; the content is a constant
-    // viberr owns, so the adapter re-establishes it and starts natively.
-    //
-    // Canary: return `false` instead of writing in `ensureCatalogSettings` and
-    // this run drops to settingSources: [] with its skills unlisted.
-    const ws = mountedWorkspace(["conventional-commits"], { excludes: false });
-
-    const captured = await optionsFor({
-      ...SPEC,
-      workdir: ws,
-      skills: ["conventional-commits"],
-    });
-
-    expect(captured.settingSources).toEqual(["project"]);
-    expect(captured.skills).toEqual(["conventional-commits"]);
-    expect(catalogExcludes(ws)).toContain("**/CLAUDE.md");
   });
 
   it("never lets a skill name the SDK would throw on reach query()", async () => {
@@ -613,18 +559,24 @@ describe("claude adapter (SDK, injected fake query)", () => {
     //
     // Canary: drop the `nativeSkillNames` call and the first expectation gets
     // the raw list back, wildcard included.
+    const plugin = pluginDir(["good-skill"]);
     const mixed = await optionsFor({
       ...SPEC,
-      workdir: mountedWorkspace(["good-skill"]),
       skills: ["good-skill", "my skill (v2)", "*", "good-skill"],
+      skillPlugin: { path: plugin, name: "viberr" },
     });
-    expect(mixed.skills).toEqual(["good-skill"]);
-    expect(mixed.settingSources).toEqual(["project"]);
+    expect(mixed.skills).toEqual(["viberr:good-skill"]);
+    expect(mixed.plugins).toEqual([{ type: "local", path: plugin, skipMcpDiscovery: true }]);
 
     // ALL unsafe ⇒ nothing to enable ⇒ the run falls back to the fully isolated
-    // shape rather than opening a project source for zero skills.
-    const none = await optionsFor({ ...SPEC, skills: ["a,b", ""] });
+    // shape rather than loading a plugin for zero skills.
+    const none = await optionsFor({
+      ...SPEC,
+      skills: ["a,b", ""],
+      skillPlugin: { path: plugin, name: "viberr" },
+    });
     expect(none.skills).toEqual([]);
+    expect(none.plugins).toEqual([]);
     expect(none.settingSources).toEqual([]);
     expect(none.disallowedTools).toContain("Skill");
   });

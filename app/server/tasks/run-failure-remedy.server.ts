@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { findUserById } from "~/server/auth/user-store.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
+import { substituteRunModel } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
@@ -38,6 +39,12 @@ export interface DescribeRunFailureInput {
   /** The failed specialist's profile id, carried on the `retry_other_backend`
    *  option so the retry re-runs the same profile. */
   profileId?: string;
+  /** F36-8: the profile's resolved model on ITS backend, so the
+   *  `retry_other_backend` option can say which model the retry will run on
+   *  (the other backend's default when this id is foreign there). Absent for
+   *  a profile nobody can resolve; the option then names the default without
+   *  claiming why. */
+  profileModel?: string;
   dataRoot?: string;
   /** Test seam for the reset-label clock; defaults to now. */
   now?: Date;
@@ -209,6 +216,7 @@ export function describeRunFailure(
         resetLabel,
         input.agentHandle,
         input.profileId,
+        input.profileModel,
         facts?.origin === "local",
       );
 
@@ -288,10 +296,25 @@ function specialistOptions(
   resetLabel: string | null,
   agentHandle: string | undefined,
   profileId: string | undefined,
+  /** F36-8: the profile's model on its own backend (see the input). */
+  profileModel: string | undefined,
   /** U35-11: the `overloaded` failure was this deployment's own network path. */
   localNetwork = false,
 ): OperatorPacketOptionInput[] {
   const handle = agentHandle ? `@${agentHandle}` : "the agent";
+  // F36-8 (pass 36): the option says which MODEL the retry runs on. A profile
+  // whose id belongs to the failed backend gets the other backend's default
+  // (`startRun` substitutes and discloses it, F21-13); one the other backend
+  // knows keeps its own. Live, the option read "re-run the same agent there and
+  // continue", the retry ran on `sonnet`, and nothing on the task named it.
+  const retryModel = profileModel
+    ? (() => {
+        const swap = substituteRunModel(other, profileModel);
+        return swap.foreignBackend
+          ? `on \`${swap.model}\` (${BACKEND_NAME[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_NAME[swap.foreignBackend]} model)`
+          : `on its own \`${profileModel}\``;
+      })()
+    : `on ${BACKEND_NAME[other]}'s default model`;
   const redirect: OperatorPacketOptionInput = {
     kind: "redirect",
     title: "Redirect with sharper guidance",
@@ -305,7 +328,7 @@ function specialistOptions(
       const retry: OperatorPacketOptionInput = {
         kind: "retry_other_backend",
         title: `Retry ${handle} on ${BACKEND_NAME[other]} now`,
-        detail: `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there and continue. The switch sticks: later prompts on this task follow it.`,
+        detail: `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.`,
         recommended: true,
         backend: other,
       };

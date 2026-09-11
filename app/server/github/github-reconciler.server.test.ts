@@ -52,6 +52,7 @@ import {
   reconcileProject,
   reconcileTask,
   resetReconcileCursorsForTests,
+  resolveRemoteBranchCollision,
 } from "./github-reconciler.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -586,6 +587,106 @@ describe("reconcileTask", () => {
     // prefix-matched `[VIB-301]` entries in the compare) and no diff stats.
     expect(fm.github?.commits ?? []).toEqual([]);
     expect(fm.github?.changed ?? null).toBeNull();
+  });
+
+  it("U36-7: a NEW branch collision reaches the task watchers' inbox once — a persisting one never re-notifies", async () => {
+    // Pass-36 live (HLC-10): the reconciler wrote `github.unownedPr: 7` and a
+    // timeline note, and nothing else — no inbox row, so the owner learned of
+    // the collision only by visiting the task page. The adoption and the
+    // divergence trio already notify from this same pass; the collision did
+    // not. Canary: drop the collision `notifyTaskWatchers` call.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const policyNotes = () =>
+      listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    const first = policyNotes();
+    expect(first.map((n) => n.title)).toContain(
+      "Branch name collision on VIB-301: PR #318 is not this task's",
+    );
+    const notice = first.find((n) => (n.title ?? "").startsWith("Branch name collision"))!;
+    // The inbox text IS the collision note: whose PR it is not, and the remedy.
+    expect(notice.text).toContain("is NOT VIB-301's review PR");
+    expect(notice.text).toContain("`resolve_remote_collision`");
+
+    // The same collision on the next pass is not news.
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    expect(policyNotes().filter((n) => (n.title ?? "").startsWith("Branch name collision"))).toHaveLength(1);
+  });
+
+  it("U36-7: clearing a collision writes ONE event that names the closed PR and the deleted branch — even when GitHub refused the explicit close", async () => {
+    // Live (HLC-10, 15:38Z): the resolution closed PR #7 and deleted the
+    // branch, but the timeline said only "Deleted branch `hlc-10-0c88`" —
+    // the close is recorded only when GitHub answers the PATCH with 200, and
+    // it did not (the ref delete had already taken the head with it). The
+    // ceremony's own event now names the PR's fate in every arm, confirming
+    // it against GitHub when the explicit close was refused.
+    // Canary: gate the event on `close.ok` again and the 422 arm below writes
+    // nothing about PR #318.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        github: { commits: [], changed: null, unownedPr: 318 },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`DELETE ${REPO_PATH}/git/refs/heads/vib-301-workspace`]: { status: 204, body: "" },
+      [`PATCH ${REPO_PATH}/pulls/318`]: {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
+      // The re-read that stands in for the refused close: GitHub closed the
+      // PR with its head.
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { number: 318, state: "closed", merged: false, merged_at: null, head: { sha: "headsha318" } },
+      },
+    });
+
+    const result = await resolveRemoteBranchCollision(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "cleared", branch: "vib-301-workspace", closedUnownedPr: null });
+
+    const events = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    const cleared = events.find((e) => e.text.startsWith("Branch collision cleared:"));
+    expect(cleared).toBeDefined();
+    expect(cleared!.type).toBe("github");
+    expect(cleared!.text).toContain("deleted branch `vib-301-workspace`");
+    expect(cleared!.text).toContain("PR #318");
+    expect(cleared!.text).toContain("is closed on GitHub");
+    expect(cleared!.text).toContain("not VIB-301's review PR");
+    // Honest about the refusal: Viberr's own close did not go through.
+    expect(cleared!.text).toContain("Validation Failed");
+    // No close is CLAIMED as Viberr's: the audit row for a Viberr close stays absent.
+    expect(listAuditEvents(store.db, { action: "github.pr.closed_unowned" })).toHaveLength(0);
   });
 
   it("V5: a PR-LESS stale branch's foreign commits are never recorded as this task's", async () => {
