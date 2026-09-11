@@ -355,25 +355,42 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   it("keeps polling while a turn works, and stops when it settles (finding 32)", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let working = true;
+    const { loads } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView({ turn: { working, runId: "run_1" } }),
+    });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    // The poll is armed by an effect of the VIEW that says a turn is working —
+    // not by the click, and not by the request for that view. This test used
+    // to wait for the request (`loads.length > 0`), which the click makes
+    // synchronously, and then jump the clock 5 s. When the view took longer
+    // than one `shouldAdvanceTime` tick to land (a loaded machine, a cold first
+    // render), the jump crossed an empty timer queue, the poll armed at its far
+    // end, and the 1 s wait for the second request ran out four seconds before
+    // the poll's first tick.
+    //
+    // So the clock moves only when the test moves it (no `shouldAdvanceTime`),
+    // and every step is an awaited act(), which does not return until what it
+    // started — the request, the view that answers it, that view's effects —
+    // has committed. What follows each one is a plain read.
+    vi.useFakeTimers();
     try {
-      let working = true;
-      const { loads } = mount({
-        path: "/projects/viberr/tasks/VIB-1",
-        view: () => taskView({ turn: { working, runId: "run_1" } }),
+      await act(async () => {
+        fireEvent.click(trigger);
       });
-      fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
-      await waitFor(() => expect(loads.length).toBeGreaterThan(0));
+      expect(screen.getByText("Controller is working")).toBeTruthy();
       const afterOpen = loads.length;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
-      await waitFor(() => expect(loads.length).toBeGreaterThan(afterOpen));
-      // The turn settles: the poll stops asking.
+      expect(loads.length).toBe(afterOpen + 1);
+      // The turn settles: the next answer says so, and the poll stops asking.
       working = false;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
+      expect(screen.queryByText("Controller is working")).toBeNull();
       const afterSettle = loads.length;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15_000);
