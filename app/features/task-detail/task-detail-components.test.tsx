@@ -625,6 +625,19 @@ function connectedPrincipal(
  *  run control, the run-an-agent combobox + prompt, the engaged-agents ledger
  *  and the owner cell — every mutation callback spied so a pin can assert the
  *  exact submit. */
+/** U36-10: the board the run control resolves eligibility against. */
+const EXEC_STAGES = [
+  { id: "triage", name: "Triage" },
+  { id: "impl", name: "Building" },
+  { id: "review", name: "Review" },
+  { id: "done", name: "Done" },
+];
+const EXEC_WORKFLOW = [
+  { from: "triage", to: "impl" },
+  { from: "impl", to: "review" },
+  { from: "review", to: "done" },
+];
+
 function renderExec(
   task: TaskSummary,
   props: Partial<ComponentProps<typeof ExecutionProfile>> = {},
@@ -642,6 +655,8 @@ function renderExec(
         busy={false}
         onOwner={() => {}}
         deployedSpecialists={deployedFixture}
+        stages={EXEC_STAGES}
+        workflow={EXEC_WORKFLOW}
         operatorBackend="claude"
         operatorAutonomy="supervised"
         runPrincipal={connectedPrincipal()}
@@ -1173,6 +1188,29 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(operatorRunBtn(missing.container).disabled).toBe(false);
   });
 
+  it("U36-10 (pass 36): a stage-ineligible pick is refused before the click, with the dispatch gate's sentence and no delivering posture", () => {
+    // Live: the Code Reviewer (scoped to Agent Review) was listed as runnable
+    // on an Intake task with "Runs as the delivering agent: it owns the branch
+    // and PR."; the server refused after the click. Canary: delete the
+    // `ineligible` computation in AgentRunControl.
+    const scoped: DeployedSpecialistView[] = [
+      { ...deployedFixture[1]!, stages: ["review"], spanAll: false },
+    ];
+    const { container } = renderExec(execTask({ stage: "triage" }), {
+      deployedSpecialists: scoped,
+    });
+    const combo = container.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+    fireEvent.focus(combo);
+    const option = container.querySelector<HTMLButtonElement>('[role="option"]')!;
+    fireEvent.click(option);
+    expect(container.textContent).toContain(
+      "Reviewer is not eligible for the Triage stage; its profile is scoped to Review. Change the task's stage or the profile's eligible stages.",
+    );
+    expect(container.textContent).not.toContain("Runs as the delivering agent");
+    const runBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Run")!;
+    expect(runBtn.disabled).toBe(true);
+  });
+
   it("a closed task disables the operator run and no longer advertises an @operator side door (N20-17 → ruling 177)", () => {
     const { container, onRunOperator } = renderExec(
       execTask({ operator: attachedOperator, displayReadiness: "accepted" }),
@@ -1509,6 +1547,7 @@ function traceTask(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [],
     diagnostics: [],
     stages: [],
+    workflow: [],
     lastActivityAt: null,
     quiet: false,
     ...patch,
@@ -2285,6 +2324,36 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     [...container.querySelectorAll(".packet-body > .packet-lede")].find((p) =>
       p.textContent?.includes("Not in this list"),
     );
+  /** The task the closed-PR recovery is about HAS a branch — that fact, not
+   *  the option shape, is what the paragraph describes (U36-2). */
+  const RECOVERY_DISCLOSURE = {
+    taskKey: "VIB-142",
+    branch: "vib-142",
+    pendingRecommendations: 0,
+    unownedPr: null,
+    foreignHead: null,
+    openPr: null,
+  };
+
+  it("U36-2 (pass 36): a branchless task renders no re-delivery paragraph, whatever the options say", () => {
+    // Live: an `input` packet on HLC-9 (no branch, no PR, no closure) rendered
+    // the closed-PR recovery paragraph. Canary: drop the
+    // `archiveDisclosure?.branch != null` half of `branchDiscardOffered`.
+    const packetView = render(
+      <DecisionPacket
+        packet={recoveryPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        archiveDisclosure={{ ...RECOVERY_DISCLOSURE, branch: null }}
+        onResolveCustom={() => {}} onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(noteOf(packetView.container)).toBeUndefined();
+  });
 
   it("points at the SAME control the GitHub panel renders beside it", () => {
     const packetView = render(
@@ -2295,6 +2364,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
         canResolveCompletion
         canEditGoal
         canArchive
+        archiveDisclosure={RECOVERY_DISCLOSURE}
         onResolveCustom={() => {}} onResolve={() => {}}
         onAsk={() => {}}
       />,
@@ -3101,6 +3171,7 @@ function heroTask(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [],
     diagnostics: [],
     stages: [],
+    workflow: [],
     lastActivityAt: null,
     quiet: false,
     ...patch,

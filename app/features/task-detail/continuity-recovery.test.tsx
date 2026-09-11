@@ -496,6 +496,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [continuityEvent],
     diagnostics: [],
     stages: STAGES,
+    workflow: [],
     ...patch,
   };
 }

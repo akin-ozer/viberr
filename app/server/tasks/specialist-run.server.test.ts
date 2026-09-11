@@ -1007,7 +1007,7 @@ describe("assignReviewer / removeReviewer", () => {
     expect(file.parsed.timeline[0]!.text).toContain("as a supporting agent.");
     expect(file.parsed.timeline[0]!.text).not.toContain("as a reviewer");
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.engagement.added" })[0]?.taskKey,
     ).toBe("VIB-1");
   });
 
@@ -1567,7 +1567,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     expect(run.agent_profile_id).toBe("dev");
     // The engage rode the dispatch: assignReviewer's own audit fired.
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.engagement.added" })[0]?.taskKey,
     ).toBe("VIB-1");
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");

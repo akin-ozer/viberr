@@ -33,6 +33,7 @@ import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
 import {
   resolveDeclaredStages,
   stageEligible,
+  stageIneligibilitySentence,
 } from "~/shared/workflow/stage-eligibility";
 import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
 import { buildAgentToolkit, type AgentToolkit } from "./agent-toolkit.server";
@@ -1004,13 +1005,17 @@ export async function assignReviewer(
   reproject(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
-    action: "task.reviewer.assigned",
+    // U36-11 (pass 36): the vocabulary predates supporting engagements — a
+    // Frontend Developer engaged "as a supporting agent" was audited as a
+    // reviewer. The posture is the fact.
+    action: "task.engagement.added",
     actor: auditActor,
     subjectKind: "task",
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     details: {
+      posture: verdictCapable ? "reviewer" : "supporting",
       profileId: reviewer.profileId,
       backend: reviewer.backend,
       role: reviewer.role,
@@ -4056,9 +4061,7 @@ function stageRefusalSentence(
   const scopedTo = board
     ? resolveDeclaredStages(spec.stages, board.stages, board.workflow).map(nameOf).join(", ")
     : spec.stages.join(", ");
-  return `${spec.name} is not eligible for the ${nameOf(stageId)} stage; its profile is scoped to ${
-    scopedTo || spec.stages.join(", ") || "no stages"
-  }. Change the task's stage or the profile's eligible stages.`;
+  return stageIneligibilitySentence(spec.name, nameOf(stageId), scopedTo || spec.stages.join(", "));
 }
 
 /**

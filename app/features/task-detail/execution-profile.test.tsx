@@ -114,6 +114,8 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         busy={false}
         onOwner={() => {}}
         deployedSpecialists={deployedFixture}
+        stages={[]}
+        workflow={[]}
         operatorBackend="claude"
         operatorAutonomy="supervised"
         runPrincipal={null}

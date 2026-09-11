@@ -11,6 +11,12 @@ import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { AgentSelect } from "./agent-select";
 import {
+  resolveDeclaredStages,
+  stageEligible,
+  stageIneligibilitySentence,
+} from "~/shared/workflow/stage-eligibility";
+import { stageName } from "~/shared/workflow/stage-roles";
+import {
   backendLabelOf,
   backendRunRefusal,
   type TaskRunPrincipalView,
@@ -64,6 +70,10 @@ export interface DeployedSpecialistView {
     askHuman: boolean;
     browser: boolean;
   };
+  /** U36-10 (pass 36): stage scope, as the loader's view carries it. Absent in
+   *  older fixtures = unknown, and the control pre-refuses nothing. */
+  stages?: string[];
+  spanAll?: boolean;
 }
 
 /**
@@ -517,6 +527,9 @@ function OperatorRunControl({
  */
 function AgentRunControl({
   agents,
+  stage,
+  stages,
+  workflow,
   activeProfileIds,
   deliveringProfileId,
   engagedSupportingIds,
@@ -530,6 +543,12 @@ function AgentRunControl({
   onCancelSchedule,
 }: {
   agents: DeployedSpecialistView[];
+  /** U36-10 (pass 36): the task's stage and the board it sits on, so a
+   *  stage-ineligible pick is refused BEFORE the click with the server's
+   *  own sentence (ruling 133), and never promises a delivering posture. */
+  stage: string;
+  stages: { id: string; name: string }[];
+  workflow: { from: string; to: string }[];
   activeProfileIds: string[];
   /** Ruling 127: whose accounts a dispatch would bill (null = unowned task).
    *  A profile pinned to a backend the owner has not connected is still
@@ -613,15 +632,30 @@ function AgentRunControl({
   // owner — so the refusal is per-pick, not per-page. Same split the operator
   // control makes: a run NOW is refused, a SCHEDULED one is not (the owner can
   // connect the backend, or the seat can change hands, before it fires).
+  // U36-10 (pass 36): eligibility is resolved here, from the same predicate
+  // the dispatch gate applies, so the refusal a person would meet after the
+  // click is the one they read before it.
+  const ineligible =
+    selected &&
+    selected.stages !== undefined &&
+    !stageEligible({ stages: selected.stages, spanAll: selected.spanAll ?? false }, stage, stages, workflow)
+      ? stageIneligibilitySentence(
+          selected.name,
+          stageName(stages, stage),
+          resolveDeclaredStages(selected.stages, stages, workflow)
+            .map((id) => stageName(stages, id))
+            .join(", "),
+        )
+      : null;
   const runRefusal = selected
-    ? backendRunRefusal(runPrincipal, selected.backend, meId)
+    ? (ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
     : null;
   // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
   // live run on this very profile, or the owner-credential refusal (ruling 127),
   // each of which renders its own reason. An empty pick is validation, so it is
   // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
   // are both false with nothing picked, so this collapses to `busy` there.
-  const off = busy || selectedRunning || (delay === "now" && !!runRefusal);
+  const off = busy || selectedRunning || (delay === "now" && !!runRefusal) || !!ineligible;
   const pickRefused = refused > 0 && !selected;
   const run = () => {
     if (off) return;
@@ -641,7 +675,9 @@ function AgentRunControl({
   // (hunt 2026-08-29); capability derivation covers only the unengaged case.
   const posture = !selected
     ? null
-    : selected.id === deliveringProfileId
+    : ineligible
+      ? null
+      : selected.id === deliveringProfileId
       ? "Runs as the delivering agent: it owns the branch and PR."
       : engagedSupportingIds.includes(selected.id)
         ? selected.capabilities?.verdict
@@ -876,6 +912,8 @@ export function ExecutionProfile({
   busy,
   onOwner,
   deployedSpecialists,
+  stages,
+  workflow,
   operatorBackend,
   operatorAutonomy,
   runPrincipal,
@@ -899,6 +937,9 @@ export function ExecutionProfile({
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   /** Deployed specialists the run-agent selector offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
+  /** U36-10 (pass 36): the board the task sits on, for pre-click eligibility. */
+  stages: { id: string; name: string }[];
+  workflow: { from: string; to: string }[];
   /** The operator's configured backend — displayed, not picked (P11-76). */
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
@@ -1030,6 +1071,9 @@ export function ExecutionProfile({
             {canRunAgents ? (
               <AgentRunControl
                 agents={deployedSpecialists}
+                stage={task.stage}
+                stages={stages}
+                workflow={workflow}
                 activeProfileIds={activeAgentProfileIds}
                 deliveringProfileId={task.specialist?.profileId ?? null}
                 engagedSupportingIds={task.reviewers.map((r) => r.profileId)}

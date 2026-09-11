@@ -104,6 +104,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [],
     diagnostics: [],
     stages: STAGES,
+    workflow: [],
     lastActivityAt: null,
     quiet: false,
     ...patch,
@@ -1008,6 +1009,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
       task: {
         stage: "triage",
         stages: FOUR_STAGES,
+        workflow: [],
         pr: { number: 147, state: "review", title: "x" },
       },
       acceptance: {
@@ -1091,6 +1093,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
       task: {
         stage: "triage",
         stages: FOUR_STAGES,
+        workflow: [],
         pr: { number: 147, state: "review", title: "x" },
       },
       acceptance: {
@@ -2057,6 +2060,8 @@ function renderExec(opts: {
         busy={false}
         onOwner={(action) => calls.owner.push(action)}
         deployedSpecialists={opts.deployedSpecialists ?? []}
+        stages={[]}
+        workflow={[]}
         operatorBackend="claude"
         operatorAutonomy="supervised"
         runPrincipal={CONNECTED_PRINCIPAL}

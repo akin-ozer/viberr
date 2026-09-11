@@ -918,6 +918,28 @@ describe("fireDueSchedules", () => {
     expect(ev!.details?.outcome).toBe("skipped-done");
   });
 
+  it("U36-9 (pass 36): the skipped-done note names the terminal stage as the board calls it", async () => {
+    // Live: "HLC-1 is already Done — the scheduled run is moot." on a board
+    // whose last stage is Shipped. Canary: put the literal "Done" back.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      stages: pf.parsed.frontmatter.stages.map((s) =>
+        s.id === terminalStage() ? { ...s, name: "Shipped" } : s,
+      ),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id, stage: terminalStage(), schedules: [rawSchedule({ id: "sch_done" })] }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await fireDueSchedules(store.db, dctx());
+    const note = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!.parsed.timeline.find(
+      (e) => e.type === "note" && e.text.includes("Scheduled action skipped"),
+    )!;
+    expect(note.text).toContain("VIB-3 is already Shipped");
+    expect(note.text).not.toContain("already Done");
+  });
+
   it("F19-20: a task Done'd AFTER the tick's SELECT is retired, not run (the file decides, not the projection)", async () => {
     // The tick reads candidates from `task_projections`, then works through
     // them one awaited locked write at a time. An acceptance landing in that

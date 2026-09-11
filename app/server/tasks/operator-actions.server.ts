@@ -1336,7 +1336,9 @@ export async function operatorOpenPacket(
     if (o.ev) option.ev = o.ev;
     if (backend) option.backend = backend;
     if (profileId) option.profileId = profileId;
-    if (o.deleteBranch) option.deleteBranch = true;
+    // U36-2 (pass 36): a branchless task has no branch to delete — the option
+    // must not promise it, and the card's recovery paragraph keys on it.
+    if (o.deleteBranch && existing.parsed.frontmatter.branch) option.deleteBranch = true;
     // Ruling 163: only a redirect returns the task to the review stage.
     if (o.rework && o.kind === "redirect") option.rework = true;
     // Ruling 164: the stage a move_stage resolution moves to, validated above.

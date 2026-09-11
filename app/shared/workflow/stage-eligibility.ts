@@ -145,3 +145,18 @@ export function stageEligible(
   if (resolved.length === 0) return true; // rule 3 — meaningless here
   return resolved.includes(stageId);
 }
+
+/**
+ * Ruling 133's refusal, in ONE spelling: the server's dispatch gate and the
+ * task page's Run-an-agent control (U36-10, pass 36) both print it, so the
+ * words a person meets before the click are the words the server answers with.
+ */
+export function stageIneligibilitySentence(
+  agentName: string,
+  stageName: string,
+  scopedTo: string,
+): string {
+  return `${agentName} is not eligible for the ${stageName} stage; its profile is scoped to ${
+    scopedTo || "no stages"
+  }. Change the task's stage or the profile's eligible stages.`;
+}

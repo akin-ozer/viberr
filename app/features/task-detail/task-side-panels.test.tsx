@@ -78,6 +78,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [],
     diagnostics: [],
     stages: STAGES,
+    workflow: [],
     lastActivityAt: null,
     atAcceptanceBoundary: false,
     quiet: false,

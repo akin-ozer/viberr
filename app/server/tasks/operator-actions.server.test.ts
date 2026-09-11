@@ -2183,6 +2183,35 @@ describe("operatorAcceptCompletion", () => {
     ).toHaveLength(0);
   });
 
+  it("U36-2 (pass 36): an archive_task option's deleteBranch is dropped on a task with no branch", async () => {
+    // Live: an `input` packet on a branchless task carried `deleteBranch`, and
+    // the card rendered the closed-PR recovery paragraph about it. Canary:
+    // drop the `existing.parsed.frontmatter.branch` half of the guard.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope: no-op probe or new fixture",
+        options: [
+          { kind: "archive_task", title: "Archive it", deleteBranch: true },
+          { kind: "edit_goal", title: "Retarget it" },
+        ],
+      },
+      authority("full"),
+    );
+    const packet = task().packet!;
+    expect(packet.options[0]).toMatchObject({ kind: "archive_task" });
+    expect("deleteBranch" in packet.options[0]!).toBe(false);
+  });
+
   it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
     // The human accept path refuses a task with an open blocked packet; the
     // full-autonomy operator must refuse it too, or it silently buries the

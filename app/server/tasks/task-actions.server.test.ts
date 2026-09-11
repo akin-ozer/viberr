@@ -3093,6 +3093,41 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(runRows[0]!.details).toMatchObject({ reason: "task-closed", cause: "force-accept" });
   });
 
+  it("U36-9 (pass 36): the completion event names the board's terminal stage, not a literal Done", async () => {
+    // Live: "HLC-10 transitioned to **Done**" on a board whose last stage is
+    // Shipped. Canary: put the literal back in the acceptance event text.
+    const store = prepared();
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      stages: pf.parsed.frontmatter.stages.map((s) =>
+        s.id === "done" ? { ...s, name: "Shipped" } : s,
+      ),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+        pr: { number: 8, state: "review", title: "[VIB-1] work" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const completion = task(store).timeline.find((e) => e.type === "completion")!;
+    expect(completion.text).toContain("transitioned to **Shipped**");
+    expect(completion.text).not.toContain("**Done**");
+  });
+
   it("force-accept is held to the same disclosure — and records no bypass row for the attempt", async () => {
     // Force overrides the GATES, never the record of what the human was shown.
     // CANARY: drop the check from forceAcceptCompletion — a bare force POST

@@ -346,6 +346,12 @@ export async function fireDueSchedules(
     if (!terminalCache.has(slug)) terminalCache.set(slug, terminalStageId(db, slug));
     return terminalCache.get(slug) ?? null;
   };
+  // U36-9 (pass 36): the note names the terminal stage as the board calls it.
+  const terminalNameFor = (slug: string): string => {
+    const id = terminalFor(slug);
+    const stages = getProject(db, slug)?.stages ?? [];
+    return id === null ? "Done" : (stages.find((s) => s.id === id)?.name ?? id);
+  };
   // Hunt 2026-08-29: the fire path runs under `operatorAuthorized`, which
   // skips the route-layer requireRunAgents and with it the F17/R6-3
   // ARCHIVED-PROJECT freeze — so a pending schedule kept engaging profiles and
@@ -473,7 +479,7 @@ export async function fireDueSchedules(
                     ? `**Scheduled action skipped:** the project has been archived (read-only) — the scheduled run is moot.`
                     : parsed.frontmatter.archived === true
                       ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled run is moot.`
-                      : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled run is moot.`,
+                      : `**Scheduled action skipped:** ${row.task_key} is already ${terminalNameFor(row.project_slug)} — the scheduled run is moot.`,
                 ),
               );
             } else {

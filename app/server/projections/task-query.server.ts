@@ -56,6 +56,10 @@ export interface TaskDetail extends TaskSummary {
   diagnostics: DiagnosticRecord[];
   /** Project stage list — the detail view renders stage names/colors. */
   stages: { id: string; name: string; color: string }[];
+  /** U36-10 (pass 36): the project's workflow edges, so the run-agent
+   *  control resolves stage eligibility with the same predicate the dispatch
+   *  gate applies (ruling 133) before the click. */
+  workflow: { from: string; to: string }[];
   /** Gap-10: ISO of the newest timeline event; null when the timeline is empty.
    *  Derived from `task_events.occurred_at`, NOT `updated_at` — see the essay in
    *  task-activity.server.ts for why the file-write stamp is not activity. */
@@ -258,6 +262,7 @@ export function getTaskDetail(
     timeline: listTaskEvents(db, slug, key),
     diagnostics: listTaskDiagnostics(db, slug, key),
     stages: project ? project.stages.map((s) => ({ id: s.id, name: s.name, color: s.color })) : [],
+    workflow: project ? project.workflow.map((w) => ({ from: w.from, to: w.to })) : [],
     lastActivityAt: facts.lastActivityAt,
     quiet: isQuiet(quietCheck),
   };

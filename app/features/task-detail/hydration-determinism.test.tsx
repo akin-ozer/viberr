@@ -176,6 +176,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: TIMELINE,
     diagnostics: [],
     stages: STAGES,
+    workflow: [],
     lastActivityAt: "2026-07-03T23:30:00.000Z",
     quiet: false,
     ...patch,

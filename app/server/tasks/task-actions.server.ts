@@ -7751,12 +7751,12 @@ export async function resolvePacket(
             title: "Completion accepted",
             text:
               (!hasPr
-                ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+                ? `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}** (no linked pull request).`
                 : alreadyMerged
-                  ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
+                  ? `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}**; the review PR had already been merged on GitHub.`
                   : reallyMerged
-                    ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-                    : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+                    ? `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}** and the review PR was merged.`
+                    : `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
               driftNote,
             toAgent: false,
             evidence: null,
@@ -10467,13 +10467,15 @@ async function acceptCompletion(
         actor: humanActorRef(db, actor),
         title: "Completion accepted",
         text:
+          // U36-9 (pass 36): the board's terminal stage has a name; "Done" was
+          // a literal on a board whose last stage is called Shipped.
           (!hasPr
-            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+            ? `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}** (no linked pull request).`
             : alreadyMerged
-              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR had already been merged on GitHub (out of band).`
+              ? `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}**; the review PR had already been merged on GitHub (out of band).`
               : reallyMerged
-                ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-                : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+                ? `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}** and the review PR was merged.`
+                : `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
           driftNote,
         toAgent: false,
         evidence: null,
