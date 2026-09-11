@@ -100,6 +100,18 @@ function addMcp(
   ).run(`mcp_${name}`, name, transport, target, sealedCred, now, now);
 }
 
+/** Ruling 176: mark a registry row's write tools, as the editor's save does. */
+function markWriteTools(
+  db: ReturnType<typeof setupTestStore>["db"],
+  name: string,
+  tools: string[],
+): void {
+  db.prepare(`UPDATE org_mcp_servers SET tool_policy_json = ? WHERE name = ?`).run(
+    JSON.stringify(tools.map((tool) => ({ name: tool, gate: "repo-write" }))),
+    name,
+  );
+}
+
 describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
   it("builds an HTTP mcpServer config from an org MCP row", () => {
     const store = setupTestStore(ctx);
@@ -413,5 +425,76 @@ describe("resolveSpecialistMcpServersDetailed", () => {
       if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS;
       else process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = saved;
     }
+  });
+});
+
+/**
+ * Ruling 176 (amends 39): a withheld repo-write grant denies the tools an admin
+ * MARKED, per server, on both transports: the SDK's per-tool policy rides the
+ * HTTP config, and every marked name comes back as a denial for `startRun` to
+ * turn into a `disallowedTools` name (Claude) or `disabled_tools` (Codex).
+ */
+describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176)", () => {
+  it("a withheld run gets the HTTP per-tool policy and a denial for each transport", () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "gh-http", "HTTP", "https://mcp.example/gh");
+    addMcp(store.db, "gh-stdio", "stdio", "npx -y gh-mcp");
+    addMcp(store.db, "docs", "stdio", "npx -y docs-mcp");
+    markWriteTools(store.db, "gh-http", ["merge_pull_request"]);
+    markWriteTools(store.db, "gh-stdio", ["create_pull_request", "push_files"]);
+
+    const withheld = resolveSpecialistMcpServersDetailed(
+      store.db,
+      ["gh-http", "gh-stdio", "docs"],
+      { withholdWriteTools: true },
+    );
+    expect(withheld.servers["gh-http"]).toEqual({
+      type: "http",
+      url: "https://mcp.example/gh",
+      tools: [{ name: "merge_pull_request", permission_policy: "always_deny" }],
+    });
+    // stdio has no per-tool policy on the SDK; its config is untouched.
+    expect(withheld.servers["gh-stdio"]).toEqual({ command: "npx", args: ["-y", "gh-mcp"] });
+    expect(withheld.toolDenials).toEqual([
+      { server: "gh-http", tools: ["merge_pull_request"] },
+      { server: "gh-stdio", tools: ["create_pull_request", "push_files"] },
+    ]);
+  });
+
+  it("a run holding the grant, and a server with no marks, are mounted exactly as before", () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "gh-http", "HTTP", "https://mcp.example/gh");
+    markWriteTools(store.db, "gh-http", ["merge_pull_request"]);
+    addMcp(store.db, "docs", "HTTP", "https://mcp.example/docs");
+
+    const granted = resolveSpecialistMcpServersDetailed(store.db, ["gh-http", "docs"]);
+    expect(granted.servers["gh-http"]).toEqual({ type: "http", url: "https://mcp.example/gh" });
+    expect(granted.toolDenials).toEqual([]);
+
+    const withheld = resolveSpecialistMcpServersDetailed(store.db, ["docs"], {
+      withholdWriteTools: true,
+    });
+    expect(withheld.servers.docs).toEqual({ type: "http", url: "https://mcp.example/docs" });
+    expect(withheld.toolDenials).toEqual([]);
+  });
+
+  it("a stdio server dropped at run-mount takes its denials with it", async () => {
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "gh-stdio", "stdio", "npx -y gh-mcp");
+    markWriteTools(store.db, "gh-stdio", ["create_pull_request"]);
+    const verified = await verifyStdioMcpMountsForRun(
+      store.db,
+      resolveSpecialistMcpServersDetailed(store.db, ["gh-stdio"], { withholdWriteTools: true }),
+      { spawnImpl: crashSpawn("Error: Cannot find module 'ajv'\n"), timeoutMs: 200 },
+    );
+    expect(verified.servers).toEqual({});
+    expect(verified.toolDenials).toEqual([]);
+
+    const healthy = await verifyStdioMcpMountsForRun(
+      store.db,
+      resolveSpecialistMcpServersDetailed(store.db, ["gh-stdio"], { withholdWriteTools: true }),
+      { spawnImpl: handshakeSpawn(2), timeoutMs: 200 },
+    );
+    expect(healthy.toolDenials).toEqual([{ server: "gh-stdio", tools: ["create_pull_request"] }]);
   });
 });

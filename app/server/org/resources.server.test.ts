@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { unreachableFetch } from "../../../test-support/fake-github";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { ENV_KEYS } from "~/server/config/env.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
 import {
@@ -59,9 +60,10 @@ type FakeMcpReply = { jsonrpc: "2.0"; id: number } & {
 
 /**
  * A fake stdio MCP server: answers the JSON-RPC `initialize` and `tools/list`
- * handshake with `tools` tools — no real process spawned.
+ * handshake with `tools` tools — no real process spawned. `names` (ruling 176)
+ * names them; otherwise they are `t0`, `t1`, …
  */
-function fakeMcpSpawn(tools: number): McpSpawn {
+function fakeMcpSpawn(tools: number, names?: readonly string[]): McpSpawn {
   return () => {
     const stdout = new EventEmitter();
     const emit = (reply: FakeMcpReply) =>
@@ -82,7 +84,7 @@ function fakeMcpSpawn(tools: number): McpSpawn {
                 jsonrpc: "2.0",
                 id: 2,
                 result: {
-                  tools: Array.from({ length: tools }, (_, i) => ({ name: `t${i}` })),
+                  tools: Array.from({ length: tools }, (_, i) => ({ name: names?.[i] ?? `t${i}` })),
                 },
               });
             }
@@ -224,7 +226,7 @@ const respondingFetch: typeof fetch = async () =>
  */
 function mcpHttpFetch(
   toolCount: number,
-  opts: { sseFramed?: boolean; requireAuth?: string } = {},
+  opts: { sseFramed?: boolean; requireAuth?: string; toolNames?: readonly string[] } = {},
 ): typeof fetch {
   return async (_url, init) => {
     const headers = new Headers(init?.headers);
@@ -254,7 +256,11 @@ function mcpHttpFetch(
       return reply({
         jsonrpc: "2.0",
         id: 2,
-        result: { tools: Array.from({ length: toolCount }, (_, i) => ({ name: `t${i}` })) },
+        result: {
+          tools: Array.from({ length: toolCount }, (_, i) => ({
+            name: opts.toolNames?.[i] ?? `t${i}`,
+          })),
+        },
       });
     }
     return new Response("", { status: 202 });
@@ -1666,5 +1672,130 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       if (savedPath === undefined) delete process.env.PATH;
       else process.env.PATH = savedPath;
     }
+  });
+});
+
+/**
+ * Ruling 176 (amends 39): discovery PROPOSES, the admin DECIDES. A probe stores
+ * the names its listing carried; the marked write tools are whatever the admin
+ * saved, audited when they change, and never touched by a save that does not
+ * carry the list (the controller's tool, a re-test).
+ */
+describe("ruling 176: an org MCP server's write tools", () => {
+  const LISTING = ["get_issue", "create_pull_request", "merge_pull_request", "list_commits"];
+  const STDIO = { name: "github", transport: "stdio", target: "npx -y gh-mcp", cred: "" };
+
+  it("a probe keeps the tool names it listed, and the marks start unreviewed", async () => {
+    const { db } = setup();
+    const { mcp } = await saveMcpServer(db, STDIO, ACTOR, {
+      spawnImpl: fakeMcpSpawn(4, LISTING),
+    });
+    expect(mcp.discoveredTools).toEqual(LISTING);
+    expect(mcp.writeTools).toEqual([]);
+    expect(mcp.writeToolsReviewed).toBe(false);
+    expect(listAuditEvents(db, { action: "org.mcp.tool_policy.changed" })).toHaveLength(0);
+  });
+
+  it("stores the marked list, audits each change, and a save without the list keeps it", async () => {
+    // Canary: drop `tool_policy_json = COALESCE(?, tool_policy_json)` from the
+    // UPDATE and the list-less save below wipes the marks.
+    const { db } = setup();
+    const opts = { spawnImpl: fakeMcpSpawn(4, LISTING) };
+    const created = await saveMcpServer(
+      db,
+      { ...STDIO, writeTools: ["create_pull_request", " create_pull_request "] },
+      ACTOR,
+      opts,
+    );
+    expect(created.mcp.writeTools).toEqual(["create_pull_request"]);
+    expect(created.mcp.writeToolsReviewed).toBe(true);
+    expect(created.toast).toContain("1 marked as write tool");
+
+    await saveMcpServer(
+      db,
+      { ...STDIO, id: created.mcp.id, writeTools: ["create_pull_request", "merge_pull_request"] },
+      ACTOR,
+      opts,
+    );
+    // The controller's tool edits a server without the list.
+    const kept = await saveMcpServer(db, { ...STDIO, id: created.mcp.id }, ACTOR, opts);
+    expect(kept.mcp.writeTools).toEqual(["create_pull_request", "merge_pull_request"]);
+
+    const none = await saveMcpServer(
+      db,
+      { ...STDIO, id: created.mcp.id, writeTools: [] },
+      ACTOR,
+      opts,
+    );
+    expect(none.mcp.writeTools).toEqual([]);
+    // A reviewed "none" is not the same as never reviewed.
+    expect(none.mcp.writeToolsReviewed).toBe(true);
+
+    const audits = listAuditEvents(db, { action: "org.mcp.tool_policy.changed" });
+    expect(audits.map((a) => a.details)).toEqual(
+      expect.arrayContaining([
+        { name: "github", before: [], after: ["create_pull_request"] },
+        {
+          name: "github",
+          before: ["create_pull_request"],
+          after: ["create_pull_request", "merge_pull_request"],
+        },
+        { name: "github", before: ["create_pull_request", "merge_pull_request"], after: [] },
+      ]),
+    );
+    // The list-less save changed nothing, so it audited nothing.
+    expect(audits).toHaveLength(3);
+    expect(audits[0]!.actorLabel).toBe(ACTOR.label);
+  });
+
+  it("refuses a name outside the MCP alphabet before spawning anything", async () => {
+    const { db } = setup();
+    let spawned = 0;
+    const counting: McpSpawn = (...args) => {
+      spawned += 1;
+      return fakeMcpSpawn(1)(...args);
+    };
+    await expect(
+      saveMcpServer(db, { ...STDIO, writeTools: ["create pull request"] }, ACTOR, {
+        spawnImpl: counting,
+      }),
+    ).rejects.toThrow('"create pull request" is not an MCP tool name');
+    expect(spawned).toBe(0);
+    expect(listMcpServers(db)).toHaveLength(0);
+  });
+
+  it("a failed re-probe keeps the listed names; re-pointing the server clears them", async () => {
+    const { db } = setup();
+    const { mcp } = await saveMcpServer(db, STDIO, ACTOR, {
+      spawnImpl: fakeMcpSpawn(4, LISTING),
+    });
+    const down = await saveMcpServer(db, { ...STDIO, id: mcp.id }, ACTOR, {
+      spawnImpl: failingSpawn,
+    });
+    expect(down.mcp.up).toBe(false);
+    expect(down.mcp.discoveredTools).toEqual(LISTING);
+
+    const moved = await saveMcpServer(
+      db,
+      { ...STDIO, id: mcp.id, target: "npx -y other-mcp" },
+      ACTOR,
+      { spawnImpl: failingSpawn },
+    );
+    expect(moved.mcp.discoveredTools).toBeNull();
+  });
+
+  it("an HTTP probe lists names too, and a re-test refreshes them", async () => {
+    const { db } = setup();
+    const { mcp } = await saveMcpServer(
+      db,
+      { name: "gh-http", transport: "HTTP", target: "https://mcp.internal/gh", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(2, { toolNames: ["get_issue", "push_files"] }) },
+    );
+    expect(mcp.discoveredTools).toEqual(["get_issue", "push_files"]);
+    const retested = await testMcpServer(db, mcp.id, {
+      fetchImpl: mcpHttpFetch(3, { toolNames: ["get_issue", "push_files", "delete_file"] }),
+    });
+    expect(retested.mcp.discoveredTools).toEqual(["get_issue", "push_files", "delete_file"]);
   });
 });

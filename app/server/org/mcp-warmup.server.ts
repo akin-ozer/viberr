@@ -119,12 +119,13 @@ export function startMcpWarmup(
           `UPDATE org_mcp_servers
              SET up = 1, tools_count = ?, last_checked_at = ?, last_error = NULL,
                  first_success_at = COALESCE(first_success_at, ?),
+                 tool_names_json = ?,
                  updated_at = ?
            WHERE id = ? AND target = ?`,
           // R20-4: the warm-up finishing is this server's first-ever success —
           // stamp it (idempotently) so a later cold probe is never mistaken for
-          // a fresh first run.
-        ).run(disc.tools, now, now, now, input.id, input.target);
+          // a fresh first run. Ruling 176: and its tool names reach the editor.
+        ).run(disc.tools, now, now, JSON.stringify(disc.toolNames), now, input.id, input.target);
         logger.info("mcp background install finished — server answered", {
           mcp: input.name,
           tools: disc.tools,

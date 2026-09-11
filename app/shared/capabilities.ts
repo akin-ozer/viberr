@@ -76,7 +76,9 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
   // Agent repository/execution toggles (bind via the Claude tool denylist; the
   // headline write family also binds on Codex through the read-only sandbox —
-  // ruling 101 — with the evidence carve-out disclosed by codexRepoWriteAdvisory)
+  // ruling 101 — with the evidence carve-out disclosed by codexRepoWriteAdvisory).
+  // Ruling 176: withholding the headline grant also denies the org MCP tools an
+  // admin marked as write tools (Claude by name, Codex as `disabled_tools`).
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
   cap("commit-push-branch", "Commit & push to the branch", ["agent"], "Repository & execution"),

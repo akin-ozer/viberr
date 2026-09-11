@@ -42,6 +42,7 @@ import { readSkillBodies } from "~/server/files/skill-body.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
+import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
   readTaskFile,
   updateTaskFile,
@@ -2277,6 +2278,8 @@ async function startCodexOperatorRun(
   // key is what the adapters read as "this run mounts none".
   if (authority.effort) spec.effort = authority.effort;
   if (Object.keys(orgMcpServers).length) spec.mcpServers = orgMcpServers;
+  // Ruling 176: Codex sends these as each server's `disabled_tools`.
+  if (mcp.toolDenials.length) spec.mcpToolDenials = mcp.toolDenials;
   // R21-4: adopt the row the human has been watching since before the clone,
   // instead of opening a second one beside it.
   if (start.reservation) spec.reservation = start.reservation;
@@ -2948,6 +2951,8 @@ async function startRealOperatorRun(
   if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
   // An absent effort leaves the SDK on its own default.
   if (authority.effort) spec.effort = authority.effort;
+  // Ruling 176: `startRun` denies each by name, after the toolkit's approvals.
+  if (mcp.toolDenials.length) spec.mcpToolDenials = mcp.toolDenials;
   // R21-4: adopt the row the human has been watching since before the clone,
   // instead of opening a second one beside it.
   if (start.reservation) spec.reservation = start.reservation;
@@ -3154,6 +3159,9 @@ export interface OperatorMcpResolution {
   mounted: string[];
   unresolved: string[];
   unhealthy: string[];
+  /** Ruling 176: the mounted servers' marked write tools. The operator never
+   *  writes, so every operator run withholds them. */
+  toolDenials: McpToolDenial[];
 }
 
 /** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
@@ -3175,9 +3183,9 @@ async function operatorMcpResolution(
   names: readonly string[],
   backend: RealBackend,
 ): Promise<OperatorMcpResolution> {
-  const { servers, unresolved } = await verifyStdioMcpMountsForRun(
+  const { servers, unresolved, toolDenials } = await verifyStdioMcpMountsForRun(
     db,
-    resolveSpecialistMcpServersDetailed(db, names),
+    resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools: true }),
     { backend },
   );
   return {
@@ -3185,6 +3193,7 @@ async function operatorMcpResolution(
     mounted: Object.keys(servers),
     unresolved: unresolved.filter((u) => !u.mounted).map((u) => u.name),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
+    toolDenials,
   };
 }
 
@@ -3197,6 +3206,7 @@ const NO_OPERATOR_MCPS: OperatorMcpResolution = {
   mounted: [],
   unresolved: [],
   unhealthy: [],
+  toolDenials: [],
 };
 
 /**
@@ -3445,21 +3455,37 @@ export function buildOperatorSystemPrompt(
   // never-describe-the-folder-as-the-repository rule, so the confabulation is
   // closed even when the checkout is missing.
   parts.push(workspaceSection(workspace, isolatedWritableRoot));
-  if (mcp.mounted.length > 0) {
+  // Ruling 176: a server whose write tools an admin marked has them removed
+  // from every operator run, on both backends, so it leaves the paragraph
+  // below and a plain statement of what was removed replaces it.
+  const gatedServers = new Set(mcp.toolDenials.map((d) => d.server));
+  const ungatedMcps = mcp.mounted.filter((name) => !gatedServers.has(name));
+  if (ungatedMcps.length > 0) {
     // A6: the MCP-governance rule specialists get (P13-KM-04). MCP tools sit
-    // OUTSIDE the capability system — there is no `mcp__*` deny rule anywhere —
-    // so the only thing standing between an org MCP with write powers and the
+    // OUTSIDE the capability system — no capability denies the `mcp__*`
+    // channel, only the tools an admin marked (ruling 176) — so for a server
+    // without marks the only thing standing between its write powers and the
     // always-human invariants is this paragraph. It was missing on the profile
     // that holds `transition-to-done: human` and `change-project-policy: human`.
     parts.push(
       "\n\n---\n# MCP tools are governed too\n\n" +
-        `You have tools from these attached MCP servers: ${mcp.mounted.join(", ")}. ` +
+        `You have tools from these attached MCP servers: ${ungatedMcps.join(", ")}. ` +
         "They are yours to read with and query with. They do NOT widen your " +
         "authority: never use an MCP tool to merge a pull request, close or " +
         "move a task to Done, change project policy, or perform any action " +
         "your capability policy withholds or reserves for a human. Viberr owns " +
         "delivery, merging and acceptance — if a tool would do one of those, " +
         "stop and open a decision packet instead.",
+    );
+  }
+  if (mcp.toolDenials.length > 0) {
+    parts.push(
+      "\n\n---\n# MCP write tools withheld\n\n" +
+        `These attached MCP servers stay mounted: ${[...gatedServers].join(", ")}. ` +
+        "You never write to the repository, so the tools on them that an " +
+        "administrator marked as write tools are removed from this run: " +
+        mcp.toolDenials.map((d) => `${d.tools.join(", ")} (on ${d.server})`).join("; ") +
+        ". Their other tools are available to you.",
     );
   }
   if (mcp.unhealthy.length > 0) {

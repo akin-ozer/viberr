@@ -11,7 +11,9 @@
 > panel. Agent backends now authenticate per person; there is no deployment-wide
 > Claude or Codex credential to administer. Updated 2026-09-11 for ruling 175 (branch
 > `option-d/pr3-cost-cap-usage`): §4's org settings gain the spending cap per Claude run
-> and its `org.run_spend_cap.changed` audit.
+> and its `org.run_spend_cap.changed` audit. Updated 2026-09-11 for ruling 176 (branch
+> `option-d/pr2-mcp-tool-gating`): §4's MCP server editor marks write tools, audited as
+> `org.mcp.tool_policy.changed`.
 
 ## 1. Authentication
 
@@ -176,7 +178,11 @@ the tabs sit the Audit log card and the run-concurrency control.
   re-index, delete), MCP servers (`HTTP` or `stdio`, target, sealed credential; saving
   runs a real `initialize` → `tools/list` handshake, stdio children get a filtered env
   plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute background warm-up;
-  reserved names refused), skills (`skills/<name>/SKILL.md` plus files), global agent
+  reserved names refused; ruling 176's "Write tools" section marks the tools a run that
+  withholds repo write, and every operator run, does not get: the probe's tool names are
+  offered, the write-looking ones pre-selected until the server is first reviewed, a
+  name can be typed, and each change is audited as `org.mcp.tool_policy.changed`
+  {name, before, after}), skills (`skills/<name>/SKILL.md` plus files), global agent
   templates (specialists only, created with conservative grants, undeletable while
   deployed; the edit modal's "Copy these grants to the N projects that adopted this
   profile" box rewrites each adopted project's copy of the grants with the save,

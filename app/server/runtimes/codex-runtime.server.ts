@@ -192,16 +192,25 @@ const codexMcpServerSchema = z.union([
  * Ruling 174: a stdio server is started with the CLI's short default
  * environment plus its declared `env`, so the run marker is declared there —
  * it is an id, not a secret, and argv is a fine place for it — and whatever
- * the server launches (a browser, a language server) inherits it. */
+ * the server launches (a browser, a language server) inherits it.
+ *
+ * Ruling 176: a server's admin-marked write tools, on a run that withholds
+ * repo write, become its `disabled_tools` (a per-server key the pinned CLI
+ * reads, alongside `enabled_tools`). Tool names, not secrets, so argv is fine
+ * here too. */
 function codexMcpServers(
   servers: RunSpec["mcpServers"],
   runMarker: string | undefined,
+  toolDenials: RunSpec["mcpToolDenials"] = [],
 ): CodexConfig {
   const translated: CodexConfig = {};
   for (const [name, value] of Object.entries(servers ?? {})) {
     if (!name) continue;
     const declaration = codexMcpServerSchema.safeParse(value);
     if (!declaration.success || declaration.data === null) continue;
+    const disabledTools = toolDenials
+      .filter((denial) => denial.server === name)
+      .flatMap((denial) => denial.tools);
 
     // F7-MCP1 credential scope: resolveSpecialistMcpServers injects the decrypted
     // token as `headers.Authorization` (HTTP) / `env.MCP_CREDENTIAL` (stdio).
@@ -213,10 +222,12 @@ function codexMcpServers(
     // limitation (same class as the S3 codex tool-confinement gap), not a silent
     // drop — the specialist-mcp docstring says so.
     if (declaration.data.transport === "http") {
-      translated[name] = {
+      const http: CodexConfig = {
         url: declaration.data.url,
         default_tools_approval_mode: "approve",
       };
+      if (disabledTools.length) http.disabled_tools = disabledTools;
+      translated[name] = http;
       continue;
     }
 
@@ -227,6 +238,7 @@ function codexMcpServers(
     // An empty `args` is not the same declaration as none at all.
     if (declaration.data.args.length) stdio.args = declaration.data.args;
     if (runMarker) stdio.env = { [RUN_MARKER_ENV]: runMarker };
+    if (disabledTools.length) stdio.disabled_tools = disabledTools;
     translated[name] = stdio;
   }
   return translated;
@@ -397,7 +409,11 @@ function codexConfigForRun(
     // run sees only the MCPs its profile selected. NOTE: the CLI merges this
     // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
     // home declares — the app-owned run home is what makes this exhaustive.
-    mcp_servers: codexMcpServers(spec.mcpServers, spec.env?.[RUN_MARKER_ENV]),
+    mcp_servers: codexMcpServers(
+      spec.mcpServers,
+      spec.env?.[RUN_MARKER_ENV],
+      spec.mcpToolDenials,
+    ),
     shell_environment_policy: shellEnvironmentPolicy,
   };
   // The persona/expertise prompt, when the run carries one. Set after the

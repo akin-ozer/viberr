@@ -4535,6 +4535,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Modal fields ---------- */
 .key-row { display: grid; grid-template-columns: 1fr 130px; gap: 1rem; }
+/* Ruling 176: a write-tool name typed in beside its Add button (MCP editor). */
+.tool-add { display: grid; grid-template-columns: 1fr auto; gap: .5rem; }
 .repo-input { display: flex; align-items: center; border: 1px solid var(--border-control); border-radius: var(--radius-button); background: var(--surface); transition: border-color .14s ease, box-shadow .14s ease; }
 .repo-input:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 /* The inner input has no border of its own, so the invalid mark lands on the frame. */

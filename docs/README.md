@@ -50,6 +50,14 @@ Claude specialist's outcome is the first `report_outcome` it sends; a second is 
 audited as `task.agent.outcome_duplicate`. Pages: `domain/agents-and-runtime.md` (§§2.4, 3.1,
 4.2) and `architecture/data-model.md`.
 
+Updated 2026-09-11 for ruling 176 (branch `option-d/pr2-mcp-tool-gating`): an org admin may
+mark an MCP server's write tools in its editor, and a run that withholds repo write (every
+operator run among them) does not get them, on Claude by name and on Codex as
+`disabled_tools`. The P13-KM-04 prompt paragraph now names only unmarked servers. Pages:
+`architecture/decisions.md` (ruling 176, a note under 39), `architecture/data-model.md`,
+`domain/agents-and-runtime.md` (§§2.4, 2.5, 4.3, 6), `domain/auth-and-rbac.md` (§4),
+`ui/surfaces.md` (§3), `product/glossary.md` and `product/overview.md`.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -83,7 +91,7 @@ audited as `task.agent.outcome_duplicate`. Pages: `domain/agents-and-runtime.md`
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 175 numbered owner rulings (1–175; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 176 numbered owner rulings (1–176; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 

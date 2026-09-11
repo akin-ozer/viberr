@@ -272,6 +272,11 @@ export function McpPanel({
                     " template" +
                     (usedBy(m.name) === 1 ? "" : "s")
                   : ""}
+                {/* Ruling 176: how many of its tools are withheld from agents
+                    that may not write, so the row says the server is gated. */}
+                {m.writeTools.length > 0
+                  ? ` · ${m.writeTools.length} write tool${m.writeTools.length === 1 ? "" : "s"} withheld from read-only runs`
+                  : ""}
               </span>
               {/* R19-17: WHY it is unreachable, in the command's own words.
                   The reason used to exist only in the toast the probe returned,

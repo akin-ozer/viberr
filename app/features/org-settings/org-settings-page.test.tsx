@@ -419,9 +419,9 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -504,6 +504,7 @@ describe("ResourcesPanel", () => {
         lastError:
           "exited before responding — ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'",
         warmingSince: null,
+        writeTools: [], writeToolsReviewed: false, discoveredTools: null,
       },
     ];
     const { container } = renderPanel(
@@ -529,6 +530,7 @@ describe("ResourcesPanel", () => {
         lastCheckedAt: new Date().toISOString(),
         lastError: "still installing after 20s — …",
         warmingSince: new Date().toISOString(),
+        writeTools: [], writeToolsReviewed: false, discoveredTools: null,
       },
     ];
     const { container } = renderPanel(
@@ -562,6 +564,7 @@ describe("ResourcesPanel", () => {
         hasCred: true,
         credUnreadable: true,
         lastError: null, warmingSince: null,
+        writeTools: [], writeToolsReviewed: false, discoveredTools: null,
         tools: null,
         up: null,
         lastCheckedAt: new Date().toISOString(),
@@ -627,7 +630,7 @@ describe("ResourcesPanel", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [
       { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
-        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null },
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null },
     ];
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,
@@ -2059,5 +2062,91 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
     fireEvent.click(kbPanel.querySelector('[title="Edit"]')!);
     expect(document.querySelector("#kb-name")).not.toBeNull();
     expect(utils.queryByText("Start from files")).toBeNull();
+  });
+});
+
+/* ------------- ruling 176: the MCP editor's "Write tools" section --------- */
+
+describe("McpModal — write tools (ruling 176)", () => {
+  const LISTED = ["get_issue", "create_pull_request", "merge_pull_request", "list_commits"];
+
+  function renderWith(mcps: McpView[]) {
+    return renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={mcps}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+  }
+
+  it("a server nobody has reviewed opens with the write-looking names selected, and saves them", async () => {
+    // Canary: seed `marked` with `[]` instead of the heuristic and the save
+    // below sends an empty list.
+    const unreviewed: McpView[] = [{ ...MCPS[0]!, discoveredTools: LISTED }];
+    const { getByLabelText, getByRole, getByText } = renderWith(unreviewed);
+    fireEvent.click(getByLabelText("Edit github-mcp"));
+    const group = getByRole("group", { name: /Write tools/ });
+    const pressed = [...group.querySelectorAll('[aria-pressed="true"]')].map((b) => b.textContent);
+    expect(pressed).toEqual(["create_pull_request", "merge_pull_request"]);
+    expect(getByText(/Review them before you save/)).toBeTruthy();
+    fireEvent.click(getByText("Save & re-test"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "mcp-save",
+        writeTools: JSON.stringify(["create_pull_request", "merge_pull_request"]),
+      }),
+    );
+  });
+
+  it("a reviewed server opens with exactly its saved marks; a toggle and a typed name change the list", async () => {
+    const reviewed: McpView[] = [
+      {
+        ...MCPS[0]!,
+        discoveredTools: LISTED,
+        writeTools: ["merge_pull_request"],
+        writeToolsReviewed: true,
+      },
+    ];
+    const { getByLabelText, getByRole, getByText, queryByText } = renderWith(reviewed);
+    // The row says the server is gated.
+    expect(getByText(/1 write tool withheld from read-only runs/)).toBeTruthy();
+    fireEvent.click(getByLabelText("Edit github-mcp"));
+    expect(queryByText(/Review them before you save/)).toBeNull();
+    const group = getByRole("group", { name: /Write tools/ });
+    const chip = (name: string) =>
+      [...group.querySelectorAll("button")].find((b) => b.textContent === name)!;
+    expect(chip("merge_pull_request").getAttribute("aria-pressed")).toBe("true");
+    expect(chip("create_pull_request").getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(chip("create_pull_request"));
+    const input = getByLabelText("Add a write tool by name");
+    const add = getByText("Add tool");
+    fireEvent.change(input, { target: { value: "delete repo" } });
+    expect(add).toHaveProperty("disabled", true);
+    fireEvent.change(input, { target: { value: "delete_repo" } });
+    fireEvent.click(add);
+    expect(chip("delete_repo").getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(getByText("Save & re-test"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        writeTools: JSON.stringify(["merge_pull_request", "create_pull_request", "delete_repo"]),
+      }),
+    );
+  });
+
+  it("a new server with nothing to show yet saves without the list, so its first probe still suggests", async () => {
+    const { getByLabelText, getByText } = renderWith(MCPS);
+    fireEvent.click(getByLabelText("Add MCP server"));
+    fireEvent.change(getByLabelText(/Server name/), { target: { value: "gh-new" } });
+    fireEvent.change(getByLabelText(/Endpoint/), { target: { value: "https://mcp.example/gh" } });
+    expect(getByText(/Its tools are listed here once the connection test answers/)).toBeTruthy();
+    fireEvent.click(getByText("Add & test connection"));
+    await waitFor(() => expect(lastForm).toMatchObject({ intent: "mcp-save", name: "gh-new" }));
+    expect(lastForm).not.toHaveProperty("writeTools");
   });
 });

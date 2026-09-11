@@ -1954,6 +1954,7 @@ export async function commentToAgent(
     // re-arm the native skills filter or the resumed run enables none.
     if (confinement) {
       resume.disallowedTools = confinement.disallowedTools;
+      if (confinement.mcpToolDenials) resume.mcpToolDenials = confinement.mcpToolDenials;
       resume.env = confinement.env;
       if (confinement.skills) resume.skills = confinement.skills;
       if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
