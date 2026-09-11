@@ -38,7 +38,8 @@ import { MiniModal } from "~/features/org-settings/mini-modal";
 import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
-import { stageLockReason } from "~/shared/workflow/stage-roles";
+import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
+import { isTerminalStage, stageLockReason } from "~/shared/workflow/stage-roles";
 import {
   PROJECT_ROLES,
   roleCan,
@@ -948,6 +949,192 @@ export function StagesPanel({
   );
 }
 
+// ------------------------------------------------------- required reviewers
+
+/** One row of the required-reviewer table as the form holds it. */
+interface RequiredReviewerDraft {
+  stageId: string;
+  profileId: string;
+}
+
+const draftKey = (rows: readonly RequiredReviewerDraft[]) =>
+  JSON.stringify(rows.map((r) => [r.stageId, r.profileId]));
+
+/**
+ * Ruling 178 (pass 36, G36-3): the project's required reviewers, edited as a
+ * small table — a non-terminal stage and a deployed verdict-capable agent per
+ * row — and saved WHOLE through one intent (`set-required-reviewers`), the
+ * same writer and validation the controller's `set_required_reviewers` uses.
+ * Lives beside the stage editor because a rule names a stage. A role without
+ * `edit-policy` reads the rules as text (ruling 65's withdrawn-not-disabled
+ * precedent, the same shape the guardrail rows take); the server enforces
+ * regardless. Remounted by the page (`key`) whenever the loader's rules
+ * change, so a saved list never fights a stale draft.
+ */
+export function RequiredReviewersPanel({
+  rules,
+  stages,
+  candidates,
+  canManage,
+  busy,
+  onSave,
+}: {
+  rules: RequiredReviewerView[];
+  stages: { id: string; name: string }[];
+  candidates: { id: string; name: string }[];
+  canManage: boolean;
+  busy: boolean;
+  onSave: (rules: RequiredReviewerDraft[]) => void;
+}) {
+  const [draft, setDraft] = useState<RequiredReviewerDraft[]>(() =>
+    rules.map((r) => ({ stageId: r.stageId, profileId: r.profileId })),
+  );
+  // The terminal stage is never a review stage: a verdict is given before it.
+  const eligibleStages = stages.filter((s) => !isTerminalStage(s.id, stages));
+  const changed = draftKey(draft) !== draftKey(rules);
+  const canAdd = candidates.length > 0 && eligibleStages.length > 0;
+  const add = () => {
+    // Default to the stage before the terminal one — the acceptance boundary
+    // on the shipped board — and the first agent that can report a verdict.
+    const stageId = eligibleStages[eligibleStages.length - 1]?.id ?? "";
+    const profileId = candidates[0]?.id ?? "";
+    setDraft((rows) => [...rows, { stageId, profileId }]);
+  };
+  const update = (i: number, patch: Partial<RequiredReviewerDraft>) =>
+    setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
+  const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
+  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
+  const agentName = (id: string) => candidates.find((c) => c.id === id)?.name ?? id;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="check" />
+        <h2>Required reviewers</h2>
+        <span className="right sub fine">{countLabel(rules.length, "rule")}</span>
+      </div>
+      {!canManage && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only. Changing the required reviewers needs the{" "}
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
+          </span>
+        </div>
+      )}
+      {canManage && candidates.length === 0 && (
+        <div className="pol-note">
+          <Icon name="alert" />
+          <span>
+            No deployed agent can report a validation verdict. Grant one{" "}
+            <strong>Report a validation verdict</strong> on Agents before
+            requiring it here.
+          </span>
+        </div>
+      )}
+      {canManage ? (
+        <div className="guard-list">
+          {draft.map((row, i) => (
+            <div className="guard-row rr-row" key={i}>
+              <label className="guard-ctl">
+                Stage
+                <select
+                  aria-label={`Rule ${i + 1} stage`}
+                  value={row.stageId}
+                  disabled={busy}
+                  onChange={(e) => update(i, { stageId: e.target.value })}
+                >
+                  {eligibleStages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="guard-ctl">
+                Reviewer
+                <select
+                  aria-label={`Rule ${i + 1} reviewer`}
+                  value={row.profileId}
+                  disabled={busy}
+                  onChange={(e) => update(i, { profileId: e.target.value })}
+                >
+                  {/* A rule naming an agent since undeployed keeps its id in
+                      the picker so the row is readable and removable, never
+                      silently rewritten to the first candidate. */}
+                  {!candidates.some((c) => c.id === row.profileId) && (
+                    <option value={row.profileId}>{row.profileId} (not deployed)</option>
+                  )}
+                  {candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn ghost sm"
+                aria-label={`Remove rule ${i + 1}: ${agentName(row.profileId)} at ${stageName(row.stageId)}`}
+                disabled={busy}
+                onClick={() => remove(i)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          {draft.length === 0 && (
+            <p className="empty sm">
+              No required reviewers. Only the reviewers an operator engages on a
+              task are required.
+            </p>
+          )}
+        </div>
+      ) : rules.length === 0 ? (
+        <p className="empty sm">No required reviewers declared.</p>
+      ) : (
+        <div className="guard-list">
+          {rules.map((r) => (
+            <div className="guard-row" key={`${r.stageId} ${r.profileId}`}>
+              <div className="guard-main">
+                <span className="guard-name">{r.agentName}</span>
+                <span className="guard-desc">Reviews at {r.stageName}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {canManage && (
+        <div className="rr-actions">
+          {canAdd && (
+            <button type="button" className="btn ghost sm" disabled={busy} onClick={add}>
+              <Icon name="plus" />
+              Add rule
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={!changed || busy}
+            aria-busy={busy || undefined}
+            onClick={() => onSave(draft)}
+          >
+            Save
+          </button>
+        </div>
+      )}
+      <div className="pol-note after last">
+        <Icon name="shield" />
+        <span>
+          A required reviewer must approve the delivered revision before a task
+          is accepted, whether or not the operator engaged it; the operator is
+          told to run it at its stage. Without a rule, only the reviewers an
+          operator engages on a task are required.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ members
 
 /** Which invite field a refused submit named. */
@@ -1796,12 +1983,14 @@ export function SettingsPage({
   const repoFetcher = useFetcher<ActionResult>();
   const credFetcher = useFetcher<ActionResult>();
   const dangerFetcher = useFetcher<ActionResult>();
+  const reviewerFetcher = useFetcher<ActionResult>();
   useActionToast(identityFetcher);
   useActionToast(stageFetcher);
   useActionToast(memberFetcher);
   useActionToast(repoFetcher);
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
+  useActionToast(reviewerFetcher);
 
   // E3: every panel gate names the RbacAction its OWN server mutation checks,
   // never a shared `myRole === "admin"` literal. Project identity, the stage
@@ -1898,6 +2087,29 @@ export function SettingsPage({
             }
             onNavPolicy={onNavPolicy}
           />
+          {/* Ruling 178: the rule names a stage, so it sits under the stage
+              editor in the same grid cell (`.profile-col`, the sheet's
+              stack-of-panels-in-a-cell, as Policy stacks Guardrails). */}
+          <div className="profile-col">
+            <RequiredReviewersPanel
+              key={JSON.stringify(data.requiredReviewers)}
+              rules={data.requiredReviewers}
+              stages={data.stages}
+              candidates={data.reviewerCandidates}
+              canManage={canEditPolicy}
+              busy={reviewerFetcher.state !== "idle"}
+              onSave={(rules) =>
+                reviewerFetcher.submit(
+                  {
+                    intent: "set-required-reviewers",
+                    _csrf: csrf,
+                    rules: JSON.stringify(rules),
+                  },
+                  { method: "post" },
+                )
+              }
+            />
+          </div>
         </div>
         <div className="policy-cols">
           <MembersPanel

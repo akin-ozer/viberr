@@ -9,6 +9,7 @@ import {
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { deploymentRuntimeIdentity } from "~/server/agents/deployment-view.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 
 /**
  * Ruling 178 (pass 36, G36-3): the project-level REQUIRED-reviewer rule.
@@ -66,6 +67,17 @@ export function resolveRequiredReviewers(
       dataRoot,
     ),
   }));
+}
+
+/** The rules as project.md holds them right now, resolved — the file is the
+ *  truth the Policy and Settings pages read (the projected copy is what the
+ *  rebuilder's task walk prints). Empty for an unreadable project. */
+export function readRequiredReviewers(
+  projectSlug: string,
+  ctx: { dataRoot?: string } = {},
+): RequiredReviewerView[] {
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  return file ? resolveRequiredReviewers(file.parsed.frontmatter, ctx.dataRoot) : [];
 }
 
 /** The review-relevant slice of a task the gate reads. */

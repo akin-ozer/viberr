@@ -15,6 +15,10 @@ import {
   type MembershipView,
 } from "~/features/project-settings/membership.server";
 import { getProject } from "~/server/projections/board-query.server";
+import {
+  readRequiredReviewers,
+  type RequiredReviewerView,
+} from "~/server/tasks/required-reviewers.server";
 
 /**
  * Policy view read model (policy spec §3): members + roles from the
@@ -60,6 +64,9 @@ export interface PolicyViewData {
   transitions: TransitionView[];
   profiles: AgentProfileView[];
   guardrails: GuardrailView[];
+  /** Ruling 178: the project's required reviewers (stage → agent), read
+   *  from project.md and resolved to names. Edited on Settings. */
+  requiredReviewers: RequiredReviewerView[];
   /** Null until a policy change has been audited (fresh seed) — the mock's
    * "Elif Demir · Mar 30" was fixture data; the chip hides when unknown. */
   /** UXA-16: the raw timestamp — the DISPLAY form is the client's job. This
@@ -136,6 +143,7 @@ export function getPolicyViewData(
     })),
     profiles: assembleAgentRoster(db, projectSlug, ctx),
     guardrails: listGuardrailViews(projectSlug, ctx),
+    requiredReviewers: readRequiredReviewers(projectSlug, ctx),
     edited: latestPolicyChange(db, projectSlug),
   };
 }

@@ -1849,6 +1849,9 @@ describe("set_required_reviewers (ruling 178)", () => {
     });
     expect(reply).toBe("[done] Required reviewers saved: Reviewer at Review.");
     expect(await rulesInFile()).toEqual([{ stageId: "review", profileId: "reviewer" }]);
+    // SAFETY: `get_project` answers `json(...)` of an object literal that
+    // always carries `requiredReviewers`; the member is typed unknown and
+    // compared structurally below.
     const project = JSON.parse(await call(ids.projectAdmin, "get_project")) as {
       requiredReviewers: unknown;
     };

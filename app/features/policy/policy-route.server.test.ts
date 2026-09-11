@@ -574,3 +574,21 @@ describe("set-boundary", () => {
     ).toBe("human");
   });
 });
+
+/** Ruling 178: the Policy loader reads the required-reviewer rules from
+ *  project.md, resolved to the names the card prints. */
+describe("required reviewers on the Policy loader (ruling 178)", () => {
+  it("lists the rule project.md holds, resolved, and [] when none is declared", async () => {
+    expect((await runLoader(ids.arda)).view.requiredReviewers).toEqual([]);
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.requiredReviewers = [{ stageId: "review", profileId: "reviewer" }];
+    });
+    expect((await runLoader(ids.arda)).view.requiredReviewers).toEqual([
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Reviewer" },
+    ]);
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.requiredReviewers = [];
+    });
+  });
+});
