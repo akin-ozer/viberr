@@ -134,6 +134,9 @@ describe("runtime-registry", () => {
     // `spec.env` from `runCredentialFor`.
     setEnv("ANTHROPIC_API_KEY", "sk-ant-instance-key");
     setEnv("CODEX_API_KEY", "instance-codex-key");
+    // Ruling 181: the CLI's state-db location is the person's too. An ambient
+    // one (a host's own ~/.codex state) must not ride into a child.
+    setEnv("CODEX_SQLITE_HOME", "/ambient/codex-state");
     setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
 
     let claudeEnv: Record<string, string> | undefined;
@@ -201,6 +204,9 @@ describe("runtime-registry", () => {
       // principal's, and arrives on spec.env.
       expect(env?.CLAUDE_CONFIG_DIR).toBeUndefined();
       expect(env?.CODEX_HOME).toBeUndefined();
+      // Ruling 181: the adapter sets CODEX_SQLITE_HOME per run, to the
+      // principal's shared home; the base must not carry a host's own.
+      expect(env?.CODEX_SQLITE_HOME).toBeUndefined();
     }
   });
 

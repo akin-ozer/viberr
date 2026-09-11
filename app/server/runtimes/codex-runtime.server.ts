@@ -28,6 +28,11 @@ import {
 import { CODEX_REPO_WRITE_ADVISORY_NOTE } from "~/server/tasks/specialist-tool-policy";
 import { withProviderText } from "~/shared/provider-marker";
 import { SESSION_MISSING_RE } from "./session-export.server";
+import {
+  finishCodexRunHome,
+  prepareCodexRunHome,
+  type CodexRunHome,
+} from "./user-homes.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
@@ -743,6 +748,11 @@ export function createCodexAdapter(
       let settled = false;
       let idleTimedOut = false;
       let emittedAdapterFailure = false;
+      // Ruling 181: the run's private CODEX_HOME, forked from the principal's
+      // home at spawn and removed by `settle` — the one exit every outcome
+      // takes. Null until the spawn env is built, and for a spec that carries
+      // no home at all (nothing to fork from).
+      let runHome: CodexRunHome | null = null;
       const abort = new AbortController();
       // Force-settle deadline armed after an abort, so a child that survives
       // SIGTERM cannot leave the row `running` forever. `settle` disarms it.
@@ -839,6 +849,14 @@ export function createCodexAdapter(
           clearTimeout(interruptTimer);
           interruptTimer = null;
         }
+        // Ruling 181: carry the refreshed sign-in back and drop the run home
+        // BEFORE the completion callback runs inside `onExit` — a follow-up
+        // run it starts forks its own home from the shared file, which must
+        // already hold this run's refresh. Never throws.
+        if (runHome) {
+          finishCodexRunHome(runHome);
+          runHome = null;
+        }
         cb.onExit({
           outcome,
           effectiveBackend: "codex",
@@ -918,6 +936,19 @@ export function createCodexAdapter(
             : undefined);
         const mergedEnv =
           baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
+        // Ruling 181: `spec.env.CODEX_HOME` is the principal's SHARED home
+        // (`runCredentialFor`). The CLI gets a private fork of it for this run
+        // — its own `tmp/arg0` helper directory, its own copy of the sign-in —
+        // while the state db (`CODEX_SQLITE_HOME`) and, by link, the sessions
+        // stay shared, so resume still finds its rollout (F36-3, Q36-11 a).
+        // Read from `spec.env`, the credential's own contract — never from the
+        // merged env, whose process.env fallback could carry an ambient home.
+        const sharedHome = spec.env?.CODEX_HOME;
+        if (mergedEnv && sharedHome) {
+          runHome = prepareCodexRunHome(sharedHome, spec.runId);
+          mergedEnv.CODEX_HOME = runHome.dir;
+          mergedEnv.CODEX_SQLITE_HOME = runHome.sharedHome;
+        }
         const config = codexConfigForRun(spec, deps.config);
         const codexOptions: CodexOptions = { config };
         if (mergedEnv) codexOptions.env = mergedEnv;

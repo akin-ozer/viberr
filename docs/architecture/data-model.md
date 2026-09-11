@@ -69,7 +69,10 @@ Created lazily by the code that needs them:
   agents/definitions/operator.md, controller.md     system-profile doctrine files shipped by boot
   runtimes/users/<userId>/claude-home/               that person's CLAUDE_CONFIG_DIR (ruling 127): the vendor's own
                                                     sign-in file plus their Claude transcripts under projects/
-  runtimes/users/<userId>/codex-home/                that person's CODEX_HOME: auth.json plus sessions/
+  runtimes/users/<userId>/codex-home/                that person's shared Codex home: auth.json plus sessions/
+  runtimes/users/<userId>/codex-home/runs/<runId>/   one live run's CODEX_HOME (ruling 181): a copy of auth.json + config.toml,
+                                                     symlinked sessions/ skills/ memories/, the CLI's own tmp/; deleted at settle
+  runtimes/codex-sandbox-probe/                      the once-per-process Codex sandbox probe's home + workdir (ruling 182); removed after
   runtimes/<backend>/<runId>.jsonl                  raw NDJSON transcript of every run (canonical run truth)
   runtimes/uv-cache/, runtimes/uv-python/           uv's cache for Python MCP servers (container)
   audit-exports/audit-events-<YYYY-MM-DD>.jsonl     rows the 90-day audit purge exported before deleting
