@@ -33,10 +33,9 @@ import {
   type RuntimeAdapter,
 } from "./adapter.server";
 import {
-  defaultModelFor,
-  foreignModelBackend,
   modelDisplayName,
   resolveRunEffort,
+  substituteRunModel,
 } from "./model-catalog.server";
 import { publishRunStateChanged } from "./run-events.server";
 import {
@@ -828,8 +827,11 @@ export async function startRun(
   // line naming the swap. The save-time rejection is the primary fix
   // (agent-profile-actions.server.ts); this is the net under it, for profiles
   // saved before that guard and for any path that builds a spec by hand.
-  const foreignBackend = foreignModelBackend(input.backend, input.model);
-  const model = foreignBackend ? defaultModelFor(input.backend) : input.model;
+  // F36-8 (pass 36): the swap has ONE home, `substituteRunModel` — the
+  // specialist dispatch hands the profile's ORIGINAL id through and names the
+  // same answer on its timeline event, so this notice fires for a
+  // cross-backend retry too (it used to pre-swap, and the log never said).
+  const { model, foreignBackend } = substituteRunModel(input.backend, input.model);
   const modelSubstitution = foreignBackend
     ? `The agent's model **${modelDisplayName(foreignBackend, input.model)}** ` +
       `(\`${input.model}\`) is a ${BACKEND_LABEL[foreignBackend]} model and cannot run on ` +

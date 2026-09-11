@@ -96,6 +96,7 @@ import {
   defaultModelFor,
   resolveRunModel,
   resolveRunEffort,
+  substituteRunModel,
 } from "~/server/runtimes/model-catalog.server";
 import {
   ensureTaskBranchBestEffort,
@@ -1490,17 +1491,24 @@ async function dispatchAgentRun(
     mcpNames = resolved.mcps;
     disallowedTools = resolveSpecialistDisallowedTools(resolved.capabilities);
     // The profile's model/effort are specific to ITS native backend. When this
-    // run overrides to a DIFFERENT backend (D4 retry-on-other-backend), the
-    // native model id is invalid there — re-resolve for the actual run backend
-    // so the retry works. Same-backend runs keep the profile's exact values.
-    if (backend === resolved.backend) {
-      model = resolved.model;
-      effort = resolved.effort;
-    } else {
-      model = resolveRunModel(backend, undefined); // backend default
-      effort = resolveRunEffort(backend, resolved.effort);
-    }
+    // run overrides to a DIFFERENT backend (D4 retry-on-other-backend, or a
+    // F27-B1 pin), the native model id is invalid there. F36-8 (pass 36): the
+    // ORIGINAL id is handed through to `startRun` all the same — run-service's
+    // F21-13 branch substitutes the backend default AND discloses it (the run
+    // log opens with the notice). This branch used to pre-swap the default in,
+    // so run-service saw a valid model and nothing anywhere said `sonnet` had
+    // replaced `gpt-5.6-luna`. Effort still translates here (`resolveRunEffort`
+    // maps by rank across the two tier scales; no disclosure needed).
+    model = resolved.model;
+    effort =
+      backend === resolved.backend
+        ? resolved.effort
+        : resolveRunEffort(backend, resolved.effort);
   }
+  // What the run will EXECUTE (F36-8): the same answer run-service records on
+  // the row, read here so the reserved row and the timeline event name it.
+  const modelSubstitution = substituteRunModel(backend, model);
+  const ranModel = modelSubstitution.model;
   // Stage eligibility holds at the RUN boundary too (F1): an already-engaged
   // agent must not be re-run after the task moved to a stage it isn't eligible
   // for. Outside the try so the undeployed-profile fallback can't swallow it.
@@ -1683,7 +1691,8 @@ async function dispatchAgentRun(
         kind: delivers ? "primary" : "reviewer",
         backend,
         credentialUserId: principal.principal.userId,
-        model,
+        // The strip's header names what will RUN, never a foreign id (F36-8).
+        model: ranModel,
         agentName,
         agentProfileId: engagement.profileId,
         phase: RUN_PHASE.preparing,
@@ -2151,6 +2160,20 @@ async function dispatchAgentRun(
 
   const backendLabel = backend === "claude" ? "Claude" : "Codex";
   const switched = engagement.backend !== backend;
+  // F36-8 (pass 36): the event names the MODEL when the backend switch made
+  // run-service substitute it, and says the pin sticks when this run set one.
+  // Live, "switched from Codex" was the whole disclosure, and the next
+  // operator dispatch ran on Claude/sonnet with nobody having chosen sonnet.
+  const substitutedNote = modelSubstitution.foreignBackend
+    ? ` on \`${ranModel}\` — the profile's \`${model}\` is a ${
+        modelSubstitution.foreignBackend === "claude" ? "Claude" : "Codex"
+      } model`
+    : "";
+  const pinNote = input.backendOverride
+    ? `. Later runs on this task stay on ${backendLabel} until another retry moves them`
+    : engagement.pinnedBackend && modelSubstitution.foreignBackend
+      ? ` (this task is pinned to ${backendLabel})`
+      : "";
   // F10-31: surface (in run evidence) when the operator directive tried to make
   // this specialist perform a server-owned delivery action (push / open / merge
   // a PR). The specialist prompt gives the typed contract precedence and the
@@ -2180,9 +2203,10 @@ async function dispatchAgentRun(
       }
       parsed.timeline.unshift(
         agentEvent(
-          switched
-            ? `Started a ${backendLabel} run for the ${engagement.role} agent (switched from ${engagement.backend === "claude" ? "Claude" : "Codex"}) — streaming to the agent logs.`
-            : `Started a ${backendLabel} run for the ${engagement.role} agent — streaming to the agent logs.`,
+          (switched
+            ? `Started a ${backendLabel} run for the ${engagement.role} agent (switched from ${engagement.backend === "claude" ? "Claude" : "Codex"})`
+            : `Started a ${backendLabel} run for the ${engagement.role} agent`) +
+            `${substitutedNote}${pinNote} — streaming to the agent logs.`,
         ),
       );
       if (directiveOverrode) {

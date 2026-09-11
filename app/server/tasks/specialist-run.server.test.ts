@@ -64,6 +64,8 @@ import {
   connectFakeBackend,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -859,6 +861,60 @@ describe("startSpecialistRun", () => {
     // reverted to the live profile's Claude.
     const later = await runOnce();
     expect(later.backend).toBe("codex");
+  });
+
+  /**
+   * F36-8 (pass 36) — a run that switches backend must say which MODEL it ran
+   * on. Live (HLC): `retry_other_backend` re-ran the Server Developer on Claude;
+   * the deployment stores `gpt-5.6-luna` (a Codex id), specialist-run swapped it
+   * for the Claude default BEFORE run-service could see a foreign id, so the
+   * F21-13 substitution notice never fired, the timeline said only "switched
+   * from Codex", and the next operator dispatch ran on Claude/sonnet with nobody
+   * having chosen sonnet. The run row's model column was the only witness.
+   *
+   * Canary: restore `model = resolveRunModel(backend, undefined)` on the
+   * cross-backend branch and the log's first line is no longer the notice;
+   * drop the model clause from the switched-backend event and the timeline
+   * assertions fail.
+   */
+  it("F36-8: a switched-backend run discloses the substituted model in the run log AND on the timeline, and says the pin sticks", async () => {
+    // The live profile is Codex; its resolved model is the Codex default.
+    deployDevSpecialist(["codex"]);
+    await assign();
+    const profileModel = defaultModelFor("codex");
+    const ranModel = defaultModelFor("claude");
+
+    const retry = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await waitForLines(retry.runId, 1);
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: retry.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+
+    // The row names what actually ran …
+    expect(retry.backend).toBe("claude");
+    expect(getRun(store.db, retry.runId)!.model).toBe(ranModel);
+    // … the run log OPENS with the F21-13 notice naming both models (the
+    // profile's original id reached run-service, which did the swap) …
+    const first = listRunLines(store.db, retry.runId)[0]!;
+    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.text).toContain(profileModel);
+    expect(first.display.text).toContain(`\`${ranModel}\``);
+    // … and the timeline event names the model, the profile's own, and that
+    // later runs on this task stay on the pinned backend.
+    const event = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline.find((e) => e.text.includes("Started a Claude run"))!;
+    expect(event.text).toContain("switched from Codex");
+    expect(event.text).toContain(`on \`${ranModel}\``);
+    expect(event.text).toContain(`\`${profileModel}\` is a Codex model`);
+    expect(event.text).toContain("Later runs on this task stay on Claude");
   });
 
   /**
