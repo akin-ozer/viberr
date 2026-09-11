@@ -131,6 +131,10 @@ import {
   type DeployedSpecialistView,
   type DispatchHeldError,
 } from "./specialist-run.server";
+import {
+  resolveRequiredReviewers,
+  type RequiredReviewerView,
+} from "./required-reviewers.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import {
   listKnowledgeBaseNames,
@@ -1607,6 +1611,13 @@ export interface OperatorTaskSnapshot {
     backend: string;
     verdict: "approve" | "request_changes" | null;
   }[];
+  /** Ruling 178: the reviewers the PROJECT requires, per review stage,
+   *  resolved to the names the acceptance gate prints. Each must hold an
+   *  `approve` verdict on the delivered revision before acceptance, engaged
+   *  or not — `reviewers` above lists only who the operator has engaged.
+   *  Optional so hand-built fixtures need not restate it; `operatorSnapshot`
+   *  always sets it. */
+  requiredReviewers?: RequiredReviewerView[];
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
   /** R7-4 rework routing, made VISIBLE. The governed workflow graph is
@@ -2072,6 +2083,8 @@ export function operatorSnapshot(
         verdict: verdictOf(r.profileId),
       }));
     })(),
+    // Ruling 178: from the project file, resolved the way the gate prints it.
+    requiredReviewers: resolveRequiredReviewers(project.parsed.frontmatter, ctx.dataRoot),
     nextStages,
     reworkStages,
     stageIds: stages.map((s) => s.id),

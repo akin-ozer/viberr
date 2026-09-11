@@ -1245,6 +1245,34 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   /**
+   * Ruling 178 (pass 36, G36-3): a project-declared required reviewer is a
+   * rule the operator must act on, not a refusal it discovers at the boundary,
+   * so every ordinary turn — and the post-delivery turn, which returns before
+   * the stage rule — names the rule and what to do about it.
+   */
+  it("ruling 178: names the project's required reviewers and the engagement it owes, on both the ordinary and the delivered turn", () => {
+    // Canary: drop `requiredReviewersRule` from `stageRule` and the delivered arm.
+    const rules = [
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
+      { stageId: "qa", stageName: "QA", profileId: "qa-bot", agentName: "QA Bot" },
+    ];
+    const line = "Required reviewers (project rule): Code Reviewer at Review, QA Bot at QA.";
+    const ordinary = buildOperatorTurnPrompt(snapshot({ requiredReviewers: rules }), "manual");
+    expect(ordinary).toContain(line);
+    expect(ordinary).toContain("`run_agent` (`delivers: false`)");
+    const delivered = buildOperatorTurnPrompt(
+      snapshot({ requiredReviewers: rules, pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      "delivered",
+    );
+    expect(delivered).toContain(line);
+    expect(buildCodexOperatorPrompt(snapshot({ requiredReviewers: rules }), "manual")).toContain(line);
+    // No rule, no line.
+    expect(buildOperatorTurnPrompt(snapshot({ requiredReviewers: [] }), "manual")).not.toContain(
+      "Required reviewers (project rule)",
+    );
+  });
+
+  /**
    * F21-17 (live VIB-4) — the recovery packet said "review before closure was
    * clean (Approve)" and offered "Rework and resubmit", never mentioning the
    * unreviewed out-of-band commit the reconciler had already recorded. The
