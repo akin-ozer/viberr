@@ -3559,6 +3559,41 @@ by rewriting those paragraphs:*
     one trace chip, the problem pills and the wait tag. The task page and the review queue keep
     the priority, labels and due date; nothing is lost, it is one click further in.
 
+173. **The Cognipeer Agent SDK was evaluated and not adopted (owner, 2026-09-11).**
+    `@cognipeer/agent-sdk` 0.10.2 was assessed against every run subsystem as a replacement
+    for `@anthropic-ai/claude-agent-sdk` ^0.3.261 and `@openai/codex-sdk` ^0.153.4, and as a
+    third backend beside them, from the library's documentation read page by page and its
+    installed typings. The assessment and that documentation were working material and are
+    not kept in the tree (owner, 2026-09-11); this ruling records the verdict and the facts
+    that decide it, and the plan that follows is `planning/option-d-2026-09-11/PLAN.md`. It
+    is not adopted in any of the four adopting shapes the assessment weighed: full
+    replacement, a third backend, the operator and controller only, or a separate advisor
+    run kind. Four facts decide it, and none is an effort question: it authenticates with
+    API keys only, so the per-person vendor sign-in of ruling 127 has no equivalent; its
+    Anthropic reasoning mapping sends a `thinking` shape that current models reject, with no
+    route to `output_config.effort`; a Zod 4 schema reaches the provider as a bare
+    `{"type":"object"}` with no error (verified on a scratch install); and it ships no
+    coding harness or sandbox and runs its loop in the server process that holds the writer
+    lock (ruling 158). What it demonstrated better
+    (spending caps, exact token usage, in-process tools without a ToolSearch hop, per-tool
+    MCP gating, cancellation that reaches every child) is reachable through options the
+    pinned Claude SDK already has, and is ported onto the pinned SDKs by rulings 174 to 176
+    as the Option D plan lands, one PR per gain (`planning/option-d-2026-09-11/PLAN.md`).
+    **Reopen** only when all three of these hold: an upstream adaptive-thinking or
+    `output_config.effort` route on current Anthropic models; a Zod 4-native schema path, or
+    a contractually stable `zod/v3` one; and a 1.x release with a published plugin API and a
+    versioned snapshot format. Or when a paying org asks for Bedrock, Vertex or Azure, in
+    which case the fallback is a third backend for non-coding runs, never a replacement of
+    either vendor SDK. Two corrections are recorded with this ruling. (a) The Codex read-only
+    sandbox is a live enforcement seam under ruling 101 despite R22's wording (ruling 93):
+    a write-withheld Codex run is confined by it today, less ruling 109's attachments
+    carve-out (`resolveCodexSandboxMode`). The "open code drift" note under
+    ruling 93 is stale, since the capability-matrix copy already says Codex runs a read-only
+    sandbox, and the Option D hygiene PR replaces it. (b) `McpServerToolPolicy` and per-server
+    `alwaysLoad` exist on the pinned Claude SDK and were never used; nor were `maxBudgetUsd`,
+    `result.modelUsage`, `allowDangerouslySkipPermissions` or `spawnClaudeCodeProcess`, which
+    the rulings that follow take up.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in
