@@ -508,11 +508,10 @@ export function SkillModal({
         fields.body = filesMode ? "" : body;
         fields.contentMode = filesMode ? "files" : "write";
         // P13-KM-18: an empty body means "keep what's on disk" (the editor
-        // only round-trips a truncated read for very large files), so
-        // BLANKING a SKILL.md was impossible from the UI — the server's
-        // explicit `clearBody` escape hatch had no caller. Emptying the
-        // editor on an existing skill now says so.
-        if (initial && body.trim() === "") fields.clearBody = "1";
+        // only round-trips a truncated read for very large files). Ruling 183
+        // retired the `clearBody` escape hatch that let this form blank a
+        // SKILL.md: an empty SKILL.md is not a skill and the writer refuses an
+        // empty body, so emptying the editor keeps the file.
         action.submit(fields);
       }}
     >

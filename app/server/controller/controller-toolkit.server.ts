@@ -1,9 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  BACKEND_LABEL,
   assertEffortForBackend,
   assertModelForBackend,
   defaultEffortFor,
   defaultModelFor,
+  effortsFor,
 } from "~/server/runtimes/model-catalog.server";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
@@ -193,6 +195,16 @@ export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "task, the task tools default to that task as well.";
 
 const prose = normalizeEscapedNewlines;
+
+/**
+ * U36-5 (pass 36): the tier lists the three effort descriptions carry come
+ * from the catalog, so a tier the catalog gains (Codex `max`, CLI 0.153) is
+ * offered here the day it lands instead of being typed by hand three times.
+ * Live, the descriptions still said Codex stops at `xhigh`; the write
+ * succeeded and the controller told the owner it could not confirm `max` is
+ * real.
+ */
+const EFFORT_TIERS_SENTENCE = `Claude ${effortsFor("claude").join("|")}, Codex ${effortsFor("codex").join("|")}`;
 
 /**
  * Ruling 156: "1 project copy does not carry this change: k9c-k9s-clone is
@@ -514,9 +526,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. No delete exists here.",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. No delete exists here. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes).",
       {
-        id: z.string().optional().describe("Existing KB id to update; omit to create."),
+        id: z
+          .string()
+          .optional()
+          .describe(
+            "Existing KB id to update — from list_knowledge_bases or this tool's own reply; omit to create.",
+          ),
         name: z.string(),
         // The shared constant, not a hand-copied list: "nightly" was retired
         // when it turned out nothing ever scheduled it (see KB_REFRESH_MODES),
@@ -545,18 +562,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             auditActor,
             { dataRoot },
           );
+          // U36-4 (pass 36): the reply carries what the next call needs — the
+          // id for a save, the grantKey for a grant. The toast alone named the
+          // folder, and the controller then guessed `disk:<dir>`.
+          const head = `[done] ${saved.toast} (id ${saved.kb.id}, grantKey ${saved.kb.dir}).`;
           let docNote = "";
           if (args.doc) {
             const target = resolveStoreTarget(db, "kb", saved.kb.id, { dataRoot });
             if (!target) {
-              return `[done] ${saved.toast}. The document could not be written: the KB folder did not resolve.`;
+              return `${head} The document could not be written: the KB folder did not resolve.`;
             }
             writeStoreDoc(db, target, [], args.doc.path, args.doc.content, auditActor, {
               overwrite: true,
             });
             docNote = ` Document ${args.doc.path} written.`;
           }
-          return `[done] ${saved.toast}.${docNote}`;
+          return `${head}${docNote}`;
         },
       ),
     ),
@@ -589,12 +610,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_skill",
-      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only.",
+      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only. The reply names the skill's id (what the next save takes) and its grantKey (what a grant takes).",
       {
-        id: z.string().optional().describe("Existing skill id to update; omit to create."),
+        id: z
+          .string()
+          .optional()
+          .describe(
+            "Existing skill id to update — from list_skills or this tool's own reply; omit to create.",
+          ),
         name: z.string(),
         summary: z.string(),
-        body: z.string().optional().describe("SKILL.md content; omit to keep what is on disk."),
+        body: z
+          .string()
+          .optional()
+          .describe(
+            "SKILL.md content with REAL newlines: a --- frontmatter block (name, description) followed by markdown, or plain markdown. Required on a create; omit on an update to keep what is on disk. An empty, JSON-escaped (literal \\n and no newline) or unparseable body is refused, never rewritten (ruling 183).",
+          ),
       },
       runWith(async (args: { id?: string; name: string; summary: string; body?: string }) => {
         requireOrgAdmin("manage skills");
@@ -609,7 +640,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           auditActor,
           { dataRoot },
         );
-        return `[done] ${saved.toast}.`;
+        // U36-4: the same re-enterable reply as save_knowledge_base.
+        return `[done] ${saved.toast} (id ${saved.skill.id}, grantKey ${saved.skill.name}).`;
       }),
     ),
     "save_skill",
@@ -750,7 +782,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Default effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh. Omit to keep the stored tier; \"\" clears it.",
+            `Default effort tier the backend offers: ${EFFORT_TIERS_SENTENCE}. Omit to keep the stored tier; "" clears it.`,
           ),
         propagate: z
           .boolean()
@@ -1969,7 +2001,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         projectSlug: z.string().optional(),
         profileId: z.string(),
         model: z.string().optional().describe("Model id for the template's backend (see the profile's backend in list_global_agents)."),
-        effort: z.string().optional().describe("Effort tier the backend offers: Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh."),
+        effort: z
+          .string()
+          .optional()
+          .describe(`Effort tier the backend offers: ${EFFORT_TIERS_SENTENCE}.`),
       },
       runWith(async (args: { projectSlug?: string; profileId: string; model?: string; effort?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1993,7 +2028,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, eligible stages, or operator autonomy. Project admin. Merge semantics: only the fields you pass change. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, and every stage id must be one of the project's stages.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, or the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -2006,10 +2041,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Effort tier the deployment's backend offers (Claude low|medium|high|xhigh|max, Codex low|medium|high|xhigh); refused by name otherwise. A backend switch with no effort resets to that backend's default.",
+            `Effort tier the deployment's backend offers (${EFFORT_TIERS_SENTENCE}); refused by name otherwise. A backend switch with no effort resets to that backend's default.`,
           ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
+        skills: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Skill grants by grantKey — the skill FOLDER NAME from list_skills, never its id. Omit to keep the deployment's grants; [] clears them. Every kind, the operator included.",
+          ),
+        mcps: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "MCP grants by grantKey — the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the deployment's grants; [] clears them.",
+          ),
+        kbs: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Knowledge-base grants by grantKey — the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the deployment's grants; [] clears them.",
+          ),
       },
       runWith(
         async (args: {
@@ -2021,6 +2074,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           effort?: string;
           stages?: string[];
           autonomy?: "supervised" | "full";
+          skills?: string[];
+          mcps?: string[];
+          kbs?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "manage this project's agents");
@@ -2056,6 +2112,24 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               `${unknownStages.map((id) => `"${id}"`).join(", ")} ${unknownStages.length === 1 ? "is not a stage" : "are not stages"} of ${slug}. Nothing was written. The project's stage ids are: ${stageIds.join(", ")}.`,
             );
           }
+          // G36-1 (pass 36, owner Q36-7): the deployment's own copy of the
+          // grants (ruling 156) is editable here for EVERY kind, the operator
+          // included — the Agents page renders the picker for all of them,
+          // while the controller answered "a system profile I can't give
+          // resources to". Keys resolve exactly as save_global_agent's do
+          // (F33-8): a recognised id is normalised to its key, an unknown key
+          // is refused by name, and (ruling 139) this runs BEFORE the write.
+          // An omitted list keeps the deployment's copy; [] clears it.
+          const grants = resolveResourceGrants(
+            db,
+            { skills: args.skills, mcps: args.mcps, kbs: args.kbs },
+            { dataRoot },
+          );
+          const resources = {
+            skills: grants.skills ?? view.resources.skills,
+            mcps: grants.mcps ?? view.resources.mcps,
+            kb: grants.kbs ?? view.resources.kb,
+          };
           // Seed from the RESOLVED grants — the same view `get_project`
           // reports and the same one the agents-page modal seeds from
           // (`seedCaps`). Seeding from the RAW stored record instead let
@@ -2071,6 +2145,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           for (const grant of resolved?.capabilities ?? deployment.capabilities) {
             caps[grant.capabilityId] = grant.mode;
           }
+          const capsBefore = { ...caps };
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
           // Ruling 139: effort is settable wherever model is, judged by name
           // against the backend the deployment will run on, BEFORE the write.
@@ -2082,6 +2157,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.effort !== undefined) assertEffortForBackend(backend, args.effort);
           if (args.model !== undefined) assertModelForBackend(backend, args.model);
           const effort = args.effort ?? (switched ? defaultEffortFor(backend) : view.effort);
+          const stages = args.stages ?? view.stages;
+          // The downstream form schema reads autonomy as optional, so an
+          // undefined value and an absent key parse identically; a specialist
+          // sends none.
+          const autonomy =
+            view.kind === "operator" ? (args.autonomy ?? view.autonomy ?? "supervised") : undefined;
           const baseForm = {
             name: view.name,
             role: view.role,
@@ -2090,21 +2171,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // hand-save landing between the read and the write is.
             fingerprint: deploymentFingerprint(deployment),
             backend,
-            stages: args.stages ?? view.stages,
+            stages,
             definition: "",
             persona: "",
             model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
             effort,
             caps,
-            resources: view.resources,
+            resources,
           };
-          // The downstream form schema reads autonomy as optional, so an
-          // undefined value and an absent key parse identically.
-          let form: SubmittedProfileForm = baseForm;
-          if (view.kind === "operator") {
-            const autonomy = args.autonomy ?? view.autonomy;
-            if (autonomy) form = { ...baseForm, autonomy };
-          }
+          const form: SubmittedProfileForm = autonomy ? { ...baseForm, autonomy } : baseForm;
           const result = await updateAgentProfile(
             db,
             { projectSlug: slug, profileId: args.profileId, form },
@@ -2117,13 +2192,36 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const governance = result.governanceNotice
             ? ` ${result.governanceNotice.message}`
             : "";
-          const reset =
-            switched && args.effort === undefined && result.applied
-              ? ` Backend switched to ${backend === "codex" ? "Codex" : "Claude"}: effort reset to its default (${result.applied.effort})${args.model === undefined ? ` and model to ${result.applied.model}` : ""}.`
-              : "";
-          const stored =
-            args.effort !== undefined && result.applied ? ` Effort is now ${result.applied.effort}.` : "";
-          return `[done] ${result.name} updated on ${slug}.${reset}${stored}${governance}${notices}`;
+          // U36-3 (pass 36): the reply lists EVERY field the call changed, old
+          // → new, built from the record this tool read and the result the
+          // writer returned — never from the request. One call that switched
+          // backend, model, effort, stages and grants used to answer "Effort
+          // is now max." and name the model only when the backend switched.
+          const changes: string[] = [];
+          const changed = (field: string, before: string, after: string, note = "") => {
+            if (before !== after) {
+              changes.push(`${field} ${before || "(none)"} → ${after || "(none)"}${note}`);
+            }
+          };
+          changed("backend", BACKEND_LABEL[currentBackend], BACKEND_LABEL[backend]);
+          if (result.applied) {
+            // A backend switch with no value given resets to that backend's
+            // default; the entry says so rather than reading as a choice.
+            const fromSwitch = (given: string | undefined) =>
+              switched && given === undefined ? ` (${BACKEND_LABEL[backend]} default: none given)` : "";
+            changed("model", view.model, result.applied.model, fromSwitch(args.model));
+            changed("effort", view.effort, result.applied.effort, fromSwitch(args.effort));
+          }
+          changed("stages", view.stages.join(", "), stages.join(", "));
+          if (autonomy) changed("autonomy", view.autonomy ?? "supervised", autonomy);
+          for (const patch of args.capabilities ?? []) {
+            changed(`capability ${patch.capabilityId}`, capsBefore[patch.capabilityId] ?? "", patch.mode);
+          }
+          changed("skills", view.resources.skills.join(", "), resources.skills.join(", "));
+          changed("mcps", view.resources.mcps.join(", "), resources.mcps.join(", "));
+          changed("kb", view.resources.kb.join(", "), resources.kb.join(", "));
+          const summary = changes.length ? `: ${changes.join("; ")}.` : ". No field changed.";
+          return `[done] ${result.name} updated on ${slug}${summary}${governance}${notices}`;
         },
       ),
     ),

@@ -34,7 +34,9 @@
 > servers). Updated 2026-09-11 for the ruling 101(e) amendment (Option D PR 5, branch
 > `option-d/pr5-pretooluse-deny`): §2.4 and §4.3 (the PreToolUse hook that refuses wrapped
 > shapes of a denied command, with a reason the model reads). Updated 2026-09-11 for Option D
-> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected. The operator's own behaviour is in
+> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected.
+> Updated 2026-09-11 for ruling 183 (pass 36 cluster 4): §6's skills bullet (the store body
+> every writer judges before the mount normalises it). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -922,7 +924,10 @@ above is the create-seed value and never the runtime's answer for a missing gran
 - **Skills, Claude**: `mountGrantedSkills` copies each granted `skills/<slug>` folder
   into the workspace `.claude/skills/` (no symlinks, no nested `.git`, SKILL.md
   frontmatter rewritten to `name` + `description` ≤ 400 chars, a `.viberr-mount` marker
-  written last), after `stripUngovernedRepoCatalog` has hidden the repo's own tracked
+  written last; ruling 183 keeps every store writer from landing an empty, JSON-escaped
+  or unparseable body, so what the mount normalises is a skill — the frontmatter schema
+  it reads, `skillFrontmatterSchema`, lives with the check in `skill-body.server.ts`),
+  after `stripUngovernedRepoCatalog` has hidden the repo's own tracked
   `.claude` with `git update-index --skip-worktree`. `settings.json` carries the
   CLAUDE.md excludes; `.claude/` is appended to `.git/info/exclude` so it can never ride
   into the delivered PR. The run then gets `settingSources: ["project"]` and a native

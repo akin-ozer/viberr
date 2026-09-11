@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   SKILL_INJECTION_BUDGET,
+  assertSkillBodyWellFormed,
   readSkillBodies,
   readSkillBody,
   readSkillBodyDetailed,
@@ -196,5 +197,44 @@ describe("readSkillBodies — ONE shared budget (C2)", () => {
     const set = readSkillBodies(["one", "ghost"], dataRoot);
     expect(set.parts.map((p) => p.name)).toEqual(["one"]);
     expect(set.unresolved.map((u) => u.name)).toEqual(["ghost"]);
+  });
+});
+
+/**
+ * Ruling 183 (pass 36, F36-2): the one judgement every SKILL.md writer makes
+ * before it writes. Refuse by name, never rewrite.
+ */
+describe("assertSkillBodyWellFormed (ruling 183)", () => {
+  it("refuses an empty body", () => {
+    expect(() => assertSkillBodyWellFormed("")).toThrowError(/empty/);
+    expect(() => assertSkillBodyWellFormed(" \n\t")).toThrowError(/empty/);
+  });
+
+  it("refuses a body with no real newline and literal \\n sequences, naming the remedy", () => {
+    expect(() => assertSkillBodyWellFormed("# Skill\\n\\n- step")).toThrowError(
+      /JSON-escaped.*real newlines/,
+    );
+    // A one-line body with no escape in it is a skill.
+    expect(() => assertSkillBodyWellFormed("Use conventional commits.")).not.toThrow();
+    // Real newlines beside a literal `\n` (a code sample) are not the escape.
+    expect(() =>
+      assertSkillBodyWellFormed("# Skill\n\nJoin lines with `\\n`."),
+    ).not.toThrow();
+  });
+
+  it("refuses a frontmatter block that does not parse, and accepts one that does or none at all", () => {
+    expect(() => assertSkillBodyWellFormed("---\nname: x\n# no closing fence")).toThrowError(
+      /frontmatter/,
+    );
+    expect(() => assertSkillBodyWellFormed("---\ndescription: [\n---\n# Body")).toThrowError(
+      /frontmatter/,
+    );
+    expect(() => assertSkillBodyWellFormed("---\n- a\n- b\n---\n# Body")).toThrowError(
+      /frontmatter/,
+    );
+    expect(() =>
+      assertSkillBodyWellFormed("---\nname: x\ndescription: Fine.\n---\n# Body"),
+    ).not.toThrow();
+    expect(() => assertSkillBodyWellFormed("# Plain\n- markdown")).not.toThrow();
   });
 });
