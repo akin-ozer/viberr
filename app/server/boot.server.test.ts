@@ -3,6 +3,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../test-support/test-db";
+import {
+  HERMETIC_TOOLCHAIN,
+  primeHermeticToolchain,
+  primeToolchain,
+} from "../../test-support/toolchain";
 import { logger } from "./logging/logger.server";
 import type {
   MaintenancePassOptions,
@@ -380,6 +385,32 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
 
   it("reports free space at the one moment an operator is reading this log", () => {
     expect(integrityFields()).toHaveProperty("disk");
+  });
+
+  it("ruling 182: carries the host toolchain, resolved here so the first health request does not pay for the probe", () => {
+    // The suite's primed reading (setup-env), not a live probe — what matters
+    // is that the boot line reads the ONE memoized toolchain.
+    expect(integrityFields()).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
+  });
+
+  it("ruling 182: WARNs, separately, when the Codex sandbox cannot start on this host", () => {
+    primeToolchain({
+      ...HERMETIC_TOOLCHAIN,
+      codexSandbox: { ok: false, detail: "bwrap: No permissions to create a new namespace" },
+    });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      logBootIntegrity(bootCtx.makeDb());
+      const line = warn.mock.calls.find(([msg]) => /codex sandbox unavailable/i.test(msg));
+      expect(line).toBeDefined();
+      expect(line![0]).toContain("docs/operations/deployment.md");
+      expect(line![1]).toMatchObject({ detail: "bwrap: No permissions to create a new namespace" });
+    } finally {
+      warn.mockRestore();
+      info.mockRestore();
+      primeHermeticToolchain();
+    }
   });
 });
 
