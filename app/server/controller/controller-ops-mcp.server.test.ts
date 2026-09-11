@@ -727,7 +727,16 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     );
     expect(body.text).toBe("the disk is fine");
     expect(body.truncated).toBe(false);
-    expect(body.resource).toEqual(expect.objectContaining({ kind: "kb", id: kbId }));
+    // `kbId` is the seeded folder's row-less `disk:controller-handbook` shape;
+    // the doc write above adopted the folder into a row (touchResource). U36-4
+    // (pass 36): a disk id whose folder has a row IS that row, so the reply
+    // names the row's real id — the one `list_knowledge_bases` reports and the
+    // next save takes — not the stale synthetic shape it was asked with.
+    expect(kbId).toBe("disk:controller-handbook");
+    expect(body.resource).toEqual(
+      expect.objectContaining({ kind: "kb", name: "controller-handbook" }),
+    );
+    expect(body.resource.id).toMatch(/^kb_/);
 
     // A document longer than one read comes back CLIPPED and says so. Without
     // this arm `truncated` could be the constant `false` and read identically —
