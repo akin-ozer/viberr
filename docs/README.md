@@ -22,6 +22,11 @@ app-owned config homes; the rest are `architecture/decisions.md`,
 `operations/runbook.md`, `product/glossary.md`, `product/requirements-status.md`,
 `development/testing.md` and `development/scripts.md`.
 
+Updated 2026-09-11 for ruling 173 (branch `option-d/p0-decision-record`): the Cognipeer Agent
+SDK was evaluated and not adopted. Rulings 174 to 176 port the gains it demonstrated onto the
+two vendor SDKs, per `planning/option-d-2026-09-11/PLAN.md`; each updates the pages it
+touches, starting with `domain/agents-and-runtime.md`, as it lands.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -55,7 +60,7 @@ app-owned config homes; the rest are `architecture/decisions.md`,
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, goal and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, 164 numbered owner rulings (1–164; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, 173 numbered owner rulings (1–173; 117 records a number that was never used), the unrecorded decisions since 2026-08-20, the route map |
 
 ### Domain
 

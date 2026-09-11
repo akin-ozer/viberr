@@ -13,7 +13,11 @@
 > `permission_denied` console line, the task-tool denylist note) and §§2.4/2.5/3.5 (the new
 > `overloaded` failure class, read from the SDK's `api_error_status: 529`). Updated the same day
 > for the Codex SDK upgrade 0.146.0 → 0.153.4: §2.3 (GPT-6 Astra offered, `max` effort per model,
-> `ultra`/`persistent` deliberately not) and the §2.5 re-check of the sandbox carve-out. The operator's own behaviour is in
+> `ultra`/`persistent` deliberately not) and the §2.5 re-check of the sandbox carve-out.
+> Updated 2026-09-11 for ruling 173: the Cognipeer Agent SDK was evaluated and not adopted,
+> so both backends stay on the vendor SDKs this page describes; rulings 174 to 176 (the
+> Option D plan, `planning/option-d-2026-09-11/PLAN.md`) update the sections they touch as
+> each lands. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
