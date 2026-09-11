@@ -236,7 +236,12 @@ describe("ensureTaskBranch", () => {
       ref: `refs/heads/${branch}`,
       sha: "basesha00",
     });
-    expect(listAuditEvents(store.db, { action: "github.branch.created" })).toHaveLength(1);
+    const created = listAuditEvents(store.db, { action: "github.branch.created" });
+    expect(created).toHaveLength(1);
+    // U36-6: the canonical name records itself as such, and a name that was
+    // free gets no allocation note — the note is for the suffixed case only.
+    expect(created[0]!.details).toMatchObject({ canonical: branch, branch, suffixed: false });
+    expect(file!.parsed.timeline.some((e) => e.text.includes("allocated:"))).toBe(false);
   });
 
   it("ruling 122: takes a suffixed name when a past pull request used the canonical one", async () => {
@@ -278,6 +283,26 @@ describe("ensureTaskBranch", () => {
       ref: `refs/heads/${allocated}`,
       sha: "basesha10",
     });
+    // U36-6 (pass 36): the suffix is DISCLOSED. Live, `hlc-10` was held by a
+    // stranger's branch + PR, Viberr allocated `hlc-10-0c88`, and neither the
+    // audit row (`{repo, from}`) nor the timeline named the taken name or the
+    // suffixing — a person reading the page could not tell why the branch
+    // was not the key. Canary: drop `canonical`/`suffixed` from the audit
+    // details, or the `allocated.suffixed` note, and this fails.
+    const audit = listAuditEvents(store.db, { action: "github.branch.created" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({
+      canonical: "vib-210",
+      branch: allocated,
+      suffixed: true,
+    });
+    const note = file!.parsed.timeline.find((e) => e.text.includes("allocated:"));
+    expect(note).toBeDefined();
+    expect(note!.type).toBe("note");
+    expect(note!.actor).toEqual({ kind: "system", systemId: "policy-engine" });
+    expect(note!.text).toBe(
+      `Branch \`${allocated}\` allocated: \`vib-210\` is already spoken for on GitHub (a ref or a past pull request), ruling 122.`,
+    );
   });
 
   it("ruling 122: takes a suffixed name when the canonical ref already exists", async () => {
