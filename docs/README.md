@@ -65,6 +65,11 @@ push'`), with a reason naming the withheld capability that the model reads and t
 shows. Pages: `architecture/decisions.md` (the note under ruling 101) and
 `domain/agents-and-runtime.md` (§2.4, §4.3).
 
+Updated 2026-09-11 for Option D PR 6 (branch `option-d/pr6-hygiene`): stale docstrings and
+drift notes corrected. Ruling 93's drift note now says R22 and ruling 101 both stand (the
+Codex `read-only` sandbox is a live seam), ruling 109 carries the `permissions.rs` watch
+item, and `domain/agents-and-runtime.md` §2.5 and gotcha 6 match.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating

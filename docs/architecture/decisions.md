@@ -1328,9 +1328,12 @@ inventory is not regenerated automatically and has drifted; the verified module 
     has an attachments dir to write), and `execute-code-or-write-repo` is back in the
     both-backend `ENFORCED_CAPABILITY_IDS`. Surviving from this ruling: the `danger-full-access`
     rule for an autonomous deliverer with egress, egress gated on both backends, and the
-    writable attachments dir. **Open code drift:** the capability-matrix modal copy
-    (`capability-matrix-modal.tsx`, "On Codex the file and command limits are advisory",
-    "advisory on Codex") still describes the R22 posture and should be rewritten to match 101.
+    writable attachments dir. *(Drift note corrected 2026-09-11, Option D PR 6: R22 removed the
+    OS sandbox as the confinement model; ruling 101 later restored `read-only` for
+    write-withheld Codex runs as a live seam (`resolveCodexSandboxMode` in
+    `codex-runtime.server.ts`). Both stand. The modal copy this note called stale has
+    matched ruling 101 since ruling 109, and "advisory on Codex" survives only as the label
+    of ruling 109's carve-out.)*
 
 94. **R22-schedule (2026-08-21, F22-02): a scheduled operator re-run resolves the LIVE
     deployed profile at fire time — FR39's per-schedule backend/autonomy pin is
@@ -1838,6 +1841,9 @@ the quieter packet or the bare owner cell as drift.)*
     `sandbox` inputs row (`RunInputs.sandbox`, filled by `describeCodexSandbox`).
     Claude binds regardless through the tool denylist, so the label is a Codex-only
     statement, not a weakening of ruling 101(a).
+    *Watch item (added 2026-09-11, Option D PR 6): the Codex CLI's `permissions.rs`
+    per-path profile would express read-only plus a writable attachments dir; revisit when
+    the SDK surfaces it.*
 
 110. **`resolve_remote_collision` is a full ceremony in a fixed order, and a resolved
     collision never strands (owner, 2026-09-01).** The remedy has three steps and the

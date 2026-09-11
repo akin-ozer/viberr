@@ -491,6 +491,14 @@ Exact replacements:
 Docs tests: `app/shared/docs/runbook-db-read.test.ts` pins runbook passages, not these; `file-formats-sync` and
 `prd-sync` are untouched. **Effort.** 0.5 day.
 
+*(As implemented 2026-09-11, branch `option-d/pr6-hygiene`. The anchors had moved with the PRs before it: the
+`attachmentsWritableDir` docstring sits at `adapter.server.ts:100-106`, `interrupt()` at `:240`, the controller
+constant at `controller-run.server.ts:111`, and `resolveCodexSandboxMode` at `codex-runtime.server.ts:474`, so the
+corrected ruling 93 note names the function, not a line range. The controller docstring now says what the code does:
+the digest rides EVERY turn, and the newest prior controller run with a session is resumed whatever state it ended
+in. §2.5's sandbox bullet was already correct about the arms; it gains the "live seam, not retired" sentence and the
+ruling 109 watch item, and gotcha 6, which pointed at exactly the stale docstring fixed here, now says so.)*
+
 ## 11. Cross-cutting rules for every PR
 
 - Five gates green; `npm run e2e` when a PR touches the image (PR 1) or the org-settings UI (PR 2, PR 3).

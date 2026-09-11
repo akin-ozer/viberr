@@ -101,8 +101,9 @@ export interface RunSpec {
    *  `attach-evidence-references` — Codex `workspace-write` sandboxes add it as
    *  an additional writable directory so the agent can copy files there ("post
    *  a file on the task thread"). Claude runs at bypassPermissions and need no
-   *  widening; `danger-full-access` can already write it (R22: no run is
-   *  read-only anymore). */
+   *  widening. Ruling 101 keeps Codex read-only for a run whose repo-write
+   *  grant is withheld; the attachments dir is the one carve-out (ruling 109)
+   *  and rides `workspace-write`. */
   attachmentsWritableDir?: string | null;
   /** The GRANTED skills Viberr mounted into this run's workspace
    *  (`mountGrantedSkills`), by exact name. Claude only: the adapter turns these
@@ -237,8 +238,10 @@ export function phaseStepForLine(line: EmittedLine): string | null {
 /** A running handle the service can interrupt. */
 export interface RunHandle {
   runId: string;
-  /** Send SIGINT. Idempotent. Interrupter attribution is stamped onto the run
-   *  row by the service (interruptRun), not passed here. */
+  /** Stop the run: a cooperative interrupt first, then the adapter's abort
+   *  ladder tears the process group down, and the settle sweep reaps whatever
+   *  the run started (ruling 174). Idempotent. Interrupter attribution is
+   *  stamped onto the run row by the service (interruptRun), not passed here. */
   interrupt(): void;
 }
 
