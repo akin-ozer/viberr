@@ -34,7 +34,12 @@
 > servers). Updated 2026-09-11 for the ruling 101(e) amendment (Option D PR 5, branch
 > `option-d/pr5-pretooluse-deny`): §2.4 and §4.3 (the PreToolUse hook that refuses wrapped
 > shapes of a denied command, with a reason the model reads). Updated 2026-09-11 for Option D
-> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected. The operator's own behaviour is in
+> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected.
+> Updated 2026-09-11 for pass 36 cluster 5 (ruling 180, F36-8): §2.3's substitution
+> column, §2.4 (`settingSources: []` on every run, the run's skill plugin as the one local
+> plugin, no `managedSettings`), §3.2, §4.1 (a backend switch names the model it ran on
+> and that the pin sticks), §6 (skills mount as a plugin BESIDE the checkout) and gotchas
+> 4 and 7. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -133,7 +138,7 @@ alike. There is no fallback engine and no other account to fall back to.
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
 | claude | `sonnet`, `opus`, `haiku` (aliases), plus a family alias carrying a bracketed context-window variant (`opus[1m]`, what the live catalog offers as "Opus (1M context)"), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; the bracketed variant is split off FIRST, the base resolved, and the variant re-appended verbatim (`claude-opus[1m]` → `opus[1m]`, `claude-sonnet-4-5[1m]` unchanged), so it reaches the SDK and is known on a cold process (pass 34, F34-7); anything else falls back to the SDK default. Display: the live catalog row's name when cached, else "Claude Opus [1m]" |
-| codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, read off the pinned CLI's bundled catalog; Astra is the CLI's own default since 0.153.4 but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`), per model as the bundled catalog lists them (GPT-5.5 stops at `xhigh`); `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
+| codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, read off the pinned CLI's bundled catalog; Astra is the CLI's own default since 0.153.4 but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`), per model as the bundled catalog lists them (GPT-5.5 stops at `xhigh`); `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
 
 `/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
 defaultEffort }` to the profile editor (unknown backend → claude; `requireUser` only).
@@ -210,10 +215,14 @@ connecting a different account there (ruling 165).
   `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `maxBudgetUsd` when the instance
   has a spending cap (ruling 175: Org settings → Max spend per Claude run, stamped on every
   run by `startRun` as `RunSpec.maxSpendUsd`; none by default), `strictMcpConfig: true`,
-  `plugins: []`, `settingSources: ["project"]` only when native skills are mounted
-  (else `[]`), `disallowedTools` (binds even under bypass), `allowedTools` for the
-  toolkit and mounted MCP names. `systemPrompt` **replaces** the preset for operator and
-  controller runs and is `{ preset: "claude_code", append }` for specialists.
+  `settingSources: []` on EVERY run (ruling 180: no host tier and no project source over
+  the checkout, so the repository under review's `.claude` and CLAUDE.md never reach the
+  model), `plugins: [{ type: "local", path, skipMcpDiscovery: true }]` naming the run's
+  own skill plugin (`RunSpec.skillPlugin`, §6) when granted skills mounted — else `[]` —
+  with `skills: ["viberr:<name>", …]` qualified by that plugin's name, `disallowedTools`
+  (binds even under bypass), `allowedTools` for the toolkit and mounted MCP names.
+  `systemPrompt` **replaces** the preset for operator and controller runs and is
+  `{ preset: "claude_code", append }` for specialists.
 - Denylists: `BASE_DENIED_BUILTINS` (Skill, Task*, Workflow, Cron*, ScheduleWakeup,
   RemoteTrigger, Monitor, PushNotification, SendMessage, DesignSync, Enter/ExitWorktree;
   `Skill` is re-allowed when native skills are mounted; SDK 0.3.233 took `TaskCreate`/
@@ -271,8 +280,8 @@ connecting a different account there (ruling 165).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
-- `MANAGED_SETTINGS.claudeMdExcludes` is passed but the SDK drops it (documented inert);
-  the effective CLAUDE.md exclusion is the `settings.json` written by skill-mount.
+- No `managedSettings` and no CLAUDE.md excludes file (both retired with ruling 180):
+  nothing under cwd is a settings source, so there is no ingress to close.
 - Success = a `result` envelope with `!is_error`. Failures tag `run·error·<kind>` with
   `kind ∈ quota | auth | overloaded | session_missing | unknown`; idle → `run·error·idle_timeout`;
   `error_max_turns` → `run·error·max_turns`; `error_max_budget_usd` → `run·error·max_budget`
@@ -445,7 +454,8 @@ connecting a different account there (ruling 165).
 
 `reserveRun` writes a `running` row with a phase before the clone starts, or declines
 when the instance cap is exhausted; `assertRunReservationLive` re-checks after the
-clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend models,
+clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend models
+(`substituteRunModel`; the run log opens with the swap, the row stores what ran),
 fails unavailable backends, and otherwise `launch`es a reserved row or `admitRun`s into
 a `pending` queue drained on every completion. The cap is the instance setting
 `maxConcurrentRuns` (0 = unlimited, ceiling 64, Org settings → set-concurrency).
@@ -642,7 +652,13 @@ once the provider's total landed.
   deliverer is refused; `delivers: false` on the current deliverer is refused.
 - Backend = `backendOverride ?? engagement.pinnedBackend ?? resolved profile backend ??
   snapshot`. `pinnedBackend` is written by a `retry_other_backend` packet resolution so
-  the switch sticks.
+  the switch sticks. F36-8 (pass 36): a run on a backend other than the profile's hands
+  the profile's ORIGINAL model through to `startRun` (no pre-swap), so the F21-13
+  substitution notice opens the run log; the "Started a … run (switched from …)" event
+  names the model it ran on and the profile's own ("on `sonnet` — the profile's
+  `gpt-5.6-luna` is a Codex model"), and a run that set the pin says later runs on this
+  task stay on that backend. The `retry_other_backend` option says both before the human
+  chooses.
 - Workspace: the deliverer clones into `tasks/<KEY>/workspace/<repo>` through the
   project mirror; each supporting run gets `workspace/support/<profileId>/<repo>`, a
   fresh `git clone --local` of the delivering checkout. On clone failure the run
@@ -919,14 +935,23 @@ above is the create-seed value and never the runtime's answer for a missing gran
 
 ## 6. Context mounting
 
-- **Skills, Claude**: `mountGrantedSkills` copies each granted `skills/<slug>` folder
-  into the workspace `.claude/skills/` (no symlinks, no nested `.git`, SKILL.md
-  frontmatter rewritten to `name` + `description` ≤ 400 chars, a `.viberr-mount` marker
-  written last), after `stripUngovernedRepoCatalog` has hidden the repo's own tracked
-  `.claude` with `git update-index --skip-worktree`. `settings.json` carries the
-  CLAUDE.md excludes; `.claude/` is appended to `.git/info/exclude` so it can never ride
-  into the delivered PR. The run then gets `settingSources: ["project"]` and a native
-  `skills:` allow-list (ruling 51).
+- **Skills, Claude** (ruling 180, pass 36): `mountGrantedSkills` builds the run's own
+  LOCAL PLUGIN at `<checkout>/../.viberr-plugins/<runId>/` — `.claude-plugin/plugin.json`
+  (`name: "viberr"`) plus `skills/<slug>/` copied from the store (no symlinks, no nested
+  `.git`, SKILL.md frontmatter rewritten to `name` + `description` ≤ 400 chars) — after
+  `stripUngovernedRepoCatalog` has hidden the repo's own tracked `.claude` with
+  `git update-index --skip-worktree` and removed it whole. Nothing Viberr writes for a run
+  lives inside the tree the project's tools scan (F36-9: the in-checkout mount failed the
+  project's own `prettier --check .`), so no exclude entry exists any more. The run gets
+  `plugins: [{ type: "local", path }]`, `skills: ["viberr:<slug>", …]` and
+  `settingSources: []`; the plugin is one per RUN (the directory is named by the run id
+  when the row was reserved before the mount, else by a fresh id; the run carries the
+  path) and run-service removes it when the run settles, the dispatch when a run fails
+  before it starts. A plugin that is gone by the start enables no skill and the persona
+  is corrected (`droppedSkillsNotice`). Residual: a run that never settles in-process (a
+  crash) leaves its directory, inert, until the workspace is reclaimed. Canaried inside
+  the image 2026-09-11 (SDK 0.3.261 / CLI 2.1.261): the init lists `viberr:<slug>` and the
+  model invokes it.
 - **Skills, Codex and the operator**: bodies are injected into the prompt under a shared
   24 000-char budget (`skill-body.server.ts`); symlinked folders or files are refused.
 - **Knowledge bases**: text files under `kb/<dir>` (depth ≤ 32, no symlinks, no
@@ -1056,15 +1081,18 @@ full` and the project-effective grants.
    `direct` under full autonomy, except acceptance.
 3. Codex drops MCP credentials and browser images; a bearer-token MCP silently runs
    unauthenticated there.
-4. Foreign-backend models are substituted silently at start.
+4. Foreign-backend models are substituted at start and disclosed: the run log's first
+   line, the switched-backend timeline event and the `retry_other_backend` option all
+   name the model (F36-8). The run row stores what ran.
 5. `RUN_STATE.error` is labelled "continuity error" for every error run.
 6. Codex repo-write is enforced by the sandbox mode since ruling 101. The last code
    comment that still said "R22: no run is read-only" (`RunSpec.attachmentsWritableDir`)
    was corrected on 2026-09-11 (Option D PR 6). The one place "advisory on Codex" is
    still the honest word is the evidence carve-out of ruling 109 (§4.3), which is printed
    on every surface that shows the grant.
-7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
-   real exclusion mechanism.
+7. A run's skills live in a plugin directory BESIDE the checkout (ruling 180), removed
+   when the run settles; nothing under the checkout is ever a settings source, so there
+   is no CLAUDE.md excludes file and no `managedSettings` any more.
 8. Agent backends are connected **per person** on Profile → Agent accounts (ruling 127):
    there is no deployment-wide key, no `CODEX_HOME`/`CLAUDE_CONFIG_DIR` to set and no
    host `~/.codex` mount. A wiped runtime volume signs each person out of their own
