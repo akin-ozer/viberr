@@ -74,6 +74,7 @@ export function OrgSettingsPage({
   meId,
   callbackOrigin,
   runConcurrency,
+  runSpendCapUsd,
   s3Audit,
   auditEvents,
   controllerConfig,
@@ -84,6 +85,8 @@ export function OrgSettingsPage({
   /** This deployment's origin — the callback URL an OAuth app must carry. */
   callbackOrigin: string;
   runConcurrency: RunConcurrencyView;
+  /** Ruling 175: the instance's spending cap per Claude run, USD (null = none). */
+  runSpendCapUsd: number | null;
   /** The S3 audit-export target (null when none is configured). */
   s3Audit: S3AuditConfigView | null;
   /** PG26-A: recent audit events for the in-app browse panel. */
@@ -222,7 +225,13 @@ export function OrgSettingsPage({
             />
           )}
         </div>
-        <RunConcurrencyControl runConcurrency={runConcurrency} />
+        {/* The instance's two run limits outside the tabs, one well, one row
+            each (ruling 175 added the second): how many runs at once, and what
+            one Claude run may spend. */}
+        <div className="conc-well">
+          <RunConcurrencyControl runConcurrency={runConcurrency} />
+          <RunSpendCapControl spendCapUsd={runSpendCapUsd} />
+        </div>
       {/* Review F7 (pass 32): the card's open state is seeded from the target
           once; keying it on the stored target resets it when a save or clear
           lands from elsewhere, so an open target modal never outlives the target
@@ -713,12 +722,7 @@ function RunConcurrencyControl({
     submit({ intent: "set-concurrency", maxConcurrentRuns: trimmed });
   };
   return (
-    <div
-      className="conc-well"
-      role="group"
-      aria-labelledby="run-concurrency-name"
-    >
-      <div className="guard-row">
+    <div className="guard-row" role="group" aria-labelledby="run-concurrency-name">
         <div className="guard-main">
           <span className="guard-name" id="run-concurrency-name">
             <Icon name="cpu" />
@@ -777,7 +781,98 @@ function RunConcurrencyControl({
             <span>Enter a whole number (0 = unlimited).</span>
           </span>
         )}
+    </div>
+  );
+}
+
+/** A spending-cap entry the action accepts: blank (no cap), or dollars above
+ *  zero with at most two decimals. */
+function spendCapEntryValid(entry: string): boolean {
+  return entry === "" || (/^\d+(?:\.\d{1,2})?$/.test(entry) && Number(entry) > 0);
+}
+
+/**
+ * Ruling 175: the instance's spending cap per Claude run (owner decision D4: an
+ * instance ceiling only, no profile field, none by default). The SDK stops a
+ * Claude run once it has spent this much, and the run is reported as cut off
+ * by its spending cap. Codex has no budget option, and the sentence under the
+ * field says so rather than implying a limit that does not exist there. Blank
+ * means no cap. Same row shape and refusal rules as the concurrency cap above
+ * (ruling 147(d): only "nothing changed" disables Save).
+ */
+function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
+  const { submit, busy } = useOrgAction();
+  const current = spendCapUsd === null ? "" : spendCapUsd.toFixed(2);
+  const [value, setValue] = useState(current);
+  const [refused, setRefused] = useState(0);
+  const capRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setValue(current);
+    setRefused(0);
+  }, [current]);
+  const trimmed = value.trim();
+  const valid = spendCapEntryValid(trimmed);
+  const changed = trimmed !== current;
+  const invalid = refused > 0 && !valid;
+  const errId = "max-run-spend-usd-err";
+  const save = () => {
+    if (busy || !changed) return;
+    if (!valid) {
+      setRefused((n) => n + 1);
+      capRef.current?.focus();
+      return;
+    }
+    submit({ intent: "set-run-spend-cap", maxRunSpendUsd: trimmed });
+  };
+  return (
+    <div className="guard-row" role="group" aria-labelledby="run-spend-cap-name">
+      <div className="guard-main">
+        <span className="guard-name" id="run-spend-cap-name">
+          <Icon name="shield" />
+          Spending cap
+        </span>
+        <span className="guard-desc">
+          {spendCapUsd === null ? "No cap" : `$${spendCapUsd.toFixed(2)} per Claude run`}
+        </span>
       </div>
+      <span className="guard-ctl">
+        <label htmlFor="max-run-spend-usd">Max spend per Claude run, USD</label>
+        <input
+          ref={capRef}
+          id="max-run-spend-usd"
+          type="number"
+          min={0.01}
+          step={0.01}
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => setValue(e.currentTarget.value)}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? errId : undefined}
+        />
+        <button
+          type="button"
+          className="btn sm"
+          disabled={busy || !changed}
+          aria-busy={busy}
+          aria-label="Save spending cap"
+          onClick={save}
+        >
+          Save
+        </button>
+        <span className="faint">blank = no cap</span>
+      </span>
+      <span className="conc-lane">
+        Claude stops a run once it has spent this much and reports it as cut off by its spending
+        cap. Codex has no budget option, so a Codex run is bounded by its idle timer only.
+      </span>
+      {invalid && (
+        <span className="form-err" role="alert" id={errId} key={`refused-${refused}`}>
+          <Icon name="alert" />
+          <span>
+            Enter a dollar amount above zero with at most two decimals, or leave it blank for no cap.
+          </span>
+        </span>
+      )}
     </div>
   );
 }

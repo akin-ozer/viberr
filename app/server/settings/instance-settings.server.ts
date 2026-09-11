@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 
 /**
  * Instance-wide admin settings (one deployment): a small JSON key-value store an
@@ -113,4 +114,54 @@ export function setMaxConcurrentRuns(db: DatabaseSync, value: number): number {
   const clamped = Math.max(0, Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.floor(value)));
   setSetting(db, MAX_CONCURRENT_RUNS_KEY, clamped);
   return clamped;
+}
+
+const MAX_RUN_SPEND_USD_KEY = "maxRunSpendUsd";
+
+/** A stored cap is a positive dollar amount; anything else reads as no cap. */
+const runSpendSchema = z.number().positive();
+
+/**
+ * Ruling 175: the instance's spending cap per Claude run, in USD, or null when
+ * none is set (the default — a side project does not want a surprise cut-off).
+ * `startRun` hands it to every run as `RunSpec.maxSpendUsd`, and the Claude
+ * adapter passes it to the SDK as `maxBudgetUsd`; the SDK ends a run that
+ * exceeds it with `error_max_budget_usd`. Codex has no budget option, so the
+ * cap binds Claude runs only (owner decision D4: an instance ceiling, no
+ * profile field).
+ */
+export function getMaxRunSpendUsd(db: DatabaseSync): number | null {
+  return getSetting(db, MAX_RUN_SPEND_USD_KEY, runSpendSchema);
+}
+
+/** A dollar amount the cap accepts: above zero, at most two decimals. */
+export function isRunSpendAmount(value: number): boolean {
+  return Number.isFinite(value) && value > 0 && Math.abs(value * 100 - Math.round(value * 100)) < 1e-9;
+}
+
+/**
+ * Set or clear the cap. `null` clears it; any other value must pass
+ * {@link isRunSpendAmount}, or this throws and nothing is written. Changing
+ * what a run may spend is an instance-policy change, so it is audited with the
+ * value before and after.
+ */
+export function setMaxRunSpendUsd(
+  db: DatabaseSync,
+  value: number | null,
+  actor: AuditActor,
+): number | null {
+  if (value !== null && !isRunSpendAmount(value)) {
+    throw new Error("A spending cap is a dollar amount above zero with at most two decimals.");
+  }
+  const before = getMaxRunSpendUsd(db);
+  if (value === null) deleteSetting(db, MAX_RUN_SPEND_USD_KEY);
+  else setSetting(db, MAX_RUN_SPEND_USD_KEY, value);
+  recordAudit(db, {
+    action: "org.run_spend_cap.changed",
+    actor,
+    subjectKind: "instance_setting",
+    subjectId: MAX_RUN_SPEND_USD_KEY,
+    details: { before, after: value },
+  });
+  return value;
 }

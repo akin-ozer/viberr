@@ -9,7 +9,9 @@
 > Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`):
 > §5 gains the `profile.backend.*` audit family and §7 describes the Agent accounts
 > panel. Agent backends now authenticate per person; there is no deployment-wide
-> Claude or Codex credential to administer.
+> Claude or Codex credential to administer. Updated 2026-09-11 for ruling 175 (branch
+> `option-d/pr3-cost-cap-usage`): §4's org settings gain the spending cap per Claude run
+> and its `org.run_spend_cap.changed` audit.
 
 ## 1. Authentication
 
@@ -192,6 +194,15 @@ the tabs sit the Audit log card and the run-concurrency control.
   derived (`max(1, ceil(cap / 4))`), printed rather than stated as a rule. That is why a
   cap of 2 can show three runs live; the extra one is an operator or controller turn
   ([agents-and-runtime.md §3.2](agents-and-runtime.md#32-reservation-and-admission)).
+- **Spending cap** (ruling 175): the second row in the same well. `set-run-spend-cap`
+  writes `maxRunSpendUsd`, the instance's cap per Claude run in dollars (above zero, at
+  most two decimals; blank clears it; none by default, owner decision D4: an instance
+  ceiling only, no profile field). Every change records `org.run_spend_cap.changed` with
+  the value before and after. The row reads "No cap" or "$X per Claude run", and the
+  sentence under it says Claude stops a run once it has spent that much while Codex has no
+  budget option. Refusals follow ruling 147(d): Save stays live and a bad value is refused
+  in words on the click
+  ([agents-and-runtime.md §3.5](agents-and-runtime.md#35-failure-kinds) for the cut-off).
 - **Audit log card**: §5.
 
 ## 5. Audit
@@ -207,6 +218,7 @@ Action families (about 145 distinct strings; the authoritative list is a grep fo
 `recordAudit` under `app/`): `auth.*`, `identity.*`, `profile.*`, `org.user.*`,
 `org.domain.*`, `org.oauth_provider.*`, `org.connection.*`, `org.kb.*`, `org.mcp.*`,
 `org.skill.*`, `org.store.*`, `org.agent_profile.*`, `org.controller.updated`,
+`org.run_spend_cap.changed` {before, after} (ruling 175), `org.audit_export.*`,
 `github.pat.*`, `github.credential.*`, `project.*` (including
 `project.org_admin.override` and `project.authority.denied`), `task.*` (creation,
 goal, metadata, comments, transitions, ownership, packets, acceptance,

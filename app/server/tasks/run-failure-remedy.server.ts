@@ -5,7 +5,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
 } from "~/shared/dates/format";
-import { localNetworkFailureCode } from "~/shared/run-failure";
+import { formatUsd, localNetworkFailureCode } from "~/shared/run-failure";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
 
@@ -171,6 +171,18 @@ export function describeRunFailure(
       reason = `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} hit its turn cap before finishing.`;
       remedy = "Re-run it with a narrower directive, or split the work.";
       break;
+    case "max_budget": {
+      // Ruling 175: the instance's spending cap, not the task, ended the run.
+      // Both figures come from the adapter's typed record.
+      const cap = facts?.spendCapUsd;
+      const spent = facts?.spentUsd;
+      reason =
+        `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} was cut off by the instance's spending cap` +
+        `${cap !== undefined ? ` of ${formatUsd(cap)}` : ""}${spent !== undefined ? ` after spending ${formatUsd(spent)}` : ""}.`;
+      remedy =
+        "Re-run it to continue from its session, or have an org admin raise the cap in Org settings (Max spend per Claude run).";
+      break;
+    }
     case "idle_timeout":
       reason = `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} produced nothing for the whole idle window and was stopped.`;
       remedy = "Re-run it; if it hangs again, inspect the session for what it was waiting on.";

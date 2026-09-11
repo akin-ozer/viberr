@@ -3,6 +3,7 @@ import { withProviderText } from "~/shared/provider-marker";
 import {
   LOCAL_NETWORK_FAILURE_RE,
   emptyRunFailureFacts,
+  formatUsd,
   localNetworkFailureCode,
   type RunFailureFacts,
   type RunFailureKind,
@@ -69,6 +70,9 @@ export interface ClaudeQueryOptions {
   /** Reasoning effort: 'low'|'medium'|'high'|'xhigh'|'max' (default high). */
   effort?: string;
   maxTurns?: number;
+  /** Ruling 175: the instance's spending cap per run. The SDK ends a query
+   *  that exceeds it with an `error_max_budget_usd` result (sdk.d.ts). */
+  maxBudgetUsd?: number;
   permissionMode?: string;
   /** Ruling 174: the SDK declares this "must be set to `true` when using
    *  `permissionMode: 'bypassPermissions'`" (sdk.d.ts), defaults it to false
@@ -977,6 +981,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let sawResult = false;
       let resultIsError = false;
       let resultSubtype: string | null = null;
+      /** Ruling 175: what the result says the run spent, for a `max_budget`
+       *  cut-off's facts. */
+      let resultCostUsd: number | null = null;
       /** The failing RESULT envelope's own error prose, kept only long enough to
        *  classify it (P14-RT-10) — it is never persisted or logged raw. */
       let resultErrorText: string | null = null;
@@ -1280,6 +1287,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess);
           return cli.process;
         };
+        // Ruling 175: the instance's spending cap, when one is set. The SDK
+        // stops the query past it and says so with `error_max_budget_usd`.
+        if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd;
         // Only NAME a model when we have a real id/alias; otherwise let the SDK
         // (and the subscription) pick its default.
         if (resolvedModel) options.model = resolvedModel;
@@ -1408,6 +1418,62 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         let liveCached = 0;
         const seenMessages = new Set<string>();
 
+        /**
+         * A result that reports a CAP, not a task failure: the turn cap and,
+         * since ruling 175, the spending cap. Writes the cut-off's classified
+         * line and says whether it did. Without it a turn-capped run surfaced as
+         * `run·error·unknown` with "review the runtime configuration" copy
+         * (observed live: a completed implementation died at turn 51 running
+         * `gh --version`).
+         */
+        const emitCutOff = (): boolean => {
+          if (resultSubtype === "error_max_turns") {
+            const now = new Date().toISOString();
+            cb.onLine({
+              raw: "",
+              display: {
+                t: now.slice(11, 19),
+                ev: "err",
+                tag: "run·error·max_turns",
+                text:
+                  `The run hit its ${resolveMaxTurns()}-turn cap and was cut off — ` +
+                  "not a task failure. Re-prompt the agent to continue from its " +
+                  "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
+              },
+              facts: {},
+              occurredAt: now,
+            });
+            return true;
+          }
+          if (resultSubtype === "error_max_budget_usd") {
+            // Ruling 175: the instance's spending cap cut the run off — like the
+            // turn cap, not a task failure. The typed record carries the cap and
+            // the spend, so the packet names both without reading this prose.
+            const now = new Date().toISOString();
+            const failure = emptyRunFailureFacts("max_budget");
+            if (spec.maxSpendUsd) failure.spendCapUsd = spec.maxSpendUsd;
+            if (resultCostUsd !== null) failure.spentUsd = resultCostUsd;
+            cb.onLine({
+              raw: "",
+              display: {
+                t: now.slice(11, 19),
+                ev: "err",
+                tag: "run·error·max_budget",
+                text:
+                  `The run reached ${spec.maxSpendUsd ? `its ${formatUsd(spec.maxSpendUsd)} spending cap` : "its spending cap"}` +
+                  `${resultCostUsd !== null ? ` after spending ${formatUsd(resultCostUsd)}` : ""} and was cut off — ` +
+                  "not a task failure. Re-prompt the agent to continue from its session, or " +
+                  "raise the cap in Org settings (Max spend per Claude run).",
+                failure,
+              },
+              facts: {},
+              occurredAt: now,
+            });
+            return true;
+          }
+          return false;
+        };
+
         try {
           armIdle();
           for await (const message of q) {
@@ -1429,6 +1495,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               resultIsError = !!facts.isError;
               resultSubtype = envelope.subtype;
               resultErrorText = envelope.result;
+              resultCostUsd = facts.costUsd ?? null;
               evidence.apiErrorStatus = envelope.api_error_status;
               evidence.terminalReason = envelope.terminal_reason;
             } else if (envelope.type === "user") {
@@ -1476,6 +1543,16 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           if (idleTimedOut) return settleIdleTimeout();
           // AbortError from interrupt() is expected; anything else is a fault.
           if (interrupted) return settle("interrupted");
+          // A cut-off result arrived and THEN the stream threw: once a result
+          // is an error and the CLI exits non-zero after it, the SDK swaps the
+          // exit error for "Claude Code returned an error result: <text>"
+          // (sdk.mjs `readMessages`), measured live on the spending cap (ruling
+          // 175). The result is the truth, so a capped run stays a cut-off; any
+          // other thrown error is classified from the throw, as before.
+          if (emitCutOff()) {
+            logger.info("claude run cut off by a cap", { runId: spec.runId, subtype: resultSubtype });
+            return settle("error");
+          }
           logger.error("claude query error", {
             runId: spec.runId,
             err: error instanceof Error ? error : new Error(String(error)),
@@ -1492,27 +1569,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         if (idleTimedOut) return settleIdleTimeout();
         if (interrupted) return settle("interrupted");
         if (sawResult && !resultIsError) return settle("finished");
-        // A turn-capped run is CUT OFF, not failed by the task — without this
-        // classified reason line it surfaced as `run·error·unknown` with
-        // "review the runtime configuration" copy (observed live: a completed
-        // implementation died at turn 51 running `gh --version`).
-        if (resultSubtype === "error_max_turns") {
-          const now = new Date().toISOString();
-          cb.onLine({
-            raw: "",
-            display: {
-              t: now.slice(11, 19),
-              ev: "err",
-              tag: "run·error·max_turns",
-              text:
-                `The run hit its ${resolveMaxTurns()}-turn cap and was cut off — ` +
-                "not a task failure. Re-prompt the agent to continue from its " +
-                "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
-            },
-            facts: {},
-            occurredAt: now,
-          });
-        } else if (sawResult && resultIsError) {
+        // A capped run is CUT OFF, not failed by the task (see `emitCutOff`);
+        // the run still settles `error` below.
+        if (!emitCutOff() && sawResult && resultIsError) {
           // P14-RT-10: a run the SDK ends with an `is_error` result (rather than
           // a thrown stream error) used to settle `error` carrying no classified
           // line at all — the result line's own tag is `result`, which

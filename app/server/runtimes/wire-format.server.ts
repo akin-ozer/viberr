@@ -155,6 +155,28 @@ type ClaudeBlock = z.infer<typeof claudeBlock>;
  *  skips it — the same outcome the hand decoder's object check produced. */
 const claudeBlocks = z.array(claudeBlock.catch(() => claudeBlock.parse({}))).catch(() => []);
 
+/**
+ * Ruling 175: one model's totals in a result's `modelUsage` (sdk.d.ts
+ * `ModelUsage`), the fields the fold reads. `inputTokens` is the uncached slice
+ * and the two cache figures are disjoint from it, the same split as `usage`.
+ */
+const claudeModelUsageEntry = z.object({
+  inputTokens: wireCount,
+  outputTokens: wireCount,
+  cacheReadInputTokens: wireCount,
+  cacheCreationInputTokens: wireCount,
+  costUSD: wireCount,
+});
+
+/** `modelUsage` keyed by model id. Tolerant per model: an entry that does not
+ *  parse is dropped, never the whole map. */
+const claudeModelUsage = z
+  .record(z.string(), claudeModelUsageEntry.nullable().catch(null))
+  .transform((byModel) =>
+    Object.entries(byModel).flatMap(([model, entry]) => (entry ? [{ model, ...entry }] : [])),
+  )
+  .catch(() => []);
+
 const claudeEnvelopeFields = z.object({
   type: wireText,
   subtype: wireText,
@@ -192,6 +214,10 @@ const claudeEnvelopeFields = z.object({
       output_tokens: 0,
     })),
   total_cost_usd: wireCount,
+  /** Ruling 175: every call the query made, per model — main loop, subagents,
+   *  sidechains, compaction. The SDK calls it "the correct field for token/cost
+   *  accounting"; `usage` is the main loop only. */
+  modelUsage: claudeModelUsage,
   num_turns: wireCount,
   duration_ms: wireCount,
   duration_api_ms: wireCount,
@@ -292,6 +318,62 @@ type CodexEnvelope = z.infer<typeof codexEnvelopeFields>;
  *     on both adapters' hottest path, to buy a type the schemas re-widen on the
  *     very next statement.
  */
+/** One model's share of a Claude result, in the run row's terms. */
+export interface ModelUsageShare {
+  model: string;
+  /** The whole prompt: uncached slice + cache writes + cache reads. */
+  in: number;
+  cached: number;
+  out: number;
+  cost: number;
+}
+
+/** What a Claude result folds to, in the run row's terms. */
+interface ClaudeResultUsage {
+  inTok: number;
+  cached: number;
+  outTok: number;
+  costUsd: number;
+  models: ModelUsageShare[];
+}
+
+/**
+ * Ruling 175: a Claude result's tokens and cost, from `modelUsage` when it
+ * carries any figure, else from `usage` and `total_cost_usd`. The row's
+ * `input_tokens` is the WHOLE prompt (uncached + cache writes + cache reads)
+ * and `cached_input_tokens` its cache-read subset on both paths, so a row
+ * written before the ruling and one written after mean the same thing; only
+ * the calls counted grew (subagents, sidechains, compaction).
+ */
+function foldClaudeResultUsage(e: ClaudeEnvelope): ClaudeResultUsage {
+  const models = e.modelUsage.map((m) => ({
+    model: m.model,
+    in: m.inputTokens + m.cacheCreationInputTokens + m.cacheReadInputTokens,
+    cached: m.cacheReadInputTokens,
+    out: m.outputTokens,
+    cost: m.costUSD,
+  }));
+  const counted = models.some((m) => m.in > 0 || m.out > 0 || m.cost > 0);
+  if (!counted) {
+    return {
+      inTok:
+        e.usage.input_tokens + e.usage.cache_creation_input_tokens + e.usage.cache_read_input_tokens,
+      cached: e.usage.cache_read_input_tokens,
+      outTok: e.usage.output_tokens,
+      costUsd: e.total_cost_usd,
+      models: [],
+    };
+  }
+  const sum = (pick: (m: ModelUsageShare) => number) => models.reduce((n, m) => n + pick(m), 0);
+  return {
+    inTok: sum((m) => m.in),
+    cached: sum((m) => m.cached),
+    outTok: sum((m) => m.out),
+    costUsd: sum((m) => m.cost),
+    models,
+  };
+}
+
 /** The result line's token clause, one shape on both backends: the whole
  *  prompt, its cache-read subset, the output. */
 function usageText(inTok: number, cached: number, outTok: number): string {
@@ -438,10 +520,15 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
       // cache-read subset of it. Before this the Claude row held the uncached
       // slice alone, and the strip read a median 60x below the provider's own
       // total on the runs this instance had stored.
-      const inTok =
-        e.usage.input_tokens + e.usage.cache_creation_input_tokens + e.usage.cache_read_input_tokens;
-      const cached = e.usage.cache_read_input_tokens;
-      const outTok = e.usage.output_tokens;
+      //
+      // Ruling 175: the figures come from `modelUsage`, which covers every call
+      // the query made, subagents and compaction included; `usage` covers the
+      // main loop only and undercounted any run that delegated. Same column
+      // semantics either way. `usage` (and `total_cost_usd`) remain the
+      // fallback for a result without per-model figures — an older CLI, or a
+      // crash result whose `modelUsage` came back empty or zeroed.
+      const fold = foldClaudeResultUsage(e);
+      const { inTok, cached, outTok } = fold;
       const durSec = Math.round(e.duration_ms / 1000);
       // U34-1: the SDK ends an API-refused run with `subtype: "success"` and
       // `is_error: true`, which printed "result · success" one line above the
@@ -457,27 +544,25 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
         ? `${outcome} · ${e.num_turns} turns` +
           (e.api_error_status != null ? ` · api ${e.api_error_status}` : "") +
           (e.terminal_reason ? ` · ${e.terminal_reason}` : "")
-        : `success · ${e.num_turns} turns · ${durSec}s · $${e.total_cost_usd.toFixed(2)} · ${usageText(inTok, cached, outTok)}`;
+        : `success · ${e.num_turns} turns · ${durSec}s · $${fold.costUsd.toFixed(2)} · ${usageText(inTok, cached, outTok)}` +
+          (fold.models.length > 1 ? ` · ${fold.models.length} models` : "");
+      const stats: NonNullable<LogLine["stats"]> = {
+        subtype: e.is_error ? outcome : undefined,
+        dur: e.duration_ms,
+        api: e.duration_api_ms,
+        turns: e.num_turns,
+        cost: fold.costUsd,
+        in: inTok,
+        cached,
+        out: outTok,
+      };
+      // The per-model breakdown lives on the line, not in a column.
+      if (fold.models.length) stats.models = fold.models;
       return {
-        display: {
-          t,
-          ev: "result",
-          tag: "result",
-          text,
-          stats: {
-            subtype: e.is_error ? outcome : undefined,
-            dur: e.duration_ms,
-            api: e.duration_api_ms,
-            turns: e.num_turns,
-            cost: e.total_cost_usd,
-            in: inTok,
-            cached,
-            out: outTok,
-          },
-        },
+        display: { t, ev: "result", tag: "result", text, stats },
         facts: {
           usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false },
-          costUsd: e.total_cost_usd,
+          costUsd: fold.costUsd,
           turns: e.num_turns,
           isError: e.is_error,
           isResult: true,

@@ -54,6 +54,10 @@ export function runStatePill(run: RunView): RunStateBadge {
   if (run.state === "error" && run.failureKind === "unavailable") {
     return { kind: "blocked", label: "backend unavailable" };
   }
+  if (run.state === "error" && run.failureKind === "max_budget") {
+    // Ruling 175: the instance's spending cap stopped it, not the task.
+    return { kind: "blocked", label: "cut off · spending cap" };
+  }
   if (run.state === "error" && run.failureKind === "overloaded") {
     // U35-11: a connection that failed in this deployment's own environment
     // is named as such; the provider is blamed only when it answered.
@@ -280,6 +284,21 @@ export function runInputRows(
       text: inputs.sandbox.note
         ? `${inputs.sandbox.mode} · ${inputs.sandbox.note}`
         : inputs.sandbox.mode,
+    });
+  }
+
+  // Ruling 175: what the run may spend, stated even when nothing caps it, and
+  // honest that the cap is Claude's alone.
+  if (inputs.spendCapUsd !== undefined) {
+    const cap = inputs.spendCapUsd;
+    rows.push({
+      tag: "spend",
+      text:
+        cap === null
+          ? "no spending cap (Org settings → Max spend per Claude run)"
+          : backend === "codex"
+            ? `the instance caps a Claude run at $${cap.toFixed(2)}, but Codex has no budget option: this run is bounded by its idle timer only`
+            : `capped at $${cap.toFixed(2)}: the run stops when it has spent that much`,
     });
   }
 

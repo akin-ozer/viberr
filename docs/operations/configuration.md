@@ -9,7 +9,9 @@
 > the nine deployment-wide agent-backend variables are gone; agent backends are
 > connected per person and appear in §4, not here. Updated 2026-09-11 for ruling 174
 > (branch `option-d/pr1-permissions-and-kill`): §3's spawn-env paragraph names the run
-> marker `VIBERR_RUN_ID` every agent child carries. No new variable.
+> marker `VIBERR_RUN_ID` every agent child carries. No new variable. Updated 2026-09-11 for
+> ruling 175 (branch `option-d/pr3-cost-cap-usage`): §4 gains the spending cap per Claude
+> run. No new variable.
 
 Viberr is configured almost entirely through environment variables, validated
 once at boot by `parseEnv` in `app/server/config/env.server.ts`. The process
@@ -215,6 +217,7 @@ rode into every agent shell and stdio MCP child, and broke a project's own `vite
 | Setting | Where it lives | Who edits it |
 |---|---|---|
 | Run concurrency cap (`maxConcurrentRuns`, `0` = unlimited, ceiling 64; a positive cap carries a coordination lane of `max(1, ceil(cap / 4))` extra slots for operator and controller turns, ruling 152(b)) | `instance_settings` table | Org admin, Org settings, the run-concurrency control below the tabs (`set-concurrency` intent) |
+| Spending cap per Claude run (`maxRunSpendUsd`, USD above zero with at most two decimals, none by default; ruling 175). Claude only: the SDK's `maxBudgetUsd`; Codex has no budget option | `instance_settings` | Org admin, Org settings, the spending-cap row under run concurrency (`set-run-spend-cap` intent; audited as `org.run_spend_cap.changed`) |
 | Backend quota observations (`backendRateLimit.<backend>`, `backendQuotaExhausted.<backend>`, `backendCredentialRefused.<backend>`) | `instance_settings` | Written by the run sink from Claude `rate_limit_event` envelopes and from classified refusals (ruling 130(d): each names the account the run billed); read by `/insights`, `instance_health`, the person's Profile card and the dispatch hold (`backendDispatchHold`, ruling 152(c)); the unauthenticated health body strips the person |
 | OAuth sign-in providers | `oauth_providers` table (sealed client secret) | Org admin, Sign-in & SSO tab; overrides the env pair per provider |
 | S3 audit export target | `s3_audit_config` table (sealed secret key) | Org admin, Audit panel |

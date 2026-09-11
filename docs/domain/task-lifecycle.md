@@ -8,7 +8,8 @@
 > @ `68b5480` (2026-09-01). Updated 2026-09-02 for ruling 127 (branch
 > `claude/per-user-codex-auth-difdnn`): §3 (creation seats the creator as owner)
 > and §7 (whose accounts a task's agent runs bill, and what an unowned task
-> refuses).
+> refuses). Updated 2026-09-11 for ruling 175 (branch `option-d/pr3-cost-cap-usage`): §7's
+> wording for a run the spending cap cut off.
 
 ## 1. The shape of every governed mutation
 
@@ -284,6 +285,14 @@ retry of the link read the list the task last held. The link's `edit_link` accep
     credential" or "retry on the other backend" unless the owner actually has the other
     backend connected, and the resolved decision restates the option the human chose,
     never a "policy / credential updated" nobody performed (ruling 130(c)).
+  - a run the instance's **spending cap** cut off (ruling 175, Claude only) is a cut-off,
+    not a failure, like the turn cap: the `blocked` event reads "the Claude run reached the
+    instance's spending cap of $X after spending $Y and was CUT OFF mid-work, which is not a
+    task failure", says nothing about undelivered changes, and ends with the remedy
+    `describeRunFailure` words for it: re-run it to continue from its session, or have an
+    org admin raise the cap in Org settings (Max spend per Claude run). The packet's
+    options are the ones a turn-cap cut-off gets (redirect for a specialist; re-run,
+    redirect or hold for the operator), never another backend.
   - a **hand-off changes whose account pays** from the next run on. An in-flight run
     keeps the principal it started with (the column is per run), and a resume after a
     hand-off looks for the provider session in the NEW owner's home, finds none, and

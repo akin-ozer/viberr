@@ -3648,6 +3648,47 @@ by rewriting those paragraphs:*
     `run-service.server.ts` `startRun`; `finalizeOrphanedRuns` and boot's
     `reconcileRestartedWork`.)
 
+175. **A Claude run carries the instance's spending cap, and its tokens and cost count every
+    call it made (owner, 2026-09-11; extends 130(a)).** Nothing capped what a run could
+    spend, and the token columns undercounted any Claude run that delegated. The pinned SDK
+    had both levers unused (ruling 173(b)).
+    (a) *The cap is an instance ceiling only* (owner decision D4): `maxRunSpendUsd` in
+    `instance_settings`, set by an org admin on Org settings ("Max spend per Claude run,
+    USD", above zero, at most two decimals, blank for none), none by default, with no
+    profile field and no file-format change. Every change is audited as
+    `org.run_spend_cap.changed` with the value before and after.
+    (b) *Every run carries it.* `startRun`, the funnel every builder goes through
+    (specialist, operator, controller, resume, scheduled, recovery), stamps it on the spec
+    as `maxSpendUsd`, and the Claude adapter passes it to the SDK as `maxBudgetUsd`. Codex
+    has no budget option, so the cap does not bind a Codex run; the run-inputs disclosure and
+    the settings row both say so rather than imply a limit that is not there.
+    (c) *A run the cap stops is cut off, not failed.* The SDK's `error_max_budget_usd`
+    result is the `max_budget` failure kind, a sibling of `max_turns`. Its typed record
+    carries the cap (`spendCapUsd`) and the spend at cut-off (`spentUsd`), and every reader
+    names both from the record: the adapter's line, the specialist's blocked event (which,
+    like the turn cap's, does not claim that no changes were delivered), `describeRunFailure`'s
+    reason and remedy (re-run to continue, or raise the cap in Org settings), the
+    controller's turn note, and the pill (`cut off · spending cap`). The recovery options
+    are a cut-off's, never another backend. The pinned SDK yields the result and then
+    throws ("Claude Code returned an error result: Reached maximum budget ($0.01)", measured
+    by this ruling's live canary), so a cut-off is classified from the result on the throw
+    path too. That also repairs the turn cap, which had been ending `run·error·unknown`
+    since the SDK began throwing.
+    (d) *Tokens and cost are folded from `modelUsage`,* which covers every call the query
+    made (the main loop, subagents, sidechains, compaction), per model. `result.usage`,
+    the main loop only, and `total_cost_usd` are the fallback for a result whose
+    `modelUsage` is absent, empty or zeroed. The columns keep their meaning (input is the
+    whole prompt, cached its cache-read subset). The per-model breakdown rides the result
+    line's `stats.models` and no column. Rows written before this ruling folded `usage` and
+    stay as stored; Insights sums what the rows hold.
+    (`getMaxRunSpendUsd` / `setMaxRunSpendUsd` in
+    `app/server/settings/instance-settings.server.ts`; the stamp in `run-service.server.ts`
+    `startRun`; `maxBudgetUsd` and the `error_max_budget_usd` arm in
+    `claude-runtime.server.ts`; `foldClaudeResultUsage` in `wire-format.server.ts`;
+    `max_budget` in `app/shared/run-failure.ts`, `run-failure-remedy.server.ts`,
+    `task-actions.server.ts`, `controller-run.server.ts` and `runs-helpers.ts`; the
+    `set-run-spend-cap` intent in `app/routes/org.settings.tsx`.)
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

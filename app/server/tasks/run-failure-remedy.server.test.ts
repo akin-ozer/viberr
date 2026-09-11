@@ -38,6 +38,26 @@ function describe_(store: TestStore, input: Partial<Parameters<typeof describeRu
 }
 
 describe("describeRunFailure", () => {
+  it("ruling 175: a spending-cap cut-off names the cap and the spend, and who can raise it; re-running is recommended", () => {
+    // Canary: drop the `max_budget` case and the reason falls to the generic
+    // "did not complete: run failed (max_budget)" with no figure.
+    const store = setupTestStore(ctx);
+    const d = describe_(store, { failure: failure("max_budget", { spendCapUsd: 0.5, spentUsd: 0.52 }) });
+    expect(d.reason).toBe(
+      "The operator run was cut off by the instance's spending cap of $0.50 after spending $0.52.",
+    );
+    expect(d.remedy).toContain("raise the cap in Org settings (Max spend per Claude run)");
+    expect(d.options.find((o) => o.recommended)?.title).toBe("Re-run the operator now");
+    // A specialist's cut-off is not a backend failure: no other-backend retry.
+    const spec = describe_(store, {
+      role: "specialist",
+      agentHandle: "developer",
+      failure: failure("max_budget", { spendCapUsd: 0.5 }),
+    });
+    expect(spec.reason).toBe("The agent run was cut off by the instance's spending cap of $0.50.");
+    expect(spec.options.some((o) => o.kind === "retry_other_backend")).toBe(false);
+  });
+
   it("formats the reset instant absolutely, in UTC", () => {
     expect(formatResetLabel(RESET)).toMatch(/Sep 3, 2026 · 11:50 UTC$/);
     expect(formatResetLabel(null)).toBeNull();

@@ -947,4 +947,17 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     );
     expect(note).not.toContain("Profile → Agent accounts");
   });
+
+  it("ruling 175: a turn the spending cap stopped names the cap and the spend, and who can raise it", async () => {
+    // Canary: route `max_budget` through the generic arm and the note reads
+    // "the run did not complete" with no figure and nobody to ask.
+    const texts = await settleErrored("run_budget", {
+      t: "1", ev: "err", tag: "run·error·max_budget", text: "The run reached its $0.50 spending cap after spending $0.52 and was cut off.",
+      failure: { kind: "max_budget", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, spendCapUsd: 0.5, spentUsd: 0.52 },
+    });
+    const note = texts.find((t) => t.startsWith("I could not finish this turn"))!;
+    expect(note).toBe(
+      "I could not finish this turn: the instance's spending cap of $0.50 stopped it after spending $0.52. Say it again to continue, or ask an org admin to raise the cap in Org settings (Max spend per Claude run).",
+    );
+  });
 });

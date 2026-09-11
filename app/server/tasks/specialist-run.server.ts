@@ -159,6 +159,7 @@ import {
   type WorkspaceCloneInput,
 } from "./repo-mirror.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
+import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 
 /** The mount call's own input contract — named so `dataRoot` can be OMITTED
  *  (not set to undefined) when the caller runs on the default store. */
@@ -2116,6 +2117,8 @@ async function dispatchAgentRun(
       }),
       promptChars: prompt.length,
       anchor,
+      // Ruling 175: the cap `startRun` just stamped on the run, disclosed.
+      spendCapUsd: getMaxRunSpendUsd(db),
       directive: input.directive?.trim()
         ? {
             from: input.directiveFrom?.trim() || null,

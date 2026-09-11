@@ -94,6 +94,12 @@ describe("runStatePill (ruling 11 lifecycle mapping)", () => {
       label: "provider overloaded",
     });
   });
+  it("ruling 175: a run the spending cap stopped reads 'cut off · spending cap', not 'continuity error'", () => {
+    expect(runStatePill({ ...base, state: "error", lifecycle: "error", failureKind: "max_budget" })).toEqual({
+      kind: "blocked",
+      label: "cut off · spending cap",
+    });
+  });
   it("U35-11: an overload whose origin is this deployment's network reads 'provider unreachable', never 'provider overloaded'", () => {
     expect(runStatePill({ ...base, state: "error", lifecycle: "error", failureKind: "overloaded", failureOrigin: "local" })).toEqual({
       kind: "blocked",
@@ -213,6 +219,22 @@ describe("runInputRows (P19-G11)", () => {
     const plain = runInputRows({ ...emptyInputs, sandbox: { mode: "read-only", note: null } }, "codex");
     expect(plain.find((r) => r.tag === "sandbox")!.text).toBe("read-only");
     expect(runInputRows(emptyInputs, "claude").some((r) => r.tag === "sandbox")).toBe(false);
+  });
+
+  it("ruling 175: states the spending cap, honest that Codex has no budget option, and 'none' when unset", () => {
+    const spend = (inputs: RunInputs, backend: "claude" | "codex") =>
+      runInputRows(inputs, backend).find((r) => r.tag === "spend")?.text;
+    expect(spend({ ...emptyInputs, spendCapUsd: 2.5 }, "claude")).toBe(
+      "capped at $2.50: the run stops when it has spent that much",
+    );
+    expect(spend({ ...emptyInputs, spendCapUsd: 2.5 }, "codex")).toBe(
+      "the instance caps a Claude run at $2.50, but Codex has no budget option: this run is bounded by its idle timer only",
+    );
+    expect(spend({ ...emptyInputs, spendCapUsd: null }, "claude")).toBe(
+      "no spending cap (Org settings → Max spend per Claude run)",
+    );
+    // A line written before the ruling says nothing it cannot know.
+    expect(spend(emptyInputs, "claude")).toBeUndefined();
   });
 
   it("carries the canonical anchor verbatim, with its line breaks intact", () => {
