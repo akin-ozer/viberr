@@ -33,7 +33,8 @@
 > Claude, as `disabled_tools` on Codex; the P13-KM-04 prompt paragraph names only unmarked
 > servers). Updated 2026-09-11 for the ruling 101(e) amendment (Option D PR 5, branch
 > `option-d/pr5-pretooluse-deny`): §2.4 and §4.3 (the PreToolUse hook that refuses wrapped
-> shapes of a denied command, with a reason the model reads). The operator's own behaviour is in
+> shapes of a denied command, with a reason the model reads). Updated 2026-09-11 for Option D
+> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected. The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -337,7 +338,10 @@ connecting a different account there (ruling 165).
   no writable root; `--add-dir` widens `workspace-write` only), so ruling 109 kept it and
   made it visible instead — see §4.3. Re-checked on the 0.153.4 pin (2026-09-06):
   `--add-dir` still reads "writable alongside the primary workspace" and the sandbox
-  modes are unchanged, so the carve-out stands.
+  modes are unchanged, so the carve-out stands. So `read-only` is a live seam for every
+  write-withheld Codex run without an attachments dir (ruling 101), not a mode R22
+  retired. Watch item (ruling 109): the CLI's `permissions.rs` per-path profile would
+  express read-only plus a writable attachments dir; revisit when the SDK surfaces it.
   `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
   off; withheld egress sets `webSearchMode: "disabled"`.
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
@@ -1054,9 +1058,10 @@ full` and the project-effective grants.
    unauthenticated there.
 4. Foreign-backend models are substituted silently at start.
 5. `RUN_STATE.error` is labelled "continuity error" for every error run.
-6. Several code comments still describe Codex repo-write as "advisory since R22"; the
-   sandbox mode enforces it since ruling 101. The one place "advisory on Codex" is still
-   the honest word is the evidence carve-out of ruling 109 (§4.3), which is now printed
+6. Codex repo-write is enforced by the sandbox mode since ruling 101. The last code
+   comment that still said "R22: no run is read-only" (`RunSpec.attachmentsWritableDir`)
+   was corrected on 2026-09-11 (Option D PR 6). The one place "advisory on Codex" is
+   still the honest word is the evidence carve-out of ruling 109 (§4.3), which is printed
    on every surface that shows the grant.
 7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
    real exclusion mechanism.

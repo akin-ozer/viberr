@@ -108,7 +108,10 @@ function latestTurnRun(db: DatabaseSync, conversationId: string) {
 }
 
 const MAX_QUEUED_MESSAGES = 8;
-/** Bounded transcript digest injected on a FRESH provider session. */
+/** Bounded transcript digest carried on EVERY turn (`buildTurnPrompt`). Each
+ *  turn resumes the newest prior controller run that has a session, whatever
+ *  state that run ended in (`latestTurnRun` does not filter), so the digest is
+ *  the insurance for a swept transcript, not an extra for fresh sessions. */
 const CONTEXT_MESSAGES = 30;
 const CONTEXT_CHARS = 24_000;
 
