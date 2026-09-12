@@ -77,7 +77,12 @@ import {
 } from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import {
+  canAcceptFromStage,
+  isTerminalStage,
+  resolveStageRoles,
+  stageName,
+} from "~/shared/workflow/stage-roles";
 import {
   POLICY_ENGINE_ACTOR,
   flagScopeViolation,
@@ -898,16 +903,41 @@ async function reconcileTaskUnlocked(
     const patch: Partial<TaskFrontmatter> = { pr: newPr, github: newGithub };
     // R8-6: surface a merged/closed-out-of-band divergence (typed event now, a
     // notification below). Never auto-advances the STAGE — a human closes the loop.
+    // U36-12 (pass 36): the note used to end "Accept the completion (or move it
+    // to Done)" whatever stage the task stood at — and acceptance is offered
+    // ONLY from the workflow's last boundary. Live (HLC-14, 18:13Z) the task
+    // sat at Agent Review with its PR merged out of band: the page had no
+    // Accept, the operator's own `accept_completion` was refused ("is at Agent
+    // Review, not Merge Approval"), and the same reconcile pass had just
+    // withdrawn the "Move the task to Merge Approval" card that led there. So
+    // ask the SAME predicate acceptance asks (`canAcceptFromStage`) and name
+    // the step the page actually offers.
+    const acceptableHere =
+      project === null ||
+      canAcceptFromStage(fm.stage, project.stages, project.workflow);
+    const boundaryName = project
+      ? stageName(
+          project.stages,
+          resolveStageRoles(project.stages, project.workflow).reviewId ?? fm.stage,
+        )
+      : null;
     const divergenceText = mergedButNotDone
-      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr, so its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
+      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr, so its stage is unchanged. ` +
+        (acceptableHere
+          ? `Accept the completion so the task reflects the merge.`
+          : `Move it to ${boundaryName ?? "the approval boundary"} first — a completion can only be accepted from there — then accept it so the task reflects the merge.`)
       : closedButActive
         ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
         : null;
     // Owner decision 2026-07-18: a divergence WITHDRAWS the now-moot pending
     // recommendations that assumed the prior delivery could be moved forward as-is
     // — otherwise a human is nudged to "Move to Review" a task whose PR is gone.
-    //  · `transition` recs are moot on ANY divergence (the PR state changed under
-    //    the premise for advancing).
+    //  · `transition` recs are moot on a divergence that FALSIFIES advancing —
+    //    a PR closed without merging, or authored drift that voided the verdict.
+    //    U36-12: a PR MERGED out of band does not; there the transition toward
+    //    the approval boundary is the only route to the acceptance the note
+    //    just asked for, and withdrawing it left the human with a note naming a
+    //    step no control offered.
     //  · `accept_completion` is moot ONLY when the PR was CLOSED (nothing to
     //    accept); when the PR MERGED out-of-band, accepting is exactly the right
     //    action, so that rec SURVIVES (the divergence text points the human at it).
@@ -928,7 +958,7 @@ async function reconcileTaskUnlocked(
       divergenceText || conflictText || authoredDriftVoidsVerdict
         ? fm.recommendations.filter(
             (r) =>
-              ((divergenceText !== null || authoredDriftVoidsVerdict) && r.kind === "transition") ||
+              ((closedButActive || authoredDriftVoidsVerdict) && r.kind === "transition") ||
               (r.kind === "accept_completion" &&
                 (closedButActive || conflictText !== null || authoredDriftVoidsVerdict)),
           )

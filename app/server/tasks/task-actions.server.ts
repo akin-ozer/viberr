@@ -75,6 +75,7 @@ import {
   DEFAULT_COMPACTION,
 } from "./timeline-compaction.server";
 import {
+  canAcceptFromStage,
   resolveStageRoles,
   isTerminalStage,
   stageName as resolveStageName,
@@ -9124,13 +9125,10 @@ function acceptanceStageBlockedReason(
   const roles = stageRolesOf(project);
   const terminalId =
     roles.terminalId ?? project.stages[project.stages.length - 1]?.id ?? null;
-  // No stages to reason about, or already terminal (the callers' idempotent
-  // "already Done" return handles that) — nothing to refuse.
-  if (!terminalId || fromStageId === terminalId) return null;
-  const hasEdgeToTerminal = project.workflow.some(
-    (w) => w.from === fromStageId && w.to === terminalId,
-  );
-  if (hasEdgeToTerminal || fromStageId === roles.reviewId) return null;
+  // U36-12: the rule itself is `canAcceptFromStage` in the shared stage-roles
+  // module, so the reconciler's divergence note asks the SAME question before
+  // it tells a human to accept. Everything below is only how this caller says no.
+  if (canAcceptFromStage(fromStageId, project.stages, project.workflow)) return null;
   const reviewName = roles.reviewId
     ? stageName(project, roles.reviewId)
     : "the review stage";

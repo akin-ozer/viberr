@@ -1521,9 +1521,7 @@ describe("reconcileTask", () => {
     expect(events.some((e) => /closed on GitHub without merging/.test(e.text) && /withdrawn/.test(e.text))).toBe(true);
   });
 
-  it("R8-6: a MERGED-out-of-band divergence withdraws transition but KEEPS accept_completion (accepting reflects the merge)", async () => {
-    const { store, actor } = setup();
-    seedWithRecs(store);
+  const mergedOutOfBand = async (store: TestStore, actor: Parameters<typeof reconcileTask>[2]) => {
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
       body: { number: 318, title: "Attach execution workspace", state: "closed",
@@ -1532,9 +1530,52 @@ describe("reconcileTask", () => {
     };
     await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    // transition withdrawn; accept_completion SURVIVES (the divergence tells the human to accept).
-    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign"]);
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    return {
+      fm: readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+        .parsed.frontmatter,
+      divergence: events.find((e) => /was merged on GitHub/.test(e.text))?.text ?? "",
+    };
+  };
+
+  it("R8-6 / U36-12: a MERGED-out-of-band divergence keeps BOTH the accept and the transition that leads to it", async () => {
+    // Live (HLC-14, 18:13Z): the note said "Accept the completion (or move it
+    // to Done)" while the same pass withdrew the "Move the task to Merge
+    // Approval" card — the only route to an Accept the page does not offer at
+    // Agent Review. A merged PR does not falsify advancing; it is the reason to.
+    // Canary: put `divergenceText !== null` back in the transition filter and
+    // `r-trans` disappears again.
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const { fm, divergence } = await mergedOutOfBand(store, actor);
+    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign", "r-trans"]);
+    // This task IS at the boundary (`review` → `done`), so the note says accept.
+    expect(divergence).toContain("Accept the completion so the task reflects the merge.");
+    expect(divergence).not.toContain("Move it to");
+  });
+
+  it("U36-12: at a stage that cannot accept, the note names the boundary instead of an Accept the page does not offer", async () => {
+    // Canary: drop the `canAcceptFromStage` branch and the note tells a human
+    // at In Progress to "Accept the completion" — the operator's own
+    // `accept_completion` is refused there with "not Review", and no control
+    // offers it.
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...file.parsed.frontmatter, stage: "impl" },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const { fm, divergence } = await mergedOutOfBand(store, actor);
+    expect(divergence).toContain(
+      "Move it to Review first — a completion can only be accepted from there — then accept it",
+    );
+    expect(divergence).not.toContain("Accept the completion so");
+    // …and the card that gets there is still on the task.
+    expect(fm.recommendations.map((r) => r.id)).toContain("r-trans");
   });
 
   it("keeps the workspace-captured commit cache when branch commits lack the [KEY] prefix (B2)", async () => {
