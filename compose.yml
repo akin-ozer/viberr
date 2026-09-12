@@ -15,20 +15,15 @@ services:
     # which layer dropped it; the process-group teardown in resources.server is
     # the belt to this brace.
     init: true
-    # F36-1 (pass 36, ruling 182): the Codex CLI confines a `workspace-write`
-    # or `read-only` run with bubblewrap, which needs an unprivileged user
-    # namespace. Docker's builtin seccomp profile refuses
-    # `unshare(CLONE_NEWUSER)` to the non-root app user, so every Codex
-    # reviewer and supporting run failed at its first shell command
-    # ("bwrap: No permissions to create a new namespace") while the
-    # fully-autonomous deliverers (no sandbox) built fine. Chromium's own
-    # namespace sandbox hits the same wall and the image passes --no-sandbox
-    # for it (Dockerfile); Codex offers no such flag, so the profile is lifted
-    # here. The container is still non-root, cap-dropped and init-reaped.
-    # Boot logs the probe's verdict; docs/operations/deployment.md, "Codex
-    # sandbox (seccomp)".
-    security_opt:
-      - seccomp=unconfined
+    # Ruling 185 (pass 36): NO `security_opt: seccomp=unconfined` here. It was
+    # added for F36-1 — the Codex CLI confined a run with bubblewrap, which
+    # needs an unprivileged user namespace Docker's builtin seccomp profile
+    # refuses to the non-root app user, so every confined Codex run died at its
+    # first shell command. Viberr no longer uses that sandbox at all (every
+    # Codex run is `danger-full-access`), so the container keeps Docker's own
+    # profile. Chromium still needs --no-sandbox for the same namespace reason
+    # and the image passes it (Dockerfile). Do not re-add this line without a
+    # ruling: it lifts the profile for every process in the container.
     env_file: .env
     environment:
       # Force the container-internal values even when .env carries the dev

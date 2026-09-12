@@ -959,11 +959,10 @@ function CapabilityGrants({
                       !locked &&
                       capabilityEnforcement(capDef.id) === "claude-only";
                     const codexInert = codexAdvisory && capDef.id === "read-github-api";
-                    // Pass 32 (E32-3 fallback): the headline write family binds
-                    // on Codex through the read-only sandbox — EXCEPT when this
-                    // very selection withholds it while granting evidence, the
-                    // shape the sandbox cannot express. Tag the row from the
-                    // live selection so the admin sees the caveat as they make it.
+                    // Ruling 185: the headline write family has no OS channel
+                    // on Codex any more, so a withheld one is advisory there.
+                    // Tag the row from the LIVE selection so the admin sees the
+                    // caveat as they make it.
                     const codexCarveOut =
                       backend === "codex" &&
                       capDef.id === "execute-code-or-write-repo" &&
@@ -987,7 +986,7 @@ function CapabilityGrants({
                           {codexCarveOut && (
                             <span
                               className="mx-scope"
-                              title={`On this Codex profile ${CODEX_REPO_WRITE_ADVISORY_NOTE}. Withhold "Attach evidence references" too, or run the profile on Claude, to make the withholding bind.`}
+                              title={`On this Codex profile ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`}
                             >
                               advisory on Codex
                             </span>

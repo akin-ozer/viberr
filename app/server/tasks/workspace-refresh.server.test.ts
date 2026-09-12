@@ -224,6 +224,74 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(await gitOut(unnamed, ["rev-parse", "HEAD"])).toBe(head20);
   });
 
+  it("ruling 179: a task branch says WHICH it is — unpushed, in sync, ahead, or diverged", async () => {
+    // Canary: return `{ status: "fetched", head: "task_branch" }` without the
+    // standing and every sentence below goes back to the one live text that
+    // called an IN-SYNC branch "a diverged task branch" (2026-09-12, HLC-18's
+    // deliverer, minutes after its rework had landed on origin).
+    const refreshTask = (dir: string, taskBranch: string) =>
+      withLocalGithub(origins, () =>
+        refreshWorkspaceFromMirror(store.db, {
+          projectSlug: store.slug,
+          repo: REPO,
+          dir,
+          defaultBranch: "main",
+          dataRoot: store.dataRoot,
+          fastForward: true,
+          taskBranch,
+        }),
+      );
+    const say = (r: Awaited<ReturnType<typeof refreshTask>>) => describeWorkspaceRefresh(r, "main");
+
+    const dir = await checkout("standing");
+    await exec("git", ["-C", dir, "checkout", "-q", "-b", "vib-30"]);
+    writeFileSync(path.join(dir, "WORK.md"), "one\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-qm", "[VIB-30] one"]);
+
+    // 1. origin has never seen the branch.
+    const unpushed = await refreshTask(dir, "vib-30");
+    expect(unpushed).toMatchObject({
+      status: "fetched",
+      head: "task_branch",
+      taskBranch: { name: "vib-30", standing: "unpushed" },
+    });
+    expect(say(unpushed)).toContain("which origin does not have yet");
+
+    // 2. ahead: committed locally, not yet delivered — the delivery pushes it.
+    await withLocalGithub(origins, () => exec("git", ["-C", dir, "push", "-q", "origin", "vib-30"]));
+    writeFileSync(path.join(dir, "WORK.md"), "two\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-qm", "[VIB-30] two"]);
+    const ahead = await refreshTask(dir, "vib-30");
+    expect(ahead).toMatchObject({ taskBranch: { standing: "ahead" } });
+    expect(say(ahead)).toContain("ahead of `origin/vib-30` — the delivery is what pushes it");
+
+    // 3. in sync: the delivery pushed it. NOT "diverged".
+    await withLocalGithub(origins, () => exec("git", ["-C", dir, "push", "-q", "origin", "vib-30"]));
+    const inSync = await refreshTask(dir, "vib-30");
+    expect(inSync).toMatchObject({ taskBranch: { standing: "in_sync" } });
+    expect(say(inSync)).toContain("matches `origin/vib-30` — nothing to move");
+    expect(say(inSync)).not.toContain("diverged");
+
+    // 4. diverged: both moved. The old sentence, now earned.
+    const pusher = await checkout("standing-pusher");
+    await withLocalGithub(origins, () => exec("git", ["-C", pusher, "fetch", "-q", "origin", "vib-30"]));
+    await exec("git", ["-C", pusher, "checkout", "-q", "-B", "vib-30", "FETCH_HEAD"]);
+    writeFileSync(path.join(pusher, "THEIRS.md"), "theirs\n");
+    await exec("git", ["-C", pusher, "add", "-A"]);
+    await exec("git", ["-C", pusher, "commit", "-qm", "observer"]);
+    await withLocalGithub(origins, () => exec("git", ["-C", pusher, "push", "-q", "origin", "vib-30"]));
+    writeFileSync(path.join(dir, "MINE.md"), "mine\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-qm", "[VIB-30] mine"]);
+    const mine = await gitOut(dir, ["rev-parse", "HEAD"]);
+    const diverged = await refreshTask(dir, "vib-30");
+    expect(diverged).toMatchObject({ taskBranch: { standing: "diverged" } });
+    expect(say(diverged)).toContain("BOTH moved");
+    expect(await gitOut(dir, ["rev-parse", "HEAD"])).toBe(mine);
+  });
+
   it("a branch that shares no history with `origin/<default>` reads `unrelated` and says so", async () => {
     // Canary: fold `unrelated` into `task_branch` and the head assertion fails.
     const dir = await checkout("unrelated");

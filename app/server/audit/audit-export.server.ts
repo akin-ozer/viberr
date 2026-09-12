@@ -97,7 +97,7 @@ export function queryAuditEventsForExport(
     db
       .prepare(
         `SELECT * FROM audit_events ${clause}
-         ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+         ORDER BY occurred_at DESC, rowid DESC LIMIT ?`,
       )
       .all(...params, limit),
   );

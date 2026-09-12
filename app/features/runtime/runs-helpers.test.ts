@@ -136,7 +136,6 @@ const emptyInputs: RunInputs = {
   unresolvedResources: [],
   tools: { denied: [], toolkit: [] },
   directive: null,
-  sandbox: null,
 };
 
 const inputsLine = (inputs: RunInputs): LogLine => ({
@@ -206,19 +205,18 @@ describe("runInputRows (P19-G11)", () => {
     expect(byTag.persona).toContain("no persona was sent");
   });
 
-  it("pass 32: renders a Codex run's sandbox row, with the carve-out note, and none for Claude", () => {
-    const codex = runInputRows(
-      {
-        ...emptyInputs,
-        sandbox: { mode: "workspace-write", note: "repo-write is withheld but evidence is granted" },
-      },
+  it("ruling 185: no sandbox row on either backend — Viberr confines neither", () => {
+    // The row existed for the Codex OS sandbox; the sandbox is gone (F36-1 and
+    // F36-11 cost more than it bought), so a run that claims one would be a
+    // claim about nothing. Canary: re-add a `sandbox` row to `runInputRows`.
+    expect(runInputRows(emptyInputs, "codex").some((r) => r.tag === "sandbox")).toBe(false);
+    expect(runInputRows(emptyInputs, "claude").some((r) => r.tag === "sandbox")).toBe(false);
+    // What DOES disclose the confinement is the denied-tool list, on both.
+    const denied = runInputRows(
+      { ...emptyInputs, tools: { denied: ["Edit", "Write"], toolkit: [] } },
       "codex",
     );
-    const row = codex.find((r) => r.tag === "sandbox")!;
-    expect(row.text).toBe("workspace-write · repo-write is withheld but evidence is granted");
-    const plain = runInputRows({ ...emptyInputs, sandbox: { mode: "read-only", note: null } }, "codex");
-    expect(plain.find((r) => r.tag === "sandbox")!.text).toBe("read-only");
-    expect(runInputRows(emptyInputs, "claude").some((r) => r.tag === "sandbox")).toBe(false);
+    expect(denied.find((r) => r.tag === "tools")?.text).toContain("Edit");
   });
 
   it("ruling 175: states the spending cap, honest that Codex has no budget option, and 'none' when unset", () => {

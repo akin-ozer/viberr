@@ -83,8 +83,6 @@ import {
 } from "./run-principal.server";
 import { runMarkerEnv } from "./run-processes.server";
 import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
-import { resolveCodexSandboxMode, type CodexSandboxInputs } from "./codex-runtime.server";
-import { cachedToolchain } from "~/server/ops/toolchain.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
 import { newId } from "~/shared/ids/new-id.server";
@@ -404,11 +402,12 @@ export interface StartRunInput {
   /** Ruling 180: the plugin directory carrying `skills`; removed when the run
    *  settles. See RunSpec.skillPlugin. */
   skillPlugin?: SkillPlugin;
-  /** The run's `execute-code-or-write-repo` grant is withheld — enforced on
-   *  BOTH backends (parity ruling 2026-08-31): Claude via the denylist, Codex
-   *  via the read-only sandbox (resolveCodexSandboxMode). Omit to let
-   *  `startRun` derive it from `disallowedTools` (see
-   *  `repoWriteWithheldFromDenylist`). */
+  /** The run's `execute-code-or-write-repo` grant is withheld. Claude's tool
+   *  denylist binds it; on Codex it is ADVISORY since ruling 185 removed the
+   *  OS sandbox — the prompt omits the delivery steps and the server-owned
+   *  delivery gate refuses them (`codexRepoWriteAdvisory` renders that
+   *  wherever the enforcement is shown). Omit to let `startRun` derive it from
+   *  `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is withheld — Codex enforces it by
    *  disabling its web search (P14-RT-06). Omit to let `startRun` derive it from
@@ -951,9 +950,8 @@ export async function startRun(
   if (input.skills && input.skills.length) spec.skills = input.skills;
   if (input.skillPlugin) spec.skillPlugin = input.skillPlugin;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
-  // it, and since ruling 101 the Codex read-only sandbox does too
-  // (resolveCodexSandboxMode; the evidence carve-out is the disclosed
-  // exception). Explicit caller value wins.
+  // it; on Codex it is advisory (ruling 185 removed the OS sandbox) and the
+  // delivery gate is the boundary. Explicit caller value wins.
   if (
     input.repoWriteWithheld ??
     repoWriteWithheldFromDenylist(input.disallowedTools)
@@ -994,13 +992,12 @@ export async function startRun(
   if (credential.ok) Object.assign(runEnv, runMarkerEnv(runId));
   if (Object.keys(runEnv).length) spec.env = runEnv;
 
-  // The two reasons no process may start, decided on the finished spec: the
-  // credential (ruling 127) and, for a Codex run the OS sandbox would
-  // confine, a host whose sandbox cannot start (ruling 182). Either one is
-  // the run's whole outcome — an honest `run·unavailable` error row.
-  const refusal: string | null = credential.ok
-    ? codexSandboxRefusal(spec)
-    : credential.message;
+  // The one reason no process may start, decided on the finished spec: the
+  // credential (ruling 127) — an honest `run·unavailable` error row. Ruling
+  // 182's sandbox refusal is gone with the sandbox itself (ruling 185): a
+  // Codex run is never OS-confined by Viberr, so there is no host condition
+  // left for it to refuse on.
+  const refusal: string | null = credential.ok ? null : credential.message;
 
   const details: RunStartedAudit = {
     threadId,
@@ -1220,65 +1217,6 @@ export function backendUnavailableMessage(
   return cause.kind === "refusal"
     ? principalRefusalMessage(cause.refusal, backend)
     : `${cause.detail} ${NO_PROCESS}`;
-}
-
-/**
- * Ruling 182 (pass 36, F36-1 / G36-4): the sentence a Codex run refused for a
- * sandbox that cannot start records — the probe's own words (bubblewrap's
- * `No permissions to create a new namespace` under Docker's default seccomp
- * profile) and the two remedies, in the same `run·unavailable` shape as a
- * credential refusal, so the error run, the blocked packet and the timeline
- * read it the way they read every other "no process was started".
- */
-export function codexSandboxUnavailableMessage(detail: string): string {
-  return backendUnavailableMessage("codex", {
-    kind: "detail",
-    detail:
-      `Codex sandbox unavailable on this host: ${detail.replace(/\.+$/, "")}. ` +
-      "Fix the deployment (see docs/operations/deployment.md, seccomp) or grant the run full access.",
-  });
-}
-
-/**
- * Ruling 184 (pass 36, F36-11): the limit a network-gated Codex run must be
- * TOLD about, or null when this host does not have it / this run is not
- * confined by it.
- *
- * The sandbox that runs `/bin/echo` fine can still deny child processes: with
- * the network off the CLI installs a seccomp filter that refuses EVERY socket
- * syscall, `AF_UNIX` included, and libuv's SYNCHRONOUS spawn needs a
- * socketpair — so `spawnSync`/`execSync` report `EPERM` even though the child
- * ran, and `npm ci` dies on its first lifecycle script. Live (HLC-18,
- * 2026-09-11): the Codex reviewer reported `request-changes` — "the required
- * `npm ci && npm run check` gate has no green result for this revision" —
- * against work that was correct, the same shape as F36-1. The owner's call
- * (Q36-12) is to DISCLOSE rather than refuse: reading, grepping and reviewing
- * all still work, and the false verdict is what the disclosure prevents.
- *
- * Only a run below `danger-full-access` is confined — a fully autonomous
- * deliverer with egress has no sandbox and no filter.
- */
-export function codexSandboxChildProcessLimit(spec: CodexSandboxInputs): string | null {
-  if (resolveCodexSandboxMode(spec) === "danger-full-access") return null;
-  const probe = cachedToolchain().codexSandbox;
-  if (!probe.ok) return null;
-  const child = probe.childProcesses;
-  return child && !child.ok ? child.detail : null;
-}
-
-/**
- * Whether THIS spec's Codex run would be confined by the OS sandbox on a host
- * whose sandbox cannot start — null when it may proceed. Only a run below
- * `danger-full-access` (the operator's `read-only`, every write-withheld run,
- * every supporting run's `workspace-write`) touches bubblewrap; a fully
- * autonomous deliverer with egress never does, which is why the F36-1
- * developers built fine while every reviewer failed at its first command.
- */
-function codexSandboxRefusal(spec: RunSpec): string | null {
-  if (spec.backend !== "codex") return null;
-  if (resolveCodexSandboxMode(spec) === "danger-full-access") return null;
-  const probe = cachedToolchain().codexSandbox;
-  return probe.ok ? null : codexSandboxUnavailableMessage(probe.detail);
 }
 
 // ------------------------------------------- continuity recovery (P13-D-2)
@@ -1521,13 +1459,12 @@ export interface ResumeRunInput {
    *  ask_human can fire. Without it a resumed Codex reviewer silently lost
    *  its envelope, a fresh-vs-resume parity break (F7). */
   outputSchema?: unknown;
-  /** C02-R3 (pass 32): re-apply the task's attachments drop on resume. It is
-   *  the Codex sandbox's ONLY extra writable root (and the evidence carve-out
-   *  in `resolveCodexSandboxMode` keys off it): a resumed evidence-granted
-   *  Codex run used to lose `additionalDirectories` — its persona still said
-   *  "copy files into attachments/" while the sandbox blocked the copy — and a
-   *  write-withheld one dropped to read-only, the F22-03 defect back on the
-   *  @mention path. Same fresh-vs-resume parity class as XS-1/F7. */
+  /** C02-R3 (pass 32): re-apply the task's attachments drop on resume, so a
+   *  resumed run's persona and its writable set still agree. It no longer
+   *  widens any sandbox (ruling 185 removed Codex's; Claude never had one) —
+   *  it is the path the persona names, and the prompt must not promise a drop
+   *  the run was not told about. Same fresh-vs-resume parity class as
+   *  XS-1/F7. */
   attachmentsWritableDir?: string;
 }
 

@@ -341,29 +341,6 @@ export function logBootIntegrity(db: DatabaseSync): void {
   const missingColumns = projectionMissingColumns(db);
   if (missingColumns.length > 0) fields.projectionMissingColumns = missingColumns;
   logger.info("boot integrity check", fields);
-  // Ruling 182: loud and separate, like the schema drift below. A host whose
-  // Codex sandbox cannot start refuses every sandboxed Codex run (reviewers,
-  // operators, every write-withheld run) with the remedy named; the operator
-  // deploying this image should read that here, not off the first refused run.
-  if (!fields.toolchain.codexSandbox.ok) {
-    logger.warn(
-      "codex sandbox unavailable on this host — sandboxed Codex runs will be refused; see docs/operations/deployment.md (seccomp)",
-      { detail: fields.toolchain.codexSandbox.detail },
-    );
-  }
-  // Ruling 184: the sandbox starts, but a command it runs cannot spawn a child
-  // through Node's synchronous API — so npm and most JS build/test tooling dies
-  // with EPERM inside every network-gated Codex run. The run is NOT refused
-  // (reading, grepping and reviewing all still work); it is DISCLOSED, here and
-  // in each run's contract, so a model never reports the environment as a
-  // verdict on the work (F36-11).
-  const childProcesses = fields.toolchain.codexSandbox.childProcesses;
-  if (childProcesses && !childProcesses.ok) {
-    logger.warn(
-      "codex sandbox denies child processes — network-gated Codex runs cannot run npm or any tool that spawns synchronously; the limit is disclosed in each run's contract; see docs/operations/deployment.md (seccomp)",
-      { detail: childProcesses.detail },
-    );
-  }
   // F21-1: loud and separate. Folded into the info line it would be one more
   // key on a line nobody greps; a task that silently stops projecting earns its
   // own WARN, carrying the remedy AND the remedy's cost.

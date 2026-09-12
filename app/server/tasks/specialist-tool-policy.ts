@@ -223,39 +223,34 @@ export function bashDenyReason(
 }
 
 /**
- * Pass 32 (owner ruling E32-3, VERIFIED 2026-09-02 against the pinned Codex
- * 0.146 sources): the `read-only` sandbox admits NO writable root at all —
- * `SandboxPolicy::ReadOnly` answers `get_writable_roots_with_cwd` with an
- * empty list, and `--add-dir` only widens `workspace-write` ("Additional
- * directories that should be writable alongside the primary workspace") — so
- * "read-only except attachments/" cannot be expressed and the ruling's stated
- * fallback applies: the evidence carve-out in `resolveCodexSandboxMode` stays,
- * and EVERY surface that renders the repo-write enforcement says so.
+ * Ruling 185 (owner, 2026-09-12, pass 36): Viberr no longer confines a Codex
+ * run with the CLI's OS sandbox, so on Codex a withheld repo-write family has
+ * no OS channel to bind it. It is ADVISORY there: the prompt omits every
+ * delivery step (`resolveDeliveryPermissions`), the run's own contract
+ * forbids them, and the server-owned delivery gate — the only thing that
+ * pushes a branch or opens a PR — refuses them whatever the agent does. On
+ * Claude the tool denylist still binds it outright.
  *
- * True exactly for the carve-out shape: the headline write family withheld AND
- * `attach-evidence-references` granted (absent counts as granted — it is not a
- * grant-required capability). Such a profile on Codex runs `workspace-write`
- * with the withholding advisory; on Claude the tool denylist binds regardless.
+ * This predicate is what every surface that RENDERS the repo-write
+ * enforcement asks, so a Codex row is never drawn as a hard block it is not.
+ * True for any Codex profile whose headline write family is withheld. (Before
+ * ruling 185 it was true only for the narrower E32-3 carve-out — write
+ * withheld AND evidence granted — because the sandbox bound the rest.)
  */
 export function codexRepoWriteAdvisory(
   grants: readonly CapabilityGrant[],
 ): boolean {
   // P13-AP-06 parity: a deployment with NO grants runs FULLY withheld
-  // (`deploymentGrants` → `withheldAgentGrants()`, evidence included), so it
-  // is read-only on Codex — not the carve-out. Mirror that here or the editor
-  // would tag a row "advisory" for a run that is in fact bound.
-  if (grants.length === 0) return false;
+  // (`deploymentGrants` → `withheldAgentGrants()`), which is still withheld —
+  // and still advisory on Codex, for the same reason.
   const modeById = specialistGrantModes(grants);
-  return (
-    isWithheld(modeById, "execute-code-or-write-repo") &&
-    !isWithheld(modeById, "attach-evidence-references")
-  );
+  return isWithheld(modeById, "execute-code-or-write-repo");
 }
 
-/** The one sentence every surface uses for the carve-out (see
+/** The one sentence every surface uses for the Codex posture (see
  *  {@link codexRepoWriteAdvisory}). */
 export const CODEX_REPO_WRITE_ADVISORY_NOTE =
-  "repo-write is withheld but evidence is granted, and Codex's sandbox cannot express read-only-except-attachments — so on Codex this run keeps workspace-write and the withholding is advisory; the server-owned delivery gate is the real boundary";
+  "repo-write is withheld, and since ruling 185 Viberr does not OS-confine a Codex run — so on Codex the withholding is advisory: the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
 
 export interface DeliveryPermissions {
   canBranch: boolean;

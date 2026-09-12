@@ -6,7 +6,6 @@ import { createTestDbContext } from "../../test-support/test-db";
 import {
   HERMETIC_TOOLCHAIN,
   primeHermeticToolchain,
-  primeToolchain,
 } from "../../test-support/toolchain";
 import { logger } from "./logging/logger.server";
 import type {
@@ -394,56 +393,17 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
     expect(integrityFields()).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
   });
 
-  it("ruling 182: WARNs, separately, when the Codex sandbox cannot start on this host", () => {
-    primeToolchain({
-      ...HERMETIC_TOOLCHAIN,
-      codexSandbox: {
-        ok: false,
-        detail: "bwrap: No permissions to create a new namespace",
-        childProcesses: null,
-      },
-    });
+  it("ruling 185: no sandbox WARN survives — there is no sandbox to be unavailable", () => {
+    // Canary: re-add either warn (the ruling-182 refusal or the ruling-184
+    // child-process limit) and this fails. Both existed only because Viberr
+    // asked the Codex CLI to confine a run; it no longer does, so a boot line
+    // about the sandbox would be a claim about nothing.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     try {
       logBootIntegrity(bootCtx.makeDb());
-      const line = warn.mock.calls.find(([msg]) => /codex sandbox unavailable/i.test(msg));
-      expect(line).toBeDefined();
-      expect(line![0]).toContain("docs/operations/deployment.md");
-      expect(line![1]).toMatchObject({ detail: "bwrap: No permissions to create a new namespace" });
-    } finally {
-      warn.mockRestore();
-      info.mockRestore();
-      primeHermeticToolchain();
-    }
-  });
-
-  it("ruling 184: WARNs when the sandbox starts but denies child processes — and does NOT claim the sandbox is unavailable", () => {
-    // Canary: drop the `childProcesses` warn from `logBootIntegrity` and the
-    // operator deploying this image learns about it from a reviewer's false
-    // verdict instead (F36-11, live HLC-18).
-    primeToolchain({
-      ...HERMETIC_TOOLCHAIN,
-      codexSandbox: {
-        ok: true,
-        detail: "codex sandbox ran /bin/echo under a workspace-write profile",
-        childProcesses: { ok: false, detail: "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox" },
-      },
-    });
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
-    try {
-      logBootIntegrity(bootCtx.makeDb());
-      const line = warn.mock.calls.find(([msg]) => /denies child processes/i.test(msg));
-      expect(line).toBeDefined();
-      expect(line![0]).toContain("npm");
-      expect(line![0]).toContain("disclosed in each run's contract");
-      expect(line![1]).toMatchObject({
-        detail: "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox",
-      });
-      // The run-refusing warning is a DIFFERENT condition and must not fire:
-      // the owner's call (Q36-12) is disclose, not refuse.
-      expect(warn.mock.calls.find(([msg]) => /codex sandbox unavailable/i.test(msg))).toBeUndefined();
+      expect(warn.mock.calls.find(([msg]) => /codex sandbox/i.test(msg))).toBeUndefined();
+      expect(warn.mock.calls.find(([msg]) => /child process/i.test(msg))).toBeUndefined();
     } finally {
       warn.mockRestore();
       info.mockRestore();

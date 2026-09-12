@@ -48,11 +48,11 @@ describe("healthSnapshot reports the toolchain (ruling 182)", () => {
     // The one memoized reading (`cachedToolchain`), never a second probe: the
     // suite primes it hermetic in setup-env, and that is what comes back.
     expect(snapshot.toolchain).toEqual(HERMETIC_TOOLCHAIN);
-    expect(snapshot.toolchain.codexSandbox).toEqual({
-      ok: true,
-      detail: expect.any(String),
-      // Ruling 184: the second question's answer rides the same field.
-      childProcesses: { ok: true, detail: expect.any(String) },
-    });
+    // Ruling 185: the reading is versions only — the sandbox verdict went with
+    // the sandbox. Canary: put `codexSandbox` back on `Toolchain` and this
+    // `toEqual` against the hermetic reading is the guard that notices.
+    expect(Object.keys(snapshot.toolchain)).toEqual([
+      "node", "npm", "git", "python3", "go", "codexCli", "claudeAgentSdk",
+    ]);
   });
 });

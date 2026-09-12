@@ -54,6 +54,15 @@ export type WorkspaceRefreshHead =
   /** A fetch-only refresh (supporting checkouts). */
   | "not_requested";
 
+/** Where a task branch stands against `origin/<branch>` (ruling 179). */
+export interface TaskBranchStanding {
+  name: string;
+  /** `unpushed`: origin has no such branch yet. `ahead`: origin's copy is an
+   *  ancestor of HEAD — the delivery pushes it. `in_sync`: the same commit.
+   *  `diverged`: both moved; `update_branch_from_base` and a person own it. */
+  standing: "unpushed" | "ahead" | "in_sync" | "diverged";
+}
+
 export type WorkspaceRefreshResult =
   | {
       status: "fast_forwarded";
@@ -61,7 +70,17 @@ export type WorkspaceRefreshResult =
       from: "unborn" | "behind" | "behind_task_branch";
       mirrorRefreshed: boolean;
     }
-  | { status: "fetched"; head: WorkspaceRefreshHead; mirrorRefreshed: boolean }
+  | {
+      status: "fetched";
+      head: WorkspaceRefreshHead;
+      mirrorRefreshed: boolean;
+      /** Ruling 179: where the TASK branch stands against origin's copy, when
+       *  the caller named the branch. Absent for every other head, and for a
+       *  caller that passed no `taskBranch` (the disclosure then stays
+       *  generic). Live (2026-09-12): the one sentence said "a diverged task
+       *  branch" for a branch that matched origin exactly. */
+      taskBranch?: TaskBranchStanding;
+    }
   | { status: "no_mirror" }
   | { status: "fetch_failed"; message: string };
 
@@ -200,18 +219,36 @@ export async function refreshWorkspaceFromMirror(
       if (taskBranch && symbolic === `refs/heads/${taskBranch}`) {
         const remote = `origin/${taskBranch}`;
         const hasRemote = await gitOk(input.dir, ["rev-parse", "--verify", "--quiet", `${remote}^{commit}`]);
-        if (hasRemote) {
-          const headSha = await git(input.dir, ["rev-parse", "HEAD"]);
-          const remoteSha = await git(input.dir, ["rev-parse", remote]);
-          const behind =
-            headSha !== remoteSha &&
-            (await gitOk(input.dir, ["merge-base", "--is-ancestor", "HEAD", remote]));
-          if (behind) {
-            await git(input.dir, ["merge", "--ff-only", "--quiet", remote]);
-            const head = await git(input.dir, ["rev-parse", "HEAD"]);
-            return { status: "fast_forwarded", head, from: "behind_task_branch", mirrorRefreshed };
-          }
+        if (!hasRemote) {
+          return {
+            status: "fetched",
+            head: "task_branch",
+            mirrorRefreshed,
+            taskBranch: { name: taskBranch, standing: "unpushed" },
+          };
         }
+        const headSha = await git(input.dir, ["rev-parse", "HEAD"]);
+        const remoteSha = await git(input.dir, ["rev-parse", remote]);
+        if (headSha === remoteSha) {
+          return {
+            status: "fetched",
+            head: "task_branch",
+            mirrorRefreshed,
+            taskBranch: { name: taskBranch, standing: "in_sync" },
+          };
+        }
+        if (await gitOk(input.dir, ["merge-base", "--is-ancestor", "HEAD", remote])) {
+          await git(input.dir, ["merge", "--ff-only", "--quiet", remote]);
+          const head = await git(input.dir, ["rev-parse", "HEAD"]);
+          return { status: "fast_forwarded", head, from: "behind_task_branch", mirrorRefreshed };
+        }
+        const ahead = await gitOk(input.dir, ["merge-base", "--is-ancestor", remote, "HEAD"]);
+        return {
+          status: "fetched",
+          head: "task_branch",
+          mirrorRefreshed,
+          taskBranch: { name: taskBranch, standing: ahead ? "ahead" : "diverged" },
+        };
       }
       return { status: "fetched", head: "task_branch", mirrorRefreshed };
     }
@@ -254,8 +291,27 @@ export function describeWorkspaceRefresh(
       switch (result.head) {
         case "current":
           return `origin/* refreshed; the checkout was already at \`origin/${defaultBranch}\`${stale(result)}`;
-        case "task_branch":
-          return `origin/* refreshed; HEAD is on the task branch and was left as it is (update_branch_from_base owns a diverged task branch)${stale(result)}`;
+        case "task_branch": {
+          // Ruling 179: the one sentence used to call EVERY task branch
+          // diverged — including one that matched origin's copy exactly (live
+          // 2026-09-12, HLC-18 after its rework landed). Say which it is.
+          const standing = result.taskBranch;
+          if (!standing) {
+            return `origin/* refreshed; HEAD is on the task branch and was left as it is (update_branch_from_base owns a diverged task branch)${stale(result)}`;
+          }
+          const remote = `\`origin/${standing.name}\``;
+          switch (standing.standing) {
+            case "unpushed":
+              return `origin/* refreshed; HEAD is on the task branch, which origin does not have yet${stale(result)}`;
+            case "in_sync":
+              return `origin/* refreshed; HEAD is on the task branch and matches ${remote} — nothing to move${stale(result)}`;
+            case "ahead":
+              return `origin/* refreshed; HEAD is on the task branch, ahead of ${remote} — the delivery is what pushes it${stale(result)}`;
+            case "diverged":
+              return `origin/* refreshed; HEAD is on the task branch and was left as it is: it and ${remote} have BOTH moved (update_branch_from_base and a person own a diverged branch)${stale(result)}`;
+          }
+          break;
+        }
         case "local_commits":
           return `origin/* refreshed; \`${defaultBranch}\` carries local commits origin does not and was left as it is${stale(result)}`;
         case "dirty":

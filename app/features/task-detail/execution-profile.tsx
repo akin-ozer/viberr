@@ -239,6 +239,7 @@ function PendingSchedules({
   agentNameOf,
   canCancel,
   busy,
+  moot = false,
   onCancel,
 }: {
   schedules: TaskSchedule[];
@@ -246,12 +247,25 @@ function PendingSchedules({
   agentNameOf: (profileId: string) => string | undefined;
   canCancel: boolean;
   busy: boolean;
+  /** Ruling 177: the task is CLOSED, so every entry here will be skipped when
+   *  it comes due (`skipped-done` / `skipped-archived`) — never run. Live
+   *  (2026-09-12, HLC-19) the controller read two pending entries on a shipped
+   *  task and could not tell from the page whether they would fire; the
+   *  control beside them already said "Task closed". */
+  moot?: boolean;
   onCancel: (scheduleId: string) => void;
 }) {
   const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
   if (schedules.length === 0) return null;
   return (
     <>
+      {moot && (
+        <span className="sub" data-sched-moot>
+          {schedules.length === 1 ? "This scheduled run" : "These scheduled runs"} will be
+          skipped, not run: the task is closed. Reopen it, or cancel{" "}
+          {schedules.length === 1 ? "it" : "them"}.
+        </span>
+      )}
       <ul className="sched-list">
         {schedules.map((s) => (
         <li key={s.id} className="sched-row">
@@ -512,6 +526,7 @@ function OperatorRunControl({
         agentNameOf={() => undefined}
         canCancel
         busy={scheduleBusy}
+        moot={disabled}
         onCancel={onCancelSchedule}
       />
     </span>
@@ -602,6 +617,7 @@ function AgentRunControl({
       agentNameOf={agentNameOf}
       canCancel
       busy={scheduleBusy}
+      moot={closed}
       onCancel={onCancelSchedule}
     />
   );

@@ -1045,12 +1045,33 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     expect(closed.container.querySelector(".agent-run")!.textContent).toContain(
       "Reviewer run · recheck",
     );
+    // Ruling 177 (U36-13, live 2026-09-12): visible is not enough — a pending
+    // entry on a CLOSED task will be SKIPPED when it comes due, never run, and
+    // the page said nothing while the control beside it said "Task closed".
+    // The controller read two such entries on shipped HLC-19 and could not
+    // tell whether they would fire. Canary: drop the `moot` prop at either
+    // call site.
+    expect(closed.container.querySelector("[data-sched-moot]")?.textContent).toContain(
+      "will be skipped, not run: the task is closed",
+    );
     cleanup();
     const bare = renderExec(execTask(), {
       deployedSpecialists: [],
       schedules: pending,
     });
     expect(bare.container.querySelector(".agent-run .sched-list")).not.toBeNull();
+    // …and an OPEN task says nothing of the kind.
+    expect(bare.container.querySelector("[data-sched-moot]")).toBeNull();
+  });
+
+  it("ruling 177 (U36-13): the OPERATOR control's pending entries say the same thing on a closed task", () => {
+    const pending = [schedule({ id: "sch-op", action: "run-operator", prompt: "check in" })];
+    const { container } = renderExec(execTask({ displayReadiness: "merged" }), {
+      schedules: pending,
+    });
+    const moot = container.querySelector(".op-run:not(.agent-run) [data-sched-moot]");
+    expect(moot?.textContent).toContain("This scheduled run will be");
+    expect(moot?.textContent).toContain("skipped, not run: the task is closed");
   });
 
   it("zero deployed agents: the cell says so and points at the Agents page", () => {

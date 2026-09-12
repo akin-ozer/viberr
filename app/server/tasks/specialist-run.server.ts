@@ -117,10 +117,7 @@ import {
   type RunReservation,
   type StartRunInput,
   repoWriteWithheldFromDenylist,
-  webSearchWithheldFromDenylist,
-  codexSandboxChildProcessLimit,
 } from "~/server/runtimes/run-service.server";
-import { describeCodexSandbox, type CodexSandboxInputs } from "~/server/runtimes/codex-runtime.server";
 import { publishRunLogAppended } from "~/server/runtimes/run-events.server";
 import { createLineRedactor } from "~/server/runtimes/run-sink.server";
 import {
@@ -540,8 +537,6 @@ export function resolvedResourceInputs(input: {
   deniedTools: string[];
   /** The collaboration tools actually mounted (null → none). */
   toolkit: { comment: boolean; ask: boolean; verdict: boolean } | null;
-  /** See `RunInputs.sandbox` — computed by {@link runSandboxDisclosure}. */
-  sandbox: RunInputs["sandbox"];
 }): ResolvedResourceInputs {
   const resolved: ResolvedResourceInputs = {
     cwd: input.cwd,
@@ -572,45 +567,9 @@ export function resolvedResourceInputs(input: {
           ]
         : [],
     },
-    sandbox: input.sandbox,
   };
   if (input.workspaceRefresh) resolved.workspaceRefresh = input.workspaceRefresh;
   return resolved;
-}
-
-/**
- * The run's OS-sandbox line for the inputs disclosure (pass 32, E32-3
- * fallback): on Codex the mode `resolveCodexSandboxMode` will pick from the
- * SAME derived flags `startRun` derives (withheld families from the denylist,
- * the evidence carve-out from the attachments dir), with the honest note when
- * the carve-out decided it. Null on Claude, where no OS sandbox exists and the
- * denylist itself is the disclosure.
- */
-export interface RunSandboxSpecInput {
-  delivers: boolean;
-  disallowedTools: readonly string[];
-  attachmentsWritableDir: string | null;
-}
-
-/** The derived flags the Codex sandbox decision reads for THIS run — one
- *  place, so the disclosure (`runSandboxDisclosure`) and the ruling-184 limit
- *  question can never disagree about which run is confined. */
-export function runSandboxSpec(input: RunSandboxSpecInput): CodexSandboxInputs {
-  const spec: CodexSandboxInputs = {
-    kind: input.delivers ? "primary" : "reviewer",
-    autonomous: true,
-  };
-  if (repoWriteWithheldFromDenylist(input.disallowedTools)) spec.repoWriteWithheld = true;
-  if (webSearchWithheldFromDenylist(input.disallowedTools)) spec.webSearchWithheld = true;
-  if (input.attachmentsWritableDir) spec.attachmentsWritableDir = input.attachmentsWritableDir;
-  return spec;
-}
-
-export function runSandboxDisclosure(
-  input: RunSandboxSpecInput & { backend: RealBackend },
-): RunInputs["sandbox"] {
-  if (input.backend !== "codex") return null;
-  return describeCodexSandbox(runSandboxSpec(input));
 }
 
 /** One-line console summary of `RunInputs` (the expandable detail is the rest). */
@@ -1426,7 +1385,8 @@ async function dispatchAgentRun(
   // push. One live delivering run per task: refuse a second until the first
   // finishes or is interrupted. Supporting agents run concurrently in their own
   // isolated checkouts (P8); their write posture is grants-derived on BOTH
-  // backends (ruling 101: Claude's denylist, Codex's read-only sandbox).
+  // backends (ruling 101: Claude's denylist binds it; on Codex it is advisory
+  // since ruling 185, with the delivery gate as the boundary).
   if (delivers) {
     const liveDelivering = listRunsForTaskRows(
       db,
@@ -1646,8 +1606,7 @@ async function dispatchAgentRun(
   // about to refuse. A refused run mounts nothing, so it resolves nothing.
   //
   // Ruling 176: the same denylist that withholds the file tools decides
-  // whether the admin's marked MCP write tools go too — one predicate, the one
-  // the Codex sandbox reads.
+  // whether the admin's marked MCP write tools go too — one predicate.
   const resolvedMcps: RunMcpMounts = realBackend
     ? await mcpServersFor(
         db,
@@ -1954,19 +1913,6 @@ async function dispatchAgentRun(
     promptInput.cloneFailure = promptFailure;
   }
   if (reviewSubject) promptInput.reviewSubject = reviewSubject;
-  // Ruling 184: the same derived flags the sandbox disclosure reads, asked of
-  // THIS host's probe — null on Claude, on a healthy host, and for a run that
-  // is not confined at all.
-  if (backend === "codex") {
-    const limit = codexSandboxChildProcessLimit(
-      runSandboxSpec({
-        delivers,
-        disallowedTools,
-        attachmentsWritableDir: collab.evidence && realBackend ? attachmentsDir : null,
-      }),
-    );
-    if (limit) promptInput.sandboxChildProcessLimit = limit;
-  }
   if (input.directive) promptInput.directive = input.directive;
   if (input.directiveFrom) promptInput.directiveFrom = input.directiveFrom;
   if (input.triggeredByName) promptInput.triggeredByName = input.triggeredByName;
@@ -2153,8 +2099,9 @@ async function dispatchAgentRun(
   if (useEnvelopeSchema) runInput.outputSchema = AGENT_OUTCOME_JSON_SCHEMA;
   if (runWorkdir) runInput.workdir = runWorkdir;
   if (realBackend) runInput.env = baseRunEnv;
-  // The sandbox widening that backs the drop section above (Codex
-  // workspace-write adds this as an additional writable directory).
+  // The attachments drop the "Posting files" section above names. It widens
+  // no sandbox any more (ruling 185 removed Codex's) — it is the path the
+  // persona promises, carried on the spec so a resumed run keeps it (C02-R3).
   if (collab.evidence && realBackend) {
     runInput.attachmentsWritableDir = attachmentsDir;
   }
@@ -2197,12 +2144,6 @@ async function dispatchAgentRun(
         unresolvedResources,
         deniedTools: disallowedTools,
         toolkit: toolkit ? collab : null,
-        sandbox: runSandboxDisclosure({
-          backend,
-          delivers,
-          disallowedTools,
-          attachmentsWritableDir: collab.evidence && realBackend ? attachmentsDir : null,
-        }),
       }),
       promptChars: prompt.length,
       anchor,
@@ -3044,13 +2985,6 @@ export interface AnalyzePromptInput {
    *  opened over stale remote junk was APPROVED by a reviewer that only ever
    *  read the local branch. */
   reviewSubject?: { headSha: string; prNumber: number | null };
-  /** Ruling 184 (F36-11): the sandbox limit this run must be told about — the
-   *  probe's words for a host whose sandboxed commands cannot spawn a child
-   *  through Node's synchronous API. Omitted when the host is fine or the run
-   *  is not confined (a fully autonomous deliverer with egress). Without it the
-   *  model reads `npm ci ... EPERM` as the work's problem and records a verdict
-   *  on it (live HLC-18). */
-  sandboxChildProcessLimit?: string;
   /** P19-G0: the canonical task-state block (`canonicalTaskAnchor`) — stage,
    *  readiness, validation, delivery refs, the canonical goal, any open decision
    *  packet and the newest timeline entries. Without it a FRESH run knows the
@@ -3129,7 +3063,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       // C02-R4 (pass 32): the LOCAL write posture follows the grants (ruling
       // 101(b): a write-GRANTED supporting agent may edit and commit in its own
       // isolated checkout; Claude's supporting denylist narrowed to the delivery
-      // commands, Codex's sandbox is workspace-write for it). The old sentence
+      // commands, and on Codex the prompt carries it — ruling 185). The old sentence
       // forbade "edit files / git commit" for EVERY supporting run — a prompt
       // stricter than the enforcement, the mirror image of XS-4 — so a granted
       // reviewer asked to try a fix refused work its tools allowed.
@@ -3172,28 +3106,6 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       }
       prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
     }
-  }
-  // Ruling 184 (F36-11): a run this host's sandbox will not let spawn a child
-  // process is TOLD so, in its own section, before it discovers it as an
-  // inexplicable `EPERM` halfway through `npm ci`. The owner's call (Q36-12)
-  // was to disclose rather than refuse: the run can still read the code. What
-  // it must not do is convert the environment's refusal into a verdict on the
-  // work — live (HLC-18) a Codex reviewer recorded `request-changes` because
-  // "the required `npm ci && npm run check` gate has no green result".
-  if (input.sandboxChildProcessLimit) {
-    prompt +=
-      `\n\n## This sandbox will not let you run build or test tooling\n` +
-      `- Viberr probed this host's sandbox at boot: ${input.sandboxChildProcessLimit}.\n` +
-      `- Practical effect: \`npm\`, \`npx\`, \`pnpm\`, \`yarn\` and most JS build/test ` +
-      `tooling fail with \`EPERM\` here even though the command itself is permitted — ` +
-      `and the failure can arrive AFTER the child already ran, so neither the error ` +
-      `nor a partial success tells you anything about the code.\n` +
-      `- This is the ENVIRONMENT, not the work. Do NOT record a verdict, request ` +
-      `changes, or report a failing gate because of it. If a check you were asked ` +
-      `to run cannot run, say exactly that — "the sandbox denied the child process ` +
-      `(EPERM), so the gate did not run in this run" — and judge what you CAN read.\n` +
-      `- Still available: reading and searching files, and anything your shell starts ` +
-      `directly (\`git\`, \`rg\`, \`grep\`, \`ls\`, \`cat\`).`;
   }
   // P19-G0: the canonical state goes AFTER the workspace/delivery contract and
   // BEFORE the directive — the contract is what the agent may do, the anchor is
@@ -3361,7 +3273,8 @@ function taskCloneDir(
  * resolve against. Every SUPPORTING (non-delivering) engagement gets its OWN
  * checkout at `<workspaceRoot>/support/<profileId>/<repo>`, so a supporting run's
  * writes — allowed there when its grants allow them (ruling 101(b)), bound by
- * Claude's denylist or Codex's read-only sandbox when they do not — can NEVER
+ * Claude's denylist when they do not, and by this isolation on either backend —
+ * can NEVER
  * reach the delivering tree or be swept into the delivered PR (the F-P8
  * governance hole). Keyed by engagement (profileId), so it is
  * reused across that engagement's runs and stays bounded; retention removes it
@@ -3403,8 +3316,8 @@ export interface ResumeConfinement {
   runInputs: ResolvedResourceInputs;
   /** C02-R3 (pass 32): the task's attachments drop, when the profile holds
    *  `attach-evidence-references` — re-armed on resume exactly as the fresh
-   *  run mounts it (the Codex sandbox's extra writable root; the evidence
-   *  carve-out keys off it). Absent when evidence is withheld. */
+   *  run mounts it — the path the "Posting files" section promises. Absent
+   *  when evidence is withheld. */
   attachmentsWritableDir?: string;
 }
 
@@ -3636,14 +3549,6 @@ export async function resolveResumeConfinement(
         unresolvedResources: resumeUnresolved,
         deniedTools: disallowedTools,
         toolkit: toolkit ? collab : null,
-        sandbox: input.backend
-          ? runSandboxDisclosure({
-              backend: input.backend,
-              delivers: input.delivers === true,
-              disallowedTools,
-              attachmentsWritableDir: attachmentsWritableDir ?? null,
-            })
-          : null,
       }),
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
@@ -3693,14 +3598,6 @@ export async function resolveResumeConfinement(
         ],
         deniedTools: withheld,
         toolkit: null,
-        sandbox: input.backend
-          ? runSandboxDisclosure({
-              backend: input.backend,
-              delivers: input.delivers === true,
-              disallowedTools: withheld,
-              attachmentsWritableDir: null,
-            })
-          : null,
       }),
     };
   }

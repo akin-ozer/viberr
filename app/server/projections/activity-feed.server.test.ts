@@ -709,4 +709,35 @@ describe("the audit column discloses the controller instrument (C5)", () => {
       `${arda.name} set the required reviewers to **Code Reviewer at Review**, **QA Bot at QA**.`,
     );
   });
+
+  it("two audit rows written in the SAME millisecond keep their insertion order", () => {
+    // Live (2026-09-12, twice in a full suite run): the ruling-178 test above
+    // flipped its two rows. `ORDER BY occurred_at DESC, id DESC` tie-breaks on
+    // a RANDOM id (`newId` is 72 random bits), so two events stamped in one
+    // millisecond render in either order — the feed says the wrong thing
+    // happened last. The tie-break is `rowid DESC` (insertion order), the
+    // shape `operator-actions` and `controller-conversations` already use.
+    //
+    // Canary: put `a.id DESC` back and this fails EVERY time (not 50% of the
+    // time): the two ids below sort against their insertion order on purpose.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const at = "2026-09-12T10:00:00.000Z";
+    const insert = (id: string, action: string, details: string) =>
+      store.db
+        .prepare(
+          `INSERT INTO audit_events
+             (id, occurred_at, actor_user_id, actor_label, action, project_slug, details_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(id, at, arda.id, arda.email, action, store.slug, details);
+    insert("evt_zzzzzzzzzzzz", "project.required_reviewers.updated", '{"count":0,"rules":[]}');
+    insert(
+      "evt_aaaaaaaaaaaa",
+      "project.policy.boundary_changed",
+      '{"from":"review","to":"done","boundary":"approval"}',
+    );
+    const rows = listAuditLog(store.db, store.slug, { limit: 2 });
+    expect(rows.map((r) => r.id)).toEqual(["evt_aaaaaaaaaaaa", "evt_zzzzzzzzzzzz"]);
+  });
 });

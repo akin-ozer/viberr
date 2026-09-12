@@ -27,11 +27,6 @@ export const HERMETIC_TOOLCHAIN: Toolchain = {
   go: null,
   codexCli: "0.0.0-test",
   claudeAgentSdk: "0.0.0-test",
-  codexSandbox: {
-    ok: true,
-    detail: "hermetic test reading: no probe ran",
-    childProcesses: { ok: true, detail: "hermetic test reading: no probe ran" },
-  },
 };
 
 /** Point `cachedToolchain()` at `reading`; `null` lets the real resolver run

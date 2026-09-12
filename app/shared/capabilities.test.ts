@@ -35,7 +35,10 @@ describe("capability catalog", () => {
     }
     const duplicated = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
     expect(duplicated).toEqual([]);
-    expect(seen.has("execute-code-or-write-repo")).toBe(true);
+    // Ruling 185 moved the headline write family OUT of this literal (Codex is
+    // no longer OS-confined, so it binds on Claude alone).
+    expect(seen.has("execute-code-or-write-repo")).toBe(false);
+    expect(seen.has("use-web-search-fetch")).toBe(true);
   });
 
   it("has no duplicate ids and every enforced id exists in the catalog", () => {
@@ -68,18 +71,22 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     }
   });
 
-  it("parity ruling: the headline repo-write cap binds on BOTH backends again", () => {
-    // History: P13-RT-02 labeled this BOTH (withheld Codex runs got the
-    // read-only sandbox), R22 removed the sandbox and made it claude-only, and
-    // the parity ruling (owner, 2026-08-31) restored the sandbox for withheld
-    // runs — resolveCodexSandboxMode returns "read-only" when
-    // spec.repoWriteWithheld is set (unless evidence-granted, the disclosed
-    // carve-out). Canary: move the cap back to CLAUDE_ONLY_ENFORCED and this
-    // reads "claude-only".
-    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("both");
+  it("ruling 185: the headline repo-write cap is claude-only again — Codex is not OS-confined", () => {
+    // History: P13-RT-02 labeled it BOTH (withheld Codex runs got the
+    // read-only sandbox), R22 removed the sandbox and made it claude-only, the
+    // 2026-08-31 parity ruling restored the sandbox for withheld runs, and
+    // ruling 185 removed the sandbox for good — bubblewrap could not start
+    // under Docker's default seccomp profile (F36-1) and the network-off
+    // filter broke every synchronous child process (F36-11). On Codex the
+    // prompt and the server-owned delivery gate carry it, which the matrix
+    // renders as "advisory on Codex". Canary: move the cap back to
+    // ENFORCED_CAPABILITY_IDS and this reads "both".
+    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("claude-only");
     expect(
       CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("execute-code-or-write-repo"),
-    ).toBe(false);
+    ).toBe(true);
+    // Web search still binds on both: it is the CLI's own tool switch.
+    expect(capabilityEnforcement("use-web-search-fetch")).toBe("both");
   });
 
   it("classifies structural ALWAYS_HUMAN caps as BOTH — never advisory-on-Codex", () => {
@@ -171,9 +178,10 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     }
     // Merge a pull request is ALWAYS_HUMAN → both backends, never claude-only.
     expect(capabilityEnforcement(capabilityByLabel("Merge a pull request")!.id)).toBe("both");
+    // Ruling 185: the headline write family joined the claude-only list.
     expect(
       capabilityEnforcement(capabilityByLabel("Execute code or write to the repo")!.id),
-    ).toBe("both");
+    ).toBe("claude-only");
   });
 });
 

@@ -175,12 +175,11 @@ export function CapabilityMatrixModal({
                     const capId = capabilityByLabel(label)?.id;
                     const claudeOnly =
                       capId && capabilityEnforcement(capId) === "claude-only";
-                    // Pass 32 (E32-3 fallback): the headline write family binds
-                    // on both backends EXCEPT for the evidence carve-out — a
-                    // Codex-first profile that withholds it while granting
-                    // evidence keeps workspace-write. Name those profiles on
-                    // the row so the matrix never reads "both" for a cell
-                    // where the withholding is advisory.
+                    // Ruling 185: with the Codex OS sandbox gone, a withheld
+                    // write family has no OS channel on Codex — the prompt and
+                    // the delivery gate carry it. Name the Codex-first
+                    // profiles on the row so the matrix never reads "both" for
+                    // a cell where the withholding is advisory.
                     const carveOut =
                       capId === "execute-code-or-write-repo"
                         ? profiles.filter(

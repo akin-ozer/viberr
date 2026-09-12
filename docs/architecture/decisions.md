@@ -3895,9 +3895,12 @@ by rewriting those paragraphs:*
     `tmp/arg0`, and rollouts went through the `sessions` link.
     (`prepareCodexRunHome` / `finishCodexRunHome` in `user-homes.server.ts`; the fork and
     settle in `codex-runtime.server.ts`; `RUNTIME_HOME_ENV_RE` in `runtime-registry.server.ts`.)
-182. **The Codex sandbox is probed once per process, reported with the host toolchain, and
-    a confined Codex run is refused with a named remedy while the probe fails (owner,
-    2026-09-11, pass 36; Q36-1 (a); deployment: seccomp).** Every Codex mode below
+182. **SUPERSEDED BY RULING 185 (2026-09-12) — only (b)'s version half survives, and the
+    sandbox halves (a), (c)'s sandbox field, (d) and the probe itself are GONE. Kept for
+    the history of why they existed.** ~~The Codex sandbox is probed once per process,
+    reported with the host toolchain, and a confined Codex run is refused with a named
+    remedy while the probe fails (owner, 2026-09-11, pass 36; Q36-1 (a); deployment:
+    seccomp).~~ Every Codex mode below
     `danger-full-access` confines the agent's commands with bubblewrap, which needs an
     unprivileged user namespace; Docker's builtin seccomp profile refuses
     `unshare(CLONE_NEWUSER)` to the non-root app user, so on the compose deployment every
@@ -3951,8 +3954,11 @@ by rewriting those paragraphs:*
     frontmatter schema (`skillFrontmatterSchema`) moves to the same home so there is ONE
     definition.
 
-184. **A sandbox that runs commands but denies child processes is disclosed to every run
-    it confines, never used to refuse one (owner Q36-12, 2026-09-12, pass 36; F36-11).**
+184. **SUPERSEDED BY RULING 185 the same day: the owner removed the sandbox itself rather
+    than keep disclosing its limits ("I don't like codex sandbox stuff let's remove that").
+    Kept because it is the measurement that produced 185.** ~~A sandbox that runs commands
+    but denies child processes is disclosed to every AGENT run it confines, never used to
+    refuse one (owner Q36-12, 2026-09-12, pass 36; F36-11).~~
     With the network off the Codex CLI installs a seccomp filter that refuses EVERY socket
     syscall, `AF_UNIX` included; libuv's SYNCHRONOUS spawn needs a socketpair, so
     `spawnSync`/`execSync` report `EPERM` inside the sandbox even though the child ran, and
@@ -3967,12 +3973,56 @@ by rewriting those paragraphs:*
     does NOT refuse the run — a confined run still reads, greps and reviews, and taking the
     backend away from every reviewer over an upstream limit costs more than the limit does.
     It is DISCLOSED three times: a separate boot WARN, `instance_health`/`/resources/health`
-    (the `childProcesses` field), and a section in the run's own contract for every run below
+    (the `childProcesses` field), and a section in the run's own contract for every AGENT run below
     `danger-full-access` (`codexSandboxChildProcessLimit` + the prompt's "This sandbox will
-    not let you run build or test tooling") that names the limit, orders the agent NOT to
+    not let you run build or test tooling"; the operator is not one — it holds no shell tool
+    at all and is told so) that names the limit, orders the agent NOT to
     turn it into a verdict or a failing-gate report, gives it the sentence to write instead,
     and says what still works. One derivation of "which run is confined" serves both the
     disclosure and the limit (`runSandboxSpec`).
+
+185. **Viberr does not confine a Codex run with the CLI's OS sandbox: every Codex run is
+    `danger-full-access`, and Viberr's own boundaries are the boundary (owner, 2026-09-12,
+    pass 36; Q36-14 (a); supersedes ruling 182, ruling 184 and the Codex half of the
+    2026-08-31 parity ruling; restores R22's position).** The owner's words: "I don't like
+    codex sandbox stuff let's remove that. So we don't get issues like this."
+    (a) *What it cost to keep.* Two whole classes of dead run, both upstream and neither
+    expressible as a Viberr rule. **F36-1**: every mode below `danger-full-access` confines
+    commands with bubblewrap, which needs an unprivileged user namespace Docker's builtin
+    seccomp profile refuses to a non-root user — so on the compose deployment EVERY
+    reviewer and supporting run failed at its first shell command, and the models reported
+    the environment as a verdict on correct work. The remedy was to run the whole container
+    `seccomp=unconfined`. **F36-11**: with the network off the CLI installs a seccomp filter
+    that refuses every socket syscall, `AF_UNIX` included; libuv's SYNCHRONOUS spawn needs a
+    socketpair, so `spawnSync`/`execSync` report `EPERM` after the child has already run and
+    `npm ci` dies on its first lifecycle script — a confined reviewer cannot run any
+    `npm`/`npx`/`pnpm` gate. Live (HLC-18, 2026-09-12) that deadlocked the review gate: the
+    reviewer reported "environment evidence blocker, not a code finding" and still recorded
+    `request-changes`, and the operator sent the deliverer back around.
+    (b) *The change.* `codex-runtime.server.ts` starts every thread `sandboxMode:
+    "danger-full-access"`. `resolveCodexSandboxMode`, `describeCodexSandbox`, the
+    `RunInputs.sandbox` row, the toolchain's `codexSandbox` probe (ruling 182(b)), its boot
+    WARNs, its `run·unavailable` refusal (182(d)) and ruling 184's child-process question
+    and contract section are all DELETED. `compose.yml` drops `security_opt:
+    seccomp=unconfined`, so the container keeps Docker's own profile (chromium keeps
+    `--no-sandbox`, which was always its own wall).
+    (c) *What that costs, rendered everywhere it matters.* On Codex a withheld
+    `execute-code-or-write-repo` is ADVISORY: it moves back into
+    `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`, `codexRepoWriteAdvisory` is now true for ANY
+    Codex profile whose write family is withheld (it was the narrower E32-3 carve-out), and
+    the agent editor, the capability matrix and the agent card all tag the row "advisory on
+    Codex" with the one shared sentence. The boundary that does bind is Viberr's: the
+    prompt omits every delivery step it may not take, the supporting run works in its own
+    isolated checkout (P8), agents hold no credential, delivery is server-owned and
+    verdicts are revision-bound. The operator's OS-level network is no longer forced off —
+    it never had a shell tool anyway.
+    (d) *What still binds on Codex.* Web SEARCH (`webSearchMode: "disabled"`) — the CLI's
+    own tool, not the OS sandbox — so `use-web-search-fetch` keeps its both-backend
+    enforcement; `disabled_tools` for MCP write tools (ruling 176); and every server-side
+    gate.
+    (`codex-runtime.server.ts`; `run-service.server.ts`; `toolchain.server.ts`;
+    `boot.server.ts`; `specialist-run.server.ts`; `specialist-tool-policy.ts`;
+    `app/shared/capabilities.ts`; `compose.yml`; `docs/operations/deployment.md`.)
 
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a

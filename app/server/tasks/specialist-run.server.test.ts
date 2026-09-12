@@ -1790,7 +1790,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(new Set(spec.disallowedTools)).toEqual(
       new Set(resolveUndeployedDisallowedTools()),
     );
-    // The Codex sandbox + the web-egress channel both derive from that denylist.
+    // The repo-write posture + the web-egress channel both derive from that denylist.
     expect(spec.repoWriteWithheld).toBe(true);
     expect(spec.webSearchWithheld).toBe(true);
   });
@@ -2277,7 +2277,8 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(granted).not.toContain("Make the changes in the workspace");
 
     // A write-WITHHELD supporting run keeps the full read-only contract — its
-    // tools deny the edit on Claude and the sandbox is read-only on Codex.
+    // tools deny the edit on Claude; on Codex the prompt and the delivery gate
+    // carry it (ruling 185).
     const withheld = buildAnalyzePrompt({
       ...base,
       delivers: false,
@@ -2324,34 +2325,21 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(delivering).not.toContain("PINNED to the delivered revision");
   });
 
-  it("ruling 184: a run whose sandbox denies child processes is told so, and told NOT to make it a verdict", () => {
-    // Canary: drop the `sandboxChildProcessLimit` section from
-    // `buildAnalyzePrompt` and the reviewer meets `npm ci ... EPERM` with no
-    // explanation — live (HLC-18) it concluded "the required `npm ci && npm
-    // run check` gate has no green result for this revision" and recorded
-    // request-changes on correct work.
-    const limit = "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox";
-    const prompt = buildAnalyzePrompt({
-      ...base,
-      delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
-      sandboxChildProcessLimit: limit,
-    });
-    expect(prompt).toContain("## This sandbox will not let you run build or test tooling");
-    expect(prompt).toContain(limit);
-    expect(prompt).toContain("This is the ENVIRONMENT, not the work.");
-    expect(prompt).toContain("Do NOT record a verdict, request changes, or report a failing gate");
-    expect(prompt).toContain("the sandbox denied the child process (EPERM), so the gate did not run");
-    // ...and it says what still works, so the run does not give up entirely.
-    expect(prompt).toContain("Still available: reading and searching files");
-    // A healthy host says nothing at all.
-    expect(
-      buildAnalyzePrompt({
+  it("ruling 185: no prompt claims an OS sandbox, on either backend", () => {
+    // Ruling 184's section existed to explain an `EPERM` the CLI's own sandbox
+    // produced; with the sandbox gone (owner Q36-14) the section would describe
+    // a confinement the run does not have. Canary: re-add it.
+    for (const delivers of [true, false]) {
+      const prompt = buildAnalyzePrompt({
         ...base,
-        delivers: false,
-        delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
-      }),
-    ).not.toContain("This sandbox will not let you");
+        delivers,
+        delivery: delivers
+          ? { canBranch: true, canCommitPush: true, canOpenPr: true }
+          : { canBranch: false, canCommitPush: false, canOpenPr: false },
+      });
+      expect(prompt).not.toContain("This sandbox will not let you");
+      expect(prompt).not.toContain("sandbox denied the child process");
+    }
   });
 
   it("R-B: a SUPPORTING run is told to answer what was asked, not always review", () => {
@@ -3590,8 +3578,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     // `dev` holds a verdict grant only: repo-write is absent (grant-required
     // ⇒ withheld) and evidence absent (catalog default ⇒ granted) — the seeded
     // Reviewer's shape, and on Codex the carve-out. A resume used to drop
-    // `attachmentsWritableDir` — the sandbox's only extra writable root —
-    // while the persona still said "copy files into attachments/". Canary:
+    // `attachmentsWritableDir` — the path the persona names — while still
+    // saying "copy files into attachments/". Canary:
     // delete the `attachmentsWritableDir` block in resolveResumeConfinement.
     await workspaceCheckout();
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
@@ -3636,12 +3624,9 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(confinement.systemPrompt ?? "").not.toContain(
       `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
     );
-    // …and the disclosure names the sandbox this confinement yields on Codex:
-    // withheld write family + evidence ⇒ the carve-out, honestly labeled.
-    expect(confinement.runInputs.sandbox).toEqual({
-      mode: "workspace-write",
-      note: expect.stringContaining("advisory"),
-    });
+    // Ruling 185: the resumed inputs carry no sandbox row at all — Viberr
+    // confines neither backend, and the denied-tool list is the disclosure.
+    expect(confinement.runInputs).not.toHaveProperty("sandbox");
   });
 
   it("C32-2 (pass 32): a SUPPORTING checkout's base refs are refreshed from the project mirror, not frozen at the delivering checkout's clone-time origin", async () => {
@@ -4380,13 +4365,11 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(JSON.parse(raw)).toMatchObject({ type: "run_inputs", source: "viberr" });
   });
 
-  it("pass 32 (E32-3 fallback): a Codex run discloses its sandbox, and the carve-out is labeled advisory", async () => {
-    // `dev` holds a verdict grant only: repo-write absent (grant-required ⇒
-    // withheld), evidence absent (catalog default ⇒ granted) — the seeded
-    // Reviewer's shape, which on Codex is the carve-out. The human reading the
-    // console sees the mode AND why it is not read-only. (An EMPTY grant list
-    // would run fully withheld — P13-AP-06 — and read back read-only.)
-    // Canary: return null from runSandboxDisclosure for codex.
+  it("ruling 185: a Codex run's inputs carry NO sandbox row — and the withheld grant still reaches the run", async () => {
+    // The row disclosed the Codex OS sandbox; there is none now. What must
+    // survive is the thing the row was really about: the run's denied tools,
+    // which the prompt and the delivery gate act on. Canary: re-add
+    // `sandbox: runSandboxDisclosure(...)` to the inputs and this fails.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     const verdictOnly = [{ capabilityId: "report-validation-verdict", mode: "direct" as const }];
@@ -4409,33 +4392,11 @@ describe("P19-G11 — the run records what it was given", () => {
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const runId = await assignAndRun();
-    const inputs = inputsLine(runId);
-    expect(inputs!.sandbox).toEqual({
-      mode: "workspace-write",
-      note: expect.stringContaining("advisory"),
-    });
-    // The Claude run has no OS sandbox — the denylist is the disclosure.
-    writeProject(store.dataRoot, {
-      ...fm,
-      agents: [
-        {
-          profileId: "dev",
-          capabilities: verdictOnly,
-          extras: [],
-          definition: {
-            kind: "specialist",
-            name: "dev",
-            role: "developer",
-            backends: ["claude"],
-            model: "sonnet",
-            resources: { skills: [], mcps: [], kb: [] },
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(inputsLine(await assignAndRun())!.sandbox).toBeNull();
+    const inputs = inputsLine(await assignAndRun());
+    expect(inputs).not.toHaveProperty("sandbox");
+    // The withheld write family is still on the run, as denied tools — the
+    // advisory posture every Codex surface now renders.
+    expect(inputs!.tools.denied.join(" ")).toContain("Edit");
   });
 
   it("names a knowledge-base grant whose content never reached the run", async () => {
@@ -5051,66 +5012,13 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
 });
 
 /**
- * Ruling 184 (pass 36, F36-11, owner Q36-12), the WIRING half: the limit is
- * only worth its probe if a dispatched run actually carries it.
- */
-describe("ruling 184: a dispatched Codex run carries the sandbox's child-process limit", () => {
-  const EPERM = "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox";
-  afterEach(async () => {
-    const { primeHermeticToolchain } = await import("../../../test-support/toolchain");
-    primeHermeticToolchain();
-  });
-
-  it("the section reaches the run's prompt, and a healthy host adds nothing", async () => {
-    // Canary: delete the `codexSandboxChildProcessLimit` block in
-    // `startAgentRun` and the probe answers a question no run ever hears —
-    // which is the live state that produced HLC-18's false verdict.
-    const { primeToolchain, HERMETIC_TOOLCHAIN, primeHermeticToolchain } = await import(
-      "../../../test-support/toolchain"
-    );
-    deployDevSpecialist(["codex"]);
-    const dispatch = async () => {
-      const run = await startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      const prompt = lastRunSpec()?.prompt ?? "";
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda),
-      );
-      return prompt;
-    };
-
-    primeHermeticToolchain();
-    expect(await dispatch()).not.toContain("This sandbox will not let you");
-
-    primeToolchain({
-      ...HERMETIC_TOOLCHAIN,
-      codexSandbox: {
-        ok: true,
-        detail: "codex sandbox ran /bin/echo under a workspace-write profile",
-        childProcesses: { ok: false, detail: EPERM },
-      },
-    });
-    const told = await dispatch();
-    expect(told).toContain("## This sandbox will not let you run build or test tooling");
-    expect(told).toContain(EPERM);
-    expect(told).toContain("This is the ENVIRONMENT, not the work.");
-  });
-});
-
-/**
  * Ruling 179 (pass 36), the CHECKOUT half. F15-15 pinned the reviewer's
  * *prompt* to the delivered revision; live on HLC-18 (2026-09-11, 19:46Z) the
- * revision under review was a commit Viberr did not author, it was never in
- * the reviewer's clone of the delivering tree, and the sandboxed Codex run
- * could not fetch it — so the reviewer judged the delivering tree's head while
- * its contract said it was reading another sha.
+ * revision under review was a commit Viberr did not author and it was never in
+ * the reviewer's clone of the delivering tree — so the reviewer judged the
+ * delivering tree's head while its contract said it was reading another sha.
+ * Viberr puts the checkout where the contract says, rather than asking the run
+ * to fetch it.
  */
 describe("ruling 179: a supporting checkout is detached at the revision under review", () => {
   const execFileAsync = promisify(execFile);

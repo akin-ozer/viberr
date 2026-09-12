@@ -228,7 +228,7 @@ export function applyRetention(
         `DELETE FROM notifications WHERE id IN (
            SELECT id FROM (
              SELECT id, ROW_NUMBER() OVER (
-               PARTITION BY user_id ORDER BY occurred_at DESC, id DESC
+               PARTITION BY user_id ORDER BY occurred_at DESC, rowid DESC
              ) AS rn
              FROM notifications
            ) WHERE rn > ?

@@ -182,90 +182,46 @@ into a shared `runtimes/codex-home` and set `VIBERR_CODEX_USE_CLI_AUTH=1`. All n
 variables, the shared homes, the `/host-codex` mount and the entrypoint that seeded it are
 deleted; the health example returned `{"claude":"real","codex":"unavailable"}`.)*
 
-## Codex sandbox (seccomp)
+## Codex runs are not OS-confined (ruling 185)
 
-`compose.yml` runs the app container with `security_opt: [seccomp=unconfined]`
-(ruling 182, pass 36). Why: the Codex CLI confines every run below full access — the
-operator's `read-only`, every write-withheld run, every supporting run's `workspace-write`
-(see [agents-and-runtime.md §2.5](../domain/agents-and-runtime.md#25-codex-adapter)) — with
-**bubblewrap**, and bubblewrap builds its sandbox from an *unprivileged user namespace*
-(`unshare(CLONE_NEWUSER)`). Docker's builtin seccomp profile refuses that syscall to a
-non-root process, and the app runs as the non-root `node` user, so the sandbox never
-starts: the first shell command a confined Codex run tries fails with
-`bwrap: No permissions to create a new namespace`. Chromium's own namespace sandbox hits
-the same wall, which is why the browser mount passes `--no-sandbox`; Codex has no such
-flag, so the profile is lifted for the container instead. It stays non-root, cap-dropped
-and init-reaped; `seccomp=unconfined` widens only the syscall filter, and the Codex
-sandbox is what then confines the agent's commands.
+Viberr starts **every** Codex run `danger-full-access`, and the container keeps Docker's
+own seccomp profile — `compose.yml` carries no `security_opt`. Do not add one back without
+a ruling.
 
-**What breaks without it.** Fully-autonomous delivering runs with egress
-(`danger-full-access`, no sandbox) build and ship as before, so the failure hides in the
-governance around them: every Codex *reviewer* and *supporting* run fails at its first
-command, and the model reports the environment failure as a verdict — live (F36-1),
-`request-changes` for "missing evidence" on correct deliveries, with nothing in the run row,
-the timeline or a packet naming the sandbox. Since ruling 182 the sandbox is **probed once
-at boot** (`codex sandbox` on a trivial command under a workspace-write-shaped profile,
-`app/server/ops/toolchain.server.ts`); the verdict is on the boot integrity line, on
-`/resources/health` and `instance_health` as `toolchain.codexSandbox`, and a confined Codex
-run is **refused before any process starts** with
-`Codex sandbox unavailable on this host: <the sandbox's own words>. Fix the deployment (see
-docs/operations/deployment.md, seccomp) or grant the run full access.` A failed probe is
-informational, never `degraded`: a host that runs no Codex is a correct host.
+The Codex CLI *can* confine a run (bubblewrap on Linux, seatbelt on macOS), and Viberr used
+to ask it to for every run below full access. Two upstream properties made that cost more
+than it bought, and pass 36 measured both:
 
-Check it on a running container:
+- **bubblewrap needs an unprivileged user namespace** (`unshare(CLONE_NEWUSER)`), which
+  Docker's builtin seccomp profile refuses to a non-root process — and the app runs as the
+  non-root `node` user. Every confined run therefore died at its first shell command with
+  `bwrap: No permissions to create a new namespace`, and the models reported the
+  environment as a verdict on correct work (F36-1). The remedy was to run the whole
+  container `seccomp=unconfined`, which is a bigger hole than the sandbox was a wall.
+- **with the network off the CLI installs a seccomp filter that refuses every socket
+  syscall, `AF_UNIX` included.** libuv's *synchronous* spawn needs a socketpair, so inside
+  such a sandbox `spawnSync` reports `EPERM` *after the child has already run*,
+  `execSync`/`execFileSync` throw it, `net` fails on both `AF_UNIX` and `AF_INET`, and only
+  async `spawn` is unaffected. `npm ci` dies on esbuild's postinstall, so no
+  `npm`/`npx`/`pnpm`/`yarn` gate can run at all (F36-11). Live, that deadlocked the review
+  gate: the reviewer called it "an environment evidence blocker, not a code finding" and
+  still requested changes, and the operator sent the deliverer back around.
 
-```bash
-curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain.codexSandbox
-# {"ok":true,"detail":"codex sandbox ran /bin/echo under a workspace-write profile",
-#  "childProcesses":{"ok":false,"detail":"Node's synchronous `spawnSync` reported `EPERM` …"}}
-docker compose exec -T app unshare -U true && echo "user namespaces: ok"
-```
+**What confines an agent now** is Viberr, not the OS: the run's contract omits every step
+it may not take, each supporting engagement works in its own isolated checkout, agents hold
+no credential, delivery is server-owned, and verdicts bind to a revision. The honest cost
+is that on Codex a withheld `execute-code-or-write-repo` is **advisory** — the agent editor,
+the capability matrix and the agent card all say so on the row. Web search still binds on
+both backends (it is the CLI's own tool, not the sandbox), and so do the MCP write-tool
+denials.
 
-### The sandbox runs commands but denies child processes (ruling 184)
-
-`codexSandbox.ok` can be **true** while `codexSandbox.childProcesses.ok` is **false**, and
-that second field is the one that decides whether an agent can run a build. With the
-network off — which is every confined run whose grants withhold egress — the Codex CLI
-installs a seccomp filter that refuses **every socket syscall, `AF_UNIX` included**.
-libuv's *synchronous* spawn needs a socketpair, so inside the sandbox:
-
-| call | what happens |
-|---|---|
-| `spawnSync` | the child RUNS and its output comes back, and Node still reports `error.code = EPERM` |
-| `execSync` / `execFileSync` | throw `EPERM`, after the child ran |
-| `spawn` (async) | fine |
-| `net` on `AF_UNIX` or `AF_INET` | `EPERM` |
-
-So `npm ci` dies on its first lifecycle script (esbuild's postinstall), and with it every
-`npm`/`npx`/`pnpm`/`yarn` gate. This is upstream: viberr cannot turn the filter off without
-turning the run's network on, which would widen a capability the grants withheld. The
-owner's call (Q36-12) is therefore to **disclose, not refuse** — unlike a sandbox that
-cannot start at all, a run confined by this one still reads, greps and reviews. The probe
-asks the second question in the same home and profile, a separate boot WARN carries it
-(`codex sandbox denies child processes …`), and **every run below `danger-full-access` gets
-a section in its own contract** naming the limit, forbidding it as a verdict or a
-failing-gate report, and giving the agent the sentence to write instead ("the sandbox denied
-the child process (EPERM), so the gate did not run in this run"). Without that section the
-model reads `npm ci … EPERM` as the work's problem: live (F36-11, HLC-18) a Codex reviewer
-recorded `request-changes` — "the required `npm ci && npm run check` gate has no green
-result for this revision" — against a correct delivery.
-
-Reproduce it directly against the image:
+The host toolchain is still reported — versions only:
 
 ```bash
-docker compose exec -T app node -e '
-const {spawnSync}=require("node:child_process");
-const r=spawnSync("/bin/echo",["x"],{encoding:"utf8"});
-console.log(JSON.stringify({status:r.status,err:r.error&&r.error.code,out:r.stdout.trim()}));'
-# outside the sandbox: {"status":0,"err":null,"out":"x"}
-# inside a network-off codex sandbox: {"status":0,"err":"EPERM","out":"x"}
+curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
+# {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
+#  "codexCli":"0.153.4","claudeAgentSdk":"0.3.261"}
 ```
-
-If `ok` is false with `bwrap: No permissions to create a new namespace`, the container is
-running without the `security_opt` (an older `compose.yml`, a platform that overrides it, or
-a host kernel with `kernel.unprivileged_userns_clone=0` / `user.max_user_namespaces=0`,
-which no seccomp setting can fix). Recreate the container after changing `compose.yml`
-(`docker compose up -d` — a restart alone keeps the old profile).
 
 ## First run
 

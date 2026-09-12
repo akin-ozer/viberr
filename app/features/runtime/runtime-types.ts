@@ -191,15 +191,6 @@ export interface RunInputs {
   };
   /** The turn's directive and who wrote it (null → no directive this turn). */
   directive: { from: string | null; chars: number } | null;
-  /** Codex only: the OS sandbox the run got, with the honest note when the
-   *  evidence carve-out decided it (pass 32, E32-3 — a write-withheld,
-   *  evidence-granted run keeps workspace-write because Codex cannot express
-   *  read-only-except-attachments). Null on Claude: no OS sandbox there, the
-   *  tool denylist in `tools.denied` is what binds. */
-  sandbox: {
-    mode: "read-only" | "workspace-write" | "danger-full-access";
-    note: string | null;
-  } | null;
   /** Ruling 175: the instance's spending cap per run when this run started
    *  (USD), null when none was set. Claude enforces it; Codex has no budget
    *  option, and the row says so. Absent on lines written before the ruling. */

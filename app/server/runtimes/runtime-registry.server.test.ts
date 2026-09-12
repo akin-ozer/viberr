@@ -373,7 +373,7 @@ describe("runtime-registry", () => {
  * These tests drive BOTH adapters — built by the production `createAdapters`
  * factory, with the provider SDKs faked so nothing bills — from ONE spec that
  * differs only in `backend`, and assert the EFFECT is the same even where the
- * mechanism is not (Claude tool denylist vs Codex sandbox mode). They replace
+ * mechanism is not (Claude tool denylist vs Codex's own switches). They replace
  * the two-legged live run in `planning/discovery-2026-08-06-pass19/runbooks/UC-16.md`,
  * which needs a real repo, real PRs and 20 minutes of provider time.
  */
@@ -516,7 +516,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     return spec;
   }
 
-  it("ruling 101: withheld repo-write binds on BOTH backends — Claude tool deny, Codex read-only sandbox", async () => {
+  it("ruling 185: withheld repo-write binds on Claude (tool deny) and is ADVISORY on Codex — which is not OS-confined", async () => {
     const withheld = await startOnBoth(
       specForGrants(withMode(DELIVERY_GRANTS, "execute-code-or-write-repo", "off")),
     );
@@ -529,12 +529,11 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     for (const tool of REPO_WRITE_TOOLS) {
       expect(granted.claude.disallowedTools ?? []).not.toContain(tool);
     }
-    // Codex (ruling 101, superseding R22's advisory posture): grants decide
-    // the sandbox. The withheld run is READ-ONLY — physically bound, matching
-    // Claude — while the granted autonomous deliverer with egress keeps
-    // danger-full-access. The scoped push/PR/merge commands remain
-    // server-owned either way.
-    expect(withheld.codex.thread.sandboxMode).toBe("read-only");
+    // Codex (ruling 185): no OS confinement at all, withheld or granted. The
+    // withholding still reaches the run — it shapes the prompt and the
+    // server-owned delivery gate — but it is advisory at the OS layer, and
+    // every surface that renders the enforcement says so.
+    expect(withheld.codex.thread.sandboxMode).toBe("danger-full-access");
     expect(granted.codex.thread.sandboxMode).toBe("danger-full-access");
 
     // Claude keeps Bash (the specialist must run its validation), so shell-level
@@ -553,12 +552,11 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     );
     expect(withheld.codex.thread.webSearchMode).toBe("disabled");
     expect(withheld.codex.thread.networkAccessEnabled).toBeUndefined();
-    // R22: an egress-withheld Codex run is workspace-write, NOT
-    // danger-full-access — full access would turn the network on and defeat the
-    // withheld egress. The workspace-write default (network off) is what gates
-    // it. So egress remains an ENFORCED capability on both backends (owner
-    // ruling: sandbox removed, egress kept).
-    expect(withheld.codex.thread.sandboxMode).toBe("workspace-write");
+    // Ruling 185: the run is not confined either way, so `webSearchMode` — the
+    // CLI's own tool switch, not the OS sandbox — is the whole of what binds
+    // egress on Codex. It still binds, so the capability stays ENFORCED on
+    // both backends.
+    expect(withheld.codex.thread.sandboxMode).toBe("danger-full-access");
 
     const granted = await startOnBoth(specForGrants(DELIVERY_GRANTS));
     expect(granted.claude.disallowedTools ?? []).not.toContain("WebFetch");
@@ -613,11 +611,13 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     ]);
   });
 
-  it("ruling 101: the operator is read-only on BOTH backends — Claude deny, Codex sandbox — with Codex egress gated", async () => {
+  it("ruling 185: the operator's write denial binds on Claude by kind; on Codex its contract is what withholds the shell", async () => {
     // R19-1 made this load-bearing: the operator stands beside a full clone of
-    // the project repo it must never write. Ruling 101 restored the Codex
-    // read-only sandbox for coordination machinery, so "never write" binds
-    // physically on both legs — and its Codex EGRESS stays gated (no network).
+    // the project repo it must never write. On Claude the adapter removes the
+    // repo-mutation built-ins by RUN KIND. On Codex there is no OS confinement
+    // any more (ruling 185) — the operator is told, in its own contract, that
+    // the file-writing and shell tools are withheld from it, and its plan
+    // executes server-side through gated tools.
     const operator = await startOnBoth({
       ...PARITY_TASK,
       kind: "operator",
@@ -633,20 +633,16 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     );
     // …while the tool-loading path it needs to reach its mcp__viberr__* tools stays.
     expect(operator.claude.disallowedTools).not.toContain("ToolSearch");
-    // Codex (ruling 101): read-only, egress fully gated — an operator that
-    // set autonomous:true must NOT reach danger-full-access (that turns the
-    // network on).
-    expect(operator.codex.thread.sandboxMode).toBe("read-only");
-    expect(operator.codex.thread.networkAccessEnabled).toBe(false);
-    // Autonomy does NOT buy the operator write access on either backend.
+    // Codex (ruling 185): not confined, and its OS network is no longer forced
+    // off — both were settings that read as enforcement for a run that holds
+    // no shell tool at all.
+    expect(operator.codex.thread.sandboxMode).toBe("danger-full-access");
+    expect(operator.codex.thread.networkAccessEnabled).toBeUndefined();
     expect(operator.claude.permissionMode).toBe("bypassPermissions");
-    expect(operator.codex.thread.sandboxMode).not.toBe("danger-full-access");
 
-    // B-2 (pass 24, owner ruling): the operator now honors `use-web-search-fetch`
-    // on BOTH backends, removing the old asymmetry. With the grant HELD, Claude
-    // keeps WebFetch/WebSearch AND the Codex operator gets web search — its
-    // OS-sandbox network stays off (`networkAccessEnabled: false`, above), which
-    // is a different egress. A withheld grant disables web search on both.
+    // B-2 (pass 24, owner ruling): the operator honors `use-web-search-fetch`
+    // on BOTH backends. With the grant HELD, Claude keeps WebFetch/WebSearch and
+    // the Codex operator gets web search; a withheld grant disables it on both.
     expect(operator.claude.disallowedTools ?? []).not.toContain("WebFetch");
     expect(operator.claude.disallowedTools ?? []).not.toContain("WebSearch");
     expect(operator.codex.thread.webSearchMode).not.toBe("disabled");

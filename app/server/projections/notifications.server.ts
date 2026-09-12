@@ -203,7 +203,7 @@ export function listNotifications(
        LEFT JOIN task_projections t
          ON t.project_slug = n.project_slug AND t.task_key = n.task_key
        WHERE n.user_id = ?
-       ORDER BY n.occurred_at DESC, n.id DESC
+       ORDER BY n.occurred_at DESC, n.rowid DESC
        LIMIT ?`,
     )
     .all(userId, options.limit ?? 100) as NotificationRow[];

@@ -369,54 +369,22 @@ connecting a different account there (ruling 165).
   it. Each stdio MCP server is declared with `env = { VIBERR_RUN_ID = <runId> }` too: the
   CLI starts a server with its own short default environment plus the declared `env`, and
   the marker is an id, not a secret, so argv is a fine place for it.
-- **Sandbox mode** (`resolveCodexSandboxMode`), in order: operator → `read-only`;
-  repo-write withheld → `workspace-write` if an attachments dir exists else `read-only`;
-  autonomous deliverer with egress → `danger-full-access`; otherwise `workspace-write`.
-  The second arm is ruling 101(c)'s carve-out and it is **not** a gap in the docs: the
-  pinned Codex 0.146 cannot express "read-only except `attachments/`" (`ReadOnly` admits
-  no writable root; `--add-dir` widens `workspace-write` only), so ruling 109 kept it and
-  made it visible instead — see §4.3. Re-checked on the 0.153.4 pin (2026-09-06):
-  `--add-dir` still reads "writable alongside the primary workspace" and the sandbox
-  modes are unchanged, so the carve-out stands. So `read-only` is a live seam for every
-  write-withheld Codex run without an attachments dir (ruling 101), not a mode R22
-  retired. Watch item (ruling 109): the CLI's `permissions.rs` per-path profile would
-  express read-only plus a writable attachments dir; revisit when the SDK surfaces it.
-  `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
-  off; withheld egress sets `webSearchMode: "disabled"`.
-- **The sandbox is probed once per process and a confined run is refused while it fails
-  (ruling 182).** Every mode but `danger-full-access` confines the agent's commands with
-  bubblewrap (Linux) or seatbelt (macOS), and bubblewrap needs an unprivileged user
-  namespace that Docker's default seccomp profile denies (F36-1: every reviewer failed at
-  its first command and reported the environment failure as a verdict). So
-  `app/server/ops/toolchain.server.ts` runs the CLI's own sandbox helper once — `codex
-  sandbox --permission-profile <probe> -C <work> -- /bin/echo <nonce>` in a throwaway home
-  under `runtimes/codex-sandbox-probe/` (not the OS temp dir, which the CLI refuses for
-  its helpers), with a profile that reads `/` and writes the workdir, network off — and
-  keeps the verdict beside the host's tool versions. `startRun` reads it after the
-  credential: a Codex spec whose `resolveCodexSandboxMode` is below `danger-full-access`
-  ends as a `run·unavailable` error run through `failRunUnavailable` — `Codex sandbox
-  unavailable on this host: <detail>. Fix the deployment (see
-  docs/operations/deployment.md, seccomp) or grant the run full access. No agent process
-  was started.` — with `failedUnavailable` on the audit row, exactly the credential
-  refusal's shape (§3.5 "unavailable"). A fully-autonomous deliverer with egress is never
-  asked; a Claude run never is. Boot resolves the reading first (its WARN names the
-  remedy), `healthSnapshot` appends it LAST as `toolchain`, and `instance_health` inherits
-  it. The unit suite never probes (`test-support/toolchain.ts`).
-- **The same probe asks whether a sandboxed command can start a CHILD process, and that
-  answer is disclosed rather than enforced (ruling 184).** A sandbox that runs `/bin/echo`
-  fine can still deny `spawnSync`: with the network off the CLI's seccomp filter refuses
-  every socket syscall, `AF_UNIX` included, and libuv's synchronous spawn needs a
-  socketpair — so `spawnSync`/`execSync` report `EPERM` after the child already ran, and
-  `npm ci` dies on its first lifecycle script (async `spawn` is unaffected). The probe runs
-  a second canary in the same home and profile (`CODEX_SANDBOX_CHILD_CANARY` through
-  `process.execPath`) and keeps `codexSandbox.childProcesses` — `null` when the sandbox
-  could not run a command at all, so the question was never asked. Nothing is refused:
-  `codexSandboxChildProcessLimit(runSandboxSpec(...))` returns the probe's sentence for
-  every run below `danger-full-access`, and `buildAnalyzePrompt` renders it as "This sandbox
-  will not let you run build or test tooling" — the limit, an order not to turn it into a
-  verdict or a failing-gate report, the sentence to write instead, and what still works.
-  Live (F36-11, HLC-18) the missing section cost a correct delivery a `request-changes` for
-  "the required `npm ci && npm run check` gate has no green result for this revision".
+- **Sandbox mode: `danger-full-access`, always (ruling 185).** Viberr does not ask the CLI
+  to confine a run. `resolveCodexSandboxMode`, `describeCodexSandbox`, the boot sandbox
+  probe (ruling 182) and its `run·unavailable` refusal, and ruling 184's child-process
+  question are all gone. The two upstream properties that decided it: bubblewrap needs an
+  unprivileged user namespace Docker's default seccomp profile denies, so every confined
+  run died at its first command (F36-1) unless the whole container ran
+  `seccomp=unconfined`; and with the network off the CLI installs a seccomp filter that
+  refuses every socket syscall (`AF_UNIX` included), so libuv's synchronous spawn reports
+  `EPERM` after the child has run and no `npm` gate can complete (F36-11). What confines an
+  agent is Viberr: the contract, the isolated per-engagement checkout, no credential in the
+  run, server-owned delivery, revision-bound verdicts. The honest cost: a withheld
+  `execute-code-or-write-repo` is ADVISORY on Codex (it is back in
+  `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`, and `codexRepoWriteAdvisory` tags it wherever the
+  enforcement is rendered), and the operator's OS network is no longer forced off — it holds
+  no shell tool anyway. `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and withheld
+  egress still sets `webSearchMode: "disabled"` (the CLI's own tool, not the sandbox).
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
 - Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`
