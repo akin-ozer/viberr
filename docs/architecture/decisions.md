@@ -3951,6 +3951,29 @@ by rewriting those paragraphs:*
     frontmatter schema (`skillFrontmatterSchema`) moves to the same home so there is ONE
     definition.
 
+184. **A sandbox that runs commands but denies child processes is disclosed to every run
+    it confines, never used to refuse one (owner Q36-12, 2026-09-12, pass 36; F36-11).**
+    With the network off the Codex CLI installs a seccomp filter that refuses EVERY socket
+    syscall, `AF_UNIX` included; libuv's SYNCHRONOUS spawn needs a socketpair, so
+    `spawnSync`/`execSync` report `EPERM` inside the sandbox even though the child ran, and
+    `npm ci` dies on its first lifecycle script. Async `spawn` is unaffected, which is why
+    the host looks healthy from the outside. Live (HLC-18, 2026-09-11): the Codex reviewer
+    recorded `request-changes` — "the required `npm ci && npm run check` gate has no green
+    result for this revision" — against correct work, F36-1's shape on a host whose sandbox
+    starts fine. So ruling 182's probe asks a SECOND question in the same throwaway home and
+    network-off profile (`CODEX_SANDBOX_CHILD_CANARY`, a `spawnSync` canary run through
+    `process.execPath`): `codexSandbox.childProcesses` is `{ok, detail}`, or `null` when the
+    sandbox could not run a command at all and the question was never asked. A false answer
+    does NOT refuse the run — a confined run still reads, greps and reviews, and taking the
+    backend away from every reviewer over an upstream limit costs more than the limit does.
+    It is DISCLOSED three times: a separate boot WARN, `instance_health`/`/resources/health`
+    (the `childProcesses` field), and a section in the run's own contract for every run below
+    `danger-full-access` (`codexSandboxChildProcessLimit` + the prompt's "This sandbox will
+    not let you run build or test tooling") that names the limit, orders the agent NOT to
+    turn it into a verdict or a failing-gate report, gives it the sentence to write instead,
+    and says what still works. One derivation of "which run is confined" serves both the
+    disclosure and the limit (`runSandboxSpec`).
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

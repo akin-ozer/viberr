@@ -78,6 +78,7 @@ import {
   buildSpecialistPersona,
   githubReadForRun,
   isDispatchHeld,
+  pinSupportCheckout,
   resolveResumeConfinement,
   type DispatchHeldError,
 } from "./specialist-run.server";
@@ -2321,6 +2322,36 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       reviewSubject: { headSha: head, prNumber: 114 },
     });
     expect(delivering).not.toContain("PINNED to the delivered revision");
+  });
+
+  it("ruling 184: a run whose sandbox denies child processes is told so, and told NOT to make it a verdict", () => {
+    // Canary: drop the `sandboxChildProcessLimit` section from
+    // `buildAnalyzePrompt` and the reviewer meets `npm ci ... EPERM` with no
+    // explanation — live (HLC-18) it concluded "the required `npm ci && npm
+    // run check` gate has no green result for this revision" and recorded
+    // request-changes on correct work.
+    const limit = "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox";
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      sandboxChildProcessLimit: limit,
+    });
+    expect(prompt).toContain("## This sandbox will not let you run build or test tooling");
+    expect(prompt).toContain(limit);
+    expect(prompt).toContain("This is the ENVIRONMENT, not the work.");
+    expect(prompt).toContain("Do NOT record a verdict, request changes, or report a failing gate");
+    expect(prompt).toContain("the sandbox denied the child process (EPERM), so the gate did not run");
+    // ...and it says what still works, so the run does not give up entirely.
+    expect(prompt).toContain("Still available: reading and searching files");
+    // A healthy host says nothing at all.
+    expect(
+      buildAnalyzePrompt({
+        ...base,
+        delivers: false,
+        delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      }),
+    ).not.toContain("This sandbox will not let you");
   });
 
   it("R-B: a SUPPORTING run is told to answer what was asked, not always review", () => {
@@ -5016,5 +5047,139 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     expect(pending).toHaveLength(1);
     expect(pending[0]!.prompt).toBe("drop the migration and fix the flake first");
     expect(file.parsed.timeline.filter((e) => e.title === "Dispatch held")).toHaveLength(2);
+  });
+});
+
+/**
+ * Ruling 184 (pass 36, F36-11, owner Q36-12), the WIRING half: the limit is
+ * only worth its probe if a dispatched run actually carries it.
+ */
+describe("ruling 184: a dispatched Codex run carries the sandbox's child-process limit", () => {
+  const EPERM = "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox";
+  afterEach(async () => {
+    const { primeHermeticToolchain } = await import("../../../test-support/toolchain");
+    primeHermeticToolchain();
+  });
+
+  it("the section reaches the run's prompt, and a healthy host adds nothing", async () => {
+    // Canary: delete the `codexSandboxChildProcessLimit` block in
+    // `startAgentRun` and the probe answers a question no run ever hears —
+    // which is the live state that produced HLC-18's false verdict.
+    const { primeToolchain, HERMETIC_TOOLCHAIN, primeHermeticToolchain } = await import(
+      "../../../test-support/toolchain"
+    );
+    deployDevSpecialist(["codex"]);
+    const dispatch = async () => {
+      const run = await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const prompt = lastRunSpec()?.prompt ?? "";
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actor(store.users.arda),
+      );
+      return prompt;
+    };
+
+    primeHermeticToolchain();
+    expect(await dispatch()).not.toContain("This sandbox will not let you");
+
+    primeToolchain({
+      ...HERMETIC_TOOLCHAIN,
+      codexSandbox: {
+        ok: true,
+        detail: "codex sandbox ran /bin/echo under a workspace-write profile",
+        childProcesses: { ok: false, detail: EPERM },
+      },
+    });
+    const told = await dispatch();
+    expect(told).toContain("## This sandbox will not let you run build or test tooling");
+    expect(told).toContain(EPERM);
+    expect(told).toContain("This is the ENVIRONMENT, not the work.");
+  });
+});
+
+/**
+ * Ruling 179 (pass 36), the CHECKOUT half. F15-15 pinned the reviewer's
+ * *prompt* to the delivered revision; live on HLC-18 (2026-09-11, 19:46Z) the
+ * revision under review was a commit Viberr did not author, it was never in
+ * the reviewer's clone of the delivering tree, and the sandboxed Codex run
+ * could not fetch it — so the reviewer judged the delivering tree's head while
+ * its contract said it was reading another sha.
+ */
+describe("ruling 179: a supporting checkout is detached at the revision under review", () => {
+  const execFileAsync = promisify(execFile);
+  let dir: string;
+  let first: string;
+  let second: string;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(path.join(tmpdir(), "viberr-pin-"));
+    await execFileAsync("git", ["init", "-q", "-b", "main", dir]);
+    await execFileAsync("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
+    await execFileAsync("git", ["-C", dir, "config", "user.name", "T"]);
+    writeFileSync(path.join(dir, "A.md"), "delivered\n");
+    await execFileAsync("git", ["-C", dir, "add", "-A"]);
+    await execFileAsync("git", ["-C", dir, "commit", "-qm", "delivered"]);
+    first = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+    writeFileSync(path.join(dir, "B.md"), "someone else's commit\n");
+    await execFileAsync("git", ["-C", dir, "add", "-A"]);
+    await execFileAsync("git", ["-C", dir, "commit", "-qm", "observer"]);
+    second = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+  });
+
+  const head = async () =>
+    (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+
+  it("detaches at the revision and says the tree moved; a matching HEAD is left alone; no revision is a no-op", async () => {
+    // Canary: make `pinSupportCheckout` return its sentence without running
+    // `checkout --detach` and the first HEAD assertion fails — which is the
+    // live state: the reviewer read the delivering tree while its contract
+    // named another sha.
+    const moved = await pinSupportCheckout(dir, first);
+    expect(await head()).toBe(first);
+    expect(moved).toContain(`detached at the revision under review \`${first.slice(0, 7)}\``);
+    expect(moved).toContain(`the delivering tree stood at \`${second.slice(0, 7)}\``);
+    // Detached, not on a branch: a supporting run never delivers.
+    await expect(
+      execFileAsync("git", ["-C", dir, "symbolic-ref", "-q", "HEAD"]),
+    ).rejects.toBeTruthy();
+    expect(existsSync(path.join(dir, "B.md"))).toBe(false);
+
+    const already = await pinSupportCheckout(dir, first);
+    expect(already).toBe(`checked out at the revision under review \`${first.slice(0, 7)}\``);
+    expect(await head()).toBe(first);
+
+    // A delivering checkout passes no revision: nothing is pinned, nothing said.
+    expect(await pinSupportCheckout(dir, null)).toBeNull();
+    expect(await head()).toBe(first);
+  });
+
+  it("a revision the clone does not carry is DISCLOSED, never thrown, and HEAD is left as it stands", async () => {
+    // Canary: drop the `cat-file -e` probe and the call throws instead — a
+    // reviewer that cannot be pinned must still run and say so.
+    const missing = "b".repeat(40);
+    const said = await pinSupportCheckout(dir, missing);
+    expect(said).toContain(`the revision under review \`${missing.slice(0, 7)}\` is not in this checkout`);
+    expect(said).toContain("HEAD was left as it is");
+    expect(await head()).toBe(second);
+  });
+
+  it("the supporting dispatch passes the task's ACTIVE work revision, and the delivering one passes none", () => {
+    // Canary: delete the `pinRevision` argument at the dispatch call site and
+    // the helper goes back to having no production caller — the state this
+    // pass found live.
+    const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
+    expect(source).toContain("pinRevision: support");
+    expect(source).toContain("activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha");
+    expect(source).toContain("await pinSupportCheckout(dir, input.pinRevision ?? null)");
+    // ...and the disclosure rides the same `refreshed` field the run contract
+    // already renders ("Before this run Viberr ...").
+    expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");
   });
 });

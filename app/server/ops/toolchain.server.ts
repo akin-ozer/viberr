@@ -42,6 +42,24 @@ import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 export type CodexSandboxProbe = {
   ok: boolean;
   detail: string;
+  /**
+   * Ruling 184 (pass 36, F36-11): whether a sandboxed command can start a
+   * CHILD process through Node's SYNCHRONOUS `child_process` API. Null when
+   * the sandbox could not run a command at all, so the question was never
+   * asked. The sandbox that runs `/bin/echo` fine can still deny this: with
+   * the network off the CLI installs a seccomp filter that refuses EVERY
+   * socket syscall, `AF_UNIX` included, and libuv's synchronous spawn needs a
+   * socketpair — so `spawnSync`/`execSync` report `EPERM` even though the
+   * child ran, and `npm ci` dies on the first lifecycle script.
+   */
+  childProcesses: CodexSandboxChildProbe | null;
+};
+
+/** The second sandbox question's answer (ruling 184). */
+export type CodexSandboxChildProbe = {
+  ok: boolean;
+  /** Node's own errno when it failed; a sentence about what ran when it did. */
+  detail: string;
 };
 
 /** A type alias, not an interface, for the same reason as `BuildInfo`. */
@@ -232,6 +250,64 @@ export function codexSandboxProbeConfig(workDir: string): string {
 }
 
 /**
+ * The canary the child-process probe runs INSIDE the sandbox: spawn
+ * `/bin/echo` through Node's synchronous API and print what Node made of it.
+ * `node -e` runs CommonJS, so `require` is available. One line, no quotes that
+ * a shell could eat — it is passed as argv, never through a shell.
+ */
+export const CODEX_SANDBOX_CHILD_CANARY =
+  'const r=require("node:child_process").spawnSync("/bin/echo",["viberr"],{encoding:"utf8"});' +
+  'process.stdout.write(r.error?"child:"+(r.error.code||"failed"):' +
+  'r.status===0?"child:ok":"child:exit "+r.status);';
+
+/**
+ * Ruling 184: ask the sandbox the SECOND question — can a command it runs
+ * start a child process the way every JS build and test tool does? The echo
+ * canary above proves exec works; this one proves `spawnSync` does. Run in the
+ * SAME throwaway home and profile (network off, which is what installs the
+ * seccomp filter that denies it).
+ */
+function probeCodexSandboxChildProcesses(
+  binary: string,
+  home: string,
+  work: string,
+  run: CommandRunner,
+): CodexSandboxChildProbe {
+  const outcome = run(
+    binary,
+    [
+      "sandbox",
+      "--permission-profile",
+      CODEX_SANDBOX_PROBE_PROFILE,
+      "-C",
+      work,
+      "--",
+      process.execPath,
+      "-e",
+      CODEX_SANDBOX_CHILD_CANARY,
+    ],
+    { timeoutMs: PROBE_TIMEOUT_MS, env: { ...probeBaseEnv(), CODEX_HOME: home, CODEX_SQLITE_HOME: home } },
+  );
+  if (!outcome.ok) return { ok: false, detail: outcome.detail };
+  const answer = outcome.stdout.trim().split("\n").at(-1)?.trim() ?? "";
+  if (answer === "child:ok") {
+    return { ok: true, detail: "a sandboxed command started a child process through Node's synchronous API" };
+  }
+  if (answer.startsWith("child:")) {
+    const code = answer.slice("child:".length).trim();
+    return {
+      ok: false,
+      detail:
+        `Node's synchronous \`spawnSync\` reported \`${code}\` inside the sandbox` +
+        (code === "EPERM"
+          ? " — the network-off seccomp filter denies every socket syscall, AF_UNIX included, and libuv's synchronous spawn needs a socketpair"
+          : ""),
+    };
+  }
+  return { ok: false, detail: "the sandboxed child-process canary printed nothing usable" };
+}
+
+/**
  * Run `/bin/echo <nonce>` under the CLI's sandbox in a throwaway home and
  * report whether the nonce came back. Everything the probe creates lives under
  * `<dataRoot>/runtimes/codex-sandbox-probe/` and is removed afterwards; the
@@ -241,7 +317,11 @@ export function probeCodexSandbox(deps: CodexSandboxProbeDeps = {}): CodexSandbo
   const binary =
     deps.codexBinary === undefined ? (backendBinaryIfPresent("codex") ?? null) : deps.codexBinary;
   if (!binary) {
-    return { ok: false, detail: "the @openai/codex package is not installed in this deployment" };
+    return {
+      ok: false,
+      detail: "the @openai/codex package is not installed in this deployment",
+      childProcesses: null,
+    };
   }
   const root = path.join(getDataRoot(deps.dataRoot), "runtimes", CODEX_SANDBOX_PROBE_DIR);
   const home = path.join(root, "home");
@@ -258,17 +338,27 @@ export function probeCodexSandbox(deps: CodexSandboxProbeDeps = {}): CodexSandbo
       ["sandbox", "--permission-profile", CODEX_SANDBOX_PROBE_PROFILE, "-C", work, "--", "/bin/echo", nonce],
       { timeoutMs: PROBE_TIMEOUT_MS, env: { ...probeBaseEnv(), CODEX_HOME: home, CODEX_SQLITE_HOME: home } },
     );
-    if (!outcome.ok) return { ok: false, detail: outcome.detail };
+    if (!outcome.ok) return { ok: false, detail: outcome.detail, childProcesses: null };
     if (outcome.stdout.trim() !== nonce) {
       return {
         ok: false,
         detail: "codex sandbox exited 0 but the sandboxed command's output did not come back",
+        childProcesses: null,
       };
     }
-    return { ok: true, detail: "codex sandbox ran /bin/echo under a workspace-write profile" };
+    return {
+      ok: true,
+      detail: "codex sandbox ran /bin/echo under a workspace-write profile",
+      // Ruling 184: the second question, asked only once exec itself works.
+      childProcesses: probeCodexSandboxChildProcesses(binary, home, work, run),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, detail: redactGitOutput(message) || "the sandbox probe could not be set up" };
+    return {
+      ok: false,
+      detail: redactGitOutput(message) || "the sandbox probe could not be set up",
+      childProcesses: null,
+    };
   } finally {
     try {
       rmSync(root, { recursive: true, force: true });

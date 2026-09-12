@@ -83,7 +83,7 @@ import {
 } from "./run-principal.server";
 import { runMarkerEnv } from "./run-processes.server";
 import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
-import { resolveCodexSandboxMode } from "./codex-runtime.server";
+import { resolveCodexSandboxMode, type CodexSandboxInputs } from "./codex-runtime.server";
 import { cachedToolchain } from "~/server/ops/toolchain.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
@@ -1237,6 +1237,33 @@ export function codexSandboxUnavailableMessage(detail: string): string {
       `Codex sandbox unavailable on this host: ${detail.replace(/\.+$/, "")}. ` +
       "Fix the deployment (see docs/operations/deployment.md, seccomp) or grant the run full access.",
   });
+}
+
+/**
+ * Ruling 184 (pass 36, F36-11): the limit a network-gated Codex run must be
+ * TOLD about, or null when this host does not have it / this run is not
+ * confined by it.
+ *
+ * The sandbox that runs `/bin/echo` fine can still deny child processes: with
+ * the network off the CLI installs a seccomp filter that refuses EVERY socket
+ * syscall, `AF_UNIX` included, and libuv's SYNCHRONOUS spawn needs a
+ * socketpair — so `spawnSync`/`execSync` report `EPERM` even though the child
+ * ran, and `npm ci` dies on its first lifecycle script. Live (HLC-18,
+ * 2026-09-11): the Codex reviewer reported `request-changes` — "the required
+ * `npm ci && npm run check` gate has no green result for this revision" —
+ * against work that was correct, the same shape as F36-1. The owner's call
+ * (Q36-12) is to DISCLOSE rather than refuse: reading, grepping and reviewing
+ * all still work, and the false verdict is what the disclosure prevents.
+ *
+ * Only a run below `danger-full-access` is confined — a fully autonomous
+ * deliverer with egress has no sandbox and no filter.
+ */
+export function codexSandboxChildProcessLimit(spec: CodexSandboxInputs): string | null {
+  if (resolveCodexSandboxMode(spec) === "danger-full-access") return null;
+  const probe = cachedToolchain().codexSandbox;
+  if (!probe.ok) return null;
+  const child = probe.childProcesses;
+  return child && !child.ok ? child.detail : null;
 }
 
 /**

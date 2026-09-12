@@ -118,8 +118,9 @@ import {
   type StartRunInput,
   repoWriteWithheldFromDenylist,
   webSearchWithheldFromDenylist,
+  codexSandboxChildProcessLimit,
 } from "~/server/runtimes/run-service.server";
-import { describeCodexSandbox } from "~/server/runtimes/codex-runtime.server";
+import { describeCodexSandbox, type CodexSandboxInputs } from "~/server/runtimes/codex-runtime.server";
 import { publishRunLogAppended } from "~/server/runtimes/run-events.server";
 import { createLineRedactor } from "~/server/runtimes/run-sink.server";
 import {
@@ -585,21 +586,31 @@ export function resolvedResourceInputs(input: {
  * the carve-out decided it. Null on Claude, where no OS sandbox exists and the
  * denylist itself is the disclosure.
  */
-export function runSandboxDisclosure(input: {
-  backend: RealBackend;
+export interface RunSandboxSpecInput {
   delivers: boolean;
   disallowedTools: readonly string[];
   attachmentsWritableDir: string | null;
-}): RunInputs["sandbox"] {
-  if (input.backend !== "codex") return null;
-  const spec: Parameters<typeof describeCodexSandbox>[0] = {
+}
+
+/** The derived flags the Codex sandbox decision reads for THIS run — one
+ *  place, so the disclosure (`runSandboxDisclosure`) and the ruling-184 limit
+ *  question can never disagree about which run is confined. */
+export function runSandboxSpec(input: RunSandboxSpecInput): CodexSandboxInputs {
+  const spec: CodexSandboxInputs = {
     kind: input.delivers ? "primary" : "reviewer",
     autonomous: true,
   };
   if (repoWriteWithheldFromDenylist(input.disallowedTools)) spec.repoWriteWithheld = true;
   if (webSearchWithheldFromDenylist(input.disallowedTools)) spec.webSearchWithheld = true;
   if (input.attachmentsWritableDir) spec.attachmentsWritableDir = input.attachmentsWritableDir;
-  return describeCodexSandbox(spec);
+  return spec;
+}
+
+export function runSandboxDisclosure(
+  input: RunSandboxSpecInput & { backend: RealBackend },
+): RunInputs["sandbox"] {
+  if (input.backend !== "codex") return null;
+  return describeCodexSandbox(runSandboxSpec(input));
 }
 
 /** One-line console summary of `RunInputs` (the expandable detail is the rest). */
@@ -1741,6 +1752,12 @@ async function dispatchAgentRun(
           // `support` is undefined for the delivering engagement (→ canonical
           // checkout) and set for a supporting one (→ isolated checkout).
           support,
+          // Ruling 179: a supporting checkout judges the revision under review;
+          // the delivering one follows origin's copy of the task branch.
+          pinRevision: support
+            ? (activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha ?? null)
+            : null,
+          taskBranch: existing.parsed.frontmatter.branch ?? null,
           // F27-U1: turn the cold first-task network clone from a silent
           // multi-minute wait into a live percentage on the run strip.
           onCloneProgress: (fraction) =>
@@ -1937,6 +1954,19 @@ async function dispatchAgentRun(
     promptInput.cloneFailure = promptFailure;
   }
   if (reviewSubject) promptInput.reviewSubject = reviewSubject;
+  // Ruling 184: the same derived flags the sandbox disclosure reads, asked of
+  // THIS host's probe — null on Claude, on a healthy host, and for a run that
+  // is not confined at all.
+  if (backend === "codex") {
+    const limit = codexSandboxChildProcessLimit(
+      runSandboxSpec({
+        delivers,
+        disallowedTools,
+        attachmentsWritableDir: collab.evidence && realBackend ? attachmentsDir : null,
+      }),
+    );
+    if (limit) promptInput.sandboxChildProcessLimit = limit;
+  }
   if (input.directive) promptInput.directive = input.directive;
   if (input.directiveFrom) promptInput.directiveFrom = input.directiveFrom;
   if (input.triggeredByName) promptInput.triggeredByName = input.triggeredByName;
@@ -3014,6 +3044,13 @@ export interface AnalyzePromptInput {
    *  opened over stale remote junk was APPROVED by a reviewer that only ever
    *  read the local branch. */
   reviewSubject?: { headSha: string; prNumber: number | null };
+  /** Ruling 184 (F36-11): the sandbox limit this run must be told about — the
+   *  probe's words for a host whose sandboxed commands cannot spawn a child
+   *  through Node's synchronous API. Omitted when the host is fine or the run
+   *  is not confined (a fully autonomous deliverer with egress). Without it the
+   *  model reads `npm ci ... EPERM` as the work's problem and records a verdict
+   *  on it (live HLC-18). */
+  sandboxChildProcessLimit?: string;
   /** P19-G0: the canonical task-state block (`canonicalTaskAnchor`) — stage,
    *  readiness, validation, delivery refs, the canonical goal, any open decision
    *  packet and the newest timeline entries. Without it a FRESH run knows the
@@ -3135,6 +3172,28 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       }
       prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
     }
+  }
+  // Ruling 184 (F36-11): a run this host's sandbox will not let spawn a child
+  // process is TOLD so, in its own section, before it discovers it as an
+  // inexplicable `EPERM` halfway through `npm ci`. The owner's call (Q36-12)
+  // was to disclose rather than refuse: the run can still read the code. What
+  // it must not do is convert the environment's refusal into a verdict on the
+  // work — live (HLC-18) a Codex reviewer recorded `request-changes` because
+  // "the required `npm ci && npm run check` gate has no green result".
+  if (input.sandboxChildProcessLimit) {
+    prompt +=
+      `\n\n## This sandbox will not let you run build or test tooling\n` +
+      `- Viberr probed this host's sandbox at boot: ${input.sandboxChildProcessLimit}.\n` +
+      `- Practical effect: \`npm\`, \`npx\`, \`pnpm\`, \`yarn\` and most JS build/test ` +
+      `tooling fail with \`EPERM\` here even though the command itself is permitted — ` +
+      `and the failure can arrive AFTER the child already ran, so neither the error ` +
+      `nor a partial success tells you anything about the code.\n` +
+      `- This is the ENVIRONMENT, not the work. Do NOT record a verdict, request ` +
+      `changes, or report a failing gate because of it. If a check you were asked ` +
+      `to run cannot run, say exactly that — "the sandbox denied the child process ` +
+      `(EPERM), so the gate did not run in this run" — and judge what you CAN read.\n` +
+      `- Still available: reading and searching files, and anything your shell starts ` +
+      `directly (\`git\`, \`rg\`, \`grep\`, \`ls\`, \`cat\`).`;
   }
   // P19-G0: the canonical state goes AFTER the workspace/delivery contract and
   // BEFORE the directive — the contract is what the agent may do, the anchor is
@@ -3744,6 +3803,43 @@ function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string
   return readProjectFile(ref)?.parsed.frontmatter.defaultBranch || "main";
 }
 
+/**
+ * Ruling 179 (pass 36): detach a SUPPORTING checkout at the task's revision
+ * under review when the commit is present (the fetch-only refresh brings
+ * `origin/<branch>` — and with it an external revision — into the clone).
+ * Returns the disclosure sentence, or null when there was nothing to pin.
+ * Never throws: a reviewer that cannot be pinned still runs, and the
+ * disclosure says the revision is missing.
+ *
+ * Exported for its test: the behaviour is real git, not a string.
+ */
+export async function pinSupportCheckout(dir: string, sha: string | null): Promise<string | null> {
+  if (!sha) return null;
+  const short = sha.slice(0, 7);
+  try {
+    await execFileAsync("git", ["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeout: 5_000 });
+  } catch {
+    logger.warn("support checkout: the revision under review is not in the clone; HEAD was left as it is", {
+      dir,
+      revision: sha,
+    });
+    return `the revision under review \`${short}\` is not in this checkout (origin has not been read since it appeared); HEAD was left as it is`;
+  }
+  try {
+    const head = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"], { timeout: 5_000 })).stdout.trim();
+    if (head === sha) return `checked out at the revision under review \`${short}\``;
+    await execFileAsync("git", ["-C", dir, "checkout", "-q", "--detach", sha], { timeout: 30_000 });
+    return `detached at the revision under review \`${short}\` (the delivering tree stood at \`${head.slice(0, 7)}\`)`;
+  } catch (error) {
+    logger.warn("support checkout: could not detach at the revision under review", {
+      dir,
+      revision: sha,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return `the revision under review \`${short}\` could not be checked out; HEAD was left as it is`;
+  }
+}
+
 async function cloneRepo(
   db: DatabaseSync,
   input: {
@@ -3763,6 +3859,17 @@ async function cloneRepo(
     /** F27-U1: 0..1 progress for a cold network clone, so the caller can drive a
      *  live percentage onto the run strip. */
     onCloneProgress?: (fraction: number) => void;
+    /** Ruling 179 (pass 36): the task's active work revision. A SUPPORTING
+     *  checkout is detached at it when it is present after the refresh — a
+     *  reviewer judges the revision under review, not the delivering tree's
+     *  head, and a sandboxed Codex run cannot move `.git` itself (the CLI
+     *  keeps it read-only). Live (HLC-18, 19:46Z): the external revision the
+     *  reconciler minted was never in the reviewer's clone of the delivering
+     *  tree, and the reviewer could not check it out. */
+    pinRevision?: string | null;
+    /** Ruling 179: the task branch, for the delivering refresh's fast-forward
+     *  to origin's copy (`refreshWorkspaceFromMirror`). */
+    taskBranch?: string | null;
   },
 ): Promise<CloneOutcome> {
   let hadCredential = false;
@@ -3825,7 +3932,8 @@ async function cloneRepo(
           await refreshWorkspaceFromMirror(db, supportRefresh);
           await setIdentity(dir);
           await stripUngovernedRepoCatalog(dir);
-          return { dir };
+          const pinned = await pinSupportCheckout(dir, input.pinRevision ?? null);
+          return pinned ? { dir, refreshed: pinned } : { dir };
         } finally {
           if (!existsSync(path.join(dir, ".git", "HEAD"))) {
             rmSync(dir, { recursive: true, force: true });
@@ -3866,6 +3974,7 @@ async function cloneRepo(
         dir,
         defaultBranch: defaultBranchForRefresh(input),
         fastForward: !input.support,
+        taskBranch: input.taskBranch ?? null,
       };
       if (input.dataRoot) refreshInput.dataRoot = input.dataRoot;
       const refresh = await refreshWorkspaceFromMirror(db, refreshInput);
@@ -3900,7 +4009,11 @@ async function cloneRepo(
       await cloneWorkspaceRepo(cloneInput);
       await setIdentity(dir);
       await stripUngovernedRepoCatalog(dir);
-      return { dir };
+      // Ruling 179: a supporting run that reached here (no delivering checkout
+      // to clone from) still judges the revision under review when the fresh
+      // clone carries it.
+      const freshPin = input.support ? await pinSupportCheckout(dir, input.pinRevision ?? null) : null;
+      return freshPin ? { dir, refreshed: freshPin } : { dir };
     } finally {
       // A clone killed mid-transfer can leave a partial tree behind. Left in
       // place it is worse than nothing: the next run's `.git` check treats it as

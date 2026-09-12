@@ -135,6 +135,95 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(await gitOut(dirty, ["status", "--porcelain"])).toContain("README.md");
   });
 
+  it("ruling 179: a clean task-branch checkout strictly behind origin's copy is fast-forwarded; a DIVERGED one is not", async () => {
+    // Canary: delete the `behind_task_branch` arm (let every non-default branch
+    // fall through to `task_branch`) and the first head assertion fails — the
+    // rework starts from the stale head, which is the dead end HLC-18 hit live
+    // on 2026-09-11: the delivery of the rework was refused as non-fast-forward
+    // ("delete or rename the remote branch, or force-push") for work the ruling
+    // had just declared the revision under review.
+    const refreshTask = (dir: string, taskBranch: string) =>
+      withLocalGithub(origins, () =>
+        refreshWorkspaceFromMirror(store.db, {
+          projectSlug: store.slug,
+          repo: REPO,
+          dir,
+          defaultBranch: "main",
+          dataRoot: store.dataRoot,
+          fastForward: true,
+          taskBranch,
+        }),
+      );
+
+    /** Land one commit on `branch` from a checkout that is NOT `dir`, so the
+     *  commit only reaches `dir` through the refresh's own fetch. */
+    async function externalCommit(branch: string, file: string): Promise<string> {
+      const pusher = await checkout(`pusher-${branch}`);
+      await withLocalGithub(origins, () => exec("git", ["-C", pusher, "fetch", "-q", "origin", branch]));
+      await exec("git", ["-C", pusher, "checkout", "-q", "-B", branch, "FETCH_HEAD"]);
+      writeFileSync(path.join(pusher, file), "someone else's work\n");
+      await exec("git", ["-C", pusher, "add", "-A"]);
+      await exec("git", ["-C", pusher, "commit", "-qm", `observer: ${file}`]);
+      await withLocalGithub(origins, () => exec("git", ["-C", pusher, "push", "-q", "origin", branch]));
+      return gitOut(pusher, ["rev-parse", "HEAD"]);
+    }
+
+    // The delivering checkout, on the task branch, pushed as Viberr delivers it.
+    const dir = await checkout("rework");
+    await exec("git", ["-C", dir, "checkout", "-q", "-b", "vib-18"]);
+    writeFileSync(path.join(dir, "WORK.md"), "delivered\n");
+    await exec("git", ["-C", dir, "add", "-A"]);
+    await exec("git", ["-C", dir, "commit", "-qm", "[VIB-18] delivered"]);
+    const delivered = await gitOut(dir, ["rev-parse", "HEAD"]);
+    await withLocalGithub(origins, () => exec("git", ["-C", dir, "push", "-q", "origin", "vib-18"]));
+
+    // A commit Viberr did not deliver joins the branch: the external revision.
+    const external = await externalCommit("vib-18", "OBSERVER.md");
+    expect(await gitOut(dir, ["rev-parse", "HEAD"])).toBe(delivered);
+
+    const result = await refreshTask(dir, "vib-18");
+    expect(result).toMatchObject({ status: "fast_forwarded", from: "behind_task_branch", head: external });
+    expect(await gitOut(dir, ["rev-parse", "HEAD"])).toBe(external);
+    // Still ON the branch — a detached rework could not be delivered at all.
+    expect(await gitOut(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("vib-18");
+    expect(await gitOut(dir, ["log", "--oneline"])).toContain("[VIB-18] delivered");
+    expect(describeWorkspaceRefresh(result, "main")).toContain(
+      "fast-forwarded the task branch to origin's copy",
+    );
+    expect(describeWorkspaceRefresh(result, "main")).toContain("ruling 179");
+
+    // A branch that DIVERGED is left exactly as it stands: the delivery's
+    // non-fast-forward refusal and a person own that, never a silent merge.
+    const diverged = await checkout("diverged");
+    await exec("git", ["-C", diverged, "checkout", "-q", "-b", "vib-19"]);
+    writeFileSync(path.join(diverged, "WORK.md"), "delivered\n");
+    await exec("git", ["-C", diverged, "add", "-A"]);
+    await exec("git", ["-C", diverged, "commit", "-qm", "[VIB-19] delivered"]);
+    await withLocalGithub(origins, () => exec("git", ["-C", diverged, "push", "-q", "origin", "vib-19"]));
+    await externalCommit("vib-19", "OBSERVER.md");
+    // ...and the local checkout committed its OWN follow-up on the old head.
+    writeFileSync(path.join(diverged, "MINE.md"), "local rework\n");
+    await exec("git", ["-C", diverged, "add", "-A"]);
+    await exec("git", ["-C", diverged, "commit", "-qm", "[VIB-19] local rework"]);
+    const mine = await gitOut(diverged, ["rev-parse", "HEAD"]);
+    const kept = await refreshTask(diverged, "vib-19");
+    expect(kept).toMatchObject({ status: "fetched", head: "task_branch" });
+    expect(await gitOut(diverged, ["rev-parse", "HEAD"])).toBe(mine);
+
+    // A task branch refreshed WITHOUT the ruling-179 input is untouched too:
+    // the fast-forward follows the task's own branch, not any branch.
+    const unnamed = await checkout("unnamed");
+    await exec("git", ["-C", unnamed, "checkout", "-q", "-b", "vib-20"]);
+    writeFileSync(path.join(unnamed, "WORK.md"), "delivered\n");
+    await exec("git", ["-C", unnamed, "add", "-A"]);
+    await exec("git", ["-C", unnamed, "commit", "-qm", "[VIB-20] delivered"]);
+    const head20 = await gitOut(unnamed, ["rev-parse", "HEAD"]);
+    await withLocalGithub(origins, () => exec("git", ["-C", unnamed, "push", "-q", "origin", "vib-20"]));
+    await externalCommit("vib-20", "OBSERVER.md");
+    expect(await refresh(unnamed)).toMatchObject({ status: "fetched", head: "task_branch" });
+    expect(await gitOut(unnamed, ["rev-parse", "HEAD"])).toBe(head20);
+  });
+
   it("a branch that shares no history with `origin/<default>` reads `unrelated` and says so", async () => {
     // Canary: fold `unrelated` into `task_branch` and the head assertion fails.
     const dir = await checkout("unrelated");

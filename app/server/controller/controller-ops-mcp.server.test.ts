@@ -236,7 +236,12 @@ const HEALTH_REPLY = z.object({
     go: z.string().nullable(),
     codexCli: z.string().nullable(),
     claudeAgentSdk: z.string().nullable(),
-    codexSandbox: z.strictObject({ ok: z.boolean(), detail: z.string() }),
+    // Ruling 184: the second sandbox question rides the same field.
+    codexSandbox: z.strictObject({
+      ok: z.boolean(),
+      detail: z.string(),
+      childProcesses: z.strictObject({ ok: z.boolean(), detail: z.string() }).nullable(),
+    }),
   }),
   // F32-9 (pass 32): what each backend last told us — the reading the
   // Insights page shows, so the controller cannot answer "no quota exhaustion

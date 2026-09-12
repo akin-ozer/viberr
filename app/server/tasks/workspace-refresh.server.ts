@@ -55,7 +55,12 @@ export type WorkspaceRefreshHead =
   | "not_requested";
 
 export type WorkspaceRefreshResult =
-  | { status: "fast_forwarded"; head: string; from: "unborn" | "behind"; mirrorRefreshed: boolean }
+  | {
+      status: "fast_forwarded";
+      head: string;
+      from: "unborn" | "behind" | "behind_task_branch";
+      mirrorRefreshed: boolean;
+    }
   | { status: "fetched"; head: WorkspaceRefreshHead; mirrorRefreshed: boolean }
   | { status: "no_mirror" }
   | { status: "fetch_failed"; message: string };
@@ -73,6 +78,13 @@ export interface WorkspaceRefreshInput {
   fastForward: boolean;
   /** Create the mirror when it is missing (a delivering dispatch pays it). */
   createMirror?: boolean;
+  /** Ruling 179 (pass 36): the task's own branch. A clean checkout ON it that
+   *  is strictly behind `origin/<taskBranch>` — commits Viberr did not deliver
+   *  joined the branch, the external revision under review — is fast-forwarded
+   *  to it, so a rework starts from the head the reviewers judge. A diverged
+   *  branch is left as it is (the delivery's non-fast-forward refusal and a
+   *  person own that). */
+  taskBranch?: string | null;
 }
 
 async function git(dir: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
@@ -177,7 +189,32 @@ export async function refreshWorkspaceFromMirror(
     }
     const related = await gitOk(input.dir, ["merge-base", "HEAD", base]);
     if (!related) return { status: "fetched", head: "unrelated", mirrorRefreshed };
-    if (!onDefault) return { status: "fetched", head: "task_branch", mirrorRefreshed };
+    if (!onDefault) {
+      // Ruling 179: the task branch follows origin's copy when it is strictly
+      // behind it. Live (HLC-18, 19:54Z): after an observer commit became the
+      // external revision under review, the rework started from the old local
+      // head, and its delivery was refused as non-fast-forward with "delete or
+      // rename the remote branch, or force-push" — a dead end for work the
+      // ruling had just declared the revision under review.
+      const taskBranch = input.taskBranch;
+      if (taskBranch && symbolic === `refs/heads/${taskBranch}`) {
+        const remote = `origin/${taskBranch}`;
+        const hasRemote = await gitOk(input.dir, ["rev-parse", "--verify", "--quiet", `${remote}^{commit}`]);
+        if (hasRemote) {
+          const headSha = await git(input.dir, ["rev-parse", "HEAD"]);
+          const remoteSha = await git(input.dir, ["rev-parse", remote]);
+          const behind =
+            headSha !== remoteSha &&
+            (await gitOk(input.dir, ["merge-base", "--is-ancestor", "HEAD", remote]));
+          if (behind) {
+            await git(input.dir, ["merge", "--ff-only", "--quiet", remote]);
+            const head = await git(input.dir, ["rev-parse", "HEAD"]);
+            return { status: "fast_forwarded", head, from: "behind_task_branch", mirrorRefreshed };
+          }
+        }
+      }
+      return { status: "fetched", head: "task_branch", mirrorRefreshed };
+    }
     const headSha = await git(input.dir, ["rev-parse", "HEAD"]);
     const baseSha = await git(input.dir, ["rev-parse", base]);
     if (headSha === baseSha) return { status: "fetched", head: "current", mirrorRefreshed };
@@ -210,7 +247,9 @@ export function describeWorkspaceRefresh(
     case "fast_forwarded":
       return result.from === "unborn"
         ? `fast-forwarded the unborn checkout to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`
-        : `fast-forwarded \`${defaultBranch}\` to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`;
+        : result.from === "behind_task_branch"
+          ? `fast-forwarded the task branch to origin's copy at \`${result.head.slice(0, 7)}\` — commits Viberr did not deliver joined it (ruling 179)${stale(result)}`
+          : `fast-forwarded \`${defaultBranch}\` to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`;
     case "fetched":
       switch (result.head) {
         case "current":

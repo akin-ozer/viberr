@@ -1,4 +1,4 @@
-# Pass 36 — surface coverage checklist (final form 17:50Z; the last two cycles still landing)
+# Pass 36 — surface coverage checklist (final form 18:45Z; re-validation rows in REVALIDATION.md)
 
 Status: `done (evidence)` · `partial (what is missing)` · `not exercised (why)`. Evidence =
 task key, run id, audit action, screenshot index (SCREENSHOTS.md) or NOTES timestamp.
@@ -20,7 +20,7 @@ task key, run id, audit action, screenshot index (SCREENSHOTS.md) or NOTES times
 | Delivery: push, PR open, PR head move, base refresh, conflict | done | PRs #1..#14 opened by Viberr; head moves on rework (PR #8 ×2, #10, #12, #13); `update_branch_from_base` before delivery; real conflicts on HLC-3/HLC-14 → `blocked` conflict packet → `redirect` to the deliverer → resolved and re-delivered (17:25-17:36Z) |
 | Approval boundary (human), ruling 151 | done | every cycle: operator recommends "Move to Merge Approval", a human applies (`boundary: approval`); the operator never crossed it |
 | Accept completion + real merge from Viberr | done ×8 | PRs #1, #6, #4, #8, #9, #10, #11, #14 merged from the accept dialog (MERGES/BRANCH/REVISION/VERDICT rows); branch deleted; task shipped; completion event copy says "Done" (U36-9) |
-| Merge out of band with gh → reconciler | planned for PR #12 (HLC-3) when approved | — |
+| Merge out of band with gh → reconciler | done | PR #13 (HLC-14) merged with `gh pr merge` at 18:12:50Z while the task sat at Agent Review; "Update status" → divergence note, `pr.state: merged`, policy notifications, operator woke; the human had to cross the approval boundary by hand before accepting (U36-12); accepted on the already-merged path 18:2xZ (shots 80-83) |
 | Reject a PR on GitHub → recovery packet (ruling 160) | done ×2 | PR #2 (HLC-8) → archive + delete branch; PR #3 (HLC-7) → packet naming the drift → adoption of hand PR #6 |
 | PR adoption | done | HLC-7 15:13:32Z `github.pr.adopted {source: reconciler}` |
 | Branch collision | done | ruling-122 suffix `hlc-10-0c88` (silent: U36-6); stray PR #7 → collision note (no inbox: U36-7) → operator `blocked` packet → "Clear the branch collision?" dialog → PR #7 closed, PR #8 opened, block lifted (15:41Z) |

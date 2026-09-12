@@ -11,6 +11,7 @@ import {
   backendUnavailableMessage,
   chainRunCompletion,
   configureRunServiceForTests,
+  codexSandboxChildProcessLimit,
   getRunLog,
   interruptRun,
   listRunsForTask,
@@ -578,7 +579,10 @@ describe("a run with no credential principal (ruling 127)", () => {
 describe("ruling 182: a sandboxed Codex run is refused while the host's sandbox cannot start", () => {
   const BWRAP = "bwrap: No permissions to create a new namespace";
   beforeEach(() => {
-    primeToolchain({ ...HERMETIC_TOOLCHAIN, codexSandbox: { ok: false, detail: BWRAP } });
+    primeToolchain({
+      ...HERMETIC_TOOLCHAIN,
+      codexSandbox: { ok: false, detail: BWRAP, childProcesses: null },
+    });
   });
   afterEach(primeHermeticToolchain);
 
@@ -677,6 +681,80 @@ describe("ruling 182: a sandboxed Codex run is refused while the host's sandbox 
     });
     await settle();
     expect(getRun(store.db, runId)!.state).toBe("finished");
+  });
+});
+
+/**
+ * Ruling 184 (pass 36, F36-11, owner Q36-12): a sandbox that RUNS commands but
+ * denies child processes does not refuse the run — it is disclosed to it.
+ */
+describe("ruling 184: the sandbox's child-process limit is reported per run, never refused", () => {
+  const EPERM =
+    "Node's synchronous `spawnSync` reported `EPERM` inside the sandbox — the network-off " +
+    "seccomp filter denies every socket syscall, AF_UNIX included";
+  const denied = () =>
+    primeToolchain({
+      ...HERMETIC_TOOLCHAIN,
+      codexSandbox: {
+        ok: true,
+        detail: "codex sandbox ran /bin/echo under a workspace-write profile",
+        childProcesses: { ok: false, detail: EPERM },
+      },
+    });
+  afterEach(primeHermeticToolchain);
+
+  it("names the limit for every CONFINED run and stays silent for a full-access deliverer", () => {
+    // Canary: return null unconditionally from `codexSandboxChildProcessLimit`
+    // and nothing tells the reviewer why `npm ci` died — the live HLC-18 state,
+    // where the model reported it as a blocking verdict on correct work.
+    denied();
+    // A reviewer (workspace-write), the operator (read-only) and a
+    // write-withheld run are all behind the filter.
+    expect(codexSandboxChildProcessLimit({ kind: "reviewer", autonomous: true })).toBe(EPERM);
+    expect(codexSandboxChildProcessLimit({ kind: "operator", autonomous: true })).toBe(EPERM);
+    expect(
+      codexSandboxChildProcessLimit({ kind: "primary", autonomous: true, repoWriteWithheld: true }),
+    ).toBe(EPERM);
+    // A fully autonomous deliverer with egress runs at danger-full-access: no
+    // sandbox, no filter, nothing to disclose.
+    expect(codexSandboxChildProcessLimit({ kind: "primary", autonomous: true })).toBeNull();
+    // ...and an egress-WITHHELD deliverer is confined again, so it IS told.
+    expect(
+      codexSandboxChildProcessLimit({ kind: "primary", autonomous: true, webSearchWithheld: true }),
+    ).toBe(EPERM);
+  });
+
+  it("says nothing on a healthy host, or on a host whose sandbox could not be probed at all", () => {
+    primeHermeticToolchain();
+    expect(codexSandboxChildProcessLimit({ kind: "reviewer", autonomous: true })).toBeNull();
+    // Sandbox down: ruling 182 already REFUSES that run, so the limit sentence
+    // would be a second, weaker answer to a question already settled.
+    primeToolchain({
+      ...HERMETIC_TOOLCHAIN,
+      codexSandbox: { ok: false, detail: "bwrap: No permissions", childProcesses: null },
+    });
+    expect(codexSandboxChildProcessLimit({ kind: "reviewer", autonomous: true })).toBeNull();
+  });
+
+  it("the confined run still STARTS — the limit is a disclosure, not a refusal (owner Q36-12)", async () => {
+    denied();
+    queueFakeRun(
+      instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }], "codex"),
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Code reviewer",
+      kind: "reviewer",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      disallowedTools: ["Bash", "Edit", "Write"],
+    });
+    await settle();
+    expect(getRun(store.db, runId)!.state).toBe("finished");
+    expect(lastRunSpec()?.runId).toBe(runId);
   });
 });
 

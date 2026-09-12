@@ -48,6 +48,11 @@ describe("healthSnapshot reports the toolchain (ruling 182)", () => {
     // The one memoized reading (`cachedToolchain`), never a second probe: the
     // suite primes it hermetic in setup-env, and that is what comes back.
     expect(snapshot.toolchain).toEqual(HERMETIC_TOOLCHAIN);
-    expect(snapshot.toolchain.codexSandbox).toEqual({ ok: true, detail: expect.any(String) });
+    expect(snapshot.toolchain.codexSandbox).toEqual({
+      ok: true,
+      detail: expect.any(String),
+      // Ruling 184: the second question's answer rides the same field.
+      childProcesses: { ok: true, detail: expect.any(String) },
+    });
   });
 });

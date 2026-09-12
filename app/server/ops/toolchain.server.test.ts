@@ -14,6 +14,7 @@ import {
   CODEX_SANDBOX_PROBE_PROFILE,
   codexSandboxProbeConfig,
   probeCodexSandbox,
+  CODEX_SANDBOX_CHILD_CANARY,
   resetToolchainCacheForTests,
   resolveToolchain,
   versionOf,
@@ -77,7 +78,11 @@ describe("resolveToolchain", () => {
         { npm: "11.19.1\n", git: "git version 2.45.0\n", python3: null, go: "go version go1.23.1 linux/arm64\n" },
         seen,
       ),
-      probeCodexSandbox: () => ({ ok: false, detail: "bwrap: No permissions to create a new namespace" }),
+      probeCodexSandbox: () => ({
+        ok: false,
+        detail: "bwrap: No permissions to create a new namespace",
+        childProcesses: null,
+      }),
     });
     expect(reading).toEqual({
       node: process.version.replace(/^v/, ""),
@@ -88,7 +93,11 @@ describe("resolveToolchain", () => {
       // The pins this checkout installs — real, read from the packages.
       codexCli: expect.stringMatching(/^\d+\.\d+\.\d+/),
       claudeAgentSdk: expect.stringMatching(/^\d+\.\d+\.\d+/),
-      codexSandbox: { ok: false, detail: "bwrap: No permissions to create a new namespace" },
+      codexSandbox: {
+        ok: false,
+        detail: "bwrap: No permissions to create a new namespace",
+        childProcesses: null,
+      },
     });
     // The key order is the health body's; `codexSandbox` comes last.
     expect(Object.keys(reading)).toEqual([
@@ -106,7 +115,7 @@ describe("resolveToolchain", () => {
   it("matches the pinned @openai/codex the Codex SDK depends on", () => {
     const reading = resolveToolchain({
       run: scriptedRunner({}),
-      probeCodexSandbox: () => ({ ok: true, detail: "faked" }),
+      probeCodexSandbox: () => ({ ok: true, detail: "faked", childProcesses: null }),
     });
     const codexSdk = z.object({ version: z.string() }).parse(
       JSON.parse(
@@ -140,13 +149,19 @@ describe("probeCodexSandbox", () => {
       const home = options.env?.CODEX_HOME ?? "";
       homeExistedDuringRun = existsSync(path.join(home, "config.toml"));
       configSeen = readFileSync(path.join(home, "config.toml"), "utf8");
-      // The helper echoes the nonce back from inside the sandbox.
+      // Ruling 184: the second call is the child-process canary, which prints
+      // its own answer; the first echoes the nonce back from inside the sandbox.
+      if (args.includes(CODEX_SANDBOX_CHILD_CANARY)) return { ok: true, stdout: "child:ok\n" };
       return { ok: true, stdout: `${args.at(-1)}\n` };
     };
     const verdict = probeCodexSandbox({ run, dataRoot: root, codexBinary: "/opt/codex/bin/codex" });
     expect(verdict).toEqual({
       ok: true,
       detail: "codex sandbox ran /bin/echo under a workspace-write profile",
+      childProcesses: {
+        ok: true,
+        detail: "a sandboxed command started a child process through Node's synchronous API",
+      },
     });
     const call = seen[0]!;
     expect(call.command).toBe("/opt/codex/bin/codex");
@@ -167,8 +182,68 @@ describe("probeCodexSandbox", () => {
     expect(configSeen).toContain('"/" = "read"');
     expect(configSeen).toContain(`${JSON.stringify(work)} = "write"`);
     expect(configSeen).toContain("enabled = false");
+    // Ruling 184: the SECOND question, asked in the same home and profile —
+    // the network-off profile is what installs the filter that denies it.
+    const canary = seen[1]!;
+    expect(canary.command).toBe("/opt/codex/bin/codex");
+    expect(canary.args).toEqual([
+      "sandbox", "--permission-profile", CODEX_SANDBOX_PROBE_PROFILE, "-C", work, "--",
+      process.execPath, "-e", CODEX_SANDBOX_CHILD_CANARY,
+    ]);
+    expect(canary.env?.CODEX_HOME).toBe(path.join(probeRoot, "home"));
+    expect(seen).toHaveLength(2);
     // Nothing is left behind.
     expect(existsSync(probeRoot)).toBe(false);
+  });
+
+  it("ruling 184: a sandbox that runs a command but DENIES a child process says so, and the echo verdict stays ok", () => {
+    // Canary: return the echo verdict without asking the second question
+    // (`childProcesses: null`) and this whole assertion fails — which is the
+    // live state: `npm ci` died with EPERM inside every network-gated Codex
+    // run and nothing in the product knew (F36-11, HLC-18).
+    const seen: { command: string; args: readonly string[] }[] = [];
+    const verdict = probeCodexSandbox({
+      run: (command, args) => {
+        seen.push({ command, args });
+        if (args.includes(CODEX_SANDBOX_CHILD_CANARY)) return { ok: true, stdout: "child:EPERM\n" };
+        return { ok: true, stdout: `${args.at(-1)}\n` };
+      },
+      dataRoot: ctx.makeTempDir(),
+      codexBinary: "/opt/codex/bin/codex",
+    });
+    // The sandbox itself is FINE: a run below full access is not refused for this.
+    expect(verdict.ok).toBe(true);
+    expect(verdict.childProcesses?.ok).toBe(false);
+    expect(verdict.childProcesses?.detail).toContain("`EPERM`");
+    expect(verdict.childProcesses?.detail).toContain("AF_UNIX");
+    expect(verdict.childProcesses?.detail).toContain("socketpair");
+    expect(seen).toHaveLength(2);
+  });
+
+  it("ruling 184: a canary that cannot run at all, or answers nonsense, is reported as such — never as ok", () => {
+    const failed = probeCodexSandbox({
+      run: (_command, args) =>
+        args.includes(CODEX_SANDBOX_CHILD_CANARY)
+          ? { ok: false, detail: "node is not installed" }
+          : { ok: true, stdout: `${args.at(-1)}\n` },
+      dataRoot: ctx.makeTempDir(),
+      codexBinary: "/opt/codex/bin/codex",
+    });
+    expect(failed.ok).toBe(true);
+    expect(failed.childProcesses).toEqual({ ok: false, detail: "node is not installed" });
+
+    const nonsense = probeCodexSandbox({
+      run: (_command, args) =>
+        args.includes(CODEX_SANDBOX_CHILD_CANARY)
+          ? { ok: true, stdout: "who knows\n" }
+          : { ok: true, stdout: `${args.at(-1)}\n` },
+      dataRoot: ctx.makeTempDir(),
+      codexBinary: "/opt/codex/bin/codex",
+    });
+    expect(nonsense.childProcesses).toEqual({
+      ok: false,
+      detail: "the sandboxed child-process canary printed nothing usable",
+    });
   });
 
   it("reports the CLI's own first line when the sandbox cannot start (F36-1's bwrap refusal)", () => {
@@ -178,7 +253,13 @@ describe("probeCodexSandbox", () => {
       dataRoot: root,
       codexBinary: "/opt/codex/bin/codex",
     });
-    expect(verdict).toEqual({ ok: false, detail: "bwrap: No permissions to create a new namespace" });
+    expect(verdict).toEqual({
+      ok: false,
+      detail: "bwrap: No permissions to create a new namespace",
+      // Ruling 184: a sandbox that cannot run a command at all was never asked
+      // the second question — `null` says "not probed", never "fine".
+      childProcesses: null,
+    });
     expect(existsSync(path.join(root, "runtimes", CODEX_SANDBOX_PROBE_DIR))).toBe(false);
   });
 
@@ -190,6 +271,7 @@ describe("probeCodexSandbox", () => {
     });
     expect(verdict.ok).toBe(false);
     expect(verdict.detail).toContain("did not come back");
+    expect(verdict.childProcesses).toBeNull();
   });
 
   it("names a missing Codex package instead of probing nothing", () => {
@@ -206,6 +288,7 @@ describe("probeCodexSandbox", () => {
     expect(verdict).toEqual({
       ok: false,
       detail: "the @openai/codex package is not installed in this deployment",
+      childProcesses: null,
     });
   });
 });

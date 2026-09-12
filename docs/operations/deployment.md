@@ -216,8 +216,49 @@ Check it on a running container:
 
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain.codexSandbox
-# {"ok":true,"detail":"codex sandbox ran /bin/echo under a workspace-write profile"}
+# {"ok":true,"detail":"codex sandbox ran /bin/echo under a workspace-write profile",
+#  "childProcesses":{"ok":false,"detail":"Node's synchronous `spawnSync` reported `EPERM` …"}}
 docker compose exec -T app unshare -U true && echo "user namespaces: ok"
+```
+
+### The sandbox runs commands but denies child processes (ruling 184)
+
+`codexSandbox.ok` can be **true** while `codexSandbox.childProcesses.ok` is **false**, and
+that second field is the one that decides whether an agent can run a build. With the
+network off — which is every confined run whose grants withhold egress — the Codex CLI
+installs a seccomp filter that refuses **every socket syscall, `AF_UNIX` included**.
+libuv's *synchronous* spawn needs a socketpair, so inside the sandbox:
+
+| call | what happens |
+|---|---|
+| `spawnSync` | the child RUNS and its output comes back, and Node still reports `error.code = EPERM` |
+| `execSync` / `execFileSync` | throw `EPERM`, after the child ran |
+| `spawn` (async) | fine |
+| `net` on `AF_UNIX` or `AF_INET` | `EPERM` |
+
+So `npm ci` dies on its first lifecycle script (esbuild's postinstall), and with it every
+`npm`/`npx`/`pnpm`/`yarn` gate. This is upstream: viberr cannot turn the filter off without
+turning the run's network on, which would widen a capability the grants withheld. The
+owner's call (Q36-12) is therefore to **disclose, not refuse** — unlike a sandbox that
+cannot start at all, a run confined by this one still reads, greps and reviews. The probe
+asks the second question in the same home and profile, a separate boot WARN carries it
+(`codex sandbox denies child processes …`), and **every run below `danger-full-access` gets
+a section in its own contract** naming the limit, forbidding it as a verdict or a
+failing-gate report, and giving the agent the sentence to write instead ("the sandbox denied
+the child process (EPERM), so the gate did not run in this run"). Without that section the
+model reads `npm ci … EPERM` as the work's problem: live (F36-11, HLC-18) a Codex reviewer
+recorded `request-changes` — "the required `npm ci && npm run check` gate has no green
+result for this revision" — against a correct delivery.
+
+Reproduce it directly against the image:
+
+```bash
+docker compose exec -T app node -e '
+const {spawnSync}=require("node:child_process");
+const r=spawnSync("/bin/echo",["x"],{encoding:"utf8"});
+console.log(JSON.stringify({status:r.status,err:r.error&&r.error.code,out:r.stdout.trim()}));'
+# outside the sandbox: {"status":0,"err":null,"out":"x"}
+# inside a network-off codex sandbox: {"status":0,"err":"EPERM","out":"x"}
 ```
 
 If `ok` is false with `bwrap: No permissions to create a new namespace`, the container is

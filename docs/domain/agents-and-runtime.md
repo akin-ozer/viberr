@@ -402,6 +402,21 @@ connecting a different account there (ruling 165).
   asked; a Claude run never is. Boot resolves the reading first (its WARN names the
   remedy), `healthSnapshot` appends it LAST as `toolchain`, and `instance_health` inherits
   it. The unit suite never probes (`test-support/toolchain.ts`).
+- **The same probe asks whether a sandboxed command can start a CHILD process, and that
+  answer is disclosed rather than enforced (ruling 184).** A sandbox that runs `/bin/echo`
+  fine can still deny `spawnSync`: with the network off the CLI's seccomp filter refuses
+  every socket syscall, `AF_UNIX` included, and libuv's synchronous spawn needs a
+  socketpair — so `spawnSync`/`execSync` report `EPERM` after the child already ran, and
+  `npm ci` dies on its first lifecycle script (async `spawn` is unaffected). The probe runs
+  a second canary in the same home and profile (`CODEX_SANDBOX_CHILD_CANARY` through
+  `process.execPath`) and keeps `codexSandbox.childProcesses` — `null` when the sandbox
+  could not run a command at all, so the question was never asked. Nothing is refused:
+  `codexSandboxChildProcessLimit(runSandboxSpec(...))` returns the probe's sentence for
+  every run below `danger-full-access`, and `buildAnalyzePrompt` renders it as "This sandbox
+  will not let you run build or test tooling" — the limit, an order not to turn it into a
+  verdict or a failing-gate report, the sentence to write instead, and what still works.
+  Live (F36-11, HLC-18) the missing section cost a correct delivery a `request-changes` for
+  "the required `npm ci && npm run check` gate has no green result for this revision".
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
 - Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`

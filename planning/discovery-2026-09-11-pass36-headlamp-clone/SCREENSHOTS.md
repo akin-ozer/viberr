@@ -92,3 +92,16 @@ Captured with headless Playwright signed in as arda (org admin) unless the name 
 | 84 | 84-hlc3-apply-after | HLC-3 at Merge Approval after the fourth-round approval was applied |
 | 85 | 85-hlc3-conflict-at-merge-approval-before, -after | HLC-3's second conflict packet at Merge Approval (main moved under PR #12) and its redirect |
 | 86 | 86-hlc3-apply-after, 86-hlc3-accept-dialog, 86-hlc3-accept-after | HLC-3 (logs API) applied again → accept dialog (PR #12, revision 607665b) → shipped (18:44Z, the tenth merge) |
+| 90 | 90-hlc4-archived-mention | RE-VALIDATION 1.1: "@operator …" on archived HLC-4 → "Mention not started" note with the ruling-177 sentence, no run (19:24Z) |
+| 91 | 91-policy-required-reviewers, -dark, -mobile | Policy page after `set_required_reviewers`: "Required reviewers · 1 rule · Code Reviewer · Reviews at Agent Review" (2.2) |
+| 92 | 92-settings-required-reviewers, -dark, -mobile (full page) | Settings → Required reviewers section with the stage and reviewer pickers, Remove / Add rule / Save (2.2) |
+| 93 | 93-hlc16-picker-ineligible-reviewer, -before | 6.1 / U36-10: the Code Reviewer picked on Intake HLC-16 — Run disabled with the ineligibility sentence before any click |
+| 94 | 94-hlc17-force-accept-live-run-dialog, -after | 1.2: the force-accept dialog on HLC-17 (MERGES none / SKIPS / BYPASSING rows) while its developer run was live, and the shipped page after |
+| 95 | 95-hlc17-shipped-after-force-accept (full), -dark | HLC-17 shipped: "Interrupted by acceptance" note, completion event, no packet, no operator run |
+| 96 | 96-github-update-status-collision | GitHub page "Update status" after the stray PR #15 fixture (U36-7) |
+| 97 | 97-notifications-collision-inbox | Inbox with "Branch name collision on HLC-18: PR #15 is not this task's" (U36-7) |
+| 98 | 98-hlc16-archive-dialog-branchless-dialog | U36-1/U36-2: the Archive dialog on branchless HLC-16 — no "reopens the question", no re-delivery paragraph (dismissed) |
+| 99 | 99-hlc18-collision-dialog-light | Ruling 164: "Clear the branch collision?" confirmation on HLC-18's blocked packet |
+| 101 | 101-hlc18-apply-move-to-merge-approval | HLC-18 after the Claude reviewer's approve: the transition card applied → Merge Approval |
+| 102 | 102-github-update-status-drift | GitHub page "Update status" after the observer commit on the approved PR head (ruling 179 fixture) |
+| 103 | 103-hlc18-after-authored-drift (full) | HLC-18 back at Agent Review: external revision, "Revision moved after review" note, Commits card "Also on the branch · not this task's · 1cc5726" |
