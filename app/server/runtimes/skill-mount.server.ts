@@ -1,113 +1,74 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { z } from "zod";
 import {
   serializeFrontmatterFile,
   splitFrontmatter,
 } from "~/server/files/frontmatter.server";
-import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
+import {
+  resolveContainedSkillFile,
+  skillFrontmatterSchema,
+} from "~/server/files/skill-body.server";
 import { logger } from "~/server/logging/logger.server";
 
 /**
- * Viberr owns the run workspace's `.claude` catalog — END TO END.
+ * Viberr's granted skills reach a Claude run as a LOCAL PLUGIN beside the task
+ * checkout (ruling 180, pass 36) — never as files inside it.
  *
- * This module is the ONLY writer of `<workspace>/.claude`, and it does two
- * halves of one job:
+ * Two halves of one rule ("a governed run may see the resources its profile
+ * grants and NOTHING else"), kept in one module so a caller cannot do half:
  *
  *  1. {@link stripUngovernedRepoCatalog} (R18-3 / F18-8) — DELETE whatever
- *     `.claude` the cloned repository ships (or an earlier run left behind), so
- *     nothing ungoverned is discoverable.
- *  2. {@link mountGrantedSkills} — WRITE the agent's GRANTED skills back in as
- *     `.claude/skills/<name>/`, which is the filesystem contract the Claude
- *     Agent SDK's native skills mechanism reads, PLUS the `settings.json` that
- *     holds the checked-out repository's CLAUDE.md out of the run (see
- *     {@link CATALOG_SETTINGS}) — one write, because the SDK option that
- *     discovers the skills is the same option that opens that ingress.
+ *     `.claude` the cloned repository ships (or an agent wrote), so nothing
+ *     ungoverned is discoverable from the working tree.
+ *  2. {@link mountGrantedSkills} — BUILD the run's plugin at
+ *     `<checkout>/../.viberr-plugins/<runId>/` (`.claude-plugin/plugin.json` +
+ *     `skills/<name>/`), which the Claude adapter hands to the SDK as
+ *     `plugins: [{ type: "local", path }]` with the skills filtered by their
+ *     plugin-qualified names (`viberr:<name>`).
  *
- * Both halves exist because of the same rule: a governed run may see the
- * resources its profile grants and NOTHING else. Splitting them across modules
- * would let a caller do half the job — strip without mounting (skills silently
- * lost) or mount without stripping (the repo's own catalog stays discoverable
- * next to Viberr's, which is precisely the leak R18-3 closed). So the mount
- * calls the strip itself: after {@link mountGrantedSkills} returns, the
- * workspace's `.claude` holds Viberr content or nothing, unconditionally — the
- * guarantee no longer depends on the caller's ordering.
+ * F36-9 — why OUTSIDE the checkout. The mount used to write `.claude/skills`
+ * and a `settings.json` into the checkout and open `settingSources:
+ * ["project"]` over it, hiding the files from git through `.git/info/exclude`.
+ * Git did not see them; every OTHER tool that walks the tree did — the
+ * project's own `npm run check` (`prettier --check .`) failed in the agent
+ * workspace and passed in a clean clone, and two reviewer runs spent turns
+ * proving the tracked tree clean. A sibling directory is invisible to anything
+ * that scans the checkout, needs no exclude entry, and closes the CLAUDE.md
+ * ingress the project source used to open (nothing under cwd is a settings
+ * source any more, so nothing needs excluding). Canaried inside the image on
+ * 2026-09-11: the CLI lists the plugin's skill as `viberr:<name>` and the
+ * model invokes it.
  *
- * ONE workspace, MANY runs (F19-15). The checkout is per TASK, not per run, and
- * every engagement on that task shares it. See {@link MOUNT_MARK} for why the
- * strip is surgical rather than a `rm -rf`.
+ * ONE plugin per RUN (not per workspace): the checkout is shared by every
+ * engagement on the task, but each run's plugin is its own directory, removed
+ * when the run settles ({@link removeSkillPlugin}) — so a second run starting
+ * on the same workspace can no longer unmount a live run's skills (the F19-15
+ * race the old in-checkout mount needed a per-process marker to survive).
  */
 
 const execFileAsync = promisify(execFile);
 
-/**
- * F19-15 — the proof that VIBERR mounted a skill folder, in THIS process.
- *
- * The bug this closes: the workspace checkout belongs to the TASK, so a second
- * run starting while the first is still executing re-ran the strip over a live
- * run's `.claude` and deleted the skills it had just mounted. The first run kept
- * going with its granted craft silently gone — no error, no event, nothing a
- * human could see. Skills only WERE mounted natively from R18-5 onward, which is
- * what turned R18-3's strip from harmless into destructive.
- *
- * Why preservation and not a lock. Serializing strip+mount per workspace would
- * only shrink the window: run A holds its skills for its whole RUN (minutes),
- * not for the duration of its mount (milliseconds), and no mutex around the
- * mount can span that. The unmount has to become impossible, so the strip must
- * be able to tell Viberr's own mounts from everything else and keep them.
- *
- * Why a per-process random mark and not a fixed filename. `.claude` arrives from
- * an UNTRUSTED clone — a repository that shipped `.claude/skills/x/<marker>`
- * with a guessable value would survive the strip and re-open exactly the R18-3
- * leak. The mark is minted once per process and never leaves it, so no repo (and
- * no leftover from a previous process, whose runs are dead anyway) can forge it.
- *
- * What preservation does NOT weaken: only `.claude/skills/<name>/` folders this
- * process wrote survive. Everything else — `settings.json` and its hooks,
- * `commands/`, `agents/`, repo-authored skills — is still deleted on every run.
- * And a preserved folder is not usable by a run that did not mount it: the
- * adapter passes the SDK `skills: [<exactly this run's mounted names>]`, which
- * rejects every unlisted skill, and a run that mounted nothing gets
- * `settingSources: []` with the `Skill` tool denied outright
- * (claude-runtime.server:596-665). The allow-list is the fence — never the
- * directory listing.
- *
- * ACCEPTED RESIDUAL, stated rather than hidden: this module cannot tell a
- * FINISHED run's mount from a live one, so a mount is never collected — a
- * profile's skill folders stay readable in a co-engaged agent's cwd for the life
- * of the workspace. Not invokable (see above), and supporting runs already share
- * the delivering run's entire working tree, but not nothing. Collecting them
- * needs run liveness, which lives in `agent_runs` and would have to be passed in
- * by the caller (a mount ledger under `.git/` keyed by profile id, reconciled
- * against `running|queued` rows — the design in
- * `planning/discovery-2026-08-06-pass19/spec-skill-mount-race.md`). That is a
- * signature change through `mountGrantedSkills` and `cloneRepo`; this fix stays
- * inside the module. Losing a live run's craft is the harm that had to stop.
- */
-const MOUNT_MARK = `viberr-skill-mount ${randomUUID()}`;
-const MOUNT_MARK_FILE = ".viberr-mount";
-/** A forged mark can only ever be as long as ours; never read more than that. */
-const MOUNT_MARK_MAX_BYTES = 256;
+/** The plugin name the CLI qualifies skills with: `viberr:<skill>`. */
+export const SKILL_PLUGIN_NAME = "viberr";
+/** The directory beside a checkout that holds every run's plugin. */
+export const SKILL_PLUGINS_DIR = ".viberr-plugins";
 
 /**
  * R18-3 / F18-8 — remove the cloned repo's own `.claude` catalog from the run's
  * working tree so the Claude CLI cannot discover its ungoverned slash-commands,
  * settings (hooks!), sub-agents and skills. A governed run needs nothing from
  * the repo's `.claude`: its own craft arrives through its profile's grants
- * (mounted below on Claude, injected as prompt text on Codex).
+ * (the run plugin on Claude, prompt text on Codex).
  *
  * `.claude` is TRACKED in many repos (incl. viberr itself: launch.json, skills,
  * submodule gitlinks), and delivery auto-commits the working tree with `git add
@@ -118,9 +79,8 @@ const MOUNT_MARK_MAX_BYTES = 256;
  * index. (A run whose task is to edit the repo's own `.claude` cannot deliver
  * those edits — the intended governance posture, not a bug.)
  *
- * F19-15: the ONE thing it does not delete is a skill folder THIS process
- * mounted ({@link MOUNT_MARK}) — those belong to a run that may still be using
- * them. Everything else in the catalog goes, on every call.
+ * Since ruling 180 nothing of Viberr's lives in this directory, so the strip
+ * is whole: every entry goes, on every call.
  */
 export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void> {
   const catalog = path.join(repoDir, ".claude");
@@ -148,80 +108,7 @@ export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void>
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
-  const ours = ownMountedSkillNames(catalog);
-  if (ours.length === 0) {
-    // Nothing of ours is in there — the R18-3 behaviour, unchanged.
-    rmSync(catalog, { recursive: true, force: true });
-    return;
-  }
-  // A live run's skills are in here. Take out everything else BY NAME rather
-  // than deleting and re-creating: another run is reading these files right now,
-  // so there must be no window in which they are absent.
-  //
-  // V6 — `settings.json` is one of those files. The run whose mounts we are
-  // preserving has `settingSources: ['project']` OPEN over this catalog, and
-  // our excludes file is the only thing in it keeping the repository's CLAUDE.md
-  // out of that run's system prompt ({@link CATALOG_SETTINGS}). Deleting it —
-  // which is what "everything else goes" used to mean — reopened that ingress
-  // under a run already executing. Ours is a constant, so we OVERWRITE it in
-  // place first (same content that run started with, and no window in which it
-  // is absent) and delete it only if that write fails, because a repo-authored
-  // `settings.json` surviving is the R18-3 hook leak and must lose to it. If
-  // the delete cannot happen either, this throws and the run dies with it —
-  // fail closed, rather than starting over a catalog we do not own.
-  //
-  // No survivors ⇒ the whole catalog goes, above, and that stays right: nobody
-  // is reading it, and a run of ours that mounts nothing keeps
-  // `settingSources: []`, so it opens no project source to protect.
-  if (!writeCatalogSettings(repoDir)) {
-    rmSync(path.join(catalog, CATALOG_SETTINGS_FILE), {
-      recursive: true,
-      force: true,
-    });
-  }
-  for (const entry of readdirSync(catalog)) {
-    if (entry !== "skills" && entry !== CATALOG_SETTINGS_FILE) {
-      rmSync(path.join(catalog, entry), { recursive: true, force: true });
-    }
-  }
-  const skillsRoot = path.join(catalog, "skills");
-  for (const entry of readdirSync(skillsRoot)) {
-    if (!ours.includes(entry)) {
-      rmSync(path.join(skillsRoot, entry), { recursive: true, force: true });
-    }
-  }
-}
-
-/**
- * The `.claude/skills` entries THIS process mounted — the only survivors of a
- * strip (F19-15). Anything unreadable, symlinked, or carrying a mark we did not
- * write is NOT ours and is reported as such, so the caller deletes it.
- */
-function ownMountedSkillNames(catalogDir: string): string[] {
-  const skillsRoot = path.join(catalogDir, "skills");
-  try {
-    // `lstat`, so a `.claude/skills` SYMLINK (a repo pointing the catalog at
-    // some other tree) is never walked — it reads as "nothing of ours", and the
-    // whole catalog is removed.
-    if (!lstatSync(skillsRoot).isDirectory()) return [];
-    return readdirSync(skillsRoot).filter((name) =>
-      isOwnMountedSkill(path.join(skillsRoot, name)),
-    );
-  } catch {
-    return [];
-  }
-}
-
-function isOwnMountedSkill(skillDir: string): boolean {
-  try {
-    if (!lstatSync(skillDir).isDirectory()) return false;
-    const mark = path.join(skillDir, MOUNT_MARK_FILE);
-    const stat = lstatSync(mark);
-    if (!stat.isFile() || stat.size > MOUNT_MARK_MAX_BYTES) return false;
-    return readFileSync(mark, "utf8").trim() === MOUNT_MARK;
-  } catch {
-    return false;
-  }
+  rmSync(catalog, { recursive: true, force: true });
 }
 
 /**
@@ -244,74 +131,115 @@ export function isSdkSkillName(name: string): boolean {
   return SDK_SKILL_NAME_RE.test(name);
 }
 
-/** What a workspace mount produced. */
+/** The run's plugin, as the Claude adapter hands it to the SDK. */
+export interface SkillPlugin {
+  /** Absolute plugin root: the directory holding `.claude-plugin/plugin.json`. */
+  path: string;
+  /** The manifest's `name` — the prefix of every skill's qualified name. */
+  name: string;
+}
+
+/** What a run's mount produced. */
 export interface SkillMount {
-  /** Exact names the SDK will discover — pass these as `options.skills`. */
+  /** Exact skill names the plugin carries — the persona announces these, the
+   *  adapter qualifies them as `<plugin>:<name>` for `options.skills`. */
   mounted: string[];
   /** Granted skills that did NOT mount, with the reason (they fall back to
    *  prompt-text injection, so this is diagnostic, not capability loss). */
   skipped: { name: string; reason: string }[];
+  /** The plugin directory, when anything mounted; null otherwise. */
+  plugin: SkillPlugin | null;
 }
 
-/** No checkout ⇒ no project source we control ⇒ no native skills (see below). */
+/** No checkout ⇒ nothing to mount BESIDE ⇒ no native skills (see below). */
 const NO_WORKSPACE_REASON =
-  "this run has no git checkout to mount skills into (Viberr injects it as prompt text instead)";
+  "this run has no git checkout to mount skills beside (Viberr injects it as prompt text instead)";
 
-/** The mount succeeded but its half of the ingress did not (see the write). */
-const NO_CATALOG_SETTINGS_REASON =
-  "the workspace settings that keep the repository's CLAUDE.md out of this run could not be written, so nothing is mounted natively (Viberr injects it as prompt text instead)";
+/** The plugin root could not be built at all: nothing is listed natively. */
+const NO_PLUGIN_REASON =
+  "the run's skill plugin directory could not be written (Viberr injects it as prompt text instead)";
+
+/** Where a run's plugin lives: a sibling of the checkout, named by the run. */
+export function skillPluginDir(workspaceDir: string, runId: string): string {
+  return path.join(path.dirname(workspaceDir), SKILL_PLUGINS_DIR, runId);
+}
 
 /**
- * Copy each GRANTED skill from the store into `<workspace>/.claude/skills/<name>`
- * so the Claude Agent SDK discovers it natively.
+ * Build the run's plugin beside the checkout: copy each GRANTED skill from the
+ * store into `<plugin>/skills/<name>` and write the manifest the CLI reads.
  *
- * WHY A WORKSPACE MOUNT AND NOT A SETTINGS DIR: the SDK's `settingSources:
- * ['project']` source is `<cwd>/.claude` plus every parent UP TO THE REPO ROOT.
- * The run's cwd is the task's workspace CHECKOUT, whose root is that repo root —
- * so the walk stops inside a directory Viberr just rewrote and cannot reach the
- * data root, let alone a host repo above it (the F13 leak: `docker-data/` lives
- * INSIDE the viberr checkout on a dev machine, so a cwd that is not itself a
- * repo root could walk straight into the host's `.claude`). That is why this
- * refuses to mount anywhere that is not a plain git checkout: the isolation
- * guarantee and the enable-switch are the same fact. A run with no checkout
- * keeps prompt-text injection, which is exactly today's behaviour.
+ * WHY BESIDE THE CHECKOUT AND NOT INSIDE (F36-9, ruling 180): see the module
+ * note. Why the checkout is still required: the plugin is a sibling of the
+ * working tree, and a run with no checkout runs in the bare task directory
+ * with no tree to be beside — it keeps prompt-text injection, exactly as it
+ * always has. The strip of the repo's own `.claude` still happens here, on
+ * every run (fresh AND resume), because the workspace is shared and an agent
+ * can write a catalog between two runs.
  *
- * NEVER SHIPPED: `.claude/` is appended to the checkout's `.git/info/exclude`
- * (repo-local, never committed, and it takes effect for the agent's own commits
- * as well as viberr's `git add -A` delivery finalization).
+ * `runId` names the directory. It is the run's id when the dispatch reserved
+ * a row before the mount (every dispatched run with a principal) and a fresh
+ * id otherwise (a resume, or a run about to be refused); removal never depends
+ * on the name — `removeSkillPlugin` takes the path the run carried.
  *
- * Returns the mounted names — the caller passes exactly these to the SDK and
- * suppresses their prompt-text injection. EMPTY when the catalog settings could
- * not be written: the native channel and the CLAUDE.md excludes are one
- * decision, never half of one (see {@link CATALOG_SETTINGS}).
+ * Returns the mounted names and the plugin — the caller passes both to the
+ * run and suppresses the mounted skills' prompt-text injection. `plugin` is
+ * null (and `mounted` empty) when nothing mounted, so the adapter keeps the
+ * fully isolated shape and the `Skill` tool stays denied.
  */
 export async function mountGrantedSkills(input: {
   /** The run's git checkout (`clone.dir`), or null when it has none. */
   workspaceDir: string | null;
   /** The profile's GRANTED skill names, in declaration order. */
   skills: readonly string[];
+  /** The run id (or a fresh id when the run has none yet) — the plugin
+   *  directory's name. */
+  runId: string;
   dataRoot?: string;
 }): Promise<SkillMount> {
   const names = [...new Set(input.skills)];
   if (names.length === 0) {
-    return { mounted: [], skipped: [] };
+    return { mounted: [], skipped: [], plugin: null };
   }
   const dir = input.workspaceDir;
-  if (!dir || !isPlainGitCheckout(dir)) {
+  if (!dir || !isDirectory(dir)) {
     return {
       mounted: [],
       skipped: names.map((name) => ({ name, reason: NO_WORKSPACE_REASON })),
+      plugin: null,
     };
   }
 
   // Strip FIRST, every run (fresh clone AND resume): the repo may ship its own
-  // `.claude`, and a previous run on this same workspace may have written one —
-  // including a `settings.json`, whose hooks the project setting source would
-  // execute. After this line the catalog holds only what the loop below writes.
+  // `.claude`, and an agent may have written one — including a `settings.json`
+  // whose hooks a project settings source would execute. No run opens that
+  // source any more (ruling 180), and the working tree still must not carry
+  // an ungoverned catalog for the model to read by hand.
   await stripUngovernedRepoCatalog(dir);
-  excludeCatalogFromDelivery(dir);
 
-  const skillsRoot = path.join(dir, ".claude", "skills");
+  const pluginRoot = skillPluginDir(dir, input.runId);
+  const skillsRoot = path.join(pluginRoot, "skills");
+  try {
+    // A stale directory under this name (a run id reused by a resume that
+    // died mid-mount) must not leak an earlier grant set into this run.
+    rmSync(pluginRoot, { recursive: true, force: true });
+    mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+      `${JSON.stringify(PLUGIN_MANIFEST)}\n`,
+    );
+  } catch (error) {
+    logger.warn("could not build the run's skill plugin — injected as prompt text", {
+      pluginRoot,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    rmSync(pluginRoot, { recursive: true, force: true });
+    return {
+      mounted: [],
+      skipped: names.map((name) => ({ name, reason: NO_PLUGIN_REASON })),
+      plugin: null,
+    };
+  }
+
   const mounted: string[] = [];
   const skipped: { name: string; reason: string }[] = [];
   for (const name of names) {
@@ -319,37 +247,10 @@ export async function mountGrantedSkills(input: {
     if (reason) skipped.push({ name, reason });
     else mounted.push(name);
   }
-  // The excludes file is the OTHER HALF of the native channel, not a decoration
-  // on top of it: the adapter opens `settingSources: ['project']` for a run that
-  // mounted skills, and that same option is what lets the checked-out repo's
-  // CLAUDE.md reach the model as system-prompt-tier instruction. So a mount
-  // whose settings write fails mounts NOTHING — every grant falls back to the
-  // prompt-text injection the caller already implements, which costs the run
-  // progressive disclosure and costs governance nothing.
-  //
-  // The folders written above stay on disk under this process's mark: F19-15
-  // never collects a mount, because it cannot tell a finished run's from a live
-  // one's. They are inert for THIS run — with `mounted` empty the caller passes
-  // no `skills`, so the adapter keeps `settingSources: []` and the `Skill` tool
-  // denied, and an unlisted skill is unreachable either way.
-  // The CLAUDE.md excludes file is the precondition for opening
-  // `settingSources: ['project']` at all: a failed write EMPTIES `mounted`
-  // (C02-R6, pass 32: `mounted` is the one seam the adapter and the persona
-  // read — a separate `settingsWritten` flag said nothing `mounted` did not).
-  if (mounted.length > 0 && !writeCatalogSettings(dir)) {
-    skipped.push(
-      ...mounted.map((name) => ({ name, reason: NO_CATALOG_SETTINGS_REASON })),
-    );
-    mounted.length = 0;
-  }
   if (mounted.length === 0) {
-    // Leave the workspace exactly as a skill-less run would find it — but go
-    // back through the strip rather than `rm -rf`ing the catalog, so a
-    // CONCURRENT run's mounts survive our failure to mount anything (F19-15).
-    // With no live mounts present this deletes the whole `.claude`, settings
-    // file included, which is right: this run opens no project source. With
-    // survivors the strip re-establishes THEIR excludes file (see the strip).
-    await stripUngovernedRepoCatalog(dir);
+    // A run whose grants all miss looks exactly like a run with no grants: no
+    // empty plugin for the CLI to load.
+    rmSync(pluginRoot, { recursive: true, force: true });
   }
   if (skipped.length > 0) {
     logger.warn("granted skills did not mount natively — injected as prompt text", {
@@ -357,203 +258,65 @@ export async function mountGrantedSkills(input: {
       skipped,
     });
   }
-  return { mounted, skipped };
+  return {
+    mounted,
+    skipped,
+    plugin: mounted.length ? { path: pluginRoot, name: SKILL_PLUGIN_NAME } : null,
+  };
 }
 
 /**
- * F31-C4 — CLOSE the CLAUDE.md ingress that `settingSources: ['project']`
- * opens, through the one channel VERIFIED to work.
- *
- * Live probe (2026-08-31, in-container, canary CLAUDE.md + one-turn run with
- * exactly the options viberr passes): `Options.managedSettings.claudeMdExcludes`
- * is SILENTLY DROPPED — the SDK filters `managedSettings` restrictive-only
- * against an allowlist ("non-allowlisted keys are dropped regardless",
- * sdk.d.ts), and the excludes key is not on it. The canary leaked. The same
- * patterns written into `<cwd>/.claude/settings.json` — a file the project
- * settings source actually loads — flipped the canary to hidden.
- *
- * Viberr owns this file by construction: the strip removes every repo-shipped
- * `.claude` entry each run before this write, and the catalog rides
- * `.git/info/exclude` so it can never reach the delivery. The object contains
- * exactly the excludes — never hooks, never permissions — so the file cannot
- * become an instruction channel itself.
- *
- * V6 — this file is a PRECONDITION of the native skills channel, not an
- * improvement to it. `settingSources: ['project']` is one decision with two
- * effects: the SDK discovers `<cwd>/.claude/skills`, AND it reads the memory
- * files of the repository under review. Everything here therefore moves
- * together: {@link mountGrantedSkills} mounts nothing when this write fails,
- * {@link stripUngovernedRepoCatalog} re-establishes the file whenever it
- * preserves another run's live mounts, and the Claude adapter re-checks it
- * through {@link ensureCatalogSettings} before it opens the source at all.
- * "Best effort" here would mean the ingress is open on a path nobody watches.
+ * Remove a run's plugin directory — called by run-service when the run
+ * settles, and by the dispatch when a run fails before it starts. Only ever
+ * removes a path that sits under a `.viberr-plugins` directory: the plugin
+ * lives beside an UNTRUSTED checkout, and a path that is not ours to delete is
+ * left alone rather than trusted.
  */
-const CLAUDE_MD_EXCLUDES = [
-  "**/CLAUDE.md",
-  "**/CLAUDE.local.md",
-  "**/.claude/**",
-] as const;
-const CATALOG_SETTINGS = JSON.stringify({ claudeMdExcludes: CLAUDE_MD_EXCLUDES });
-const CATALOG_SETTINGS_FILE = "settings.json";
-
-/** Only shape enough to answer "are our patterns still in this file?" — the
- *  file is ours, but a live run may be reading a version an older process
- *  wrote, and a hand-edited one must read as absent rather than as trusted. */
-const catalogSettingsSchema = z.object({ claudeMdExcludes: z.array(z.string()) });
-/** Ours is ~70 bytes. Anything larger was written by the repo or by an agent
- *  in its own checkout, so it is not ours to trust OR to read into memory. */
-const CATALOG_SETTINGS_MAX_BYTES = 4096;
-
-/**
- * Write the excludes file; report whether it is now in place.
- *
- * Temp file + rename, not a plain overwrite: ONE workspace, MANY runs — a
- * concurrent run's SDK may be reading this exact path, and a rename swaps the
- * whole file in a single step, so no reader can observe the empty middle of a
- * truncate-then-write.
- */
-function writeCatalogSettings(repoDir: string): boolean {
-  const catalog = path.join(repoDir, ".claude");
-  const tmp = path.join(catalog, `${CATALOG_SETTINGS_FILE}.${randomUUID()}.tmp`);
+export function removeSkillPlugin(plugin: SkillPlugin | null | undefined): void {
+  if (!plugin) return;
+  if (path.basename(path.dirname(plugin.path)) !== SKILL_PLUGINS_DIR) {
+    logger.warn("refusing to remove a skill plugin outside the plugins directory", {
+      path: plugin.path,
+    });
+    return;
+  }
   try {
-    writeFileSync(tmp, CATALOG_SETTINGS);
-    renameSync(tmp, path.join(catalog, CATALOG_SETTINGS_FILE));
-    return true;
+    rmSync(plugin.path, { recursive: true, force: true });
   } catch (error) {
-    try {
-      rmSync(tmp, { force: true });
-    } catch {
-      // A temp file we cannot remove is collected by the next strip, which
-      // keeps only `skills/` and the settings file itself.
-    }
-    logger.warn(
-      "could not write the catalog settings (CLAUDE.md excludes) — this run mounts no native skills",
-      {
-        repoDir,
-        err: error instanceof Error ? error : new Error(String(error)),
-      },
-    );
-    return false;
+    // Inert residue: no session names this path once its run has settled.
+    logger.warn("could not remove the run's skill plugin", {
+      path: plugin.path,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
   }
 }
 
-/**
- * The precondition seam the Claude adapter calls before opening
- * `settingSources: ['project']` — true only when the workspace really does hold
- * the excludes above.
- *
- * It REPAIRS rather than only reporting, because the workspace is shared: a
- * second engagement's mount strips this catalog on every run of its own, and
- * the agent of any live run can delete files inside its own checkout. Between
- * this run's mount and its start, the file can therefore go missing while the
- * skills it belongs to are still mounted. Rewriting a constant we own is exactly
- * as safe as writing it the first time, and it keeps the honest failure —
- * running without native skills — for the case where the filesystem genuinely
- * refuses us.
- *
- * Never CREATES a catalog, and never writes THROUGH one: `.claude` must already
- * be a real directory. Absent, it means nothing was mounted into this workspace
- * and there is nothing for a project source to read; a SYMLINK means every path
- * built from it lands wherever the repo (or a live agent) pointed it, which is
- * the one way this writer could leave the workspace at all.
- */
-export function ensureCatalogSettings(repoDir: string): boolean {
-  if (!repoDir) return false;
-  if (catalogSettingsInPlace(repoDir)) return true;
+/** Does the run's plugin still hold the manifest the CLI reads? The adapter
+ *  asks at start: a plugin somebody deleted between the mount and the spawn
+ *  must not be handed to the SDK as if it loaded. */
+export function skillPluginInPlace(plugin: SkillPlugin | null | undefined): boolean {
+  if (!plugin) return false;
   try {
-    if (!lstatSync(path.join(repoDir, ".claude")).isDirectory()) return false;
-  } catch {
-    return false;
-  }
-  return writeCatalogSettings(repoDir);
-}
-
-/**
- * Does the workspace catalog hold every exclude pattern we depend on?
- *
- * `lstat` first, and only a plain file of a plausible size: this path lives in
- * an UNTRUSTED checkout that a live agent can write to, so a symlink (pointing
- * the read anywhere) and an oversized file (read into memory at run start) both
- * read as "not ours" — and the repair above then replaces them with a rename,
- * which follows no symlink.
- */
-function catalogSettingsInPlace(repoDir: string): boolean {
-  const file = path.join(repoDir, ".claude", CATALOG_SETTINGS_FILE);
-  try {
-    const stat = lstatSync(file);
-    if (!stat.isFile() || stat.size > CATALOG_SETTINGS_MAX_BYTES) return false;
-    const parsed = catalogSettingsSchema.safeParse(
-      JSON.parse(readFileSync(file, "utf8")),
-    );
-    if (!parsed.success) return false;
-    return CLAUDE_MD_EXCLUDES.every((pattern) =>
-      parsed.data.claudeMdExcludes.includes(pattern),
-    );
+    return lstatSync(path.join(plugin.path, ".claude-plugin", "plugin.json")).isFile();
   } catch {
     return false;
   }
 }
 
-/** A plain checkout (`.git` is a real directory) — not a worktree/submodule
- *  pointer file, and not a bare directory that git never created. */
-function isPlainGitCheckout(dir: string): boolean {
+/** The manifest every run plugin carries. The CLI reads `name` (the qualified
+ *  skill prefix) and `version`; nothing here is an instruction channel. */
+const PLUGIN_MANIFEST = {
+  name: SKILL_PLUGIN_NAME,
+  description:
+    "Skills a Viberr project administrator attached to this agent's profile, mounted for one run.",
+  version: "1.0.0",
+} as const;
+
+function isDirectory(dir: string): boolean {
   try {
-    return lstatSync(path.join(dir, ".git")).isDirectory();
+    return lstatSync(dir).isDirectory();
   } catch {
     return false;
-  }
-}
-
-const EXCLUDE_ENTRY = ".claude/";
-
-/**
- * Keep the mounted catalog out of every commit.
- *
- * `.git/info/exclude` is the repo-LOCAL ignore file: it is not a tracked file,
- * so it can never itself appear in the review PR, and it binds `git add -A`
- * (viberr's delivery finalization) and the agent's own `git add`/`git status`
- * alike. A `.gitignore` edit would have been delivered as a change to the repo.
- */
-function excludeCatalogFromDelivery(repoDir: string): void {
-  const infoDir = path.join(repoDir, ".git", "info");
-  const file = path.join(infoDir, "exclude");
-  let current = "";
-  try {
-    current = readFileSync(file, "utf8");
-  } catch {
-    // No exclude file yet (a fresh `git init` usually writes one; a clone may
-    // not) — we create it below.
-  }
-  if (current.split(/\r?\n/).some((line) => line.trim() === EXCLUDE_ENTRY)) {
-    return; // idempotent: every run re-mounts, the entry is written once
-  }
-  try {
-    mkdirSync(infoDir, { recursive: true });
-    const gap = current === "" || current.endsWith("\n") ? "" : "\n";
-    writeFileSync(
-      file,
-      `${current}${gap}# Viberr: the run's granted skills are mounted here — never deliver them.\n${EXCLUDE_ENTRY}\n`,
-    );
-  } catch (error) {
-    // C10.5: non-fatal on purpose (a broken exclude write must not abort the
-    // run), but this is a real delivery-safety gap, not routine noise — with
-    // no working `.git/info/exclude` entry, the mounted `.claude/skills`
-    // catalog is NOT git-ignored, so a later `git add -A` (viberr's delivery
-    // finalization, or the agent's own commit) can sweep the granted skill
-    // folders into the PR. Keep this at WARN and name the risk explicitly so
-    // it is findable in the run log rather than reading as a generic I/O
-    // warning. A cheap follow-up (out of scope here, would need a
-    // `mountGrantedSkills`/`SkillMount` shape change every caller picks up)
-    // would be to return an `excluded: boolean` flag so a caller could refuse
-    // delivery or surface this to a human instead of only logging it.
-    logger.warn(
-      "could not write .git/info/exclude — the mounted skill catalog is NOT git-ignored and may be swept into the delivered PR",
-      {
-        repoDir,
-        excludeFile: file,
-        err: error instanceof Error ? error : new Error(String(error)),
-      },
-    );
   }
 }
 
@@ -580,11 +343,6 @@ function mountOneSkill(
 
   const src = path.dirname(resolved.file);
   const dest = path.join(skillsRoot, name);
-  // Is another run of this process already using a mount under this name? Same
-  // process ⇒ same store ⇒ `name` resolves to the same folder, so re-copying
-  // over it is a no-op in content. What must NOT happen is the failure path
-  // below deleting a mount that is not ours to delete (F19-15).
-  const liveMount = isOwnMountedSkill(dest);
   try {
     mkdirSync(skillsRoot, { recursive: true });
     // The WHOLE folder: skills are multi-file (checklists/, examples.md, scripts)
@@ -624,28 +382,21 @@ function mountOneSkill(
         body,
       ),
     );
-    // LAST — the mark is what makes this folder survive the next run's strip
-    // (F19-15), so it is only written once the mount is complete. A half-copied
-    // folder stays unmarked and is cleaned up like repo content.
-    writeFileSync(path.join(dest, MOUNT_MARK_FILE), `${MOUNT_MARK}\n`);
   } catch (error) {
-    // Only clean up a mount we were CREATING. If this name was already mounted
-    // for another live run, removing it would be the very silent unmount F19-15
-    // closes — and a partial re-copy of the identical store folder is strictly
-    // better than no folder at all. This run falls back to prompt-text
-    // injection either way, because we return a reason below.
-    if (!liveMount) rmSync(dest, { recursive: true, force: true });
-    logger.warn("granted skill could not be mounted into the run workspace", {
+    // A half-copied folder must not be listed: this run falls back to
+    // prompt-text injection for the skill, because we return a reason below.
+    rmSync(dest, { recursive: true, force: true });
+    logger.warn("granted skill could not be mounted into the run's plugin", {
       skill: name,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return "its files could not be copied into the run's workspace";
+    return "its files could not be copied into the run's skill plugin";
   }
   return null;
 }
 
 /** Refuse symlinks (they leave the store) and nested `.git` dirs (an imported
- *  skill folder carrying one would turn the workspace into nested repos). */
+ *  skill folder carrying one would turn the plugin into a nested repo). */
 function copyableEntry(src: string): boolean {
   if (path.basename(src) === ".git") return false;
   try {
@@ -654,15 +405,6 @@ function copyableEntry(src: string): boolean {
     return false;
   }
 }
-
-/**
- * The only frontmatter key a store file gets to keep (see the NORMALIZE note in
- * `mountOneSkill`). `.catch(undefined)` so a non-string `description` falls back
- * to the body's first line instead of failing the whole parse.
- */
-const skillFrontmatterSchema = z.object({
-  description: z.string().optional().catch(undefined),
-});
 
 /** The one-line description the model reads when deciding to invoke a skill. */
 function skillDescription(

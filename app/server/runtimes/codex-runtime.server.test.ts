@@ -11,12 +11,13 @@ import {
   createCodexAdapter,
   INTERRUPT_SETTLE_GRACE_MS,
   resolveCodexReasoningEffort,
-  describeCodexSandbox,
-  resolveCodexSandboxMode,
   type CodexClient,
   type CodexThread,
 } from "./codex-runtime.server";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { ensureUserBackendHome } from "./user-homes.server";
 import { insertRunLine, upsertRun } from "./run-store.server";
 import { runFailureReason } from "../tasks/agent-reply.server";
 import { resetEnvCacheForTests } from "../config/env.server";
@@ -258,14 +259,13 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     const opOpts = operator.startOptions()!;
     expect(opOpts).toMatchObject({
-      // Parity ruling (2026-08-31): the operator is coordination machinery
-      // (its plan executes server-side), so it is read-only again, matching
-      // the Claude operator's OPERATOR_READ_ONLY_DENIED_TOOLS. Its OS-sandbox
-      // network stays off, same as the pre-R22 shape.
-      sandboxMode: "read-only",
+      // Ruling 185: no kind is OS-confined any more, the operator included —
+      // it holds no shell tool at all, so its confinement was never the thing
+      // that bound it. Its OS network is no longer forced off either.
+      sandboxMode: "danger-full-access",
       approvalPolicy: "never",
-      networkAccessEnabled: false,
     });
+    expect(opOpts.networkAccessEnabled).toBeUndefined();
     // B-2 (pass 24, owner ruling): web SEARCH now follows the grant on the
     // operator exactly as on a specialist. This SPEC does not withhold it, so web
     // search is ENABLED (option unset) — the operator honors `use-web-search-fetch`
@@ -283,11 +283,10 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     const opWithheldOpts = opWithheld.startOptions()!;
     expect(opWithheldOpts.webSearchMode).toBe("disabled");
-    expect(opWithheldOpts.networkAccessEnabled).toBe(false);
+    expect(opWithheldOpts.networkAccessEnabled).toBeUndefined();
 
-    // Ruling 101: a supporting run with NO withheld write family (this SPEC
-    // sets no repoWriteWithheld) is workspace-write — grants decide, never the
-    // role name. It keeps network for declared MCP resources.
+    // A supporting run is not confined for its role's name either (R22's core,
+    // now the whole rule — ruling 185).
     const reviewer = fakeCodex(events);
     createCodexAdapter({ codexFactory: reviewer.factory }).start(
       { ...SPEC, kind: "reviewer" },
@@ -295,7 +294,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
     );
     await drain();
     const revOpts = reviewer.startOptions()!;
-    expect(revOpts.sandboxMode).toBe("workspace-write");
+    expect(revOpts.sandboxMode).toBe("danger-full-access");
     expect(revOpts.networkAccessEnabled).toBeUndefined();
   });
 
@@ -316,10 +315,11 @@ describe("codex adapter (SDK, injected fake client)", () => {
     const withheldOpts = withheld.startOptions()!;
     expect(withheldOpts.webSearchMode).toBe("disabled");
     expect(withheldOpts.networkAccessEnabled).toBeUndefined();
-    // R22: an egress-withheld run is workspace-write, NOT danger-full-access —
-    // full access would force the network on and defeat the withheld egress.
-    // The workspace-write default (network off) is what actually gates it.
-    expect(withheldOpts.sandboxMode).toBe("workspace-write");
+    // Ruling 185: the run is not confined, so `webSearchMode` — the CLI's own
+    // tool switch — is the whole of what withheld egress binds on Codex. The
+    // OS-level network gate is gone with the sandbox, and the capability
+    // surfaces say what each half enforces.
+    expect(withheldOpts.sandboxMode).toBe("danger-full-access");
 
     const granted = fakeCodex(events);
     createCodexAdapter({ codexFactory: granted.factory }).start(SPEC, {
@@ -1101,189 +1101,74 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
   });
 });
 
-describe("parity ruling (2026-08-31): grants decide the codex sandbox; egress-gated runs stay workspace-write", () => {
-  it("a withheld repo-write run is READ-ONLY — the grant binds physically on Codex again", () => {
-    // The owner's parity ruling partially superseded R22: "reviewer is just a
-    // type of an agent; some agents should be able to write, some don't,
-    // related to their work/assignment, but parity between Claude and Codex is
-    // essential." Claude denies the write tools for this run; the read-only
-    // sandbox is the channel Codex respects. Even a fully-autonomous deliverer
-    // with egress never rises above the withheld family.
-    // Canary: drop the repoWriteWithheld arm from resolveCodexSandboxMode and
-    // this reads back "danger-full-access".
-    expect(
-      resolveCodexSandboxMode({
-        ...SPEC,
-        kind: "primary",
-        autonomous: true,
-        repoWriteWithheld: true,
-      }),
-    ).toBe("read-only");
-    expect(
-      resolveCodexSandboxMode({
-        ...SPEC,
-        kind: "reviewer",
-        autonomous: true,
-        repoWriteWithheld: true,
-      }),
-    ).toBe("read-only");
-  });
+describe("ruling 185: Viberr never OS-confines a Codex run", () => {
+  const KINDS = ["primary", "reviewer", "operator", "controller"] as const;
 
-  it("the evidence carve-out: a withheld run that posts files gets workspace-write, never full access", () => {
-    // Owner-chosen asymmetry: the sandbox cannot express "read-only except
-    // attachments/", and a read-only mode blocks the copy-into-attachments
-    // flow (F22-03). The carve-out widens exactly to workspace-write — the
-    // withheld family still caps the run below the unconditional-network tier.
-    expect(
-      resolveCodexSandboxMode({
-        ...SPEC,
-        kind: "reviewer",
-        autonomous: true,
-        repoWriteWithheld: true,
-        attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
-      }),
-    ).toBe("workspace-write");
-    expect(
-      resolveCodexSandboxMode({
-        ...SPEC,
-        kind: "primary",
-        autonomous: true,
-        repoWriteWithheld: true,
-        attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
-      }),
-    ).toBe("workspace-write");
-  });
-
-  it("C02-R8 (pass 32): only a DELIVERING run is a deliverer — a controller-kind run never reaches full access", () => {
-    // The old `kind !== "reviewer"` admitted `controller`; stated positively
-    // now. Canary: restore the negation and the controller reads full access.
-    expect(
-      resolveCodexSandboxMode({ ...SPEC, kind: "controller", autonomous: true }),
-    ).toBe("workspace-write");
-    expect(resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: true })).toBe(
-      "danger-full-access",
-    );
-  });
-
-  it("describeCodexSandbox names the evidence carve-out honestly (E32-3 fallback)", () => {
-    const carveOut = describeCodexSandbox({
-      kind: "reviewer",
-      autonomous: true,
-      repoWriteWithheld: true,
-      attachmentsWritableDir: "/data/projects/p/tasks/T-1/attachments",
-    });
-    expect(carveOut.mode).toBe("workspace-write");
-    expect(carveOut.note).toContain("advisory");
-    expect(carveOut.note).toContain("read-only-except-attachments");
-    // A plain withheld run is read-only with nothing to disclose…
-    expect(
-      describeCodexSandbox({ kind: "reviewer", autonomous: true, repoWriteWithheld: true }),
-    ).toEqual({ mode: "read-only", note: null });
-    // …and a granted run's workspace-write is what its grants say.
-    expect(describeCodexSandbox({ kind: "reviewer", autonomous: true })).toEqual({
-      mode: "workspace-write",
-      note: null,
-    });
-    // The operator is read-only by kind: an attachments dir on it is not a carve-out.
-    expect(
-      describeCodexSandbox({
-        kind: "operator",
-        autonomous: true,
-        repoWriteWithheld: true,
-        attachmentsWritableDir: "/x",
-      }),
-    ).toEqual({ mode: "read-only", note: null });
-  });
-
-  it("a write-GRANTED supporting run is workspace-write — never confined for its role's name (R22's core survives)", () => {
-    expect(resolveCodexSandboxMode({ ...SPEC, kind: "reviewer", autonomous: true })).toBe(
-      "workspace-write",
-    );
-  });
-
-  it("only an autonomous delivering run with egress gets danger-full-access", () => {
-    expect(
-      resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: true }),
-    ).toBe("danger-full-access");
-    // Supervised (non-autonomous) → workspace-write.
-    expect(
-      resolveCodexSandboxMode({ ...SPEC, kind: "primary", autonomous: false }),
-    ).toBe("workspace-write");
-  });
-
-  it("the operator is read-only — coordination machinery, like Claude's operator denylist", () => {
-    expect(resolveCodexSandboxMode({ ...SPEC, kind: "operator", autonomous: true })).toBe(
-      "read-only",
-    );
-  });
-
-  it("an egress-withheld run stays workspace-write so the network toggle binds", () => {
-    // Even an autonomous deliverer: danger-full-access forces the network on,
-    // which would defeat the withheld egress. Egress wins → workspace-write.
-    expect(
-      resolveCodexSandboxMode({
-        ...SPEC,
-        kind: "primary",
-        autonomous: true,
-        webSearchWithheld: true,
-      }),
-    ).toBe("workspace-write");
-  });
-
-  it("reaches the SDK thread options as read-only for a withheld run", async () => {
-    const run = fakeCodex([
-      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ]);
-    createCodexAdapter({ codexFactory: run.factory }).start(
-      { ...SPEC, autonomous: false, repoWriteWithheld: true },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(run.startOptions()?.sandboxMode).toBe("read-only");
-  });
-
-  /** R22 / F22-03 — the attachments dir is added at workspace-write (full access
-   * can already write it). Since no run is read-only anymore, an evidence-granted
-   * reviewer is workspace-write and CAN copy screenshots into attachments/, so
-   * the "Posting files" persona no longer promises a blocked write. */
-  it("widens the workspace-write sandbox with the attachments dir", async () => {
+  it("every kind, every grant shape, reaches the SDK as `danger-full-access` with no extra dirs", async () => {
+    // Canary: put ANY other mode back on one arm (a read-only operator, a
+    // workspace-write withheld run) and one of these fails. The owner removed
+    // the sandbox because every confined mode was a dead run on the compose
+    // deployment — bubblewrap's namespace refusal (F36-1) and the network-off
+    // seccomp filter's EPERM on every synchronous child process (F36-11).
     const DIR = "/data/projects/p/tasks/T-1/attachments";
-    const done = [
-      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ];
+    const postures = [
+      { label: "autonomous deliverer", spec: { kind: "primary", autonomous: true } },
+      { label: "supervised deliverer", spec: { kind: "primary", autonomous: false } },
+      { label: "write-withheld", spec: { kind: "reviewer", autonomous: true, repoWriteWithheld: true } },
+      { label: "egress-withheld deliverer", spec: { kind: "primary", autonomous: true, webSearchWithheld: true } },
+      {
+        label: "evidence-granted, write-withheld",
+        spec: { kind: "reviewer", autonomous: true, repoWriteWithheld: true, attachmentsWritableDir: DIR },
+      },
+    ] as const;
+    for (const posture of postures) {
+      const run = fakeCodex([
+        { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+      ]);
+      createCodexAdapter({ codexFactory: run.factory }).start(
+        { ...SPEC, ...posture.spec },
+        { onLine: () => {}, onExit: () => {} },
+      );
+      await drain();
+      expect(run.startOptions()?.sandboxMode, posture.label).toBe("danger-full-access");
+      // No `--add-dir`: full access already writes the attachments drop.
+      expect(run.startOptions()?.additionalDirectories, posture.label).toBeUndefined();
+    }
+    for (const kind of KINDS) {
+      const run = fakeCodex([
+        { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+      ]);
+      createCodexAdapter({ codexFactory: run.factory }).start(
+        { ...SPEC, kind, autonomous: true },
+        { onLine: () => {}, onExit: () => {} },
+      );
+      await drain();
+      expect(run.startOptions()?.sandboxMode, kind).toBe("danger-full-access");
+    }
+  });
 
-    const ws = fakeCodex(done);
-    createCodexAdapter({ codexFactory: ws.factory }).start(
-      { ...SPEC, autonomous: false, attachmentsWritableDir: DIR },
+  it("the operator's OS network is no longer forced off, and withheld web search still binds", async () => {
+    // `networkAccessEnabled` only ever bound below full access; keeping it
+    // would be a setting that reads as enforcement and is not one. Web SEARCH
+    // is the CLI's own tool and still follows the grant on BOTH kinds.
+    // Canary: set `networkAccessEnabled = false` for the operator again and the
+    // first assertion fails; drop the `webSearchWithheld` arm and the last does.
+    const op = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
+    createCodexAdapter({ codexFactory: op.factory }).start(
+      { ...SPEC, kind: "operator", autonomous: true },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(ws.startOptions()).toMatchObject({
-      sandboxMode: "workspace-write",
-      additionalDirectories: [DIR],
-    });
+    expect(op.startOptions()?.networkAccessEnabled).toBeUndefined();
+    expect(op.startOptions()?.webSearchMode).toBeUndefined();
 
-    // An evidence-granted reviewer (F22-03): now workspace-write, attachments writable.
-    const rev = fakeCodex(done);
-    createCodexAdapter({ codexFactory: rev.factory }).start(
-      { ...SPEC, kind: "reviewer", attachmentsWritableDir: DIR },
+    const withheld = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
+    createCodexAdapter({ codexFactory: withheld.factory }).start(
+      { ...SPEC, kind: "operator", autonomous: true, webSearchWithheld: true },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(rev.startOptions()).toMatchObject({
-      sandboxMode: "workspace-write",
-      additionalDirectories: [DIR],
-    });
-
-    // A fully-autonomous delivering run: danger-full-access, no widening needed.
-    const full = fakeCodex(done);
-    createCodexAdapter({ codexFactory: full.factory }).start(
-      { ...SPEC, attachmentsWritableDir: DIR },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(full.startOptions()?.sandboxMode).toBe("danger-full-access");
-    expect(full.startOptions()?.additionalDirectories).toBeUndefined();
+    expect(withheld.startOptions()?.webSearchMode).toBe("disabled");
   });
 });
 
@@ -1654,6 +1539,125 @@ describe("codex MCP write-tool denials (ruling 176)", () => {
  * started carries. The CLI inherits its full env; the model's shell and each
  * stdio server get only what is declared, so the marker is declared for both.
  */
+describe("per-run CODEX_HOME (ruling 181)", () => {
+  const homes = createTestDbContext();
+  afterEach(homes.cleanup);
+
+  /** A fake whose stream waits for `release()` before it completes, so a test
+   *  can look at the run home WHILE the CLI would be running. */
+  function gatedCodex() {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let factoryOpts: CodexOptions | undefined;
+    const thread: CodexThread = {
+      id: "0199a1f3-4c02-7d31",
+      async runStreamed() {
+        const gen = (async function* () {
+          await gate;
+          yield { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
+        })();
+        return { events: asSdkEvents(gen) };
+      },
+    };
+    const client: CodexClient = {
+      startThread: () => thread,
+      resumeThread: () => thread,
+    };
+    return {
+      factory: (options?: CodexOptions) => {
+        factoryOpts = options;
+        return client;
+      },
+      factoryOptions: () => factoryOpts,
+      release: () => release(),
+    };
+  }
+
+  it("spawns the CLI in a private run home seeded from the person's home, shares the state db, and carries the refreshed sign-in back when the run settles", async () => {
+    // F36-3 / Q36-11 (a): the person's shared codex-home is what
+    // `runCredentialFor` puts on spec.env; the adapter forks a per-run home
+    // off it so concurrent runs never share the CLI's `tmp/arg0` helper dir.
+    // Canary: hand the SDK `spec.env.CODEX_HOME` unchanged and the first
+    // expectation reads the shared home back.
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    writeFileSync(path.join(shared, "auth.json"), '{"tokens":"before"}');
+    const run = gatedCodex();
+    let exit: RunExit | undefined;
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      {
+        ...SPEC,
+        runId: "run_home1",
+        env: { CODEX_HOME: shared, VIBERR_RUN_ID: "run_home1" },
+      },
+      { onLine: () => {}, onExit: (e) => { exit = e; } },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const env = run.factoryOptions()?.env;
+    const runHome = path.join(shared, "runs", "run_home1");
+    expect(env?.CODEX_HOME).toBe(runHome);
+    // The CLI's thread/state db stays the person's, so resume and history
+    // keep working across runs.
+    expect(env?.CODEX_SQLITE_HOME).toBe(shared);
+    expect(env?.VIBERR_RUN_ID).toBe("run_home1");
+    expect(env?.PATH).toBe("/usr/bin");
+    // Live: the run home exists, seeded from the shared one.
+    expect(existsSync(runHome)).toBe(true);
+    expect(readFileSync(path.join(runHome, "auth.json"), "utf8")).toBe('{"tokens":"before"}');
+    // The CLI refreshes its token inside the run home…
+    writeFileSync(path.join(runHome, "auth.json"), '{"tokens":"after"}');
+
+    run.release();
+    await drain();
+    expect(exit?.outcome).toBe("finished");
+    // …and the settle carried it back and removed the run home.
+    expect(existsSync(runHome)).toBe(false);
+    expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"after"}');
+  });
+
+  it("removes the run home when the run is interrupted, too", async () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    const client: CodexClient = {
+      startThread: () => ({
+        id: "t",
+        async runStreamed(_input, turnOptions) {
+          return { events: stalledEvents(turnOptions?.signal) };
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not resumed");
+      },
+    };
+    let exit: RunExit | undefined;
+    const handle = createCodexAdapter({ codexFactory: () => client }).start(
+      { ...SPEC, runId: "run_home2", env: { CODEX_HOME: shared } },
+      { onLine: () => {}, onExit: (e) => { exit = e; } },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const runHome = path.join(shared, "runs", "run_home2");
+    expect(existsSync(runHome)).toBe(true);
+    handle.interrupt();
+    await drain();
+    expect(exit?.outcome).toBe("interrupted");
+    expect(existsSync(runHome)).toBe(false);
+  });
+
+  it("a run whose spec carries no home (no principal env) forks nothing", async () => {
+    const run = fakeCodex([
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(SPEC, {
+      onLine: () => {},
+      onExit: () => {},
+    });
+    await drain();
+    expect(run.factoryOptions()?.env?.CODEX_HOME).toBeUndefined();
+    expect(run.factoryOptions()?.env?.CODEX_SQLITE_HOME).toBeUndefined();
+  });
+});
+
 describe("codex run marker and settle sweep (ruling 174)", () => {
   const COMPLETED = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
   const MARKED: RunSpec = { ...SPEC, runId: "run_marked", env: { VIBERR_RUN_ID: "run_marked" } };

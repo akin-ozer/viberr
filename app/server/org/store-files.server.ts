@@ -32,6 +32,7 @@ import {
   STORE_TEXT_EXTENSION_LIST,
 } from "~/shared/text/store-extensions";
 import { logger } from "~/server/logging/logger.server";
+import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   getDefaultConnectionTokenFresh,
@@ -275,6 +276,20 @@ export interface UploadResult {
 }
 
 /**
+ * Is this write THE skill's SKILL.md — the root-level file the loader reads
+ * (`resolveContainedSkillFile`)? A SKILL.md nested in a sub-folder is a
+ * supporting file and is not judged as the skill.
+ */
+function isTheSkillMd(target: StoreTarget, base: string[], parts: string[]): boolean {
+  return (
+    target.kind === "skill" &&
+    base.length === 0 &&
+    parts.length === 1 &&
+    parts[0] === "SKILL.md"
+  );
+}
+
+/**
  * Writes uploaded files under `dirPath` (structure-preserving). Pre-checks
  * every path first — a conflict writes NOTHING. Same-name files are
  * replaced (mock merge semantics); a file never clobbers a directory.
@@ -295,6 +310,11 @@ export function writeStoreFiles(
   for (const file of cleaned) {
     const abs = path.join(target.rootAbs, ...base, ...file.parts);
     assertInsideRoot(target.rootAbs, abs);
+    // Ruling 183 (pass 36, F36-2): the skill's SKILL.md is judged with the
+    // other pre-flight checks, so a refusal writes NOTHING of the batch.
+    if (isTheSkillMd(target, base, file.parts)) {
+      assertSkillBodyWellFormed(file.data.toString("utf8"));
+    }
     if (existsSync(abs) && statSync(abs).isDirectory()) {
       throw AppError.validation(
         `A folder named “${file.parts[file.parts.length - 1]}” already exists there. Rename the file first.`,
@@ -319,14 +339,7 @@ export function writeStoreFiles(
     mkdirSync(path.dirname(abs), { recursive: true });
     writeFileSync(abs, file.data);
     if (file.parts.length > 1) topLevelDirs.add(file.parts[0]!);
-    if (
-      target.kind === "skill" &&
-      base.length === 0 &&
-      file.parts.length === 1 &&
-      file.parts[0] === "SKILL.md"
-    ) {
-      capturedSkillMd = true;
-    }
+    if (isTheSkillMd(target, base, file.parts)) capturedSkillMd = true;
   }
 
   if (cleaned.length > 0) {
@@ -496,6 +509,8 @@ export function writeStoreDoc(
       `${[...base, withExt].join("/")} already exists. Open it to edit, or pick another name.`,
     );
   }
+  // Ruling 183: the document editor is a SKILL.md writer too.
+  if (isTheSkillMd(target, base, [withExt])) assertSkillBodyWellFormed(body);
   mkdirSync(dirAbs, { recursive: true });
   writeFileSync(abs, body);
   touchResource(db, target);

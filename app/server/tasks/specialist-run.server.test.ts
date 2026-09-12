@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -58,12 +57,15 @@ import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
   lastRunSpec,
+  queueFakeRun,
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
 import {
   connectFakeBackend,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   assignReviewer,
   assignSpecialist,
@@ -76,6 +78,7 @@ import {
   buildSpecialistPersona,
   githubReadForRun,
   isDispatchHeld,
+  pinSupportCheckout,
   resolveResumeConfinement,
   type DispatchHeldError,
 } from "./specialist-run.server";
@@ -862,6 +865,60 @@ describe("startSpecialistRun", () => {
   });
 
   /**
+   * F36-8 (pass 36) — a run that switches backend must say which MODEL it ran
+   * on. Live (HLC): `retry_other_backend` re-ran the Server Developer on Claude;
+   * the deployment stores `gpt-5.6-luna` (a Codex id), specialist-run swapped it
+   * for the Claude default BEFORE run-service could see a foreign id, so the
+   * F21-13 substitution notice never fired, the timeline said only "switched
+   * from Codex", and the next operator dispatch ran on Claude/sonnet with nobody
+   * having chosen sonnet. The run row's model column was the only witness.
+   *
+   * Canary: restore `model = resolveRunModel(backend, undefined)` on the
+   * cross-backend branch and the log's first line is no longer the notice;
+   * drop the model clause from the switched-backend event and the timeline
+   * assertions fail.
+   */
+  it("F36-8: a switched-backend run discloses the substituted model in the run log AND on the timeline, and says the pin sticks", async () => {
+    // The live profile is Codex; its resolved model is the Codex default.
+    deployDevSpecialist(["codex"]);
+    await assign();
+    const profileModel = defaultModelFor("codex");
+    const ranModel = defaultModelFor("claude");
+
+    const retry = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await waitForLines(retry.runId, 1);
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: retry.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+
+    // The row names what actually ran …
+    expect(retry.backend).toBe("claude");
+    expect(getRun(store.db, retry.runId)!.model).toBe(ranModel);
+    // … the run log OPENS with the F21-13 notice naming both models (the
+    // profile's original id reached run-service, which did the swap) …
+    const first = listRunLines(store.db, retry.runId)[0]!;
+    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.text).toContain(profileModel);
+    expect(first.display.text).toContain(`\`${ranModel}\``);
+    // … and the timeline event names the model, the profile's own, and that
+    // later runs on this task stay on the pinned backend.
+    const event = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline.find((e) => e.text.includes("Started a Claude run"))!;
+    expect(event.text).toContain("switched from Codex");
+    expect(event.text).toContain(`on \`${ranModel}\``);
+    expect(event.text).toContain(`\`${profileModel}\` is a Codex model`);
+    expect(event.text).toContain("Later runs on this task stay on Claude");
+  });
+
+  /**
    * T7 (pass 31) — the resolution order is written once, as
    * `backendOverride ?? pinnedBackend ?? live deployment ?? snapshot`, and only
    * three of its four steps had a test. The pair the tests above never put in
@@ -1007,7 +1064,7 @@ describe("assignReviewer / removeReviewer", () => {
     expect(file.parsed.timeline[0]!.text).toContain("as a supporting agent.");
     expect(file.parsed.timeline[0]!.text).not.toContain("as a reviewer");
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.engagement.added" })[0]?.taskKey,
     ).toBe("VIB-1");
   });
 
@@ -1567,7 +1624,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     expect(run.agent_profile_id).toBe("dev");
     // The engage rode the dispatch: assignReviewer's own audit fired.
     expect(
-      listAuditEvents(store.db, { action: "task.reviewer.assigned" })[0]?.taskKey,
+      listAuditEvents(store.db, { action: "task.engagement.added" })[0]?.taskKey,
     ).toBe("VIB-1");
 
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
@@ -1733,7 +1790,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(new Set(spec.disallowedTools)).toEqual(
       new Set(resolveUndeployedDisallowedTools()),
     );
-    // The Codex sandbox + the web-egress channel both derive from that denylist.
+    // The repo-write posture + the web-egress channel both derive from that denylist.
     expect(spec.repoWriteWithheld).toBe(true);
     expect(spec.webSearchWithheld).toBe(true);
   });
@@ -2220,7 +2277,8 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(granted).not.toContain("Make the changes in the workspace");
 
     // A write-WITHHELD supporting run keeps the full read-only contract — its
-    // tools deny the edit on Claude and the sandbox is read-only on Codex.
+    // tools deny the edit on Claude; on Codex the prompt and the delivery gate
+    // carry it (ruling 185).
     const withheld = buildAnalyzePrompt({
       ...base,
       delivers: false,
@@ -2265,6 +2323,23 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       reviewSubject: { headSha: head, prNumber: 114 },
     });
     expect(delivering).not.toContain("PINNED to the delivered revision");
+  });
+
+  it("ruling 185: no prompt claims an OS sandbox, on either backend", () => {
+    // Ruling 184's section existed to explain an `EPERM` the CLI's own sandbox
+    // produced; with the sandbox gone (owner Q36-14) the section would describe
+    // a confinement the run does not have. Canary: re-add it.
+    for (const delivers of [true, false]) {
+      const prompt = buildAnalyzePrompt({
+        ...base,
+        delivers,
+        delivery: delivers
+          ? { canBranch: true, canCommitPush: true, canOpenPr: true }
+          : { canBranch: false, canCommitPush: false, canOpenPr: false },
+      });
+      expect(prompt).not.toContain("This sandbox will not let you");
+      expect(prompt).not.toContain("sandbox denied the child process");
+    }
   });
 
   it("R-B: a SUPPORTING run is told to answer what was asked, not always review", () => {
@@ -2980,7 +3055,7 @@ describe("buildSpecialistPersona — attached resources", () => {
 
     // Mounted: announced (with its provenance, so the agent does not read its
     // own workspace files as an injection attempt) but NOT inlined.
-    expect(persona).toContain("Attached skills (trusted — installed in your workspace)");
+    expect(persona).toContain("Attached skills (trusted — attached to this run as the `viberr` plugin)");
     expect(persona).toContain("mounted-craft");
     expect(persona).not.toContain("SENTINEL-MOUNTED-BODY");
     expect(persona).not.toContain("mounted-craft (skill)");
@@ -3353,26 +3428,49 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     }
   }
 
-  it("mounts the grant into the workspace, passes it to the SDK, and stops injecting the body", async () => {
-    // End to end on the fresh-run path: store grant → workspace mount → RunSpec.
+  it("mounts the grant as the run's plugin beside the workspace, passes it to the SDK, stops injecting the body, and removes it when the run settles", async () => {
+    // End to end on the fresh-run path: store grant → plugin mount → RunSpec.
+    // Ruling 180 (F36-9): the plugin sits BESIDE the checkout, named by the
+    // run, and nothing of Viberr's lands inside the tree the project's own
+    // tools scan; run-service removes the plugin when the run settles.
     // Canary: drop `skills: skillMount.mounted` from the startRun call and the
     // spec assertion fails; drop `nativeSkills` from buildSpecialistPersona and
-    // the body reappears in the system prompt.
+    // the body reappears in the system prompt; drop `removeSkillPlugin` from
+    // the exit handler and the directory outlives the run.
     const ws = await workspaceCheckout();
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await runDev();
+    await assignSpecialist(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    // A run that stays LIVE, so the plugin can be inspected while it exists.
+    queueFakeRun({ lines: [], keepRunning: true });
+    const run = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
 
-    expect(lastRunSpec()?.skills).toEqual(["conventional-commits"]);
-    const mounted = path.join(ws, ".claude", "skills", "conventional-commits", "SKILL.md");
-    expect(existsSync(mounted)).toBe(true);
+    const spec = lastRunSpec()!;
+    expect(spec.skills).toEqual(["conventional-commits"]);
+    const plugin = path.join(path.dirname(ws), ".viberr-plugins", run.runId);
+    expect(spec.skillPlugin).toEqual({ path: plugin, name: "viberr" });
+    const mounted = path.join(plugin, "skills", "conventional-commits", "SKILL.md");
     expect(readFileSync(mounted, "utf8")).toContain("SENTINEL-SKILL-BODY");
+    // Nothing under the checkout, no exclude entry, and git sees nothing.
+    expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+    expect(readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8")).not.toContain(".claude");
     // The body is NOT in the prompt any more — the SDK loads it on invocation.
-    const sys = lastRunSpec()?.systemPrompt ?? "";
+    const sys = spec.systemPrompt ?? "";
     expect(sys).not.toContain("SENTINEL-SKILL-BODY");
-    expect(sys).toContain("installed in your workspace");
+    expect(sys).toContain("attached to this run as the `viberr` plugin");
+    expect(sys).toContain("`viberr:<name>`");
     expect(sys).toContain("conventional-commits");
+
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda));
+    expect(existsSync(plugin)).toBe(false);
   });
 
   it("keeps the prompt-text injection on CODEX — its skills channel is severed (LV-13)", async () => {
@@ -3463,18 +3561,25 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
     expect(confinement.skills).toEqual(["conventional-commits"]);
     expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
-    expect(confinement.systemPrompt ?? "").toContain("installed in your workspace");
+    expect(confinement.systemPrompt ?? "").toContain("attached to this run as the `viberr` plugin");
+    // Ruling 180: the resumed run gets its OWN plugin beside the checkout
+    // (a fresh id: the resumed row does not exist yet) and nothing inside it.
+    expect(confinement.skillPlugin?.name).toBe("viberr");
+    expect(path.dirname(confinement.skillPlugin!.path)).toBe(
+      path.join(path.dirname(ws), ".viberr-plugins"),
+    );
     expect(
-      existsSync(path.join(ws, ".claude", "skills", "conventional-commits")),
+      existsSync(path.join(confinement.skillPlugin!.path, "skills", "conventional-commits", "SKILL.md")),
     ).toBe(true);
+    expect(existsSync(path.join(ws, ".claude"))).toBe(false);
   });
 
   it("C02-R3 (pass 32): a RESUMED evidence-granted run keeps its attachments drop — dir, spec field and persona section", async () => {
     // `dev` holds a verdict grant only: repo-write is absent (grant-required
     // ⇒ withheld) and evidence absent (catalog default ⇒ granted) — the seeded
     // Reviewer's shape, and on Codex the carve-out. A resume used to drop
-    // `attachmentsWritableDir` — the sandbox's only extra writable root —
-    // while the persona still said "copy files into attachments/". Canary:
+    // `attachmentsWritableDir` — the path the persona names — while still
+    // saying "copy files into attachments/". Canary:
     // delete the `attachmentsWritableDir` block in resolveResumeConfinement.
     await workspaceCheckout();
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
@@ -3519,12 +3624,9 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(confinement.systemPrompt ?? "").not.toContain(
       `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
     );
-    // …and the disclosure names the sandbox this confinement yields on Codex:
-    // withheld write family + evidence ⇒ the carve-out, honestly labeled.
-    expect(confinement.runInputs.sandbox).toEqual({
-      mode: "workspace-write",
-      note: expect.stringContaining("advisory"),
-    });
+    // Ruling 185: the resumed inputs carry no sandbox row at all — Viberr
+    // confines neither backend, and the denied-tool list is the disclosure.
+    expect(confinement.runInputs).not.toHaveProperty("sandbox");
   });
 
   it("C32-2 (pass 32): a SUPPORTING checkout's base refs are refreshed from the project mirror, not frozen at the delivering checkout's clone-time origin", async () => {
@@ -3621,29 +3723,40 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       }
     }
 
-    it("Claude: the grant mounts alone — the decoy is in no spec field, no prompt, no workspace", async () => {
+    it("Claude: the grant mounts alone — the decoy is in no spec field, no prompt, no plugin", async () => {
       // Canary: make `mountGrantedSkills` mount the whole store (the "load
       // every skill on disk" regression) and both the `skills` filter and the
-      // workspace-catalog assertions fail.
+      // plugin-catalog assertions fail.
       const ws = await workspaceCheckout();
       writeOrgSkills();
       deployWithSkills(["developer-expertise"]);
 
-      await runDev();
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      // A run that stays LIVE, so the plugin can be inspected while it exists
+      // (run-service removes it the moment the run settles, ruling 180).
+      queueFakeRun({ lines: [], keepRunning: true });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
 
       const spec = lastRunSpec()!;
       // (1) the native SDK channel (R18-5 / ruling 51) — exactly the grant.
       expect(spec.skills).toEqual(["developer-expertise"]);
-      // (2) the catalog the SDK resolves that filter against — exactly the grant.
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
-        "developer-expertise",
-      ]);
+      // (2) the plugin the SDK resolves that filter against — exactly the grant,
+      //     beside the checkout and never inside it (ruling 180).
+      const plugin = spec.skillPlugin!.path;
+      expect(path.dirname(plugin)).toBe(path.join(path.dirname(ws), ".viberr-plugins"));
+      expect(readdirSync(path.join(plugin, "skills"))).toEqual(["developer-expertise"]);
       expect(
-        readFileSync(
-          path.join(ws, ".claude", "skills", "developer-expertise", "SKILL.md"),
-          "utf8",
-        ),
+        readFileSync(path.join(plugin, "skills", "developer-expertise", "SKILL.md"), "utf8"),
       ).toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actor(store.users.arda));
       // (3) NOTHING the run is handed names the decoy or carries its body —
       // system prompt, turn prompt, tool policy, env, MCP config, all of it.
       const assembled = JSON.stringify(spec);
@@ -3726,31 +3839,22 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       await runDev();
 
-      // The repo's own catalog is gone from the working tree — F31-C4: the
-      // settings file that remains is VIBERR'S OWN (CLAUDE.md excludes only,
-      // never hooks), written by the mount after the strip.
-      const rewrittenSettings = z
-        .record(z.string(), z.unknown())
-        .parse(
-          JSON.parse(readFileSync(path.join(ws, ".claude", "settings.json"), "utf8")),
-        );
-      expect(Object.keys(rewrittenSettings)).toEqual(["claudeMdExcludes"]);
-      expect(existsSync(path.join(ws, ".claude", "skills", "repo-rogue"))).toBe(false);
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
-        "granted-craft",
-      ]);
+      // The repo's own catalog is gone from the working tree — whole (ruling
+      // 180): no settings file of anyone's remains, hooks included, and the
+      // grant lives in the run's plugin beside the checkout instead.
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(lastRunSpec()?.skills).toEqual(["granted-craft"]);
       // …and nothing of it reached the run.
       const assembled = JSON.stringify(lastRunSpec());
       expect(assembled).not.toContain("repo-rogue");
       expect(assembled).not.toContain("SENTINEL-REPO-ROGUE-SKILL");
       expect(assembled).not.toContain("SENTINEL-REPO-HOOK");
-      // R18-3's delivery half: git sees no change (skip-worktree) and the mount
-      // is excluded, so delivering from this workspace ships no catalog edit.
+      // R18-3's delivery half: git sees no change (skip-worktree), so
+      // delivering from this workspace ships no catalog edit — and no exclude
+      // entry is needed for a mount that never enters the tree.
       const status = await exec("git", ["-C", ws, "status", "--porcelain"]);
       expect(status.stdout).not.toContain(".claude");
-      expect(
-        readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8"),
-      ).toContain(".claude/");
+      expect(readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8")).not.toContain(".claude");
     });
 
     it("strips it even when the profile grants NO skills (the mount never runs)", async () => {
@@ -3804,17 +3908,11 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       );
 
       expect(confinement.skills).toEqual(["granted-craft"]);
-      // F31-C4: the agent-written hooks settings died with the strip; the file
-      // now present is viberr's excludes-only rewrite.
-      const resumedSettings = readFileSync(
-        path.join(ws, ".claude", "settings.json"),
-        "utf8",
-      );
-      expect(resumedSettings).not.toContain("SENTINEL-AGENT-HOOK");
-      expect(
-        Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(resumedSettings))),
-      ).toEqual(["claudeMdExcludes"]);
-      expect(readdirSync(path.join(ws, ".claude", "skills"))).toEqual([
+      // The agent-written hooks settings died with the strip, and nothing
+      // replaced them (ruling 180: no run reads the checkout as a settings
+      // source); the grant is in the resumed run's own plugin.
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(readdirSync(path.join(confinement.skillPlugin!.path, "skills"))).toEqual([
         "granted-craft",
       ]);
       expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SELF-WRITTEN");
@@ -3895,17 +3993,21 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(spec.skills).toEqual(["critic-craft"]);
       // P8 (pass 25): the reviewer runs in its OWN isolated checkout
       // (`workspace/support/<profileId>/<repo>`), not the delivering tree, so its
-      // skills mount THERE — and the delivering checkout stays untouched.
+      // plugin sits beside THAT checkout (ruling 180) — and the delivering
+      // checkout and its neighbourhood stay untouched.
       const criticWs = path.join(
         path.dirname(ws),
         "support",
         "critic",
         path.basename(ws),
       );
-      expect(readdirSync(path.join(criticWs, ".claude", "skills"))).toEqual([
-        "critic-craft",
-      ]);
-      expect(existsSync(path.join(ws, ".claude", "skills"))).toBe(false);
+      expect(spec.skillPlugin).toEqual({
+        path: path.join(path.dirname(criticWs), ".viberr-plugins", run.runId),
+        name: "viberr",
+      });
+      expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+      expect(existsSync(path.join(criticWs, ".claude"))).toBe(false);
+      expect(existsSync(path.join(path.dirname(ws), ".viberr-plugins"))).toBe(false);
       const assembled = JSON.stringify(spec);
       expect(assembled).not.toContain("deliverer-craft");
       expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
@@ -4263,13 +4365,11 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(JSON.parse(raw)).toMatchObject({ type: "run_inputs", source: "viberr" });
   });
 
-  it("pass 32 (E32-3 fallback): a Codex run discloses its sandbox, and the carve-out is labeled advisory", async () => {
-    // `dev` holds a verdict grant only: repo-write absent (grant-required ⇒
-    // withheld), evidence absent (catalog default ⇒ granted) — the seeded
-    // Reviewer's shape, which on Codex is the carve-out. The human reading the
-    // console sees the mode AND why it is not read-only. (An EMPTY grant list
-    // would run fully withheld — P13-AP-06 — and read back read-only.)
-    // Canary: return null from runSandboxDisclosure for codex.
+  it("ruling 185: a Codex run's inputs carry NO sandbox row — and the withheld grant still reaches the run", async () => {
+    // The row disclosed the Codex OS sandbox; there is none now. What must
+    // survive is the thing the row was really about: the run's denied tools,
+    // which the prompt and the delivery gate act on. Canary: re-add
+    // `sandbox: runSandboxDisclosure(...)` to the inputs and this fails.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     const verdictOnly = [{ capabilityId: "report-validation-verdict", mode: "direct" as const }];
@@ -4292,33 +4392,11 @@ describe("P19-G11 — the run records what it was given", () => {
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const runId = await assignAndRun();
-    const inputs = inputsLine(runId);
-    expect(inputs!.sandbox).toEqual({
-      mode: "workspace-write",
-      note: expect.stringContaining("advisory"),
-    });
-    // The Claude run has no OS sandbox — the denylist is the disclosure.
-    writeProject(store.dataRoot, {
-      ...fm,
-      agents: [
-        {
-          profileId: "dev",
-          capabilities: verdictOnly,
-          extras: [],
-          definition: {
-            kind: "specialist",
-            name: "dev",
-            role: "developer",
-            backends: ["claude"],
-            model: "sonnet",
-            resources: { skills: [], mcps: [], kb: [] },
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(inputsLine(await assignAndRun())!.sandbox).toBeNull();
+    const inputs = inputsLine(await assignAndRun());
+    expect(inputs).not.toHaveProperty("sandbox");
+    // The withheld write family is still on the run, as denied tools — the
+    // advisory posture every Codex surface now renders.
+    expect(inputs!.tools.denied.join(" ")).toContain("Edit");
   });
 
   it("names a knowledge-base grant whose content never reached the run", async () => {
@@ -4930,5 +5008,86 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     expect(pending).toHaveLength(1);
     expect(pending[0]!.prompt).toBe("drop the migration and fix the flake first");
     expect(file.parsed.timeline.filter((e) => e.title === "Dispatch held")).toHaveLength(2);
+  });
+});
+
+/**
+ * Ruling 179 (pass 36), the CHECKOUT half. F15-15 pinned the reviewer's
+ * *prompt* to the delivered revision; live on HLC-18 (2026-09-11, 19:46Z) the
+ * revision under review was a commit Viberr did not author and it was never in
+ * the reviewer's clone of the delivering tree — so the reviewer judged the
+ * delivering tree's head while its contract said it was reading another sha.
+ * Viberr puts the checkout where the contract says, rather than asking the run
+ * to fetch it.
+ */
+describe("ruling 179: a supporting checkout is detached at the revision under review", () => {
+  const execFileAsync = promisify(execFile);
+  let dir: string;
+  let first: string;
+  let second: string;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(path.join(tmpdir(), "viberr-pin-"));
+    await execFileAsync("git", ["init", "-q", "-b", "main", dir]);
+    await execFileAsync("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
+    await execFileAsync("git", ["-C", dir, "config", "user.name", "T"]);
+    writeFileSync(path.join(dir, "A.md"), "delivered\n");
+    await execFileAsync("git", ["-C", dir, "add", "-A"]);
+    await execFileAsync("git", ["-C", dir, "commit", "-qm", "delivered"]);
+    first = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+    writeFileSync(path.join(dir, "B.md"), "someone else's commit\n");
+    await execFileAsync("git", ["-C", dir, "add", "-A"]);
+    await execFileAsync("git", ["-C", dir, "commit", "-qm", "observer"]);
+    second = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+  });
+
+  const head = async () =>
+    (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+
+  it("detaches at the revision and says the tree moved; a matching HEAD is left alone; no revision is a no-op", async () => {
+    // Canary: make `pinSupportCheckout` return its sentence without running
+    // `checkout --detach` and the first HEAD assertion fails — which is the
+    // live state: the reviewer read the delivering tree while its contract
+    // named another sha.
+    const moved = await pinSupportCheckout(dir, first);
+    expect(await head()).toBe(first);
+    expect(moved).toContain(`detached at the revision under review \`${first.slice(0, 7)}\``);
+    expect(moved).toContain(`the delivering tree stood at \`${second.slice(0, 7)}\``);
+    // Detached, not on a branch: a supporting run never delivers.
+    await expect(
+      execFileAsync("git", ["-C", dir, "symbolic-ref", "-q", "HEAD"]),
+    ).rejects.toBeTruthy();
+    expect(existsSync(path.join(dir, "B.md"))).toBe(false);
+
+    const already = await pinSupportCheckout(dir, first);
+    expect(already).toBe(`checked out at the revision under review \`${first.slice(0, 7)}\``);
+    expect(await head()).toBe(first);
+
+    // A delivering checkout passes no revision: nothing is pinned, nothing said.
+    expect(await pinSupportCheckout(dir, null)).toBeNull();
+    expect(await head()).toBe(first);
+  });
+
+  it("a revision the clone does not carry is DISCLOSED, never thrown, and HEAD is left as it stands", async () => {
+    // Canary: drop the `cat-file -e` probe and the call throws instead — a
+    // reviewer that cannot be pinned must still run and say so.
+    const missing = "b".repeat(40);
+    const said = await pinSupportCheckout(dir, missing);
+    expect(said).toContain(`the revision under review \`${missing.slice(0, 7)}\` is not in this checkout`);
+    expect(said).toContain("HEAD was left as it is");
+    expect(await head()).toBe(second);
+  });
+
+  it("the supporting dispatch passes the task's ACTIVE work revision, and the delivering one passes none", () => {
+    // Canary: delete the `pinRevision` argument at the dispatch call site and
+    // the helper goes back to having no production caller — the state this
+    // pass found live.
+    const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
+    expect(source).toContain("pinRevision: support");
+    expect(source).toContain("activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha");
+    expect(source).toContain("await pinSupportCheckout(dir, input.pinRevision ?? null)");
+    // ...and the disclosure rides the same `refreshed` field the run contract
+    // already renders ("Before this run Viberr ...").
+    expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");
   });
 });

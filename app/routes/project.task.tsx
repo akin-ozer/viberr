@@ -80,6 +80,10 @@ import {
 } from "~/server/tasks/operator-actions.server";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import {
+  completionToast,
+  terminalStageNameFor,
+} from "~/features/task-detail/completion-toast";
+import {
   getProject,
   listProjectLabels,
   listProjectMembers,
@@ -487,7 +491,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             ? `Comment posted · @${result.agent.name} is picking it up`
             : result.operatorRefused === "open-packet"
               ? "Comment posted · resolve the open decision to continue"
-              : result.operatorRefused === "terminal-stage"
+              : result.operatorRefused === "closed"
                 ? "Comment posted · reopen the task to run the operator"
                 : result.runNotStarted && result.agent
                   ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
@@ -602,13 +606,13 @@ export async function action({ request, params }: Route.ActionArgs) {
           );
         const toast =
           option.kind === "accept_completion"
-            ? `Completion accepted · ${taskKey} moved to Done`
+            ? completionToast("accepted", taskKey, terminalStageNameFor(getProject(db, projectSlug)))
             // Ruling 164 (pass 35, F35-14): the two kinds that PERFORM what
             // their title promises say what happened, in the same words the
             // button and the picker use. A generic "Decision recorded" was the
             // whole defect: the record read like an act.
             : option.kind === "force_accept"
-              ? `Force-accepted ${taskKey} · moved to Done (review gate overridden)`
+              ? completionToast("forced", taskKey, terminalStageNameFor(getProject(db, projectSlug)))
               : option.kind === "move_stage"
                 ? resolvedTask.stage === option.toStage
                   ? `Decision recorded · ${taskKey} moved to ${
@@ -720,7 +724,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `Completion accepted · ${taskKey} moved to ${toName}`,
+          toast: completionToast("accepted", taskKey, toName),
         };
       }
       case "deliver-review": {
@@ -772,7 +776,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `Force-accepted ${taskKey} · moved to Done (review gate overridden)`,
+          toast: completionToast("forced", taskKey, terminalStageNameFor(getProject(db, projectSlug))),
         };
       }
       case "owner-take": {
@@ -1075,8 +1079,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast:
             started.refused === "open-packet"
               ? "Operator not started · resolve the open decision to continue"
-              : started.refused === "terminal-stage"
-                ? "Operator not started · reopen the task to run the operator"
+              : started.refused === "closed"
+                ? `Operator not started · ${started.refusalReason ?? "reopen the task to run the operator"}`
                 : started.queued
                   ? `Operator queued · runs when the current run finishes · ${backendLabel} · ${started.autonomy} autonomy`
                   : `Operator running · ${backendLabel} · ${started.autonomy} autonomy`,

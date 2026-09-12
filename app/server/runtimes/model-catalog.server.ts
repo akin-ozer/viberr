@@ -219,8 +219,8 @@ export function defaultEffortFor(backend: RealBackend): string {
   return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
 }
 
-/** Display names for the refusal sentences below. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const satisfies Record<RealBackend, string>;
+/** Display names for the refusal sentences below (and the controller's replies). */
+export const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const satisfies Record<RealBackend, string>;
 
 /** The effort tiers a backend OFFERS (the curated list; Codex's accepted but
  *  unoffered `minimal` is deliberately absent, see `CODEX_EFFORTS`). */
@@ -342,6 +342,36 @@ export function foreignModelBackend(
   if (!m || isKnownModel(backend, m)) return null;
   const other: RealBackend = backend === "codex" ? "claude" : "codex";
   return isKnownModel(other, m) ? other : null;
+}
+
+/**
+ * F21-13 / F36-8 (pass 36): what a run on `backend` EXECUTES when handed
+ * `model` — the model itself when this backend knows it, the backend default
+ * when the id belongs to the OTHER backend (`foreignBackend` names it). ONE
+ * home for the swap: `startRun` performs and discloses it (the row stores
+ * `model`, the run log opens with the notice), and the callers that must name
+ * the swap BEFORE the row exists — the specialist dispatch's timeline event, the
+ * recovery packet's `retry_other_backend` option — read the same answer here
+ * instead of pre-swapping, which is what used to hide the substitution from
+ * run-service altogether.
+ */
+export interface ModelSubstitution {
+  /** The model the run executes. */
+  model: string;
+  /** The backend that knows the requested id when THIS one does not; null
+   *  when no substitution happened. */
+  foreignBackend: RealBackend | null;
+}
+
+export function substituteRunModel(
+  backend: RealBackend,
+  model: string,
+): ModelSubstitution {
+  const foreignBackend = foreignModelBackend(backend, model);
+  return {
+    model: foreignBackend ? defaultModelFor(backend) : model,
+    foreignBackend,
+  };
 }
 
 /**

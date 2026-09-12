@@ -1,4 +1,6 @@
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import { closureRefusal, taskClosure } from "./task-closure.server";
+import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd } from "~/shared/run-failure";
 import type {
@@ -73,6 +75,7 @@ import {
   DEFAULT_COMPACTION,
 } from "./timeline-compaction.server";
 import {
+  canAcceptFromStage,
   resolveStageRoles,
   isTerminalStage,
   stageName as resolveStageName,
@@ -131,6 +134,7 @@ import {
   notifyOwnerSeatChange,
 } from "./task-mutation.server";
 import {
+  appendTimelineEvent,
   createTaskFile,
   readTaskFile,
   updateTaskFile,
@@ -1364,7 +1368,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * operator branch reported `triggered: "started"` on a refused run, so the route
    * toasted "@Operator is picking it up" while nothing ran (the reply never came).
    */
-  operatorRefused: "open-packet" | "terminal-stage" | "blocked-by" | null;
+  operatorRefused: "open-packet" | "closed" | "blocked-by" | null;
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
    * run-start failure (single-flight conflict, a backend the task owner has not
@@ -1746,6 +1750,20 @@ export async function commentToAgent(
     // is picking the comment up (the reply would never come). The comment is
     // already recorded via `base`.
     if (result.refused) {
+      // Ruling 177 (pass 36, F36-4): a closed task refuses the mention's run;
+      // the comment stays on the record and the F35-5 note says the mention
+      // went nowhere, with the same sentence the Run buttons show.
+      if (result.refused === "closed") {
+        await noteMentionNotStarted(
+          db,
+          ctx,
+          input,
+          actor,
+          "operator",
+          "operator",
+          result.refusalReason ?? `${input.taskKey} is closed`,
+        );
+      }
       return {
         ...base,
         agent: agentIdentity,
@@ -1957,6 +1975,7 @@ export async function commentToAgent(
       if (confinement.mcpToolDenials) resume.mcpToolDenials = confinement.mcpToolDenials;
       resume.env = confinement.env;
       if (confinement.skills) resume.skills = confinement.skills;
+      if (confinement.skillPlugin) resume.skillPlugin = confinement.skillPlugin;
       if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
       if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
@@ -3297,10 +3316,16 @@ export async function recordAgentCompletion(
         // recommendation stale (the acceptance gate would 409), so drop it: the
         // UI must not show a misleading "Accept completion" card. The operator
         // re-recommends the right next step on its next turn.
+        // F36-6 (pass 36): a FAILING verdict also voids any pending
+        // "move to <review/acceptance stage>" card — Viberr's own delivery
+        // next-step or the operator's — since applying it would carry a
+        // rejected revision across the approval boundary.
         if (validation !== "healthy") {
           parsed.frontmatter.recommendations =
             parsed.frontmatter.recommendations.filter(
-              (r) => r.kind !== "accept_completion",
+              (r) =>
+                r.kind !== "accept_completion" &&
+                !(validation === "failing" && r.kind === "transition"),
             );
         }
       }
@@ -4095,6 +4120,21 @@ export async function applyAgentCompletionEffects(
       profileId: input.profileId,
     };
     if (ctx.dataRoot) describeInput.dataRoot = ctx.dataRoot;
+    // F36-8: the profile's own model, so the `retry_other_backend` option can
+    // name what the other backend will run. A profile undeployed since the run
+    // started resolves to nothing, and the option names the default alone.
+    if (input.profileId) {
+      try {
+        const { resolveDeployedSpecialist } = await import("./specialist-run.server");
+        describeInput.profileModel = resolveDeployedSpecialist(
+          ctx,
+          input.projectSlug,
+          input.profileId,
+        ).model;
+      } catch {
+        // Not a current deployment — nothing to name.
+      }
+    }
     const described = describeRunFailure(db, describeInput);
     // Ruling 130(b): a classified refusal is worded ONCE, by the leaf. The
     // other kinds keep their own sentences below; `unavailable` is ruling
@@ -4340,6 +4380,47 @@ export async function applyAgentCompletionEffects(
   // was dispatched and one was not — a looping agent then bought an extra
   // operator react per source change. Strip the appended line from BOTH sides
   // of the comparison; it is bookkeeping, not progress.
+  // Ruling 177 (pass 36, F36-5): a run that finishes after its task CLOSED
+  // (accepted, force-accepted or archived while it was live) has its report
+  // recorded above — evidence is evidence — but wakes no operator, however it
+  // was dispatched: the dispatch-completion contract's forced react is what
+  // re-invoked the operator on a shipped HLC-9 and opened a decision packet
+  // there. One note says why nothing follows; waiting settles to `none`.
+  {
+    const closedFile = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    const closedProject = closedFile ? loadProjectContext(ctx, input.projectSlug) : null;
+    const closure =
+      closedFile && closedProject
+        ? taskClosure(closedFile.parsed.frontmatter, closedProject.stages)
+        : ({ closed: false } as const);
+    if (closure.closed && closedProject) {
+      const reason = closureRefusal(
+        input.taskKey,
+        closure,
+        closedProject.stages,
+        "coordinating it again",
+      );
+      await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Completed after the task closed",
+        text:
+          `**Closed task:** the ${input.role} run \`${finished.id}\` finished after ${reason.replace(/ — .*$/, "")}. ` +
+          `Its report is on the record; no coordination follows (the operator is not re-invoked and nothing is dispatched).`,
+        toAgent: false,
+        evidence: null,
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      logger.info("operator react skipped — the task is closed", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        why: closure.why,
+      });
+      await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
+      return;
+    }
+  }
   const shouldReact = operatorShouldReactToReply(
     finished.state,
     stripCcLine(replyForCompare),
@@ -6578,13 +6659,17 @@ async function recordPushedHead(
  * row `via: delivery`. A task at or before the review stage, a healthy or
  * unreviewed revision, and a terminal task are left alone.
  */
-async function returnChangedRevisionToReview(
+export async function returnChangedRevisionToReview(
   db: DatabaseSync,
   ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
   headSha: string | null,
   actor: TaskActor,
+  /** Ruling 179 (pass 36): the reconciler's authored-drift door — the head
+   *  moved by a push Viberr did not make; the audit names it and the event is
+   *  the policy engine's. Absent = a delivery moved the head (ruling 163). */
+  opts: { via?: "delivery" | "authored-drift" } = {},
 ): Promise<void> {
   const project = loadProjectContext(ctx, projectSlug);
   const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -6595,11 +6680,15 @@ async function returnChangedRevisionToReview(
   const reviewId = await verdictStageOf(ctx, projectSlug, project, fm);
   if (reviewId === null) return;
   const fromStageId = fm.stage;
-  const actorRef: FileActorRef = ctx.operatorAuthorized
-    ? { kind: "operator" }
-    : actor.userId
-      ? humanActorRef(db, actor)
-      : { kind: "system", systemId: "delivery" };
+  const via = opts.via ?? "delivery";
+  const actorRef: FileActorRef =
+    via === "authored-drift"
+      ? { kind: "system", systemId: "policy-engine" }
+      : ctx.operatorAuthorized
+        ? { kind: "operator" }
+        : actor.userId
+          ? humanActorRef(db, actor)
+          : { kind: "system", systemId: "delivery" };
   const rev = headSha ? `\`${headSha.slice(0, 7)}\`` : "the delivered revision";
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     if (parsed.frontmatter.stage !== fromStageId) return;
@@ -6611,23 +6700,30 @@ async function returnChangedRevisionToReview(
       actor: actorRef,
       title: null,
       text:
-        `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
-        `${stageName(project, reviewId)}: ${rev} changed after the last verdict, so the ` +
-        `reviewers judge it there.`,
+        via === "authored-drift"
+          ? `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
+            `${stageName(project, reviewId)}: the pull request's head moved to ${rev} after the ` +
+            `last verdict by commits Viberr did not deliver (ruling 179), so the reviewers judge it there.`
+          : `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
+            `${stageName(project, reviewId)}: ${rev} changed after the last verdict, so the ` +
+            `reviewers judge it there.`,
       toAgent: false,
       evidence: null,
     });
   });
   recordAudit(db, {
     action: "task.transition",
-    actor: ctx.operatorAuthorized
-      ? OPERATOR_AUDIT_ACTOR
-      : { userId: actor.userId, label: actor.label },
+    actor:
+      via === "authored-drift"
+        ? SYSTEM_ACTOR
+        : ctx.operatorAuthorized
+          ? OPERATOR_AUDIT_ACTOR
+          : { userId: actor.userId, label: actor.label },
     subjectKind: "task",
     subjectId: taskKey,
     projectSlug,
     taskKey,
-    details: { from: fromStageId, to: reviewId, boundary: "rework", via: "delivery" },
+    details: { from: fromStageId, to: reviewId, boundary: "rework", via },
   });
   reprojectTask(db, ctx, projectSlug, taskKey);
 }
@@ -6734,6 +6830,42 @@ async function recordDeliveredNextStep(
     const stageIdx = project.stages.findIndex((s) => s.id === fm.stage);
     const reviewIdx = project.stages.findIndex((s) => s.id === reviewStageId);
     if (stageIdx < 0 || reviewIdx < 0 || stageIdx >= reviewIdx) return;
+    // F36-6 (pass 36): the card is a VERDICT-AWARE offer. "Review stage" here
+    // is the stage with an edge into the terminal one (Merge Approval on a
+    // board with a verdict stage before it), so a task sitting AT its verdict
+    // stage was "strictly before" it — and this writer, which never read the
+    // verdict, invited a human to carry a task whose required review had just
+    // FAILED (HLC-8, HLC-14) or was still pending (HLC-3) across the approval
+    // boundary; the transition landed because nothing below reads validation
+    // either. The card is written only when the delivered revision is
+    // verdict-clean, or when the project has no verdict-capable specialist at
+    // all (a board that never reviews). Withheld cards leave an audit row that
+    // says why, so the silence is explainable.
+    const validation = deriveValidation(fm);
+    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const specialistCtx: TaskMutationContext = {};
+    if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
+    const reviewsExist = listDeployedSpecialists(projectSlug, specialistCtx).some(
+      (d) => d.capabilities.verdict,
+    );
+    const withheld: "verdict-failing" | "verdict-pending" | null =
+      validation === "failing"
+        ? "verdict-failing"
+        : validation !== "healthy" && validation !== "bypassed" && reviewsExist
+          ? "verdict-pending"
+          : null;
+    if (withheld) {
+      recordAudit(db, {
+        action: DELIVERY_NEXT_STEP_AUDIT_ACTION,
+        actor: { userId: null, label: "delivery" },
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: { kind: "transition", toStageId: reviewStageId, prNumber, withheld, validation },
+      });
+      return;
+    }
     // Folded in from A's `ensureDeliveredNextStep`: only ever propose a move the
     // project's OWN workflow declares — a custom board with no `stage → review`
     // edge must not be handed a card for a transition it would refuse.
@@ -7301,6 +7433,12 @@ export async function setTaskArchived(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  // Ruling 177 (pass 36): archiving closes the task — its live runs end too.
+  if (input.archived) {
+    await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, {
+      cause: "archive",
+    });
+  }
 
   recordAudit(db, {
     action: input.archived ? "task.archived" : "task.unarchived",
@@ -7631,12 +7769,12 @@ export async function resolvePacket(
             title: "Completion accepted",
             text:
               (!hasPr
-                ? "Human acceptance recorded. Task transitioned to **Done** (no linked pull request)."
+                ? `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}** (no linked pull request).`
                 : alreadyMerged
-                  ? "Human acceptance recorded. Task transitioned to **Done**; the review PR had already been merged on GitHub."
+                  ? `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}**; the review PR had already been merged on GitHub.`
                   : reallyMerged
-                    ? "Human acceptance recorded. Task transitioned to **Done** and the review PR was merged."
-                    : `Human acceptance recorded. Task transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+                    ? `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}** and the review PR was merged.`
+                    : `Human acceptance recorded. Task transitioned to **${stageName(project, doneStageId)}**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
               driftNote,
             toAgent: false,
             evidence: null,
@@ -8987,13 +9125,10 @@ function acceptanceStageBlockedReason(
   const roles = stageRolesOf(project);
   const terminalId =
     roles.terminalId ?? project.stages[project.stages.length - 1]?.id ?? null;
-  // No stages to reason about, or already terminal (the callers' idempotent
-  // "already Done" return handles that) — nothing to refuse.
-  if (!terminalId || fromStageId === terminalId) return null;
-  const hasEdgeToTerminal = project.workflow.some(
-    (w) => w.from === fromStageId && w.to === terminalId,
-  );
-  if (hasEdgeToTerminal || fromStageId === roles.reviewId) return null;
+  // U36-12: the rule itself is `canAcceptFromStage` in the shared stage-roles
+  // module, so the reconciler's divergence note asks the SAME question before
+  // it tells a human to accept. Everything below is only how this caller says no.
+  if (canAcceptFromStage(fromStageId, project.stages, project.workflow)) return null;
   const reviewName = roles.reviewId
     ? stageName(project, roles.reviewId)
     : "the review stage";
@@ -9063,6 +9198,12 @@ function acceptanceRefusalReasons(
     acceptanceStageBlockedReason(project, fm.stage, taskKey),
     // F10-15: every required reviewer must have approved the CURRENT revision.
     acceptanceBlockedReason(fm),
+    // Ruling 178 (pass 36, G36-3): the reviewers the PROJECT declares must have
+    // approved it too, engaged or not. F10-15's set is emergent (whoever the
+    // operator engaged), so a task whose operator never ran the project's
+    // reviewer was acceptable on another agent's verdict. Same order in the
+    // projection's `acceptanceBlockReason`.
+    ...requiredReviewerRefusals(project.requiredReviewers, fm),
     // R20-2 / F20-6: when the live probe already looked at the branch and found
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
@@ -10067,6 +10208,80 @@ export async function applyAcceptanceWrite(
 }
 
 /**
+ * Ruling 177 (pass 36, F36-5): a task that closes ends its live runs. Called
+ * after the closing write (acceptance, force-accept) so the runs are stopped
+ * on a task that IS closed; the interrupt itself is the run-service's, audited
+ * under the system actor with the cause and the person. Writes ONE policy note
+ * naming every run it stopped and one audit row for the task; nothing when no
+ * run was live. Best-effort: a failure here never masks the acceptance.
+ */
+async function interruptLiveRunsOnClosure(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+  closure: { cause: "accept" | "force-accept" | "archive" },
+): Promise<string[]> {
+  try {
+    const { interruptRunOnClosure } = await import("~/server/runtimes/run-service.server");
+    const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
+    const live = listRunsForTaskRows(db, projectSlug, taskKey).filter(
+      (r) => (r.state === "running" || r.state === "queued") && r.kind !== "controller",
+    );
+    const stopped: { id: string; label: string }[] = [];
+    for (const run of live) {
+      const outcome = interruptRunOnClosure(
+        db,
+        { projectSlug, taskKey, runId: run.id },
+        { cause: closure.cause, byUserId: actor.userId },
+      );
+      if (outcome === "interrupted") {
+        stopped.push({ id: run.id, label: run.agent_name ?? run.role });
+      }
+    }
+    if (stopped.length === 0) return [];
+    const verb =
+      closure.cause === "archive"
+        ? "archived"
+        : closure.cause === "force-accept"
+          ? "force-accepted"
+          : "accepted";
+    const list = stopped.map((r) => `\`${r.id}\` (${r.label})`).join(", ");
+    await appendTimelineEvent(taskRef(ctx, projectSlug, taskKey), {
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: "Interrupted by acceptance",
+      text:
+        `**Closed task:** ${stopped.length === 1 ? "the run" : `${stopped.length} runs`} ${list} ` +
+        `${stopped.length === 1 ? "was" : "were"} still live when ${taskKey} was ${verb}; ` +
+        `${stopped.length === 1 ? "it was" : "they were"} interrupted so a closed task spends nothing more, ` +
+        `and no completion of ${stopped.length === 1 ? "it" : "them"} will re-invoke the operator here.`,
+      toAgent: false,
+      evidence: null,
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.acceptance.interrupted_runs",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { cause: closure.cause, runIds: stopped.map((r) => r.id) },
+    });
+    return stopped.map((r) => r.id);
+  } catch (error) {
+    logger.warn("closure interrupt failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return [];
+  }
+}
+
+/**
  * Apply human acceptance through the shared Done transition and merge path.
  *
  * Returns whether THIS call performed the acceptance: `false` means the task
@@ -10273,13 +10488,15 @@ async function acceptCompletion(
         actor: humanActorRef(db, actor),
         title: "Completion accepted",
         text:
+          // U36-9 (pass 36): the board's terminal stage has a name; "Done" was
+          // a literal on a board whose last stage is called Shipped.
           (!hasPr
-            ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** (no linked pull request).`
+            ? `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}** (no linked pull request).`
             : alreadyMerged
-              ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR had already been merged on GitHub (out of band).`
+              ? `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}**; the review PR had already been merged on GitHub (out of band).`
               : reallyMerged
-                ? `Human acceptance recorded. ${input.taskKey} transitioned to **Done** and the review PR was merged.`
-                : `Human acceptance recorded. ${input.taskKey} transitioned to **Done**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
+                ? `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}** and the review PR was merged.`
+                : `Human acceptance recorded. ${input.taskKey} transitioned to **${stageName(project, doneStageId)}**; the review PR is **accepted, merge pending** (${mergePendingCause(merge)}).`) +
           driftNote,
         toAgent: false,
         evidence: null,
@@ -10314,6 +10531,14 @@ async function acceptCompletion(
     acceptance.forced = true;
   }
   const { accepted } = await applyAcceptanceWrite(db, ctx, acceptance);
+  // Ruling 177 (pass 36, F36-5): the task just closed — end its live runs so a
+  // Shipped task spends nothing more and no completion re-invokes the operator
+  // on it. One note names every run; each run's own audit row carries the cause.
+  if (accepted) {
+    await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, {
+      cause: input.force ? "force-accept" : "accept",
+    });
+  }
   // U3: a concurrent acceptance closed this task first — its write carries the
   // completion event and the audit row. Recording a second row here is exactly
   // the "two audit rows for one human act" NFR18 forbids.

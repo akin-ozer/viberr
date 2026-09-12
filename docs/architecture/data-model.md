@@ -64,12 +64,16 @@ Created lazily by the code that needs them:
   projects/<slug>/tasks/<KEY>/attachments/          files agents post on the task thread (member-only served)
   projects/<slug>/tasks/<KEY>/workspace/<repo>       the delivering engagement's git clone (cache, not canonical)
   projects/<slug>/tasks/<KEY>/workspace/support/<profileId>/<repo>   a supporting engagement's isolated clone
+  projects/<slug>/tasks/<KEY>/workspace/.viberr-plugins/<runId>/     a Claude run's skill plugin (ruling 180; beside the checkout it serves, removed when the run settles; a supporting run's sits beside its own clone under support/<profileId>/)
   projects/<slug>/goals/<goal-id>.md                chained goals (ruling 99)
   projects/<slug>/.mirror or equivalent             per-project git mirror cache (repo-mirror.server.ts)
   agents/definitions/operator.md, controller.md     system-profile doctrine files shipped by boot
   runtimes/users/<userId>/claude-home/               that person's CLAUDE_CONFIG_DIR (ruling 127): the vendor's own
                                                     sign-in file plus their Claude transcripts under projects/
-  runtimes/users/<userId>/codex-home/                that person's CODEX_HOME: auth.json plus sessions/
+  runtimes/users/<userId>/codex-home/                that person's shared Codex home: auth.json plus sessions/
+  runtimes/users/<userId>/codex-home/runs/<runId>/   one live run's CODEX_HOME (ruling 181): a copy of auth.json + config.toml,
+                                                     symlinked sessions/ skills/ memories/, the CLI's own tmp/; deleted at settle
+  runtimes/codex-sandbox-probe/                      the once-per-process Codex sandbox probe's home + workdir (ruling 182); removed after
   runtimes/<backend>/<runId>.jsonl                  raw NDJSON transcript of every run (canonical run truth)
   runtimes/uv-cache/, runtimes/uv-python/           uv's cache for Python MCP servers (container)
   audit-exports/audit-events-<YYYY-MM-DD>.jsonl     rows the 90-day audit purge exported before deleting
@@ -112,7 +116,7 @@ files) · **C** cache/operational (safe to lose).
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `projects` | D | One row per `project.md`: name, `archived`, `repo`, `default_branch`, `task_prefix`, JSON copies of stages/workflow/agent policy/credential policy/guardrails, `content_hash`. |
+| `projects` | D | One row per `project.md`: name, `archived`, `repo`, `default_branch`, `task_prefix`, JSON copies of stages/workflow/agent policy/credential policy/guardrails, `required_reviewers_json` (ruling 178: the required-reviewer rules RESOLVED to stage and agent names at project-rebuild time, so the task walk prints the acceptance gate's sentence from the row; a self-healing baseline column), `content_hash`. |
 | `project_members` | D | `members[]` from `project.md` (`admin \| maintainer \| contributor \| viewer`). |
 | `task_projections` | D | One row per `task.md`: stage, **derived** `readiness` plus `stored_readiness`, `waiting`, `priority`/`labels_json`/`due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; resolved to per-entry states at read time, never cached), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), owner, engagement snapshots, `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count`, `schedules_json`, counts, `goal_id`/`goal_link_index`, `board_rank`, `content_hash`. |
 | `task_events` | D | The task timeline, one row per entry, `position` 0 = newest, with a denormalized `actor_json` snapshot, `title`, `text`, `to_agent`, `evidence_json`, `attachments_json`. Replaced wholesale per task on every re-project. |
@@ -136,7 +140,7 @@ files) · **C** cache/operational (safe to lose).
 | Table | Kind | What it holds |
 |---|---|---|
 | `org_knowledge_bases` | P (metadata) | `name`, `dir` (the grant key), `refresh` (`manual \| on change`; the CHECK still admits `nightly`, which is coerced away), `last_indexed_at`. Content is the folder on disk. |
-| `org_skills` | P (metadata) | `name` (slug and folder), `summary`. Content is `skills/<name>/SKILL.md`. |
+| `org_skills` | P (metadata) | `name` (slug and folder), `summary`. Content is `skills/<name>/SKILL.md`, judged by `assertSkillBodyWellFormed` at every writer (ruling 183). |
 | `org_mcp_servers` | P | `name`, `transport` (`HTTP \| stdio`), `target`, optional `cred_ref`, probe results (`tools_count`, `up`, `last_checked_at`, `last_error`), warm-up bookkeeping (`warming_since`, `first_success_at`, `heuristic_warmups`). Ruling 176: `tool_policy_json` (the admin-marked write tools as `{ name, gate: "repo-write" }`; NULL until first reviewed, `[]` a reviewed none) and `tool_names_json` (the names the last successful probe listed, kept across a failed one and cleared when the target changes). Both reach an older root through `ensureBaselineColumns`. |
 | `model_availability` | C | Models the provider refused for this account, learned only from real run failures; presence = unavailable. |
 | `controller_conversations` / `controller_messages` | P | The controller's transcripts, owned by the asking user. Scope (ruling 121): `project_slug` + `task_key` (both null = instance, slug alone = board, slug + key = one task; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`), indexed per user and scope. `controller_messages.surface` is the in-app path a user message was sent from (null on controller rows). |

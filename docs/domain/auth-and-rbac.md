@@ -13,7 +13,8 @@
 > `option-d/pr3-cost-cap-usage`): §4's org settings gain the spending cap per Claude run
 > and its `org.run_spend_cap.changed` audit. Updated 2026-09-11 for ruling 176 (branch
 > `option-d/pr2-mcp-tool-gating`): §4's MCP server editor marks write tools, audited as
-> `org.mcp.tool_policy.changed`.
+> `org.mcp.tool_policy.changed`. Updated 2026-09-11 for ruling 183 (pass 36 cluster 4):
+> §4's skills entry — every SKILL.md writer refuses a body that is not a skill.
 
 ## 1. Authentication
 
@@ -182,7 +183,13 @@ the tabs sit the Audit log card and the run-concurrency control.
   withholds repo write, and every operator run, does not get: the probe's tool names are
   offered, the write-looking ones pre-selected until the server is first reviewed, a
   name can be typed, and each change is audited as `org.mcp.tool_policy.changed`
-  {name, before, after}), skills (`skills/<name>/SKILL.md` plus files), global agent
+  {name, before, after}), skills (`skills/<name>/SKILL.md` plus files; ruling 183: every
+  writer — this editor, the controller's `save_skill`, an upload and the store browser's
+  document editor — refuses a SKILL.md body that is empty, that arrived JSON-escaped
+  (literal `\n` sequences, no real newline) or whose frontmatter block does not parse, by
+  name and never rewritten, through `assertSkillBodyWellFormed` in
+  `skill-body.server.ts`; plain markdown with no block stays valid, and a SKILL.md is
+  never blanked — an empty submission on an existing skill keeps the file), global agent
   templates (specialists only, created with conservative grants, undeletable while
   deployed; the edit modal's "Copy these grants to the N projects that adopted this
   profile" box rewrites each adopted project's copy of the grants with the save,
@@ -246,6 +253,17 @@ non-zero exit, an unconfirmed sign-in or the 15/16-minute timeout,
 the session rows and `backend_credential` for the stored ones. The `reason` is the
 same already-redacted sentence the person sees; a key, a token, a one-time code and a
 raw vendor line never reach an audit row.
+
+**Pass-36 rows.** `task.engagement.added {posture: "reviewer" | "supporting", profileId,
+backend, role}` replaces `task.reviewer.assigned` (U36-11: a supporting engagement is not a
+reviewer). `task.acceptance.interrupted_runs {cause: "accept" | "force-accept" | "archive",
+runIds}` is written by the closure interrupt (ruling 177) beside one
+`runtime.run.interrupted {reason: "task-closed", cause, closedBy}` row per run, actor the
+system. `github.delivery.next_step` gains `{withheld: "verdict-pending" | "verdict-failing",
+validation}` when the delivery card is not written (F36-6). `task.transition {boundary:
+"rework", via: "authored-drift"}` is the reconciler's ruling-179 move, actor the system.
+`project.required_reviewers.updated` records the ruling-178 rule (via the controller or the
+project settings form).
 
 **Pass-35 rows.** `task.acceptance.forced` carries `bypassed` (the gate sentences
 joined with " | "), `bypassedGates` (the same list), `skippedStages`, `validation` and

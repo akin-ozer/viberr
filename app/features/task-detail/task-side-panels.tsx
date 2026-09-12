@@ -393,6 +393,21 @@ export function GithubTrace({
             ))}
           </div>
         )}
+        {/* Ruling 179 (pass 36, F36-7): the `[KEY]` filter above hid the very
+            commits that move a reviewed head — a stranger's push sat on the
+            branch and this card showed only the task's own. Named apart, not
+            mixed in. */}
+        {task.otherCommits.length > 0 && (
+          <div className="commit-list" data-other-commits>
+            <div className="flabel">Also on the branch · not this task's</div>
+            {task.otherCommits.map((c) => (
+              <div className="commit" key={c.sha}>
+                <span className="sha">{c.sha}</span>
+                <span className="msg">{c.msg}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {/* Ruling 135: the delivered revision is not on the open PR. Named
             beside the branch so the push control below reads from a fact. */}
         {pushOffer && (

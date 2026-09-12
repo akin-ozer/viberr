@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
+import { HERMETIC_TOOLCHAIN } from "../../../test-support/toolchain";
 import { recordBackendQuotaExhaustion } from "~/server/runtimes/backend-quota.server";
 import { healthSnapshot } from "./health-snapshot.server";
 
@@ -32,5 +33,26 @@ describe("healthSnapshot and the quota principal", () => {
     const signedIn = healthSnapshot(store.db, { principal: true }).quota.find((q) => q.backend === "claude")!;
     expect(signedIn.exhausted?.credentialUserId).toBe(store.users.arda.id);
     expect(signedIn.exhausted?.credentialLabel).toBe("Arda");
+  });
+});
+
+describe("healthSnapshot reports the toolchain (ruling 182)", () => {
+  it("appends the toolchain reading LAST — key order is the wire contract — with the sandbox verdict", () => {
+    // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
+    // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
+    // verdict. The reading rides the health body and, through the spread,
+    // `instance_health`. Canary: drop `toolchain` from the snapshot.
+    const store = setupTestStore(ctx);
+    const snapshot = healthSnapshot(store.db);
+    expect(Object.keys(snapshot).at(-1)).toBe("toolchain");
+    // The one memoized reading (`cachedToolchain`), never a second probe: the
+    // suite primes it hermetic in setup-env, and that is what comes back.
+    expect(snapshot.toolchain).toEqual(HERMETIC_TOOLCHAIN);
+    // Ruling 185: the reading is versions only — the sandbox verdict went with
+    // the sandbox. Canary: put `codexSandbox` back on `Toolchain` and this
+    // `toEqual` against the hermetic reading is the guard that notices.
+    expect(Object.keys(snapshot.toolchain)).toEqual([
+      "node", "npm", "git", "python3", "go", "codexCli", "claudeAgentSdk",
+    ]);
   });
 });

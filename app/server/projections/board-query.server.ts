@@ -106,7 +106,7 @@ export function getProject(
   db: DatabaseSync,
   slug: string,
 ): ProjectRecord | null {
-  // SAFETY: ProjectRow mirrors the 15 `projects` columns 0001_baseline
+  // SAFETY: ProjectRow mirrors the 16 `projects` columns 0001_baseline
   // declares, so `SELECT *` yields exactly it; a missing slug yields no row.
   const row = db.prepare(`SELECT * FROM projects WHERE slug = ?`).get(slug) as
     | ProjectRow

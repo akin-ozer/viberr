@@ -74,9 +74,10 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // never rebase or force-push. An absent grant follows the DELIVERY gate
   // (updateBranchGate) — the capability postdates every deployment.
   cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
-  // Agent repository/execution toggles (bind via the Claude tool denylist; the
-  // headline write family also binds on Codex through the read-only sandbox —
-  // ruling 101 — with the evidence carve-out disclosed by codexRepoWriteAdvisory).
+  // Agent repository/execution toggles (bind via the Claude tool denylist; on
+  // Codex they are advisory since ruling 185 removed the OS sandbox — the
+  // prompt and the server-owned delivery gate carry them, disclosed by
+  // codexRepoWriteAdvisory).
   // Ruling 176: withholding the headline grant also denies the org MCP tools an
   // admin marked as write tools (Claude by name, Codex as `disabled_tools`).
   cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
@@ -253,17 +254,6 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   // claude-only set below; without landing HERE it would read as "advisory",
   // understating the enforcement further than the label it replaced.
   "use-web-search-fetch",
-  // Parity ruling (owner, 2026-08-31): the headline write family binds on BOTH
-  // backends again — Claude via the tool denylist, Codex via the read-only
-  // sandbox a withheld run gets back (resolveCodexSandboxMode; the P13-RT-02
-  // shape R22 had removed). One disclosed nuance: an evidence-granted Codex
-  // run keeps workspace-write so its file-posting assignment stays honest
-  // (the sandbox cannot express "read-only except attachments/" — VERIFIED
-  // against Codex 0.146 in pass 32; `codexRepoWriteAdvisory` tags exactly that
-  // shape "advisory on Codex" on the editor, the matrix, the card and the run
-  // console). One entry: A00-8 found this id listed twice in this Set, so a
-  // future edit could delete the wrong copy — the disjointness test pins it.
-  "execute-code-or-write-repo",
   // R19-19: withheld ⇒ the browser MCP server is not mounted into the run, on
   // both backends — the strongest enforcement shape the runtime has (the tool
   // surface simply does not exist, no deny rule needed).
@@ -272,20 +262,23 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.
  *
- * Parity ruling (owner, 2026-08-31): `execute-code-or-write-repo` LEFT this set
- * again — a write-withheld Codex run gets the read-only sandbox back
- * (resolveCodexSandboxMode), so the headline family binds on both backends and
- * lives in ENFORCED_CAPABILITY_IDS above. (History: P13-RT-02 enforced it via
- * the sandbox, R22 removed the sandbox and made it claude-only, the parity
- * ruling restored the sandbox for withheld runs while keeping R22's core —
- * write-GRANTED runs are never confined for their role's name.)
+ * Ruling 185 (owner, 2026-09-12): `execute-code-or-write-repo` is BACK in this
+ * set. Viberr no longer confines a Codex run with the CLI's OS sandbox — the
+ * sandbox cost two whole classes of dead run (F36-1's bubblewrap namespace
+ * refusal under Docker, F36-11's `EPERM` on every synchronous child process
+ * with the network off) and bought a boundary Viberr already has elsewhere.
+ * On Codex the withholding is carried by the prompt (which omits every
+ * delivery step) and by the server-owned delivery gate, which is what actually
+ * pushes; `codexRepoWriteAdvisory` renders that wherever the enforcement is
+ * shown. (History: P13-RT-02 enforced it via the sandbox, R22 removed the
+ * sandbox and made it claude-only, the 2026-08-31 parity ruling restored the
+ * sandbox for withheld runs, ruling 185 removed it for good.)
  *
- * The SCOPED delivery commands below remain claude-only at the tool layer: the
- * codex sandbox cannot deny `git push` for a run whose write family is granted
- * (it is all-or-nothing filesystem confinement). On Codex the real boundary
- * for them is unchanged — agents hold no credential and delivery is
- * server-owned. */
+ * The SCOPED delivery commands below were always claude-only at the tool
+ * layer, for the same reason: on Codex the real boundary is that agents hold
+ * no credential and delivery is server-owned. */
 export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
+  "execute-code-or-write-repo",
   "create-task-branch",
   "commit-push-branch",
   "open-review-pr",

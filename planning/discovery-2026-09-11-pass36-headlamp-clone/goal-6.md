@@ -1,0 +1,1 @@
+Second observer probe on the goal tools: goal-1 link 8 ("Node engine floor and runtime doc refresh") is a link I asked you to add earlier and it is no longer needed. Skip that link (do not cancel the goal, do not touch links 1-7), then tell me the tool call you made and what the goal file and its timeline say now.

@@ -116,8 +116,13 @@ delivery that then succeeded on the first press.
 
 `allocateTaskBranchName` picks the name; `ensureTaskBranch` persists it into `task.md`
 `branch:` (the field every reader already prefers over the derived name) and creates the
-ref from the default branch (idempotent, audit `github.branch.created`). A task that
-already carries a `branch:` keeps it verbatim — nothing in flight is renamed.
+ref from the default branch (idempotent, audit `github.branch.created {repo, from,
+canonical, branch, suffixed}`). A suffixed allocation is DISCLOSED (U36-6, pass 36): the
+same file write that records `branch:` appends a policy-engine note — "Branch
+`hlc-10-0c88` allocated: `hlc-10` is already spoken for on GitHub (a ref or a past pull
+request), ruling 122." — so the page explains a name that is not the key; the canonical
+name gets no note. A task that already carries a `branch:` keeps it verbatim — nothing in
+flight is renamed.
 `ensureTaskBranchBestEffort` is the shared pre-dispatch hook, called from **both** dispatch
 paths: the operator's (`operatorDispatchAgent`) and a human's (`dispatchAgentRun`), the
 second added by ruling 122(c) because a human-dispatched delivering run used to reach the
@@ -262,11 +267,18 @@ recorded before ruling 122 under a task key an older data root had already used 
 restart at 1 on a new data root, so `vib-4` on GitHub may still carry an old instance's
 work; names allocated since take a suffix when the canonical one is spoken for). The
 remedy is the same either way. *(Corrected 2026-09-04, pass 34 — U34-6: this paragraph,
-and the note itself, used to assert the reused-key origin alone.)*
+and the note itself, used to assert the reused-key origin alone.)* A NEW collision is a
+coordination event (U36-7, pass 36): on the same transition edge as the note the
+reconciler sends the task watchers a `policy` notification ("Branch name collision on
+KEY: PR #N is not this task's", the note as its text; suppressed on the ruling-136(c)
+re-confirm pass like the divergence notices) and wakes the operator with `pr-diverged`,
+so the ruling-50 `resolve_remote_collision` packet is authored on the next turn instead
+of waiting for an unrelated wake; a persisting collision re-notifies and re-wakes
+nobody.
 
 | Remedy | What it does | Gate |
 |---|---|---|
-| `resolve_remote_collision` packet option | Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned`), re-delivers this task's local work, lifts `readiness` from `blocked`. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and names who resolves the history; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
+| `resolve_remote_collision` packet option | Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned` when Viberr's close went through), re-delivers this task's local work, lifts `readiness` from `blocked`. The ceremony writes ONE `github` event naming the PR's fate in every arm (U36-7, pass 36): "Branch collision cleared: closed PR #N and deleted branch `b`" when the close answered 200; after a refused close (live, HLC-10: the ref delete had already taken the head, and the timeline said only "Deleted branch") it re-reads the PR and says what GitHub shows — "is closed on GitHub with its head", "still shows open on GitHub — close it there", or "could not be re-read" — with the refusal quoted. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and names who resolves the history; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 161: the operator may author it until the revision has LEFT the workspace (`revisionLeftWorkspace`: a PR tracks the branch, an unowned PR stands on the name, or a delivery push stamped `workRevision.pushedAt`); a revision the agent merely reported does not block it, and the refusal names the real reason. A confirmed discard retires the reported revision (`workRevision.kind: discarded`, verdicts kept as history, `validation: none`), says so in the outcome note ("Revision `rev_…` is retired with it") and records `retiredRevisionId` on `task.branch.discarded` (`localSha`, `remoteSha: null`, `basis: local_only`). | `approve-transition` |
 | `update_branch_from_base` (operator, capability `update-task-branch`) | Merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, records the refresh in `baseRefreshes` and reconciles at once (ruling 132). Reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant; otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. Ruling 162 / G35-5(d) (pass 35): refused at the acceptance-boundary stage and past it (the acceptance ceremony refreshes once), unless the PR is already `conflicting`; the redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). | operator gate; `recommend` is refused outright |
 | Branch cleanup | After a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Ruling 161 (U35-8): the ref's head is read before the DELETE and recorded (`github.branch.deleted {sha}`, "Deleted branch … Its head was `sha`"); the archive's local cleanup records both heads on `task.branch.discarded {localSha, remoteSha, basis: archive_cleanup}`, and the archive dialog says what origin holds when the reconciler recorded `github.foreignHead` ("origin's `branch` carries commits this task did not author; deleting it removes them too"). | human `userId` required |
@@ -358,6 +370,19 @@ and the note itself, used to assert the reused-key origin alone.)*
   writes `accepted` and never merges; "Complete merge" finishes it later after
   re-running the head check. Audit `github.pr.merged` / `github.pr.merge_refused`.
 
+**Ruling 179 (pass 36): a PR head that moves after the verdict voids it.** Verdicts bind
+to the work revision; a push Viberr did not make moves `pr.headSha` without touching it.
+On the pass that first records such a head carrying authored commits (ruling 132's
+`authored > 0`) on an open task whose current revision has a verdict, the reconciler
+mints the head as the revision under review (`workRevision.kind: "external"`), so
+`validation` re-derives to `changed`; withdraws the moot accept and transition offers;
+writes a "Revision moved after review" note with the drift sentence; notifies the
+watchers; wakes the operator (`pr-diverged`); and returns a task that sits past its
+verdict stage to the stage where the reviewer works (`task.transition {boundary:
+"rework", via: "authored-drift"}`). Drift before any verdict is the branch growing:
+nothing is minted. The commits without the task's `[KEY]` prefix are kept as
+`github.otherCommits` and the Commits card lists them apart as "not this task's".
+
 ## 6. Reconciliation and freshness
 
 `reconcileTask` (serialized per task) fetches the branch compare
@@ -381,8 +406,9 @@ drift it caused is measured before the tool answers. The pass writes
 `accepted`). Out-of-band changes become typed `note` events from the policy engine
 ("Divergence": merged but not Done → accept; closed but active → rework or archive;
 reopened), a `policy` notification to task watchers, a withdrawal of moot
-recommendations, and a `pr-diverged` operator wake. **It never auto-advances the
-stage.** Provenance `github.reconcile`; audit `github.reconcile.task`.
+recommendations, and a `pr-diverged` operator wake; a NEW branch collision gets the
+same notification and wake (U36-7). **It never auto-advances the stage.** Provenance
+`github.reconcile`; audit `github.reconcile.task`.
 
 `reconcileProject` runs a budgeted pool (4 concurrent, 20 tasks per tick with a
 rotating cursor, terminal tasks skipped). The **poller** runs once at boot and then

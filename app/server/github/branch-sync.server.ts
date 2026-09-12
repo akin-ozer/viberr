@@ -564,7 +564,12 @@ export async function ensureTaskBranch(
   // pull request already speaks for that name. A task that already carries a
   // `branch:` keeps it verbatim, so nothing in flight is renamed.
   const recorded = file.parsed.frontmatter.branch;
-  let branch = recorded ?? taskBranchName(input.taskKey);
+  const canonical = taskBranchName(input.taskKey);
+  let branch = recorded ?? canonical;
+  // U36-6 (pass 36): a suffixed allocation is DISCLOSED — on the audit row and
+  // as a policy note — instead of being a name nobody can explain (live,
+  // `hlc-10-0c88` appeared with nothing saying `hlc-10` was taken).
+  let suffixed = false;
   if (!recorded) {
     const allocated = await allocateTaskBranchName(
       gh.client,
@@ -591,6 +596,7 @@ export async function ensureTaskBranch(
     }
     if (allocated.status !== "ok") return allocated;
     branch = allocated.branch;
+    suffixed = allocated.suffixed;
   }
 
   // 1. Does the ref already exist? (idempotency first)
@@ -729,7 +735,25 @@ export async function ensureTaskBranch(
   // Persist the branch name into task.md when it wasn't recorded yet
   // (file write → reproject; canonical truth stays in the file).
   if (file.parsed.frontmatter.branch !== branch) {
-    await patchTaskFrontmatter(taskRef, { branch });
+    if (suffixed) {
+      // The note and the `branch:` write land in ONE file write, so a reader
+      // never sees the suffixed name without the sentence that explains it.
+      await appendTimelineEvent(
+        taskRef,
+        {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text: `Branch \`${branch}\` allocated: \`${canonical}\` is already spoken for on GitHub (a ref or a past pull request), ruling 122.`,
+          toAgent: false,
+          evidence: null,
+        },
+        { branch },
+      );
+    } else {
+      await patchTaskFrontmatter(taskRef, { branch });
+    }
     rebuildPath(db, resolveTaskFilePath(taskRef), {
       dataRoot: ctx.dataRoot,
     });
@@ -743,7 +767,7 @@ export async function ensureTaskBranch(
       subjectId: branch,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { repo: gh.repo, from: gh.defaultBranch },
+      details: { repo: gh.repo, from: gh.defaultBranch, canonical, branch, suffixed },
     });
   }
 

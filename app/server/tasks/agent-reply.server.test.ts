@@ -1819,9 +1819,14 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     const resumed = specs[specs.length - 1]!;
     expect(resumed.skills).toEqual(["conventional-commits"]);
     expect(resumed.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
-    expect(existsSync(path.join(ws, ".claude", "skills", "conventional-commits"))).toBe(
-      true,
+    // Ruling 180: the resumed run's skills ride its own plugin beside the
+    // checkout, never inside it (the plugin dir itself is gone once the fake
+    // run settles — that removal is the ruling's cleanup, not a defect).
+    expect(resumed.skillPlugin?.name).toBe("viberr");
+    expect(path.dirname(resumed.skillPlugin?.path ?? "")).toBe(
+      path.join(path.dirname(ws), ".viberr-plugins"),
     );
+    expect(existsSync(path.join(ws, ".claude"))).toBe(false);
   }, 20_000);
 });
 

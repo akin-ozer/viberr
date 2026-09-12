@@ -117,8 +117,14 @@ list keeps ruling 131's floor. Every dispatch lifts the same way (§4.1 of
 agents-and-runtime). The lift is not a claim that the cause is fixed: the operator
 re-checks and opens a new packet when the block stands.
 
-Fire-time refusals from `runOperator`: `terminal-stage` (a scheduled re-run never
-fires on a terminal task), `open-packet` (a **human-pressed** Run operator, or the same turn a person
+Fire-time refusals from `runOperator`: `closed` (ruling 177, pass 36: a task at its
+terminal stage or archived refuses EVERY trigger — `create`, `transition`, `agent-reply`,
+`goal-updated`, `pr-diverged`, `delivered`, `packet-resolved`, `dependencies-released`,
+`scheduled`, `manual` — before any run row exists; the refusal carries `refusalReason`,
+the one closed-task sentence `closureRefusal` builds, and an `@operator` mention that
+meets it leaves the F35-5 "Mention not started" note; reopening a closed task is a
+human stage move, and the transition that reopens it is the trigger that coordinates
+again), `open-packet` (a **human-pressed** Run operator, or the same turn a person
 **scheduled**, while a packet is open is a paid no-op, rulings 76 and 141; machine
 reaction triggers such as `pr-diverged` and `agent-reply` are not refused; a scheduled
 occurrence is retired `fired` with a "Scheduled action skipped" note and outcome
@@ -182,8 +188,15 @@ the current unpushed-revision record with the acceptance gate's own sentence (ru
 does not re-propose a just-dismissed move), `blockedBy` (ruling 131: each entry with
 its resolved state), `deployedSpecialists[].eligibleForCurrentStage` meaning "may RUN
 here" (declared stages, or the engaged deliverer, ruling 133) beside
-`engagedAsDeliverer`, and its own `operatorPolicy` labelled with scope so it cannot
-mistake its own web grant for a specialist's.
+`engagedAsDeliverer`, its own `operatorPolicy` labelled with scope so it cannot
+mistake its own web grant for a specialist's, and `requiredReviewers` (ruling 178, pass
+36): the reviewers the PROJECT requires per review stage, resolved to stage and agent
+names, each of which must hold an approve verdict on the delivered revision before
+acceptance whether or not anyone engaged it — `reviewers` lists only who the operator
+has engaged. Every ordinary turn and the post-delivery turn open with "Required
+reviewers (project rule): <Agent> at <Stage>" and tell the operator to engage each
+one with `run_agent` (`delivers: false`) at its stage before offering or performing
+`accept_completion`.
 
 Before triage the operator gets a **full read-only clone** of the project repository
 (ruling 55), the same per-task checkout a specialist run reuses; on the shared

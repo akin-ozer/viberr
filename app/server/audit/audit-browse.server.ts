@@ -56,7 +56,7 @@ export function listRecentAuditEvents(
     .prepare(
       `SELECT id, occurred_at, actor_label, action, subject_kind, subject_id, project_slug
          FROM audit_events
-        ORDER BY occurred_at DESC
+        ORDER BY occurred_at DESC, rowid DESC
         LIMIT ?`,
     )
     .all(limit);

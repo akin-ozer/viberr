@@ -17,6 +17,11 @@ import {
   type Validation,
 } from "~/schemas/task-file.schema";
 import { verdictGateReason } from "~/server/github/pr-human-approval.server";
+import {
+  requiredReviewerRefusals,
+  resolveRequiredReviewers,
+  type RequiredReviewerView,
+} from "~/server/tasks/required-reviewers.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
   getDataRoot,
@@ -147,6 +152,7 @@ interface ProjectContextRow {
   slug: string;
   repo: string | null;
   stages_json: string;
+  required_reviewers_json: string;
 }
 
 function getMemberIds(db: DatabaseSync, slug: string): Set<string> {
@@ -208,8 +214,9 @@ export function rebuildProjectFile(
     `INSERT INTO projects
        (slug, name, archived, repo, default_branch, task_prefix, description,
         stages_json, workflow_json, agent_policy_json, credential_policy_json,
-        guardrails_json, source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        guardrails_json, required_reviewers_json, source_path, content_hash,
+        parsed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(slug) DO UPDATE SET
        name = excluded.name, archived = excluded.archived, repo = excluded.repo,
        default_branch = excluded.default_branch,
@@ -218,6 +225,7 @@ export function rebuildProjectFile(
        agent_policy_json = excluded.agent_policy_json,
        credential_policy_json = excluded.credential_policy_json,
        guardrails_json = excluded.guardrails_json,
+       required_reviewers_json = excluded.required_reviewers_json,
        source_path = excluded.source_path, content_hash = excluded.content_hash,
        parsed_at = excluded.parsed_at`,
   ).run(
@@ -233,6 +241,10 @@ export function rebuildProjectFile(
     JSON.stringify(fm.agents),
     fm.credentialPolicy ? JSON.stringify(fm.credentialPolicy) : null,
     JSON.stringify(fm.guardrails),
+    // Ruling 178: RESOLVED here (stage and agent names) so the task walk below
+    // prints the gate's sentence from the row alone. A changed project file
+    // cascades into every task (below), so a rule edit refreshes the queue.
+    JSON.stringify(resolveRequiredReviewers(fm, options.dataRoot)),
     sourcePath,
     // F28-D3: sentinel hash; the real content_hash is the LAST write below, so a
     // crash between here and the project_members / diagnostics rewrite leaves it
@@ -347,6 +359,8 @@ function acceptanceBlockReason(
     /** The writers' `blockedPacket` predicate, computed by the caller because
      *  the packet lives in the task file's BODY, not its frontmatter. */
     blockedPacket: boolean;
+    /** Ruling 178: the project's resolved rules, from the projected row. */
+    requiredReviewers: readonly RequiredReviewerView[];
   },
 ): string | null {
   return (
@@ -364,6 +378,9 @@ function acceptanceBlockReason(
     closedPrBlockedReason(fm, fm.key) ??
     // F10-15: every required reviewer must have approved the current revision.
     acceptanceBlockedReason(fm) ??
+    // Ruling 178: and every reviewer the PROJECT declares, engaged or not —
+    // the same position it holds in `acceptanceRefusalReasons`.
+    requiredReviewerRefusals(ctx.requiredReviewers, fm)[0] ??
     verdictGateReason(fm, ctx.validation, fm.key) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Same sentence the writers refuse with.
@@ -455,17 +472,23 @@ export function rebuildTaskFile(
 
   // Project context (already-projected row): stages for reference checks,
   // default repo, member ids for guest flags.
-  // SAFETY: the SELECT names exactly ProjectContextRow's three members;
-  // 0001_baseline declares `slug` and `stages_json` NOT NULL and `repo`
-  // nullable, which is how the row types them.
+  // SAFETY: the SELECT names exactly ProjectContextRow's four members;
+  // 0001_baseline declares `slug`, `stages_json` and `required_reviewers_json`
+  // NOT NULL and `repo` nullable, which is how the row types them.
   const project = db
-    .prepare(`SELECT slug, repo, stages_json FROM projects WHERE slug = ?`)
+    .prepare(
+      `SELECT slug, repo, stages_json, required_reviewers_json FROM projects WHERE slug = ?`,
+    )
     .get(slug) as ProjectContextRow | undefined;
   // SAFETY: `stages_json` has ONE writer — rebuildProjectFile above stores
   // `JSON.stringify(fm.stages)`, and every stage the project-file schema parses
   // carries an `id`. Only the ids are read here.
   const stageIds: string[] = project
     ? (JSON.parse(project.stages_json) as { id: string }[]).map((s) => s.id)
+    : [];
+  // SAFETY: same single writer — `JSON.stringify(resolveRequiredReviewers(fm))`.
+  const requiredReviewers: RequiredReviewerView[] = project
+    ? (JSON.parse(project.required_reviewers_json) as RequiredReviewerView[])
     : [];
   const allDiagnostics = [
     ...diagnostics,
@@ -597,6 +620,7 @@ export function rebuildTaskFile(
     acceptanceBlockReason(fm, {
       validation: derivedValidation,
       blockedPacket,
+      requiredReviewers,
     }),
     // N20-14 (§5c): the durable force-accept fact, projected for the display arm.
     fm.acceptance ?? null,

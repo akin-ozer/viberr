@@ -2,6 +2,7 @@ import {
   describeRevisionDrift,
   type RevisionDrift,
 } from "~/shared/revision-drift";
+import { closureRefusal, taskClosure } from "./task-closure.server";
 import { resolveDependencies } from "~/server/projections/dependencies.server";
 import {
   misdirectedOptionPromise,
@@ -131,6 +132,10 @@ import {
   type DeployedSpecialistView,
   type DispatchHeldError,
 } from "./specialist-run.server";
+import {
+  resolveRequiredReviewers,
+  type RequiredReviewerView,
+} from "./required-reviewers.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import {
   listKnowledgeBaseNames,
@@ -1105,6 +1110,28 @@ export async function operatorOpenPacket(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
+  // Ruling 177 (pass 36, F36-5): no decision packet on a closed task. The
+  // operator that outlives an acceptance (its turn started before the human
+  // accepted) reaches this writer with a plan authored for an open task; the
+  // packet it wants would ask a person to decide something about a task that
+  // is already Shipped or archived.
+  {
+    const packetProject = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+    const closure = packetProject
+      ? taskClosure(existing.parsed.frontmatter, packetProject.parsed.frontmatter.stages)
+      : ({ closed: false } as const);
+    if (closure.closed && packetProject) {
+      return {
+        outcome: "noop",
+        message: closureRefusal(
+          input.taskKey,
+          closure,
+          packetProject.parsed.frontmatter.stages,
+          "opening a decision packet on it",
+        ),
+      };
+    }
+  }
   // F31-6: option/semantics coherence, checked where the option is AUTHORED.
   // `discard_branch` deletes the LOCAL, never-pushed branch and destroys its
   // commits — offered on a task whose revision has LEFT the workspace (a PR
@@ -1313,7 +1340,9 @@ export async function operatorOpenPacket(
     if (o.ev) option.ev = o.ev;
     if (backend) option.backend = backend;
     if (profileId) option.profileId = profileId;
-    if (o.deleteBranch) option.deleteBranch = true;
+    // U36-2 (pass 36): a branchless task has no branch to delete — the option
+    // must not promise it, and the card's recovery paragraph keys on it.
+    if (o.deleteBranch && existing.parsed.frontmatter.branch) option.deleteBranch = true;
     // Ruling 163: only a redirect returns the task to the review stage.
     if (o.rework && o.kind === "redirect") option.rework = true;
     // Ruling 164: the stage a move_stage resolution moves to, validated above.
@@ -1607,6 +1636,13 @@ export interface OperatorTaskSnapshot {
     backend: string;
     verdict: "approve" | "request_changes" | null;
   }[];
+  /** Ruling 178: the reviewers the PROJECT requires, per review stage,
+   *  resolved to the names the acceptance gate prints. Each must hold an
+   *  `approve` verdict on the delivered revision before acceptance, engaged
+   *  or not — `reviewers` above lists only who the operator has engaged.
+   *  Optional so hand-built fixtures need not restate it; `operatorSnapshot`
+   *  always sets it. */
+  requiredReviewers?: RequiredReviewerView[];
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
   /** R7-4 rework routing, made VISIBLE. The governed workflow graph is
@@ -2072,6 +2108,8 @@ export function operatorSnapshot(
         verdict: verdictOf(r.profileId),
       }));
     })(),
+    // Ruling 178: from the project file, resolved the way the gate prints it.
+    requiredReviewers: resolveRequiredReviewers(project.parsed.frontmatter, ctx.dataRoot),
     nextStages,
     reworkStages,
     stageIds: stages.map((s) => s.id),
@@ -3486,7 +3524,11 @@ export async function operatorAcceptCompletion(
     "done";
 
   if (file.parsed.frontmatter.stage === doneStageId) {
-    return { outcome: "noop", message: `${input.taskKey} is already Done.` };
+    // U36-9 (pass 36): the terminal stage by the board's own name.
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is already ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+    };
   }
 
   // P14-LV-02/B-WF6: ONE shared gate — `acceptanceRefusalFor` reads the same
@@ -3615,9 +3657,10 @@ export async function operatorAcceptCompletion(
           actor: { kind: "operator" },
           title: "Completion accepted",
           text:
+            // U36-9 (pass 36): the terminal stage by the board's own name.
             (hasPr
-              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to Done; the review PR is **accepted, merge pending** (a human merges it).`
-              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to Done.`) +
+              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}; the review PR is **accepted, merge pending** (a human merges it).`
+              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`) +
             driftNote,
           toAgent: false,
           evidence: null,
@@ -3633,7 +3676,10 @@ export async function operatorAcceptCompletion(
   // this is the decision. Same shape as `forceAcceptCompletion`, which has
   // followed the write rather than preceding it since U3.
   if (!accepted) {
-    return { outcome: "noop", message: `${input.taskKey} is already Done.` };
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is already ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+    };
   }
   recordAudit(db, {
     action: "task.operator.accepted_completion",
@@ -3644,5 +3690,8 @@ export async function operatorAcceptCompletion(
     taskKey: input.taskKey,
     details: { autonomy: "full", toStage: doneStageId },
   });
-  return { outcome: "done", message: `Accepted completion: ${input.taskKey} moved to Done.` };
+  return {
+    outcome: "done",
+    message: `Accepted completion: ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+  };
 }

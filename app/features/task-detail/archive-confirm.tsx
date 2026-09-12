@@ -108,7 +108,7 @@ export function ArchiveConfirm({
             <span className="k">Withdrawn</span>
             <span>
               {withdrawn.length > 0
-                ? `${withdrawn.join(" and ")}. Restoring the task reopens the question.`
+                ? `${withdrawn.join(" and ")}. Restoring brings the task back to a human; run the operator to reopen the decision.`
                 : // C14: this row surveys the open packet + pending
                   // recommendations only — it said "Nothing is pending on this
                   // task right now" while a live run streamed behind the dialog.

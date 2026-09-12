@@ -89,7 +89,7 @@ import {
   type SpecialistMcpServerConfig,
 } from "~/server/tasks/specialist-mcp.server";
 import { getProject } from "~/server/projections/board-query.server";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import {
@@ -280,7 +280,10 @@ export interface RunOperatorResult {
    *     PR change, a manual run) still drive, under the held doctrine. The
    *     refusal settles the task's waiting flag itself.
    */
-  refused?: "terminal-stage" | "open-packet" | "blocked-by";
+  refused?: "closed" | "open-packet" | "blocked-by";
+  /** Ruling 177: the sentence every door shows for a closed task (set with
+   *  `refused: "closed"`). */
+  refusalReason?: string;
 }
 
 /** The operator triggers a held task refuses (ruling 131(d)). */
@@ -708,7 +711,7 @@ async function noteQueuedTriggerRefused(
   const outcome =
     refused === "open-packet"
       ? "skipped-packet"
-      : refused === "terminal-stage"
+      : refused === "closed"
         ? "skipped-done"
         : "skipped-held";
   try {
@@ -722,8 +725,8 @@ async function noteQueuedTriggerRefused(
       const cause =
         refused === "open-packet"
           ? `a decision packet is open on ${queued.taskKey}${packetTitle ? ` ("${packetTitle}")` : ""} and coordination is paused until it is resolved`
-          : refused === "terminal-stage"
-            ? `${queued.taskKey} is already Done`
+          : refused === "closed"
+            ? `${queued.taskKey} is closed (${parsed.frontmatter.archived ? "archived" : "at its terminal stage"})`
             : `${queued.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")})`;
       const text = queued.scheduleId
         ? `**Scheduled action skipped:** the scheduled operator re-run for ${queued.taskKey} reached the front of the queue, but ${cause} — no run was started, and the occurrence spends no retry.`
@@ -1470,48 +1473,55 @@ export async function runOperator(
   const authority = resolveOperatorAuthority(ctx, input.projectSlug, overrides);
   const backend = authority.backend;
 
-  // FR39 / F19-20 — a SCHEDULED re-run never fires on a terminal stage, checked
-  // HERE (where the run starts) and not only where the occurrence was claimed.
-  //
-  // Two windows made the claim-time check insufficient on its own: the schedule
-  // runner drains its due list sequentially after claiming it, and — far wider
-  // — a trigger arriving while a drive holds the lease is QUEUED and fired on
-  // release, with no mootness re-check anywhere. That in-flight turn is
-  // frequently the one that calls `accept_completion`, so the queued scheduled
-  // trigger would start a real, unwatched operator turn on a task that is now
-  // Done and merged, in front of a human who just closed it.
-  //
-  // Scoped to the `scheduled` trigger on purpose: every other trigger on a
-  // terminal task is legitimate (a `pr-diverged` recovery, an `@operator`
-  // question about finished work). This is the one capability that acts with no
-  // human present, which is why FR39 singles it out.
-  if (input.trigger === "scheduled") {
-    const stage = readStageAtStart(taskFileRef(input), "drive");
+  // Ruling 177 (pass 36, F36-4 / F36-5): a CLOSED task — terminal stage or
+  // archived — refuses EVERY trigger here, where the run starts. FR39 / F19-20
+  // used to scope this to the `scheduled` trigger ("every other trigger on a
+  // terminal task is legitimate — a pr-diverged recovery, an @operator
+  // question about finished work"); live, that legitimacy was the door: the
+  // dispatch-completion contract's `agent-reply` re-invoked the operator on a
+  // force-accepted task and the operator opened a decision packet on it
+  // (HLC-9), and an `@operator` mention (`manual`) started a paid run on an
+  // archived task behind a page whose own button refused it. The pr-diverged
+  // wake on a Done task (an out-of-band merge reconciling into a task that is
+  // already Done) has nothing left to route either: the reconciler writes the
+  // note and the notification itself. Reopening a closed task is a HUMAN stage
+  // move, and the transition that reopens it is the trigger that coordinates
+  // again.
+  {
+    const closedFile = readTaskFile(taskFileRef(input));
     const project = getProject(db, input.projectSlug);
-    const terminalId = project
-      ? (resolveStageRoles(project.stages, project.workflow ?? []).terminalId ??
-        project.stages[project.stages.length - 1]?.id ??
-        null)
-      : null;
-    if (stage !== null && terminalId !== null && stage === terminalId) {
-      logger.info("scheduled operator re-run refused — the task is already Done", {
+    const closure =
+      closedFile && project
+        ? taskClosure(closedFile.parsed.frontmatter, project.stages)
+        : ({ closed: false } as const);
+    if (closure.closed && project) {
+      const reason = closureRefusal(
+        input.taskKey,
+        closure,
+        project.stages,
+        "running the operator on it",
+      );
+      logger.info("operator run refused — the task is closed", {
         taskKey: input.taskKey,
         projectSlug: input.projectSlug,
-        stage,
+        trigger: input.trigger ?? "manual",
+        why: closure.why,
+        stage: closure.stageId,
       });
       // A refusal must leave the task's waiting state HONEST. When this trigger
       // was drained off the queue, `releaseOperatorLease` skipped its settle
       // precisely because a trigger existed to fire — so refusing without this
       // would strand `waiting: agent` on a closed task with no agent running.
       // It is a no-op unless the flag is `agent` and nothing else is live, and
-      // it settles a terminal task to `none` rather than "waiting on a human".
+      // it settles a closed task to `none` rather than "waiting on a human".
       settleWaitingAfterOperator(db, taskFileRef(input));
       return {
         runId: null,
         queued: false,
         backend,
         autonomy: authority.autonomy,
-        refused: "terminal-stage",
+        refused: "closed",
+        refusalReason: reason,
       };
     }
   }
@@ -3855,7 +3865,11 @@ function operatorTurnDoctrine(
       "verdict-capable profile with a review prompt (`delivers: false`); if a review has " +
       "already passed, `accept_completion` per policy; if a stage move is needed to reach " +
       "review, `transition_stage`. If the reviewer's run is already IN FLIGHT (`liveRuns`), " +
-      "do nothing and stop — you are re-invoked when it reports."
+      "do nothing and stop — you are re-invoked when it reports. " +
+      // Ruling 178: this arm returns before the stage rule, so the project's
+      // required reviewers are named here too — the review this turn should
+      // dispatch is theirs.
+      requiredReviewersRule(snapshot)
     );
   }
 
@@ -3886,9 +3900,33 @@ function operatorTurnDoctrine(
   );
 }
 
+/**
+ * Ruling 178 (pass 36, G36-3): the reviewers the PROJECT requires, as a rule
+ * the operator acts on rather than a refusal it meets at the boundary. Live,
+ * a task reached Merge Approval with `validation: healthy` from whichever
+ * verdict-capable agent had run while the project's reviewer never ran, and
+ * the snapshot's `reviewers` (who is ENGAGED) could not tell the operator who
+ * was still owed. Empty when the project declares no rule.
+ */
+function requiredReviewersRule(snapshot: OperatorTaskSnapshot): string {
+  const rules = snapshot.requiredReviewers ?? [];
+  if (rules.length === 0) return "";
+  const named = rules.map((r) => `${r.agentName} at ${r.stageName}`).join(", ");
+  return (
+    `Required reviewers (project rule): ${named}. ` +
+    "Acceptance is refused until each of them holds an `approve` verdict on the delivered revision " +
+    "(`notAcceptableReason` names the one still owed), whether or not anyone engaged them. When the " +
+    "task stands at that reviewer's stage with delivered work, the stage's own work IS that review: " +
+    "engage the named profile with `run_agent` (`delivers: false`) and a review prompt before offering " +
+    "or performing `accept_completion`. Another reviewer's approval never stands in for it, and a " +
+    "reviewer's earlier verdict on a replaced revision does not count. "
+  );
+}
+
 /** The ordinary stage rule: what THIS stage calls for, from the live snapshot. */
 function stageRule(snapshot: OperatorTaskSnapshot): string {
   return (
+    requiredReviewersRule(snapshot) +
     `You are at stage "${snapshot.stageName}"` +
     (snapshot.previousStage
       ? `, arrived from "${snapshot.previousStage.name}"`

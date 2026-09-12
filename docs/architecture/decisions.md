@@ -3762,6 +3762,275 @@ by rewriting those paragraphs:*
     `codexMcpServers` in `codex-runtime.server.ts`; `buildSpecialistPersona` and
     `buildOperatorSystemPrompt`; `McpModal` in `app/features/org-settings/resource-modals.tsx`.)
 
+177. **A closed task refuses every coordination door, and closing it ends its live runs
+    (owner, 2026-09-11, pass 36; Q36-8).** A task at its terminal stage or archived is
+    CLOSED. Before this ruling "closed" had three spellings and several doors read none of
+    them: the schedule runner's `mootNow`, the specialist dispatch's archived-only gate, and
+    `runOperator`'s terminal-stage refusal scoped to the `scheduled` trigger (FR39 / F19-20:
+    "every other trigger on a terminal task is legitimate"). Live (F36-4, F36-5): an
+    `@operator` mention started a paid run on an archived task behind a page whose own
+    button refused it, and a developer run that outlived a force-accept re-invoked the
+    operator on the shipped task, whose plan then opened a decision packet there.
+    (a) *One predicate.* `taskClosure(fm, stages)` (`app/server/tasks/task-closure.server.ts`)
+    is the only spelling — `archived`, or the stage is the board's last — and
+    `closureRefusal` the only sentence ("<KEY> is archived — restore it before <verb>." /
+    "<KEY> is closed (<Stage> is the terminal stage) — move it back to an open stage before
+    <verb>."). `runOperator` refuses EVERY trigger with `refused: "closed"` and the sentence
+    in `refusalReason`, settling `waiting` to `none`; the mention door writes the F35-5
+    "Mention not started" note; the specialist dispatch, the packet writer, the schedule
+    runner and the reconciler's budgeted queue read it too. A run's completion on a closed
+    task records its report with a "Completed after the task closed" note and wakes no
+    operator, however it was dispatched. Reopening is a human stage move, and the
+    transition that reopens the task is the trigger that coordinates again.
+    (b) *Closing ends live runs.* Acceptance, force-accept and archive interrupt the task's
+    running and queued runs through `interruptRunOnClosure` (run-service; audited
+    `runtime.run.interrupted {reason: "task-closed", cause, closedBy}` under the system
+    actor, no RBAC — the person's authority was spent on the closure), write one
+    "Interrupted by acceptance" note naming every run and one
+    `task.acceptance.interrupted_runs` row. A closed task spends nothing more.
+    (c) *A restart says so on the task.* Boot recovery leaves one "Interrupted by a restart"
+    note per task whose runs it finalized (U36-8), before the operator it re-invokes.
+    (d) N20-17's disclosure ("mentioning @operator still runs it") is gone with the door,
+    and the archive dialogs promise what restore does — a human, not a reopened question
+    (U36-1). Rulings 131(d) and 141 keep their own refusals beside this one.
+178. **A project declares its required reviewers (owner, 2026-09-11, pass 36; Q36-5;
+    G36-3).** Required-ness was emergent: the task-level set (`requiredReviewers(fm)` on
+    the task file) is the engaged, non-delivering, verdict-capable engagements, so a
+    reviewer gated a task only once the operator had engaged it there. Live, a task whose
+    operator never engaged the project's Code Reviewer reached the acceptance boundary
+    `healthy` on whichever other verdict-capable agent had run, and nothing named the
+    reviewer the project meant.
+    (a) *The rule.* `project.md` gains `requiredReviewers: [{ stageId, profileId }]` —
+    "profile X reviews at stage Y", per review stage, `[]` by default (only the engaged
+    reviewers are required). Every stage id must be a non-terminal stage and every profile
+    id a deployed agent holding `report-validation-verdict`; a writer refuses anything else
+    by name and writes nothing. The task-level emergent set stays: the project rule ADDS
+    a reviewer the task must hear from whether or not anyone engaged it.
+    (b) *One gate.* `requiredReviewerRefusals` (`required-reviewers.server.ts`) is pure:
+    for every rule, the named agent must hold an `approve` verdict bound to the task's
+    ACTIVE work revision (an approval of a replaced revision is history, ruling 163);
+    otherwise "Required reviewer <Agent> (project rule at <Stage>) has not approved
+    revision <sha7>. Run the review at <Stage>, or an admin can force-accept." A task with
+    no active revision and no pull request is not held. The acceptance refusal stack (task
+    page, `notAcceptableReason`, every writer), the projection's `validation_block_reason`
+    (so the review queue lists the task as review work and never offers acceptance; the
+    `projects` row carries the resolved rules for the rebuilder's task walk), the operator
+    snapshot (`requiredReviewers`, and the turn prompt says to engage each one at its
+    stage) and the controller's `get_project` read that one function. Force-accept
+    bypasses it and the audit row names the bypassed rule.
+    (c) *One writer.* Settings → Required reviewers (stage and agent pickers, the WHOLE
+    list saved, `edit-policy` tier) and the controller's `set_required_reviewers` (the
+    whole list, `[]` clearing it, `[noop]` when unchanged) go through `setRequiredReviewers`,
+    audited as `project.required_reviewers.updated` with the resolved stage and agent
+    names ("set the required reviewers to **Reviewer at Review**"); the Policy page reads
+    the rules as agent → stage and points a manager at Settings.
+179. **Ruling 163 applies to the pull-request head (owner, 2026-09-11, pass 36; Q36-9).**
+    Verdicts bind to the WORK revision, and a foreign push moves the review PR's head
+    without touching it — so after an observer commit landed on an approved PR at Merge
+    Approval, `validation` stayed healthy, the accept card stayed applicable, nothing
+    woke or notified, the Commits card (prefix-filtered) hid the commit, and no re-review
+    path existed because the reviewer is scoped to the verdict stage (F36-7). The merge is
+    what a verdict protects, and the merge takes the head.
+    (a) *Authored drift after a verdict voids it.* On the pass that first records a moved
+    head carrying authored commits (ruling 132's classification: `authored > 0`, the cached
+    drift names a different head) on a task that is not closed and whose current revision
+    carries a verdict, the reconciler mints the head as the revision under review
+    (`workRevision.kind: "external"`, `sourceProfileId: null`), re-derives `validation`
+    (→ `changed`), withdraws the moot accept and transition offers, writes a "Revision
+    moved after review" note carrying ruling 132's drift sentence, notifies the watchers
+    (`policy`), wakes the operator (`pr-diverged`) and — when the task sits past its
+    verdict stage — returns it there through the rework route (`task.transition
+    {boundary: "rework", via: "authored-drift"}`, actor the system). The same head on a
+    later pass is old news; a delivery that replaces the revision in the window wins.
+    (b) *Drift before any verdict is the branch growing.* Nothing is minted or voided; the
+    drift record is written as before.
+    (c) *The foreign commits are visible.* `github.otherCommits` keeps the branch commits
+    without the task's `[KEY]` prefix, and the Commits card lists them apart as "Also on
+    the branch · not this task's".
+180. **Claude skills mount outside the task checkout (owner, 2026-09-11, pass 36; F36-9).**
+    A Claude run's granted skills are handed to the SDK as one LOCAL PLUGIN built for that
+    run at `<checkout>/../.viberr-plugins/<runId>/` (`.claude-plugin/plugin.json`, name
+    `viberr`, plus `skills/<name>/` copied from the store with normalized frontmatter),
+    passed as `plugins: [{ type: "local", path, skipMcpDiscovery: true }]` and filtered as
+    `skills: ["viberr:<name>", …]`; `settingSources` is `[]` on every run, so nothing under
+    the checkout is ever a settings source and the repository's own `.claude`/CLAUDE.md
+    never reach the model at system-prompt tier. Nothing Viberr writes for a run lives
+    inside the tree the project's tools scan (live, the mounted `.claude/skills` broke the
+    clone's own `npm run check` in the reviewer's workspace three times): the in-checkout
+    `.claude/skills` + `settings.json` mount, the `.git/info/exclude` entry, the CLAUDE.md
+    excludes and the per-process mount marker are retired. One plugin per run: run-service
+    removes it when the run settles, the dispatch removes one a refused run never adopted,
+    and a run whose plugin is gone at start enables no skill and corrects its persona.
+    Verified in the image on 2026-09-11 (SDK 0.3.261 / CLI 2.1.261): the init lists
+    `viberr:<name>` and the model invokes it. Codex is unchanged (skills as prompt text; it
+    writes no files). (`mountGrantedSkills`, `removeSkillPlugin` in `skill-mount.server.ts`;
+    `RunSpec.skillPlugin`; the adapter in `claude-runtime.server.ts`.)
+181. **Every Codex run gets a private `CODEX_HOME` forked from the person's home (owner,
+    2026-09-11, pass 36; Q36-11 (a); extends 127).** The Codex CLI extracts its exec
+    helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into one
+    directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new process of
+    the same home replaces it; ruling 127's one `codex-home` per person let concurrent
+    sandboxed runs of one person delete each other's helper mid-run (F36-3, live 14:53Z).
+    The binary offers no override for that path.
+    (a) *The fork.* The Codex adapter hands the CLI `<codex-home>/runs/<runId>/` as
+    `CODEX_HOME`: `auth.json` and `config.toml` copied in when present; `sessions/`,
+    `skills/` and `memories/` symlinked to the shared home (created first) so rollouts land
+    where resume, export and retention look; `CODEX_SQLITE_HOME` set to the shared home so
+    the CLI's state database stays the person's; `tmp/` whatever the CLI creates, private
+    by construction. `runCredentialFor` still names the shared home; the fork is the
+    adapter's, so every path that builds a Codex spec gets it.
+    (b) *The settle.* When the run settles — finished, failed, interrupted or crashed, the
+    adapter's one `settle`, before the completion callback — the run's `auth.json` is copied
+    back only when its bytes changed, under a per-person lockfile (`O_EXCL` with retry; a
+    holder older than 30 s is broken; last writer wins), and only while the shared file
+    still exists (a disconnect during the run is not undone); the run directory is then
+    deleted. A run a restart orphaned never reaches its settle, so boot recovery
+    (`finalizeOrphanedRuns`) finishes its home the same way before it re-invokes the
+    operator (live 19:48Z: two restart-cut developer runs still owned their `runs/<id>/`
+    copies of the sign-in).
+    (c) *Hygiene.* `filteredSpawnEnv` strips an ambient `CODEX_SQLITE_HOME` as it strips
+    the two vendor homes.
+    (d) *Measured* in the image on 2026-09-11: two `codex exec` in fresh homes wrote all
+    five state databases into the shared `CODEX_SQLITE_HOME`, each kept its own
+    `tmp/arg0`, and rollouts went through the `sessions` link.
+    (`prepareCodexRunHome` / `finishCodexRunHome` in `user-homes.server.ts`; the fork and
+    settle in `codex-runtime.server.ts`; `RUNTIME_HOME_ENV_RE` in `runtime-registry.server.ts`.)
+182. **SUPERSEDED BY RULING 185 (2026-09-12) — only (b)'s version half survives, and the
+    sandbox halves (a), (c)'s sandbox field, (d) and the probe itself are GONE. Kept for
+    the history of why they existed.** ~~The Codex sandbox is probed once per process,
+    reported with the host toolchain, and a confined Codex run is refused with a named
+    remedy while the probe fails (owner, 2026-09-11, pass 36; Q36-1 (a); deployment:
+    seccomp).~~ Every Codex mode below
+    `danger-full-access` confines the agent's commands with bubblewrap, which needs an
+    unprivileged user namespace; Docker's builtin seccomp profile refuses
+    `unshare(CLONE_NEWUSER)` to the non-root app user, so on the compose deployment every
+    reviewer and supporting run failed at its first command and the model reported the
+    environment failure as a verdict (F36-1: `request-changes`, "missing evidence", on
+    correct deliveries; G36-4: nothing named the sandbox).
+    (a) *Deployment.* `compose.yml` runs the app with `security_opt: [seccomp=unconfined]`;
+    the container stays non-root, cap-dropped and init-reaped, and the Codex sandbox is
+    what then confines the agent. Chromium already needed `--no-sandbox` for the same
+    wall; Codex has no such flag.
+    (b) *The probe.* `app/server/ops/toolchain.server.ts` resolves once per process the
+    versions of node, npm, git, python3 and go (null when absent), the pinned
+    `@openai/codex` and `@anthropic-ai/claude-agent-sdk`, and `codexSandbox: { ok, detail }`
+    from the CLI's own sandbox helper — `codex sandbox --permission-profile <probe> -C
+    <work> -- /bin/echo <nonce>` in a throwaway home under `runtimes/codex-sandbox-probe/`
+    (not the OS temp dir, which the CLI refuses for its helpers), a profile that reads `/`
+    and writes the workdir, network off, no sign-in; `detail` is the sandbox's own first
+    line when it fails.
+    (c) *Where it is read.* Boot resolves it on the integrity line and WARNs separately when
+    it failed; `healthSnapshot` appends it LAST as `toolchain`, so `/resources/health` and
+    `instance_health` carry it; it never sets `degraded` (a host that runs no Codex is a
+    correct host).
+    (d) *The refusal.* `startRun`, after the credential, ends a Codex spec whose
+    `resolveCodexSandboxMode` is below `danger-full-access` as a `run·unavailable` error run
+    through `failRunUnavailable` — `Codex sandbox unavailable on this host: <detail>. Fix
+    the deployment (see docs/operations/deployment.md, seccomp) or grant the run full
+    access. No agent process was started.` — with `failedUnavailable` on the audit row; a
+    fully autonomous deliverer with egress is never asked, nor is a Claude run.
+    (e) *Tests never probe:* `test-support/toolchain.ts` primes a hermetic reading in
+    `setup-env.ts`, the same override-slot shape as the sign-in binaries.
+    (`cachedToolchain`, `probeCodexSandbox` in `toolchain.server.ts`;
+    `codexSandboxUnavailableMessage`, `codexSandboxRefusal` in `run-service.server.ts`;
+    `logBootIntegrity` in `boot.server.ts`; `compose.yml`; `docs/operations/deployment.md`
+    "Codex sandbox (seccomp)".)
+183. **A SKILL.md body is judged before any writer writes it (owner, 2026-09-11, pass 36;
+    F36-2).** Live, the controller sent `body` JSON-escaped twice and two skills landed on
+    disk as ONE line of literal `\n`; nothing judged the body, the mount took the escaped
+    text as the description and Codex agents read it as-is. `assertSkillBodyWellFormed`
+    lives beside the containment reader in `skill-body.server.ts` and runs from EVERY
+    writer — `saveSkill` (the org-settings editor and the controller's `save_skill`),
+    `writeStoreFiles` in its pre-flight loop (a refusal writes nothing of the batch) and
+    `writeStoreDoc` (the store browser). Three shapes are refused BY NAME and never
+    rewritten: an empty body ("SKILL.md is empty. Send the skill's markdown body."); a
+    body with no real newline but literal `\n` sequences ("The SKILL.md body arrived
+    JSON-escaped … Send real newlines." — a writer that unescaped would also unescape a
+    one-line body that means `\n` literally); a frontmatter block that does not parse or
+    is not a mapping. Plain markdown with no block stays valid: the mount adds the block,
+    the editor never wrote one. An empty body refused on every write retires the E4
+    `clearBody` flag (writer, org-settings action and modal): an empty SKILL.md is not a
+    skill, and an empty submission on an existing skill keeps the file. The mount's
+    frontmatter schema (`skillFrontmatterSchema`) moves to the same home so there is ONE
+    definition.
+
+184. **SUPERSEDED BY RULING 185 the same day: the owner removed the sandbox itself rather
+    than keep disclosing its limits ("I don't like codex sandbox stuff let's remove that").
+    Kept because it is the measurement that produced 185.** ~~A sandbox that runs commands
+    but denies child processes is disclosed to every AGENT run it confines, never used to
+    refuse one (owner Q36-12, 2026-09-12, pass 36; F36-11).~~
+    With the network off the Codex CLI installs a seccomp filter that refuses EVERY socket
+    syscall, `AF_UNIX` included; libuv's SYNCHRONOUS spawn needs a socketpair, so
+    `spawnSync`/`execSync` report `EPERM` inside the sandbox even though the child ran, and
+    `npm ci` dies on its first lifecycle script. Async `spawn` is unaffected, which is why
+    the host looks healthy from the outside. Live (HLC-18, 2026-09-11): the Codex reviewer
+    recorded `request-changes` — "the required `npm ci && npm run check` gate has no green
+    result for this revision" — against correct work, F36-1's shape on a host whose sandbox
+    starts fine. So ruling 182's probe asks a SECOND question in the same throwaway home and
+    network-off profile (`CODEX_SANDBOX_CHILD_CANARY`, a `spawnSync` canary run through
+    `process.execPath`): `codexSandbox.childProcesses` is `{ok, detail}`, or `null` when the
+    sandbox could not run a command at all and the question was never asked. A false answer
+    does NOT refuse the run — a confined run still reads, greps and reviews, and taking the
+    backend away from every reviewer over an upstream limit costs more than the limit does.
+    It is DISCLOSED three times: a separate boot WARN, `instance_health`/`/resources/health`
+    (the `childProcesses` field), and a section in the run's own contract for every AGENT run below
+    `danger-full-access` (`codexSandboxChildProcessLimit` + the prompt's "This sandbox will
+    not let you run build or test tooling"; the operator is not one — it holds no shell tool
+    at all and is told so) that names the limit, orders the agent NOT to
+    turn it into a verdict or a failing-gate report, gives it the sentence to write instead,
+    and says what still works. One derivation of "which run is confined" serves both the
+    disclosure and the limit (`runSandboxSpec`).
+
+185. **Viberr does not confine a Codex run with the CLI's OS sandbox: every Codex run is
+    `danger-full-access`, and Viberr's own boundaries are the boundary (owner, 2026-09-12,
+    pass 36; Q36-14 (a); supersedes ruling 182, ruling 184 and the Codex half of the
+    2026-08-31 parity ruling; restores R22's position).** The owner's words: "I don't like
+    codex sandbox stuff let's remove that. So we don't get issues like this."
+    (a) *What it cost to keep.* Two whole classes of dead run, both upstream and neither
+    expressible as a Viberr rule. **F36-1**: every mode below `danger-full-access` confines
+    commands with bubblewrap, which needs an unprivileged user namespace Docker's builtin
+    seccomp profile refuses to a non-root user — so on the compose deployment EVERY
+    reviewer and supporting run failed at its first shell command, and the models reported
+    the environment as a verdict on correct work. The remedy was to run the whole container
+    `seccomp=unconfined`. **F36-11**: with the network off the CLI installs a seccomp filter
+    that refuses every socket syscall, `AF_UNIX` included; libuv's SYNCHRONOUS spawn needs a
+    socketpair, so `spawnSync`/`execSync` report `EPERM` after the child has already run and
+    `npm ci` dies on its first lifecycle script — a confined reviewer cannot run any
+    `npm`/`npx`/`pnpm` gate. Live (HLC-18, 2026-09-12) that deadlocked the review gate: the
+    reviewer reported "environment evidence blocker, not a code finding" and still recorded
+    `request-changes`, and the operator sent the deliverer back around.
+    (b) *The change.* `codex-runtime.server.ts` starts every thread `sandboxMode:
+    "danger-full-access"`. `resolveCodexSandboxMode`, `describeCodexSandbox`, the
+    `RunInputs.sandbox` row, the toolchain's `codexSandbox` probe (ruling 182(b)), its boot
+    WARNs, its `run·unavailable` refusal (182(d)) and ruling 184's child-process question
+    and contract section are all DELETED. `compose.yml` drops `security_opt:
+    seccomp=unconfined`, so the container keeps Docker's own profile (chromium keeps
+    `--no-sandbox`, which was always its own wall).
+    (c) *What that costs, rendered everywhere it matters.* On Codex a withheld
+    `execute-code-or-write-repo` is ADVISORY: it moves back into
+    `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`, `codexRepoWriteAdvisory` is now true for ANY
+    Codex profile whose write family is withheld (it was the narrower E32-3 carve-out), and
+    the agent editor, the capability matrix and the agent card all tag the row "advisory on
+    Codex" with the one shared sentence. The boundary that does bind is Viberr's: the
+    prompt omits every delivery step it may not take, the supporting run works in its own
+    isolated checkout (P8), agents hold no credential, delivery is server-owned and
+    verdicts are revision-bound. The operator's OS-level network is no longer forced off —
+    it never had a shell tool anyway.
+    (d) *What still binds on Codex.* Web SEARCH (`webSearchMode: "disabled"`) — the CLI's
+    own tool, not the OS sandbox — so `use-web-search-fetch` keeps its both-backend
+    enforcement; `disabled_tools` for MCP write tools (ruling 176); and every server-side
+    gate.
+    (`codex-runtime.server.ts`; `run-service.server.ts`; `toolchain.server.ts`;
+    `boot.server.ts`; `specialist-run.server.ts`; `specialist-tool-policy.ts`;
+    `app/shared/capabilities.ts`; `compose.yml`; `docs/operations/deployment.md`.)
+
+F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
+a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
+`failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
+audit row, and a request-changes verdict drops any pending transition card the same way
+it already dropped the accept offer. "Review stage" in that writer is the stage with an
+edge into the terminal one, so a task AT its verdict stage was "strictly before" it.
+
 *(Documentation drift closed by pass 35, recorded 2026-09-07. The pass-35 discovery read
 found five places where a page or a sentence said something the code did not. Each is
 corrected on the page named; the note stays here so a reader who meets the old wording, in

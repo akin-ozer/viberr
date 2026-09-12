@@ -56,6 +56,7 @@ Key order is part of the contract:
 | `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1, pass 32) |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in the stock image |
+| `toolchain` | (last, rulings 182/185) `{ node, npm, git, python3, go, codexCli, claudeAgentSdk }` — each version a string or `null` when that tool is not installed, plus the two pinned agent packages. Never `degraded`: what an agent's shell finds is information, not a fault. (The `codexSandbox` verdict that used to ride here went with the sandbox itself, ruling 185.) |
 
 Status codes: the bare URL is a **liveness** probe and returns `200` even when degraded;
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while
@@ -351,6 +352,26 @@ recommendation is open. Nothing is owed by anyone while it waits.
   (capped 3 per 30 min); finished runs whose completion never posted are replayed. This
   is why `task.agent.replied` and `runtime.operator.plan_executed` audit rows are exempt
   from retention.
+- **`bwrap: No permissions to create a new namespace`, or `EPERM` from `npm ci` inside a
+  Codex run** — you are on an image from before ruling 185 (2026-09-12), or something has
+  re-introduced an OS sandbox. Viberr starts every Codex run `danger-full-access` now:
+  nothing should invoke bubblewrap, and no seccomp filter should be installed. Rebuild and
+  recreate (`docker compose build app && docker compose up -d`; a restart keeps the old
+  image). The pre-185 symptoms, for reading old runs: every confined Codex run failed at
+  its first shell command (F36-1) or could not complete `npm ci` because the network-off
+  filter denies the socketpair libuv's synchronous spawn needs (F36-11) — both reported by
+  the model as verdicts on correct work. `compose.yml` must NOT carry
+  `security_opt: [seccomp=unconfined]` any more; see
+  [deployment.md — Codex runs are not OS-confined](deployment.md#codex-runs-are-not-os-confined-ruling-185).
+- **A Codex run says `codex-linux-sandbox` is missing or `launch rejected … No such file or
+  directory` mid-run** (F36-3) — the CLI's exec helpers live in ONE directory per
+  `CODEX_HOME` and every new process of that home replaces it. Ruling 181 gives every run
+  a private `CODEX_HOME` (`runtimes/users/<id>/codex-home/runs/<runId>/`, removed at
+  settle), so this cannot recur on the current image; on an older one it means two Codex
+  runs of one person overlapped. A `runs/` directory that survives with no live run is a
+  crash's leftover and is replaced the next time that run id is prepared; deleting it by
+  hand while the app is stopped is safe (the shared home's `auth.json` and `sessions/` are
+  never inside it, only a copy and links).
 - A settled run leaves no live process (ruling 174). Every agent child carries
   `VIBERR_RUN_ID=<runId>`, and when a run settles, or boot finalizes it as an orphan,
   Viberr SIGTERMs whatever still carries that id, waits 5 s and SIGKILLs the rest. The

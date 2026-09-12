@@ -21,6 +21,7 @@ import { GOVERNED_CAP_LABELS, MODE_LABEL } from "~/features/agents/capability-ca
 import type { MembershipView } from "~/features/project-settings/membership.server";
 import type { GuardrailView, PolicyViewData, TransitionView } from "./policy-query.server";
 import type { GuardrailOp } from "./policy-actions.server";
+import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import {
   ALWAYS_HUMAN_ROWS,
   BCLS,
@@ -889,6 +890,78 @@ export function Guardrails({
   );
 }
 
+// ------------------------------------------------------- required reviewers
+
+/**
+ * Ruling 178 (pass 36, G36-3): the reviewers the project REQUIRES per review
+ * stage, read here beside the other acceptance rules. Before the rule, a
+ * reviewer was required on a task only once the operator engaged it there, so
+ * a task whose operator never ran the project's reviewer was acceptable on
+ * another agent's verdict. The list is EDITED on Settings, where the stage and
+ * agent pickers live (the same split Guardrails has with its GitHub-owned row):
+ * this card states the rule and where to change it.
+ */
+export function RequiredReviewers({
+  rules,
+  canManage,
+  onOpenSettings,
+}: {
+  rules: RequiredReviewerView[];
+  canManage: boolean;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="check" />
+        <h2>Required reviewers</h2>
+        <span className="right sub fine">{countLabel(rules.length, "rule")}</span>
+      </div>
+      <div className="pol-note">
+        <Icon name="message" />
+        <span>
+          A required reviewer must approve the delivered revision before a task
+          can be accepted, whether or not the operator engaged it; the operator
+          is told to run it at its stage. Without a rule, only the reviewers an
+          operator engages on a task are required.
+        </span>
+      </div>
+      {rules.length === 0 ? (
+        <p className="empty sm">No required reviewers declared.</p>
+      ) : (
+        <div className="guard-list">
+          {rules.map((r) => (
+            <div className="guard-row" key={`${r.stageId} ${r.profileId}`}>
+              <div className="guard-main">
+                <span className="guard-name">{r.agentName}</span>
+                <span className="guard-desc">Reviews at {r.stageName}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="pol-note after last">
+        <Icon name={canManage ? "shield" : "lock"} />
+        <span>
+          {canManage ? (
+            <>
+              Add or remove a rule in{" "}
+              <button type="button" className="keybtn" onClick={onOpenSettings}>
+                Settings → Required reviewers
+              </button>
+            </>
+          ) : (
+            <>
+              Read-only. Changing the rules needs the{" "}
+              <strong>Edit workflow &amp; policy</strong> grant (project admin).
+            </>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------- page
 
 export function PolicyPage({
@@ -1003,6 +1076,13 @@ export function PolicyPage({
               canManage={canEditPolicy}
               busy={busy}
               onSet={onSetGuardrail}
+            />
+            {/* Ruling 178: the acceptance rule beside the other rules; the
+                pickers that edit it live on Settings, next to the stages. */}
+            <RequiredReviewers
+              rules={data.requiredReviewers}
+              canManage={canEditPolicy}
+              onOpenSettings={() => navigate(`/projects/${projectSlug}/settings`)}
             />
           </div>
         </div>

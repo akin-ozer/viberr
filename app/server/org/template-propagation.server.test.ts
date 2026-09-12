@@ -130,6 +130,7 @@ describe("listTemplateResourceDrift", () => {
       agents: [copyOf(store)],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
       archived: true,
     });
     // A seeded-shape deployment: profileId + capabilities, no definition, so
@@ -147,6 +148,7 @@ describe("listTemplateResourceDrift", () => {
       agents: [{ profileId: "developer", capabilities: [], extras: [] }],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await grantOnTemplate(store, ["github"]);

@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { primeHermeticToolchain } from "./toolchain";
 
 /**
  * Vitest setup: hermetic env for the test suite. The app's env parser
@@ -102,3 +103,16 @@ process.env.GIT_ALLOW_PROTOCOL = "file";
 process.env.VIBERR_DATA_ROOT ??= mkdtempSync(
   path.join(tmpdir(), "viberr-suite-root-"),
 );
+
+/**
+ * Fail closed against PROBING THE HOST (ruling 182).
+ *
+ * `healthSnapshot` — and so the health route, `instance_health` and the boot
+ * integrity line — reports the toolchain, which `cachedToolchain()` resolves
+ * once per process by spawning `npm`, `git`, `python3`, `go` and the Codex
+ * CLI's own sandbox helper. None of that belongs in a unit test: the answers
+ * are the host's, and the sandbox probe runs a vendor binary. The override
+ * slot is primed with a fixed reading here, before any app module loads; the
+ * toolchain module's own tests clear it and drive the resolver with fakes.
+ */
+primeHermeticToolchain();

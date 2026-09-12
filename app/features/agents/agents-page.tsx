@@ -788,6 +788,7 @@ export function ProfileDetail({
   const isGoverned = (label: string) => GOVERNED_CAP_LABELS.has(label);
   // F-P1 (pass 25): when a run would resolve to Codex, the claude-only-enforced
   // grants in these columns bind only advisorily — CapColumn shows the caveat.
+  // Ruling 185 adds the write family to that set on Codex.
   const codexPrimary = primaryBackend(a) === "codex";
   const codexCarveOut = codexPrimary && codexRepoWriteAdvisory(a.capabilities);
   const governed = {

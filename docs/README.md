@@ -70,6 +70,49 @@ drift notes corrected. Ruling 93's drift note now says R22 and ruling 101 both s
 Codex `read-only` sandbox is a live seam), ruling 109 carries the `permissions.rs` watch
 item, and `domain/agents-and-runtime.md` §2.5 and gotcha 6 match.
 
+Updated 2026-09-11 for pass 36 cluster 4 (ruling 183; U36-3, U36-4, U36-5, G36-1): a
+SKILL.md body is validated at every writer and a JSON-escaped, empty or unparseable one is
+refused by name, never rewritten; `save_knowledge_base` and `save_skill` answer with the
+id and grantKey and a `disk:<dir>` id whose folder has a row updates that row;
+`update_agent_deployment` takes `skills` / `mcps` / `kbs` for every kind (the operator
+included), lists every changed field old → new, audits model and effort on the `updated`
+row, and the three effort descriptions read the catalog. Pages:
+`domain/controller-and-goals.md` (§3, §4.1, §4.2), `domain/auth-and-rbac.md` (§4),
+`domain/agents-and-runtime.md` (§6) and `architecture/data-model.md` (`org_skills`).
+
+Updated 2026-09-11 for pass 36 cluster 5 (ruling 180, F36-8, U36-6, U36-7): a Claude run's
+granted skills mount as a local plugin BESIDE the task checkout (`<checkout>/../.viberr-plugins/<runId>/`),
+never inside it, and the run's `settingSources` stays `[]`; a run that switches backend
+names the model it ran on (the F21-13 log line, the timeline event, the retry option); a
+suffixed branch allocation records the taken canonical name and writes the ruling-122
+note; a new branch collision notifies the task watchers and wakes the operator, and
+clearing one names the closed PR. Pages: `domain/agents-and-runtime.md` (§§2.3, 2.4, 3.2,
+4.1, 6, gotchas 4 and 7), `domain/github-delivery.md` (§§3, 4, 5),
+`architecture/data-model.md` (the data-root layout). Ruling 180's text is proposed in the
+cluster's report and lands in `architecture/decisions.md` with the pass-36 PR.
+
+Updated 2026-09-11 for rulings 181 and 182 (pass 36, branch `pass36/headlamp-clone-fixes`,
+Cluster 3): every Codex run gets a private `CODEX_HOME` forked from the person's home
+(`runs/<runId>/`: sign-in and config copied, sessions/skills/memories linked,
+`CODEX_SQLITE_HOME` shared, the refreshed sign-in carried back under a per-person lock);
+the Codex sandbox is probed once per process with the CLI's own sandbox helper, reported
+as `toolchain` — appended LAST — on `/resources/health`, `instance_health` and the boot
+integrity line, and a confined Codex run is refused with a named remedy while the probe
+fails; `compose.yml` lifts Docker's seccomp profile for bubblewrap. Pages:
+`domain/agents-and-runtime.md` (§2.2, §2.5), `operations/deployment.md` (new "Codex
+sandbox (seccomp)"), `operations/runbook.md` (Agent runtimes: the `bwrap` and
+`codex-linux-sandbox` symptoms), `architecture/data-model.md` (data-root layout) and
+`development/testing.md` (§2, the hermetic toolchain).
+
+Updated 2026-09-11 for ruling 178 (pass 36, G36-3): a project declares required reviewers
+per review stage in `project.md` (`requiredReviewers`); the acceptance gate, the review
+queue, the operator snapshot and the controller read the same rule, and a task is not
+acceptable while a required reviewer has no current verdict on the delivered revision.
+Pages: `architecture/decisions.md` (ruling 178), `architecture/file-formats.md` (§1),
+`architecture/data-model.md` (§3), `domain/task-lifecycle.md` (§6, §11 gate 4a),
+`domain/operator.md` (§4), `domain/controller-and-goals.md` (§4), `product/glossary.md`
+and `ui/surfaces.md`.
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating
@@ -112,7 +155,7 @@ item, and `domain/agents-and-runtime.md` §2.5 and gotcha 6 match.
 | [domain/task-lifecycle.md](domain/task-lifecycle.md) | Governed mutation shape, RBAC matrix, creation, stages and boundaries, transitions, readiness/waiting/validation, ownership, engagements, packets, recommendations, schedules, delivery, the acceptance endings, archive, timeline, notifications |
 | [domain/operator.md](domain/operator.md) | The per-task coordinator: authority and gates, triggers, the turn, the 12 `viberr` tools, packets, guardrails |
 | [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends, the credential principal and per-person runtime homes (ruling 127), models, a run's life (persistence, admission, streaming, failure kinds, resume), specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
-| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the asker's own Claude account (ruling 127), the 41 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
+| [domain/controller-and-goals.md](domain/controller-and-goals.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read (ruling 121), the asker's own Claude account (ruling 127), the 42 `viberr_controller` tools, `viberr_ops`, deployment locks, chained goals |
 | [domain/github-delivery.md](domain/github-delivery.md) | PATs and connections, repo attach, the delivery pipeline, PR adoption and collisions, revisions and verdicts, the reconciler, scope violations |
 | [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, org settings, audit, insights, profile (incl. Agent accounts) |
 

@@ -984,7 +984,6 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     unresolvedResources: [{ name: "house-style", reason: "no such knowledge base" }],
     tools: { denied: ["Edit", "Write"], toolkit: ["post_comment"] },
     directive: { from: "Deniz", chars: 88 },
-    sandbox: null,
   };
   const rawEnvelope = '{"type":"run_inputs","source":"viberr","run_id":"run_1"}';
   const line: StreamedLine = {

@@ -570,6 +570,41 @@ describe("a run with no credential principal (ruling 127)", () => {
 
 });
 
+/**
+ * Ruling 185 (owner Q36-14, 2026-09-12): Viberr does not confine a Codex run
+ * with the CLI's OS sandbox, so there is no host condition left to refuse one
+ * over. Rulings 182(d) and 184 are gone with it.
+ */
+describe("ruling 185: no Codex run is refused for a sandbox", () => {
+  it("a write-withheld reviewer — the shape ruling 182 refused — starts normally", async () => {
+    // Canary: re-introduce `codexSandboxRefusal` in `startRun` and this run
+    // ends `error` with `run·unavailable` instead of finishing. The refusal
+    // existed because bubblewrap could not start under Docker's default
+    // seccomp profile (F36-1); nothing asks bubblewrap any more.
+    queueFakeRun(
+      instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }], "codex"),
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Code reviewer",
+      kind: "reviewer",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      repoWriteWithheld: true,
+    });
+    await settle();
+    expect(getRun(store.db, runId)!.state).toBe("finished");
+    const lines = listRunLines(store.db, runId).map((l) => l.raw);
+    expect(lines.join("\n")).not.toContain("Codex sandbox unavailable");
+    // And the spec the adapter got carries the withheld grant, which is what
+    // the prompt and the delivery gate read (the advisory posture).
+    expect(lastRunSpec()?.repoWriteWithheld).toBe(true);
+  });
+});
+
 describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
   // An adapter that finalizes SYNCHRONOUSLY inside start() models a run that
   // crashes at spawn (spawn EBADF): its onExit fires — and finds no callback —

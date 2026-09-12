@@ -8,6 +8,7 @@ import type {
 } from "~/features/runtime/runtime-types";
 import {
   recordAudit,
+  SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -33,10 +34,9 @@ import {
   type RuntimeAdapter,
 } from "./adapter.server";
 import {
-  defaultModelFor,
-  foreignModelBackend,
   modelDisplayName,
   resolveRunEffort,
+  substituteRunModel,
 } from "./model-catalog.server";
 import { publishRunStateChanged } from "./run-events.server";
 import {
@@ -82,6 +82,7 @@ import {
   type RunPrincipalRefusal,
 } from "./run-principal.server";
 import { runMarkerEnv } from "./run-processes.server";
+import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
 import { newId } from "~/shared/ids/new-id.server";
@@ -395,14 +396,18 @@ export interface StartRunInput {
   /** Ruling 176: the org servers' marked write tools this run withholds (see
    *  `RunSpec.mcpToolDenials`), as the MCP resolver returned them. */
   mcpToolDenials?: McpToolDenial[];
-  /** Granted skills mounted into the run workspace (`mountGrantedSkills`).
-   *  Claude only — the SDK's native skills filter. See RunSpec.skills. */
+  /** Granted skills mounted for the run (`mountGrantedSkills`). Claude only —
+   *  the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
-  /** The run's `execute-code-or-write-repo` grant is withheld — enforced on
-   *  BOTH backends (parity ruling 2026-08-31): Claude via the denylist, Codex
-   *  via the read-only sandbox (resolveCodexSandboxMode). Omit to let
-   *  `startRun` derive it from `disallowedTools` (see
-   *  `repoWriteWithheldFromDenylist`). */
+  /** Ruling 180: the plugin directory carrying `skills`; removed when the run
+   *  settles. See RunSpec.skillPlugin. */
+  skillPlugin?: SkillPlugin;
+  /** The run's `execute-code-or-write-repo` grant is withheld. Claude's tool
+   *  denylist binds it; on Codex it is ADVISORY since ruling 185 removed the
+   *  OS sandbox — the prompt omits the delivery steps and the server-owned
+   *  delivery gate refuses them (`codexRepoWriteAdvisory` renders that
+   *  wherever the enforcement is shown). Omit to let `startRun` derive it from
+   *  `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is withheld — Codex enforces it by
    *  disabling its web search (P14-RT-06). Omit to let `startRun` derive it from
@@ -828,8 +833,11 @@ export async function startRun(
   // line naming the swap. The save-time rejection is the primary fix
   // (agent-profile-actions.server.ts); this is the net under it, for profiles
   // saved before that guard and for any path that builds a spec by hand.
-  const foreignBackend = foreignModelBackend(input.backend, input.model);
-  const model = foreignBackend ? defaultModelFor(input.backend) : input.model;
+  // F36-8 (pass 36): the swap has ONE home, `substituteRunModel` — the
+  // specialist dispatch hands the profile's ORIGINAL id through and names the
+  // same answer on its timeline event, so this notice fires for a
+  // cross-backend retry too (it used to pre-swap, and the log never said).
+  const { model, foreignBackend } = substituteRunModel(input.backend, input.model);
   const modelSubstitution = foreignBackend
     ? `The agent's model **${modelDisplayName(foreignBackend, input.model)}** ` +
       `(\`${input.model}\`) is a ${BACKEND_LABEL[foreignBackend]} model and cannot run on ` +
@@ -887,28 +895,6 @@ export async function startRun(
     throw err;
   }
 
-  const details: RunStartedAudit = {
-    threadId,
-    backend: input.backend,
-    role: input.role,
-    kind: input.kind,
-    resumed: Boolean(input.resumeSessionId),
-    credentialUserId: input.credentialUserId,
-  };
-  if (!credential.ok) details.failedUnavailable = true;
-
-  // Governed action: opening a runtime session is audited (BUILD-PLAN
-  // Phase 10 / contracts — run start + interrupt both leave audit rows).
-  recordAudit(db, {
-    action: "runtime.run.started",
-    actor: input.actor ?? OPERATOR_ACTOR,
-    subjectKind: "run",
-    subjectId: runId,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details,
-  });
-
   // D4: every mounted MCP server is auto-approved here, not per caller.
   const allowedTools = withMcpAutoApproval(
     input.allowedTools,
@@ -962,10 +948,10 @@ export async function startRun(
   if (denied.length) spec.disallowedTools = denied;
   if (mcpToolDenials.length) spec.mcpToolDenials = mcpToolDenials;
   if (input.skills && input.skills.length) spec.skills = input.skills;
+  if (input.skillPlugin) spec.skillPlugin = input.skillPlugin;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
-  // it, and since ruling 101 the Codex read-only sandbox does too
-  // (resolveCodexSandboxMode; the evidence carve-out is the disclosed
-  // exception). Explicit caller value wins.
+  // it; on Codex it is advisory (ruling 185 removed the OS sandbox) and the
+  // delivery gate is the boundary. Explicit caller value wins.
   if (
     input.repoWriteWithheld ??
     repoWriteWithheldFromDenylist(input.disallowedTools)
@@ -1006,16 +992,49 @@ export async function startRun(
   if (credential.ok) Object.assign(runEnv, runMarkerEnv(runId));
   if (Object.keys(runEnv).length) spec.env = runEnv;
 
-  if (!credential.ok) {
+  // The one reason no process may start, decided on the finished spec: the
+  // credential (ruling 127) — an honest `run·unavailable` error row. Ruling
+  // 182's sandbox refusal is gone with the sandbox itself (ruling 185): a
+  // Codex run is never OS-confined by Viberr, so there is no host condition
+  // left for it to refuse on.
+  const refusal: string | null = credential.ok ? null : credential.message;
+
+  const details: RunStartedAudit = {
+    threadId,
+    backend: input.backend,
+    role: input.role,
+    kind: input.kind,
+    resumed: Boolean(input.resumeSessionId),
+    credentialUserId: input.credentialUserId,
+  };
+  if (refusal !== null) details.failedUnavailable = true;
+
+  // Governed action: opening a runtime session is audited (BUILD-PLAN
+  // Phase 10 / contracts — run start + interrupt both leave audit rows).
+  recordAudit(db, {
+    action: "runtime.run.started",
+    actor: input.actor ?? OPERATOR_ACTOR,
+    subjectKind: "run",
+    subjectId: runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details,
+  });
+
+  const refuse = (message: string) => {
     // F26-1: a reserved run that fails here never launches — release its slot
     // and let a run parked behind the cap take it.
     if (reservation) {
       state.reserved.delete(reservation.runId);
       drainRunQueue(db);
     }
-    failRunUnavailable(db, spec, credential.message, reservation?.startedAt);
+    failRunUnavailable(db, spec, message, reservation?.startedAt);
+    // Ruling 180: a refused run never spawns, so its plugin has no reader.
+    removeSkillPlugin(spec.skillPlugin);
     return { runId };
-  }
+  };
+  if (!credential.ok) return refuse(credential.message);
+  if (refusal !== null) return refuse(refusal);
 
   const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
@@ -1411,13 +1430,16 @@ export interface ResumeRunInput {
   /** Ruling 176: re-apply the org servers' withheld write tools on resume, or
    *  a resumed read-only agent would get back the tools its fresh run lacked. */
   mcpToolDenials?: McpToolDenial[];
-  /** Re-apply the granted skills mounted into the workspace on resume. The
-   *  workspace (and its mount) survives between runs, but the SDK options do
-   *  not: without this a resumed @mention run would enable NO skill while its
-   *  persona — built by the same `resolveResumeConfinement` — already left the
-   *  bodies out for native delivery, so the agent would silently lose its
-   *  granted craft mid-thread (the XS-1 fresh-vs-resume parity class). */
+  /** Re-apply the granted skills mounted for the resumed run. A resume
+   *  re-mounts (ruling 180: one plugin per run), but the SDK options do not
+   *  carry over: without this a resumed @mention run would enable NO skill
+   *  while its persona — built by the same `resolveResumeConfinement` —
+   *  already left the bodies out for native delivery, so the agent would
+   *  silently lose its granted craft mid-thread (the XS-1 fresh-vs-resume
+   *  parity class). */
   skills?: string[];
+  /** Ruling 180: the resumed run's own plugin directory (see `skills`). */
+  skillPlugin?: SkillPlugin;
   /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
    *  omit this while accepting every other half of the run's tool policy, so
    *  a caller that curated an allowlist (the operator does) silently lost it
@@ -1437,13 +1459,12 @@ export interface ResumeRunInput {
    *  ask_human can fire. Without it a resumed Codex reviewer silently lost
    *  its envelope, a fresh-vs-resume parity break (F7). */
   outputSchema?: unknown;
-  /** C02-R3 (pass 32): re-apply the task's attachments drop on resume. It is
-   *  the Codex sandbox's ONLY extra writable root (and the evidence carve-out
-   *  in `resolveCodexSandboxMode` keys off it): a resumed evidence-granted
-   *  Codex run used to lose `additionalDirectories` — its persona still said
-   *  "copy files into attachments/" while the sandbox blocked the copy — and a
-   *  write-withheld one dropped to read-only, the F22-03 defect back on the
-   *  @mention path. Same fresh-vs-resume parity class as XS-1/F7. */
+  /** C02-R3 (pass 32): re-apply the task's attachments drop on resume, so a
+   *  resumed run's persona and its writable set still agree. It no longer
+   *  widens any sandbox (ruling 185 removed Codex's; Claude never had one) —
+   *  it is the path the persona names, and the prompt must not promise a drop
+   *  the run was not told about. Same fresh-vs-resume parity class as
+   *  XS-1/F7. */
   attachmentsWritableDir?: string;
 }
 
@@ -1466,6 +1487,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.disallowedTools) target.disallowedTools = input.disallowedTools;
   if (input.mcpToolDenials) target.mcpToolDenials = input.mcpToolDenials;
   if (input.skills) target.skills = input.skills;
+  if (input.skillPlugin) target.skillPlugin = input.skillPlugin;
   if (input.allowedTools) target.allowedTools = input.allowedTools;
   if (input.env) target.env = input.env;
   if (input.mcpServers) target.mcpServers = input.mcpServers;
@@ -1831,6 +1853,9 @@ function launch(
         });
       }
       state.handles.delete(spec.runId);
+      // Ruling 180: the settled run's skill plugin goes with it — the CLI
+      // that read it has exited, and nothing else names the path.
+      removeSkillPlugin(spec.skillPlugin);
       // This run's slot is now free — promote the oldest queued run behind the
       // concurrency cap. Before the completion callback, so a chain of queued
       // runs keeps flowing even if the callback throws.
@@ -1879,6 +1904,80 @@ export interface InterruptResult {
   /** interrupted | already-terminal (idempotent no-op). */
   outcome: "interrupted" | "already-terminal";
   run: RunView | null;
+}
+
+/**
+ * The interrupt itself — the live-handle arm and the no-handle arm — shared by
+ * the human interrupt (`interruptRun`) and the closure interrupt
+ * (`interruptRunOnClosure`, ruling 177). `actorUserId` is stamped into
+ * `interrupted_by`; `auditActor`/`auditDetails` shape the audit row.
+ */
+function stopRunProcess(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  input: { projectSlug: string; taskKey: string; runId: string },
+  actorUserId: string,
+  auditActor: { userId: string; label: string } | typeof SYSTEM_ACTOR,
+  auditDetails: { reason?: "task-closed"; cause?: "accept" | "force-accept" | "archive"; closedBy?: string } = {},
+): void {
+  const state = getState();
+  const slot = state.handles.get(input.runId);
+  if (slot) {
+    slot.handle.interrupt();
+    state.handles.delete(input.runId);
+    // The adapter's onExit → sink.finalize sets the interrupted state; stamp
+    // the interrupter here so it lands regardless of the adapter's timing.
+    patchRun(db, input.runId, { interruptedBy: actorUserId });
+  } else {
+    // No live process (e.g. after a restart, or a seeded run) — write the
+    // terminal state directly.
+    patchRun(db, input.runId, {
+      state: "interrupted",
+      finishedAt: new Date().toISOString(),
+      interruptedBy: actorUserId,
+      phase: null,
+      step: null,
+    });
+    publishRunStateChanged({
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: input.runId,
+      threadId: run.thread_id,
+      state: "interrupted",
+      controller: controllerRunRoute(db, run),
+    });
+    // The run reached its terminal state with no adapter to report it, so the
+    // completion callback the starter registered would never fire: `launch`'s
+    // onExit is its only other trigger, and there is no process to exit. A
+    // reserved specialist run's completion effects, and a queued controller
+    // turn's settle (which releases the conversation's lease and records that
+    // the turn was stopped), were both lost that way — the page then read
+    // "working" until a restart replayed recovery. Same precondition as the
+    // spawn-crash race: terminal state, no live handle, so fire it now.
+    fireIfAlreadyTerminal(db, input.runId);
+    // F28-R1: a run interrupted while still RESERVED (its workspace clone is in
+    // flight, so no live handle exists yet) must release its committed
+    // concurrency slot NOW. Otherwise the slot stays counted against the cap —
+    // starving every other dispatch — until the ABANDONED clone finishes on its
+    // own, up to CLONE_TIMEOUT (~15 min). The reserve→clone path still aborts
+    // cleanly at its post-clone `assertRunReservationLive` check, and the later
+    // `reservation.abandon()` finds the row already `interrupted` (its
+    // precedence guard won't demote it) and the slot already freed (the delete
+    // is idempotent) — so no double-release and no launch-after-interrupt.
+    if (state.reserved.delete(input.runId)) {
+      drainRunQueue(db);
+    }
+  }
+
+  recordAudit(db, {
+    action: "runtime.run.interrupted",
+    actor: auditActor,
+    subjectKind: "run",
+    subjectId: input.runId,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { threadId: run.thread_id, backend: run.backend, role: run.role, ...auditDetails },
+  });
 }
 
 /**
@@ -1939,64 +2038,7 @@ export async function interruptRun(
     return { outcome: "already-terminal", run: projectOne(db, run) };
   }
 
-  const state = getState();
-  const slot = state.handles.get(input.runId);
-  if (slot) {
-    slot.handle.interrupt();
-    state.handles.delete(input.runId);
-    // The adapter's onExit → sink.finalize sets the interrupted state; stamp
-    // the interrupter here so it lands regardless of the adapter's timing.
-    patchRun(db, input.runId, { interruptedBy: actor.userId });
-  } else {
-    // No live process (e.g. after a restart, or a seeded run) — write the
-    // terminal state directly.
-    patchRun(db, input.runId, {
-      state: "interrupted",
-      finishedAt: new Date().toISOString(),
-      interruptedBy: actor.userId,
-      phase: null,
-      step: null,
-    });
-    publishRunStateChanged({
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      runId: input.runId,
-      threadId: run.thread_id,
-      state: "interrupted",
-      controller: controllerRunRoute(db, run),
-    });
-    // The run reached its terminal state with no adapter to report it, so the
-    // completion callback the starter registered would never fire: `launch`'s
-    // onExit is its only other trigger, and there is no process to exit. A
-    // reserved specialist run's completion effects, and a queued controller
-    // turn's settle (which releases the conversation's lease and records that
-    // the turn was stopped), were both lost that way — the page then read
-    // "working" until a restart replayed recovery. Same precondition as the
-    // spawn-crash race: terminal state, no live handle, so fire it now.
-    fireIfAlreadyTerminal(db, input.runId);
-    // F28-R1: a run interrupted while still RESERVED (its workspace clone is in
-    // flight, so no live handle exists yet) must release its committed
-    // concurrency slot NOW. Otherwise the slot stays counted against the cap —
-    // starving every other dispatch — until the ABANDONED clone finishes on its
-    // own, up to CLONE_TIMEOUT (~15 min). The reserve→clone path still aborts
-    // cleanly at its post-clone `assertRunReservationLive` check, and the later
-    // `reservation.abandon()` finds the row already `interrupted` (its
-    // precedence guard won't demote it) and the slot already freed (the delete
-    // is idempotent) — so no double-release and no launch-after-interrupt.
-    if (state.reserved.delete(input.runId)) {
-      drainRunQueue(db);
-    }
-  }
-
-  recordAudit(db, {
-    action: "runtime.run.interrupted",
-    actor,
-    subjectKind: "run",
-    subjectId: input.runId,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: { threadId: run.thread_id, backend: run.backend, role: run.role },
-  });
+  stopRunProcess(db, run, input, actor.userId, actor);
   logger.info("run interrupted", { runId: input.runId, by: actor.userId });
 
   // The response is complete BEFORE the best-effort note: every DB read for the
@@ -2010,6 +2052,40 @@ export async function interruptRun(
   };
   await noteInterrupt(db, run, actor, input.dataRoot);
   return result;
+}
+
+/**
+ * Ruling 177 (pass 36, F36-5): a task that closes — accepted, force-accepted or
+ * archived — ends its live runs. No RBAC: the person's authority was spent on
+ * the closure itself (acceptance is owner-or-maintainer, archive is
+ * maintainer+), and the interrupt is that act's consequence, audited under the
+ * SYSTEM actor with the cause and the person who closed the task in the
+ * details. The caller writes the one timeline note naming every run; this
+ * function writes none. Idempotent like `interruptRun`.
+ */
+export function interruptRunOnClosure(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; runId: string },
+  closure: { cause: "accept" | "force-accept" | "archive"; byUserId: string },
+): "interrupted" | "already-terminal" | "not-found" {
+  const run = getRun(db, input.runId);
+  if (!run || run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) {
+    return "not-found";
+  }
+  if (run.kind === "controller") return "not-found";
+  if (run.state !== "running" && run.state !== "queued") return "already-terminal";
+  if (run.interrupted_by) return "already-terminal";
+  stopRunProcess(db, run, input, closure.byUserId, SYSTEM_ACTOR, {
+    reason: "task-closed",
+    cause: closure.cause,
+    closedBy: closure.byUserId,
+  });
+  logger.info("run interrupted — the task closed", {
+    runId: input.runId,
+    cause: closure.cause,
+    by: closure.byUserId,
+  });
+  return "interrupted";
 }
 
 /**

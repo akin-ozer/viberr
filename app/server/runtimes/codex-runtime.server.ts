@@ -11,7 +11,6 @@ import type {
   Codex as CodexSdk,
   CodexOptions,
   ModelReasoningEffort,
-  SandboxMode,
   Thread,
   ThreadErrorEvent,
   ThreadOptions,
@@ -25,9 +24,13 @@ import {
   type RunSpec,
   type RuntimeAdapter,
 } from "./adapter.server";
-import { CODEX_REPO_WRITE_ADVISORY_NOTE } from "~/server/tasks/specialist-tool-policy";
 import { withProviderText } from "~/shared/provider-marker";
 import { SESSION_MISSING_RE } from "./session-export.server";
+import {
+  finishCodexRunHome,
+  prepareCodexRunHome,
+  type CodexRunHome,
+} from "./user-homes.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
@@ -88,7 +91,7 @@ import {
  * 0.153.4 binary, as were the `login --device-auth` prompt (byte-identical
  * source) and `login status` markers `backend-login` parses. `--add-dir` still
  * reads "writable alongside the primary workspace", so the ruling-109 carve-out
- * (`resolveCodexSandboxMode`) stands.
+ * (ruling 185: `danger-full-access`, always) stands.
  */
 export const CODEX_SDK_VERIFIED_VERSION = "0.153.4";
 
@@ -424,101 +427,34 @@ function codexConfigForRun(
 }
 
 /**
- * The sandbox a run gets.
+ * Ruling 185 (owner, 2026-09-12, pass 36): **Viberr does not confine a Codex
+ * run with the CLI's OS sandbox.** Every Codex run is started
+ * `danger-full-access`; the boundary is Viberr's own — the prompt contract,
+ * the per-engagement workspace isolation (P8), the server-owned delivery gate
+ * and the revision-bound verdicts — exactly the R22 position ("viberr IS the
+ * sandbox"), which the 2026-08-31 parity ruling had partly reversed.
  *
- * Parity ruling (owner, 2026-08-31, partially superseding R22): repo-write
- * posture is GRANTS-derived and must bind THE SAME on both backends —
- * "reviewer is just a type of an agent; some agents should be able to write,
- * some don't, related to their work/assignment, but parity between Claude and
- * Codex is essential." Claude binds a withheld `execute-code-or-write-repo`
- * through its tool denylist; the only channel Codex respects is this sandbox
- * mode, so a write-withheld Codex run is `read-only` again (the P13-RT-02
- * shape R22 had removed). What R22 got RIGHT stays: a run whose grants allow
- * writing is never confined for its role's name alone — a supporting agent
- * GRANTED the write family runs `workspace-write` and may edit its own
- * isolated checkout (P8 isolation + sha-bound verdicts contain it).
+ * Why it came back: the sandbox cost more than it bought. F36-1 — bubblewrap
+ * cannot create a user namespace under Docker's default seccomp profile, so
+ * EVERY confined run failed at its first shell command and the model reported
+ * the environment as a verdict; the remedy was to run the whole container
+ * `seccomp=unconfined`. F36-11 — with the network off the CLI installs a
+ * seccomp filter that refuses every socket syscall, `AF_UNIX` included, so
+ * Node's synchronous `child_process` (npm, and most build and test tooling)
+ * fails with `EPERM` after the child already ran; a confined reviewer could
+ * not run the project's gate, and the review gate deadlocked on it (live
+ * HLC-18, 2026-09-12). Both are upstream and neither is expressible as a
+ * Viberr rule. Removing the sandbox removes both, and lets the container keep
+ * Docker's own seccomp profile.
  *
- * The one deliberate asymmetry (owner-chosen): a write-withheld run that is
- * EVIDENCE-granted (`attachmentsWritableDir` set — its assignment includes
- * producing files for humans) keeps `workspace-write`, because this sandbox
- * cannot express "read-only except attachments/" and a read-only mode blocks
- * the copy-into-attachments flow (the F22-03 defect). Pass 32 re-asked the
- * owner (E32-3) and VERIFIED the constraint against the pinned Codex 0.146
- * sources: `SandboxPolicy::ReadOnly` has no writable roots and `--add-dir`
- * widens `workspace-write` only — so the carve-out stands, disclosed as
- * "advisory on Codex" wherever the enforcement is rendered
- * (`codexRepoWriteAdvisory`, `describeCodexSandbox`). Claude expresses the
- * same intent more finely: file-write tools denied, the browser MCP's own
- * writes land in attachments/.
- *
- * The operator (and the Claude-only controller) are coordination machinery,
- * not agents with a write assignment: structurally `read-only`, matching
- * Claude's OPERATOR_READ_ONLY_DENIED_TOOLS. EGRESS survives unchanged from
- * R22: `danger-full-access` turns the network on unconditionally, so any
- * egress-gated run must stay below it (`workspace-write`, whose network
- * toggle Codex respects); only a fully-autonomous delivering run with egress
- * reaches `danger-full-access`.
- *
- * `spec.autonomous` deliberately does NOT decide repo write access on its own:
- * it also drives Claude's `permissionMode`, and flipping it to `"default"`
- * would hang a server run on an approval nobody can answer.
+ * What that costs, stated plainly and rendered everywhere it matters: on
+ * Codex a withheld repo-write family is ADVISORY (the prompt omits the steps,
+ * the delivery gate refuses them — `codexRepoWriteAdvisory`), and the
+ * operator's OS-level network is no longer forced off. Web SEARCH still binds
+ * on both backends (`webSearchMode: "disabled"`), because that is the CLI's
+ * own tool, not the OS sandbox. Claude is unchanged: its tool denylist was
+ * always the channel there.
  */
-/** The spec fields the sandbox decision reads — narrowed so a caller that
- *  only wants to DESCRIBE a run's confinement (the run-inputs disclosure)
- *  need not build a whole RunSpec. */
-export type CodexSandboxInputs = Pick<
-  RunSpec,
-  "kind" | "repoWriteWithheld" | "attachmentsWritableDir" | "autonomous" | "webSearchWithheld"
->;
-
-export function resolveCodexSandboxMode(spec: CodexSandboxInputs): SandboxMode {
-  // Coordination machinery: read-only, like the Claude operator's denylist.
-  // (Its plan executes server-side; the run itself only reads the checkout.)
-  if (spec.kind === "operator") return "read-only";
-  // Grants decide (parity ruling): a withheld write family binds physically —
-  // unless the run is evidence-granted, the owner's carve-out above, which
-  // widens exactly to `workspace-write` (never to full access: the withheld
-  // family must keep the run below the unconditional-network tier too).
-  if (spec.repoWriteWithheld) {
-    return spec.attachmentsWritableDir ? "workspace-write" : "read-only";
-  }
-  // Only a fully-autonomous DELIVERING run with egress reaches
-  // `danger-full-access` (full filesystem + network). Everything else is
-  // `workspace-write`: writable and shell-capable, but with the network gated
-  // by the egress capability (`networkAccessEnabled` / `webSearchMode`, set
-  // below). `danger-full-access` cannot honor that gate, which is why
-  // egress-gated runs must NOT use it. Operators (which also set
-  // `autonomous: true`) never reach this line — the read-only early return
-  // above already settled them.
-  // C02-R8 (pass 32): DELIVERING means `kind === "primary"` — stated
-  // positively. The old `!== "reviewer"` also admitted `controller`, so a
-  // controller run on Codex (forced to Claude today, controller-run.server)
-  // would have read as a deliverer and reached full access.
-  const isDeliverer = spec.kind === "primary";
-  if (spec.autonomous && isDeliverer && !spec.webSearchWithheld) {
-    return "danger-full-access";
-  }
-  return "workspace-write";
-}
-
-/**
- * The run's OS sandbox for the run-inputs disclosure: the mode it got, plus
- * the honest note when the evidence carve-out is what decided it (pass 32,
- * E32-3 fallback — see `codexRepoWriteAdvisory`).
- */
-/** The run-inputs disclosure of a Codex run's sandbox — the shape
- *  `RunInputs.sandbox` carries. */
-export interface CodexSandboxDisclosure {
-  mode: SandboxMode;
-  note: string | null;
-}
-
-export function describeCodexSandbox(spec: CodexSandboxInputs): CodexSandboxDisclosure {
-  const mode = resolveCodexSandboxMode(spec);
-  const carveOut =
-    spec.kind !== "operator" && !!spec.repoWriteWithheld && !!spec.attachmentsWritableDir;
-  return { mode, note: carveOut ? CODEX_REPO_WRITE_ADVISORY_NOTE : null };
-}
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
  *  turn/tool may produce no event before the run is treated as hung. Overridable
@@ -743,6 +679,11 @@ export function createCodexAdapter(
       let settled = false;
       let idleTimedOut = false;
       let emittedAdapterFailure = false;
+      // Ruling 181: the run's private CODEX_HOME, forked from the principal's
+      // home at spawn and removed by `settle` — the one exit every outcome
+      // takes. Null until the spawn env is built, and for a spec that carries
+      // no home at all (nothing to fork from).
+      let runHome: CodexRunHome | null = null;
       const abort = new AbortController();
       // Force-settle deadline armed after an abort, so a child that survives
       // SIGTERM cannot leave the row `running` forever. `settle` disarms it.
@@ -839,6 +780,14 @@ export function createCodexAdapter(
           clearTimeout(interruptTimer);
           interruptTimer = null;
         }
+        // Ruling 181: carry the refreshed sign-in back and drop the run home
+        // BEFORE the completion callback runs inside `onExit` — a follow-up
+        // run it starts forks its own home from the shared file, which must
+        // already hold this run's refresh. Never throws.
+        if (runHome) {
+          finishCodexRunHome(runHome);
+          runHome = null;
+        }
         cb.onExit({
           outcome,
           effectiveBackend: "codex",
@@ -918,26 +867,37 @@ export function createCodexAdapter(
             : undefined);
         const mergedEnv =
           baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
+        // Ruling 181: `spec.env.CODEX_HOME` is the principal's SHARED home
+        // (`runCredentialFor`). The CLI gets a private fork of it for this run
+        // — its own `tmp/arg0` helper directory, its own copy of the sign-in —
+        // while the state db (`CODEX_SQLITE_HOME`) and, by link, the sessions
+        // stay shared, so resume still finds its rollout (F36-3, Q36-11 a).
+        // Read from `spec.env`, the credential's own contract — never from the
+        // merged env, whose process.env fallback could carry an ambient home.
+        const sharedHome = spec.env?.CODEX_HOME;
+        if (mergedEnv && sharedHome) {
+          runHome = prepareCodexRunHome(sharedHome, spec.runId);
+          mergedEnv.CODEX_HOME = runHome.dir;
+          mergedEnv.CODEX_SQLITE_HOME = runHome.sharedHome;
+        }
         const config = codexConfigForRun(spec, deps.config);
         const codexOptions: CodexOptions = { config };
         if (mergedEnv) codexOptions.env = mergedEnv;
         const codex = factory(codexOptions);
-        // Parity ruling (2026-08-31, superseding R22's advisory posture):
-        // repo-write is GRANTS-derived and binds on BOTH backends — a
-        // write-withheld Codex run is `read-only` (the one channel Codex
-        // respects), a write-granted one is `workspace-write`, and only a
-        // fully-autonomous delivering run with egress gets
-        // `danger-full-access` (mirroring Claude's bypassPermissions so a
-        // server-spawned run never blocks on an approval it can't answer).
-        // EGRESS survives from R22: operators never reach the network on
-        // Codex, and a specialist whose web egress is withheld loses web
-        // search — both set below; the network toggle needs a mode at or
-        // below `workspace-write` to bind (see resolveCodexSandboxMode).
-        const sandboxMode: SandboxMode = resolveCodexSandboxMode(spec);
+        // Ruling 185: no OS confinement from Viberr. Every Codex run starts
+        // `danger-full-access` — the mode that installs neither bubblewrap nor
+        // the network seccomp filter, and so has neither F36-1's "bwrap: No
+        // permissions to create a new namespace" nor F36-11's `EPERM` on every
+        // synchronous child process. The boundary is Viberr's: the contract,
+        // the isolated per-engagement checkout, the delivery gate and the
+        // revision-bound verdicts. `attachmentsWritableDir` needs no
+        // `--add-dir` here (full access already writes it), and the operator's
+        // OS network is no longer forced off — the header comment says what
+        // that costs.
         const reasoningEffort = resolveCodexReasoningEffort(spec.effort);
         const threadOptions: ThreadOptions = {
           model: spec.model,
-          sandboxMode,
+          sandboxMode: "danger-full-access",
           workingDirectory: spec.workdir,
           skipGitRepoCheck: true,
           // There is no interactive approval channel in a server run. "never"
@@ -949,27 +909,11 @@ export function createCodexAdapter(
         if (reasoningEffort) {
           threadOptions.modelReasoningEffort = reasoningEffort;
         }
-        // The task's attachments dir joins the writable set at workspace-write;
-        // danger-full-access can already write it. An evidence-granted run is
-        // never `read-only` (the parity ruling's carve-out in
-        // resolveCodexSandboxMode), so a reviewer that posts files CAN copy
-        // screenshots into attachments/ — the "Posting files" persona never
-        // promises a write the sandbox blocks (F22-03/AD-1 stays resolved).
-        if (sandboxMode === "workspace-write" && spec.attachmentsWritableDir) {
-          threadOptions.additionalDirectories = [spec.attachmentsWritableDir];
-        }
-        // The operator's OS-sandbox network stays off on Codex — declared MCP
-        // servers and workspace tooling do not need it, and it is not the egress
-        // `use-web-search-fetch` governs. Web SEARCH, though, follows the grant on
-        // the operator exactly as on a specialist (pass-24 B-2, owner ruling): a
-        // Codex operator that HOLDS `use-web-search-fetch` gets web search,
-        // matching the Claude operator (which keeps WebFetch/WebSearch unless the
-        // grant is withheld); a withheld grant disables it. The unconditional
-        // `webSearchMode:"disabled"` here used to dishonour the grant on Codex
-        // operators while the matrix rendered the cell green.
-        if (spec.kind === "operator") {
-          threadOptions.networkAccessEnabled = false;
-        }
+        // Web SEARCH still follows the grant on BOTH kinds (pass-24 B-2, owner
+        // ruling): it is the CLI's own tool, not the OS sandbox, so ruling 185
+        // does not touch it. A Codex operator that HOLDS `use-web-search-fetch`
+        // gets web search, matching the Claude operator; a withheld grant
+        // disables it.
         if (spec.webSearchWithheld) {
           // P14-RT-06: a run whose `use-web-search-fetch` grant is withheld loses
           // Codex's web search too. Claude removes WebFetch/WebSearch from the

@@ -1991,6 +1991,47 @@ describe("operatorAcceptCompletion", () => {
     expect(audits).toContain("task.operator.accepted_completion");
   });
 
+  it("U36-9 (pass 36): the full-autonomy acceptance names the terminal stage as the board calls it", async () => {
+    // Live: every completion sentence said "moved to **Done**" on a board whose
+    // last stage is Shipped. Canary: put the literal back into the message or
+    // the completion event.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+      { capabilityId: "completion-for-acceptance", mode: "direct" },
+    ]);
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      stages: project.parsed.frontmatter.stages.map((s) =>
+        s.id === "done" ? { ...s, name: "Shipped" } : s,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedTask("review");
+    const r = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toBe("Accepted completion: VIB-1 moved to Shipped.");
+    // This fixture has no repository, so the completion event takes the
+    // verified no-change arm (R17-2); the two merge arms share the sentence the
+    // message above was built from, and none of the three may say "Done".
+    const completion = task().timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain("**VIB-1 completed with no changes**");
+    expect(completion?.text).not.toContain("moved to Done");
+    // The idempotent second call names the stage the same way.
+    const again = await operatorAcceptCompletion(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      authority("full"),
+    );
+    expect(again).toEqual({ outcome: "noop", message: "VIB-1 is already Shipped." });
+  });
+
   it("reports validation HEALTHY when a required reviewer really approved the revision", async () => {
     // The other half of the derivation: real review evidence still reads healthy,
     // so the honest version is not just "always none".
@@ -2181,6 +2222,35 @@ describe("operatorAcceptCompletion", () => {
     expect(
       listAuditEvents(store.db, { action: "task.operator.accepted_completion" }),
     ).toHaveLength(0);
+  });
+
+  it("U36-2 (pass 36): an archive_task option's deleteBranch is dropped on a task with no branch", async () => {
+    // Live: an `input` packet on a branchless task carried `deleteBranch`, and
+    // the card rendered the closed-PR recovery paragraph about it. Canary:
+    // drop the `existing.parsed.frontmatter.branch` half of the guard.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope: no-op probe or new fixture",
+        options: [
+          { kind: "archive_task", title: "Archive it", deleteBranch: true },
+          { kind: "edit_goal", title: "Retarget it" },
+        ],
+      },
+      authority("full"),
+    );
+    const packet = task().packet!;
+    expect(packet.options[0]).toMatchObject({ kind: "archive_task" });
+    expect("deleteBranch" in packet.options[0]!).toBe(false);
   });
 
   it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
@@ -4739,5 +4809,34 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.message).toContain("belongs back at Review");
     expect(r.message).toContain("transition_stage");
     expect(r.message).toContain("stage picker on the task page");
+  });
+});
+
+/**
+ * Ruling 178 (pass 36, G36-3): the project's declared required reviewers ride
+ * the snapshot, resolved to the stage and agent names the acceptance gate
+ * prints, so the operator engages them instead of learning the rule from a
+ * refusal at the boundary.
+ */
+describe("ruling 178: the snapshot carries the project's required reviewers", () => {
+  it("lists each rule with its stage and agent names; an empty rule set is an empty list", async () => {
+    // Canary: drop `requiredReviewers` from `operatorSnapshot`'s return.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    expect(
+      operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"))
+        .requiredReviewers,
+    ).toEqual([]);
+
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+    expect(snap.requiredReviewers).toEqual([
+      { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Rev" },
+    ]);
   });
 });

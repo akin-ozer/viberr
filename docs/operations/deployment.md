@@ -182,6 +182,47 @@ into a shared `runtimes/codex-home` and set `VIBERR_CODEX_USE_CLI_AUTH=1`. All n
 variables, the shared homes, the `/host-codex` mount and the entrypoint that seeded it are
 deleted; the health example returned `{"claude":"real","codex":"unavailable"}`.)*
 
+## Codex runs are not OS-confined (ruling 185)
+
+Viberr starts **every** Codex run `danger-full-access`, and the container keeps Docker's
+own seccomp profile — `compose.yml` carries no `security_opt`. Do not add one back without
+a ruling.
+
+The Codex CLI *can* confine a run (bubblewrap on Linux, seatbelt on macOS), and Viberr used
+to ask it to for every run below full access. Two upstream properties made that cost more
+than it bought, and pass 36 measured both:
+
+- **bubblewrap needs an unprivileged user namespace** (`unshare(CLONE_NEWUSER)`), which
+  Docker's builtin seccomp profile refuses to a non-root process — and the app runs as the
+  non-root `node` user. Every confined run therefore died at its first shell command with
+  `bwrap: No permissions to create a new namespace`, and the models reported the
+  environment as a verdict on correct work (F36-1). The remedy was to run the whole
+  container `seccomp=unconfined`, which is a bigger hole than the sandbox was a wall.
+- **with the network off the CLI installs a seccomp filter that refuses every socket
+  syscall, `AF_UNIX` included.** libuv's *synchronous* spawn needs a socketpair, so inside
+  such a sandbox `spawnSync` reports `EPERM` *after the child has already run*,
+  `execSync`/`execFileSync` throw it, `net` fails on both `AF_UNIX` and `AF_INET`, and only
+  async `spawn` is unaffected. `npm ci` dies on esbuild's postinstall, so no
+  `npm`/`npx`/`pnpm`/`yarn` gate can run at all (F36-11). Live, that deadlocked the review
+  gate: the reviewer called it "an environment evidence blocker, not a code finding" and
+  still requested changes, and the operator sent the deliverer back around.
+
+**What confines an agent now** is Viberr, not the OS: the run's contract omits every step
+it may not take, each supporting engagement works in its own isolated checkout, agents hold
+no credential, delivery is server-owned, and verdicts bind to a revision. The honest cost
+is that on Codex a withheld `execute-code-or-write-repo` is **advisory** — the agent editor,
+the capability matrix and the agent card all say so on the row. Web search still binds on
+both backends (it is the CLI's own tool, not the sandbox), and so do the MCP write-tool
+denials.
+
+The host toolchain is still reported — versions only:
+
+```bash
+curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
+# {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
+#  "codexCli":"0.153.4","claudeAgentSdk":"0.3.261"}
+```
+
 ## First run
 
 ```bash

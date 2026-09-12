@@ -3031,6 +3031,103 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(1);
   });
 
+  it("ruling 177: accepting a task interrupts its live runs, notes them and audits the cause", async () => {
+    // F36-5 live: HLC-9 was force-accepted while its developer was building;
+    // the run finished later and re-invoked the operator on the shipped task.
+    // Canary: delete the `interruptLiveRunsOnClosure` call after
+    // `applyAcceptanceWrite` — the run row stays `running`, no note, no row.
+    const store = prepared();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "agent",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+        pr: { number: 8, state: "review", title: "[VIB-1] work" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: "run_live_dev",
+      taskKey: "VIB-1",
+      projectSlug: store.slug,
+      threadId: "th-live-dev",
+      role: "Implementation",
+      kind: "primary",
+      backend: "codex",
+      agentProfileId: "developer",
+      agentName: "Server Developer",
+      model: "gpt-5.6-luna",
+      sdk: "codex-sdk",
+      state: "running",
+      startedAt: new Date().toISOString(),
+    });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task(store).frontmatter.stage).toBe("done");
+    // SAFETY: the SELECT names two `agent_runs` columns (`state` TEXT NOT NULL,
+    // `interrupted_by` TEXT NULL per 0001_baseline) and the id was inserted above.
+    const row = store.db
+      .prepare(`SELECT state, interrupted_by FROM agent_runs WHERE id = ?`)
+      .get("run_live_dev") as { state: string; interrupted_by: string | null };
+    expect(row.state).toBe("interrupted");
+    expect(row.interrupted_by).toBe(store.users.arda.id);
+    const note = task(store).timeline.find(
+      (e) => e.type === "note" && e.title === "Interrupted by acceptance",
+    )!;
+    expect(note).toBeDefined();
+    expect(note.text).toContain("run_live_dev");
+    expect(note.text).toMatch(/force-accepted/);
+    const rows = listAuditEvents(store.db, { action: "task.acceptance.interrupted_runs" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toMatchObject({ cause: "force-accept", runIds: ["run_live_dev"] });
+    const runRows = listAuditEvents(store.db, { action: "runtime.run.interrupted" });
+    expect(runRows).toHaveLength(1);
+    expect(runRows[0]!.details).toMatchObject({ reason: "task-closed", cause: "force-accept" });
+  });
+
+  it("U36-9 (pass 36): the completion event names the board's terminal stage, not a literal Done", async () => {
+    // Live: "HLC-10 transitioned to **Done**" on a board whose last stage is
+    // Shipped. Canary: put the literal back in the acceptance event text.
+    const store = prepared();
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      stages: pf.parsed.frontmatter.stages.map((s) =>
+        s.id === "done" ? { ...s, name: "Shipped" } : s,
+      ),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+        pr: { number: 8, state: "review", title: "[VIB-1] work" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await forceAcceptCompletion(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const completion = task(store).timeline.find((e) => e.type === "completion")!;
+    expect(completion.text).toContain("transitioned to **Shipped**");
+    expect(completion.text).not.toContain("**Done**");
+  });
+
   it("force-accept is held to the same disclosure — and records no bypass row for the attempt", async () => {
     // Force overrides the GATES, never the record of what the human was shown.
     // CANARY: drop the check from forceAcceptCompletion — a bare force POST
@@ -4598,6 +4695,74 @@ describe("pass 35: operator and task actions", () => {
   });
 
   describe("F35-5: an @mention whose run did not start leaves a note and an audit row", () => {
+    /** Ruling 177 tests: the `@operator` handle only routes when an operator is
+     *  deployed on the project — without one the mention is unrouted, not refused. */
+    function deployOperatorFor(store: TestStore): void {
+      const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...projectFile.parsed.frontmatter,
+        agents: [
+          ...projectFile.parsed.frontmatter.agents,
+          {
+            profileId: "operator",
+            capabilities: [
+              { capabilityId: "generate-packets", mode: "direct" as const },
+              { capabilityId: "append-typed-events", mode: "direct" as const },
+            ],
+            extras: [],
+            definition: {
+              kind: "operator" as const,
+              name: "Operator",
+              role: "Task coordinator",
+              backends: ["claude" as const],
+              model: "sonnet",
+              autonomy: "supervised" as const,
+            },
+          },
+        ],
+      });
+    }
+
+    it("ruling 177: an @operator mention on an ARCHIVED task writes 'Mention not started' and starts no run", async () => {
+      // Canary: drop the `closed` refusal from `runOperator` (or the note from
+      // the `operatorRefused` branch of `commentToAgent`): F36-4 — a paid
+      // operator run starts on an archived task behind a page whose own
+      // button refuses it, and no note says the mention went nowhere.
+      const store = prepared();
+      deployOperatorFor(store);
+      seed(store, { stage: "impl", archived: true, waiting: "none" });
+      const result = await commentToAgent(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator observer probe: do you run on an archived task?" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.triggered).toBeNull();
+      expect(result.operatorRefused).toBe("closed");
+      const note = file(store).timeline.find((e) => e.type === "note" && e.title === "Mention not started")!;
+      expect(note).toBeDefined();
+      expect(note.text).toMatch(/@operator was mentioned, but its run did not start: VIB-1 is archived — restore it before running the operator on it\./);
+      expect(
+        store.db.prepare(`SELECT COUNT(*) AS n FROM agent_runs WHERE kind = 'operator'`).get(),
+      ).toMatchObject({ n: 0 });
+      expect(listAuditEvents(store.db, { action: "task.comment.unrouted" })).toHaveLength(1);
+    });
+
+    it("ruling 177: an @operator mention on a task at the terminal stage is refused the same way", async () => {
+      const store = prepared();
+      deployOperatorFor(store);
+      seed(store, { stage: "done", waiting: "none" });
+      const result = await commentToAgent(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator anything left?" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(result.operatorRefused).toBe("closed");
+      const note = file(store).timeline.find((e) => e.type === "note" && e.title === "Mention not started")!;
+      expect(note.text).toMatch(/VIB-1 is closed \(Done is the terminal stage\)/);
+    });
+
     it("a stage-ineligible mention writes 'Mention not started' naming the stage, and task.comment.unrouted", async () => {
       // Canary: remove the `noteMentionNotStarted` call from the catch.
       const store = prepared();

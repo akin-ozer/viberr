@@ -245,11 +245,37 @@ describe("pr-diverged wakes the operator", () => {
   });
 
   it("an unchanged happy-path reconcile never wakes the operator", async () => {
-    const { store, actor } = setup();
+    // The task OWNS PR #318 (R15-15: the state `openTaskPr` leaves behind).
+    // This case used to start with no `pr` and a stranger's open PR on the
+    // branch, which is not a linking but a branch collision (ruling 35 adopts
+    // only a delivered head) — and since U36-7 a NEW collision wakes the
+    // operator, so the fixture has to be the steady state it claims to be.
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
     const routes = routesWithPr({ number: 318, state: "open", merged: false });
-    await reconcile(store, actor, routes); // review PR appears (a normal linking)
+    await reconcile(store, actor, routes); // a check lands, nothing diverges
     await reconcile(store, actor, routes); // steady state
     expect(invoked).toHaveLength(0);
+  });
+
+  it("U36-7: a NEW branch collision wakes the operator once, so the ruling-50 packet is authored on the next turn", async () => {
+    // Pass-36 live (HLC-10): the collision reached no inbox and woke nobody;
+    // the `resolve_remote_collision` packet was authored only because the
+    // developer's completion happened to invoke the operator 16 minutes later.
+    // Canary: drop `(unownedPrIsNew && collisionNote)` from the wake predicate.
+    const { store, actor } = setup(); // no pr, no delivered revision
+    const routes = routesWithPr({ number: 318, state: "open", merged: false });
+    await reconcile(store, actor, routes); // a stranger's PR stands on the name
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+        .parsed.frontmatter.github?.unownedPr,
+    ).toBe(318);
+    expect(invoked).toEqual([{ projectSlug: store.slug, taskKey: "VIB-301", trigger: "pr-diverged" }]);
+
+    // A persisting collision is not a new event — no second wake-up.
+    await reconcile(store, actor, routes);
+    expect(invoked).toHaveLength(1);
   });
 });
 
@@ -347,7 +373,11 @@ describe("the healing transition — a closed PR goes live again", () => {
     expect(collision, "the stranger is reported as a collision").toBeTruthy();
     expect(collision!.text).toContain("#999");
     expect(collision!.text).toContain("the-del"); // the delivered sha, abbreviated
-    expect(invoked).toHaveLength(0);
+    // U36-7: the ONE wake here is the new collision's (so the operator authors
+    // the ruling-50 packet), never a healing wake — nothing was adopted.
+    expect(invoked).toEqual([{ projectSlug: store.slug, taskKey: "VIB-301", trigger: "pr-diverged" }]);
+    await reconcile(store, actor, routesWithPr({ number: 999, state: "open", merged: false }));
+    expect(invoked).toHaveLength(1);
   });
 });
 

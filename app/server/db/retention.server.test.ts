@@ -153,6 +153,42 @@ describe("applyRetention (F10-29)", () => {
       ).c,
     ).toBe(1);
   });
+
+  it("a same-instant tie keeps the notification written LAST, not the one with the luckier id", () => {
+    // Notification ids are 72 random bits (`newId("ntf")`), so the old
+    // `ORDER BY occurred_at DESC, id DESC` tie-break decided by coin flip WHICH
+    // row retention deleted — for rows stamped in the same millisecond, the
+    // newer one could be the one that went. Insertion order (`rowid`) is the
+    // only thing that knows. Canary: put `id DESC` back and the surviving id
+    // flips to the `zzz` one every time (these ids sort against their
+    // insertion order on purpose).
+    const db = ctx.makeDb();
+    const at = iso(9);
+    const insert = db.prepare(
+      `INSERT INTO notifications (id, user_id, kind, title, text, project_slug,
+         task_key, occurred_at, read_at, created_at)
+       VALUES (?, 'u3', 'mention', 't', 'b', 'p', 'VIB-1', ?, null, ?)`,
+    );
+    // The tied pair has to STRADDLE the cap: fill it with NEWER rows, then
+    // write the two tied (older) ones, so exactly one of them is pruned and
+    // the tie-break is what picks it.
+    for (let i = 0; i < NOTIFICATION_MAX_PER_USER - 1; i++) {
+      const newer = iso(1);
+      insert.run(`n_new_${String(i).padStart(4, "0")}`, newer, newer);
+    }
+    insert.run("ntf_zzzzzzzzzzzz", at, at);
+    insert.run("ntf_aaaaaaaaaaaa", at, at);
+
+    applyRetention(db, new Date(), { dataRoot: ctx.makeTempDir() });
+    // SAFETY: the SELECT names one column of a table this test just wrote, and
+    // `id` is NOT NULL on `notifications` in 0001_baseline.
+    const kept = db
+      .prepare(
+        `SELECT id FROM notifications WHERE user_id='u3' AND occurred_at=? ORDER BY rowid`,
+      )
+      .all(at) as { id: string }[];
+    expect(kept.map((r) => r.id)).toEqual(["ntf_aaaaaaaaaaaa"]);
+  });
 });
 
 describe("idempotency-keyed audit rows survive retention (B-FD10)", () => {

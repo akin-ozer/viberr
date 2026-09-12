@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
@@ -5,6 +6,11 @@ import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
 import { patchRun } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
+import {
+  codexRunHomeDir,
+  finishCodexRunHome,
+  userBackendHome,
+} from "./user-homes.server";
 
 /**
  * Crash-loop backstop for the boot recovery re-invoke (F7-BOOT1). A boot that
@@ -62,9 +68,18 @@ export interface OrphanFinalization {
    * deletes. Never rejects.
    */
   reaped: Promise<void>;
+  /**
+   * Ruling 177 / U36-8 (pass 36): the "Interrupted by a restart" notes, one per
+   * orphaned task, joinable so a caller (and a test) can read the task file
+   * after they landed. Never rejects: each note is caught per task.
+   */
+  notes: Promise<void>;
 }
 
 export interface FinalizeOrphanedRunsDeps {
+  /** Ruling 177 / U36-8: the data root the restart notes are written under
+   *  (the process default when omitted, as boot calls it). */
+  dataRoot?: string;
   /** The sweep (default: the real one), injectable so a test can see which
    *  runs it was asked to reap. */
   reapProcesses?: ReapRunProcesses;
@@ -100,9 +115,11 @@ export function finalizeOrphanedRuns(
   // SAFETY: every column named here is declared NOT NULL TEXT on `agent_runs`
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
+  // (`backend` is NOT NULL too; `credential_user_id` is nullable — a row
+  // written before ruling 127 carries none.)
   const orphans = db
     .prepare(
-      `SELECT id, project_slug, task_key, kind
+      `SELECT id, project_slug, task_key, kind, backend, credential_user_id
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
@@ -111,6 +128,8 @@ export function finalizeOrphanedRuns(
     project_slug: string;
     task_key: string;
     kind: string;
+    backend: string;
+    credential_user_id: string | null;
   }[];
   if (orphans.length === 0) {
     return {
@@ -119,6 +138,7 @@ export function finalizeOrphanedRuns(
       capped: 0,
       reinvokes: Promise.resolve(),
       reaped: Promise.resolve(),
+      notes: Promise.resolve(),
     };
   }
 
@@ -134,7 +154,19 @@ export function finalizeOrphanedRuns(
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
+  const runsByTask = new Map<string, { id: string; kind: string }[]>();
   for (const run of orphans) {
+    // Ruling 181 (pass 36): a Codex run's private CODEX_HOME is finished by the
+    // adapter's settle — which a process that died never reached. Live
+    // 19:48Z: two restart-orphaned developer runs still owned
+    // `codex-home/runs/<runId>/`, each with a copy of the person's sign-in.
+    // Finish them here exactly as the settle would: the refreshed `auth.json`
+    // written back when its bytes changed, the directory removed.
+    if (run.backend === "codex" && run.credential_user_id) {
+      const sharedHome = userBackendHome(run.credential_user_id, "codex", deps.dataRoot);
+      const dir = codexRunHomeDir(sharedHome, run.id);
+      if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, runId: run.id });
+    }
     patchRun(db, run.id, {
       state: "interrupted",
       finishedAt: now,
@@ -146,11 +178,50 @@ export function finalizeOrphanedRuns(
     // operator to re-invoke for it. Its own recovery (an honest "interrupted
     // by a restart" note on the conversation) lives in controller-run.
     if (run.kind === "controller") continue;
-    realTasks.set(`${run.project_slug}/${run.task_key}`, {
+    const taskId = `${run.project_slug}/${run.task_key}`;
+    realTasks.set(taskId, {
       projectSlug: run.project_slug,
       taskKey: run.task_key,
     });
+    runsByTask.set(taskId, [...(runsByTask.get(taskId) ?? []), { id: run.id, kind: run.kind }]);
   }
+  // Ruling 177 / U36-8 (pass 36): the task file said NOTHING about a restart
+  // cutting its runs — the re-fired operator's directive was the first trace.
+  // One policy note per task names every run the restart ended, before the
+  // operator is re-invoked below (so the note precedes the turn it explains).
+  const notes: Promise<void> = (async () => {
+    if (realTasks.size === 0) return;
+    const { appendTimelineEvent } = await import("~/server/files/task-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    for (const [taskId, t] of realTasks) {
+      const runs = runsByTask.get(taskId) ?? [];
+      const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
+      const list = runs
+        .map((r) => `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`)
+        .join(", ");
+      try {
+        await appendTimelineEvent(ref, {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Interrupted by a restart",
+          text:
+            `**Restart:** ${runs.length === 1 ? "the run" : `${runs.length} runs`} ${list} ` +
+            `${runs.length === 1 ? "was" : "were"} still running when the server stopped; ` +
+            `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart, and the operator is re-invoked to decide what to do next.`,
+          toAgent: false,
+          evidence: null,
+        });
+        rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
+      } catch (error) {
+        logger.warn("restart note failed", {
+          taskKey: t.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+  })();
   logger.info("finalized non-terminal runs at boot", {
     total: orphans.length,
   });
@@ -232,6 +303,7 @@ export function finalizeOrphanedRuns(
     capped,
     reinvokes,
     reaped,
+    notes,
   };
 }
 

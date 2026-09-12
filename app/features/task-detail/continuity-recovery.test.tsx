@@ -465,6 +465,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     prChecks: null,
     prReview: null,
     commits: [],
+    otherCommits: [],
     changed: null,
     unownedPr: null,
     foreignHead: null,
@@ -495,6 +496,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     timeline: [continuityEvent],
     diagnostics: [],
     stages: STAGES,
+    workflow: [],
     ...patch,
   };
 }

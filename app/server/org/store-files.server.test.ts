@@ -132,6 +132,43 @@ describe("uploads", () => {
     // The skill body is re-read from disk on the next load.
     expect(getSkill(db, skill.id, ctx)!.body).toBe("## captured body");
   });
+
+  // Ruling 183 (pass 36, F36-2): the upload path is a SKILL.md writer too.
+  it("ruling 183: refuses a root-level SKILL.md that is not a skill before any file in the batch is written", async () => {
+    // Canary: move the check into the write loop — notes.md lands first.
+    const db = dbCtx.makeDb();
+    const ctx = { dataRoot: dbCtx.makeTempDir() };
+    const { skill } = await saveSkill(
+      db,
+      { name: "escaped-upload", summary: "Upload probe.", body: "# kept" },
+      ACTOR,
+      ctx,
+    );
+    const target = resolveStoreTarget(db, "skill", skill.id, ctx)!;
+    expect(() =>
+      writeStoreFiles(
+        db,
+        target,
+        [],
+        [
+          { relPath: "notes.md", data: Buffer.from("# notes") },
+          { relPath: "SKILL.md", data: Buffer.from("# Skill\\n\\nArrived escaped.") },
+        ],
+        ACTOR,
+      ),
+    ).toThrowError(/JSON-escaped/);
+    expect(existsSync(path.join(target.rootAbs, "notes.md"))).toBe(false);
+    expect(getSkill(db, skill.id, ctx)!.body).toBe("# kept");
+    // A nested SKILL.md is a supporting file, not the skill: not judged.
+    const nested = writeStoreFiles(
+      db,
+      target,
+      [],
+      [{ relPath: "examples/SKILL.md", data: Buffer.from("literal \\n is fine here") }],
+      ACTOR,
+    );
+    expect(nested.added).toBe(1);
+  });
 });
 
 describe("mkdir + delete", () => {
@@ -788,6 +825,30 @@ describe("writeStoreDoc", () => {
     });
     expect(replaced.replaced).toBe(true);
     expect(readFileSync(abs, "utf8")).toBe("REPLACED");
+  });
+
+  it("ruling 183: a SKILL.md written through the document editor is judged like every other SKILL.md write", async () => {
+    // Canary: skip the check in writeStoreDoc.
+    const db = dbCtx.makeDb();
+    const ctx = { dataRoot: dbCtx.makeTempDir() };
+    const { skill } = await saveSkill(
+      db,
+      { name: "doc-edited", summary: "Doc probe.", body: "# kept" },
+      ACTOR,
+      ctx,
+    );
+    const target = resolveStoreTarget(db, "skill", skill.id, ctx)!;
+    expect(() =>
+      writeStoreDoc(db, target, [], "SKILL.md", "---\nname: [\n---\n# Body", ACTOR, {
+        overwrite: true,
+      }),
+    ).toThrowError(/frontmatter/);
+    expect(getSkill(db, skill.id, ctx)!.body).toBe("# kept");
+    const ok = writeStoreDoc(db, target, [], "SKILL.md", "# Rewritten\n- fine", ACTOR, {
+      overwrite: true,
+    });
+    expect(ok.replaced).toBe(true);
+    expect(getSkill(db, skill.id, ctx)!.body).toBe("# Rewritten\n- fine");
   });
 
   // P14-RV-02: `assertInsideRoot` was LEXICAL — it proved the path STRING sat

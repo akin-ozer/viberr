@@ -1675,7 +1675,12 @@ describe("resolvePacket kind matrix", () => {
 
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     const texts = detail!.timeline.map((e) => e.text);
-    expect(texts.some((t) => t.includes("Closed unrelated PR #232"))).toBe(true);
+    // U36-7 (pass 36): the ceremony's own event names BOTH facts.
+    expect(
+      texts.some((t) =>
+        t.includes("Branch collision cleared: closed PR #232 and deleted branch `vib-1-work`"),
+      ),
+    ).toBe(true);
     expect(texts.some((t) => t.includes("Deleted branch `vib-1-work`"))).toBe(true);
     // No workspace exists in this fixture, so the redelivery degrades honestly
     // — cleared, but the push did not complete, with the next step named.
@@ -3056,7 +3061,8 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
       workRevision: workRev("rev_1"),
       recommendations: [
         { id: "rec-acc", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "Clean review." },
-        { id: "rec-tr", kind: "transition", toStageId: "review", label: "Move to Review", detail: "" },
+        { id: "rec-tr", kind: "transition", toStageId: "done", label: "Move to Done", detail: "" },
+        { id: "rec-run", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "Keep going." },
       ],
     });
     await recordReviewerReply(
@@ -3065,8 +3071,10 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
     );
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.validation).toBe("failing");
-    // The stale "Accept completion" card is gone; unrelated recs survive.
-    expect(fm.recommendations.map((r) => r.kind)).toEqual(["transition"]);
+    // The stale "Accept completion" card is gone, and so is the "move on" card
+    // (F36-6, pass 36: a failing verdict voids any pending transition card);
+    // unrelated recs survive.
+    expect(fm.recommendations.map((r) => r.kind)).toEqual(["run_agent"]);
   });
 
   it("keeps accept_completion when the reviewer approves (validation stays healthy)", async () => {

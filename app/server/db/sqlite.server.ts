@@ -429,6 +429,19 @@ const BASELINE_COLUMNS: readonly {
     table: "controller_messages",
     columns: [{ name: "surface", ddl: "surface TEXT" }],
   },
+  // Ruling 178: the project's resolved required-reviewer rules. The rebuilder
+  // names the column on every project write and every task walk reads it, so
+  // a root that predates it would stop projecting entirely; its DEFAULT is the
+  // honest value for every existing project (none declared).
+  {
+    table: "projects",
+    columns: [
+      {
+        name: "required_reviewers_json",
+        ddl: "required_reviewers_json TEXT NOT NULL DEFAULT '[]'",
+      },
+    ],
+  },
 ];
 
 /**

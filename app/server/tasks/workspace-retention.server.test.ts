@@ -113,6 +113,7 @@ describe("reclaimTerminalTaskWorkspaces", () => {
       agents: [],
       credentialPolicy: null,
       guardrails: [],
+      requiredReviewers: [],
     });
     task(store, "VIB-1", "shipped");
     task(store, "VIB-2", "impl");

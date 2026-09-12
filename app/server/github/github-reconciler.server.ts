@@ -4,11 +4,16 @@ import { classifyRevisionDrift } from "~/shared/revision-drift";
 import {
   activeWorkRevision,
   conflictingPrBlockedReason,
+  currentVerdicts,
+  deriveValidation,
   type GithubCache,
   type PrMergeable,
   type PrRef,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
+import { describeRevisionDrift } from "~/shared/revision-drift";
+import { newId } from "~/shared/ids/new-id.server";
+import { taskClosure } from "~/server/tasks/task-closure.server";
 import {
   recordAudit,
   type AuditActor,
@@ -36,7 +41,12 @@ import {
   type BranchCompare,
   type BranchSyncState,
 } from "./branch-sync.server";
-import { encodeRefPath, GITHUB_API_BASE, isMissingRefAnswer } from "./github-client.server";
+import {
+  encodeRefPath,
+  GITHUB_API_BASE,
+  githubFailureMessage,
+  isMissingRefAnswer,
+} from "./github-client.server";
 import {
   prAdoptionText,
   recordPrAdoption,
@@ -67,7 +77,12 @@ import {
 } from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import {
+  canAcceptFromStage,
+  isTerminalStage,
+  resolveStageRoles,
+  stageName,
+} from "~/shared/workflow/stage-roles";
 import {
   POLICY_ENGINE_ACTOR,
   flagScopeViolation,
@@ -718,6 +733,15 @@ async function reconcileTaskUnlocked(
   // "not derived this pass", which leaves the cache below standing.
   const prefixCommits =
     compare && provenBranchHead ? taskCommits(compare.commits, fm.key) : null;
+  // Ruling 179 (pass 36, F36-7): the commits the prefix filter drops are the
+  // ones that move a reviewed head from outside — kept apart so the card can
+  // show them as "not this task's" instead of hiding them.
+  const otherCommits =
+    compare && provenBranchHead
+      ? compare.commits
+          .filter((c) => !c.msg.toLowerCase().startsWith(`[${fm.key.toLowerCase()}]`))
+          .map((c) => ({ sha: c.sha, msg: c.msg }))
+      : null;
   const existingCommits = existingGithub?.commits ?? [];
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
@@ -744,6 +768,7 @@ async function reconcileTaskUnlocked(
   // The key is present only while a foreign head stands (an absent key and a
   // null one would otherwise alternate in the compared snapshot).
   if (newGithub && foreignHead) newGithub.foreignHead = foreignHead;
+  if (newGithub && otherCommits !== null) newGithub.otherCommits = otherCommits;
   const unownedPrIsNew =
     !!unownedPr && existingGithub?.unownedPr !== unownedPr.number;
   // The collision is not a divergence and must not read like one: nothing about
@@ -832,24 +857,87 @@ async function reconcileTaskUnlocked(
       : `**Note:** PR #${newPr!.number} now tracks ${fm.key}'s branch on GitHub, replacing closed PR #${fm.pr!.number}, so the closed-PR block is lifted.`
     : null;
 
+  // Ruling 179 (pass 36, F36-7): AUTHORED drift after a verdict voids it. The
+  // verdicts bind to the WORK revision, and a foreign push moves the PR head
+  // without touching it — so `validation` stayed healthy, the accept card
+  // stayed applicable and nobody was told (live: an observer commit on hlc-7
+  // at Merge Approval). The pull request's head is what merges; a head that
+  // moved past the last verdict by commits Viberr did not deliver becomes the
+  // revision under review (`kind: external`), the verdicts on the old one no
+  // longer bind, the task returns to its verdict stage, and the watchers and
+  // the operator hear about it. Fires on the tick the moved head is FIRST
+  // recorded (the cached drift names the previous head), never again for the
+  // same head.
+  const authoredDriftNow = newPr?.revisionDrift ?? null;
+  const reviewedByVerdict = currentVerdicts(fm).length > 0;
+  const authoredDriftVoidsVerdict =
+    authoredDriftNow !== null &&
+    authoredDriftNow.authored > 0 &&
+    cachedPr?.revisionDrift?.headSha !== authoredDriftNow.headSha &&
+    reviewedByVerdict &&
+    !taskClosure(fm, project?.stages ?? []).closed;
+  const externalRevision = authoredDriftVoidsVerdict
+    ? {
+        id: newId("rev"),
+        headSha: authoredDriftNow.headSha,
+        treeSha: null,
+        branch,
+        createdAt: new Date().toISOString(),
+        sourceProfileId: null,
+        kind: "external" as const,
+      }
+    : null;
+  const voidedRevisionSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
+  const driftVoidText = authoredDriftVoidsVerdict
+    ? `**Revision moved after review (ruling 179):** PR #${newPr!.number}'s head is now \`${authoredDriftNow.headSha.slice(0, 7)}\`, ` +
+      `${describeRevisionDrift(authoredDriftNow).sentence}. The verdict on \`${(voidedRevisionSha ?? "").slice(0, 7)}\` no longer binds: ` +
+      `the new head is the revision under review and needs a fresh verdict before ${fm.key} can be accepted.`
+    : null;
+
   const changed =
+    authoredDriftVoidsVerdict ||
     JSON.stringify({ pr: fm.pr, github: fm.github }) !==
-    JSON.stringify({ pr: newPr, github: newGithub });
+      JSON.stringify({ pr: newPr, github: newGithub });
 
   if (changed) {
     const patch: Partial<TaskFrontmatter> = { pr: newPr, github: newGithub };
     // R8-6: surface a merged/closed-out-of-band divergence (typed event now, a
     // notification below). Never auto-advances the STAGE — a human closes the loop.
+    // U36-12 (pass 36): the note used to end "Accept the completion (or move it
+    // to Done)" whatever stage the task stood at — and acceptance is offered
+    // ONLY from the workflow's last boundary. Live (HLC-14, 18:13Z) the task
+    // sat at Agent Review with its PR merged out of band: the page had no
+    // Accept, the operator's own `accept_completion` was refused ("is at Agent
+    // Review, not Merge Approval"), and the same reconcile pass had just
+    // withdrawn the "Move the task to Merge Approval" card that led there. So
+    // ask the SAME predicate acceptance asks (`canAcceptFromStage`) and name
+    // the step the page actually offers.
+    const acceptableHere =
+      project === null ||
+      canAcceptFromStage(fm.stage, project.stages, project.workflow);
+    const boundaryName = project
+      ? stageName(
+          project.stages,
+          resolveStageRoles(project.stages, project.workflow).reviewId ?? fm.stage,
+        )
+      : null;
     const divergenceText = mergedButNotDone
-      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr, so its stage is unchanged. Accept the completion (or move it to Done) so the task reflects the merge.`
+      ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr, so its stage is unchanged. ` +
+        (acceptableHere
+          ? `Accept the completion so the task reflects the merge.`
+          : `Move it to ${boundaryName ?? "the approval boundary"} first — a completion can only be accepted from there — then accept it so the task reflects the merge.`)
       : closedButActive
         ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
         : null;
     // Owner decision 2026-07-18: a divergence WITHDRAWS the now-moot pending
     // recommendations that assumed the prior delivery could be moved forward as-is
     // — otherwise a human is nudged to "Move to Review" a task whose PR is gone.
-    //  · `transition` recs are moot on ANY divergence (the PR state changed under
-    //    the premise for advancing).
+    //  · `transition` recs are moot on a divergence that FALSIFIES advancing —
+    //    a PR closed without merging, or authored drift that voided the verdict.
+    //    U36-12: a PR MERGED out of band does not; there the transition toward
+    //    the approval boundary is the only route to the acceptance the note
+    //    just asked for, and withdrawing it left the human with a note naming a
+    //    step no control offered.
     //  · `accept_completion` is moot ONLY when the PR was CLOSED (nothing to
     //    accept); when the PR MERGED out-of-band, accepting is exactly the right
     //    action, so that rec SURVIVES (the divergence text points the human at it).
@@ -867,11 +955,12 @@ async function reconcileTaskUnlocked(
       ? conflictingPrBlockedReason({ pr: newPr }, fm.key)
       : null;
     const supersededRecs =
-      divergenceText || conflictText
+      divergenceText || conflictText || authoredDriftVoidsVerdict
         ? fm.recommendations.filter(
             (r) =>
-              (divergenceText !== null && r.kind === "transition") ||
-              (r.kind === "accept_completion" && (closedButActive || conflictText !== null)),
+              ((closedButActive || authoredDriftVoidsVerdict) && r.kind === "transition") ||
+              (r.kind === "accept_completion" &&
+                (closedButActive || conflictText !== null || authoredDriftVoidsVerdict)),
           )
         : [];
     const supersededIds = new Set(supersededRecs.map((r) => r.id));
@@ -924,6 +1013,16 @@ async function reconcileTaskUnlocked(
         );
       }
       Object.assign(parsed.frontmatter, applied);
+      // Ruling 179: re-checked under the lock — a delivery landing during
+      // this pass's round trips replaces the revision itself, and then the
+      // moved head is that delivery's, not a stranger's.
+      if (
+        externalRevision &&
+        activeWorkRevision(parsed.frontmatter.workRevision)?.headSha === voidedRevisionSha
+      ) {
+        parsed.frontmatter.workRevision = externalRevision;
+        parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
+      }
     });
     if (unownedPrIsNew && collisionNote) {
       await appendTimelineEvent(ref, {
@@ -935,6 +1034,29 @@ async function reconcileTaskUnlocked(
         toAgent: false,
         evidence: null,
       });
+      // U36-7 (pass 36): a NEW collision reaches the watchers' inbox like an
+      // adoption or a divergence does — live (HLC-10) the note above was the
+      // only trace, and the owner learned of the block by visiting the page.
+      // Same transition edge as the note, so a persisting collision never
+      // re-notifies; suppressed on the branch-cleanup re-confirm pass (ruling
+      // 136(c)) like the divergence notices.
+      if (!ctx.suppressDivergenceNotice) {
+        const { notifyTaskWatchers } = await import(
+          "~/server/tasks/task-actions.server"
+        );
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            kind: "policy",
+            title: `Branch name collision on ${fm.key}: PR #${unownedPr!.number} is not this task's`,
+            text: collisionNote,
+            from: POLICY_ENGINE_NOTIFY_FROM,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
     }
     if (acceptedClosedText) {
       await appendTimelineEvent(ref, {
@@ -994,9 +1116,56 @@ async function reconcileTaskUnlocked(
         evidence: null,
       });
     }
+    if (driftVoidText) {
+      const withdrawnNames = supersededRecs.map((r) => `“${r.label}”`);
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: POLICY_ENGINE_ACTOR,
+        title: "Revision moved after review",
+        text:
+          driftVoidText +
+          (withdrawnNames.length > 0
+            ? ` The now-moot ${withdrawnNames.join(", ")} recommendation${withdrawnNames.length === 1 ? " was" : "s were"} withdrawn.`
+            : ""),
+        toAgent: false,
+        evidence: null,
+      });
+    }
     rebuildPath(db, resolveTaskFilePath(ref), {
       dataRoot: ctx.dataRoot,
     });
+    if (authoredDriftVoidsVerdict) {
+      // The task returns to the stage where a verdict can be given (ruling
+      // 163's rework route, the authored-drift door), notifies the watchers
+      // and wakes the operator below.
+      const { returnChangedRevisionToReview, notifyTaskWatchers } = await import(
+        "~/server/tasks/task-actions.server"
+      );
+      await returnChangedRevisionToReview(
+        db,
+        { dataRoot: ctx.dataRoot },
+        input.projectSlug,
+        input.taskKey,
+        authoredDriftNow.headSha,
+        { userId: actor.userId ?? "", label: actor.label ?? "system" },
+        { via: "authored-drift" },
+      );
+      if (!ctx.suppressDivergenceNotice && driftVoidText) {
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            kind: "policy",
+            title: `PR #${newPr!.number} moved after review: ${fm.key} needs a fresh verdict`,
+            text: driftVoidText,
+            from: POLICY_ENGINE_NOTIFY_FROM,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
+    }
     if (adoptionInput) {
       await recordPrAdoption(db, ref, adoptionInput, actor);
       if (!prJustReopened) {
@@ -1061,12 +1230,18 @@ async function reconcileTaskUnlocked(
     // withdraws the now-moot recovery packet. Fire-and-forget on the same
     // transition edge as the notes — a persistent divergence never re-fires,
     // and a project with no operator deployed is a no-op inside.
+    // U36-7 (pass 36): a NEW branch collision is a coordination event too —
+    // the ruling-50 `resolve_remote_collision` packet is operator-authored, and
+    // nothing scheduled the turn that authors it (live it waited on an
+    // unrelated completion wake).
     if (
       mergedButNotDone ||
       closedButActive ||
       acceptedClosedExternally ||
       prJustReopened ||
-      prReplacedLive
+      prReplacedLive ||
+      authoredDriftVoidsVerdict ||
+      (unownedPrIsNew && !!collisionNote)
     ) {
       const wake =
         ctx.wakeOperator ??
@@ -1225,7 +1400,7 @@ export function resetReconcileCursorsForTests(): void {
 /** One branched task the pass may visit. `terminal` is sqlite's 0/1 answer to
  *  the archived-or-merged test the SELECT computes. */
 const reconcileQueueRows = z
-  .object({ task_key: z.string(), terminal: z.number() })
+  .object({ task_key: z.string(), stage: z.string(), terminal: z.number() })
   .array();
 
 /**
@@ -1251,10 +1426,11 @@ export async function reconcileProject(
     };
   }
 
-  const rows = reconcileQueueRows.parse(
+  const rawRows = reconcileQueueRows.parse(
     db
       .prepare(
         `SELECT task_key,
+              stage,
               (archived = 1
                OR COALESCE(json_extract(pr_json, '$.state'), '') = 'merged')
               AS terminal
@@ -1264,6 +1440,19 @@ export async function reconcileProject(
       )
       .all(projectSlug),
   );
+  // Ruling 177 (pass 36, F36-5): a task at the board's terminal stage is
+  // closed whether or not a PR merged — a force-accepted task with no PR, or
+  // one accepted as "merge pending", kept buying a compare of its deleted
+  // branch every five minutes forever under the archived-OR-merged spelling.
+  const queueProject = getProject(db, projectSlug);
+  const rows = rawRows.map((row) => ({
+    task_key: row.task_key,
+    terminal:
+      row.terminal === 1 ||
+      (queueProject !== null && isTerminalStage(row.stage, queueProject.stages))
+        ? 1
+        : 0,
+  }));
 
   const budget = ctx.taskBudget ?? 0;
   // R15-6 + B-GH5: cleanup deletes the remote ref but `branch:` stays in the
@@ -1991,18 +2180,17 @@ export async function resolveRemoteBranchCollision(
         { body: { state: "closed" } },
       );
       // Best-effort by design: a PR that is already closed (which the ref
-      // delete just did) answers 200. Only a SUCCESS is recorded.
+      // delete just did) answers 200. Only a SUCCESS is Viberr's close.
+      //
+      // U36-7 (pass 36): the ceremony writes ONE `github` event naming the
+      // PR's fate in EVERY arm. Live (HLC-10) the close came back non-200 —
+      // the ref delete had already taken the head — so the timeline said only
+      // "Deleted branch", and never that PR #7 was closed. A refused close is
+      // followed by a re-read, so the record says what GitHub shows, not what
+      // Viberr assumes.
+      let fate: string;
       if (close.ok) {
         closedUnownedPr = unowned;
-        await appendTimelineEvent(ref, {
-          occurredAt: new Date().toISOString(),
-          type: "github",
-          actor: { kind: "human", userId, nameHint: userName(db, userId) },
-          title: null,
-          text: `Closed unrelated PR #${unowned} that stood on branch \`${branch}\` (it was not ${input.taskKey}'s review PR).`,
-          toAgent: false,
-          evidence: null,
-        });
         recordAudit(db, {
           action: "github.pr.closed_unowned",
           actor,
@@ -2012,27 +2200,52 @@ export async function resolveRemoteBranchCollision(
           taskKey: input.taskKey,
           details: { repo: gh.repo, branch, prNumber: unowned },
         });
-      } else if (close.kind === "http" && close.status === 403) {
-        // C05-D (pass 32): a 403 here is the SAME fact `openTaskPr` and
-        // `mergeTaskPr` flag — the credential lacks pull_request:write — and
-        // it used to vanish into the best-effort silence. The half-remedy
-        // (ref gone, PR left to GitHub's auto-close) is honest; the missing
-        // scope is what the human has to fix, so it gets its chip.
-        await flagScopeViolation(
-          db,
-          {
-            projectSlug: input.projectSlug,
-            taskKey: input.taskKey,
-            scope: "pull_request:write",
-            detail: policyViolationText(
-              "pull_request:write",
-              `closing the unrelated pull request #${unowned} that stood on branch \`${branch}\``,
-            ),
-            actor,
-          },
-          { dataRoot: ctx.dataRoot },
+        fate = `closed PR #${unowned} and deleted branch \`${branch}\``;
+      } else {
+        if (close.kind === "http" && close.status === 403) {
+          // C05-D (pass 32): a 403 here is the SAME fact `openTaskPr` and
+          // `mergeTaskPr` flag — the credential lacks pull_request:write — and
+          // it used to vanish into the best-effort silence. The half-remedy
+          // (ref gone, PR left to GitHub's auto-close) is honest; the missing
+          // scope is what the human has to fix, so it gets its chip.
+          await flagScopeViolation(
+            db,
+            {
+              projectSlug: input.projectSlug,
+              taskKey: input.taskKey,
+              scope: "pull_request:write",
+              detail: policyViolationText(
+                "pull_request:write",
+                `closing the unrelated pull request #${unowned} that stood on branch \`${branch}\``,
+              ),
+              actor,
+            },
+            { dataRoot: ctx.dataRoot },
+          );
+        }
+        const reread = await gh.client.request(
+          "GET",
+          `/repos/${gh.repo}/pulls/${unowned}`,
+          z.object({ state: z.string() }),
         );
+        const shows = reread.ok
+          ? reread.data.state === "closed"
+            ? "is closed on GitHub with its head"
+            : "still shows open on GitHub — close it there"
+          : "could not be re-read on GitHub";
+        fate =
+          `deleted branch \`${branch}\`; PR #${unowned}, which stood on the name, ${shows} ` +
+          `(Viberr's own close request was refused: ${githubFailureMessage(close)})`;
       }
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "human", userId, nameHint: userName(db, userId) },
+        title: null,
+        text: `Branch collision cleared: ${fate}. PR #${unowned} was not ${input.taskKey}'s review PR; it only stood on the name.`,
+        toAgent: false,
+        evidence: null,
+      });
     }
     // The R15-15 record is stale the moment the ref is gone — clear it so the
     // GitHub card and the policy engine stop reporting a collision that no

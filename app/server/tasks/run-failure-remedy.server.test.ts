@@ -4,6 +4,7 @@ import { setupTestStore, type TestStore } from "../../../test-support/test-store
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import type { RunFailure } from "./agent-reply.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { describeRunFailure, formatResetLabel } from "./run-failure-remedy.server";
 
 /**
@@ -183,6 +184,45 @@ describe("describeRunFailure", () => {
       ["redirect", false],
     ]);
     expect(withOther.options[0]).toMatchObject({ backend: "codex" });
+  });
+
+  /**
+   * F36-8 (pass 36): the `retry_other_backend` option says BOTH things the
+   * human is choosing — the model the retry will run on (the profile's own id
+   * belongs to the failed backend, so the other backend's default runs) and
+   * that later runs on this task stay on the backend picked here. Live, the
+   * option read "re-run the same agent there and continue", the retry ran on
+   * `sonnet`, and nothing on the task named the model.
+   *
+   * Canary: drop `profileModel` from the option builder and the model sentence
+   * falls back to the generic "on its default model".
+   */
+  it("F36-8: the retry_other_backend option names the model the retry runs on and that the switch pins later runs", async () => {
+    const store = setupTestStore(ctx);
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    const d = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      profileId: "developer",
+      profileModel: "sonnet",
+      failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+    });
+    const retry = d.options.find((o) => o.kind === "retry_other_backend")!;
+    expect(retry.detail).toContain(`on \`${defaultModelFor("codex")}\``);
+    expect(retry.detail).toContain("`sonnet` is a Claude model");
+    expect(retry.detail).toContain("Later runs on this task stay on Codex");
+    // A profile whose model the OTHER backend already knows keeps it: no
+    // substitution sentence, the model named as its own.
+    const native = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      profileId: "developer",
+      profileModel: defaultModelFor("codex"),
+      failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+    });
+    const keep = native.options.find((o) => o.kind === "retry_other_backend")!;
+    expect(keep.detail).toContain(`on its own \`${defaultModelFor("codex")}\``);
+    expect(keep.detail).not.toContain("is a Claude model");
   });
 
   /**

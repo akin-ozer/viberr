@@ -209,7 +209,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "instance_health",
-      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), and the run concurrency queue. Open to anyone: agent backends are connected per person, so nothing here names another person or any deployment configuration.",
+      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), the run concurrency queue, and the host toolchain (node, npm, git, python3, go versions or null when absent; and the pinned Codex CLI and Claude Agent SDK). Open to anyone: agent backends are connected per person, so nothing here names another person or any deployment configuration.",
       {},
       run(() => {
         // The READING is ungated: it is what `/resources/health` already serves

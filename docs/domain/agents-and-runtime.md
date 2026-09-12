@@ -34,7 +34,13 @@
 > servers). Updated 2026-09-11 for the ruling 101(e) amendment (Option D PR 5, branch
 > `option-d/pr5-pretooluse-deny`): §2.4 and §4.3 (the PreToolUse hook that refuses wrapped
 > shapes of a denied command, with a reason the model reads). Updated 2026-09-11 for Option D
-> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected. The operator's own behaviour is in
+> PR 6 (branch `option-d/pr6-hygiene`): §2.5's sandbox sentence and gotcha 6 corrected.
+> Updated 2026-09-11 for pass 36: ruling 183 (cluster 4: §6's skills bullet, the store body
+> every writer judges before the mount normalises it) and cluster 5 (ruling 180, F36-8: §2.3's
+> substitution column, §2.4 (`settingSources: []` on every run, the run's skill plugin as the
+> one local plugin, no `managedSettings`), §3.2, §4.1 (a backend switch names the model it
+> ran on and that the pin sticks), §6 (skills mount as a plugin BESIDE the checkout) and
+> gotchas 4 and 7). The operator's own behaviour is in
 > [operator.md](operator.md); the controller's in
 > [controller-and-goals.md](controller-and-goals.md).
 
@@ -99,6 +105,29 @@ alike. There is no fallback engine and no other account to fall back to.
   (`user-homes.server.ts`); the user id is path-checked against
   `/^[A-Za-z0-9_-]{1,64}$/` first. The deployment-wide `runtimes/claude-home` /
   `runtimes/codex-home` and the host `~/.codex` mount are gone.
+- **Every Codex run gets a private `CODEX_HOME` (ruling 181).** The Codex CLI extracts
+  its exec helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into
+  ONE directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new
+  process of the same home replaces it; with one `codex-home` per person, concurrent
+  sandboxed runs of one person (a reviewer, the operator, a developer) deleted each
+  other's helper mid-run (F36-3). So the Codex adapter forks
+  `<codex-home>/runs/<runId>/` at spawn (`prepareCodexRunHome`, `user-homes.server.ts`)
+  and hands it to the CLI as `CODEX_HOME`: `auth.json` and `config.toml` are **copied**
+  in when present (a copy, so two runs never write one shared file through a link);
+  `sessions/`, `skills/` and `memories/` are **symlinks** to the shared home's
+  directories, created first, so a rollout the CLI writes lands where
+  `probeSessionContinuity`, the exporter and the retention sweep look; `CODEX_SQLITE_HOME`
+  is set to the shared home so the CLI's thread/state database stays the person's; `tmp/`
+  is whatever the CLI creates inside the run home, private by construction. When the run
+  settles — finished, failed, interrupted or crashed, the adapter's one `settle` — the
+  run's `auth.json` is copied back to the shared home only when its bytes changed, under a
+  per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s is
+  broken), only while the shared file still exists (a disconnect mid-run is not undone),
+  and the run directory is deleted; a run a restart orphaned is finished the same way by
+  boot recovery before the operator is re-invoked. Resume is unchanged: the SDK reads the rollout through
+  the symlinked `sessions/`. `runCredentialFor` still names the SHARED home on
+  `spec.env.CODEX_HOME`; the fork is the adapter's, so every path that builds a Codex
+  spec (specialist, operator, controller, resume, scheduled, recovery) gets it.
 - `runCredentialFor(db, userId, backend)` builds what the run's child env carries: the
   home always; `ANTHROPIC_API_KEY` (claude), `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`
   (codex) only for a pasted credential. In both codex secret cases `OPENAI_API_KEY` is
@@ -108,7 +137,9 @@ alike. There is no fallback engine and no other account to fall back to.
   set (`DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`), **both vendor
   homes** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` — neither is credential-shaped, but a home
   is where a vendor binary keeps its credential, so an ambient one would let a run billed
-  to one person authenticate as whoever a leftover sign-in file names) **and every name
+  to one person authenticate as whoever a leftover sign-in file names — and, since ruling
+  181, `CODEX_SQLITE_HOME`, the CLI's state-db location, which the Codex adapter sets per
+  run to the principal's shared home) **and every name
   the app's own env schema declares** (`ENV_KEYS`: `NODE_ENV`, `PORT`, `VIBERR_DATA_ROOT`,
   `BETTER_AUTH_URL`, the OAuth client ids, every `VIBERR_*` knob; ruling 142 — an agent
   works in the project's repository, not in Viberr's process, and the container's
@@ -133,7 +164,7 @@ alike. There is no fallback engine and no other account to fall back to.
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
 | claude | `sonnet`, `opus`, `haiku` (aliases), plus a family alias carrying a bracketed context-window variant (`opus[1m]`, what the live catalog offers as "Opus (1M context)"), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache keyed by that person's home, 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; the bracketed variant is split off FIRST, the base resolved, and the variant re-appended verbatim (`claude-opus[1m]` → `opus[1m]`, `claude-sonnet-4-5[1m]` unchanged), so it reaches the SDK and is known on a cold process (pass 34, F34-7); anything else falls back to the SDK default. Display: the live catalog row's name when cached, else "Claude Opus [1m]" |
-| codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, read off the pinned CLI's bundled catalog; Astra is the CLI's own default since 0.153.4 but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`), per model as the bundled catalog lists them (GPT-5.5 stops at `xhigh`); `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted silently** at start with only a `run·model_substituted` log line |
+| codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, read off the pinned CLI's bundled catalog; Astra is the CLI's own default since 0.153.4 but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`), per model as the bundled catalog lists them (GPT-5.5 stops at `xhigh`); `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
 
 `/resources/model-catalog?backend=` serves `{ models, efforts, defaultModel,
 defaultEffort }` to the profile editor (unknown backend → claude; `requireUser` only).
@@ -210,10 +241,14 @@ connecting a different account there (ruling 165).
   `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `maxBudgetUsd` when the instance
   has a spending cap (ruling 175: Org settings → Max spend per Claude run, stamped on every
   run by `startRun` as `RunSpec.maxSpendUsd`; none by default), `strictMcpConfig: true`,
-  `plugins: []`, `settingSources: ["project"]` only when native skills are mounted
-  (else `[]`), `disallowedTools` (binds even under bypass), `allowedTools` for the
-  toolkit and mounted MCP names. `systemPrompt` **replaces** the preset for operator and
-  controller runs and is `{ preset: "claude_code", append }` for specialists.
+  `settingSources: []` on EVERY run (ruling 180: no host tier and no project source over
+  the checkout, so the repository under review's `.claude` and CLAUDE.md never reach the
+  model), `plugins: [{ type: "local", path, skipMcpDiscovery: true }]` naming the run's
+  own skill plugin (`RunSpec.skillPlugin`, §6) when granted skills mounted — else `[]` —
+  with `skills: ["viberr:<name>", …]` qualified by that plugin's name, `disallowedTools`
+  (binds even under bypass), `allowedTools` for the toolkit and mounted MCP names.
+  `systemPrompt` **replaces** the preset for operator and controller runs and is
+  `{ preset: "claude_code", append }` for specialists.
 - Denylists: `BASE_DENIED_BUILTINS` (Skill, Task*, Workflow, Cron*, ScheduleWakeup,
   RemoteTrigger, Monitor, PushNotification, SendMessage, DesignSync, Enter/ExitWorktree;
   `Skill` is re-allowed when native skills are mounted; SDK 0.3.233 took `TaskCreate`/
@@ -241,7 +276,7 @@ connecting a different account there (ruling 165).
   to 2 and 7-10 s to 4 s, $0.03-0.04 to $0.02 warm, for a turn-1 prompt of 12.9k tokens
   instead of 5.3k (cached after the first run; a cold first run pays the cache write
   once); a reviewer went from 4 turns to 3 at the same cost. The controller's
-  `viberr_controller` (41 tools) and `viberr_ops` stay deferred: loading them saved a turn
+  `viberr_controller` (41 tools when measured; 42 since ruling 178) and `viberr_ops` stay deferred: loading them saved a turn
   but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost ($0.05 to
   $0.21). Org MCP servers are never loaded up front. Pinned per server by the
   `toolLoading` tests (`test-support/mcp-tool-meta.ts`).
@@ -271,8 +306,8 @@ connecting a different account there (ruling 165).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
-- `MANAGED_SETTINGS.claudeMdExcludes` is passed but the SDK drops it (documented inert);
-  the effective CLAUDE.md exclusion is the `settings.json` written by skill-mount.
+- No `managedSettings` and no CLAUDE.md excludes file (both retired with ruling 180):
+  nothing under cwd is a settings source, so there is no ingress to close.
 - Success = a `result` envelope with `!is_error`. Failures tag `run·error·<kind>` with
   `kind ∈ quota | auth | overloaded | session_missing | unknown`; idle → `run·error·idle_timeout`;
   `error_max_turns` → `run·error·max_turns`; `error_max_budget_usd` → `run·error·max_budget`
@@ -321,6 +356,10 @@ connecting a different account there (ruling 165).
 
 ### 2.5 Codex adapter
 
+- The CLI's `CODEX_HOME` is the run's private fork of the principal's home,
+  `<codex-home>/runs/<runId>/`, with `CODEX_SQLITE_HOME` pointed at the shared home
+  (ruling 181, §2.2); the adapter builds it right after the spawn env is merged and
+  removes it in `settle`, the one exit every outcome takes.
 - Per-run `config.toml` merged per leaf into `$CODEX_HOME`: `allow_login_shell: false`,
   `project_doc_max_bytes: 0`, bundled skills and skill instructions off, apps/plugins/hooks
   off, memories off, `developer_instructions = systemPrompt`, `mcp_servers`.
@@ -330,20 +369,22 @@ connecting a different account there (ruling 165).
   it. Each stdio MCP server is declared with `env = { VIBERR_RUN_ID = <runId> }` too: the
   CLI starts a server with its own short default environment plus the declared `env`, and
   the marker is an id, not a secret, so argv is a fine place for it.
-- **Sandbox mode** (`resolveCodexSandboxMode`), in order: operator → `read-only`;
-  repo-write withheld → `workspace-write` if an attachments dir exists else `read-only`;
-  autonomous deliverer with egress → `danger-full-access`; otherwise `workspace-write`.
-  The second arm is ruling 101(c)'s carve-out and it is **not** a gap in the docs: the
-  pinned Codex 0.146 cannot express "read-only except `attachments/`" (`ReadOnly` admits
-  no writable root; `--add-dir` widens `workspace-write` only), so ruling 109 kept it and
-  made it visible instead — see §4.3. Re-checked on the 0.153.4 pin (2026-09-06):
-  `--add-dir` still reads "writable alongside the primary workspace" and the sandbox
-  modes are unchanged, so the carve-out stands. So `read-only` is a live seam for every
-  write-withheld Codex run without an attachments dir (ruling 101), not a mode R22
-  retired. Watch item (ruling 109): the CLI's `permissions.rs` per-path profile would
-  express read-only plus a writable attachments dir; revisit when the SDK surfaces it.
-  `approvalPolicy: "never"`, `skipGitRepoCheck: true`; operator threads have network
-  off; withheld egress sets `webSearchMode: "disabled"`.
+- **Sandbox mode: `danger-full-access`, always (ruling 185).** Viberr does not ask the CLI
+  to confine a run. `resolveCodexSandboxMode`, `describeCodexSandbox`, the boot sandbox
+  probe (ruling 182) and its `run·unavailable` refusal, and ruling 184's child-process
+  question are all gone. The two upstream properties that decided it: bubblewrap needs an
+  unprivileged user namespace Docker's default seccomp profile denies, so every confined
+  run died at its first command (F36-1) unless the whole container ran
+  `seccomp=unconfined`; and with the network off the CLI installs a seccomp filter that
+  refuses every socket syscall (`AF_UNIX` included), so libuv's synchronous spawn reports
+  `EPERM` after the child has run and no `npm` gate can complete (F36-11). What confines an
+  agent is Viberr: the contract, the isolated per-engagement checkout, no credential in the
+  run, server-owned delivery, revision-bound verdicts. The honest cost: a withheld
+  `execute-code-or-write-repo` is ADVISORY on Codex (it is back in
+  `CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`, and `codexRepoWriteAdvisory` tags it wherever the
+  enforcement is rendered), and the operator's OS network is no longer forced off — it holds
+  no shell tool anyway. `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and withheld
+  egress still sets `webSearchMode: "disabled"` (the CLI's own tool, not the sandbox).
 - MCP servers are passed **without credentials** (argv exposure), and in-process SDK
   servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex.
 - Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`
@@ -445,7 +486,8 @@ connecting a different account there (ruling 165).
 
 `reserveRun` writes a `running` row with a phase before the clone starts, or declines
 when the instance cap is exhausted; `assertRunReservationLive` re-checks after the
-clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend models,
+clone. `startRun` audits `runtime.run.started`, substitutes foreign-backend models
+(`substituteRunModel`; the run log opens with the swap, the row stores what ran),
 fails unavailable backends, and otherwise `launch`es a reserved row or `admitRun`s into
 a `pending` queue drained on every completion. The cap is the instance setting
 `maxConcurrentRuns` (0 = unlimited, ceiling 64, Org settings → set-concurrency).
@@ -642,7 +684,13 @@ once the provider's total landed.
   deliverer is refused; `delivers: false` on the current deliverer is refused.
 - Backend = `backendOverride ?? engagement.pinnedBackend ?? resolved profile backend ??
   snapshot`. `pinnedBackend` is written by a `retry_other_backend` packet resolution so
-  the switch sticks.
+  the switch sticks. F36-8 (pass 36): a run on a backend other than the profile's hands
+  the profile's ORIGINAL model through to `startRun` (no pre-swap), so the F21-13
+  substitution notice opens the run log; the "Started a … run (switched from …)" event
+  names the model it ran on and the profile's own ("on `sonnet` — the profile's
+  `gpt-5.6-luna` is a Codex model"), and a run that set the pin says later runs on this
+  task stay on that backend. The `retry_other_backend` option says both before the human
+  chooses.
 - Workspace: the deliverer clones into `tasks/<KEY>/workspace/<repo>` through the
   project mirror; each supporting run gets `workspace/support/<profileId>/<repo>`, a
   fresh `git clone --local` of the delivering checkout. On clone failure the run
@@ -919,14 +967,26 @@ above is the create-seed value and never the runtime's answer for a missing gran
 
 ## 6. Context mounting
 
-- **Skills, Claude**: `mountGrantedSkills` copies each granted `skills/<slug>` folder
-  into the workspace `.claude/skills/` (no symlinks, no nested `.git`, SKILL.md
-  frontmatter rewritten to `name` + `description` ≤ 400 chars, a `.viberr-mount` marker
-  written last), after `stripUngovernedRepoCatalog` has hidden the repo's own tracked
-  `.claude` with `git update-index --skip-worktree`. `settings.json` carries the
-  CLAUDE.md excludes; `.claude/` is appended to `.git/info/exclude` so it can never ride
-  into the delivered PR. The run then gets `settingSources: ["project"]` and a native
-  `skills:` allow-list (ruling 51).
+- **Skills, Claude** (ruling 180, pass 36): `mountGrantedSkills` builds the run's own
+  LOCAL PLUGIN at `<checkout>/../.viberr-plugins/<runId>/` — `.claude-plugin/plugin.json`
+  (`name: "viberr"`) plus `skills/<slug>/` copied from the store (no symlinks, no nested
+  `.git`, SKILL.md frontmatter rewritten to `name` + `description` ≤ 400 chars; ruling 183
+  keeps every store writer from landing an empty, JSON-escaped or unparseable body, so
+  what the mount normalises is a skill — the frontmatter schema it reads,
+  `skillFrontmatterSchema`, lives with the check in `skill-body.server.ts`) — after
+  `stripUngovernedRepoCatalog` has hidden the repo's own tracked `.claude` with
+  `git update-index --skip-worktree` and removed it whole. Nothing Viberr writes for a run
+  lives inside the tree the project's tools scan (F36-9: the in-checkout mount failed the
+  project's own `prettier --check .`), so no exclude entry exists any more. The run gets
+  `plugins: [{ type: "local", path }]`, `skills: ["viberr:<slug>", …]` and
+  `settingSources: []`; the plugin is one per RUN (the directory is named by the run id
+  when the row was reserved before the mount, else by a fresh id; the run carries the
+  path) and run-service removes it when the run settles, the dispatch when a run fails
+  before it starts. A plugin that is gone by the start enables no skill and the persona
+  is corrected (`droppedSkillsNotice`). Residual: a run that never settles in-process (a
+  crash) leaves its directory, inert, until the workspace is reclaimed. Canaried inside
+  the image 2026-09-11 (SDK 0.3.261 / CLI 2.1.261): the init lists `viberr:<slug>` and the
+  model invokes it.
 - **Skills, Codex and the operator**: bodies are injected into the prompt under a shared
   24 000-char budget (`skill-body.server.ts`); symlinked folders or files are refused.
 - **Knowledge bases**: text files under `kb/<dir>` (depth ≤ 32, no symlinks, no
@@ -1056,15 +1116,18 @@ full` and the project-effective grants.
    `direct` under full autonomy, except acceptance.
 3. Codex drops MCP credentials and browser images; a bearer-token MCP silently runs
    unauthenticated there.
-4. Foreign-backend models are substituted silently at start.
+4. Foreign-backend models are substituted at start and disclosed: the run log's first
+   line, the switched-backend timeline event and the `retry_other_backend` option all
+   name the model (F36-8). The run row stores what ran.
 5. `RUN_STATE.error` is labelled "continuity error" for every error run.
 6. Codex repo-write is enforced by the sandbox mode since ruling 101. The last code
    comment that still said "R22: no run is read-only" (`RunSpec.attachmentsWritableDir`)
    was corrected on 2026-09-11 (Option D PR 6). The one place "advisory on Codex" is
    still the honest word is the evidence carve-out of ruling 109 (§4.3), which is printed
    on every surface that shows the grant.
-7. The `MANAGED_SETTINGS` SDK option is inert; `settings.json` from skill-mount is the
-   real exclusion mechanism.
+7. A run's skills live in a plugin directory BESIDE the checkout (ruling 180), removed
+   when the run settles; nothing under the checkout is ever a settings source, so there
+   is no CLAUDE.md excludes file and no `managedSettings` any more.
 8. Agent backends are connected **per person** on Profile → Agent accounts (ruling 127):
    there is no deployment-wide key, no `CODEX_HOME`/`CLAUDE_CONFIG_DIR` to set and no
    host `~/.codex` mount. A wiped runtime volume signs each person out of their own

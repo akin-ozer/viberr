@@ -6318,3 +6318,12 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    "Max at / once" and the hint into "0 = / unlimited" beside a full-height field. */
 .conc-well .guard-ctl { flex-wrap: wrap; }
 .conc-well .guard-ctl label, .conc-well .guard-ctl .faint { white-space: nowrap; }
+
+/* ---------- appended: ruling 178, the required-reviewer table on Settings ---------- */
+/* A rule is a `.guard-row` (the shape Policy gives every rule) whose two
+   pickers are `.guard-ctl` label + select pairs; the row's Remove sits at the
+   far end like the guardrail rows' own controls. The action pair (Add rule,
+   Save) takes the foot of the list, right-aligned as every panel foot is. */
+.rr-row > .btn { margin-left: auto; }
+.rr-row .guard-ctl select { min-width: 9rem; }
+.rr-actions { display: flex; justify-content: flex-end; gap: .5rem; padding-top: .75rem; }

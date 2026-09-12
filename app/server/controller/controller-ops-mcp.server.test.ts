@@ -225,6 +225,19 @@ const HEALTH_REPLY = z.object({
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
   // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
   browserDetail: z.string().optional(),
+  // Ruling 182: what this host can run — tool versions (null when absent) and
+  // whether a sandboxed Codex run can exec at all, with the CLI's own words
+  // when it cannot. Inherited from `healthSnapshot`, never a second probe.
+  toolchain: z.strictObject({
+    node: z.string().nullable(),
+    npm: z.string().nullable(),
+    git: z.string().nullable(),
+    python3: z.string().nullable(),
+    go: z.string().nullable(),
+    codexCli: z.string().nullable(),
+    claudeAgentSdk: z.string().nullable(),
+
+  }),
   // F32-9 (pass 32): what each backend last told us — the reading the
   // Insights page shows, so the controller cannot answer "no quota exhaustion
   // flagged" from a poorer source than the admin's own page.
@@ -346,6 +359,10 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
     // F32-9: the quota/credential store rides along, one row per backend.
     expect(body.quota.map((q) => q.backend)).toEqual(["claude", "codex"]);
+    // Ruling 182: the toolchain and the Codex sandbox verdict, the same
+    // reading the health route serves — the controller answers "can a
+    // sandboxed Codex run exec here" from the probe, not from a guess.
+    expect(body.toolchain).toEqual(snapshot.toolchain);
   });
 
   it("ruling 130(d): instance_health carries the refusal's principal, which the unauthenticated body strips", async () => {
@@ -727,7 +744,16 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     );
     expect(body.text).toBe("the disk is fine");
     expect(body.truncated).toBe(false);
-    expect(body.resource).toEqual(expect.objectContaining({ kind: "kb", id: kbId }));
+    // `kbId` is the seeded folder's row-less `disk:controller-handbook` shape;
+    // the doc write above adopted the folder into a row (touchResource). U36-4
+    // (pass 36): a disk id whose folder has a row IS that row, so the reply
+    // names the row's real id — the one `list_knowledge_bases` reports and the
+    // next save takes — not the stale synthetic shape it was asked with.
+    expect(kbId).toBe("disk:controller-handbook");
+    expect(body.resource).toEqual(
+      expect.objectContaining({ kind: "kb", name: "controller-handbook" }),
+    );
+    expect(body.resource.id).toMatch(/^kb_/);
 
     // A document longer than one read comes back CLIPPED and says so. Without
     // this arm `truncated` could be the constant `false` and read identically —

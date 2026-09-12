@@ -52,6 +52,13 @@ import {
 } from "~/shared/workflow/transitions";
 import { countLiveAdmins, removedAccountLabel } from "./membership.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import {
+  resolveRequiredReviewers,
+  type RequiredReviewerView,
+} from "~/server/tasks/required-reviewers.server";
+import type { RequiredReviewerRule } from "~/schemas/project-file.schema";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 
 /**
  * F20-15: GitHub's `/repos/{owner}/{repo}` returns the `permissions` block it
@@ -303,6 +310,153 @@ export async function setBranchCleanup(
       ? "Merged task branches will be deleted on GitHub"
       : "Merged task branches will be kept on GitHub",
     enabled: input.enabled,
+  };
+}
+
+// ------------------------------------------------------- required reviewers
+
+/** Ruling 178: the audit action ONE writer records; the activity feed's
+ *  catalog and the Policy page's last-change chip both name it. */
+export const REQUIRED_REVIEWERS_AUDIT_ACTION = "project.required_reviewers.updated";
+
+/** One submitted rule, before validation. */
+export interface RequiredReviewerRuleInput {
+  stageId: string;
+  profileId: string;
+}
+
+const requiredReviewerRulesFieldSchema = z.array(
+  z.object({ stageId: z.string(), profileId: z.string() }),
+);
+
+/** The Settings form posts its table as one JSON field; decode it or refuse
+ *  with a sentence, never with a stack. */
+export function parseRequiredReviewerRulesField(raw: string): RequiredReviewerRuleInput[] {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw || "[]");
+  } catch {
+    throw AppError.validation("The required-reviewer list could not be read. Reload the page and try again.");
+  }
+  const parsed = requiredReviewerRulesFieldSchema.safeParse(decoded);
+  if (!parsed.success) {
+    throw AppError.validation("The required-reviewer list could not be read. Reload the page and try again.");
+  }
+  return parsed.data;
+}
+
+/**
+ * Ruling 178 (pass 36, G36-3): check a submitted rule list against the
+ * project — every stage id must be a non-terminal stage, every profile id a
+ * deployed specialist that can report a validation verdict — and refuse by
+ * name with nothing written otherwise (ruling 139's shape). Returns the list
+ * de-duplicated, in submitted order. Shared by the Settings form and the
+ * controller's `set_required_reviewers`, so the two cannot drift.
+ */
+export function validateRequiredReviewerRules(
+  projectSlug: string,
+  rules: readonly RequiredReviewerRuleInput[],
+  ctx: SettingsMutationContext = {},
+): RequiredReviewerRule[] {
+  const file = readProjectFile(projectRef(ctx, projectSlug));
+  if (!file) throw AppError.notFound(`Project ${projectSlug} not found.`);
+  const stages = file.parsed.frontmatter.stages;
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
+  const capable = specialists.filter((s) => s.capabilities.verdict);
+  const capableList =
+    capable.length === 0
+      ? "No deployed agent on this project can report a verdict; grant one report-validation-verdict first."
+      : `Verdict-capable agents here: ${capable.map((s) => `${s.name} (${s.id})`).join(", ")}.`;
+  const seen = new Set<string>();
+  const out: RequiredReviewerRule[] = [];
+  for (const rule of rules) {
+    const stageId = rule.stageId.trim();
+    const profileId = rule.profileId.trim();
+    const stage = stages.find((s) => s.id === stageId);
+    if (!stage) {
+      throw AppError.validation(
+        `"${stageId}" is not a stage of ${projectSlug}. Nothing was written. The project's stage ids are: ${stages.map((s) => s.id).join(", ")}.`,
+      );
+    }
+    if (isTerminalStage(stageId, stages)) {
+      throw AppError.validation(
+        `${stage.name} is the terminal stage; a review runs before it. Nothing was written.`,
+      );
+    }
+    const specialist = specialists.find((s) => s.id === profileId);
+    if (!specialist) {
+      throw AppError.validation(
+        `No agent "${profileId}" is deployed on ${projectSlug}. Nothing was written. ${capableList}`,
+      );
+    }
+    if (!specialist.capabilities.verdict) {
+      throw AppError.validation(
+        `${specialist.name} (${specialist.id}) cannot report a validation verdict, so it cannot be a required reviewer. Nothing was written. ${capableList}`,
+      );
+    }
+    const key = `${stageId} ${profileId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ stageId, profileId });
+  }
+  return out;
+}
+
+/**
+ * Ruling 178: replace the project's required-reviewer list — the WHOLE list,
+ * `[]` clearing it — through the project writer, reproject (the project
+ * cascade refreshes every task's projected acceptance block, so the review
+ * queue follows at once) and audit with the resolved names. `edit-policy`
+ * tier: a required reviewer decides what acceptance waits on, which is
+ * project policy, the same tier every boundary and guardrail edit carries.
+ * An unchanged list writes and audits nothing (`changed: false`).
+ */
+export async function setRequiredReviewers(
+  db: DatabaseSync,
+  input: { projectSlug: string; rules: readonly RequiredReviewerRuleInput[] },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; rules: RequiredReviewerView[]; changed: boolean }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
+  const rules = validateRequiredReviewerRules(input.projectSlug, input.rules, ctx);
+  const key = (list: readonly RequiredReviewerRule[]) =>
+    JSON.stringify(list.map((r) => [r.stageId, r.profileId]));
+  let changed = false;
+  const after = await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    changed = key(parsed.frontmatter.requiredReviewers) !== key(rules);
+    if (!changed) return;
+    parsed.frontmatter.requiredReviewers = rules;
+  });
+  const views = resolveRequiredReviewers(after.frontmatter, ctx.dataRoot);
+  const named = views.map((v) => `${v.agentName} at ${v.stageName}`).join(", ");
+  if (!changed) {
+    return {
+      toast: views.length === 0 ? "No required reviewers to clear" : `Required reviewers unchanged: ${named}`,
+      rules: views,
+      changed: false,
+    };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: REQUIRED_REVIEWERS_AUDIT_ACTION,
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: {
+      count: views.length,
+      rules: views.map((v) => ({
+        stageId: v.stageId,
+        stageName: v.stageName,
+        profileId: v.profileId,
+        agentName: v.agentName,
+      })),
+    },
+  });
+  return {
+    toast: views.length === 0 ? "Required reviewers cleared" : `Required reviewers saved: ${named}`,
+    rules: views,
+    changed: true,
   };
 }
 

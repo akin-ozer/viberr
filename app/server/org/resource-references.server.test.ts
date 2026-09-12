@@ -52,6 +52,7 @@ function deployProfile(
     ],
     credentialPolicy: null,
     guardrails: [],
+    requiredReviewers: [],
   });
 }
 

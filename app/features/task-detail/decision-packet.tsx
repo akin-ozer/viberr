@@ -410,7 +410,7 @@ function PacketArchiveConfirm({
       <div className="obs">
         <span className="k">Withdrawn</span>
         <span>
-          {withdrawn.join(" and ")}. Restoring the task reopens the question.
+          {withdrawn.join(" and ")}. Restoring brings the task back to a human; run the operator to reopen the decision.
         </span>
       </div>
     </PacketDestructiveConfirm>
@@ -924,9 +924,13 @@ export function DecisionPacket({
    * deletion is refused while a PR is open (`deleteTaskRemoteBranch`) — so its
    * presence also means no live PR stands in the button's way.
    */
-  const branchDiscardOffered = p.options.some(
-    (o) => o.kind === "archive_task" && o.deleteBranch === true,
-  );
+  // U36-2 (pass 36): the option shape alone was the proxy — an `input`
+  // packet on a branchless task rendered the closed-PR recovery paragraph
+  // about a Deliver refusal that could not exist. The task's branch is the
+  // fact the paragraph describes, and the card already receives it.
+  const branchDiscardOffered =
+    archiveDisclosure?.branch != null &&
+    p.options.some((o) => o.kind === "archive_task" && o.deleteBranch === true);
 
   // E4: the reason the Confirm button can't be pressed. It used to live ONLY in
   // `title` on a `disabled` button — the one place a browser guarantees nobody

@@ -52,6 +52,7 @@ import {
   reconcileProject,
   reconcileTask,
   resetReconcileCursorsForTests,
+  resolveRemoteBranchCollision,
 } from "./github-reconciler.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -586,6 +587,106 @@ describe("reconcileTask", () => {
     // prefix-matched `[VIB-301]` entries in the compare) and no diff stats.
     expect(fm.github?.commits ?? []).toEqual([]);
     expect(fm.github?.changed ?? null).toBeNull();
+  });
+
+  it("U36-7: a NEW branch collision reaches the task watchers' inbox once — a persisting one never re-notifies", async () => {
+    // Pass-36 live (HLC-10): the reconciler wrote `github.unownedPr: 7` and a
+    // timeline note, and nothing else — no inbox row, so the owner learned of
+    // the collision only by visiting the task page. The adoption and the
+    // divergence trio already notify from this same pass; the collision did
+    // not. Canary: drop the collision `notifyTaskWatchers` call.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "impl",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const policyNotes = () =>
+      listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
+
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    const first = policyNotes();
+    expect(first.map((n) => n.title)).toContain(
+      "Branch name collision on VIB-301: PR #318 is not this task's",
+    );
+    const notice = first.find((n) => (n.title ?? "").startsWith("Branch name collision"))!;
+    // The inbox text IS the collision note: whose PR it is not, and the remedy.
+    expect(notice.text).toContain("is NOT VIB-301's review PR");
+    expect(notice.text).toContain("`resolve_remote_collision`");
+
+    // The same collision on the next pass is not news.
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    expect(policyNotes().filter((n) => (n.title ?? "").startsWith("Branch name collision"))).toHaveLength(1);
+  });
+
+  it("U36-7: clearing a collision writes ONE event that names the closed PR and the deleted branch — even when GitHub refused the explicit close", async () => {
+    // Live (HLC-10, 15:38Z): the resolution closed PR #7 and deleted the
+    // branch, but the timeline said only "Deleted branch `hlc-10-0c88`" —
+    // the close is recorded only when GitHub answers the PATCH with 200, and
+    // it did not (the ref delete had already taken the head with it). The
+    // ceremony's own event now names the PR's fate in every arm, confirming
+    // it against GitHub when the explicit close was refused.
+    // Canary: gate the event on `close.ok` again and the 422 arm below writes
+    // nothing about PR #318.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        github: { commits: [], changed: null, unownedPr: 318 },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch({
+      [`DELETE ${REPO_PATH}/git/refs/heads/vib-301-workspace`]: { status: 204, body: "" },
+      [`PATCH ${REPO_PATH}/pulls/318`]: {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
+      // The re-read that stands in for the refused close: GitHub closed the
+      // PR with its head.
+      [`GET ${REPO_PATH}/pulls/318`]: {
+        body: { number: 318, state: "closed", merged: false, merged_at: null, head: { sha: "headsha318" } },
+      },
+    });
+
+    const result = await resolveRemoteBranchCollision(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "cleared", branch: "vib-301-workspace", closedUnownedPr: null });
+
+    const events = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    const cleared = events.find((e) => e.text.startsWith("Branch collision cleared:"));
+    expect(cleared).toBeDefined();
+    expect(cleared!.type).toBe("github");
+    expect(cleared!.text).toContain("deleted branch `vib-301-workspace`");
+    expect(cleared!.text).toContain("PR #318");
+    expect(cleared!.text).toContain("is closed on GitHub");
+    expect(cleared!.text).toContain("not VIB-301's review PR");
+    // Honest about the refusal: Viberr's own close did not go through.
+    expect(cleared!.text).toContain("Validation Failed");
+    // No close is CLAIMED as Viberr's: the audit row for a Viberr close stays absent.
+    expect(listAuditEvents(store.db, { action: "github.pr.closed_unowned" })).toHaveLength(0);
   });
 
   it("V5: a PR-LESS stale branch's foreign commits are never recorded as this task's", async () => {
@@ -1420,9 +1521,7 @@ describe("reconcileTask", () => {
     expect(events.some((e) => /closed on GitHub without merging/.test(e.text) && /withdrawn/.test(e.text))).toBe(true);
   });
 
-  it("R8-6: a MERGED-out-of-band divergence withdraws transition but KEEPS accept_completion (accepting reflects the merge)", async () => {
-    const { store, actor } = setup();
-    seedWithRecs(store);
+  const mergedOutOfBand = async (store: TestStore, actor: Parameters<typeof reconcileTask>[2]) => {
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
       body: { number: 318, title: "Attach execution workspace", state: "closed",
@@ -1431,9 +1530,52 @@ describe("reconcileTask", () => {
     };
     await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    // transition withdrawn; accept_completion SURVIVES (the divergence tells the human to accept).
-    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign"]);
+    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
+    const events = store.db
+      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
+      .all() as { text: string }[];
+    return {
+      fm: readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
+        .parsed.frontmatter,
+      divergence: events.find((e) => /was merged on GitHub/.test(e.text))?.text ?? "",
+    };
+  };
+
+  it("R8-6 / U36-12: a MERGED-out-of-band divergence keeps BOTH the accept and the transition that leads to it", async () => {
+    // Live (HLC-14, 18:13Z): the note said "Accept the completion (or move it
+    // to Done)" while the same pass withdrew the "Move the task to Merge
+    // Approval" card — the only route to an Accept the page does not offer at
+    // Agent Review. A merged PR does not falsify advancing; it is the reason to.
+    // Canary: put `divergenceText !== null` back in the transition filter and
+    // `r-trans` disappears again.
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const { fm, divergence } = await mergedOutOfBand(store, actor);
+    expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign", "r-trans"]);
+    // This task IS at the boundary (`review` → `done`), so the note says accept.
+    expect(divergence).toContain("Accept the completion so the task reflects the merge.");
+    expect(divergence).not.toContain("Move it to");
+  });
+
+  it("U36-12: at a stage that cannot accept, the note names the boundary instead of an Accept the page does not offer", async () => {
+    // Canary: drop the `canAcceptFromStage` branch and the note tells a human
+    // at In Progress to "Accept the completion" — the operator's own
+    // `accept_completion` is refused there with "not Review", and no control
+    // offers it.
+    const { store, actor } = setup();
+    seedWithRecs(store);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...file.parsed.frontmatter, stage: "impl" },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const { fm, divergence } = await mergedOutOfBand(store, actor);
+    expect(divergence).toContain(
+      "Move it to Review first — a completion can only be accepted from there — then accept it",
+    );
+    expect(divergence).not.toContain("Accept the completion so");
+    // …and the card that gets there is still on the task.
+    expect(fm.recommendations.map((r) => r.id)).toContain("r-trans");
   });
 
   it("keeps the workspace-captured commit cache when branch commits lack the [KEY] prefix (B2)", async () => {
@@ -2690,6 +2832,30 @@ describe("reconcileProject fan-out control", () => {
     expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-800`)).toHaveLength(0);
   });
 
+  it("ruling 177: a budgeted pass skips a task at the terminal stage even when its PR never merged", async () => {
+    // F36-5 sub-item: a force-accepted task (Shipped, PR-less or PR open) kept
+    // polling its deleted branch every 5 minutes forever because "terminal"
+    // was spelled archived-OR-merged. Canary: put `archived = 1 OR merged` back
+    // as the whole predicate.
+    const { store, actor } = zombieBoard(0, 1);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-700", {
+        stage: "done",
+        branch: "vib-700",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch(boardRoutes(store));
+    const summary = await reconcileProject(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+      taskBudget: 4,
+    });
+    expect(reconciledKeys(summary).sort()).toEqual(["VIB-301", "VIB-900"]);
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-700`)).toHaveLength(0);
+  });
+
   it("a budgeted pass still visits a CLOSED PR — it can be reopened", async () => {
     // A closed PR is not terminal: GitHub allows reopening, and this
     // reconciler is the only thing that notices — it writes the "PR live
@@ -3285,6 +3451,159 @@ describe("ruling 132: drift is classified, not counted", () => {
     partialRoutes[baseRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(A0), { commit: { message: "no sha" } }] } };
     partialRoutes[sinceRoute] = routes[sinceRoute]!;
     expect((await partial.run(partialRoutes)).pr?.revisionDrift).toEqual(cached);
+  });
+});
+
+/**
+ * Ruling 179 (pass 36, F36-7): authored drift after a verdict VOIDS it. Live:
+ * an observer commit on hlc-7 at Merge Approval — `pr.revisionDrift
+ * {authored: 1}` was written, nothing woke, nothing notified, the accept card
+ * stayed applicable and the Commits card (prefix-filtered) hid the commit.
+ */
+describe("ruling 179: a PR head moved after the verdict voids it", () => {
+  const REV = "rev0delivered";
+  const HEAD = "headsha318";
+  const A0 = "a0".padEnd(40, "0");
+  const X1 = "x1".padEnd(40, "0");
+  const commit = (sha: string, message: string, parents: string[] = ["p".repeat(40)]) => ({
+    sha,
+    commit: { message },
+    parents: parents.map((p) => ({ sha: p })),
+  });
+  const baseRoute = `GET ${REPO_PATH}/compare/main...vib-301-workspace`;
+  const sinceRoute = `GET ${REPO_PATH}/compare/${REV}...${HEAD}`;
+
+  function seedApproved(opts: { stage?: string; deployReviewerAt?: string[]; recs?: boolean } = {}) {
+    const store = setupTestStore(ctx);
+    if (opts.deployReviewerAt) {
+      const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...pf.parsed.frontmatter,
+        agents: [
+          ...pf.parsed.frontmatter.agents,
+          {
+            profileId: "reviewer",
+            capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "Reviewer",
+              role: "Review",
+              backends: ["claude"],
+              model: "sonnet",
+              stages: opts.deployReviewerAt,
+            },
+          },
+        ],
+      });
+    }
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: opts.stage ?? "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ],
+        pr: { number: 318, state: "review", title: "Attach execution workspace", headSha: REV },
+        workRevision: {
+          id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
+          createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer", kind: "delivered",
+        },
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z" },
+        ],
+        validation: "healthy",
+        recommendations: opts.recs
+          ? [
+              { id: "rec_accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "for revision rev0del", forHeadSha: REV },
+            ]
+          : [],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler179" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const wakes: string[] = [];
+    const run = async () => {
+      const routes = happyRoutes();
+      routes[baseRoute] = { body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [commit(A0, "[VIB-301] the work"), commit(X1, "observer fixture: drift after review")] } };
+      routes[sinceRoute] = { body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [commit(X1, "observer fixture: drift after review")] } };
+      await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+        wakeOperator: async (_db: DatabaseSync, _ctx: { dataRoot?: string }, _slug: string, _key: string, trigger: string) => {
+          wakes.push(trigger);
+        },
+      });
+      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    };
+    return { store, run, wakes };
+  }
+
+  it("mints an external revision from the moved head, voids the verdict, withdraws the accept card, notes, notifies and wakes", async () => {
+    // Canary: delete the `authoredDriftVoidsVerdict` block in reconcileTask —
+    // validation stays `healthy`, the accept card survives, nothing wakes.
+    const { store, run, wakes } = seedApproved({ recs: true });
+    const parsed = await run();
+    const fm = parsed.frontmatter;
+    expect(fm.workRevision).toMatchObject({ headSha: HEAD, kind: "external", sourceProfileId: null });
+    expect(fm.workRevision!.id).not.toBe("rev_1");
+    expect(fm.validation).toBe("changed");
+    expect(fm.pr?.revisionDrift).toMatchObject({ headSha: HEAD, authored: 1 });
+    expect(fm.recommendations).toEqual([]);
+    // The foreign commit is on the record beside the task's own.
+    expect(fm.github?.commits).toEqual([{ sha: A0.slice(0, 7), msg: "[VIB-301] the work" }]);
+    expect(fm.github?.otherCommits).toEqual([{ sha: X1.slice(0, 7), msg: "observer fixture: drift after review" }]);
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Revision moved after review")!;
+    expect(note).toBeDefined();
+    expect(note.text).toContain("ruling 179");
+    expect(note.text).toContain("no longer binds");
+    // Live 19:45Z: the drift sentence carries no terminal punctuation, so the
+    // note read "…merges unreviewed The verdict on…". Canary: drop the period.
+    expect(note.text).toMatch(/unreviewed\. The verdict on `[^`]+` no longer binds/);
+    expect(note.text).toContain("“Accept completion and move VIB-301 to Done”");
+    const inbox = listNotifications(store.db, store.users.arda.id).filter((n) => n.taskKey === "VIB-301");
+    expect(inbox.some((n) => n.title === "PR #318 moved after review: VIB-301 needs a fresh verdict")).toBe(true);
+    expect(wakes).toEqual(["pr-diverged"]);
+    // The same head on the next pass is old news: nothing fires twice.
+    const again = await run();
+    expect(again.frontmatter.workRevision!.id).toBe(fm.workRevision!.id);
+    expect(again.timeline.filter((e) => e.title === "Revision moved after review")).toHaveLength(1);
+    expect(wakes).toEqual(["pr-diverged"]);
+  });
+
+  it("returns a task that sits past its verdict stage to the stage where the reviewer works", async () => {
+    // The reviewer is eligible at `impl`; the task sits at `review` (the
+    // acceptance boundary on the GOVERNED template). The moved head sends it
+    // back to `impl` through the rework route, audited `via: authored-drift`.
+    const { store, run } = seedApproved({ stage: "review", deployReviewerAt: ["impl"] });
+    const parsed = await run();
+    expect(parsed.frontmatter.stage).toBe("impl");
+    const move = parsed.timeline.find((e) => e.type === "transition")!;
+    expect(move.text).toContain("ruling 179");
+    expect(move.actor).toMatchObject({ kind: "system", systemId: "policy-engine" });
+    const rows = listAuditEvents(store.db, { action: "task.transition" }).filter((r) => r.taskKey === "VIB-301");
+    expect(rows.at(-1)!.details).toMatchObject({ from: "review", to: "impl", boundary: "rework", via: "authored-drift" });
+  });
+
+  it("drift before any verdict is plain delivery news: no revision minted, nothing voided", async () => {
+    const { store, run, wakes } = seedApproved();
+    // Strip the verdict: a head that moves before anyone judged it is not a
+    // voided review, it is the branch growing.
+    const ref = { projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot };
+    const before = readTaskFile(ref)!.parsed;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...before.frontmatter, verdicts: [], validation: "changed" },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const parsed = await run();
+    expect(parsed.frontmatter.workRevision!.id).toBe("rev_1");
+    expect(parsed.frontmatter.pr?.revisionDrift).toMatchObject({ headSha: HEAD, authored: 1 });
+    expect(parsed.timeline.some((e) => e.title === "Revision moved after review")).toBe(false);
+    expect(wakes).toEqual([]);
   });
 });
 

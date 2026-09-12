@@ -652,6 +652,12 @@ export const githubCacheSchema = z
         prNumber: z.number().int().nullable(),
       })
       .nullish(),
+    /** Ruling 179 (pass 36, F36-7): commits on the branch that do NOT carry
+     *  this task's `[KEY]` prefix — a stranger's push, a hand fix, a merge
+     *  Viberr did not record. `commits` keeps this task's own; these are shown
+     *  beside them as "not this task's" so a moved head is visible where the
+     *  decision is made. Absent = none, or not derived this pass. */
+    otherCommits: z.array(githubCommitSchema).optional(),
   })
   .loose();
 export type GithubCache = z.infer<typeof githubCacheSchema>;
@@ -781,8 +787,15 @@ export const workRevisionSchema = z
      *  as history, but it is no longer the revision under review: every
      *  reader that means "the revision under review" goes through
      *  `activeWorkRevision`, which answers null for it, and `nextWorkRevision`
-     *  mints a fresh id over it even for the same tree. */
-    kind: z.enum(["delivered", "verified", "discarded"]).optional(),
+     *  mints a fresh id over it even for the same tree.
+     *
+     *  Ruling 179 (pass 36, F36-7): `external` — the review pull request's head
+     *  moved after the latest verdict by commits Viberr did not deliver (a
+     *  stranger's push, a hand fix). The reconciler mints it from the PR head so
+     *  the verdicts on the previous revision no longer bind (the merge is what
+     *  a verdict protects, and the merge takes the head); it is the revision
+     *  under review until a reviewer judges it or a delivery replaces it. */
+    kind: z.enum(["delivered", "verified", "discarded", "external"]).optional(),
     /** Ruling 161 (pass 35, G35-6): the instant a delivery push published
      *  this head to origin (`performDelivery`, on `pushed` or `up_to_date`
      *  with the same head). This is the one fact that says the revision LEFT

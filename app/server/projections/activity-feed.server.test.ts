@@ -679,4 +679,65 @@ describe("the audit column discloses the controller instrument (C5)", () => {
     const row = listAuditLog(store.db, store.slug, { limit: 5 })[0]!;
     expect(row.text).toContain("gone@viberr.dev (via the controller)");
   });
+
+  it("ruling 178: a required-reviewer change reads as a policy change naming each rule, and a clear says so", () => {
+    // Canary: leave `project.required_reviewers.updated` out of AUDIT_ACTION_KINDS.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    recordAudit(store.db, {
+      action: "project.required_reviewers.updated",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: {
+        count: 2,
+        rules: [
+          { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
+          { stageId: "qa", stageName: "QA", profileId: "qa-bot", agentName: "QA Bot" },
+        ],
+      },
+    });
+    recordAudit(store.db, {
+      action: "project.required_reviewers.updated",
+      actor: { userId: arda.id, label: arda.email },
+      projectSlug: store.slug,
+      details: { count: 0, rules: [] },
+    });
+    const rows = listAuditLog(store.db, store.slug, { limit: 5 });
+    expect(rows.map((r) => r.kind)).toEqual(["change", "change"]);
+    expect(rows[0]!.text).toBe(`${arda.name} cleared the required reviewers.`);
+    expect(rows[1]!.text).toBe(
+      `${arda.name} set the required reviewers to **Code Reviewer at Review**, **QA Bot at QA**.`,
+    );
+  });
+
+  it("two audit rows written in the SAME millisecond keep their insertion order", () => {
+    // Live (2026-09-12, twice in a full suite run): the ruling-178 test above
+    // flipped its two rows. `ORDER BY occurred_at DESC, id DESC` tie-breaks on
+    // a RANDOM id (`newId` is 72 random bits), so two events stamped in one
+    // millisecond render in either order — the feed says the wrong thing
+    // happened last. The tie-break is `rowid DESC` (insertion order), the
+    // shape `operator-actions` and `controller-conversations` already use.
+    //
+    // Canary: put `a.id DESC` back and this fails EVERY time (not 50% of the
+    // time): the two ids below sort against their insertion order on purpose.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const at = "2026-09-12T10:00:00.000Z";
+    const insert = (id: string, action: string, details: string) =>
+      store.db
+        .prepare(
+          `INSERT INTO audit_events
+             (id, occurred_at, actor_user_id, actor_label, action, project_slug, details_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(id, at, arda.id, arda.email, action, store.slug, details);
+    insert("evt_zzzzzzzzzzzz", "project.required_reviewers.updated", '{"count":0,"rules":[]}');
+    insert(
+      "evt_aaaaaaaaaaaa",
+      "project.policy.boundary_changed",
+      '{"from":"review","to":"done","boundary":"approval"}',
+    );
+    const rows = listAuditLog(store.db, store.slug, { limit: 2 });
+    expect(rows.map((r) => r.id)).toEqual(["evt_aaaaaaaaaaaa", "evt_zzzzzzzzzzzz"]);
+  });
 });

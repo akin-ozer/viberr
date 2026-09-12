@@ -13,7 +13,14 @@
 > correction note under ruling 121 for what that review changed). Updated 2026-09-02 for
 > ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §1 and §2 (a turn runs on the
 > asker's own Claude account), §5 (`instance_health`'s new per-backend shape, and a dated
-> correction to ruling 107).
+> correction to ruling 107). Updated 2026-09-11 for pass 36 cluster 4 (ruling 183, U36-3,
+> U36-4, U36-5, G36-1): §3 and §4.1 (`save_knowledge_base` and `save_skill` answer with the
+> id and grantKey, a `disk:<dir>` id whose folder has a row updates that row, `save_skill`
+> refuses a body that is not a skill, `update_agent_deployment` takes `skills` / `mcps` /
+> `kbs` for every kind) and §4.2 (the reply lists every changed field old → new, the
+> `updated` audit row carries model and effort, the effort descriptions read the catalog).
+> Updated 2026-09-11 for ruling 178 (pass 36, G36-3): §4 gains `set_required_reviewers`,
+> and `get_project` reports `requiredReviewers`.
 
 ## 1. What it is
 
@@ -280,7 +287,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
 - Every handler maps a 401/403 to `[denied] <sentence>` and anything else to
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 
-The 41 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
+The 42 tools (ruling 121: `projectSlug` defaults to the bound project and, on a
 task-anchored conversation, every task tool's `taskKey` defaults to the anchored task —
 **only within the anchor's own project**: a call that names a different `projectSlug`
 must name its task, or it is refused. `whoami` reports both bindings):
@@ -288,10 +295,10 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Scope | Tools | Gate |
 |---|---|---|
 | Instance reads | `whoami`, `list_users`, `list_knowledge_bases`, `list_skills`, `list_mcp_servers`, `list_global_agents`, `inspect_audit_log` (limit 50, max 200), `inspect_run_analytics` | `whoami`: signed-in; the rest: org admin |
-| Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base`, `save_skill`, `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below; ruling 153: `model` and `effort` set the template's defaults, checked by name; ruling 156: the reply names every project copy whose grants differ and `propagate: true` rewrites them) | org admin |
+| Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base` (U36-4: the reply names the KB id the next save takes and the grantKey a grant takes; a `disk:<dir>` id whose folder already has a row updates that row), `save_skill` (the same reply; ruling 183: an empty, JSON-escaped or unparseable SKILL.md body is refused by name, never rewritten), `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below; ruling 153: `model` and `effort` set the template's defaults, checked by name; ruling 156: the reply names every project copy whose grants differ and `propagate: true` rewrites them) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
-| Board reads | `get_project` (each deployment with its `resources` copy and `templateDrift`, ruling 156), `list_tasks`, `get_task` (events 12, max 50; `schedules` lists the pending entries, ruling 153), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
-| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `terminal-stage` / queued honestly, else `startAgentRun`), `schedule_task_action` and `cancel_task_schedule` (ruling 153; `run-agents`: the task page's schedule form through the controller, `agent: "operator"` or a deployed profile id, `delayMinutes` 1 to 40320 or an ISO `dueAt` with the same bounds and sentences, the entry on `task.md` with the `<email> · via controller` label; a cancel answers `[noop]` when the entry is not pending), `update_project_settings`, `update_stages`, `set_transition_boundary` (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
+| Board reads | `get_project` (each deployment with its `resources` copy and `templateDrift`, ruling 156; `requiredReviewers`, the project's required-reviewer rules resolved to stage and agent names, ruling 178), `list_tasks`, `get_task` (events 12, max 50; `schedules` lists the pending entries, ruling 153), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
+| Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `closed` (ruling 177) / queued honestly, else `startAgentRun`), `schedule_task_action` and `cancel_task_schedule` (ruling 153; `run-agents`: the task page's schedule form through the controller, `agent: "operator"` or a deployed profile id, `delayMinutes` 1 to 40320 or an ISO `dueAt` with the same bounds and sentences, the entry on `task.md` with the `<email> · via controller` label; a cancel answers `[noop]` when the entry is not pending), `update_project_settings`, `update_stages`, `set_transition_boundary`, `set_required_reviewers` (ruling 178: the project's required reviewers per review stage as the WHOLE list, `[]` clearing it, through the same writer Settings → Required reviewers uses; every stage id must be a non-terminal stage and every profile id a deployed agent holding report-validation-verdict, else refused by name with nothing written; an unchanged list answers `[noop]`; audited `project.required_reviewers.updated`) (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`; G36-1: `skills` / `mcps` / `kbs` for every kind, the operator included, grant keys resolved before the write, omitted = unchanged, `[]` = clear; U36-3: the reply lists every changed field old → new) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
 | Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; on an ACTIVE link `blockedBy` is the only editable field and is written on the link's task through `setTaskDependencies`, under that writer's own gate, the link mirroring it back (ruling 155); `add_link` takes one) | `requireVisible` then the goal gate (§7) |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
@@ -341,6 +348,34 @@ tool descriptions.
   is answerable without a run. Names are entity-decoded once and angle brackets are
   refused (U35-1): `Test &amp; CI Engineer` is stored as `Test & CI Engineer` with the
   id `test-ci-engineer`.
+- **The controller edits a deployment's copy for every kind** (G36-1, owner Q36-7, pass
+  36). `update_agent_deployment` takes `skills` / `mcps` / `kbs` with the same semantics:
+  grant keys resolved through `resolveResourceGrants` before anything is written, an
+  unknown key refused by name, an omitted list left alone, `[]` clearing it. They merge
+  into the deployment's own copy (`definition.resources`), the operator included. The
+  Agents page already rendered the picker for every kind while the controller answered
+  "a system profile I can't give resources to". The `grantKey` each `list_*` tool leads
+  with is what it takes; `get_project` shows the copy; the reply lists each list old →
+  new.
+- **A create reply is re-enterable** (U36-4, pass 36). `save_knowledge_base` and
+  `save_skill` answer with the id the next save takes and the grantKey a grant takes:
+  `[done] X created. Folder ready at store://kb/x/ (id kb_…, grantKey x).` The toast
+  alone named the folder, so the controller guessed `disk:<dir>` — the shape shipped,
+  row-less folders carry — and was refused "already exists" on a KB it had just made,
+  because a `disk:` id matched no row and fell into the create arm. A `disk:<dir>` (or
+  `disk:<name>`) id whose folder has since gained a row now resolves to that row and
+  updates it (`kbRowForId` / `skillRowForId` in `resources.server.ts`); the folder
+  conflict fires only for its real case, another row holding the target name.
+- **A SKILL.md body is judged before it is written** (ruling 183, pass 36, F36-2).
+  `save_skill` is one of the writers `assertSkillBodyWellFormed` guards
+  (`skill-body.server.ts`, beside the containment reader; the others are the
+  org-settings editor, an upload and the store browser's document editor). A body that
+  is empty, that arrived JSON-escaped (literal `\n` sequences and no real newline — what
+  the model sent twice, live, and what landed on disk as one line) or whose frontmatter
+  block does not parse is refused by name with the remedy, never rewritten; plain
+  markdown with no block stays valid, since the mount adds the block and the editor
+  never wrote one. `body` is required on a create and omitted on an update to keep what
+  is on disk.
 
 ### 4.2 Catalogued writes read first and refuse by name (pass 34, ruling 139)
 
@@ -387,11 +422,23 @@ Effort is settable wherever model is (ruling 139): `deploy_agent` takes `model` 
 against the backend's tier list (`assertEffortForBackend`, `assertModelForBackend` in
 `model-catalog.server.ts`) BEFORE the write and refuse by name, listing the tiers, so the
 controller can never store a tier the runtime would silently clamp. A backend switch with
-no effort resets to that backend's default and the reply says so; the deployed-audit row
-records the model and effort written. The profile editor shares the check for a CHANGED
-value only, so a deployment that legitimately stores a preserved tier (Codex `minimal`)
-stays editable, and the editor re-seeds a stored tier the backend does not list instead of
+no effort resets to that backend's default and the reply says so; both the `deployed` and
+the `updated` audit rows record the model and effort written (U36-3, pass 36: the
+`updated` row used to carry neither). The three effort descriptions (`save_global_agent`,
+`deploy_agent`, `update_agent_deployment`) are generated from the catalog's tier lists
+(`effortsFor`; U36-5), so a tier the catalog offers — Codex `max` since CLI 0.153 — is
+never described as missing. The profile editor shares the check for a CHANGED value only,
+so a deployment that legitimately stores a preserved tier (Codex `minimal`) stays
+editable, and the editor re-seeds a stored tier the backend does not list instead of
 offering it.
+
+`update_agent_deployment`'s reply is built from the record it read and the result the
+writer returned, never from the request (U36-3): it lists every field the call changed,
+old → new — backend, model, effort (a switch-time reset marked "(Codex default: none
+given)"), stages, autonomy, each patched capability and each grant list — as
+`[done] Developer updated on viberr-core: backend Claude → Codex; effort high → max; …`,
+and a call that changes nothing answers `[done] … No field changed.` One live call that
+switched backend, model, effort, stages and grants used to answer "Effort is now max."
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 

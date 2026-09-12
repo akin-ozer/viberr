@@ -1,5 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
+import { AppError } from "~/server/errors/app-error.server";
 import {
   skillDirPath,
   skillsRootDir,
@@ -238,4 +240,59 @@ export function readSkillBodies(
     }
   }
   return { parts, unresolved };
+}
+
+/**
+ * The only frontmatter key a store SKILL.md gets to keep when it is mounted
+ * (the NORMALIZE note in `mountOneSkill`, skill-mount.server.ts: `name` is
+ * pinned to the folder there and run-policy keys are dropped).
+ * `.catch(undefined)` so a non-string `description` falls back to the body's
+ * first line instead of failing the whole parse. ONE definition, read by the
+ * mount and by {@link assertSkillBodyWellFormed}.
+ */
+export const skillFrontmatterSchema = z.object({
+  description: z.string().optional().catch(undefined),
+});
+
+/**
+ * Ruling 183 (pass 36, F36-2): a SKILL.md body is validated at EVERY writer —
+ * the org-settings editor, the controller's `save_skill`, uploads and the
+ * store browser's document editor — and refused by name, never rewritten.
+ *
+ * Live, the controller sent `body` JSON-escaped twice and two skills landed on
+ * disk as ONE line of literal `\n` (`wc -l` = 0). Nothing judged the body: the
+ * mount then normalised frontmatter from a body that had none, took the whole
+ * escaped text as the description, and Codex agents read it as-is. The three
+ * shapes refused here are the ones that make a SKILL.md not a skill:
+ *  · an empty body (a run would report "its SKILL.md is empty");
+ *  · a body with no real newline but literal `\n` sequences — the JSON escape
+ *    that reached the store. The remedy is real newlines, not a rewrite here:
+ *    a writer that unescaped would also unescape a one-line body that means
+ *    `\n` literally;
+ *  · a frontmatter block that does not parse (unterminated fence, invalid
+ *    YAML, a non-mapping). Plain markdown with NO block stays valid: the seeds
+ *    ship a block, the editor never wrote one, and the mount adds it.
+ */
+export function assertSkillBodyWellFormed(body: string): void {
+  if (body.trim() === "") {
+    throw AppError.validation("SKILL.md is empty. Send the skill's markdown body.");
+  }
+  if (!/[\r\n]/.test(body) && body.includes("\\n")) {
+    throw AppError.validation(
+      "The SKILL.md body arrived JSON-escaped: it has no real newline, only literal \\n sequences. Send real newlines.",
+    );
+  }
+  const { data, diagnostics } = splitFrontmatter(body);
+  if (diagnostics.some((d) => d.code === "frontmatter.missing")) return;
+  const broken = diagnostics.find((d) => d.code !== "frontmatter.missing");
+  if (broken) {
+    throw AppError.validation(
+      `SKILL.md frontmatter does not parse: ${broken.message} Fix the YAML between the --- fences (name and description), or send plain markdown with no fences.`,
+    );
+  }
+  if (!skillFrontmatterSchema.safeParse(data).success) {
+    throw AppError.validation(
+      "SKILL.md frontmatter must be a YAML mapping between the --- fences (name: …, description: …), or send plain markdown with no fences.",
+    );
+  }
 }

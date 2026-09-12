@@ -516,6 +516,8 @@ export function ExecutionSection({
 
   return (
     <ExecutionProfile
+      stages={task.stages}
+      workflow={task.workflow}
       task={task}
       meId={meId}
       myRole={myRole}

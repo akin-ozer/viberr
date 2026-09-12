@@ -8,17 +8,21 @@ import {
   resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
 
-describe("codexRepoWriteAdvisory (pass 32, E32-3 fallback)", () => {
-  // Verified against Codex 0.146: `read-only` has no writable roots and
-  // `--add-dir` widens workspace-write only, so "read-only except attachments/"
-  // is not expressible. The carve-out shape is exactly: repo-write withheld AND
-  // evidence granted (absent = granted; evidence is not grant-required).
+describe("codexRepoWriteAdvisory (ruling 185)", () => {
+  // Viberr no longer OS-confines a Codex run, so a withheld write family has
+  // no OS channel there at all: it is advisory for EVERY such profile, not
+  // just the old E32-3 carve-out (withheld + evidence granted). What binds is
+  // the prompt (which omits the delivery steps) and the server-owned delivery
+  // gate.
   const g = (capabilityId: string, mode: "direct" | "recommend" | "human" | "off"): CapabilityGrant => ({
     capabilityId,
     mode,
   });
 
-  it("is TRUE for a withheld write family with evidence granted (explicitly or by default)", () => {
+  it("is TRUE whenever the write family is withheld, however it is withheld", () => {
+    // Canary: narrow it back to the carve-out (`&& !isWithheld(evidence)`) and
+    // the evidence-withheld cases below read false again — a Codex row drawn
+    // as a hard block for a run nothing confines.
     expect(codexRepoWriteAdvisory([g("execute-code-or-write-repo", "off")])).toBe(true);
     expect(codexRepoWriteAdvisory([g("execute-code-or-write-repo", "human")])).toBe(true);
     expect(
@@ -30,25 +34,17 @@ describe("codexRepoWriteAdvisory (pass 32, E32-3 fallback)", () => {
     // The seeded Reviewer shape: no headline grant at all (grant-required ⇒
     // withheld), evidence left at its default.
     expect(codexRepoWriteAdvisory([g("report-validation-verdict", "direct")])).toBe(true);
-  });
-
-  it("is FALSE when evidence is withheld too — the sandbox then binds read-only", () => {
+    // Evidence withheld TOO — before ruling 185 the sandbox bound this one
+    // read-only, so it was not advisory. Now nothing confines it.
     expect(
       codexRepoWriteAdvisory([
         g("execute-code-or-write-repo", "off"),
         g("attach-evidence-references", "off"),
       ]),
-    ).toBe(false);
-    expect(
-      codexRepoWriteAdvisory([
-        g("execute-code-or-write-repo", "human"),
-        g("attach-evidence-references", "human"),
-      ]),
-    ).toBe(false);
-  });
-
-  it("is FALSE for an EMPTY grant list — such a deployment runs fully withheld (P13-AP-06), evidence included", () => {
-    expect(codexRepoWriteAdvisory([])).toBe(false);
+    ).toBe(true);
+    // An EMPTY grant list runs FULLY withheld (P13-AP-06) — still withheld,
+    // still advisory on Codex.
+    expect(codexRepoWriteAdvisory([])).toBe(true);
   });
 
   it("is FALSE for a write-GRANTED profile — nothing is withheld to be advisory about", () => {

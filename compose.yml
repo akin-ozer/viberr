@@ -15,6 +15,15 @@ services:
     # which layer dropped it; the process-group teardown in resources.server is
     # the belt to this brace.
     init: true
+    # Ruling 185 (pass 36): NO `security_opt: seccomp=unconfined` here. It was
+    # added for F36-1 — the Codex CLI confined a run with bubblewrap, which
+    # needs an unprivileged user namespace Docker's builtin seccomp profile
+    # refuses to the non-root app user, so every confined Codex run died at its
+    # first shell command. Viberr no longer uses that sandbox at all (every
+    # Codex run is `danger-full-access`), so the container keeps Docker's own
+    # profile. Chromium still needs --no-sandbox for the same namespace reason
+    # and the image passes it (Dockerfile). Do not re-add this line without a
+    # ruling: it lifts the profile for every process in the container.
     env_file: .env
     environment:
       # Force the container-internal values even when .env carries the dev

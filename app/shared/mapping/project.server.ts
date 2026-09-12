@@ -6,6 +6,7 @@ import type {
   StageDef,
   WorkflowBoundary,
 } from "~/schemas/project-file.schema";
+import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 
 /**
  * Centralized snake_case → camelCase mapping for the `projects` +
@@ -28,6 +29,7 @@ export type ProjectRow = {
   agent_policy_json: string;
   credential_policy_json: string | null;
   guardrails_json: string;
+  required_reviewers_json: string;
   source_path: string;
   content_hash: string;
   parsed_at: string;
@@ -46,6 +48,10 @@ export interface ProjectRecord {
   agentPolicy: AgentDeployment[];
   credentialPolicy: CredentialPolicy | null;
   guardrails: Guardrail[];
+  /** Ruling 178: the declared required reviewers, RESOLVED to stage and agent
+   *  names at project-rebuild time (the rebuilder's task walk prints them in
+   *  `validation_block_reason`, so the queue needs no file read). */
+  requiredReviewers: RequiredReviewerView[];
   /** Store-relative path, e.g. "projects/viberr-core/project.md". */
   sourcePath: string;
   contentHash: string;
@@ -53,11 +59,12 @@ export interface ProjectRecord {
 }
 
 export function mapProjectRow(row: ProjectRow): ProjectRecord {
-  // SAFETY: the five `*_json` columns have ONE writer — `rebuildProjectFile`
+  // SAFETY: the six `*_json` columns have ONE writer — `rebuildProjectFile`
   // (server/projections/rebuilder.server.ts) stores `JSON.stringify` of the
-  // frontmatter `parseProjectFileContent` just produced, so each column holds
-  // exactly the schema type named below. `credential_policy_json` is the one
-  // nullable column of the five and its null is checked before the parse.
+  // frontmatter `parseProjectFileContent` just produced (the required-reviewer
+  // column holds the RESOLVED views that walk derives from it), so each column
+  // holds exactly the type named below. `credential_policy_json` is the one
+  // nullable column of the six and its null is checked before the parse.
   return {
     slug: row.slug,
     name: row.name,
@@ -73,6 +80,7 @@ export function mapProjectRow(row: ProjectRow): ProjectRecord {
       ? (JSON.parse(row.credential_policy_json) as CredentialPolicy)
       : null,
     guardrails: JSON.parse(row.guardrails_json) as Guardrail[],
+    requiredReviewers: JSON.parse(row.required_reviewers_json) as RequiredReviewerView[],
     sourcePath: row.source_path,
     contentHash: row.content_hash,
     parsedAt: row.parsed_at,

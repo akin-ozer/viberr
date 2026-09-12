@@ -5,6 +5,11 @@ import {
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import {
+  readRequiredReviewers,
+  type RequiredReviewerView,
+} from "~/server/tasks/required-reviewers.server";
 import { repoFootprintTasks } from "./settings-actions.server";
 import { listMembershipViews, type MembershipView } from "./membership.server";
 
@@ -46,6 +51,11 @@ export interface SettingsViewData {
   repoFootprintTasks: number;
   /** R15-6: delete a task's branch on GitHub once its PR merges (default on). */
   branchCleanupOnMerge: boolean;
+  /** Ruling 178: the required-reviewer rules as project.md holds them. */
+  requiredReviewers: RequiredReviewerView[];
+  /** Ruling 178: the deployed specialists a rule may name — those holding
+   *  report-validation-verdict, the same predicate the writer refuses on. */
+  reviewerCandidates: { id: string; name: string }[];
 }
 
 export function getSettingsViewData(
@@ -89,5 +99,9 @@ export function getSettingsViewData(
     credential: getProjectCredentialHealth(db, projectSlug),
     repoFootprintTasks: repoFootprintTasks(db, projectSlug),
     branchCleanupOnMerge: branchCleanupOnMerge(db, projectSlug),
+    requiredReviewers: readRequiredReviewers(projectSlug, ctx),
+    reviewerCandidates: listDeployedSpecialists(projectSlug, ctx)
+      .filter((s) => s.capabilities.verdict)
+      .map((s) => ({ id: s.id, name: s.name })),
   };
 }

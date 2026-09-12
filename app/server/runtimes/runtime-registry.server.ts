@@ -67,8 +67,14 @@ const PRIVATE_RUNTIME_ENV_RE =
  * "carries NO home" promise true rather than aspirational. The two sibling
  * spawn sites (the sign-in driver and `runVendorLogout`) delete them by hand
  * for the same reason, at the same boundary.
+ *
+ * Ruling 181 adds `CODEX_SQLITE_HOME`, the CLI's state-db location: the Codex
+ * adapter sets it per run to the principal's shared home (the run's own
+ * `CODEX_HOME` is a private fork), so an ambient one — a host's `~/.codex`
+ * state — must not be what a child inherits when the adapter has nothing to
+ * set it to.
  */
-const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME)$/;
+const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|CODEX_SQLITE_HOME)$/;
 
 /**
  * Ruling 142 (pass 34, U34-7): the app's OWN configuration, stripped for a

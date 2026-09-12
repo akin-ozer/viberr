@@ -11,6 +11,12 @@ import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { AgentSelect } from "./agent-select";
 import {
+  resolveDeclaredStages,
+  stageEligible,
+  stageIneligibilitySentence,
+} from "~/shared/workflow/stage-eligibility";
+import { stageName } from "~/shared/workflow/stage-roles";
+import {
   backendLabelOf,
   backendRunRefusal,
   type TaskRunPrincipalView,
@@ -64,6 +70,10 @@ export interface DeployedSpecialistView {
     askHuman: boolean;
     browser: boolean;
   };
+  /** U36-10 (pass 36): stage scope, as the loader's view carries it. Absent in
+   *  older fixtures = unknown, and the control pre-refuses nothing. */
+  stages?: string[];
+  spanAll?: boolean;
 }
 
 /**
@@ -229,6 +239,7 @@ function PendingSchedules({
   agentNameOf,
   canCancel,
   busy,
+  moot = false,
   onCancel,
 }: {
   schedules: TaskSchedule[];
@@ -236,12 +247,25 @@ function PendingSchedules({
   agentNameOf: (profileId: string) => string | undefined;
   canCancel: boolean;
   busy: boolean;
+  /** Ruling 177: the task is CLOSED, so every entry here will be skipped when
+   *  it comes due (`skipped-done` / `skipped-archived`) — never run. Live
+   *  (2026-09-12, HLC-19) the controller read two pending entries on a shipped
+   *  task and could not tell from the page whether they would fire; the
+   *  control beside them already said "Task closed". */
+  moot?: boolean;
   onCancel: (scheduleId: string) => void;
 }) {
   const [confirmCancel, setConfirmCancel] = useState<TaskSchedule | null>(null);
   if (schedules.length === 0) return null;
   return (
     <>
+      {moot && (
+        <span className="sub" data-sched-moot>
+          {schedules.length === 1 ? "This scheduled run" : "These scheduled runs"} will be
+          skipped, not run: the task is closed. Reopen it, or cancel{" "}
+          {schedules.length === 1 ? "it" : "them"}.
+        </span>
+      )}
       <ul className="sched-list">
         {schedules.map((s) => (
         <li key={s.id} className="sched-row">
@@ -489,13 +513,11 @@ function OperatorRunControl({
       {blockedReason ? (
         <span className="sub">{blockedReason}</span>
       ) : disabled ? (
-        // N20-17: the explicit Run-operator button is off on a closed task, but
-        // an @operator comment still starts a full operator run — say so, or
-        // the two run paths read as silently inconsistent.
-        <span className="sub">
-          Task closed. Reopen it to run the operator. Mentioning{" "}
-          <code>@operator</code> in a comment still runs it.
-        </span>
+        // Ruling 177 (pass 36): every door refuses a closed task — the button,
+        // an @operator comment, a schedule, an agent's completion. N20-17's
+        // "mentioning @operator still runs it" disclosure described the F36-4
+        // hole and is gone with it.
+        <span className="sub">Task closed. Reopen it to run the operator.</span>
       ) : holdNote ? (
         <span className="sub" data-hold-note>{holdNote}</span>
       ) : null}
@@ -504,6 +526,7 @@ function OperatorRunControl({
         agentNameOf={() => undefined}
         canCancel
         busy={scheduleBusy}
+        moot={disabled}
         onCancel={onCancelSchedule}
       />
     </span>
@@ -519,6 +542,9 @@ function OperatorRunControl({
  */
 function AgentRunControl({
   agents,
+  stage,
+  stages,
+  workflow,
   activeProfileIds,
   deliveringProfileId,
   engagedSupportingIds,
@@ -532,6 +558,12 @@ function AgentRunControl({
   onCancelSchedule,
 }: {
   agents: DeployedSpecialistView[];
+  /** U36-10 (pass 36): the task's stage and the board it sits on, so a
+   *  stage-ineligible pick is refused BEFORE the click with the server's
+   *  own sentence (ruling 133), and never promises a delivering posture. */
+  stage: string;
+  stages: { id: string; name: string }[];
+  workflow: { from: string; to: string }[];
   activeProfileIds: string[];
   /** Ruling 127: whose accounts a dispatch would bill (null = unowned task).
    *  A profile pinned to a backend the owner has not connected is still
@@ -585,6 +617,7 @@ function AgentRunControl({
       agentNameOf={agentNameOf}
       canCancel
       busy={scheduleBusy}
+      moot={closed}
       onCancel={onCancelSchedule}
     />
   );
@@ -615,15 +648,30 @@ function AgentRunControl({
   // owner — so the refusal is per-pick, not per-page. Same split the operator
   // control makes: a run NOW is refused, a SCHEDULED one is not (the owner can
   // connect the backend, or the seat can change hands, before it fires).
+  // U36-10 (pass 36): eligibility is resolved here, from the same predicate
+  // the dispatch gate applies, so the refusal a person would meet after the
+  // click is the one they read before it.
+  const ineligible =
+    selected &&
+    selected.stages !== undefined &&
+    !stageEligible({ stages: selected.stages, spanAll: selected.spanAll ?? false }, stage, stages, workflow)
+      ? stageIneligibilitySentence(
+          selected.name,
+          stageName(stages, stage),
+          resolveDeclaredStages(selected.stages, stages, workflow)
+            .map((id) => stageName(stages, id))
+            .join(", "),
+        )
+      : null;
   const runRefusal = selected
-    ? backendRunRefusal(runPrincipal, selected.backend, meId)
+    ? (ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
     : null;
   // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
   // live run on this very profile, or the owner-credential refusal (ruling 127),
   // each of which renders its own reason. An empty pick is validation, so it is
   // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
   // are both false with nothing picked, so this collapses to `busy` there.
-  const off = busy || selectedRunning || (delay === "now" && !!runRefusal);
+  const off = busy || selectedRunning || (delay === "now" && !!runRefusal) || !!ineligible;
   const pickRefused = refused > 0 && !selected;
   const run = () => {
     if (off) return;
@@ -643,7 +691,9 @@ function AgentRunControl({
   // (hunt 2026-08-29); capability derivation covers only the unengaged case.
   const posture = !selected
     ? null
-    : selected.id === deliveringProfileId
+    : ineligible
+      ? null
+      : selected.id === deliveringProfileId
       ? "Runs as the delivering agent: it owns the branch and PR."
       : engagedSupportingIds.includes(selected.id)
         ? selected.capabilities?.verdict
@@ -878,6 +928,8 @@ export function ExecutionProfile({
   busy,
   onOwner,
   deployedSpecialists,
+  stages,
+  workflow,
   operatorBackend,
   operatorAutonomy,
   runPrincipal,
@@ -901,6 +953,9 @@ export function ExecutionProfile({
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
   /** Deployed specialists the run-agent selector offers (loader). */
   deployedSpecialists: DeployedSpecialistView[];
+  /** U36-10 (pass 36): the board the task sits on, for pre-click eligibility. */
+  stages: { id: string; name: string }[];
+  workflow: { from: string; to: string }[];
   /** The operator's configured backend — displayed, not picked (P11-76). */
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
@@ -1032,6 +1087,9 @@ export function ExecutionProfile({
             {canRunAgents ? (
               <AgentRunControl
                 agents={deployedSpecialists}
+                stage={task.stage}
+                stages={stages}
+                workflow={workflow}
                 activeProfileIds={activeAgentProfileIds}
                 deliveringProfileId={task.specialist?.profileId ?? null}
                 engagedSupportingIds={task.reviewers.map((r) => r.profileId)}

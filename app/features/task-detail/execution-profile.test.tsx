@@ -58,6 +58,7 @@ function unownedTask(): TaskSummary {
     prChecks: null,
     prReview: null,
     commits: [],
+    otherCommits: [],
     changed: null,
     unownedPr: null,
     foreignHead: null,
@@ -113,6 +114,8 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         busy={false}
         onOwner={() => {}}
         deployedSpecialists={deployedFixture}
+        stages={[]}
+        workflow={[]}
         operatorBackend="claude"
         operatorAutonomy="supervised"
         runPrincipal={null}

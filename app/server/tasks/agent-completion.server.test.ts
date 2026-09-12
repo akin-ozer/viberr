@@ -278,6 +278,125 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     return started.runId;
   }
 
+  /**
+   * Ruling 177 (pass 36, F36-5): a run that outlives its task's closure —
+   * HLC-9 was force-accepted while its developer was still building; the run
+   * finished three minutes later, the dispatch-completion contract re-invoked
+   * the operator on the SHIPPED task and the operator opened a decision packet
+   * there. The completion is recorded (the report is evidence), a note says the
+   * task had closed, and NO operator wake follows — however the run was
+   * dispatched. Canary: delete the `taskClosure` branch in
+   * `applyAgentCompletionEffects` (the operator run row appears again).
+   */
+  it("ruling 177: a run finishing after the task closed leaves a note and wakes no operator", async () => {
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    // Shipped (terminal) while the run was live — the F36-5 shape.
+    writeReviewTask({ stage: "done", waiting: "agent" });
+    const runId = await finishedRunWith("Implemented the harness; branch hlc-9, HEAD 16c6e2e. @operator");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "developer",
+        role: "Implementation",
+        delivers: true,
+        workdir: null,
+        agentHandle: "developer",
+        // The dispatch-completion contract's forced react hop — the very hop
+        // that woke the operator on the shipped task live.
+        dispatchedByName: "Arda",
+        dispatchedByUserId: store.users.arda.id,
+      },
+      { id: runId, state: "finished" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    const operatorRows = store.db
+      .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator'`)
+      .all();
+    expect(operatorRows).toHaveLength(0);
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.stage).toBe("done");
+    expect(fm.waiting).toBe("none");
+    expect(taskFile().parsed.packet).toBeFalsy();
+    const note = taskFile().parsed.timeline.find(
+      (e) => e.type === "note" && e.title === "Completed after the task closed",
+    )!;
+    expect(note).toBeDefined();
+    expect(note.text).toMatch(/VIB-1 is closed \(Done is the terminal stage\)/);
+    expect(note.text).toMatch(/no coordination follows/);
+    // The report itself stays on the record.
+    expect(taskFile().parsed.timeline.some((e) => e.type === "comment")).toBe(true);
+  });
+
+  it("F36-6 (pass 36): a request-changes verdict voids a pending 'move to <stage>' card", async () => {
+    // Live (HLC-14 17:43Z): Viberr's delivery card "Move the task to Merge
+    // Approval" stayed on the page with Apply next to `validation failing`.
+    // Canary: drop the `validation === "failing" && r.kind === "transition"`
+    // clause from the verdict block's recommendation filter.
+    writeReviewTask({
+      recommendations: [
+        {
+          id: "rec_move",
+          kind: "transition",
+          toStageId: "done",
+          label: "Move the task to Done",
+          detail: "Recorded by Viberr when the delivery landed.",
+        },
+        {
+          id: "rec_run",
+          kind: "run_agent",
+          profileId: "developer",
+          label: "Run Developer",
+          detail: "Keep going.",
+        },
+      ],
+    });
+    const runId = await finishedRunWith("Verdict: request changes — the tests are missing.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.validation).toBe("failing");
+    expect(fm.recommendations.map((r) => r.id)).toEqual(["rec_run"]);
+  });
+
   it("records a reviewer verdict from the FULL reply even when the verdict sits past the 1200-char comment cut (X9)", async () => {
     // A delivered revision under review + a verdict-capable reviewer, so the
     // reviewer's verdict binds to the current revision and derives validation.

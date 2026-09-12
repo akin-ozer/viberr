@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { closureRefusal, taskClosure } from "./task-closure.server";
 import { z } from "zod";
 import {
   recordAudit,
@@ -161,9 +162,16 @@ export async function scheduleTaskAction(
   const ref = taskFileRef(ctx, input.projectSlug, input.taskKey);
   const existing = readTaskFile(ref);
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
-  const terminal = terminalStageId(db, input.projectSlug);
-  if (terminal && existing.parsed.frontmatter.stage === terminal) {
-    throw AppError.validation("That task is already Done — nothing to schedule.");
+  // Ruling 177 (pass 36): a closed task — archived, or at the board's terminal
+  // stage whatever it is named — refuses the schedule with the one closure
+  // sentence every door uses. Live (U36-9, 19:37Z): "That task is already
+  // Done — nothing to schedule." on a board whose last stage is Shipped.
+  const stages = getProject(db, input.projectSlug)?.stages ?? [];
+  const closure = taskClosure(existing.parsed.frontmatter, stages);
+  if (closure.closed) {
+    throw AppError.validation(
+      closureRefusal(input.taskKey, closure, stages, "scheduling a run on it"),
+    );
   }
 
   // R22: the entry pins no backend/autonomy — the fired run resolves the LIVE
@@ -345,6 +353,12 @@ export async function fireDueSchedules(
     if (!terminalCache.has(slug)) terminalCache.set(slug, terminalStageId(db, slug));
     return terminalCache.get(slug) ?? null;
   };
+  // U36-9 (pass 36): the note names the terminal stage as the board calls it.
+  const terminalNameFor = (slug: string): string => {
+    const id = terminalFor(slug);
+    const stages = getProject(db, slug)?.stages ?? [];
+    return id === null ? "Done" : (stages.find((s) => s.id === id)?.name ?? id);
+  };
   // Hunt 2026-08-29: the fire path runs under `operatorAuthorized`, which
   // skips the route-layer requireRunAgents and with it the F17/R6-3
   // ARCHIVED-PROJECT freeze — so a pending schedule kept engaging profiles and
@@ -453,10 +467,12 @@ export async function fireDueSchedules(
             // row only FOUND the candidate; an acceptance (or archive) landing
             // between the SELECT and this locked read never rides a stale
             // snapshot into a real, unwatched operator turn.
-            const mootNow =
-              projectFrozen ||
-              parsed.frontmatter.archived === true ||
-              (terminal !== null && parsed.frontmatter.stage === terminal);
+            // Ruling 177 (pass 36): the one closed-task predicate.
+            const closure = taskClosure(
+              parsed.frontmatter,
+              terminal !== null ? [{ id: terminal }] : [],
+            );
+            const mootNow = projectFrozen || closure.closed;
             if (mootNow) {
               target.status = "fired";
               target.firedAt = new Date().toISOString();
@@ -470,7 +486,7 @@ export async function fireDueSchedules(
                     ? `**Scheduled action skipped:** the project has been archived (read-only) — the scheduled run is moot.`
                     : parsed.frontmatter.archived === true
                       ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled run is moot.`
-                      : `**Scheduled action skipped:** ${row.task_key} is already Done — the scheduled run is moot.`,
+                      : `**Scheduled action skipped:** ${row.task_key} is already ${terminalNameFor(row.project_slug)} — the scheduled run is moot.`,
                 ),
               );
             } else {
@@ -659,7 +675,7 @@ export async function fireDueSchedules(
             // the turn instruction as a stated reason.
             if (t.prompt) runInput.scheduleNote = t.prompt;
             const result = await runOperator(db, runInput);
-            refusedTerminal = result.refused === "terminal-stage";
+            refusedTerminal = result.refused === "closed";
             refusedHeld = result.refused === "blocked-by";
             refusedPacket = result.refused === "open-packet";
             queuedBehindDrive = result.queued;

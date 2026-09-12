@@ -19,7 +19,7 @@ import { listScopeViolations } from "./policy-violations.server";
  * Activity view read models (activity.md, Phase 9C).
  *
  * Stream: ONE projection query over `task_events` — every typed timeline
- * event across the project's tasks, `ORDER BY occurred_at DESC, id DESC`
+ * event across the project's tasks, `ORDER BY occurred_at DESC, rowid DESC`
  * (the total order the porting notes mandate). `title` is folded into the
  * text as a leading bold sentence (`**{title}.** {text}`), exactly the
  * mock's `norm()`.
@@ -245,6 +245,9 @@ export const AUDIT_LOG_LIMIT = 60;
 const AUDIT_ACTION_KINDS = {
   "project.policy.boundary_changed": "change",
   "project.policy.guardrail_changed": "change",
+  // Ruling 178: the required-reviewer rule (Settings → Required reviewers,
+  // or the controller's set_required_reviewers) — acceptance policy.
+  "project.required_reviewers.updated": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
   "project.member.removed": "change",
@@ -277,6 +280,8 @@ const AUDIT_ACTION_KINDS = {
   // nowhere — reconstructing "who bypassed the required reviewer" used to need
   // raw SQLite access, the exact thing this panel exists to make unnecessary.
   "task.acceptance.forced": "audit",
+  // Ruling 177 (pass 36): acceptance ended the task's live runs.
+  "task.acceptance.interrupted_runs": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
@@ -344,6 +349,10 @@ const auditDetailsSchema = z.object({
   label: detailText,
   op: detailText,
   value: z.number().optional().catch(undefined),
+  // Ruling 178: the required-reviewer list as written, resolved to names.
+  rules: z
+    .array(z.object({ stageName: z.string().catch("?"), agentName: z.string().catch("?") }))
+    .catch([]),
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -375,6 +384,12 @@ function auditText(
       if (d.op === "remove") return `${actor} removed the **${label}** guardrail.`;
       if (d.op === "value") return `${actor} set **${label}** to ${d.value ?? "?"}.`;
       return `${actor} turned **${label}** ${d.op === "on" ? "on" : "off"}.`;
+    }
+    case "project.required_reviewers.updated": {
+      // Ruling 178: the whole list as it now stands; a clear says so.
+      if (d.rules.length === 0) return `${actor} cleared the required reviewers.`;
+      const named = d.rules.map((r) => `**${r.agentName} at ${r.stageName}**`).join(", ");
+      return `${actor} set the required reviewers to ${named}.`;
     }
     case "project.member.role_changed": {
       const target = resolveUserName(d.targetUserId) ?? "a member";
@@ -740,7 +755,7 @@ function collectAuditEntries(
                 a.subject_id, a.task_key, a.details_json, u.name AS actor_name
          FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
          WHERE ${parts.join(" AND ")}
-         ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?`,
+         ORDER BY a.occurred_at DESC, a.rowid DESC LIMIT ?`,
       )
       .all(...args, cap) as AuditRow[];
     auditEntries = rows.map((row) => ({
@@ -760,12 +775,17 @@ function collectAuditEntries(
     entry.text.toLowerCase().includes(q) ||
     (entry.taskKey ?? "").toLowerCase().includes(q);
 
+  // Each leg arrives newest-first from its own query, and `Array.sort` is
+  // stable (ES2019) — so a TIE must return 0 and keep that order. It used to
+  // tie-break on `b.id.localeCompare(a.id)`, and audit ids are 72 random bits
+  // (`newId`): two events stamped in the same millisecond rendered in either
+  // order, so the panel could say the wrong one happened last. Live
+  // (2026-09-12) that flipped "cleared the required reviewers" above the "set"
+  // it followed. Same reason the audit query tie-breaks on `rowid DESC`.
   return [...violations, ...auditEntries]
     .filter(matchesQ)
     .sort((a, b) =>
-      a.occurredAt === b.occurredAt
-        ? b.id.localeCompare(a.id)
-        : b.occurredAt.localeCompare(a.occurredAt),
+      a.occurredAt === b.occurredAt ? 0 : b.occurredAt.localeCompare(a.occurredAt),
     );
 }
 

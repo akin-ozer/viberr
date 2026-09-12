@@ -68,6 +68,32 @@ export function resolveStageRoles(
 }
 
 /**
+ * May a completion be ACCEPTED from this stage?
+ *
+ * Acceptance is the human authority at the workflow's last boundary, so it may
+ * only be exercised FROM that boundary: the resolved review stage, or any stage
+ * with a declared edge into the terminal one (a custom board may have several).
+ * A board with no terminal stage to reason about, and the terminal stage
+ * itself, answer true — their callers handle "already Done" idempotently.
+ *
+ * U36-12 (pass 36): this used to live only inside `acceptanceStageBlockedReason`,
+ * so the GitHub reconciler could not ask it — and told a human to "Accept the
+ * completion" on a task whose stage offers no Accept at all (live: HLC-14 at
+ * Agent Review after an out-of-band `gh pr merge`). One predicate, both readers.
+ */
+export function canAcceptFromStage(
+  stageId: string,
+  stages: readonly Pick<StageDef, "id">[],
+  workflow: readonly Pick<WorkflowBoundary, "from" | "to">[],
+): boolean {
+  const roles = resolveStageRoles(stages, workflow);
+  const terminalId = roles.terminalId ?? stages[stages.length - 1]?.id ?? null;
+  if (!terminalId || stageId === terminalId) return true;
+  if (workflow.some((w) => w.from === stageId && w.to === terminalId)) return true;
+  return stageId === roles.reviewId;
+}
+
+/**
  * A stage's DISPLAY name, or the raw id when the id resolves to no stage (a
  * reference to a renamed/removed stage). The one spelling every caller shares,
  * so the "unknown id → show the id" fallback can never diverge.

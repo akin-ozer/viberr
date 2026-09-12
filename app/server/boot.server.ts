@@ -32,6 +32,7 @@ import { startGithubReconcilePoller } from "./github/reconcile-poller.server";
 import { reapStaleWarmups } from "~/server/org/mcp-warmup.server";
 import { logger, writeFatalSync } from "./logging/logger.server";
 import { getBuildInfo, type BuildInfo } from "./ops/build-info.server";
+import { cachedToolchain, type Toolchain } from "./ops/toolchain.server";
 import {
   formatBytes,
   measureDataRootSpace,
@@ -128,6 +129,9 @@ type BootIntegrityFields = {
   users: number;
   build: BuildInfo;
   disk: { free: string; total: string; status: DiskStatus } | null;
+  /** Ruling 182: what this host can run, probed once here so the first health
+   *  request does not pay for it; the sandbox verdict also gets its own WARN. */
+  toolchain: Toolchain;
   /** F21-1 / ruling 140: absent on a healthy schema — see
    *  `projectionCheckGaps` (table-qualified CHECK gaps). */
   projectionSchemaDrift?: string[];
@@ -325,6 +329,9 @@ export function logBootIntegrity(db: DatabaseSync): void {
           status: disk.status,
         }
       : null,
+    // Ruling 182: resolved here, once, so the probe's cost lands in boot and
+    // the sandbox verdict is on the one line an operator reads after a deploy.
+    toolchain: cachedToolchain(),
   };
   // Named only when some are actually gone: a healthy boot has nothing to list,
   // and an empty `missingDirs: []` reads like a finding that isn't there.
