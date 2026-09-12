@@ -96,6 +96,51 @@ old → new reply (4.3), the picker's pre-click ineligibility (6.1), the suffixe
 ("Add GET /api/version") covered the rest: see REVALIDATION.md rows 2.1, 2.3, 3.3, 5.1, 5.3,
 6.2.
 
+## The second day (2026-09-12): two live-found defects, one ruling reversed
+
+Finishing the live checklist cost the pass its two hardest findings, and one of them
+reversed a ruling written the day before.
+
+**F36-10** — ruling 179's second half. Ruling 179 mints an external revision and sends the
+task back for re-review, and then neither half of the rework could happen: the reviewer's
+supporting checkout is a `--local` clone of the delivering tree, so the external commit was
+present only as `origin/<branch>` while HEAD stood on the delivering head — its contract
+said "PINNED to the delivered revision" and a sandboxed run could not move `.git` itself —
+and the rework, started from the stale local head, had its delivery refused as
+non-fast-forward. Fixed: a supporting checkout is detached at the active work revision (or
+discloses why it could not), and a CLEAN task-branch checkout strictly behind
+`origin/<branch>` is fast-forwarded; a diverged one is still left to a person, and the
+refresh now says which of unpushed / in sync / ahead / diverged it is rather than calling
+every task branch diverged.
+
+**F36-11 → F36-12 → ruling 185** — the Codex sandbox, removed. With the network off the CLI
+installs a seccomp filter that refuses every socket syscall, `AF_UNIX` included; libuv's
+synchronous spawn needs a socketpair, so `spawnSync`/`execSync` report `EPERM` *after the
+child has already run* and `npm ci` dies on esbuild's postinstall. No confined Codex run
+could run a gate. Ruling 184 disclosed it (and the reviewer's next verdict said, in its own
+words, that the environment limit "was not used as the content finding") — but it still
+recorded `request-changes`, because an evidence-bound reviewer cannot approve a gate it
+never ran, and the operator sent the deliverer back around. Rather than keep managing the
+sandbox's limits the owner removed it (Q36-14): **ruling 185 — every Codex run is
+`danger-full-access`**, the mode resolver, the probe, the refusal, the per-run sandbox row
+and `compose.yml`'s `seccomp=unconfined` are gone, and a withheld repo-write grant is
+ADVISORY on Codex, rendered as such on the editor, the matrix, the card and the run inputs.
+That also retires F36-1's whole class: the container is back on Docker's own seccomp
+profile. It was proven live end to end — HLC-19 ran through the controller in ~18 minutes
+with no sandbox and no sandbox failure, and the same reviewer profile that could not
+complete `npm ci` an hour earlier reported "The required `npm ci && npm run check` gate
+passed at this exact SHA".
+
+Two smaller ones rode along. **F36-13**: audit rows, notifications and retention pruning all
+tie-broke on a random id, so two events in the same millisecond rendered in either order —
+live, the activity feed put "cleared the required reviewers" above the "set" it followed,
+and retention could delete the newer of two notifications; every such order now tie-breaks
+on insertion order. **U36-13**: a pending schedule on a closed task now says it will be
+skipped, beside the control that already says the task is closed.
+
+Final gates: lint clean, typecheck clean, `npm test` 363 files / 6459 tests passed,
+`npm run e2e` 70 passed. Twelve PRs merged in `headlamp-clone` across the pass.
+
 ## Next
 
 Another model reviews PR #301.

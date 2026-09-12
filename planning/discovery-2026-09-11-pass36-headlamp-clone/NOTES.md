@@ -958,3 +958,60 @@ QUESTIONS.md; per-surface coverage in COVERAGE.md; screenshots in SCREENSHOTS.md
   19:45:57Z ("switched from Claude" disclosure); Commits card lists 1cc5726 apart (shot 103).
   The operator's branch refresh step reported honestly that origin holds a commit the
   workspace does not ("a plain push would be refused as non-fast-forward").
+
+## 2026-09-12 — the two live-found defects, the sandbox decision, and the last cycle
+
+The compose container was killed overnight when Docker Desktop stopped (exit 137, ~03:04Z);
+nothing had progressed since. Restarted it, rebuilt from the branch, and picked the pass up
+where it stopped: HLC-18 blocked on the packet "Resolve remote branch collision for
+`hlc-18-11aa`" — "Delivery was refused as non-fast-forward: remote head `1cc5726` is not in
+the local delivery (`2580893`)" (shot 104). That is F36-10 as the product shows it.
+
+- 09:32:39Z rebuilt image up. Ruling 184's probe answered on the real host:
+  `childProcesses {ok: false}` with the EPERM sentence, plus its own boot WARN. **The first
+  reading was wrong** — "the sandboxed child-process canary printed nothing usable" — and
+  chasing that found a defect in the probe I had just written: the canary answered with
+  `process.stdout.write`, which is ASYNC on a pipe, and inside the sandbox the flush at exit
+  never landed, so the probe would have reported a false `false` on every host. `writeSync(1, …)`
+  fixed it; the unit test pins the mechanism (RED-PROOFS).
+- 09:35Z answered the HLC-18 packet with option 3 ("Write your own directive"): keep PR #16
+  and the observer commit, rebase the local delivery onto `origin/hlc-18-11aa`, re-deliver.
+  The operator dispatched the developer at 09:36:06Z. Its run inputs read "origin/* refreshed;
+  HEAD is on the task branch and was left as it is (**update_branch_from_base owns a diverged
+  task branch**)" — the ruling-179 refresh leaving a genuinely diverged branch alone, which is
+  the negative half of the fix, live. (It also exposed U36-13's sibling: that one sentence
+  called EVERY task branch diverged, including one that matched origin exactly — now it says
+  which it is: unpushed / in sync / ahead / diverged.)
+- 09:40:48Z the rebase landed (`8b9a5b7` on `1cc5726` on `d7ca302`), 09:41:34Z the delivery
+  fast-forwarded onto PR #16. **The dead end is gone and the external revision survived.**
+- 09:41:37Z the reviewer's run inputs: "workspace **checked out at the revision under review
+  `8b9a5b7`**" — ruling 179's checkout half, live.
+- 09:46:59Z the reviewer's verdict carried ruling 184's disclosure exactly as designed:
+  "`npm ci && npm run check` was attempted, but the sandbox denied esbuild's child process
+  with EPERM …; the gate did not run, and this environment limitation **was not used as the
+  content finding**" — against the same reviewer's pre-fix verdict, which had made it the
+  blocking finding (shot 106). Its blocking finding this time was real content
+  (`docs/OBSERVER-DRIFT.md` out of scope).
+- 09:47–10:04Z **F36-12**: it still recorded `request-changes`, the operator moved the task
+  back to Building and re-dispatched the deliverer — which has full access, ran the gate
+  GREEN, and delivered the same code. One cycle later the reviewer approved, citing the
+  deliverer's green gate at the same SHA. Cost: one wasted rework cycle; shape: a verdict that
+  blocks on the environment sends the deliverer back around.
+- Owner Q36-13 → **Q36-14: remove the Codex OS sandbox entirely** ("I don't like codex sandbox
+  stuff let's remove that"). Ruling 185. Rulings 182 and 184 marked superseded, `compose.yml`
+  drops `security_opt`, the write family goes back to claude-only-enforced with
+  `codexRepoWriteAdvisory` rendering the Codex posture.
+- 10:36:21Z HLC-18 accepted and PR #16 merged (the eleventh merge).
+- 10:57Z–11:16Z **HLC-19 end to end through the controller with no OS sandbox**: created,
+  planned, developed, delivered, reviewed and merged in ~18 minutes, no sandbox failure
+  anywhere. The reviewer's verdict: "The required `npm ci && npm run check` gate **passed at
+  this exact SHA**" (shots 107–108). The container runs on Docker's own seccomp profile again
+  (`SecurityOpt: null`, `unshare -U` refused, and nothing cares).
+- 11:24:15Z the controller's check-in on the now-shipped HLC-19 fired `skipped-done`
+  ("Scheduled action skipped: HLC-19 is already Shipped — the scheduled run is moot"). The
+  controller had asked what would happen to it and could not tell from the page — U36-13,
+  fixed here.
+- The controller's own closing read of the trade, unprompted: "What it bought is real
+  independent verification and the end of the bounce-the-developer-for-an-infrastructure-failure
+  loop… What it costs is that the OS is no longer the thing holding a withheld grant… it means
+  the review agents' instructions are now load-bearing in a way they weren't yesterday."
