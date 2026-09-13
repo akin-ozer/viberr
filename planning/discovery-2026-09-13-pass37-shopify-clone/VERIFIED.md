@@ -629,3 +629,13 @@ the work is.
 **A number I checked instead of trusting.** The board badge in a 0.7-scale screenshot read as
 "34" against 15 task files. Read from the DOM it is `Board14`: 15 rows in `task_projections`, one
 archived, 14 active. The projection and the files agree; the screenshot did not.
+
+**And the record survived it.** Re-ran the files-are-truth comparison immediately after the
+crash — the strongest moment to run it, because a process that dies mid-write is exactly what
+atomic writes exist for. Every task's `title`, `stage`, `readiness` (against `stored_readiness`,
+not the derived column — the comparison that manufactured a false finding earlier today),
+`waiting`, `validation`, `branch` and `archived`, file against projection:
+
+```
+comparisons: 105   mismatches: 0
+```
