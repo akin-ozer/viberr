@@ -153,6 +153,42 @@ describe("controller mounts (ruling 107)", () => {
     expect(prompt).toContain("No org MCP servers are attached to you.");
     expect(prompt).not.toContain("No MCP servers are attached to you.");
   });
+
+  /**
+   * Ruling 191 (F37-13, live): the controller writes the profiles, knowledge
+   * bases and architecture that agents WITH a shell are measured against. Pass
+   * 37 it chose a pnpm + turbo monorepo, a root `Makefile` and a Docker Compose
+   * stack on a host with none of those, and chartered a required reviewer whose
+   * pass begins "clean checkout, `make up`, everything healthy". The reading was
+   * sitting in `instance_health` and it never asked — an inventory you must know
+   * to ask for is not a fact the planner has.
+   */
+  it("ruling 191: carries the agents' shell inventory without being asked", async () => {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+    });
+    const prompt = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: resolveControllerConfig(app.dataRoot),
+      mountedMcps: [],
+      unresolvedMcps: [],
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: remove the section and the planner is back to guessing.
+    expect(prompt).toContain("# Shell inventory (measured on this host, not a guess)");
+    expect(prompt).toContain("NOT installed: make, docker, pnpm, yarn, curl, python3, go.");
+    // It says whose shell it is: the controller has none of its own, and the
+    // line above this one already told it so.
+    expect(prompt).toContain("You have no shell yourself.");
+    expect(prompt).toContain(
+      "what any build, test or verification contract you write for them has to run on",
+    );
+  });
 });
 
 // ------------------------------------------------------------ ruling 121

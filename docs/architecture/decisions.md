@@ -4165,6 +4165,35 @@ by rewriting those paragraphs:*
     that genuinely reported $0.00 was observed, so 100% is earned there and is shown.
     (`insights-query.server.ts`, `insights-page.tsx`.)
 
+191. **Everyone who plans against the shell is told what the shell contains (owner,
+    2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
+    nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`
+    and a Docker Compose stack, wrote that into the project's architecture knowledge
+    base ("`make up` must: build the workspace, start Postgres + Redis, run every
+    service's migrations…"), and chartered a REQUIRED reviewer whose pass opens "Cold
+    start. Clean checkout of the task branch, `make up`, everything healthy" and ends
+    "Report `approve` only when the stack came up cold". On that host the reviewer could
+    not return anything but `request_changes` — and it did, twice, on a document-only
+    task the Code Reviewer had already approved, after which the coordinator sent the
+    DELIVERER back to edit a document that was never the problem. Agents rediscovered the
+    same absences one at a time: 75 `command not found` lines in a single pass
+    (`pnpm`, `corepack`, `make`, `curl`). Viberr had measured the inventory since ruling
+    182 — G36-2 asked it for exactly this, "what an agent's shell would actually find
+    here" — but the reading covered five tools (node, npm, git, python3, go), omitted
+    every one the build contract was written around, and was reachable ONLY through the
+    controller's opt-in `instance_health`, which it never called. The agents whose shell
+    it is could not see it at all, and neither could the operator. So: the probe grows
+    `make`, `docker`, `pnpm`, `yarn` and `curl` — the ones a run reaches for first and
+    cannot install — and the reading goes into the system prompt of every specialist run,
+    every operator run and every controller turn, unasked. The advice half is not
+    decoration: `npx` genuinely rescues an npm-published tool and nothing rescues one the
+    operating system was meant to provide, so the two must not read alike, and the
+    paragraph closes by telling a reviewer that an unrun check is not a pass and is not
+    the deliverable's fault. An inventory you must know to ask for is not a fact the
+    planner has.
+    (`toolchain.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
+    `controller-run.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

@@ -234,6 +234,12 @@ const HEALTH_REPLY = z.object({
     git: z.string().nullable(),
     python3: z.string().nullable(),
     go: z.string().nullable(),
+    // Ruling 191: the five a run reaches for and cannot install.
+    make: z.string().nullable(),
+    docker: z.string().nullable(),
+    pnpm: z.string().nullable(),
+    yarn: z.string().nullable(),
+    curl: z.string().nullable(),
     codexCli: z.string().nullable(),
     claudeAgentSdk: z.string().nullable(),
 

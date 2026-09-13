@@ -115,6 +115,10 @@ import {
   type StartRunInput,
 } from "./run-service.server";
 import { getRun, patchRun } from "./run-store.server";
+import {
+  cachedToolchain,
+  shellInventoryPrompt,
+} from "~/server/ops/toolchain.server";
 import type { DependencyReleasePayload } from "~/shared/dependencies";
 import {
   describeRunFailure,
@@ -3465,6 +3469,20 @@ export function buildOperatorSystemPrompt(
   // never-describe-the-folder-as-the-repository rule, so the confabulation is
   // closed even when the checkout is missing.
   parts.push(workspaceSection(workspace, isolatedWritableRoot));
+  // Ruling 191: the same shell inventory every agent you dispatch now gets.
+  // You do not run these commands yourself; you plan work that does, and you
+  // read verdicts that ran them. Live pass 37, a required reviewer chartered to
+  // `make up` a Docker stack on a host with neither could only ever request
+  // changes, and the coordinator answered each verdict by sending the
+  // DELIVERER back to edit a document that was never the problem.
+  parts.push(
+    "\n\n---\n" +
+      shellInventoryPrompt(cachedToolchain()).replace(
+        "## Shell inventory (measured on this host, not a guess)",
+        "# Shell inventory (measured on this host, not a guess)\n\n" +
+          "This is what the shell of every agent you dispatch contains.",
+      ),
+  );
   // Ruling 176: a server whose write tools an admin marked has them removed
   // from every operator run, on both backends, so it leaves the paragraph
   // below and a plain statement of what was removed replaces it.

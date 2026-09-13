@@ -30,6 +30,10 @@ import {
   resolveAgentCollab,
 } from "./agent-outcome.server";
 import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
+import {
+  cachedToolchain,
+  shellInventoryPrompt,
+} from "~/server/ops/toolchain.server";
 import { holdRefusal } from "~/shared/dependencies";
 import {
   resolveDeclaredStages,
@@ -3128,6 +3132,15 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
     }
   }
+  // Ruling 191: what this host's shell actually contains, before the agent
+  // plans anything that runs. Live pass 37 every run discovered the absences
+  // one exit-127 at a time — `pnpm`, `corepack`, `make`, `curl`, Docker, all
+  // missing, 75 `command not found` lines — and a required reviewer chartered
+  // to bring a Docker stack up could only ever request changes. The reading
+  // was already measured (ruling 182) and reachable ONLY through the
+  // controller's opt-in `instance_health`; the agents whose shell it is could
+  // not see it at all.
+  prompt += `\n\n${shellInventoryPrompt(cachedToolchain())}`;
   // P19-G0: the canonical state goes AFTER the workspace/delivery contract and
   // BEFORE the directive — the contract is what the agent may do, the anchor is
   // where the task actually stands, and the directive is this turn's focus. The

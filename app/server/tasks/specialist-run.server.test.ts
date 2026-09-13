@@ -2168,6 +2168,38 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("open a pull request");
   });
 
+  /**
+   * Ruling 191 (F37-13, live): every agent discovered its own shell one
+   * exit-127 at a time — `pnpm`, `corepack`, `make`, `curl`, Docker, 75
+   * `command not found` lines across one pass — while Viberr had measured the
+   * inventory since ruling 182 and offered it only through the controller's
+   * opt-in `instance_health`. The people whose shell it is now get it.
+   */
+  it("ruling 191: the prompt names what this host's shell has and has not", () => {
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+    });
+    // CANARY: drop the `shellInventoryPrompt` line and an agent plans a
+    // `make up` it cannot run, exactly as pass 37's board did.
+    expect(prompt).toContain("## Shell inventory (measured on this host, not a guess)");
+    expect(prompt).toContain("NOT installed: make, docker, pnpm, yarn, curl, python3, go.");
+    expect(prompt).toContain("npx <tool>");
+  });
+
+  it("ruling 191: a task with NO repository still gets the inventory", () => {
+    // A docs/advisory task runs commands too — and pass 37's live example was
+    // exactly that: a document-only task whose REQUIRED reviewer failed it for
+    // not bringing a Docker stack up.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      repo: null,
+      cloned: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+    });
+    expect(prompt).toContain("## Shell inventory (measured on this host, not a guess)");
+  });
+
   it("a failed checkout names the REAL reason and forbids the credential guess", () => {
     // Live-caught on a fresh instance. The server's clone hit its 60s ceiling on
     // a 55 MB repo, the run continued against an empty workspace, and this

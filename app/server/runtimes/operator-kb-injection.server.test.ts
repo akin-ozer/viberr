@@ -254,8 +254,11 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
     expect(prompt).toContain("skill omitted entirely");
     // C1 rides along: what was dropped is named, not merely truncated away.
     expect(prompt).toContain("**second-skill**");
-    // The whole prompt stays near one budget, not two.
-    expect(prompt.length).toBeLessThan(30_000);
+    // The whole prompt stays near ONE budget, not two: the base operator
+    // prompt (~6.7k, and it grows — ruling 191 added the shell inventory to it)
+    // plus the single 24k skill budget. Two budgets would land past 54k, so the
+    // bound separates the two cases with room for the base prompt to move.
+    expect(prompt.length).toBeLessThan(40_000);
   });
 });
 
@@ -543,5 +546,25 @@ describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)",
     expect(prompt).toContain("sanctioned");
     expect(prompt).toContain("`transition-to-done: human` is the RAW stage transition");
     expect(prompt).toContain("never narrate that you cannot accept while you hold that grant");
+  });
+});
+
+/**
+ * Ruling 191 (F37-13, live): the operator does not run these commands — it
+ * plans work that does and reads verdicts that ran them. Pass 37 a REQUIRED
+ * reviewer chartered to `make up` a Docker stack on a host with neither could
+ * only ever return request_changes, and the coordinator answered each verdict
+ * by sending the DELIVERER back to edit a document that was never the problem.
+ */
+describe("buildOperatorSystemPrompt — shell inventory (ruling 191)", () => {
+  it("carries what the agents it dispatches can actually run", () => {
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-shell-"));
+    const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot);
+    // CANARY: drop the section and an environmental verdict reads to the
+    // coordinator as a defect in the work.
+    expect(prompt).toContain("# Shell inventory (measured on this host, not a guess)");
+    expect(prompt).toContain("This is what the shell of every agent you dispatch contains.");
+    expect(prompt).toContain("NOT installed: make, docker, pnpm, yarn, curl, python3, go.");
+    expect(prompt).toContain("never treat one as the deliverable's fault");
   });
 });

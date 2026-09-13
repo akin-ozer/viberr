@@ -46,6 +46,10 @@ import {
   type ControllerConversation,
   type ControllerMessage,
 } from "./controller-conversations.server";
+import {
+  cachedToolchain,
+  shellInventoryPrompt,
+} from "~/server/ops/toolchain.server";
 import { gatherControllerContext } from "./controller-context.server";
 import {
   CONTROLLER_PROFILE_ID,
@@ -899,6 +903,25 @@ export function buildControllerSystemPrompt(
       "permission level, so use them to answer how this instance and its runs are really doing " +
       "instead of guessing.\n" +
       "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.",
+  );
+
+  // Ruling 191: the controller has no shell, but it writes the profiles, the
+  // knowledge bases and the architecture the agents that DO have one are
+  // measured against. Live pass 37 it chose a pnpm + turbo monorepo, a root
+  // `Makefile` and a Docker Compose stack, and chartered a required reviewer
+  // whose pass opens "clean checkout, `make up`, everything healthy" — on a
+  // host with none of pnpm, turbo, make or Docker. The reading existed
+  // (`instance_health`) and it never asked; an inventory you must know to ask
+  // for is not a fact the planner has.
+  parts.push(
+    "\n\n---\n" +
+      shellInventoryPrompt(cachedToolchain()).replace(
+        "## Shell inventory (measured on this host, not a guess)",
+        "# Shell inventory (measured on this host, not a guess)\n\n" +
+          "You have no shell yourself. This is what the agents you configure have, " +
+          "and what any build, test or verification contract you write for them has " +
+          "to run on.",
+      ),
   );
 
   parts.push(

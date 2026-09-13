@@ -773,3 +773,97 @@ The test is the **count of runs**, not the dollars: a delivery run that genuinel
 $0.00 *was* observed, so a 100% earned that way is real and is still shown. Proven red both
 ways — drop `&& costedDeliveryRuns > 0` and the query hands back `1`; hand the card
 `share ?? 1` and "100%" comes back on screen.
+
+## F37-13 · Nobody who plans against the shell is told what the shell contains — HIGH
+
+**What the host actually is.** Every agent on this instance runs inside the viberr
+container. Its entire toolchain:
+
+```
+make             ABSENT
+docker           ABSENT
+docker-compose   ABSENT
+pnpm             ABSENT
+yarn             ABSENT
+turbo            ABSENT
+python3          ABSENT
+go               ABSENT
+psql             ABSENT
+```
+
+`node`, `npm` and `git`. Nothing else.
+
+**What was built on top of it.** The controller chose a **pnpm + turbo** monorepo with a
+root **Makefile** and a **Docker Compose** stack, and wrote it into the project's
+architecture knowledge base:
+
+> - Local orchestration: Docker Compose, driven by a root `Makefile`.
+> - `make up` must: build the workspace, start Postgres + Redis, run every service's
+>   migrations…
+
+It then chartered the **Integration Verifier** — a *required* reviewer whose verdict gates
+acceptance — with this pass:
+
+> 1. Cold start. Clean checkout of the task branch, `make up`, everything healthy with no
+>    manual nudging. […]
+> Report `approve` only when the stack came up cold, the journey passed over real HTTP and
+> the failure injection behaved.
+
+On this host that reviewer **cannot ever approve anything**.
+
+**What it cost, live.**
+
+- 75 `command not found` lines across the pass: `pnpm`, `corepack`, `make`, `curl`, each
+  rediscovered by each agent that reached for it. 841 log lines mention `pnpm`, 272
+  mention `turbo`, 118 mention `docker`.
+- SHOP-7 — a **document-only** task, one file, owned path `docs/decisions/` — ran **7
+  verdict rounds**. The Code Reviewer approved revision `522e640`. The Integration
+  Verifier then requested changes on the *same* revision, and on the next one, both times
+  for the same reason:
+
+  > Mandatory Step 1 failed: `make up` returned `/bin/bash: line 1: make: command not
+  > found` (127), Docker was absent, and `http://localhost:8080/health` returned
+  > `ERR_CONNECTION_REFUSED`. Steps 2–5 could not run because the checkout has no services
+  > or compose stack.
+
+  The operator's response each time was to send the **deliverer** back to rework the
+  document. The document was never the problem.
+- The delivered repo carries a `Makefile` whose every target is a stub that exits 1, and a
+  `pnpm-lock.yaml` that nothing on this host can install from. The user's "one command to
+  bring it up" is, as committed, unreachable.
+
+**The viberr defect, stated precisely.** Viberr *had already measured this*. Ruling 182
+exists because G36-2 asked "what an agent's shell would actually find here", and
+`toolchain.server.ts` says so in its own header. Two things were wrong with it:
+
+1. **The inventory omitted everything that mattered.** It probed `node`, `npm`, `git`,
+   `python3`, `go`. Not `make`. Not `docker`. Not a package manager other than npm. Those
+   are precisely the tools an orchestration contract is written around, and there was no
+   way to ask about a tool not on the list.
+2. **Only the controller could reach it, and only by asking.** The reading is exposed
+   through `instance_health` (controller-only, opt-in) and `/resources/health`. It is in
+   **no agent prompt at all** — not the deliverer's, not the reviewer's, not the
+   operator's. `grep -rn "toolchain" app/server/runtimes/ app/server/tasks/` returned
+   nothing before this fix.
+
+I checked whether the controller consulted it: `select count(*) from run_log_lines where
+display_json like '%instance_health%'` → **0**. It never asked. That weakens "the
+incomplete list misled it" and strengthens the real point: **an inventory you must know to
+ask for is not a fact the planner has** — and had it asked, the answer would still not have
+mentioned `make` or `docker`, so the architecture would have come out the same.
+
+**Fix — ruling 191.** The probe grows `make`, `docker`, `pnpm`, `yarn`, `curl`. A shared
+`shellInventoryPrompt()` renders the present/absent split, and it is injected unasked into
+**every specialist run** (deliverers and reviewers), **every operator run** and **every
+controller turn**. Three details are deliberate:
+
+- The two failure modes do not read alike: `npx <tool>` genuinely rescues an npm-published
+  tool, and `make`/`docker`/`curl` "cannot be installed from here at all".
+- The paragraph closes by telling a reviewer that an unrun check is **not a pass** and
+  **not the deliverable's fault** — the exact inversion that cost SHOP-7 two rounds.
+- The runtimes that spawn the agent (`codexCli`, `claudeAgentSdk`) are excluded from the
+  list, with a test pinning that: naming them as shell tools invites an agent to drive its
+  own backend.
+
+Proven red four ways — delete the probe entries and the absences stop being named; delete
+each of the three injections and that surface's test fails.

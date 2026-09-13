@@ -33,6 +33,17 @@ export type Toolchain = {
   git: string | null;
   python3: string | null;
   go: string | null;
+  /** Ruling 191: the four a run reaches for before anything else and cannot
+   *  install when they are missing. `make` and `docker` drive nearly every
+   *  "one command to bring it up" contract; `pnpm` and `yarn` decide whether a
+   *  workspace's own lockfile can be honoured; `curl` is how a health check
+   *  gets made. Live pass 37: all five absent, 75 `command not found` lines,
+   *  and a required reviewer chartered to run a stack that cannot exist. */
+  make: string | null;
+  docker: string | null;
+  pnpm: string | null;
+  yarn: string | null;
+  curl: string | null;
   /** The pinned `@openai/codex` package — the CLI the Codex SDK spawns. */
   codexCli: string | null;
   /** The pinned `@anthropic-ai/claude-agent-sdk` package, which bundles the
@@ -131,6 +142,11 @@ const VERSION_COMMANDS: ReadonlyArray<readonly [keyof Toolchain, string, readonl
   ["git", "git", ["--version"]],
   ["python3", "python3", ["--version"]],
   ["go", "go", ["version"]],
+  ["make", "make", ["--version"]],
+  ["docker", "docker", ["--version"]],
+  ["pnpm", "pnpm", ["--version"]],
+  ["yarn", "yarn", ["--version"]],
+  ["curl", "curl", ["--version"]],
 ];
 
 const packageManifestSchema = z.object({
@@ -197,6 +213,11 @@ export function resolveToolchain(deps: ToolchainDeps = {}): Toolchain {
     git: versions.git ?? null,
     python3: versions.python3 ?? null,
     go: versions.go ?? null,
+    make: versions.make ?? null,
+    docker: versions.docker ?? null,
+    pnpm: versions.pnpm ?? null,
+    yarn: versions.yarn ?? null,
+    curl: versions.curl ?? null,
     codexCli: pinnedPackageVersion("@openai/codex"),
     claudeAgentSdk: pinnedPackageVersion("@anthropic-ai/claude-agent-sdk"),
   };
@@ -227,4 +248,74 @@ export function cachedToolchain(): Toolchain {
 /** Test-only: drop the cached resolution (the override, if any, still wins). */
 export function resetToolchainCacheForTests(): void {
   cached = null;
+}
+
+/**
+ * The shell tools a run can invoke, in the order a reader wants them — the
+ * runtimes (`codexCli`, `claudeAgentSdk`) are deliberately out: they are what
+ * SPAWNS the agent, not something the agent calls.
+ */
+const SHELL_TOOLS: ReadonlyArray<readonly [keyof Toolchain, string]> = [
+  ["node", "node"],
+  ["npm", "npm"],
+  ["git", "git"],
+  ["make", "make"],
+  ["docker", "docker"],
+  ["pnpm", "pnpm"],
+  ["yarn", "yarn"],
+  ["curl", "curl"],
+  ["python3", "python3"],
+  ["go", "go"],
+];
+
+/**
+ * Ruling 191: what a run's shell will and will not find, as a paragraph for
+ * the agent, the operator and the controller alike.
+ *
+ * Until this existed the reading was reachable only through the controller's
+ * opt-in `instance_health`, and the people whose shell it actually is — every
+ * delivering and reviewing agent — could not see it at all. Live pass 37 they
+ * discovered it one exit-127 at a time: 75 `command not found` lines, a
+ * monorepo committed around `pnpm` and `turbo`, a root `Makefile` nothing can
+ * run, an architecture built on Docker Compose, and a REQUIRED reviewer whose
+ * entire pass begins "clean checkout, `make up`, everything healthy" on a host
+ * with neither `make` nor Docker — so its verdict could only ever be
+ * `request_changes`, and the work went back for rework over it.
+ *
+ * The advice half matters as much as the inventory: `npx` genuinely rescues an
+ * npm-published tool, and nothing rescues one the operating system was meant
+ * to provide, so the two cases must not read alike.
+ */
+export function shellInventoryPrompt(tc: Toolchain): string {
+  const present: string[] = [];
+  const absent: string[] = [];
+  for (const [field, label] of SHELL_TOOLS) {
+    const version = tc[field];
+    if (version) present.push(`${label} ${version}`);
+    else absent.push(label);
+  }
+  const lines = [
+    "## Shell inventory (measured on this host, not a guess)",
+    "",
+    present.length > 0
+      ? `Present: ${present.join(", ")}.`
+      : "Present: nothing this probe recognises.",
+  ];
+  if (absent.length > 0) {
+    lines.push(
+      `NOT installed: ${absent.join(", ")}.`,
+      "",
+      "A missing command exits 127 (`command not found`). npm is here, so an " +
+        "npm-published tool can still be fetched with `npx <tool>`; anything the " +
+        "operating system provides — `make`, `docker`, `curl` — cannot be " +
+        "installed from here at all. Plan the work, and any verification you " +
+        "promise, around what is actually present. A step that calls an absent " +
+        "tool will not run, and saying so plainly is the honest outcome — never " +
+        "report an unrun check as a pass, and never treat one as the " +
+        "deliverable's fault.",
+    );
+  } else {
+    lines.push("", "Every tool this probe knows about is installed.");
+  }
+  return lines.join("\n");
 }
