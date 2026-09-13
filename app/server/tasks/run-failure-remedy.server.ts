@@ -9,6 +9,7 @@ import { formatClockUTC, utcDayKey,
 import { formatUsd, localNetworkFailureCode } from "~/shared/run-failure";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
+import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.server";
 
 /**
  * Ruling 130 (pass 34, F34-1 / F34-12 / Q34-7): the ONE home for
@@ -195,8 +196,20 @@ export function describeRunFailure(
       remedy = "Re-run it; if it hangs again, inspect the session for what it was waiting on.";
       break;
     case "session_missing":
-      reason = "The provider session this run tried to resume no longer exists.";
-      remedy = "Re-run it: a fresh session re-anchors on task.md and continues.";
+      // Ruling 221 (F37-41): two roads to one class, and the difference is
+      // what a human does next. A vanished session heals itself on the next
+      // fresh run; a session STORE that cannot be opened keeps failing every
+      // resume on this host until someone repairs or removes the file, so the
+      // sentence has to say which one this was.
+      if ((input.failure?.text ?? "").includes(SESSION_STORE_UNREADABLE_MARK)) {
+        reason =
+          "The provider's own session store on this host could not be opened, so this run could not resume its conversation.";
+        remedy =
+          "Re-run it: a fresh session re-anchors on task.md and continues. Every resume keeps failing until that store file is repaired or removed, so if this repeats, that file is the thing to fix.";
+      } else {
+        reason = "The provider session this run tried to resume no longer exists.";
+        remedy = "Re-run it: a fresh session re-anchors on task.md and continues.";
+      }
       break;
     default:
       reason = input.failure?.text

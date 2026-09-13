@@ -4662,6 +4662,28 @@ by rewriting those paragraphs:*
     position to state and a row that alarms on everything is a row nobody reads.
     (`resource-rows.tsx`.)
 
+221. **A provider store that cannot be OPENED is a session problem, not a credential one
+    (owner, 2026-09-13, pass 37; F37-41).** Ruling 212 taught viberr the Codex CLI's words for
+    a network fault. This is the same lesson for the CLI's own disk. After the host corrupted
+    a SQLite file under load, the CLI reported `failed to open thread history database ... (code:
+    26) file is not a database`. That matched nothing, fell through to `unknown`, and
+    `unknown`'s sentence is the credential one - so viberr told the owner to "review its
+    authentication and runtime configuration" and RECOMMENDED "Redirect with sharper guidance",
+    a rewritten directive, for a corrupt file on its own disk. The credential was fine and no
+    prompt could have helped: the file's first page was not a SQLite header at all. What made
+    it costly is that fresh runs kept working while every RESUME failed - which is precisely
+    the shape `session_missing` already names, and whose remedy, one fresh run re-anchored on
+    task.md, is already the right one. So an unreadable store classifies as `session_missing`,
+    and the two roads into that class are told apart where it matters to a person: a vanished
+    session heals itself on the next run, while a store that cannot be opened keeps failing
+    every resume until the file is repaired or removed, and the sentence says so. One shared
+    marker constant carries the distinction from the adapter to the remedy layer, so neither
+    side re-parses the provider's prose. The pattern is anchored on the STORE's own nouns, not
+    on "not a database" alone: an agent building a SQLite-backed service can print that
+    sentence out of its own work, and a run is not a session failure because the code it was
+    writing hit a bad file.
+    (`session-export.server.ts`, `codex-runtime.server.ts`, `run-failure-remedy.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

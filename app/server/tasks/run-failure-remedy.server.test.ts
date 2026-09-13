@@ -349,6 +349,46 @@ describe("describeRunFailure", () => {
     expect(d.remedy).toContain("no owner to bill");
     expect(d.options.map((o) => o.kind)).toEqual(["request_edit", "redirect"]);
   });
+
+  /**
+   * Ruling 221 (F37-41): `session_missing` now has two roads into it, and the
+   * difference is what a human does next. A vanished session heals itself on
+   * the next fresh run; a session STORE that cannot be opened keeps failing
+   * every resume on this host until the file is repaired, so the sentence has
+   * to say which one happened.
+   */
+  it("names the unreadable STORE rather than a vanished session (ruling 221)", () => {
+    const store = setupTestStore(ctx);
+    const d = describe_(store, {
+      role: "specialist",
+      agentHandle: "developer",
+      failure: {
+        kind: "session_missing",
+        text: "The Codex session could not be resumed — the CLI's own session store on this host could not be opened.",
+        facts: emptyRunFailureFacts("session_missing"),
+      },
+    });
+    // CANARY: drop the branch and a human reads "no longer exists" about a
+    // file that is right there and will break the next resume too.
+    expect(d.reason).toContain("session store on this host could not be opened");
+    expect(d.reason).not.toContain("no longer exists");
+    expect(d.remedy).toContain("repaired or removed");
+  });
+
+  it("keeps the vanished-session sentence for a vanished session (ruling 221)", () => {
+    const store = setupTestStore(ctx);
+    const d = describe_(store, {
+      role: "specialist",
+      agentHandle: "developer",
+      failure: {
+        kind: "session_missing",
+        text: "rollout not found",
+        facts: emptyRunFailureFacts("session_missing"),
+      },
+    });
+    expect(d.reason).toContain("no longer exists");
+    expect(d.remedy).not.toContain("repaired or removed");
+  });
 });
 
 /**

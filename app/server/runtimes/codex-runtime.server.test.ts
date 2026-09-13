@@ -950,6 +950,49 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.text).not.toContain("/data/codex/sessions");
   });
 
+  /**
+   * Ruling 221 (F37-41). Live on pass 37, after the host corrupted a SQLite
+   * file under load, the Codex CLI said its own thread-history database was
+   * `file is not a database`. That matched nothing, fell through to the auth
+   * branch, and viberr told the owner to "review its authentication and runtime
+   * configuration" — with "redirect with sharper guidance" as the RECOMMENDED
+   * remedy, for a corrupt file on this host's disk. Every resume failed on it
+   * while fresh runs kept working, which is the shape `session_missing` already
+   * names and whose remedy is already the right one.
+   */
+  it("a session store that cannot be OPENED classifies 'session_missing', not 'auth' (ruling 221)", async () => {
+    const reason = await classifyThrownFailure(
+      "internal error: failed to open thread history database: failed to open thread history DB at " +
+        "/data/runtimes/users/u_x/codex-home/thread_history_1.sqlite: error returned from database: " +
+        "(code: 26) file is not a database (code -32603)",
+    );
+    // CANARY: drop the SESSION_STORE_UNREADABLE_RE arm and this is `unknown`
+    // — which is what it WAS live, and `unknown`'s sentence is the credential
+    // one ("Review its authentication and runtime configuration"), the same
+    // fallthrough F37-32 found for a DNS failure.
+    expect(reason?.kind).toBe("session_missing");
+    expect(reason?.text).toContain("session store on this host could not be opened");
+    // The two things the old sentence got wrong, asserted as the opposite.
+    expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
+    expect(reason?.text).toContain("no rewritten directive changes it");
+    // And it says what IS true of this one and not of a vanished session:
+    // fresh runs still work, so the task is not dead.
+    expect(reason?.text).toContain("fresh runs still work");
+    // Redaction invariant: the store path never reaches the human sentence.
+    expect(reason?.text).not.toContain("/data/runtimes/users");
+  });
+
+  it("an agent's OWN corrupt database is not a session failure (ruling 221)", async () => {
+    // The clone this pass built is SQLite-backed. A run whose agent hit a bad
+    // file in its own work must not be reported as a session problem — which
+    // is why the pattern is anchored on the store's nouns, not on "not a
+    // database" alone.
+    const reason = await classifyThrownFailure(
+      "the migration failed: services/inventory/.data/inventory.sqlite: file is not a database",
+    );
+    expect(reason?.kind).not.toBe("session_missing");
+  });
+
   it("U35-11: a connection that failed before the provider answered classifies 'overloaded' with origin local and names this deployment", async () => {
     // Canary: delete the local-network arm and the sentence blames the
     // provider's own side (or, for `fetch failed`, falls to `unknown`).

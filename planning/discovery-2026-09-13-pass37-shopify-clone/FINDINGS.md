@@ -2229,3 +2229,52 @@ position to state, and a row that alarms on everything is a row nobody reads.
 
 Canary (proved red): render "" for the unreviewed case and the row goes back to saying nothing
 about a server three templates can rewrite the knowledge bases with.
+
+---
+
+## F37-41 · A corrupt file on viberr's own disk was reported as a credential problem, with "rewrite the prompt" recommended — HIGH
+
+**Found by reading a recovery packet I had to answer.** SHOP-3's Platform Architect run failed
+right after I answered its decision, and viberr opened this:
+
+> **Work stalled: pick a recovery path**
+> The Platform Architect agent run failed: Codex run failed: **Codex execution failed. Review
+> its authentication and runtime configuration.**
+> *Provider said:* `…failed to open thread history database: failed to open thread history DB at
+> /data/runtimes/users/<u>/codex-home/thread_history_1.sqlite: error returned from database:
+> (code: 26) file is not a database`
+> Recommended: **Redirect with sharper guidance** — re-prompt the specialist with a corrected
+> directive.
+
+The credential was fine. No directive could have helped. I checked the file: 76MB, and its first
+sixteen bytes are a b-tree page header, not `SQLite format 3`. The database's first page is gone.
+
+This is F37-32's lesson for a different surface. That finding taught viberr the Codex CLI's words
+for a *network* fault; this is the CLI's own *disk*. The text matched no arm, fell to `unknown`,
+and `unknown`'s sentence is the credential one.
+
+**What made it expensive is the part viberr could have got right for free.** Fresh runs kept
+working the whole time; only RESUMES failed, because only a resume opens the thread history. That
+is exactly the shape `session_missing` already names — "neither a credential problem nor a task
+failure; the honest recovery is a fresh run re-anchored on task.md" — and its remedy and packet
+options were already correct. Viberr had the right answer one branch away and took the wrong one.
+
+**Fix (ruling 221).** An unreadable store classifies as `session_missing`. The two roads into
+that class are then told apart where it matters to a person: a vanished session heals itself on
+the next fresh run, while a store that cannot be opened keeps failing **every** resume on this
+host until the file is repaired or removed. A single shared marker constant carries the
+distinction from the adapter to the remedy layer, so neither side re-parses the provider's prose
+twice.
+
+The pattern is anchored on the store's own nouns rather than on "file is not a database" alone,
+and that restraint has its own test: the clone this pass is building is SQLite-backed, so an
+agent hitting a bad file *in its own work* must not be reported as a session failure.
+
+Canaries (both red): remove the arm and the live text classifies `unknown`, whose sentence is the
+credential one; remove the remedy branch and a human reads "the session no longer exists" about a
+file that is right there and will break the next resume too.
+
+**Recovery.** I moved the corrupt file aside and answered the packet with what had actually
+happened; the CLI recreates it, resumes start fresh, and SHOP-3 resumed on the next run. The
+corruption itself is environment — the same host episode as F37-37 — and, as there, the finding
+is what viberr said about it.

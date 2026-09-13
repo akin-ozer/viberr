@@ -818,3 +818,31 @@ AssertionError: expected 'github-mcpHTTP · https://mcp.internal…'
 ```
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6588 tests passed**, `build` green.
+
+---
+
+## Ruling 221 — canaried on both sides of one shared constant, and on the restraint
+
+The classification and the sentence a human reads live in different modules, so each pins its
+own half, and they meet at one exported constant rather than at a duplicated regex:
+
+```
+# the classifier arm removed
+AssertionError: expected 'unknown' to be 'session_missing'
+# the remedy branch removed
+AssertionError: expected 'The provider session this run tried t…'
+  to contain 'session store on this host could not …'
+```
+
+The `unknown` in that first line is worth noting: it is what the live failure actually
+classified as, and `unknown`'s sentence is the credential one — the same fallthrough F37-32
+found for a DNS failure, reached by a different road.
+
+A third test pins the restraint rather than the behaviour: the clone this pass is building runs
+on `node:sqlite`, so a run whose agent hits `file is not a database` **in its own work** must not
+be reported as a session failure. That is why the pattern is anchored on the store's nouns
+(`thread history database`, `thread_history*.sqlite`) instead of on the error string alone — and
+without that test, the cheap version of this fix would quietly misreport every future migration
+bug in the clone as a broken agent session.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6592 tests passed**, `build` green.
