@@ -339,3 +339,32 @@ pr:
 So an approval cannot be laundered onto code nobody reviewed by pushing after the verdict, and
 a routine base refresh is not mistaken for smuggled work. This was the one part of the GitHub
 pipeline I most expected to find soft, and it is not.
+
+## Archive and restore — CORRECT
+
+Probed on a throwaway task (SHOP-8) so the real build was not disturbed.
+
+| step | result |
+|---|---|
+| archive as **viewer** | **403** "Your project role (viewer) cannot archive this task." |
+| archive as admin | 200 "SHOP-8 archived. Find it under Archived on the board." |
+| projection | `archived=1` |
+| the open decision packet | **withdrawn** — "the open 'Archive throwaway task SHOP-8' decision was withdrawn" |
+| dispatch an agent on it | **400** "SHOP-8 is archived — restore it before running an agent on it." (ruling 177's closure gate, the same sentence ruling 186 was modelled on) |
+| restore | 200 "SHOP-8 restored to Triage." · `archived=0` |
+
+The archive note states the consequences rather than gesturing at them: it leaves the board
+and the review queue, the record is kept, and it is reversible.
+
+Incidentally this also showed the operator behaving sensibly on a task it could see no point
+in: its first act was to open a decision packet titled "Archive throwaway task SHOP-8" rather
+than invent work for it.
+
+## Force-accept — the door, not the act
+
+No task reached the acceptance boundary with a failing verdict during the pass, so the act
+itself is unexercised (recorded honestly above). The **door** is verified by the RBAC matrix:
+`admin` reaches the acceptance ceremony (400, "needs the confirmation dialog"), while
+`maintainer`, `contributor` and `viewer` are each stopped at the role check with their own
+role named — "Your project role (maintainer) cannot force-accept past the review gate."
+That contrast is the proof the gate is a role gate and not an accident of ordering.
