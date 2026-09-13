@@ -5,6 +5,10 @@
 > dies. Source of truth: `app/server/runtimes/*`, `app/server/tasks/specialist-*.ts`,
 > `app/server/tasks/agent-*.ts`, `app/shared/capabilities.ts`, `app/server/seed/*`.
 > Verified against `main` @ `68b5480` (2026-09-01); §2.5 and §4.3 re-verified
+> Updated 2026-09-13 for rulings 191, 196, 198 and 199 (pass 37): every run's prompt carries
+> the measured shell inventory, the image ships make/curl/pnpm and deliberately not Docker,
+> a capped boot re-invoke says so instead of promising a turn, and a settled run's rollout
+> paths are re-pointed at the shared home so `thread/resume` can still find them.
 > 2026-09-02 against `pass32/implementation` @ `478bed0`. Updated 2026-09-02 for
 > ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §§2.1, 2.2, 2.3, 3.1, 3.5,
 > 3.6, 3.7 and gotcha 8 now describe the per-person credential principal, and the closing
@@ -124,8 +128,19 @@ alike. There is no fallback engine and no other account to fall back to.
   per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s is
   broken), only while the shared file still exists (a disconnect mid-run is not undone),
   and the run directory is deleted; a run a restart orphaned is finished the same way by
-  boot recovery before the operator is re-invoked. Resume is unchanged: the SDK reads the rollout through
-  the symlinked `sessions/`. `runCredentialFor` still names the SHARED home on
+  boot recovery before the operator is re-invoked. **Resume needs one more step, and this
+  paragraph used to say it did not** (F37-20, ruling 199): the CLI does not find a rollout by
+  walking `sessions/`, it looks up `threads.rollout_path` in its own state database — and what
+  it recorded there is the path it SAW, through the link, `…/runs/<runId>/sessions/…`. Deleting
+  the run directory therefore invalidates the index while leaving the file perfectly intact, so
+  every `thread/resume` answered "no rollout found" and Viberr passed that on as "the agent's
+  stored Codex session no longer exists". Measured live before the fix: 138 of 140 threads
+  unresumable, every one of their files present at the shared path. The settle now re-points
+  that run's threads at the shared path before removing the directory, and a boot pass repairs
+  any left from before — both fail-soft, parsing the vendor schema rather than asserting it.
+  Note what this does NOT change: `probeSessionContinuity`, the exporter and the retention
+  sweep were right all along, because the bytes really are in the shared tree; the index was
+  the only thing pointing at a path Viberr had deleted. `runCredentialFor` still names the SHARED home on
   `spec.env.CODEX_HOME`; the fork is the adapter's, so every path that builds a Codex
   spec (specialist, operator, controller, resume, scheduled, recovery) gets it.
 - `runCredentialFor(db, userId, backend)` builds what the run's child env carries: the
@@ -1051,7 +1066,16 @@ above is the create-seed value and never the runtime's answer for a missing gran
    pill and footer say "interrupted by a restart", Insights counts the run as stopped and
    leaves a never-started one out of the completion rate); one `runOperator({ trigger:
    "manual" })` per affected task (controller turns get a conversation note instead),
-   capped at 3 per task per 30 min via `run.recovery.reinvoked` audit rows. The orphans'
+   capped at 3 per task per 30 min via `run.recovery.reinvoked` audit rows. **The cap is
+   decided BEFORE the "Interrupted by a restart" note is written** (ruling 198, pass 37): the
+   note used to end "and the operator is re-invoked to decide what to do next" on every
+   orphaned task, including the ones already skipped, so a capped task carried a promise the
+   code had decided not to keep, kept `waiting: "agent"` with no agent alive, and nothing
+   revisited it — the only trace was a `logger.warn`. Live, SHOP-7 sat there for two hours
+   while the board and the review queue both said "agent working". A capped task now gets the
+   honest sentence (what Viberr decided, why, and that running the operator from the page is
+   the way on), its `waiting` settled off `agent` through the same `clearWaitingToHuman`
+   ruling 195 uses, and a notification to its owner. The orphans'
    run ids are swept too (ruling 174, §3.4): a Claude CLI leads its own group, so a
    server that died without shutting down did not take it along.
 1. `recoverUnreactedAgentRuns`: finished specialist runs on tasks still `waiting: agent`
