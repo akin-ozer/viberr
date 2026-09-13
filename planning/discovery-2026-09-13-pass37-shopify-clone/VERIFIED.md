@@ -380,6 +380,25 @@ So an approval cannot be laundered onto code nobody reviewed by pushing after th
 a routine base refresh is not mistaken for smuggled work. This was the one part of the GitHub
 pipeline I most expected to find soft, and it is not.
 
+## Engagements and secondary assignments — CORRECT
+
+Not a probe; this is what the board did on its own, read back off the canonical files:
+
+```
+SHOP-1  platform: infrastructure-engineer (delivers) + code-reviewer + integration-verifier
+SHOP-2  platform-architect (delivers)
+SHOP-6  platform-architect (delivers) + code-reviewer
+SHOP-7  platform-architect (delivers) + code-reviewer + integration-verifier
+```
+
+One delivering engagement per task and up to two SUPPORTING ones beside it, each
+verdict-capable, each engaged by the operator when its stage called for it and none of them
+displacing the deliverer. The deliverer runs at every stage (ruling 133) — SHOP-7's architect
+was re-prompted at Review and at Build without being re-engaged — while a supporting
+engagement never delivers: across the pass, every branch on GitHub belongs to a delivering
+profile and no reviewer has pushed a commit, which is F10-12's prompt branch holding in
+practice rather than only in its test.
+
 ## PR adoption (R16-1) — CORRECT
 
 The one GitHub path still unexercised at the end of the first day, probed deliberately.
