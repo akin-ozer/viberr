@@ -104,6 +104,7 @@ function approval(profileId: string): ReviewVerdict {
     result: "approve",
     reason: "looks right",
     at: "2026-09-11T09:30:00.000Z",
+    rounds: 1,
   };
 }
 

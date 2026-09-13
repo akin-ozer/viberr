@@ -521,3 +521,66 @@ its job on the exact shape it was written for.
 The "(242 on Codex)" clause is read off the rows, not written into the source. The instance is
 now 248 runs, 6 of them cost-reporting: exactly the shape that made ruling 190's guard
 insufficient, and the first card that has ever said so out loud.
+
+## Force-accept — the ACT, end to end (the pass's last unexercised surface)
+
+Recorded earlier as "the door, not the act": no task had reached the acceptance boundary with
+a failing verdict. SHOP-9 produced one for real, and the whole ceremony ran.
+
+**The dilemma was genuine, not manufactured.** SHOP-9 (contract freeze) owns
+`packages/contracts/**` and `docs/contracts.md`. Its Verify charter demands a cold-started
+stack, which SHOP-15 and SHOP-10 own. Code Reviewer approved revision `53b37f1`; the
+Integration Verifier blocked it twice on `make up`. The operator opened a `blocked` packet
+with two options — hold for the baseline (its own pick) or an admin override — and put it to
+the owner.
+
+**The confirmation dialog says what it is about to do**, which is the part that matters:
+
+| field | what it showed |
+|---|---|
+| DECISION | Admin override: accept current revision |
+| MERGES | **PR #7 · in review** into main |
+| BRANCH | `shop-9` is brought up to date with main first. If the base has moved, that merge commit is pushed to the branch and becomes the merge head. |
+| REVISION | 53b37f1a610b |
+| VERDICT | validation failing |
+| BYPASSING | This task's latest review requests changes on the current revision. Rework and re-review before accepting. |
+
+with "Admin override. The bypassed gate is recorded to the audit log." beside **Not yet** /
+**Force-accept SHOP-9**. The Confirm button's accessible name tracks the selected option
+("Confirm decision: Admin override: accept current revision"), so the button cannot promise one
+thing while the radio says another.
+
+**What actually happened, in order** (15:58:52 → 15:59:00):
+
+```
+transition  Decision: Admin override: accept current revision. + my note, verbatim
+github      Merged PR #7 into `main`.
+github      Deleted branch `shop-9` from GitHub. Its head was `53b37f1a610b`.
+completion  Human acceptance recorded. SHOP-9 → Done and the review PR was merged.
+            Bypassed: This task's latest review requests changes on the current revision;
+            Required reviewer Integration Verifier (project rule at Verify) has not approved
+            revision 53b37f1
+```
+
+`gh` agrees: PR #7 `MERGED`, merge commit `f0b6d909`, at 15:58:57Z. **Four merged PRs.**
+
+**The audit trail keeps the dialog's promise**, and names BOTH bypassed gates separately
+rather than summarising them:
+
+```
+task.acceptance.forced   {"bypassed":"This task's latest review requests changes on the
+  current revision. Rework and re-review before accepting. | Required reviewer Integration
+  Verifier (project rule at Verify) has not approved revision 53b37f1…","bypassedGates":[…]}
+task.transition          {"to":"done","boundary":"human","via":"accept_completion"}
+github.pr.merged         {"repo":"akin-ozer/shopify-clone","prNumber":7,"sha":"f0b6d909…"}
+github.branch.deleted    {"repo":"akin-ozer/shopify-clone","branch":"shop-9","sha":"53b37f1…"}
+github.branch_update.acceptance {"status":"already_current"}
+```
+
+**And the board widened on its own.** Within seconds SHOP-4 released itself:
+
+> Released: everything this task waited on is done (SHOP-9). The task can move again; the base
+> branch has changed since the hold, so the work re-reads it before continuing.
+
+— then Triage → Design with the Platform Architect engaged. The dependency engine did what the
+acceptance implied, with no human step in between.

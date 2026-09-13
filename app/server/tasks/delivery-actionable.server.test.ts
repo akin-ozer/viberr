@@ -567,7 +567,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
         kind: "delivered",
       },
       verdicts: verdict
-        ? [{ profileId: "reviewer", revisionId: "rev_1", headSha: REVIEWED, result: verdict, reason: "…", at: "2026-09-11T14:05:00.000Z" }]
+        ? [{ profileId: "reviewer", revisionId: "rev_1", headSha: REVIEWED, result: verdict, reason: "…", at: "2026-09-11T14:05:00.000Z", rounds: 1 }]
         : [],
     });
     writeTask(store.dataRoot, store.slug, { frontmatter, goal: "F36-6 probe." });

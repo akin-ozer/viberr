@@ -3525,7 +3525,7 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
           createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer", kind: "delivered",
         },
         verdicts: [
-          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z" },
+          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z", rounds: 1 },
         ],
         validation: "healthy",
         recommendations: opts.recs

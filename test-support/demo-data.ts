@@ -305,6 +305,7 @@ function fm(input: {
       result,
       reason: result === "approve" ? "Meets the spec." : "Needs changes.",
       at: input.updatedAt,
+      rounds: 1,
     });
     if (input.validation === "healthy") {
       verdicts = verdictReviewers.map((r) => mk(r.profileId, "approve"));

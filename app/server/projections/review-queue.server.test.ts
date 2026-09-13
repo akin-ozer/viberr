@@ -380,6 +380,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
             result: "request_changes",
             reason: "spec violation",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
       }),
@@ -425,6 +426,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
             result: "approve",
             reason: "looks good",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
       }),
@@ -968,6 +970,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     result,
     reason: "r",
     at: "2026-09-06T11:00:00.000Z",
+    rounds: 1,
   });
 
   function seed(workflow: typeof WORKFLOW = WORKFLOW) {

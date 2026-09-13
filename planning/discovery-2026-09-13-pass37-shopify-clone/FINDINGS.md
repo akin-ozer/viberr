@@ -1373,3 +1373,73 @@ and "undelivered" is derived from it, so a restart cannot drop it. The refusal c
 what viberr will do rather than what it hopes the agent will notice. Three canaries proven red,
 including the end-to-end one that unwires the completion hook — the helper's own test cannot
 prove its caller exists, so it does not claim to.
+
+## F37-24 · The escape hatch for a reviewer that cannot pass is keyed on the one signal that stops moving when the work gets stuck — HIGH
+
+**Provoked, then watched, on SHOP-9.** Its Verify charter requires a cold-started stack;
+SHOP-9 owns `packages/contracts/**` and `docs/contracts.md`, and the Makefile and services
+belong to SHOP-15 and SHOP-10. So the Integration Verifier's blocker is real and SHOP-9 is not
+allowed to fix it:
+
+> request_changes … `make up` exited 2 because [Makefile](Makefile:5) is still a placeholder,
+> and only `.gitkeep` exists under services/apps. Consequently migrations, real HTTP journey,
+> trace propagation, and failure injection could not run. … **No approval is possible without a
+> cold-started stack and integration evidence.**
+
+The deliverer answered honestly and committed nothing:
+
+> Re-anchored on `shop-9`; **no legitimate deficiency remains** within `packages/contracts/**`
+> or `docs/contracts.md`, so no new patch was made.
+
+The operator moved the task back to Verify and re-engaged the verifier **on the same
+revision**, which blocked again. That is the deadlock ruling 193 exists to escalate.
+
+**What the escalation signal read.** Ruling 193 escalates at `consecutiveRequestChanges ≥ 2`,
+and the counter was:
+
+```ts
+const revisions = new Set<string>();
+for (…) { if (v.result !== "request_changes") break; revisions.add(v.revisionId); }
+return revisions.size;
+```
+
+Verdicts are **last-write-wins per (profileId, revisionId)** (F10-15), so the second
+request_changes *replaced* the first. On the live file, after two objections:
+
+```
+verdicts:
+  code-reviewer        rev_zBpyBbteAvt1  request_changes
+  code-reviewer        rev_fHwMGQOVn_8i  approve
+  integration-verifier rev_fHwMGQOVn_8i  request_changes     ← ONE row, two reviews
+```
+
+`consecutiveRequestChanges(integration-verifier)` = **1**.
+
+**That is not a near miss; it is structural.** The counter can only exceed 1 when the deliverer
+minted a NEW revision — that is, when the work is *moving*. In a genuine deadlock the deliverer
+commits nothing, by definition, so no new revision ever appears and the count is pinned at 1
+forever. The rule fires in the case where a packet is least warranted (productive rework) and
+cannot fire in the case it was written for. My own ruling-193 test asserted this as correct
+behaviour — *"counts the REVISIONS, so a re-run on the same revision is still one objection"* —
+with a canary defending it.
+
+**What saved it this time was not the mechanism.** The operator opened the packet anyway, on
+its own reading:
+
+> **Blocked:** Verify blocked by out-of-scope stack baseline. Opened a decision packet for the
+> owner to resolve.
+
+Good judgement, on a good model, on this run. F37-14's original symptom — ten rework rounds on
+a one-file document — is what the same board looks like without it. A doctrine whose trigger
+cannot see the state it describes is a doctrine that works only when it is not needed.
+
+**Fix — ruling 204.** The verdict row stays last-write-wins (that model is right: a verdict
+judges a revision, and the latest judgement binds). What must survive the overwrite is the
+count of times this reviewer returned the same result on that revision: `rounds`, incremented
+in the upsert, summed across the trailing request_changes streak. A re-review that blocks an
+unchanged revision is now the second objection it plainly is; a re-dispatch that records no
+verdict still counts for nothing, which is the distinction ruling 193 was reaching for and
+missed by using revisions as its proxy. **Ruling 193's revision-counting is reversed, said so
+out loud, and re-ruled** — along with the two prose descriptions that taught the reader the old
+meaning (`get_task`'s field note and the turn doctrine), because a field whose description and
+behaviour disagree is the defect ruling 200(i) was about.

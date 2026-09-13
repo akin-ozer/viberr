@@ -1901,6 +1901,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
             result: "request_changes",
             reason: "the diff violates the spec",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "failing",
@@ -2881,6 +2882,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
             result: "approve",
             reason: "looks right",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy",
@@ -4649,6 +4651,7 @@ describe("pass 35: operator and task actions", () => {
               result: "request_changes",
               reason: "needs tests",
               at: "2026-09-06T09:30:00.000Z",
+              rounds: 1,
             },
           ],
           validation: "failing",
@@ -5016,6 +5019,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
             result: "approve",
             reason: "looked right then",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "changed",
@@ -5185,7 +5189,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5220,7 +5224,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5264,7 +5268,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5315,7 +5319,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5332,7 +5336,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       if (url.includes(`${REPO_PATH}/pulls/7`)) {
         await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
           parsed.frontmatter.verdicts = [
-            { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "request_changes", reason: "needs tests", at: "2026-08-19T10:30:00.000Z" },
+            { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "request_changes", reason: "needs tests", at: "2026-08-19T10:30:00.000Z", rounds: 1 },
           ];
         });
       }

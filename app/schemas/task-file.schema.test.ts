@@ -67,6 +67,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     result,
     reason: "",
     at: "2026-07-04T01:00:00.000Z",
+    rounds: 1,
   });
 
   it("requiredReviewers = supporting AND verdict-capable only", () => {
@@ -1133,6 +1134,7 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
     result: "approve",
     reason: "fine",
     at: "2026-09-06T19:00:00.000Z",
+    rounds: 1,
   };
 
   it("activeWorkRevision answers null for a discarded revision and the same object otherwise", () => {

@@ -4226,6 +4226,33 @@ by rewriting those paragraphs:*
     fails writes no second note — the first one already named the agent and the reason.
     (`task-actions.server.ts`.)
 
+204. **A deadlock counter may not be keyed on the thing that stops moving in a deadlock
+    (owner, 2026-09-13, pass 37; F37-24). Reverses ruling 193's revision-counting.**
+    Ruling 193 escalates when a reviewer's objection survives a rework
+    (`consecutiveRequestChanges` ≥ 2), and counted DISTINCT REVISIONS — a deliberate choice,
+    with a test defending it, so that a reviewer re-run on the same revision would not
+    escalate. Live on SHOP-9 that is exactly backwards. Its Verify charter demanded a
+    cold-started stack the task is not allowed to build (another task owns the Makefile and
+    the services); the deliverer answered "no legitimate deficiency remains within the owned
+    paths" and committed nothing; the operator re-engaged the verifier on the SAME revision and
+    it blocked again. Verdicts are last-write-wins per (profileId, revisionId) (F10-15), so the
+    second objection REPLACED the first and the counter read **1**. The count can only exceed 1
+    when the deliverer minted a new revision — that is, when the work is moving — so it fires
+    where a packet is least warranted and is pinned at 1 in the deadlock it was written for.
+    (The operator opened the packet anyway, on its own reading. That is a good model, not a
+    mechanism; F37-14's ten rework rounds are what the same board looks like without one.)
+    The verdict row keeps last-write-wins, which is right — a verdict judges a revision and the
+    latest judgement binds. What survives the overwrite now is `rounds` on the verdict:
+    incremented when the same reviewer returns the SAME result on the SAME revision, summed
+    across the trailing request_changes streak. A re-review that blocks an unchanged revision
+    is the second objection it plainly is; a re-DISPATCH that records no verdict still counts
+    for nothing, which is the distinction ruling 193 was reaching for and missed by using
+    revisions as its proxy. `get_task`'s field description and the turn doctrine were both
+    rewritten to teach the new meaning, because a field whose description and behaviour
+    disagree is ruling 200(i)'s defect.
+    (`task-file.schema.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
+    `operator-toolkit.server.ts`, `operator-run.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

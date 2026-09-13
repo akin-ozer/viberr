@@ -112,6 +112,7 @@ function rejectionVerdict(revisionId = "rev_1") {
     result: "request_changes" as const,
     reason: "standing rejection",
     at: "2026-07-04T01:00:00.000Z",
+    rounds: 1,
   };
 }
 
@@ -2489,6 +2490,7 @@ describe("resolvePacket kind matrix", () => {
             result: "approve",
             reason: "fine",
             at: "2026-09-06T19:00:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy",

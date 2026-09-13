@@ -864,6 +864,60 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
+   * Ruling 204 (F37-24, live on SHOP-9). The verdict row is last-write-wins per
+   * (profileId, revisionId) — F10-15's model, and right: a verdict judges a
+   * revision, and the latest judgement is the one that binds. What the overwrite
+   * destroyed was the COUNT of times this reviewer had blocked, which is the
+   * only evidence that the deliverer could not move. Live, the Integration
+   * Verifier blocked a revision, the deliverer reported it had nothing in scope
+   * to change and committed nothing, and the verifier blocked the same revision
+   * again: two objections, one row, and ruling 193's escalation counter read 1.
+   */
+  it("ruling 204: a second request_changes on the SAME revision is a second round, not a replacement", async () => {
+    writeReviewTask();
+    const reviewerInput = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId: "reviewer",
+      role: "Reviewer",
+      delivers: false,
+      workdir: null,
+      agentHandle: "reviewer",
+    };
+    const review = async (reply: string) => {
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput,
+        { id: runId, state: "finished" },
+      );
+    };
+
+    await review("Verdict: request_changes\n\n@operator the stack cannot start.");
+    expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(1);
+    expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
+
+    // Nothing changed in between: no new revision, no new head. The reviewer
+    // simply looked again and said the same thing.
+    // CANARY: write `rounds: 1` unconditionally (the pre-204 upsert) and this
+    // reads 1 — the deadlock signal ruling 193 escalates on stays flat forever.
+    await review("Verdict: request_changes\n\n@operator the stack still cannot start.");
+    const blocked = taskFile().parsed.frontmatter.verdicts;
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.rounds).toBe(2);
+    expect(blocked[0]?.result).toBe("request_changes");
+
+    // A DIFFERENT result is a fresh position, not another round of the same one.
+    await review("Verdict: approve\n\n@operator the blocker is gone.");
+    const approved = taskFile().parsed.frontmatter.verdicts;
+    expect(approved).toHaveLength(1);
+    expect(approved[0]?.result).toBe("approve");
+    expect(approved[0]?.rounds).toBe(1);
+  });
+
+  /**
    * R15-7 (owner ruling): a run whose profile cannot be resolved is fully
    * conservative. The RUN layer withholds its toolkit, but completion re-derived
    * the gates from `[]`, which the catalog defaults read as comment/ask/evidence

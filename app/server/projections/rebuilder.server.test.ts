@@ -735,6 +735,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
             result: "approve",
             reason: "Nothing to change.",
             at: "2026-08-06T09:01:00.000Z",
+            rounds: 1,
           },
         ],
       }),
@@ -817,6 +818,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     result: "approve" as const,
     reason: "looks good",
     at: "2026-08-06T01:00:00.000Z",
+    rounds: 1,
   };
 
   function seed(

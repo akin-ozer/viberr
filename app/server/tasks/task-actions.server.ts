@@ -3284,6 +3284,15 @@ export async function recordAgentCompletion(
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
         if (rev && reviewerProfileId) {
+          // Ruling 204: the overwrite keeps the latest verdict and would keep
+          // nothing else. A reviewer that returns the SAME result on the SAME
+          // revision has reviewed twice, and that is the only signal saying the
+          // deliverer could not move — precisely the case where no new revision
+          // is ever minted, so a count of distinct revisions stays at 1 forever.
+          const prior = parsed.frontmatter.verdicts.find(
+            (v) => v.profileId === reviewerProfileId && v.revisionId === rev.id,
+          );
+          const rounds = prior?.result === verdict ? prior.rounds + 1 : 1;
           parsed.frontmatter.verdicts = [
             ...parsed.frontmatter.verdicts.filter(
               (v) =>
@@ -3296,6 +3305,7 @@ export async function recordAgentCompletion(
               result: verdict,
               reason: (replyText ?? "").trim().slice(0, 2000),
               at: new Date().toISOString(),
+              rounds,
             },
           ];
         }

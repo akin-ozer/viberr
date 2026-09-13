@@ -2035,13 +2035,19 @@ export function consecutiveRequestChanges(
   profileId: string,
 ): number {
   const mine = fm.verdicts.filter((v) => v.profileId === profileId);
-  const revisions = new Set<string>();
+  let rounds = 0;
   for (let i = mine.length - 1; i >= 0; i -= 1) {
     const v = mine[i]!;
     if (v.result !== "request_changes") break;
-    revisions.add(v.revisionId);
+    // Ruling 204: ROUNDS, not distinct revisions. Live on SHOP-9 the Integration
+    // Verifier blocked the same revision twice — the deliverer had nothing it
+    // was allowed to change, because the blocker was another task's work — and
+    // the old count read 1, so the doctrine that exists to put exactly that
+    // deadlock in front of a human could not see it. The counter was keyed on
+    // the one signal that STOPS MOVING when the work gets stuck.
+    rounds += v.rounds;
   }
-  return revisions.size;
+  return rounds;
 }
 
 export function operatorSnapshot(

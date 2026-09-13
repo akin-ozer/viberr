@@ -129,6 +129,7 @@ function approval(revisionId = "rev_1", sha = "a".repeat(40)) {
     result: "approve" as const,
     reason: "clean",
     at: "2026-07-28T09:30:00.000Z",
+    rounds: 1,
   };
 }
 

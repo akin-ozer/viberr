@@ -849,6 +849,13 @@ export const reviewVerdictSchema = z
     result: z.enum(REVIEW_VERDICT_RESULTS),
     reason: z.string().default(""),
     at: z.string().min(1),
+    /** Ruling 204: how many times this reviewer has returned THIS result on
+     *  THIS revision. The verdict itself stays last-write-wins per
+     *  (profileId, revisionId) — F10-15's model, unchanged — but the count of
+     *  blocking rounds must not be destroyed by the overwrite, because a
+     *  reviewer re-blocking an UNCHANGED revision is the strongest evidence
+     *  there is that the deliverer cannot satisfy it. Absent reads 1. */
+    rounds: z.number().int().min(1).default(1),
   })
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;

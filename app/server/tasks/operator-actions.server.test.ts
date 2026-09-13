@@ -2071,6 +2071,7 @@ describe("operatorAcceptCompletion", () => {
             result: "approve" as const,
             reason: "looks right",
             at: "2026-07-25T09:30:00.000Z",
+            rounds: 1,
           },
         ],
       },
@@ -2160,6 +2161,7 @@ describe("operatorAcceptCompletion", () => {
             result: "approve" as const,
             reason: "looks right",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy" as const,
@@ -4014,7 +4016,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
         ],
         workRevision: rev,
         verdicts: [
-          { profileId: "reviewer", revisionId: rev.id, headSha: rev.headSha, result: "approve", reason: "ok", at: "2026-08-24T01:00:00.000Z" },
+          { profileId: "reviewer", revisionId: rev.id, headSha: rev.headSha, result: "approve", reason: "ok", at: "2026-08-24T01:00:00.000Z", rounds: 1 },
         ],
       },
       goal: file.parsed.goal,
@@ -4435,7 +4437,7 @@ describe("ruling 137: acceptance offers are bound to a revision and withdrawn on
       ];
       parsed.frontmatter.workRevision = rev;
       parsed.frontmatter.verdicts = [
-        { profileId: "reviewer", revisionId: rev.id, headSha, result: "approve", reason: "clean", at: "2026-09-04T10:05:00.000Z" },
+        { profileId: "reviewer", revisionId: rev.id, headSha, result: "approve", reason: "clean", at: "2026-09-04T10:05:00.000Z", rounds: 1 },
       ];
       parsed.frontmatter.validation = "healthy";
       parsed.frontmatter.branch = "vib-1-work";
@@ -4656,7 +4658,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
           { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
         ],
         verdicts: [
-          { profileId: "reviewer", revisionId: "rev_1", headSha: HEAD, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z" },
+          { profileId: "reviewer", revisionId: "rev_1", headSha: HEAD, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z", rounds: 1 },
         ],
         validation: "healthy",
         pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: HEAD, mergeable },
@@ -4925,7 +4927,13 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
   const head = "a".repeat(40);
 
   function writeVerdicts(
-    verdicts: { revisionId: string; result: "approve" | "request_changes"; at: string }[],
+    verdicts: {
+      revisionId: string;
+      result: "approve" | "request_changes";
+      at: string;
+      /** Ruling 204: blocking rounds this reviewer spent on THIS revision. */
+      rounds?: number;
+    }[],
   ): void {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -4955,6 +4963,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
           result: v.result,
           reason: "r",
           at: v.at,
+          rounds: v.rounds ?? 1,
         })),
       }),
       goal: "g",
@@ -4984,12 +4993,34 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
     expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
   });
 
-  it("counts the REVISIONS, so a re-run on the same revision is still one objection", () => {
-    // CANARY: count verdict rows instead of revision ids and this reads 2 —
-    // a retry of the same reviewer on the same revision would escalate.
+  /**
+   * Ruling 204 REVERSES this case, which ruling 193 decided the other way
+   * ("counts the REVISIONS, so a re-run on the same revision is still one
+   * objection"). Live on SHOP-9 that reading was exactly backwards: the
+   * Integration Verifier blocked on a stack another task owns, the deliverer
+   * reported it had nothing in scope to change and committed nothing, and the
+   * verifier blocked the SAME revision again. No new revision is ever minted in
+   * a deadlock — so a count of distinct revisions sat at 1 while the loop ran,
+   * and the doctrine written to put this in front of a human could not see it.
+   * The counter was keyed on the one signal that stops moving when the work
+   * gets stuck. Rounds, recorded on the verdict as it is overwritten, move.
+   */
+  it("ruling 204: a reviewer that blocks the SAME revision twice has objected twice", () => {
+    // CANARY: sum 1 per verdict row (or count revision ids, ruling 193's
+    // reading) and this reads 1 — the deadlock stays invisible.
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:20:00.000Z", rounds: 2 },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(2);
+  });
+
+  it("ruling 204: an interrupted re-review records no verdict, so it adds no round", () => {
+    // The distinction ruling 193 was reaching for and got wrong by proxy: a
+    // re-DISPATCH is not an objection. Only a completed review writes a verdict,
+    // and only a verdict carrying the same result increments `rounds` — so the
+    // count is objections, never retries.
     writeVerdicts([
       { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
-      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:20:00.000Z" },
     ]);
     expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
   });
