@@ -466,12 +466,13 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // $0.50 operator + $0.10 controller = $0.60 coordination, over $1.00
-    // reported → 60%; the cost-less run contributes to neither side.
+    // reported → 60%. Ruling 201: every run here reports, which is what makes
+    // the quotient a measurement — a single cost-less run and this share is
+    // suppressed instead (asserted in its own test below).
     insertRun(db, { kind: "operator", cost: 0.5 });
     insertRun(db, { kind: "controller", cost: 0.1 });
     insertRun(db, { kind: "primary", cost: 0.3 });
     insertRun(db, { kind: "reviewer", cost: 0.1 });
-    insertRun(db, { kind: "operator", cost: null });
     const g = getInsightsSummary(db, NOW).oversight;
     // CANARY: narrow the totals CASE back to `kind = 'operator'` and the share
     // drops to 50%, hiding the controller's spend inside the denominator.
@@ -512,7 +513,11 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     // CANARY: drop the `unobserved` guard from the share and this is 1 — the
     // card prints "100%" off a denominator delivery never entered.
     expect(g.coordination.share).toBeNull();
-    expect(g.coordination.unobserved).toBe("delivery");
+    // Ruling 201 replaced the `unobserved` enum with the counts the card reads:
+    // a side whose every run is cost-silent is the ruling-190 case, and it is
+    // legible here as uncosted === runs.
+    expect(g.coordination.uncosted.delivery).toBe(g.coordination.runs.delivery);
+    expect(g.coordination.uncosted.coordination).toBe(1);
     // The dollar figure that IS real survives: the card still reports it.
     expect(g.coordination.coordinationCostUsd).toBeCloseTo(4.0, 5);
     expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
@@ -521,8 +526,11 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     // the share comes back — including a real, earned 100%-adjacent figure.
     insertRun(db, { kind: "primary", cost: 1.0 });
     const seen = getInsightsSummary(db, NOW).oversight;
-    expect(seen.coordination.unobserved).toBeNull();
-    expect(seen.coordination.share).toBeCloseTo(0.8, 5);
+    // Ruling 201: one delivery run reporting is no longer enough — the
+    // operator run in this fixture still reports nothing, so there is still no
+    // share. Ruling 190 stopped here and printed 0.8.
+    expect(seen.coordination.share).toBeNull();
+    expect(seen.coordination.uncosted).toEqual({ delivery: 2, coordination: 1 });
 
     // A delivery run reporting a genuine $0.00 is an observation, not a gap:
     // the complement was seen, it was just free, so 100% is earned and shown.
@@ -531,7 +539,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertRun(free, { kind: "controller", cost: 2.0 });
     insertRun(free, { kind: "primary", cost: 0 });
     const g3 = getInsightsSummary(free, NOW).oversight;
-    expect(g3.coordination.unobserved).toBeNull();
+    expect(g3.coordination.uncosted).toEqual({ delivery: 0, coordination: 0 });
     expect(g3.coordination.share).toBeCloseTo(1, 5);
   });
 
@@ -552,7 +560,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     // CANARY: guard only the delivery side and this reads 0 — "coordination
     // costs you nothing", off runs that never reported a figure.
     expect(g.coordination.share).toBeNull();
-    expect(g.coordination.unobserved).toBe("coordination");
+    expect(g.coordination.uncosted.coordination).toBe(g.coordination.runs.coordination);
     expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
   });
 
@@ -564,7 +572,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertRun(db, { kind: "controller", cost: 2.0 });
     insertRun(db, { kind: "operator", cost: 1.0 });
     const g = getInsightsSummary(db, NOW).oversight;
-    expect(g.coordination.unobserved).toBeNull();
+    expect(g.coordination.runs.delivery).toBe(0);
     expect(g.coordination.share).toBeCloseTo(1, 5);
 
     // And the mirror: no coordination runs at all, so 0% is earned.
@@ -572,8 +580,108 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertProject(none, "gp");
     insertRun(none, { kind: "primary", cost: 2.0 });
     const g2 = getInsightsSummary(none, NOW).oversight;
-    expect(g2.coordination.unobserved).toBeNull();
+    expect(g2.coordination.runs.coordination).toBe(0);
     expect(g2.coordination.share).toBeCloseTo(0, 5);
+  });
+
+  /**
+   * Ruling 201 (F37-21). Ruling 190 asked whether a side reported ANYTHING and
+   * printed a confident percentage the moment it did. Cost is a Claude-only
+   * observation — the Codex result envelope carries tokens and no price — so on
+   * the live instance 209 of 215 runs reported nothing, and the rule's test was
+   * satisfied by the 6 that did. The share is a measurement only when every run
+   * on both sides reported one.
+   */
+  it("ruling 201: a partly-costed instance has no share, and the silent runs are counted and attributed", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // The live shape in miniature: a Codex fleet that never reports, one Claude
+    // controller that does, and one Claude deliverer — the single ordinary
+    // change that turned ruling 190's honest "n/a" into a confident lie.
+    insertRun(db, { kind: "operator", backend: "codex", cost: null });
+    insertRun(db, { kind: "operator", backend: "codex", cost: null });
+    insertRun(db, { kind: "operator", backend: "codex", cost: null });
+    insertRun(db, { kind: "controller", backend: "claude", cost: 12.0 });
+    insertRun(db, { kind: "primary", backend: "codex", cost: null });
+    insertRun(db, { kind: "reviewer", backend: "codex", cost: null });
+    insertRun(db, { kind: "primary", backend: "claude", cost: 36.0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: restore ruling 190's test (`costedDelivery === 0 || costedCoord
+    // === 0`) and this is 0.25 — "coordination is a quarter of the bill", off
+    // one of four coordination runs, with the other three unpriced.
+    expect(g.coordination.share).toBeNull();
+    expect(g.coordination.coordinationCostUsd).toBeCloseTo(12.0, 5);
+    expect(g.coordination.totalCostUsd).toBeCloseTo(48.0, 5);
+    expect(g.coordination.runs).toEqual({ delivery: 3, coordination: 4 });
+    expect(g.coordination.uncosted).toEqual({ delivery: 2, coordination: 3 });
+    // Named, not hedged: the card can say "5 on Codex" because the rows say so.
+    expect(g.coordination.uncostedByBackend).toEqual([{ backend: "codex", runs: 5 }]);
+
+    // And the complement: price every run and the share is a real measurement.
+    const all = ctx.makeDb();
+    insertProject(all, "gp");
+    insertRun(all, { kind: "operator", cost: 1.0 });
+    insertRun(all, { kind: "primary", cost: 3.0 });
+    const g2 = getInsightsSummary(all, NOW).oversight;
+    expect(g2.coordination.uncostedByBackend).toEqual([]);
+    expect(g2.coordination.share).toBeCloseTo(0.25, 5);
+  });
+
+  /**
+   * Ruling 201, the other half of the owner's call: suppressing the dollar
+   * share leaves the card with nothing to say on an ordinary instance, so it
+   * carries the share that CAN be measured. Tokens are the unit both backends
+   * report.
+   */
+  it("ruling 201: the token share is computed over final provider figures, and names the rows it leaves out", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "operator", backend: "codex", cost: null, inTok: 1000, outTok: 200 });
+    insertRun(db, { kind: "controller", backend: "claude", cost: 12.0, inTok: 500, outTok: 100 });
+    insertRun(db, { kind: "primary", backend: "codex", cost: null, inTok: 5000, outTok: 1000 });
+    insertRun(db, { kind: "reviewer", backend: "codex", cost: null, inTok: 2000, outTok: 200 });
+    // F35-1: a live estimate is not a total. Counted as excluded, not summed —
+    // on BOTH sides, because the numerator has its own guard and a fixture that
+    // only strands a delivery row would let that guard rot untested.
+    insertRun(db, {
+      kind: "primary",
+      backend: "codex",
+      cost: null,
+      inTok: 900_000,
+      outTok: 900_000,
+      usageFinal: 0,
+    });
+    insertRun(db, {
+      kind: "operator",
+      backend: "codex",
+      cost: null,
+      inTok: 900_000,
+      outTok: 900_000,
+      usageFinal: 0,
+    });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop the `usage_final = 1` guard from `coordination_tokens` and
+    // the numerator swallows 1.8M of estimate — a share of 181, printed as
+    // "18100%" — while the guarded denominator stays at 10k.
+    expect(g.coordination.tokenShare).toBeCloseTo(0.18, 5);
+    expect(g.coordination.coordinationTokens).toBe(1800);
+    expect(g.coordination.totalTokens).toBe(10_000);
+    expect(g.coordination.tokenless).toEqual({ delivery: 1, coordination: 1 });
+    // The dollar share is still suppressed on the same data: the two questions
+    // are independent, and only one of them has an answer here.
+    expect(g.coordination.share).toBeNull();
+  });
+
+  it("ruling 201: a side that landed NO provider figure has no token share either", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "operator", inTok: 1000, outTok: 200 });
+    insertRun(db, { kind: "primary", inTok: 5000, outTok: 1000, usageFinal: 0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop the `tokenBlind` test and this reads 1 — "coordination is
+    // all of the tokens", which is ruling 190's fake 100% in the other unit.
+    expect(g.coordination.tokenShare).toBeNull();
+    expect(g.coordination.tokenless).toEqual({ delivery: 1, coordination: 0 });
   });
 
   it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {

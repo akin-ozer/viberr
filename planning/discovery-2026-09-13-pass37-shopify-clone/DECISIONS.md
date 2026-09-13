@@ -60,3 +60,45 @@ clone's design alone.
 - The clone keeps `pnpm-lock.yaml` and `packageManager: pnpm@9.15.4` while the image ships
   pnpm 12. A repo pinning its own version reaches it with `npx pnpm@9.15.4`; the SHOP-6
   "Lockfile ownership" packet is now answerable either way, because a pnpm exists to run.
+
+## The coordination card, when only some runs report a cost (F37-21 → ruling 201)
+
+**Asked because the alternative was to pick a doctrine on the owner's behalf.** Ruling 190
+suppressed the share when a side reported *nothing*, and I had recorded that as fixed. Going
+back to ask *why* the live card was honest, the answer turned out to be an accident: the
+delivery fleet is entirely Codex, so it reports nothing at all. The moment one delivery run
+reports, ruling 190's test passes and the card divides by a denominator most runs never
+entered.
+
+**The background given.** Cost is a Claude-only observation — `costUsd` comes off the Claude
+result envelope, the Codex envelope carries tokens and no price. Live census at the time:
+
+```
+operator    codex    137 runs   0 costed    3.4M tokens
+primary     codex     40 runs   0 costed   90.5M tokens
+reviewer    codex     32 runs   0 costed   41.6M tokens
+controller  claude     6 runs   6 costed    9.1M tokens   $13.38
+```
+
+209 of 215 runs, 94% of the tokens, outside the figure. Add one Claude deliverer and the card
+reads **27%** off 6 of 142 coordination runs where the truth is likely north of 90%.
+
+**Four options offered.** (a) Suppress the percentage unless every run on both sides
+reported, and name the silent population by count and backend. (b) The same, plus a token
+share alongside — the unit both backends report. (c) Keep the percentage and state the counts
+in the sub-text. (d) Leave ruling 190 as it stands and record the partial case as accepted.
+
+**Owner chose (b).** The reasoning I had put behind (a) holds — with both sides partly silent
+the visible ratio is not even a bound — and (b) answers the objection that (a) leaves an
+ordinary instance with a permanently blank card. The token share is a different question,
+labelled as such on its face.
+
+**Consequences I own and have carried out.** Ruling 201. The dollar share is null unless
+every run reported; the card names the gap from per-side counts (`169 of 215 runs report no
+cost (169 on Codex)`) instead of the old hedge "reported by cost-reporting runs", which names
+no quantity and reads as "all". A second card carries coordination's share of tokens, with
+ruling 190's test applied at the token level and F35-1's excluded rows disclosed rather than
+suppressed on. Ruling 190's `unobserved` enum is gone — it could not express "partly" — and
+its distinction between *reported nothing* and *never ran* still decides both cards. Four
+canaries proven red, including one that was vacuous on its first writing: the fixture only
+stranded a delivery row, so dropping the numerator's `usage_final` guard changed nothing.

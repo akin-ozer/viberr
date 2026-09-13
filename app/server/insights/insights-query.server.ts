@@ -112,16 +112,41 @@ export interface OversightSummary {
   coordination: {
     coordinationCostUsd: number;
     totalCostUsd: number;
-    /** Ruling 190: the side that RAN and reported no cost at all, so the share
-     *  it would produce is an artefact of which backend bills rather than a
-     *  measurement — `"delivery"` (the live case: a Codex delivery fleet under
-     *  a Claude controller reads 100%), `"coordination"` (the mirror, which
-     *  reads 0% and claims coordination is free), or null when both sides were
-     *  observed or a side never ran at all. The card names it. */
-    unobserved: "delivery" | "coordination" | null;
-    /** coordination / total over cost-reporting runs; null when nothing
-     *  reported, and null when a side that ran reported nothing (ruling 190). */
+    /** Ruling 201 (F37-21): coordination / total, and null unless EVERY run on
+     *  BOTH sides reported a cost. Ruling 190 suppressed the share when a side
+     *  reported *nothing*; the partial case is the same defect and is the
+     *  ordinary one — cost is a Claude-only observation (the Codex result
+     *  envelope carries tokens and no price), so a mixed-backend instance
+     *  computes this over whichever runs happen to bill. With both sides
+     *  partly silent the visible ratio is not even a bound: unreported
+     *  delivery spend pushes it down and unreported coordination spend pushes
+     *  it up. */
     share: number | null;
+    /** Runs in scope per side, and how many of them reported no cost — the
+     *  population a share would have to ignore. The card reads the pair: all
+     *  of a side (the ruling-190 case, "no delivery run reported a cost") and
+     *  some of it (the ruling-201 case, "137 of 142") are different sentences
+     *  and the counts tell them apart. */
+    runs: { delivery: number; coordination: number };
+    uncosted: { delivery: number; coordination: number };
+    /** Those same cost-silent runs by backend, descending, zero counts
+     *  dropped. F35-1 counts the rows its token sums leave out so the card can
+     *  NAME them; cost gets the same treatment, and `agent_runs.backend` makes
+     *  it specific ("209 Codex runs report no cost") rather than the hedge
+     *  "cost-reporting runs", which names no quantity and reads as "all". */
+    uncostedByBackend: readonly { backend: string; runs: number }[];
+    /** Coordination's share of TOKENS processed — the unit both backends
+     *  report, so it survives the blind spot above. A different question from
+     *  the dollar share and never a substitute: a luna-max token and an opus
+     *  token are not the same money. Null when a side ran and contributed no
+     *  final provider figure at all (ruling 190's test, at the token level). */
+    tokenShare: number | null;
+    coordinationTokens: number;
+    totalTokens: number;
+    /** Runs whose provider usage never landed (F35-1: interrupted, or errored
+     *  with an empty usage block), per side — the token share's own excluded
+     *  population, named for the same reason. */
+    tokenless: { delivery: number; coordination: number };
   };
 }
 
@@ -179,6 +204,9 @@ const totalsSchema = z.object({
   costed_delivery_runs: z.number().nullable(),
   coordination_runs: z.number().nullable(),
   costed_coordination_runs: z.number().nullable(),
+  coordination_tokens: z.number().nullable(),
+  tokenless_delivery_runs: z.number().nullable(),
+  tokenless_coordination_runs: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
@@ -522,6 +550,15 @@ export function getInsightsSummary(
                 COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
                                    AND total_cost_usd IS NOT NULL
                                   THEN 1 ELSE 0 END), 0) AS costed_coordination_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                   AND usage_final = 1
+                                  THEN input_tokens + output_tokens END), 0) AS coordination_tokens,
+                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
+                                   AND usage_final = 0
+                                  THEN 1 ELSE 0 END), 0) AS tokenless_delivery_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                   AND usage_final = 0
+                                  THEN 1 ELSE 0 END), 0) AS tokenless_coordination_runs,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
@@ -546,23 +583,69 @@ export function getInsightsSummary(
   // was not observed, and the share is null. A side that never ran contributes
   // a real zero and is not a gap — an instance with no delivery runs at all
   // genuinely spent everything on coordination.
+  //
+  // Ruling 201 (F37-21): ruling 190 guards the EMPTY case and not the PARTIAL
+  // one, and the partial case is the ordinary one. Cost is a Claude-only
+  // observation — `costUsd` is assigned off the Claude result envelope, and the
+  // Codex envelope carries token counts with no price — so on a mixed-backend
+  // instance most runs never report. Live, at the time of the ruling: 209 of
+  // 215 runs, 94% of the tokens. Ruling 190's test passed the moment ONE run on
+  // each side reported, and the card would then divide 6 costed coordination
+  // runs by a denominator the other 137 never entered. So the share is a
+  // measurement only when every run on both sides reported one; short of that
+  // the ratio is not a bound in either direction, and the card says what it
+  // does not know and offers the token share instead.
   const coordinationCost = totals.coordination_cost ?? 0;
   const totalCost = totals.cost ?? 0;
   const deliveryRuns = totals.delivery_runs ?? 0;
   const costedDeliveryRuns = totals.costed_delivery_runs ?? 0;
   const coordinationRuns = totals.coordination_runs ?? 0;
   const costedCoordinationRuns = totals.costed_coordination_runs ?? 0;
-  const unobserved: "delivery" | "coordination" | null =
-    deliveryRuns > 0 && costedDeliveryRuns === 0
-      ? "delivery"
-      : coordinationRuns > 0 && costedCoordinationRuns === 0
-        ? "coordination"
-        : null;
+  const uncosted = {
+    delivery: deliveryRuns - costedDeliveryRuns,
+    coordination: coordinationRuns - costedCoordinationRuns,
+  };
+  const fullyCosted = uncosted.delivery === 0 && uncosted.coordination === 0;
+  // The card names the silent runs by backend rather than by a hedge. Derived
+  // from the rows, never from a list of backend names in the source: ruling
+  // 191's lesson is that advice which hardcodes what the environment contains
+  // goes stale the day the environment changes.
+  const uncostedByBackend = z
+    .array(z.object({ backend: z.string(), runs: z.number() }))
+    .parse(
+      db
+        .prepare(
+          `SELECT backend, count(*) AS runs FROM agent_runs ${and("total_cost_usd IS NULL")}
+           GROUP BY backend ORDER BY runs DESC, backend ASC`,
+        )
+        .all(...params),
+    );
+  // Tokens: the unit both backends report. Same suppression test as ruling 190
+  // applied one level down — a side that RAN and landed no provider figure at
+  // all was not observed, and its 0 is not a measurement. The incidental gap
+  // (F35-1: an interrupted run, or one that errored with an empty usage block)
+  // is COUNTED and named instead of suppressing the figure, because it is not
+  // systematic to one side the way the cost blind spot is.
+  const coordinationTokens = totals.coordination_tokens ?? 0;
+  const totalTokens = (totals.input_tokens ?? 0) + (totals.output_tokens ?? 0);
+  const tokenless = {
+    delivery: totals.tokenless_delivery_runs ?? 0,
+    coordination: totals.tokenless_coordination_runs ?? 0,
+  };
+  const tokenBlind =
+    (deliveryRuns > 0 && tokenless.delivery === deliveryRuns) ||
+    (coordinationRuns > 0 && tokenless.coordination === coordinationRuns);
   const coordination = {
     coordinationCostUsd: coordinationCost,
     totalCostUsd: totalCost,
-    unobserved,
-    share: totalCost > 0 && unobserved === null ? coordinationCost / totalCost : null,
+    share: totalCost > 0 && fullyCosted ? coordinationCost / totalCost : null,
+    runs: { delivery: deliveryRuns, coordination: coordinationRuns },
+    uncosted,
+    uncostedByBackend,
+    tokenShare: totalTokens > 0 && !tokenBlind ? coordinationTokens / totalTokens : null,
+    coordinationTokens,
+    totalTokens,
+    tokenless,
   };
 
   const outcomeRows = z.array(outcomeSchema).parse(

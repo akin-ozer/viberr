@@ -56,8 +56,14 @@ const FULL: InsightsSummary = {
     coordination: {
       coordinationCostUsd: 0.6,
       totalCostUsd: 1.2,
-      unobserved: null,
       share: 0.5,
+      runs: { delivery: 3, coordination: 2 },
+      uncosted: { delivery: 0, coordination: 0 },
+      uncostedByBackend: [],
+      tokenShare: 0.25,
+      coordinationTokens: 1_000,
+      totalTokens: 4_000,
+      tokenless: { delivery: 0, coordination: 0 },
     },
     clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
     traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
@@ -182,9 +188,11 @@ describe("InsightsPage", () => {
     expect(getByText("Coordination overhead")).toBeTruthy();
     // CANARY: put "operator runs spent" back and the card credits the whole
     // coordination figure to one of the two kinds that produced it.
-    // D04-U12: the denominator is named — cost-reporting runs only.
+    // D04-U12 named the denominator as "cost-reporting runs"; ruling 201 made
+    // that phrase unnecessary here, because this branch is reached only when
+    // the denominator IS every run.
     expect(
-      getByText("operator and controller runs spent $0.60 of $1.20 reported by cost-reporting runs"),
+      getByText("operator and controller runs spent $0.60 of $1.20; every run reported a cost"),
     ).toBeTruthy();
   });
 
@@ -201,10 +209,13 @@ describe("InsightsPage", () => {
         // could print "100%" here is the one under test.
         traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
         coordination: {
+          ...FULL.oversight.coordination,
           coordinationCostUsd: 4.34,
           totalCostUsd: 4.34,
-          unobserved: "delivery" as const,
           share: null,
+          runs: { delivery: 32, coordination: 5 },
+          uncosted: { delivery: 32, coordination: 0 },
+          uncostedByBackend: [{ backend: "codex", runs: 32 }],
         },
       },
     });
@@ -212,7 +223,53 @@ describe("InsightsPage", () => {
     expect(queryByText("100%")).toBeNull();
     expect(
       getByText(
-        "operator and controller runs spent $4.34; no delivery run reported a cost, so there is no share to take",
+        "operator and controller runs reported $4.34; no delivery run reported a cost (32 on Codex), so there is no share to take",
+      ),
+    ).toBeTruthy();
+  });
+
+  /**
+   * Ruling 201 (F37-21): the partial case. Ruling 190's sentence covers a side
+   * that reported NOTHING; the ordinary mixed-backend instance has a side that
+   * reported a LITTLE, and the old rule printed a confident percentage off it.
+   * The card must name the quantity — "209 of 215" is the fact that makes the
+   * suppression legible — and must still carry a real number, in tokens.
+   */
+  it("ruling 201: a partly-costed instance names how many runs are outside the figure, and the token share stands", () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      oversight: {
+        ...FULL.oversight,
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
+        coordination: {
+          coordinationCostUsd: 13.38,
+          totalCostUsd: 49.38,
+          // CANARY: hand back `share: 13.38 / 49.38` and "27%" appears — the
+          // figure ruling 201 exists to keep off the screen.
+          share: null,
+          runs: { delivery: 72, coordination: 143 },
+          uncosted: { delivery: 32, coordination: 137 },
+          uncostedByBackend: [{ backend: "codex", runs: 169 }],
+          tokenShare: 0.087,
+          coordinationTokens: 12_536_746,
+          totalTokens: 144_595_424,
+          tokenless: { delivery: 1, coordination: 0 },
+        },
+      },
+    });
+    expect(queryByText("27%")).toBeNull();
+    expect(
+      getByText(
+        "operator and controller runs reported $13.38; 169 of 215 runs report no cost (169 on Codex), so there is no share to take",
+      ),
+    ).toBeTruthy();
+    // The card that still says something true, in the unit both backends
+    // report — and it discloses its own excluded row.
+    expect(getByText("Coordination tokens")).toBeTruthy();
+    expect(getByText("9%")).toBeTruthy();
+    expect(
+      getByText(
+        "12.5M of 144.6M tokens processed; tokens, not dollars · 1 of 215 runs report no provider total",
       ),
     ).toBeTruthy();
   });

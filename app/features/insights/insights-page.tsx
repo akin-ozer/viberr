@@ -252,11 +252,15 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
           work it coordinated. "Coordination" is the operator AND the
           controller: both decide what the working agents do rather than doing
           the work, so the sub-text names both instead of implying the
-          controller's turns are free. Share over COST-REPORTING runs only;
-          null when nothing reported a cost (never a fake 0%) and null when
-          EITHER side ran and reported nothing (ruling 190 — never a 100% that
-          only means "delivery doesn't bill", never a 0% that only means
-          "coordination doesn't"). */}
+          controller's turns are free.
+
+          Ruling 190 → 201: the share is shown only when EVERY run on both
+          sides reported a cost. Anything less and the figure is a ratio of
+          whichever runs happened to bill — on a mixed-backend instance that is
+          a small minority, because only Claude's result envelope carries a
+          price. The suppressed case gives the dollars that ARE real and names
+          the silent runs by their count and their backend; the token card
+          beside it carries the share that survives the blind spot. */}
       <StatCard
         label="Coordination overhead"
         value={fmtPercent(g.coordination.share)}
@@ -264,19 +268,68 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         sub={
           g.coordination.totalCostUsd <= 0
             ? "no run has reported a cost yet"
-            : g.coordination.unobserved !== null
-              ? // Ruling 190 (F37-12): one side ran and reported nothing, so the
-                // share it would produce is an artefact of which backend bills.
-                // Give the figure that IS real and name the side that is missing.
-                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)}; no ${g.coordination.unobserved === "delivery" ? "delivery" : "operator or controller"} run reported a cost, so there is no share to take`
-              : // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
-                // only, the way "Total cost" above discloses its subset.
-                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
+            : g.coordination.share === null
+              ? `operator and controller runs reported $${g.coordination.coordinationCostUsd.toFixed(2)}; ${costSilence(g.coordination)}, so there is no share to take`
+              : // D04-U12 (pass 32): name the denominator. It is now every run
+                // in scope, which is what makes the quotient a measurement.
+                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)}; every run reported a cost`
+        }
+      />
+      {/* Ruling 201: the owner's call on F37-21 — suppress the dollar share
+          when it cannot be measured, and put a real number beside it rather
+          than a gap. Tokens are the unit BOTH backends report. Its own unit is
+          stated on the card, because a token is not a dollar and the models on
+          either side of this ratio are not priced alike. */}
+      <StatCard
+        label="Coordination tokens"
+        value={fmtPercent(g.coordination.tokenShare)}
+        icon="memory"
+        sub={
+          g.coordination.totalTokens <= 0
+            ? "no run has reported a provider token total yet"
+            : g.coordination.tokenShare === null
+              ? `operator and controller runs processed ${fmtTokens(g.coordination.coordinationTokens)} tokens; ${tokenSilence(g.coordination)}, so there is no share to take`
+              : `${fmtTokens(g.coordination.coordinationTokens)} of ${fmtTokens(g.coordination.totalTokens)} tokens processed; tokens, not dollars` +
+                (g.coordination.tokenless.delivery + g.coordination.tokenless.coordination > 0
+                  ? ` · ${fmtCount(g.coordination.tokenless.delivery + g.coordination.tokenless.coordination)} of ${fmtCount(g.coordination.runs.delivery + g.coordination.runs.coordination)} runs report no provider total`
+                  : "")
         }
       />
       </div>
     </section>
   );
+}
+
+/** Ruling 201: which runs left the dollar share unmeasurable, in the reader's
+ *  terms. A side that reported NOTHING and a side that reported SOME are
+ *  different facts and get different sentences; the backend clause comes off
+ *  the rows, so it names whatever actually went silent rather than a backend
+ *  this file guessed at. */
+function costSilence(c: OversightSummary["coordination"]): string {
+  const backends = c.uncostedByBackend
+    // Title-cased from the row, not matched against a list of backend names
+    // this file knows: ruling 191's lesson is that copy which hardcodes what
+    // the environment contains goes stale the day the environment changes.
+    .map((b) => `${fmtCount(b.runs)} on ${b.backend.charAt(0).toUpperCase()}${b.backend.slice(1)}`)
+    .join(" and ");
+  const silent = c.uncosted.delivery + c.uncosted.coordination;
+  const total = c.runs.delivery + c.runs.coordination;
+  const whole =
+    c.runs.delivery > 0 && c.uncosted.delivery === c.runs.delivery
+      ? "no delivery run reported a cost"
+      : c.runs.coordination > 0 && c.uncosted.coordination === c.runs.coordination
+        ? "no operator or controller run reported a cost"
+        : null;
+  const counted = whole ?? `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost`;
+  return backends ? `${counted} (${backends})` : counted;
+}
+
+/** The same sentence for the token share, whose gap is a side that landed no
+ *  provider figure at all (F35-1's excluded rows, concentrated on one side). */
+function tokenSilence(c: OversightSummary["coordination"]): string {
+  return c.runs.delivery > 0 && c.tokenless.delivery === c.runs.delivery
+    ? "no delivery run reported a provider token total"
+    : "no operator or controller run reported a provider token total";
 }
 
 /** Is `iso` strictly newer than `thanIso`? False when either is missing or

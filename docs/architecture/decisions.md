@@ -4416,6 +4416,40 @@ by rewriting those paragraphs:*
     `run-recovery.server.ts`, `user-homes.server.ts`, `task-actions.server.ts`,
     `operator-run.server.ts`, `runbook.md`, `deployment.md`.)
 
+201. **A share is a measurement only when every run it claims to describe reported one;
+    short of that, the card says so and offers the unit both backends DO report (owner,
+    2026-09-13, pass 37; F37-21).** Ruling 190 guards the EMPTY case — a side that ran and
+    reported nothing — and its test is satisfied the moment ONE run on each side reports.
+    The partial case is the same defect and it is the ORDINARY one, because cost is a
+    Claude-only observation: `costUsd` is assigned off the Claude result envelope, and the
+    Codex envelope carries token counts with no price. On the live instance when this was
+    written, 209 of 215 runs and 94% of the tokens reported no dollar figure; the card was
+    honest only because the delivery fleet happened to be silent *entirely*. Put one Claude
+    deliverer on that instance — an ordinary act — and the card divides 6 costed
+    coordination runs by a denominator the other 137 never entered and prints a confident
+    **27%** where the truth is likely north of 90%. That is worse than ruling 190's 100% in
+    one specific way: a degenerate quotient can be spotted by noticing it is degenerate,
+    and this one varies with the data and is wrong anyway. It is not even a bound —
+    unreported delivery spend pushes the ratio down, unreported coordination spend pushes
+    it up. So the dollar share is null unless EVERY run on both sides reported a cost, and
+    the suppressed card gives the dollars that are real plus the count and the BACKEND of
+    the runs that are not ("169 of 215 runs report no cost (169 on Codex)") — F35-1 already
+    counts the rows its token sums leave out so the card can name them, and `agent_runs.backend`
+    makes the same disclosure specific here. The hedge it replaces, "reported by
+    cost-reporting runs", names no quantity and reads as "all". Suppression alone would
+    leave an ordinary instance with a permanently blank card, so the owner's call pairs it
+    with a second card: **coordination's share of TOKENS**, the unit both backends report,
+    labelled as tokens on its face because a luna-max token and an opus token are not the
+    same money. The token share carries ruling 190's test at its own level — a side that
+    ran and landed no final provider figure at all has no token share either — and it
+    discloses F35-1's excluded rows rather than suppressing on them, because that gap is
+    incidental (an interrupted run) rather than systematic to one backend.
+    **Ruling 190 is amended, not reversed:** its distinction between *reported nothing* and
+    *never ran* still decides both cards, and a side that never ran still contributes a real
+    zero. What goes is its `unobserved` enum, which could not express "partly"; the card now
+    reads per-side run and uncosted counts and writes the sentence from them.
+    (`insights-query.server.ts`, `insights-page.tsx`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

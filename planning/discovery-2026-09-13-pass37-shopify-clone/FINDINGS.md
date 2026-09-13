@@ -1149,3 +1149,76 @@ skipped whole, a path is only moved onto a file that exists, and a live run keep
 Proven red both ways — drop the settle call and the recorded path still points into the removed
 home; drop the in-flight guard and the sweep re-points a running agent's thread out from under
 it.
+
+## F37-21 · Ruling 190 guards the empty case and not the partial one, so the coordination share is a ratio of whatever happened to be visible — med
+
+**Where this came from.** Not from a screen. F37-12 is fixed and the live card is honest
+today; I went back to it to check *why* it is honest, and the answer turned out to be an
+accident of this instance rather than the rule doing its job.
+
+**The census, now, on the running instance** (`agent_runs`, whole instance):
+
+```
+kind        backend  runs  costed  cost      tokens
+----------  -------  ----  ------  --------  -----------
+operator    codex    137   0       0.0         3,417,466
+primary     codex     40   0       0.0        90,476,360
+reviewer    codex     32   0       0.0        41,582,318
+controller  claude     6   6       13.3783     9,119,280
+```
+
+209 of 215 runs — 97% of the runs and 94% of the tokens — report no dollar figure at all.
+That is not viberr dropping data: `costUsd` is assigned on the Claude result envelope only
+(`wire-format.server.ts:363,372`), and the Codex envelope carries token counts with no price.
+**Cost is a Claude-only observation**, and any instance that mixes backends — which is the
+configuration viberr is built for — has a partially-observed cost picture by construction.
+
+**What ruling 190 actually tests.** The guard is all-or-nothing per side:
+
+```ts
+deliveryRuns > 0 && costedDeliveryRuns === 0        ? "delivery"
+: coordinationRuns > 0 && costedCoordinationRuns === 0 ? "coordination"
+: null
+```
+
+So the share is suppressed when a side reported **nothing**, and printed with full confidence
+the moment a single run on each side reports **something**. Today's card is in the first case
+only because the delivery fleet is *entirely* Codex. Coordination is already in the second:
+142 coordination runs, **6** of them costed, and the card's healthy branch would happily
+divide with them.
+
+**The reachable failure.** Put one Claude deliverer on this instance — an ordinary act, no
+misconfiguration — and nothing else changes. Say the Claude deliverers report $36 across the
+runs they cover. The card computes `13.38 / 49.38` and prints:
+
+> **27%** — Coordination overhead
+> *operator and controller runs spent $13.38 of $49.38 reported by cost-reporting runs*
+
+The 137 operator runs are in neither number. At the controller's own observed rate
+(~$2.23/run) they would be several hundred dollars, and the true share would be north of 90%.
+The card would be telling a supervisor that coordination is a quarter of the bill while it is
+in fact most of it — and it would be telling them that in the same confident typography it
+uses for a figure it actually measured.
+
+**Why the existing sub-text does not rescue it.** "reported by cost-reporting runs" is a
+hedge that names no quantity, so it reads as a synonym for "all runs". It is also the *only*
+hedge: the headline is a bare percentage. F37-12's own paragraph on this stands unchanged —
+"the number is what gets read".
+
+**Why this is not F37-12 again.** F37-12 was a quotient of 1 that no sequence of events could
+have changed. This is a quotient that *varies* with the data and is wrong anyway, which is
+worse in one specific way: it cannot be spotted by noticing that the number looks degenerate.
+It is also not a bound — with both sides partially observed, unreported delivery spend pushes
+the share down and unreported coordination spend pushes it up, so the visible ratio is not
+even a floor or a ceiling. It is a ratio of the observed subset, presented as a ratio of the
+work.
+
+**Ruling 190 is not being reversed.** Its test — *reported nothing* versus *never ran* — is
+right and stays. What it is missing is that "observed" is not binary per side: the population
+the share claims to describe and the population it is computed from can differ by 97% without
+the rule noticing. The amendment is about that gap, and the fix needs the owner's call on
+which of three shapes the card should take (see DECISIONS).
+
+**Viberr already holds the fact it needs to say this well.** `agent_runs.backend` is on every
+row, so the card can name the excluded population precisely — "209 Codex runs report no cost"
+— rather than gesturing at "cost-reporting runs".
