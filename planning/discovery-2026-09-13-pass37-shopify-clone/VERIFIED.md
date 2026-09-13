@@ -380,6 +380,39 @@ So an approval cannot be laundered onto code nobody reviewed by pushing after th
 a routine base refresh is not mistaken for smuggled work. This was the one part of the GitHub
 pipeline I most expected to find soft, and it is not.
 
+## The audit trail against its own effects — CORRECT, 5 families, 0 unbacked claims
+
+The technique that found F37-19 was: *the audit says it re-invoked the operator — did a run
+start?* It didn't. So I ran that question over every audit family that CLAIMS an effect, on the
+whole pass's trail.
+
+| audit action | claimed | effect checked | unbacked |
+|---|---|---|---|
+| `runtime.run.started` | 155 | a row in `agent_runs` with that id | **0** |
+| `task.agent.run_started` | 48 | `details.runId` names a real run | **0** |
+| `task.transition` | 39 | a `**Transition:**` timeline event | **0** |
+| `task.goal.updated` | 15 | a "goal / acceptance criteria were edited" note | **0** |
+| `github.delivery.operator` | 18 | a push, a PR open, or a stated refusal | **0** |
+
+Two of those needed the comparison sharpened before they meant anything, and both sharpenings
+are the point:
+
+- **`task.transition`** looked short by 6 events until I noticed that a packet resolution also
+  writes a `transition`-TYPE timeline event ("**Decision:** answered with a custom directive.
+  Operator re-engages with it.") without being a stage move. Counting only entries that start
+  `**Transition:**` makes SHOP-6 read 14/14 and SHOP-7 15/15. The one genuine difference is
+  SHOP-1's move to Done, which is audited as `{"to":"done","via":"accept_completion"}` and
+  recorded in the timeline as something better than a transition note: *"Human acceptance
+  recorded. SHOP-1 transitioned to **Done** and the review PR was merged."*, beside "Merged
+  **PR #1** into `main`" and "Deleted branch `shop-1`".
+- **`github.delivery.operator`** looked short by 5 until I stopped assuming every delivery is a
+  push: 13 `Pushed …`, 4 `Opened **PR #n** for review`, and one honest refusal — *"No pull
+  request was opened for SHOP-7: PR #2 was closed without merging"*. 18 for 18.
+
+Also visible in that scan, and left there deliberately: the two `**Work lost:**` events written
+by the WRONG first version of ruling 187, before I reverted it. They are part of this record
+now, and `VALIDATION.md` says whose fault they are.
+
 ## Engagements and secondary assignments — CORRECT
 
 Not a probe; this is what the board did on its own, read back off the canonical files:
