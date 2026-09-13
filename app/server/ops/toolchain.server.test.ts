@@ -208,3 +208,33 @@ describe("shellInventoryPrompt (ruling 191)", () => {
     expect(text).not.toContain("claudeAgentSdk");
   });
 });
+
+/**
+ * Ruling 196 (owner, pass 37): the image ships the three tools an agent reaches
+ * for first and cannot install for itself. Ruling 191 stopped agents
+ * rediscovering the gap one exit-127 at a time; this closed the cheap part of
+ * it. A unit test cannot inspect a built image, so it pins the Dockerfile —
+ * which is the artifact that changed, and deleting the line makes this red.
+ */
+describe("ruling 196: the runtime image installs what a run reaches for", () => {
+  const dockerfile = (): string =>
+    readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
+
+  it("installs make, curl and a pinned pnpm", () => {
+    const text = dockerfile();
+    expect(text).toMatch(/apt-get install -y --no-install-recommends make curl/);
+    // Pinned, not `pnpm@latest`: an image whose package manager changes under
+    // a rebuild is a toolchain nobody measured.
+    expect(text).toMatch(/npm install -g pnpm@\d+\.\d+\.\d+/);
+  });
+
+  it("does NOT install docker, and says why", () => {
+    const text = dockerfile();
+    // CANARY: add a docker install here and this fails. The daemon socket is a
+    // posture change (an agent holding it controls every container on the
+    // host), and ruling 196 deliberately left it out; the shell inventory tells
+    // every run that a Compose stack cannot come up in this image.
+    expect(text).not.toMatch(/install[^\n]*\bdocker(-ce|\.io)?\b/);
+    expect(text).toMatch(/docker-in-docker is a posture change/);
+  });
+});

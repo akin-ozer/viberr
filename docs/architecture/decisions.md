@@ -4273,6 +4273,22 @@ by rewriting those paragraphs:*
     packet's own owner.
     (`operator-run.server.ts`.)
 
+196. **The image ships `make`, `curl` and a pinned `pnpm`; Docker stays out (owner,
+    2026-09-13, pass 37; answers F37-13's other half).** Ruling 191 stopped agents
+    rediscovering the toolchain one exit-127 at a time. This closes the part of the gap
+    that is cheap to close: the three a run reaches for first and cannot install for
+    itself. `pnpm` comes from npm, not corepack — Node unbundled corepack and pass 37
+    logged `corepack: command not found` beside the pnpm one — and it is ONE pinned
+    version; a repository pinning a different one in `packageManager` reaches it through
+    `npx pnpm@<version>`. Docker is deliberately absent and this ruling does not open that
+    door: an agent holding the daemon socket controls every container on the host, and
+    docker-in-docker is a posture change that needs its own pass with its own ruling. So a
+    Compose stack still cannot come up in this image, every run is told so by the shell
+    inventory, and a reviewer chartered to bring one up is a charter that needs rewriting
+    (ruling 193's arm is what surfaces that to a human rather than looping the deliverer).
+    The owner chose this over re-platforming the pass-37 clone onto npm workspaces.
+    (`Dockerfile`, pinned by `toolchain.server.test.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
