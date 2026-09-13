@@ -4195,8 +4195,11 @@ by rewriting those paragraphs:*
     decoration: `npx` genuinely rescues an npm-published tool and nothing rescues one the
     operating system was meant to provide, so the two must not read alike, and the
     paragraph closes by telling a reviewer that an unrun check is not a pass and is not
-    the deliverable's fault. An inventory you must know to ask for is not a fact the
-    planner has.
+    the deliverable's fault. BOTH halves of that advice are derived from the reading rather
+    than written down — a hardcoded pair of sentences lies twice over, once by promising
+    `npx` on a host with no npm, and once by naming an installed tool as its example of
+    something uninstallable, which is exactly what ruling 196 made of `make` and `curl` the
+    same day. An inventory you must know to ask for is not a fact the planner has.
     (`toolchain.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
     `controller-run.server.ts`.)
 

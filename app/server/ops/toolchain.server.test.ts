@@ -175,8 +175,35 @@ describe("shellInventoryPrompt (ruling 191)", () => {
     const text = shellInventoryPrompt(host({}));
     // The two cases must not read alike: `npx pnpm` genuinely works here and
     // `npx make` never will, so one sentence cannot cover both.
-    expect(text).toContain("npx <tool>");
-    expect(text).toContain("cannot be installed from here at all");
+    expect(text).toContain("`pnpm` and `yarn` can still be fetched with `npx <tool>`");
+    expect(text).toContain(
+      "`make`, `docker`, `curl`, `python3`, `go` come from the operating system and " +
+        "cannot be installed from here at all",
+    );
+  });
+
+  /**
+   * Self-review: the advice half was two hardcoded sentences. Both could lie —
+   * one by promising `npx` on a host with no npm, the other by naming an
+   * INSTALLED tool as its example of something uninstallable, which is exactly
+   * what happened the moment ruling 196 put `make` and `curl` in the image.
+   */
+  it("derives both halves of the advice from the reading, so neither can go stale", () => {
+    // Ruling 196's host: make and curl present, docker still absent.
+    const shipped = shellInventoryPrompt(
+      host({ make: "4.4.1", curl: "8.14.1", pnpm: "12.4.1" }),
+    );
+    // CANARY: hardcode the examples again and `make`/`curl` reappear in the
+    // uninstallable list on a host that has them.
+    expect(shipped).toContain("`docker`, `python3`, `go` come from the operating system");
+    expect(shipped).not.toContain("`make`, `docker`");
+    // pnpm is present now, so only yarn is offered through npx.
+    expect(shipped).toContain("`yarn` can still be fetched");
+
+    // A host with no npm must not be told to run `npx`.
+    const bare = shellInventoryPrompt(host({ npm: null }));
+    expect(bare).not.toContain("npx <tool>");
+    expect(bare).toContain("npm is not here either, so nothing can be fetched");
   });
 
   it("tells a reviewer that an unrun check is not a pass and not the deliverable's fault", () => {

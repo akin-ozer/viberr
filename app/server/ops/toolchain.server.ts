@@ -268,6 +268,10 @@ const SHELL_TOOLS: ReadonlyArray<readonly [keyof Toolchain, string]> = [
   ["go", "go"],
 ];
 
+/** The absent tools `npx` can still fetch, because npm publishes them. The rest
+ *  come from the operating system and no run can install one. */
+const NPM_REACHABLE: ReadonlySet<keyof Toolchain> = new Set(["pnpm", "yarn"]);
+
 /**
  * Ruling 191: what a run's shell will and will not find, as a paragraph for
  * the agent, the operator and the controller alike.
@@ -289,10 +293,16 @@ const SHELL_TOOLS: ReadonlyArray<readonly [keyof Toolchain, string]> = [
 export function shellInventoryPrompt(tc: Toolchain): string {
   const present: string[] = [];
   const absent: string[] = [];
+  const fetchable: string[] = [];
+  const osOnly: string[] = [];
   for (const [field, label] of SHELL_TOOLS) {
     const version = tc[field];
-    if (version) present.push(`${label} ${version}`);
-    else absent.push(label);
+    if (version) {
+      present.push(`${label} ${version}`);
+      continue;
+    }
+    absent.push(label);
+    (NPM_REACHABLE.has(field) ? fetchable : osOnly).push(label);
   }
   const lines = [
     "## Shell inventory (measured on this host, not a guess)",
@@ -302,17 +312,31 @@ export function shellInventoryPrompt(tc: Toolchain): string {
       : "Present: nothing this probe recognises.",
   ];
   if (absent.length > 0) {
+    // Both halves of the advice are derived, not asserted. Naming `npx` on a
+    // host with no npm would be a lie, and listing an INSTALLED tool as the
+    // example of something uninstallable reads as one.
+    const routes: string[] = [];
+    if (fetchable.length > 0 && tc.npm) {
+      routes.push(
+        `npm is here, so ${fetchable.map((t) => `\`${t}\``).join(" and ")} can still be ` +
+          "fetched with `npx <tool>`",
+      );
+    }
+    if (osOnly.length > 0) {
+      routes.push(
+        `${osOnly.map((t) => `\`${t}\``).join(", ")} come from the operating system and ` +
+          "cannot be installed from here at all",
+      );
+    }
+    if (!tc.npm) routes.push("npm is not here either, so nothing can be fetched");
     lines.push(
       `NOT installed: ${absent.join(", ")}.`,
       "",
-      "A missing command exits 127 (`command not found`). npm is here, so an " +
-        "npm-published tool can still be fetched with `npx <tool>`; anything the " +
-        "operating system provides — `make`, `docker`, `curl` — cannot be " +
-        "installed from here at all. Plan the work, and any verification you " +
-        "promise, around what is actually present. A step that calls an absent " +
-        "tool will not run, and saying so plainly is the honest outcome — never " +
-        "report an unrun check as a pass, and never treat one as the " +
-        "deliverable's fault.",
+      `A missing command exits 127 (\`command not found\`). ${routes.join("; ")}. ` +
+        "Plan the work, and any verification you promise, around what is actually " +
+        "present. A step that calls an absent tool will not run, and saying so plainly " +
+        "is the honest outcome — never report an unrun check as a pass, and never treat " +
+        "one as the deliverable's fault.",
     );
   } else {
     lines.push("", "Every tool this probe knows about is installed.");
