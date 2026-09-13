@@ -3,6 +3,15 @@
 One instance conversation, one turn. I gave it the goal at 06:13:34Z and watched. It made
 every structural decision itself; I pre-built nothing but its own model (`opus[1m]`/`high`).
 
+> **This file is the day-one record and is left as written.** On day two the controller
+> **re-planned the board itself**, twice: once when I told it the chain was narrower than the
+> real dependencies (six new tasks, two new goal chains, every `blockedBy` re-derived from what
+> is actually consumed), and again when ruling 191 put the measured shell inventory in front of
+> it (10 task contracts and 17 goal links rewritten off Postgres/Docker/Testcontainers/Playwright
+> and onto what this host can run, plus a rewritten required-reviewer charter). Both re-plans are
+> in `FINDINGS.md` and `VALIDATION.md`. What follows is what it built from nothing, which is the
+> thing this file exists to record.
+
 ## Project
 
 `Shopify Clone Platform` / slug `shopify-clone-platform` / key `SHOP`, on
