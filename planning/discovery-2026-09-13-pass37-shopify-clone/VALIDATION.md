@@ -774,3 +774,23 @@ The test also asserts the caller still LEARNS about the failure — `projectionF
 — so "does not throw" is never confused with "says nothing".
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6585 tests passed**, `build` green.
+
+### Ruling 215, measured on a board carrying both shapes at once
+
+The deploy of 218/219 landed on three tasks at `waiting: agent`: two with live run rows
+(SHOP-10, SHOP-16) and one genuinely abandoned (SHOP-4, stranded since its `resolvePacket`
+threw — F37-39). The boot log separates them by name:
+
+```
+{"msg":"settling tasks the restart left waiting on an absent agent","tasks":1,"claimedByOrphanSweep":2}
+```
+
+and each task got exactly one note, the right one:
+
+| task | note |
+|---|---|
+| SHOP-10 | "the run `run_Zd07Hng1u3Zd` (operator) was still running when the server stopped" |
+| SHOP-16 | "the run `run_m6CFAq3Oo2UW` (agent) was still running when the server stopped" |
+| SHOP-4 | "this task was waiting on an agent, and **no run was live** when the server came back" |
+
+Before ruling 215 all three would have carried both sentences and been driven twice.
