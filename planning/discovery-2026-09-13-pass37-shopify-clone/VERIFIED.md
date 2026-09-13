@@ -489,3 +489,35 @@ itself is unexercised (recorded honestly above). The **door** is verified by the
 `maintainer`, `contributor` and `viewer` are each stopped at the role check with their own
 role named — "Your project role (maintainer) cannot force-accept past the review gate."
 That contrast is the proof the gate is a role gate and not an accident of ordering.
+
+## Ruling 201 on screen, and ruling 199 proven a second time by a live restart
+
+Deployed mid-pass at 15:24Z with three agent runs in flight, which made the restart its own
+test.
+
+**Boot recovery.** `finalized non-terminal runs at boot: 3` — SHOP-10's deliverer, SHOP-9's
+Integration Verifier and SHOP-15's Code Reviewer. Each got an honest note naming its own run
+id ("was still running when the server stopped; it is recorded as interrupted by the restart,
+and the operator is re-invoked to decide what to do next"), each task's operator was
+re-invoked within 400ms, and all three reviewers were re-engaged on the same revisions without
+a person touching anything. `skipped the boot workspace reclaim: runs are in flight,
+activeRuns: 3` reads like a contradiction of the line above it and is not: those three are the
+re-invoked operators, started 0.2–0.4s earlier. I checked the run rows rather than assuming.
+
+**Ruling 199** re-pointed the rollout paths for all three interrupted runs on this boot
+(`codex rollout paths re-pointed at the shared home … threads: 1` ×3), which is the fix doing
+its job on the exact shape it was written for.
+
+**Ruling 201, live** on `/insights`:
+
+> **n/a** — Coordination overhead
+> *operator and controller runs reported $13.38; no delivery run reported a cost (242 on
+> Codex), so there is no share to take*
+
+> **7%** — Coordination tokens
+> *13.1M of 176.7M tokens processed; tokens, not dollars · 20 of 248 runs report no provider
+> total*
+
+The "(242 on Codex)" clause is read off the rows, not written into the source. The instance is
+now 248 runs, 6 of them cost-reporting: exactly the shape that made ruling 190's guard
+insufficient, and the first card that has ever said so out loud.
