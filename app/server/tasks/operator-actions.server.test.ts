@@ -3383,6 +3383,41 @@ describe("operatorPostComment", () => {
       ),
     ).toHaveLength(0);
   });
+
+  /**
+   * Ruling 214 (F37-34). Live on SHOP-10 the operator followed ruling 210's own
+   * words — "ask the reviewer, in ONE comment" — and posted "@Code Reviewer,
+   * name everything you would still block on across your owned surface, now."
+   * `post_comment` starts no run, so the reviewer never read it; the stranded
+   * backstop then recorded a deliberate hold ("without advancing, dispatching,
+   * or opening a packet") and paused coordination on the task five others were
+   * waiting behind. The doctrine now names `run_agent`; this is the backstop
+   * for when the tag happens anyway. Same reasoning as S5-G3 above: a visible
+   * non-delivery beats a silent one.
+   */
+  it("an operator comment that @tags an AGENT says the agent was not reached (ruling 214)", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "@Reviewer name everything you would still block on across your owned surface, now.",
+      },
+      authority("supervised"),
+    );
+    const top = task().timeline[0]!;
+    expect(top.actor.kind).toBe("operator");
+    // CANARY: drop the disclosure and this comment reads as a question put to
+    // the reviewer, on a timeline where nothing was ever sent to it.
+    expect(top.text).toContain("is an agent, and an operator comment starts no run");
+    expect(top.text).toContain("Run the agent to put this to it.");
+    // …and it really did start nothing: the tag is decorative, which is the
+    // whole reason the sentence has to be there.
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
+  });
 });
 
 /* --------------------------------------------------------------- A4 / B1-B3 */

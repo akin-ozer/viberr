@@ -342,7 +342,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "post_comment",
-        "Post a concise operator comment to the task timeline. Use it to narrate your plan and decisions (observed → changed → recommended → decision required). Keep it short.",
+        "Post a concise operator comment to the task timeline. Use it to narrate your plan and decisions (observed → changed → recommended → decision required). Keep it short. It is read by the HUMANS and starts no agent: an @name here reaches nobody. To put a question or a directive to an agent, `run_agent` it with that text as its prompt.",
         { text: z.string().describe("The comment text (markdown allowed).") },
         async (args) =>
           resultText(

@@ -665,6 +665,15 @@ function opCtx(ctx: TaskMutationContext): TaskMutationContext {
  * model then built on narration that did not exist and, on Codex, settled the
  * task to `waiting:human` with no packet or note (a silent strand).
  */
+/** Ruling 214: what an operator comment says when it tagged an agent. The
+ *  operator narrates for the humans; only a run reaches an agent. */
+function unreachedAgentNote(agentName: string): string {
+  return (
+    `_@${agentName} is an agent, and an operator comment starts no run \u2014 ` +
+    `nothing was sent to it. Run the agent to put this to it._`
+  );
+}
+
 async function writeOperatorComment(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -705,12 +714,29 @@ async function writeOperatorComment(
   // own — the comment discloses the non-delivery instead of dropping it in
   // silence. Applied after the guardrails so it rides the text actually written.
   const text2 = withAmbiguityDisclosure(db, guardrail.text ?? text);
+  // Ruling 214 (F37-34): the same principle, one audience over. The operator's
+  // own doctrine used to tell it to put the completeness question to a reviewer
+  // "in ONE comment", and live on SHOP-10 it did — "@Code Reviewer, name
+  // everything you would still block on" — to an audience that does not exist.
+  // `post_comment` writes a timeline line and starts nothing, so no reviewer
+  // ever read it; then the stranded backstop, which counts a transition, a
+  // dispatch, a delivery or a packet as progress and a comment as none,
+  // recorded a deliberate hold and paused coordination on the task five others
+  // were waiting behind. The doctrine now names `run_agent`. This is the
+  // backstop for when it tags an agent anyway: the record says plainly that
+  // nothing was sent, instead of the tag going nowhere in silence.
+  const { resolveMentionedAgent } = await import("./agent-reply.server");
+  const taggedAgent = resolveMentionedAgent(db, ctx, projectSlug, taskKey, text2);
+  const text3 =
+    taggedAgent && !taggedAgent.isOperator
+      ? `${text2}\n\n${unreachedAgentNote(taggedAgent.name)}`
+      : text2;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
     actor: { kind: "operator" },
     title: null,
-    text: text2,
+    text: text3,
     toAgent: false,
     evidence: null,
   };
@@ -723,7 +749,7 @@ async function writeOperatorComment(
       const lastOperator = parsed.timeline.find(
         (e) => e.type === "comment" && e.actor.kind === "operator",
       );
-      if (lastOperator && lastOperator.text.trim() === text2.trim()) {
+      if (lastOperator && lastOperator.text.trim() === text3.trim()) {
         suppressed = true;
         return;
       }
@@ -788,7 +814,7 @@ async function writeOperatorComment(
       details: {},
     });
   }
-  return { text: text2, dropped: null, trimmedBy: guardrail.trimmedBy };
+  return { text: text3, dropped: null, trimmedBy: guardrail.trimmedBy };
 }
 
 /**

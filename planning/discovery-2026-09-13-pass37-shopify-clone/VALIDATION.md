@@ -525,3 +525,58 @@ actually happens: the note is written and an operator run exists.
 
 Gates after 211-213: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6570 tests passed**,
 `build` green.
+
+### …and then proved live, on the deploy that shipped it
+
+The deploy of 211-213 landed on a board that was already carrying the bug **twice**. Before the
+restart, held stable across three checks a minute apart:
+
+```
+t=20s  live runs=0  waiting=agent: SHOP-4, SHOP-16
+t=40s  live runs=0  waiting=agent: SHOP-4, SHOP-16
+t=60s  live runs=0  waiting=agent: SHOP-4, SHOP-16
+```
+
+Two tasks claiming an agent, zero runs in `running` or `queued`, nothing moving. After
+`docker compose up -d`:
+
+```
+{"msg":"settling tasks the restart left waiting on an absent agent","tasks":2}
+```
+
+Both task files now carry the note, and both got a fresh operator run (`run_Eynh52` on SHOP-4,
+`run_t5E8Qk` on SHOP-16). SHOP-4's operator then did the thing no human had been offered: it read
+the reviewer's `request_changes` and dispatched the Frontend Engineer to rework the storefront on
+the revision that was rejected. Work that had been frozen for roughly twenty minutes resumed
+without anybody guessing that a comment would wake it.
+
+---
+
+## Ruling 214 — the doctrine and the record, both canaried
+
+Two independent canaries, both proved red before the fix went in.
+
+**The doctrine.** `operator-run.server.test.ts` asserts the arm names the dispatch and says why
+a comment cannot work. Restoring "Ask the reviewer which, in ONE comment":
+
+```
+AssertionError: expected 'You are operating VIB-6, "Improve the…'
+  to contain '`run_agent` THE REVIEWER with `delive…'
+```
+
+**The record.** `operator-actions.server.test.ts` posts an operator comment tagging a deployed
+reviewer and asserts the disclosure — and asserts, in the same test, that the tag really did
+start nothing (`listRunsForTask` is empty), because that is the fact the sentence exists to
+report. Disabling the disclosure:
+
+```
+AssertionError: expected '@Reviewer name everything you would s…'
+  to contain 'is an agent, and an operator comment …'
+```
+
+A prompt-string test alone would have been the weaker half of this: it proves the words are
+there, not that the claim behind them holds. The pairing is deliberate — if anyone later wires
+mention-delivery into operator comments, the behaviour test goes red and the doctrine's new
+sentence stops being true in the same commit.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6572 tests passed**, `build` green.

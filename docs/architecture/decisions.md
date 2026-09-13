@@ -4521,6 +4521,29 @@ by rewriting those paragraphs:*
     those can still repair is repaired by its owner and never double-handled.
     (`run-recovery.server.ts`, `boot.server.ts`.)
 
+214. **A question put to an agent in a comment is put to nobody, and the doctrine that
+    asked for one paused a task five others were waiting behind (owner, 2026-09-13, pass 37;
+    F37-34).** Ruling 210 gave the operator its arm for a reviewer that returns a NEW valid
+    objection every round: ask it to name everything it would still block on, "in ONE
+    comment", and do not rework again until you have the answer. Live on SHOP-10, at round
+    six, the operator did exactly that, and wrote a good question: "@Code Reviewer, before
+    another rework run, name everything you would still block on across your owned surface
+    for the current revision, now." Nothing read it. `post_comment` writes a timeline line
+    for the humans and starts no run; an agent only ever reads a directive that comes with
+    one. Forty-five seconds later the stranded backstop - which counts a transition, a
+    dispatch, a delivery or a packet as progress, and a comment as nothing - recorded a
+    deliberate hold, paused coordination and settled the task to `waiting: human`, with
+    SHOP-2, SHOP-3, SHOP-11, SHOP-12 and SHOP-13 all declared blocked on it. The turn's own
+    text already said it, six bullets above the arm: "a directive comment on the timeline is
+    not a running agent." So: ruling 210's arm now names the only action that can get the
+    answer, `run_agent` on the reviewer with `delivers: false` and the question as its
+    prompt, and says why a comment cannot. The `post_comment` tool and the Codex plan
+    schema say the same in their own descriptions. And when an operator comment tags an
+    agent anyway, the comment discloses it - "_@X is an agent, and an operator comment
+    starts no run; nothing was sent to it. Run the agent to put this to it._" - which is
+    S5-G3's rule one audience over: a visible non-delivery beats a silent one.
+    (`operator-run.server.ts`, `operator-toolkit.server.ts`, `operator-actions.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

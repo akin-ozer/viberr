@@ -2070,8 +2070,28 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
       "name everything you would still block on across your owned surface, now",
     );
     expect(prompt).toContain(
-      "Do not send the deliverer back into another round until you have it.",
+      "Do not send the deliverer back into another round until the reviewer has answered.",
     );
+  });
+
+  /**
+   * Ruling 214 (F37-34). Ruling 210's arm said "ask in ONE comment", and live
+   * on SHOP-10 the operator did exactly that: it posted "@Code Reviewer, name
+   * everything you would still block on" and stopped. `post_comment` writes a
+   * timeline line and starts nothing, so no reviewer ever read it — and the
+   * stranded backstop, which counts a transition, a dispatch, a delivery or a
+   * packet as progress and a comment as nothing, recorded a deliberate hold
+   * and paused coordination on the task five others were waiting behind. The
+   * turn's own earlier bullet already says a directive comment is not a
+   * running agent; this arm contradicted it.
+   */
+  it("ruling 214: the completeness question is a RUN of the reviewer, not a comment nobody reads", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    // CANARY: put "in ONE comment" back and the only action the arm names is
+    // one that reaches no agent and counts as no progress.
+    expect(prompt).toContain("`run_agent` THE REVIEWER with `delivers: false`");
+    expect(prompt).toContain("`post_comment` is narration for the humans and reaches no agent");
+    expect(prompt).not.toContain("Ask the reviewer which, in ONE comment");
   });
 
   it("ruling 193: a second rework on the same reviewer stops being a rework", () => {

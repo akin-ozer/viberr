@@ -1871,3 +1871,71 @@ other three can still repair is repaired by its owner.
 
 Canaries (both proved red): flip the `NOT EXISTS` to `EXISTS` — the sweep returns 0 and the board
 keeps claiming an agent; rename the note title — the record no longer says why a run started.
+
+---
+
+## F37-34 · Viberr told the operator to ask a question no mechanism can deliver, then called the asking "no progress" — HIGH
+
+**The clearest self-contradiction of the pass, and it cost the whole board.**
+
+SHOP-10 (the service template) is the critical path: SHOP-2, SHOP-3, SHOP-11, SHOP-12 and
+SHOP-13 all declare `blockedBy: SHOP-10`. At 19:10 it took its **sixth** consecutive
+`request_changes` from the Code Reviewer, which is precisely the shape ruling 210 was written
+for. The operator read ruling 210's arm, and did what it says:
+
+> Ask the reviewer which, **in ONE comment**, and require the answer before the next rework:
+> "name everything you would still block on across your owned surface, now". Do not send the
+> deliverer back into another round until you have it.
+
+**19:11:57 · comment · operator**
+
+> @Code Reviewer, before another rework run, name everything you would still block on across
+> your owned surface for the current revision, now. Confirm whether the lockfile/path
+> boundary, clean-install dependency build flow, and frozen gateway-header contract are the
+> complete blocker set…
+
+A good question, correctly aimed, at an audience that does not exist. `operatorPostComment`
+appends a timeline event and returns. It runs no agent, sends no notification, and sets no
+`toAgent` flag — the operator's `post_comment` tool takes one parameter, `text`. The Code
+Reviewer was never going to read it, because an agent reads only a directive that arrives with
+a run.
+
+**19:11:57 · note · system:policy-engine** — the same second:
+
+> this stage auto-advances, but the operator held it twice in a row **without advancing,
+> dispatching, or opening a packet** — treating that as a deliberate hold. Coordination is
+> paused here.
+
+So the turn doctrine told the operator to take an action, and the stranded backstop scored that
+same action as having done nothing. Both are right about their own half: asking WAS the correct
+move, and a comment IS no progress. What was wrong is that viberr named the one form of asking
+that cannot work.
+
+Viberr knew, too. Six bullets above the arm, in the same turn text:
+
+> `liveRuns` in the snapshot is the ONLY proof of that (`waiting` is a display flag and **a
+> directive comment on the timeline is not a running agent**)
+
+Cost: a task at `waiting: human` under a question addressed to a reviewer that will never
+answer, five tasks declared blocked behind it, and a remedy line ("run the operator manually,
+adjust the goal, or loosen the boundary in Policy → Workflow rules") that does not mention the
+actual next move — run the reviewer.
+
+**Fix (ruling 214).** Three parts, because the doctrine and the tool both lied and the record
+stayed silent:
+
+1. Ruling 210's arm names `run_agent` on the reviewer with `delivers: false` and the question
+   as its prompt, and says in the same breath that `post_comment` reaches no agent. The
+   Code Reviewer's declared stages already include `build`, so the dispatch is legal exactly
+   where the arm fires.
+2. The `post_comment` tool description and the Codex plan schema's `text` description both say
+   it is narration the humans read, that it starts no agent, and that an `@name` in it reaches
+   nobody.
+3. An operator comment that tags an agent **discloses the non-delivery** — "_@X is an agent,
+   and an operator comment starts no run; nothing was sent to it. Run the agent to put this to
+   it._" This is S5-G3's rule one audience over. That finding said it best: the old behaviour
+   was noisy and wrong, and a silent one is worse.
+
+Canaries (both proved red): restore "in ONE comment" and the arm's only named action is one
+that reaches nobody; drop the disclosure and the comment reads as a question put to the
+reviewer on a timeline where nothing was ever sent to it.
