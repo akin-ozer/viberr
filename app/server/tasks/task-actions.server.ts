@@ -8225,9 +8225,21 @@ export async function resolvePacket(
     "discard_branch",
     "resolve_remote_collision",
     "move_stage",
+    // Ruling 200(h): "the label promises an UNBLOCK, so this records one … 'I
+    // fixed the credential, carry on' is the recovery the human means". That is
+    // what happens NEXT, not what the work IS — the same reason `redirect` and
+    // `hold_runtime_debug` are here, and it was missed when the list was first
+    // written.
+    "block_on_policy",
   ]);
+  // Ruling 189 excludes "a resolution that ENDS the task", and `acceptsInto`
+  // catches only ONE of the two doors that do: `force_accept` closes the task
+  // through `forceAcceptCompletion` and never assigns it (ruling 200(h)). A
+  // contract amendment on a task being closed in the same breath binds no
+  // future run's work, which is the whole test the exclusion applies.
+  const endsTheTask = acceptsInto !== null || option.kind === "force_accept";
   const goalAmendment: string | null =
-    acceptsInto !== null ||
+    endsTheTask ||
     !clearPacket ||
     (!customDirective && PROCESS_ONLY_OPTION_KINDS.has(option.kind))
       ? null

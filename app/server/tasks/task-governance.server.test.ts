@@ -3619,6 +3619,80 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(goalOf(store)).toBe(before);
   });
 
+  /**
+   * Found by the pass's own self-review (ruling 200(h)): the ruling's stated
+   * exclusion is "a resolution that ENDS the task", and `acceptsInto` catches
+   * only ONE of the two doors that do. `force_accept` closes the task through
+   * `forceAcceptCompletion` and never assigns it, so a task being closed in the
+   * same breath still collected a contract amendment binding future work it
+   * will never have.
+   */
+  it("does NOT amend when the resolution FORCE-ACCEPTS the task closed", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        workRevision: {
+          id: "rev_fa",
+          headSha: "f".repeat(40),
+          treeSha: "t".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-13T09:00:00.000Z",
+          sourceProfileId: "dev",
+        },
+        noChanges: true,
+      },
+      {
+        ...QUESTION,
+        title: "Acceptance is wedged",
+        options: [
+          {
+            kind: "force_accept",
+            t: "Force-accept as admin without a fresh verdict",
+            d: "",
+            rec: true,
+          },
+        ],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: test only `acceptsInto !== null` again and a closed task's goal
+    // grows a decision block nobody will ever act on.
+    expect(goalOf(store)).toBe(before);
+  });
+
+  it("does NOT amend on block_on_policy — an unblock is what happens next, not what the work is", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        type: "blocked",
+        title: "The run failed on a credential",
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop `block_on_policy` from PROCESS_ONLY_OPTION_KINDS and "I
+    // fixed the credential, carry on" lands in the task's contract.
+    expect(goalOf(store)).toBe(before);
+  });
+
   it("DOES amend when a person types a directive, whatever packet they typed it on", async () => {
     const store = prepared();
     // A typed directive is content a person wrote; it binds the work even when

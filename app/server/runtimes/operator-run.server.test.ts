@@ -1959,7 +1959,13 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     // work" — is the only instruction the turn carries for a request-changes.
     expect(prompt).toContain("consecutiveRequestChanges");
     expect(prompt).toContain("the deliverer owes NOTHING");
-    expect(prompt).toContain("`open_packet` for the person who owns the task");
+    // Ruling 200(i): the SHARED doctrine names Claude's tool everywhere else
+    // (`open_decision_packet`, four other places in the same turn text);
+    // `open_packet` is the CODEX plan action. My arm was the only line in the
+    // doctrine naming a tool a Claude operator does not have. CANARY: put
+    // `open_packet` back and this fails.
+    expect(prompt).toContain("`open_decision_packet` for the person who owns the task");
+    expect(prompt).not.toContain("`open_packet` for the person");
     // It names the three real exits, so the packet is not an empty escalation.
     expect(prompt).toContain("drop or replace that required reviewer");
     expect(prompt).toContain("A reviewer that cannot pass is a decision, not a defect.");

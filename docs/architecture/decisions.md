@@ -4398,8 +4398,23 @@ by rewriting those paragraphs:*
     Two of the seven were VACUOUS TESTS that had "gone red" on demand — (c) and (g) — which is
     the sharper lesson: a canary is only evidence when the state it constructs is one the
     product can actually reach.
+    Three more came from findings the panel REFUTED **on scope** — the review's base commit sat
+    after rulings 186–189, so day-one code read as "not in the diff" even where the correctness
+    lens upheld the claim. A vote is not a verdict, and re-checking them by hand found two real:
+    (h) ruling 189's stated exclusion is "a resolution that ENDS the task", and `acceptsInto`
+    catches only ONE of the two doors that do — `force_accept` closes the task through
+    `forceAcceptCompletion` and never assigns it, so a task being closed in the same breath
+    still collected a contract amendment binding work it will never have; and `block_on_policy`
+    ("the label promises an UNBLOCK … 'I fixed the credential, carry on'") is a recovery choice
+    that belongs beside `redirect` in the process-only set and was missed when that set was
+    written. (i) The ruling-193 arm named `open_packet` — the CODEX plan action — while the
+    SHARED doctrine says `open_decision_packet` in every one of its four other places, so a
+    Claude operator was told to call a tool it does not have. The third, "the @mention resume
+    door bypasses the hold gate", was correctly refuted: `commentToAgent`'s resume arm already
+    carries `assertDispatchNotHeld`, added with ruling 186 for exactly that reason.
     (`github-reconciler.server.ts`, `goal-actions.server.ts`, `goal-file.schema.ts`,
-    `run-recovery.server.ts`, `user-homes.server.ts`, `runbook.md`, `deployment.md`.)
+    `run-recovery.server.ts`, `user-homes.server.ts`, `task-actions.server.ts`,
+    `operator-run.server.ts`, `runbook.md`, `deployment.md`.)
 
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
