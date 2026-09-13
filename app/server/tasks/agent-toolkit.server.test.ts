@@ -123,6 +123,48 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
   });
 
+  /**
+   * Ruling 222 (F37-42): the audit row above has named the agent since P11-23.
+   * The NOTIFICATION for the same event did not — `notifyTaskWatchers` stamps
+   * `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so the owner's
+   * inbox announced an agent's question under the Operator's name and avatar,
+   * on the one surface whose chip IS "who wants something from you". Live on
+   * SHOP-18, the Frontend Engineer's question about a missing catalog contract
+   * arrived as "Operator·SHOP-18 cannot satisfy its required filter/facet
+   * sidebar…" — the agent's own words, over the operator's name.
+   */
+  it("attributes the question NOTIFICATION to the agent too, not the operator (ruling 222)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-9",
+        actorRef: AGENT_REF,
+        title: "Publish the catalog facet contract",
+        body: "The frozen contract has no facet endpoint.",
+      },
+    );
+
+    const note = listNotifications(store.db, store.users.arda.id).find(
+      (n) => n.kind === "approval" && n.taskKey === "VIB-9",
+    );
+    expect(note, "the owner must hear about a question put to them").toBeTruthy();
+    // CANARY: drop the `notice.from` and this is { kind: "agent", name:
+    // "Operator" } — the default every un-attributed notice falls back to.
+    expect(note!.from).toMatchObject({ kind: "agent", name: "Security review" });
+    expect(note!.from).not.toMatchObject({ name: "Operator" });
+  });
+
   it("ruling 137: an agent's question withdraws the standing acceptance offers on the record", async () => {
     // Canary: remove the `withdrawAcceptanceOffers` call in
     // openAgentQuestionPacket and the accept card outlives the question.

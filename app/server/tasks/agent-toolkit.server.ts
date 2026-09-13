@@ -38,6 +38,7 @@ import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 // which a dynamic import hid rather than fixed (see task-mutation.server.ts).
 import {
   notifyTaskWatchers,
+  type TaskWatcherNotice,
   reprojectTask,
   taskRef,
   type TaskMutationContext,
@@ -269,17 +270,31 @@ export async function openAgentQuestionPacket(
     taskKey: input.taskKey,
     details: { actorRef: encodeActorRef(input.actorRef), title: packet.title },
   });
-  notifyTaskWatchers(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      kind: "approval",
-      title: `${role} asks: ${packet.title}`,
-      text: packet.body || "An engaged agent needs a human decision.",
-    },
-    ctx,
-  );
+  // Ruling 222 (F37-42): the notification says WHO is asking. `notifyTaskWatchers`
+  // stamps `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so an agent's
+  // own question reached the owner's inbox under the Operator's name and avatar
+  // — on the one surface whose chip IS the "who wants something from you"
+  // signal, and whose row renders the body rather than the title that named the
+  // role. This file already settled the principle for the audit row two calls
+  // above: "P11-23: the agent opened this question packet — attribute it to the
+  // agent." Live on SHOP-18, the Frontend Engineer's question about a missing
+  // catalog contract was announced by the Operator.
+  const notice: TaskWatcherNotice = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    kind: "approval",
+    title: `${role} asks: ${packet.title}`,
+    text: packet.body || "An engaged agent needs a human decision.",
+  };
+  if (input.actorRef.kind === "agent") {
+    notice.from = {
+      kind: "agent",
+      backend: input.actorRef.backend,
+      name: role,
+      role,
+    };
+  }
+  notifyTaskWatchers(db, notice, ctx);
   return true;
 }
 

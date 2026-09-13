@@ -2278,3 +2278,43 @@ file that is right there and will break the next resume too.
 happened; the CLI recreates it, resumes start fresh, and SHOP-3 resumed on the next run. The
 corruption itself is environment — the same host episode as F37-37 — and, as there, the finding
 is what viberr said about it.
+
+---
+
+## F37-42 · The agent's question arrived in the inbox under the Operator's name — MEDIUM
+
+**Found by reading the notifications page after answering two packets.** The row for SHOP-18:
+
+> **Operator**·SHOP-18 cannot satisfy its required filter/facet sidebar against the current
+> frozen contracts. Please publish the facet endpoint's request/response schemas and gateway
+> route…
+
+Those are the **Frontend Engineer's** words. Its question packet says so
+(`from: agent:codex/frontend-engineer`, `askedBy: frontend-engineer`), and so does the audit row
+for the same event. The inbox says Operator.
+
+`notifyTaskWatchers` ends with `from: notice.from ?? OPERATOR_NOTIFY_FROM`, and the agent's
+`ask_human` path passes no `from`. The title it does set — "Frontend Engineer asks: …" — is not
+what the row renders; the row renders the chip and the body.
+
+The reason this is worth fixing rather than shrugging at is two calls above it, in the same
+function:
+
+```ts
+recordAudit(db, {
+  action: "task.agent.packet_opened",
+  // P11-23: the agent opened this question packet — attribute it to the agent.
+  actor: { userId: null, label: encodeActorRef(input.actorRef) },
+```
+
+Viberr settled this exact principle for the audit trail and did not carry it to the surface a
+person actually reads. And the chip is not decoration here: an inbox exists to say who wants
+something from you, and answering "the Operator" when a specialist is blocked on a contract
+decision points the reader at the wrong conversation.
+
+**Fix (ruling 222).** The question notification carries the asking agent as its `from`. The
+default stays as it is — it is right for the many notices the operator genuinely authors, and
+narrowing it further belongs to a surface caught getting it wrong, not to a hunch.
+
+Canary (proved red): drop the `from` and the notification reads
+`{ kind: "agent", name: "Operator" }` — the fallback every un-attributed notice lands on.

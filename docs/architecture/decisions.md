@@ -4684,6 +4684,22 @@ by rewriting those paragraphs:*
     writing hit a bad file.
     (`session-export.server.ts`, `codex-runtime.server.ts`, `run-failure-remedy.server.ts`.)
 
+222. **A question an agent asks reaches the person under that agent's name (owner,
+    2026-09-13, pass 37; F37-42).** `notifyTaskWatchers` stamps `OPERATOR_NOTIFY_FROM` on any
+    notice that names nobody, and the agent-question path named nobody - so an agent's own
+    question arrived in the owner's inbox under the Operator's name and avatar, on the one
+    surface whose chip IS "who wants something from you", and whose row renders the packet
+    BODY rather than the title that did name the role. Live on SHOP-18 the Frontend Engineer
+    asked the owner to publish a catalog facet contract or cut the scope, and the inbox said
+    "Operator: SHOP-18 cannot satisfy its required filter/facet sidebar…" - the agent's words
+    over another actor's name. The principle was already settled one file over and two calls
+    up, for the audit row of the same event: "P11-23: the agent opened this question packet -
+    attribute it to the agent." The notification now carries the same actor. The DEFAULT is
+    left alone deliberately: it is right for the many notices the operator really does author,
+    and narrowing it further is a change to make when a surface is caught getting it wrong,
+    not on a hunch.
+    (`agent-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

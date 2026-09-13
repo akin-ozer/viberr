@@ -846,3 +846,21 @@ without that test, the cheap version of this fix would quietly misreport every f
 bug in the clone as a broken agent session.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6592 tests passed**, `build` green.
+
+---
+
+## Ruling 222 — one assertion, and the fallback named in it
+
+The test opens a real question packet as a real agent and reads the owner's inbox:
+
+```
+# notice.from removed
+AssertionError: expected { kind: 'agent', name: 'Operator' }
+  to match object { kind: 'agent', …(1) }
+```
+
+The canary output is the finding itself: the object the test gets back with the fix removed is
+exactly what the owner saw on screen. The test also asserts the owner was notified AT ALL before
+asserting who from, so "attributed correctly" can never pass by silently delivering nothing.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6593 tests passed**, `build` green.
