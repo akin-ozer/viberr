@@ -4626,6 +4626,22 @@ by rewriting those paragraphs:*
     (`file-watch.service.server.ts`, `store-health.server.ts`, `rebuilder.server.ts`,
     `health-snapshot.server.ts`.)
 
+219. **A catch that writes to the thing that just failed is not a catch (owner,
+    2026-09-13, pass 37; F37-39).** `rebuildPath` wraps every rebuild so one bad file cannot
+    take the process down, and inside that catch it wrote a provenance row saying the rebuild
+    failed - to the same store that had just failed. So in the one case the catch exists for,
+    a broken store, it threw, and `rebuildPath` raised into its caller after all. Live:
+    `resolvePacket` wrote SHOP-4's file (the packet resolved, `waiting: agent`), called
+    `reprojectTask`, and died at that line with `disk I/O error`. The canonical write had
+    already landed - the decision is on the record, correctly - but everything the resolution
+    still owed, the operator re-invoke included, went with the throw. SHOP-4 read
+    "agent working" with nothing running for eleven minutes, on the board of a task five
+    others were waiting behind. A projection is a MIRROR: its failure is reported, never
+    raised, because the action that called it has already told the truth in the file. The
+    note is now attempted inside its own try, and a store too broken to take even that gets
+    one warn line; the return is `{ action: "error" }` on every path.
+    (`rebuilder.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

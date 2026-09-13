@@ -1212,6 +1212,64 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
   });
 
   /**
+   * Ruling 219 (F37-39). `rebuildPath`'s catch exists so one bad file cannot
+   * take the process down — and it wrote its "this failed" provenance row to
+   * the SAME store that had just failed, so when the store itself was the
+   * fault, the catch threw and `rebuildPath` raised after all.
+   *
+   * Live cost: `resolvePacket` wrote SHOP-4's file (packet resolved, `waiting:
+   * agent`), called `reprojectTask`, and died right here. The operator
+   * re-invoke that the resolution owes never ran, and the task sat reading
+   * "agent working" with nothing running for eleven minutes — after the
+   * canonical write had already succeeded. Only the mirror had failed.
+   */
+  it("never throws into its caller, even when the store cannot take the failure note (ruling 219)", () => {
+    const store = setupTestStore(ctx);
+    resetProjectionFaultsForTests();
+    const uid = store.users.arda.id;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [mkEvent(uid, "2026-08-26T10:00:00.000Z", "first")],
+    });
+    const taskPath = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "task.md",
+    );
+    rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot });
+
+    // The store is broken for BOTH the rebuild and the note about it — which
+    // is the only interesting case, because a store that can still write the
+    // note was never the one that hurt anybody.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    store.db.exec(`ALTER TABLE provenance RENAME TO provenance_gone`);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [
+        mkEvent(uid, "2026-08-26T10:00:00.000Z", "first"),
+        mkEvent(uid, "2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+
+    // CANARY: take the inner try/catch off `recordProvenance` and this THROWS,
+    // which is what aborted resolvePacket's operator re-invoke live.
+    let result: ReturnType<typeof rebuildPath> | null = null;
+    expect(() => {
+      result = rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot });
+    }).not.toThrow();
+    expect(result!.action).toBe("error");
+    // …and the caller still learns about it, through the latch health reads.
+    expect(projectionFaultCount()).toBe(1);
+
+    store.db.exec(`ALTER TABLE provenance_gone RENAME TO provenance`);
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    resetProjectionFaultsForTests();
+  });
+
+  /**
    * Ruling 218 (F37-38): 217's latch held ONE slot, so any later rebuild that
    * wrote cleared it. Live, ninety seconds after the corrupt store was
    * replaced, a transient `disk I/O error` on SHOP-4 left its card reading

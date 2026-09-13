@@ -2136,3 +2136,44 @@ over exactly the state it was written to catch.
 Canaries (all proved red): delete `scheduleRetry` and the retry test never converges — the
 timeline stays one comment behind its own file, exactly as SHOP-4 did; clear the latch wholesale
 instead of per path and one file's success reports a healthy instance over another's stale row.
+
+---
+
+## F37-39 · A projection failure aborted the action that had already written the truth — HIGH
+
+**Found by asking why SHOP-4 had not moved in eleven minutes.** It read `waiting: agent`, the
+board said "agent working", and `ps` inside the container showed exactly one codex process — on
+SHOP-10. Its last timeline entry was the packet decision at 19:58:57.
+
+The log at 19:58:57:
+
+```
+error  request handler error   POST /projects/…/tasks/SHOP-4.data
+       disk I/O error
+         at recordProvenance
+         at rebuildPath
+         at reprojectTask
+         at resolvePacket
+```
+
+`rebuildPath` wraps every rebuild in a try/catch so that one bad file cannot take the process
+down. Inside that catch it wrote a provenance row recording the failure — **to the same store
+that had just failed.** A throw from inside a catch propagates, so in the one situation the
+catch exists for, a broken store, `rebuildPath` raised into its caller anyway.
+
+What that cost: `resolvePacket` had already written SHOP-4's task file. The decision is on the
+record, correctly, and always was — the canonical write is not what broke. What died was
+everything the resolution still owed after the reproject, the **operator re-invoke** included.
+So the task was left claiming an agent, with no agent, and nothing scheduled to notice.
+
+It is the sharpest version of a pattern this pass keeps finding: viberr writes the truth to the
+file and then loses the consequence. F37-33 lost it to a restart; this one loses it to a cache
+update, which is worse, because the cache is not supposed to be able to stop anything.
+
+**Fix (ruling 219).** The provenance note is attempted inside its own try; a store too broken
+to take even that gets one `warn` line. `rebuildPath` returns `{action: "error"}` on every path
+and can no longer throw. The caller learns about the failure the way health does — through the
+ruling 217/218 latch — instead of by dying.
+
+Canary (proved red): remove the inner try and the test throws `no such table: provenance` out
+of `rebuildPath`, which is exactly the line `resolvePacket` died on.

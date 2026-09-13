@@ -754,3 +754,23 @@ fails and the other succeeds, once at the health body — because 217's version 
 tests while holding a single slot.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6584 tests passed**, `build` green.
+
+---
+
+## Ruling 219 — the only interesting case is when BOTH writes fail
+
+The test breaks the store for the rebuild *and* for the note about the rebuild
+(`ALTER TABLE task_events RENAME …` plus `ALTER TABLE provenance RENAME …`), because a store
+that can still write the provenance row was never the one that hurt anybody — the catch
+"worked" for every fault except the one it was written for.
+
+```
+# the inner try removed
+AssertionError: expected [Function] to not throw an error
+  but 'Error: no such table: provenance' was thrown
+```
+
+The test also asserts the caller still LEARNS about the failure — `projectionFaultCount()` is 1
+— so "does not throw" is never confused with "says nothing".
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6585 tests passed**, `build` green.

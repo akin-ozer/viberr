@@ -1011,6 +1011,7 @@ export function rebuildPath(
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     logger.error("projection rebuild failed", {
       sourcePath: rel,
       err: error instanceof Error ? error : new Error(String(error)),
@@ -1019,16 +1020,32 @@ export function rebuildPath(
     // cannot take the process down — and for the twelve minutes the store was
     // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
     // `degraded: []`. The log line stays; the FACT now has somewhere to live.
-    recordProjectionFault(
-      rel,
-      error instanceof Error ? error.message : String(error),
-    );
-    recordProvenance(db, {
-      sourcePath: rel,
-      contentHash: null,
-      action: "error",
-      details: { message: error instanceof Error ? error.message : String(error) },
-    });
+    recordProjectionFault(rel, message);
+    // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
+    // it is written to the same store that just failed — so when the store
+    // itself is the fault, this threw out of the catch and `rebuildPath` raised
+    // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
+    // `waiting: agent`), called `reprojectTask`, and died here — so the operator
+    // re-invoke that the resolution owes never ran, and the task sat at
+    // "agent working" with nothing running for eleven minutes. The canonical
+    // write had already succeeded; only the MIRROR failed, and a mirror must
+    // never take down the action that already told the truth.
+    try {
+      recordProvenance(db, {
+        sourcePath: rel,
+        contentHash: null,
+        action: "error",
+        details: { message },
+      });
+    } catch (provenanceError) {
+      logger.warn("could not record the rebuild failure's provenance row either", {
+        sourcePath: rel,
+        err:
+          provenanceError instanceof Error
+            ? provenanceError
+            : new Error(String(provenanceError)),
+      });
+    }
     return { action: "error", kind: "other" };
   }
 }
