@@ -356,3 +356,58 @@ phantom on a real branch, which buys a screenshot and costs the record's integri
 `npm run lint` clean · `npm run typecheck` clean · **6518 tests / 363 files** green ·
 **70/70 e2e** on the production image with all eleven rulings in it (37.3s), including the
 WCAG 2.2 AA sweep over every surface in both themes.
+
+## Ruling 199 — live, and measurable to the row
+
+Before the deploy, read straight out of the Codex CLI's own state database:
+
+```
+threads: 140   resumable: 2   broken: 138
+```
+
+The 2 were the runs still in flight. Every other conversation the instance had ever held
+pointed at a run home Viberr had deleted.
+
+The boot line from the rebuilt image:
+
+```
+"re-pointed Codex rollout paths left behind by removed run homes","threads":138
+```
+
+…followed, seconds later, by the settle half doing its job on the two runs the restart had
+just interrupted:
+
+```
+"codex rollout paths re-pointed at the shared home","runId":"run_4y_Y-1Fyeq9N","threads":1
+"codex rollout paths re-pointed at the shared home","runId":"run_irmD7e-f0HGa","threads":1
+```
+
+After:
+
+```
+threads: 140   resumable: 140   broken: 0   still under a run home: 0
+```
+
+Both halves of the ruling exercised on the same boot, on real data, and the number that
+matters went from **2 of 140** to **140 of 140**.
+
+## Ruling 198 — exercised on the same restart
+
+The two interrupted runs were under the cap (the 30-minute window had rolled), so both tasks
+were re-invoked and both notes read "…and the operator is re-invoked to decide what to do
+next" — which is now a true sentence because the decision is taken before the note is written
+rather than after. The capped arm is covered by its own test, proved red by putting the
+promise back; forcing it live again would mean restarting five times in half an hour to
+manufacture a stall I had already measured once.
+
+## Ruling 190's symmetric form — live
+
+The card on the rebuilt image, with the instance's spend now at $13.38:
+
+> **n/a** · Coordination overhead
+> *operator and controller runs spent $13.38; no delivery run reported a cost, so there is no
+> share to take*
+
+## Ruling 196 — still true after four rebuilds
+
+`/resources/health`: `make 4.4.1`, `pnpm 12.4.1`, `curl 8.14.1`, `docker null`, `python3 null`.
