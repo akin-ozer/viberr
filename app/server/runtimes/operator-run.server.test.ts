@@ -2052,6 +2052,28 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
    * Docker, said so plainly, and the work went back for rework round after
    * round. The missing arm is here.
    */
+  /**
+   * Ruling 210 (owner). Ruling 193 covers a reviewer whose objection SURVIVES a
+   * rework. The other expensive shape had no arm at all: a reviewer whose
+   * objection is answered every round and who returns a new, valid one each
+   * time. Live on this board, twice — SHOP-6 took seven rounds, SHOP-10 five,
+   * every round correct on its own terms and nobody ever asked the reviewer
+   * what else it would block on.
+   */
+  it("ruling 210: the turn names the DIFFERENT-objection-each-round shape too, and what to require", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    // CANARY: delete the arm and the doctrine has one answer for every
+    // request-changes that was actually fixed — send it back again.
+    expect(prompt).toContain("a DIFFERENT objection each round");
+    expect(prompt).toContain("the COMPLETE set it would block on for that revision");
+    expect(prompt).toContain(
+      "name everything you would still block on across your owned surface, now",
+    );
+    expect(prompt).toContain(
+      "Do not send the deliverer back into another round until you have it.",
+    );
+  });
+
   it("ruling 193: a second rework on the same reviewer stops being a rework", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
     // CANARY: delete the arm and the line above it — "the deliverer owes NEW

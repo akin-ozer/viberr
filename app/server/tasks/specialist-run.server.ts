@@ -2022,7 +2022,22 @@ async function dispatchAgentRun(
           (collab.evidence
             ? ", plus `evidence` — short REFERENCES to what you checked (a suite, a file, a check), never raw output"
             : "") +
-          ", then finish with your full findings.",
+          ", then finish with your full findings.\n" +
+          // Ruling 210 (owner): the round count is the expensive thing, and the
+          // doctrine only ever addressed a reviewer whose objection SURVIVES a
+          // rework. A reviewer that returns a NEW valid objection every round
+          // costs exactly as much and was asked for nothing: live, SHOP-6 took
+          // seven rounds and SHOP-10 five, each one correct, each one finding
+          // something the previous round had not looked for.
+          "  A `request_changes` is a COMPLETE list, not the first thing you found. Before you " +
+          "report it, sweep your whole owned surface for this revision and name EVERY change you " +
+          "would block on — including the ones you have not verified in detail, marked as such. " +
+          "Then say so in one sentence: that this is the complete set for this revision, and that " +
+          "a fix addressing all of it should pass your next review. If something genuinely new " +
+          "appears in a later revision (the rework introduced it, or it was unreachable until an " +
+          "earlier blocker was cleared), say THAT explicitly and why it could not have been named " +
+          "before. Finding one defect, sending the work back, and finding the next one next round " +
+          "is not review — it is a queue, and it is paid for a round at a time.",
       );
     } else if (collab.evidence) {
       // U11 (the Claude half of B-AG3): an evidence-only profile now MOUNTS

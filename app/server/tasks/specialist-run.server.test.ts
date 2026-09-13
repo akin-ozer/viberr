@@ -1911,6 +1911,54 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * approval entries now, so this holds for fresh runs, resumes and the
    * continuity reset alike.
    */
+  /**
+   * Ruling 210 (owner). Viberr's doctrine addressed a reviewer whose objection
+   * SURVIVES a rework (ruling 193/204) and said nothing about one that answers
+   * every round and returns a NEW valid objection each time — which costs
+   * exactly as many rounds. Live on this board twice: SHOP-6 took seven, SHOP-10
+   * five, every round correct on its own terms, and nobody ever asked the
+   * reviewer what ELSE it would block on. The reviewer's own contract now does.
+   */
+  it("ruling 210: a verdict-capable reviewer is told a request_changes is a COMPLETE list", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "reviewer",
+            backends: ["claude"],
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const prompt = specs.at(-1)!.prompt;
+    // CANARY: drop the ruling-210 sentences and the contract asks only for "a
+    // one-paragraph justification", which a first-finding-only review satisfies.
+    expect(prompt).toContain("A `request_changes` is a COMPLETE list, not the first thing you found");
+    expect(prompt).toContain("name EVERY change you would block on");
+    expect(prompt).toContain("this is the complete set for this revision");
+    // …and the escape hatch for a genuinely new problem, so the rule does not
+    // push a reviewer into hiding one.
+    expect(prompt).toContain("say THAT explicitly and why it could not have been named before");
+  });
+
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {

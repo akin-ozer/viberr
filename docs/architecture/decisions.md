@@ -4404,6 +4404,30 @@ by rewriting those paragraphs:*
     to-agent hand-off.
     (`timeline-compaction.server.ts`.)
 
+210. **A request_changes is the complete list, not the first thing found (owner, 2026-09-13,
+    pass 37).** Ruling 193 escalates a reviewer whose objection SURVIVES a rework, and ruling
+    204 fixed the counter that sees it. Neither addresses the other expensive shape: a reviewer
+    whose objection is answered every round and who returns a different, equally valid one next
+    time. Live on this board twice — SHOP-6 took **seven** rounds and broke only when the owner
+    told the reviewer to name the defect CLASS rather than instances; SHOP-10 took **five**,
+    each on a different revision, each finding real issues. Every round is correct on its own
+    terms, the work is better for them, and nobody had ever asked the reviewer what ELSE it
+    would block on. So the reviewer's own contract now says: a `request_changes` is a COMPLETE
+    list — sweep the whole owned surface for this revision, name every change you would block
+    on (including ones you have not verified in detail, marked as such), and state in one
+    sentence that this is the complete set and that a fix addressing all of it should pass. A
+    deliberate escape hatch keeps the rule from pushing a reviewer into hiding a late finding:
+    when something is genuinely new (the rework introduced it, or it was unreachable until an
+    earlier blocker cleared) it says THAT, and why it could not have been named before. The
+    operator's turn doctrine carries the matching arm beside ruling 193's: when the same
+    reviewer returns a DIFFERENT objection each round and the earlier findings were actually
+    fixed, ask which of the three it is in ONE comment and require "name everything you would
+    still block on across your owned surface, now" before sending the deliverer back. Finding
+    one defect, returning the work, and finding the next one next round is not review; it is a
+    queue, paid for a round at a time. Cost accepted by the owner: reviews get slower per round,
+    because the round count is the expensive thing.
+    (`specialist-run.server.ts`, `operator-run.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

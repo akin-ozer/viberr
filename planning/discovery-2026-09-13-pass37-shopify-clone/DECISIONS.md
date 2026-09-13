@@ -102,3 +102,47 @@ suppressed on. Ruling 190's `unobserved` enum is gone — it could not express "
 its distinction between *reported nothing* and *never ran* still decides both cards. Four
 canaries proven red, including one that was vacuous on its first writing: the fixture only
 stranded a delivery row, so dropping the numerator's `usage_final` guard changed nothing.
+
+## What to do about a reviewer that finds something NEW every round (→ ruling 210)
+
+**Asked because the doctrine only ever addressed the other half.** Ruling 193 escalates when a
+reviewer's objection SURVIVES a rework, and ruling 204 (today) fixed the counter that detects
+it. Neither says anything about a reviewer whose objection is answered every round and who
+returns a different, equally valid one next time — which costs exactly as many rounds.
+
+**The background given.** It has happened twice on this board:
+
+| task | rounds | shape |
+|---|---|---|
+| SHOP-6 | **7** | broke only when I stepped in as owner and told the reviewer to name the defect CLASS, not instances |
+| SHOP-10 | **5** and counting | five request_changes from `code-reviewer`, each on a different revision, each finding real issues |
+
+Every round is correct on its own terms: the reviewer is doing its job, the deliverer is fixing
+real things, and the work is materially better. And nobody has ever asked the reviewer what
+ELSE it would block on.
+
+**Four options offered.** (a) Make reviewers certify completeness — a `request_changes` must
+name everything the reviewer would block on across its owned surface, and say so. (b) Surface
+the round count to the owner, gate nothing. (c) Cap the rounds with a decision packet at N.
+(d) Leave it: this is review working.
+
+**Owner chose (a).** It is the only one that attacks the cause rather than the symptom, and it
+is what unstuck SHOP-6 by hand.
+
+**Consequences I own and have carried out.** Ruling 210, in two places, because a rule an agent
+is never told is not a rule:
+
+- **The reviewer's own contract** (`report_outcome`'s instruction): a `request_changes` is a
+  COMPLETE list, not the first thing you found; sweep the whole owned surface, name every
+  change you would block on including the unverified ones marked as such, and state that this
+  is the complete set for this revision. With a deliberate escape hatch — if something is
+  genuinely new (the rework introduced it, or it was unreachable until an earlier blocker
+  cleared), say that and why — so the rule cannot push a reviewer into hiding a late finding.
+- **The operator's turn doctrine**, beside ruling 193's arm: when the same reviewer returns a
+  DIFFERENT objection each round and the earlier findings were actually fixed, ask which of the
+  three it is, in one comment, and require "name everything you would still block on across
+  your owned surface, now" BEFORE the next rework.
+
+Cost accepted: reviews get slower and more expensive per round. The round count is the
+expensive thing, and a reviewer can still miss something honestly — which is what the escape
+hatch is for.
