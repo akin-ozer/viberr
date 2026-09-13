@@ -219,6 +219,15 @@ says it is doing so, and the stored row is what `{ } raw` exists to show. Measur
 whole pass, telemetry is 13% of rows and 1.5% of bytes — not the flood one early turn
 suggested. Dropping the rows would break a documented honesty contract to save 70 KB.
 
+## C7 — The operator can see how far its branch is behind the base  ·  F37-11  ·  LOW
+
+Added after the plan was written, when 8 of the pass's 9 "plan was not carried out in full"
+notes turned out to be one step. `baseBehindBy` on the operator's snapshot, read through
+`createReconcileBehindByLookup` — the same lookup the GitHub page's sync pill uses. The
+call-when-unsure posture is deliberately unchanged; `null` is explicitly not a reason to skip
+the call. Tested for all three readings (absent / behind / level), red-proved by pinning the
+field to null.
+
 ## Validation for every item
 
 - `npm run lint && npm run typecheck && npm test && npm run build` green.

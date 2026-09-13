@@ -293,3 +293,21 @@ Recorded honestly rather than claimed:
   verdict, which is the only state where force-accept means anything. The RBAC probe did
   confirm the door is admin-only (maintainer → 403 "Your project role (maintainer) cannot
   force-accept past the review gate", admin → reaches the acceptance ceremony).
+
+## Environment fact for the next pass — pnpm is not on an agent workspace's PATH
+
+Not a finding; worth writing down because it cost this pass a review round. The clone is a
+pnpm monorepo, and agent workspaces have `node` and `npm` but no `pnpm` binary. Agents have to
+reach it through `npx --yes pnpm@9.15.4 …`, which needs npm-registry egress and sometimes an
+`--offline` fallback once the store is warm.
+
+All four roles hit it at some point (Infrastructure Engineer, Platform Architect, Code
+Reviewer, Integration Verifier), so it is **not** a viberr-imposed asymmetry between
+delivering and supporting runs — I checked that specifically, because the deliverer once
+reported "the Prettier check could not run because pnpm is unavailable in the workspace" while
+the verifier had just run `npx --yes pnpm@9.15.4 install --frozen-lockfile --offline`
+successfully. Same capability, same backend; the difference was whether that particular run
+reached for npx.
+
+The visible cost: SHOP-7 spent a review round on a Prettier formatting failure the delivering
+agent could not check for itself before delivering.
