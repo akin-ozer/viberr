@@ -74,16 +74,30 @@ For F37-9, removing `syncChanged` from the write condition turned
 'behind_main' ]`), while "stays quiet while the verdict holds" stayed green — the bounded-growth
 guarantee is tested, not assumed.
 
-**Live proof — the fix caught the original bug on its first reconcile after restart**, with no
-prompting from me:
+**Live — and this is where the live system corrected me.** The first implementation caught the
+original phantom on its first reconcile after restart, unprompted, and announced:
 
-> **Work lost:** commit `3aad6ff` was recorded for `shop-2` but is not on it. It was committed
-> inside a run's workspace and never delivered, and that workspace is gone, so the change it
-> held is not recoverable. SHOP-2's goal is unchanged — run it again to redo the work.
+> **Work lost:** commit `3aad6ff` was recorded for `shop-2` but is not on it …
 
-`task.md` now reads `commits: []`, and the announcement is **idempotent**: one `Work lost`
-event on SHOP-2 across the four reconcile passes that have run since, because the drop
-persists into the cache the next pass reads. And the same GitHub page row, before and after:
+Right answer, wrong mechanism. Within the hour the same rule fired on SHOP-7's `522e640` —
+**seconds before Viberr pushed it** — because the reconcile landed in the window between an
+agent committing in its workspace and delivery pushing. At reconcile time the two cases are
+identical: neither commit is on the remote, neither carries `pushedAt`. The remedy is now the
+one my own plan had specified before I departed from it — stamp `pushed`, render it, declare
+nothing lost. Recorded in full in `FINDINGS.md` F37-8.
+
+Live proof of the corrected version: `pushed: true` stamps are landing on SHOP-6's three and
+SHOP-7's seven commits, the GitHub page renders no spurious "not pushed", and SHOP-1 — Done
+and not reconciled since the change — correctly carries **no stamp at all**, which is the
+"unjudged" state rendering as neither answer.
+
+**One consequence I have to own:** the first implementation *dropped* SHOP-2's phantom from
+the canonical record before I reverted the mechanism, so `commits: []` there is the wrong
+version's edit and the corrected code cannot restore what it removed. The commit itself was
+genuinely gone, so nothing recoverable was lost — but the record was mutated by a rule that no
+longer exists, and that is worth stating rather than quietly leaving.
+
+And the same GitHub page row, before and after:
 
 | | commits | sync |
 |---|---|---|
