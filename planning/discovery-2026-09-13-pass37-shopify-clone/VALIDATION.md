@@ -440,3 +440,52 @@ No packet, no escalation — the rework the situation calls for. That is the arm
 written: it asks whether the deliverable can satisfy the objection AT ALL, and a run of six
 honest rounds answers yes and passes straight through. A threshold that escalated on the number
 alone would have interrupted the best review cycle on the board.
+
+## The pass reviewing itself — 136 agents against my own diff
+
+Rulings 186–199 were written by me, tested by me, and proved red by me. That is the same
+person marking their own homework, and another model reviews this afterwards, so I ran an
+adversarial pass over my own work before they did: 12 clusters (one per ruling), each reading
+the real `git diff 655b67ea..HEAD` and the ruling's own paragraph, hunting correctness,
+regression, vacuous tests and honesty. Every finding then went to **three diverse skeptics**
+— correctness, regression-risk, test-reality — each prompted to REFUTE it and to default to
+"refuted" when unsure. Majority refute kills a finding.
+
+```
+clusters 12 · agents 136 · raw findings 41 · survived verification 7 · errors 0
+```
+
+**All seven were in the FIXES. None was in the original twenty findings.** That asymmetry is
+the useful part: the diagnosis held up and the treatment did not, which is the opposite of
+what I would have guessed.
+
+What they were, and what each cost had it shipped:
+
+| | defect | what it would have done |
+|---|---|---|
+| 187(b) | `compare` is an AHEAD-only list, so a merged branch answers empty; the carve-out stamped every cached commit `pushed: false` | the record announcing origin lacks commits sitting in `main` — this ruling's own prohibited lie, inverted |
+| 192(b) | the retry carried the failed task's text over an `edit_link` made on that failed link | the one correction the tool advertises there, discarded without a word |
+| 194 | `taskKey !== null` on a link that always has one | **the entire ruling was dead code** |
+| 194 | its test built a null-key failed link the product cannot produce | the canary "went red" while the arm never ran |
+| 192 | `liveGoal` compared against `link.goal` where the task was built from `link.goal \|\| link.title` | permanent false drift on every title-only link |
+| 192 | the rename clause fired on a RESENT title | history claiming a rename that never happened |
+| 198 | "Nothing further happens on its own" | `recoverUnreactedAgentRuns` can still run an `agent-reply` turn on that task in the same boot |
+| 199 | a comment promising a log line, and no log line | a vendor schema change disables the repair in silence |
+
+**Two of the seven were vacuous tests I had personally "proved red".** That is the lesson I
+would carry out of this pass above any individual ruling: *a canary is only evidence when the
+state it constructs is one the product can actually reach.* Ruling 194's test proved that
+deleting the arm changed the output — on a state `reconcileGoal` never produces. Both the fix
+and its proof were fiction, and nothing in my own process caught it.
+
+The seven are fixed as **ruling 200**, each with a canary re-proved against a reachable state,
+and one of them — 187(b) — reproduced first as a failing test before the fix went in:
+
+```
+- "pushed": true
++ "pushed": false
+```
+
+Refuted findings are recorded too rather than quietly dropped: 34 of 41, including several
+plausible-sounding ones about ruling 186's dispatch gate and ruling 193's `open_packet`
+naming that did not survive being asked to demonstrate themselves.
