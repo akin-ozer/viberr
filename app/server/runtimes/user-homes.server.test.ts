@@ -11,7 +11,8 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { logger } from "~/server/logging/logger.server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
@@ -374,13 +375,49 @@ describe("ruling 199: a settled run's rollout paths are re-pointed at the shared
     expect(repairCodexRolloutPaths(dataRoot)).toBe(0);
   });
 
-  it("skips a state database whose shape it does not recognise, rather than guessing", () => {
+  /**
+   * The self-review caught this one as VACUOUS in its first form: it asserted
+   * only `=== 0`, which is what an unrecognised schema returns with the guard
+   * deleted too (the row parse fails and the loop `continue`s anyway). The
+   * assertion that can actually go red is the one that says a repair silently
+   * stopped happening — which is the whole point of the guard, and which the
+   * first version of the code did not emit at all despite its own comment
+   * promising "skipped with a log line".
+   */
+  it("skips a state database whose shape it does not recognise, and SAYS it skipped", () => {
     const dataRoot = ctx.makeTempDir();
     const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
     const db = new DatabaseSync(path.join(shared, "state_5.sqlite"));
     db.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, some_other_column TEXT)`);
     db.prepare(`INSERT INTO threads (id, some_other_column) VALUES ('x', 'y')`).run();
     db.close();
-    expect(repairCodexRolloutPaths(dataRoot)).toBe(0);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(repairCodexRolloutPaths(dataRoot)).toBe(0);
+      // CANARY: drop the `logger.warn` and this is empty — a vendor schema
+      // change disables the repair and nobody ever hears about it.
+      expect(warn.mock.calls.map(([msg]) => String(msg)).join("\n")).toContain(
+        "codex rollout paths NOT repaired at boot",
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the SETTLE half says so too when the schema is unrecognised", () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", ctx.makeTempDir());
+    const db = new DatabaseSync(path.join(shared, "state_5.sqlite"));
+    db.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, some_other_column TEXT)`);
+    db.close();
+    const home = prepareCodexRunHome(shared, "run_unknown_schema");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      finishCodexRunHome(home);
+      expect(warn.mock.calls.map(([msg]) => String(msg)).join("\n")).toContain(
+        "codex rollout paths NOT re-pointed",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

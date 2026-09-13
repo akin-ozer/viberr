@@ -271,7 +271,14 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note.text).not.toMatch(/the operator is re-invoked/);
     expect(note.text).toContain("Viberr did NOT re-invoke the operator");
     expect(note.text).toContain("crash-loop guard");
-    expect(note.text).toContain("run the operator from this page");
+    expect(note.text).toContain("Run the operator from this page when you are ready");
+    // The self-review caught the first draft over-promising here. This loop
+    // decides ONE thing — whether IT re-invokes — and `recoverUnreactedAgentRuns`
+    // further down the same boot chain can still run an `agent-reply` operator
+    // turn on this very task, under its own separate cap. CANARY: put "Nothing
+    // further happens on its own" back and the note claims something about the
+    // rest of the boot that this loop does not know.
+    expect(note.text).not.toContain("Nothing further happens on its own");
     // CANARY: drop the `clearWaitingToHuman` call and the board keeps saying an
     // agent is working on a task with no run alive.
     expect(parsed.frontmatter.waiting).toBe("human");

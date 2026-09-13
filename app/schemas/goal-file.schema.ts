@@ -62,6 +62,13 @@ export const goalLinkSchema = z.object({
   status: z.enum(GOAL_LINK_STATUS_VALUES).default("pending"),
   /** Failure reason / redirect note, shown on the chain card. */
   note: z.string().nullable().default(null),
+  /** Ruling 192(b): this link's text was RE-DECLARED by `edit_link` after its
+   *  task failed, so the next retry must build from the link rather than carry
+   *  the failed task's copy forward. Ruling 192's first draft carried the task's
+   *  text unconditionally, which silently discarded the one edit the product
+   *  explicitly offers on a failed link — "edit a pending or failed link" is in
+   *  `update_goal`'s own description. Cleared by the retry that consumes it. */
+  redeclared: z.boolean().default(false),
   /** Ruling 131(c) (pass 34): what this link's task WAITS ON, in the canonical
    *  spellings of `app/shared/dependencies.ts` (`JC-6`, `goal-2 link 1`).
    *  Copied onto the task the chain creates for this link and validated then,

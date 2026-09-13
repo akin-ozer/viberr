@@ -212,6 +212,7 @@ export async function createGoal(
         taskKey: null,
         status: "pending",
         note: null,
+            redeclared: false,
         blockedBy: l.blockedBy ?? [],
       }),
     );
@@ -451,9 +452,15 @@ export async function updateGoal(
             throw AppError.validation("A goal title cannot be empty.");
           }
           const parts: string[] = [];
+          // Tracked here, not re-derived after the write: comparing `fm.title`
+          // to `title` afterwards is true both when the name moved AND when the
+          // caller resent the name it already had, so a description-only edit
+          // claimed link tasks were keeping "the old name".
+          let titleMoved = false;
           if (title !== undefined && title !== fm.title) {
             parts.push(`renamed from "${fm.title}" to "${title}"`);
             fm.title = title;
+            titleMoved = true;
           }
           if (description !== undefined && description !== goal.description) {
             parts.push("description rewritten");
@@ -468,10 +475,9 @@ export async function updateGoal(
           // written at create time. Say so rather than implying a rename
           // reaches back into work that has already started — and say it only
           // when the NAME moved, because a description edit reaches nothing.
-          const renamed = fm.title === title;
           return (
             `Goal ${parts.join(" and ")} by ${by}.` +
-            (renamed
+            (titleMoved
               ? " Link tasks created before now keep the old name in their chain header."
               : "")
           );
@@ -575,6 +581,13 @@ export async function updateGoal(
               `Only a pending or failed link can be edited; link ${op.index} is ${link.status}.`,
             );
           }
+          // Ruling 192(b): an edit to a FAILED link is a deliberate
+          // re-declaration of the work, and it must outrank the text the retry
+          // would otherwise carry from the task that failed. Only the failed
+          // arm sets it — a pending link has no task to carry from.
+          if (link.status === "failed" && (op.title?.trim() || op.goal?.trim())) {
+            link.redeclared = true;
+          }
           if (op.title?.trim()) link.title = op.title.trim();
           if (op.goal?.trim()) link.goal = op.goal.trim();
           // Ruling 131(c): absent leaves the list; `[]` clears it. Validated
@@ -610,6 +623,7 @@ export async function updateGoal(
             taskKey: null,
             status: "pending",
             note: null,
+            redeclared: false,
             blockedBy: validateLinkWait(db, input.projectSlug, fm.id, nextIndex, fm.links, op.blockedBy ?? []),
           });
           advanceAfter = true;
@@ -679,6 +693,15 @@ export async function updateGoal(
   // flaps it back, re-notifying and recording a retry that never started. Same
   // shape as reconcileGoal's advance path.
   if (retryLinkIndex !== null) {
+    // Ruling 194, corrected: a FAILED link keeps its task key — `reconcileGoal`
+    // sets `status = "failed"` and names that task in the note — so the first
+    // draft's `link.taskKey !== null` guard returned before doing anything, on
+    // every path, and the test that "proved" it built a null-taskKey failed
+    // link the product cannot produce. The real question is whether the retry
+    // REPLACED the task, so the answer is the key it had before.
+    const priorTaskKey =
+      readGoalFile(goalRef(ctx, input.projectSlug, input.goalId))
+        ?.parsed.frontmatter.links.find((l) => l.index === retryLinkIndex)?.taskKey ?? null;
     try {
       const started = await startLinkTask(
         db,
@@ -699,7 +722,10 @@ export async function updateGoal(
         // was written; the decline had no arm at all.
         await updateGoalFile(goalRef(ctx, input.projectSlug, input.goalId), (goal) => {
           const link = goal.frontmatter.links.find((l) => l.index === retryLinkIndex);
-          if (!link || link.taskKey !== null) return;
+          // Unchanged key ⇒ nothing replaced it ⇒ the retry really started
+          // nothing. A key that moved means a task exists and this arm is not
+          // its business.
+          if (!link || link.taskKey !== priorTaskKey) return;
           if (goal.frontmatter.status === "active") goal.frontmatter.status = "attention";
           link.note = "The retry did not start: the chain was redirected while it ran.";
           return (
@@ -873,8 +899,15 @@ async function startLinkTaskLocked(
   // everyone had moved past, silently, with nothing in the timeline saying a
   // correction had been dropped. Live pass 37 the two copies of SHOP-2's
   // contract disagreed about which task owns `packages/contracts`.
+  //
+  // Ruling 192(b): unless the link was RE-DECLARED. `edit_link` explicitly
+  // accepts a failed link — "edit a pending or failed link" is in the tool's
+  // own description — and ruling 192's first draft carried the task's text over
+  // that edit without a word, so "edit the failed link, then retry it" silently
+  // did nothing. An explicit re-declaration is the later, deliberate
+  // instruction and outranks the text the failed task happened to end with.
   const priorTask =
-    mode === "retry" && link.taskKey
+    mode === "retry" && link.taskKey && !link.redeclared
       ? readTaskFile({ projectSlug, taskKey: link.taskKey, dataRoot: ctx.dataRoot })
       : null;
   const carried = priorTask ? stripChainHeader(priorTask.parsed.goal) : "";
@@ -902,12 +935,16 @@ async function startLinkTaskLocked(
     target.taskKey = created.key;
     target.status = "active";
     target.note = null;
+    // Ruling 192(b): the re-declaration has been consumed by this start.
+    target.redeclared = false;
     // Ruling 192: say so when the retry carried the failed task's own text
     // rather than the link's — a silent substitution either way is the defect.
     const carriedNote =
       priorTask && carried && carried !== link.goal.trim()
         ? `, carrying ${priorTask.parsed.frontmatter.key}'s own text rather than the link's original`
-        : "";
+        : link.redeclared
+          ? ", from the link's re-declared text rather than the failed task's"
+          : "";
     return `Link ${linkIndex} (${target.title}) started as ${created.key}${target.blockedBy.length > 0 ? `, waiting on ${target.blockedBy.join(", ")}` : ""}${carriedNote}.`;
   });
   if (!attached) {
@@ -1324,7 +1361,11 @@ export function getGoalView(
     });
     if (!task) return link;
     const goal = stripChainHeader(task.parsed.goal);
-    if (goal === link.goal.trim()) return link;
+    // Compare against what the task was BUILT from, not against `link.goal`
+    // alone: `linkGoalText` falls back to the title when a link declares no
+    // goal, so a title-only link read as permanently drifted and `liveGoal`
+    // announced a change that never happened.
+    if (goal === (link.goal.trim() || link.title)) return link;
     return { ...link, liveGoal: goal };
   });
   return view;

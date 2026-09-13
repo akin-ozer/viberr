@@ -3819,18 +3819,70 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
     return routes;
   }
 
-  function seedCached(store: Store, sha: string, msg: string): void {
+  function seedCached(
+    store: Store,
+    sha: string,
+    msg: string,
+    over: { prState?: "review" | "merged"; pushed?: boolean } = {},
+  ): void {
+    const commit =
+      over.pushed === undefined ? { sha, msg } : { sha, msg, pushed: over.pushed };
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-301", {
         title: "Attach execution workspace",
         stage: "review",
         branch: "vib-301-workspace",
         ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "review", title: "Attach execution workspace" },
-        github: { commits: [{ sha, msg }], changed: null, unownedPr: null },
+        pr: {
+          number: 318,
+          state: over.prState ?? "review",
+          title: "Attach execution workspace",
+        },
+        github: { commits: [commit], changed: null, unownedPr: null },
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** A MERGED PR's compare: the branch has nothing the base lacks, because the
+   *  base now has all of it. `droppedCommits` is 0 — an empty list drops
+   *  nothing — so the completeness guard alone cannot tell this apart from a
+   *  branch that never received the work. */
+  function mergedRoutes(): FakeRoutes {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] },
+    };
+    // Coherent with the compare: GitHub says the pull request merged, and the
+    // branch still exists (the post-merge delete is best-effort and can be
+    // refused, which is exactly when this path is reachable).
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "closed",
+        merged: true,
+        merged_at: "2026-09-13T12:00:00Z",
+        head: { sha: "headsha318" },
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+      },
+    };
+    // `findPrForBranch` asks for `state=all`, so a merged PR IS listed.
+    routes[`GET ${REPO_PATH}/pulls`] = {
+      body: [
+        {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "closed",
+          draft: false,
+          merged_at: "2026-09-13T12:00:00Z",
+          head: { sha: "headsha318" },
+        },
+      ],
+    };
+    return routes;
   }
 
   const fileOf = (store: Store) =>
@@ -3872,6 +3924,41 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
     // is on the remote, neither carries `pushedAt`. "Not pushed" is the only
     // claim this code can honestly make.
     expect(fileOf(store).timeline.some((e) => e.text.includes("Work lost"))).toBe(false);
+  });
+
+  /**
+   * Found by the pass's own adversarial self-review, not by me: `compare` is an
+   * AHEAD-only list, so a merged branch answers with an EMPTY one — and the
+   * carve-out then stamped every cached commit `pushed: false`, announcing that
+   * origin lacks commits that are sitting in `main`. This ruling's own
+   * prohibited lie, pointed the other way. It never fired live only because
+   * Viberr deletes the branch after merging, and that delete is best-effort.
+   */
+  it("ruling 187(b): a MERGED pr does not flip its commits to `not pushed`", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice", {
+      prState: "merged",
+      pushed: true,
+    });
+    await reconcileWith(store, actor, mergedRoutes());
+    // CANARY: drop `&& !landed` from `compareComplete` and this reads
+    // `pushed: false` — the record claiming the remote lost work it merged.
+    expect(fileOf(store).frontmatter.github?.commits).toEqual([
+      { sha: "3aad6ff", msg: "[VIB-301] Define identity service slice", pushed: true },
+    ]);
+  });
+
+  it("ruling 187(b): an unjudged commit on a merged pr stays unjudged, never `false`", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice", {
+      prState: "merged",
+    });
+    await reconcileWith(store, actor, mergedRoutes());
+    const commits = fileOf(store).frontmatter.github?.commits ?? [];
+    expect(commits).toHaveLength(1);
+    // Absent, not false: after a landing the compare cannot judge the cache,
+    // and "not judged" is the honest record of that.
+    expect(commits[0]).not.toHaveProperty("pushed");
   });
 
   it("marks a commit the remote DOES have as pushed, prefix or no prefix", async () => {

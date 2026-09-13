@@ -220,8 +220,15 @@ The host toolchain is still reported — versions only:
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
 # {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
+#  "make":"4.4.1","docker":null,"pnpm":"12.4.1","yarn":null,"curl":"8.14.1",
 #  "codexCli":"0.153.4","claudeAgentSdk":"0.3.261"}
 ```
+
+`make`, `curl` and a pinned `pnpm` ship in the image (ruling 196); `docker` is `null`
+deliberately and is not coming — an agent holding the daemon socket controls every
+container on the host. The same reading is injected into every specialist, operator and
+controller prompt (ruling 191), so an agent plans around what is present instead of
+discovering each absence as an exit-127.
 
 ## First run
 

@@ -1476,7 +1476,11 @@ describe("ruling 194: a retry that starts nothing says so", () => {
     await updateGoalFile(goalFile, (goal) => {
       const link = goal.frontmatter.links[0]!;
       link.status = "failed";
-      link.taskKey = null;
+      // The state `reconcileGoal` really produces: a failed link KEEPS its task
+      // key — it names that task in its own note. The first version of this
+      // test cleared it, which is a state the product cannot reach, and the
+      // guard it was "proving" (`taskKey !== null`) therefore returned early on
+      // every real path while the test stayed green over it.
       goal.frontmatter.status = "attention";
       return `Link 1 failed: ${first} was archived.`;
     });
@@ -1510,9 +1514,11 @@ describe("ruling 194: a retry that starts nothing says so", () => {
 
     const after = getGoalView(SLUG, chain.goalId, ctx)!;
     // CANARY: drop the `started === null` arm and the newest timeline entry is
-    // "Link 1 (Failing link) retried by arda@viberr.dev" over a link that has
-    // no task and never got one.
-    expect(after.links[0]!.taskKey).toBeNull();
+    // "Link 1 (Failing link) retried by arda@viberr.dev" over a link whose task
+    // is still the one that failed. CANARY 2: restore the `taskKey !== null`
+    // guard and this arm never fires at all, because a failed link always has
+    // one.
+    expect(after.links[0]!.taskKey).toBe(first);
     expect(after.links[0]!.status).toBe("failed");
     expect(after.history.some((h) => h.text.includes("did NOT start a task"))).toBe(true);
     expect(after.links[0]!.note).toContain("The retry did not start");
@@ -1703,5 +1709,183 @@ describe("ruling 192: a live chain can be renamed", () => {
     await expect(
       updateGoal(app.db, { ...args, action: { op: "rename", title: "Too late" } }, actor, ctx),
     ).rejects.toThrow(/cancelled/i);
+  });
+});
+
+/**
+ * The self-review of ruling 192 found what its first draft broke: `edit_link`
+ * explicitly accepts a FAILED link — "edit a pending or failed link" is in
+ * `update_goal`'s own description — and carrying the failed task's text over
+ * that edit discarded the one correction the product offers there, silently.
+ */
+describe("ruling 192(b): an edit to a FAILED link outranks the text the retry would carry", () => {
+  it("retries from the re-declared link, says so, and clears the flag", async () => {
+    const { createGoal, updateGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Redeclared chain",
+        links: [
+          { title: "Drifting link", goal: "ORIGINAL-TEXT-2. Done when merged." },
+          { title: "Later link", goal: "Follows." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+    // The task's own text moves — the case ruling 192 was written for…
+    await updateTaskGoal(
+      app.db,
+      { projectSlug: SLUG, taskKey: first, goal: "TASK-TEXT-5: what the task ended up saying." },
+      actor,
+      ctx,
+    );
+    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: first, archived: true }, actor, ctx);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    // …and then a person re-declares the link, which is the later instruction.
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        action: { op: "edit_link", index: 1, goal: "REDECLARED-TEXT-9: do it this way instead." },
+      },
+      actor,
+      ctx,
+    );
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.redeclared).toBe(true);
+
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    const retried = after.links[0]!.taskKey!;
+    const fresh = readTaskFile({ projectSlug: SLUG, taskKey: retried, dataRoot: app.dataRoot })!;
+    // CANARY: drop `&& !link.redeclared` from the `priorTask` read and this is
+    // TASK-TEXT-5 — the edit the person just made, thrown away without a word.
+    expect(fresh.parsed.goal).toContain("REDECLARED-TEXT-9");
+    expect(fresh.parsed.goal).not.toContain("TASK-TEXT-5");
+    // The record says which source it used, in this direction too.
+    expect(after.history[0]!.text).toContain("re-declared text");
+    // And the flag is consumed, so the NEXT retry carries the task again.
+    expect(after.links[0]!.redeclared).toBe(false);
+  });
+
+  it("a failed link nobody re-declared still carries the task's text", async () => {
+    const { createGoal, updateGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Untouched chain",
+        links: [
+          { title: "Drifting link", goal: "ORIGINAL-TEXT-3." },
+          { title: "Later link", goal: "Follows." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+    await updateTaskGoal(
+      app.db,
+      { projectSlug: SLUG, taskKey: first, goal: "TASK-TEXT-8: the corrected contract." },
+      actor,
+      ctx,
+    );
+    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: first, archived: true }, actor, ctx);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    const fresh = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: after.links[0]!.taskKey!,
+      dataRoot: app.dataRoot,
+    })!;
+    expect(fresh.parsed.goal).toContain("TASK-TEXT-8");
+  });
+});
+
+/** Both found by the self-review: a link declared with no goal read as
+ *  permanently drifted, and a resent title claimed a rename that never was. */
+describe("ruling 192: liveGoal and the rename clause stop claiming changes that never happened", () => {
+  it("a link declared with only a title is not reported as drifted", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Title-only chain",
+        // What `add_link` with no goal produces (`prose(args.goal ?? "")`), and
+        // what the schema's own `goal: z.string().default("")` allows.
+        links: [{ title: "Just a title", goal: "" }],
+      },
+      actor,
+      ctx,
+    );
+    expect(chain.activeTaskKey).toBeTruthy();
+    // CANARY: compare against `link.goal.trim()` alone and this is the title,
+    // i.e. drift announced on a link nobody touched.
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.liveGoal).toBeUndefined();
+  });
+
+  it("resending the current title with a new description claims no rename", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Same name",
+        description: "Before.",
+        links: [{ title: "Only link", goal: "One." }],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        // The shape a caller that echoes the whole object produces.
+        action: { op: "rename", title: "Same name", description: "After." },
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.description).toBe("After.");
+    // CANARY: derive `renamed` from `fm.title === title` again and this says
+    // link tasks keep "the old name" after an edit that changed no name.
+    expect(after.history[0]!.text).toBe("Goal description rewritten by arda@viberr.dev.");
   });
 });

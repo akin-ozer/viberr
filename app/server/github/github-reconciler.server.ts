@@ -761,8 +761,26 @@ async function reconcileTaskUnlocked(
   // abandoned one are indistinguishable (neither is on the remote, neither has
   // `pushedAt` yet), so "lost" is a claim this code cannot make. "Not on the
   // remote" is one it can, it is always true, and it is what the reader needs.
+  //
+  // Ruling 187(b): …and only while the branch's work has NOT landed on the
+  // base. `compare` is `base...branch`, an AHEAD-only list: a commit missing
+  // from it is either absent from the branch OR present on BOTH, which is
+  // exactly what a merge produces. Once the PR merges, the ahead-list goes
+  // empty with `droppedCommits: 0`, and the carve-out below would then stamp
+  // every cached commit `pushed: false` — announcing that origin lacks commits
+  // sitting in `main`. That is this ruling's own prohibited lie pointed the
+  // other way, and it is reachable on any merged PR whose branch still exists
+  // (the branch delete is best-effort and can be refused). After a landing the
+  // compare cannot judge the cache at all, so it does not: the stamps already
+  // written stay, and nothing new is claimed.
+  // The FILE's recorded state counts too: a reconcile whose PR read failed
+  // knows less than the record does, and "the API did not answer" is not a
+  // licence to claim the remote lost merged work.
+  const landedState = (state: string | undefined): boolean =>
+    state === "merged" || state === "accepted";
+  const landed = landedState(prState) || landedState(fm.pr?.state);
   const compareComplete =
-    compare !== null && provenBranchHead && compare.droppedCommits === 0;
+    compare !== null && provenBranchHead && compare.droppedCommits === 0 && !landed;
   const remoteShas = new Set<string>();
   if (compareComplete && compare) {
     for (const c of compare.commits) {

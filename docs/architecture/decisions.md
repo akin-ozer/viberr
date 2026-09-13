@@ -4363,6 +4363,44 @@ by rewriting those paragraphs:*
     flight owns its own path until it settles.
     (`user-homes.server.ts`, `boot.server.ts`.)
 
+200. **Seven corrections the pass's own adversarial self-review found in rulings 186–199
+    (owner, 2026-09-13, pass 37).** A 12-cluster, 136-agent review of this pass's diff, each
+    finding put to three diverse skeptics prompted to REFUTE it, produced seven that survived
+    — all in the fixes, none in the original findings. They are recorded as one numbered
+    ruling because they share a lesson: a fix written to stop a lie can tell a smaller one.
+    (a) **Ruling 187(b)** — `compare` is an AHEAD-only list, so a MERGED branch answers with
+    an empty one and `droppedCommits: 0`, and the carve-out then stamped every cached commit
+    `pushed: false`: the record announcing that origin lacks commits sitting in `main`, this
+    ruling's own prohibited lie inverted. It never fired live only because Viberr deletes the
+    branch after merging, and that delete is best-effort. A landing now ends judgement —
+    stamps already written stand, nothing new is claimed — and the file's own `pr.state`
+    counts, because a failed API read knows less than the record does.
+    (b) **Ruling 192(b)** — `edit_link` explicitly accepts a FAILED link, and ruling 192's
+    retry carried the failed task's text straight over that edit, so the edit-then-retry
+    sequence `update_goal` advertises in one breath silently discarded the correction. A
+    `redeclared` flag makes the explicit re-declaration win, and the timeline says which
+    source a retry used in BOTH directions.
+    (c) **Ruling 194 was dead code.** A failed link keeps its task key — `reconcileGoal` names
+    that task in its own note — so the `taskKey !== null` guard returned before doing anything
+    on every real path, and the test that "proved" it built a null-key failed link the product
+    cannot produce. The arm now compares against the key the link had BEFORE the retry, and
+    its test uses the state the product actually reaches.
+    (d) `liveGoal` compared against `link.goal` while the task was built from
+    `link.goal || link.title`, so a title-only link read as permanently drifted.
+    (e) The rename clause fired whenever a caller RESENT the current title, claiming a rename
+    that never happened — the same defect its own earlier fix had half-closed.
+    (f) Ruling 198's note said "Nothing further happens on its own", which is not this loop's
+    to promise: `recoverUnreactedAgentRuns` can still run an `agent-reply` turn on that task
+    later in the same boot, under its own cap.
+    (g) Ruling 199's comment promised a log line for an unrecognised vendor schema and emitted
+    none, and its test passed with the guard deleted. Both skips now say so, and the test
+    asserts the sentence rather than the return value.
+    Two of the seven were VACUOUS TESTS that had "gone red" on demand — (c) and (g) — which is
+    the sharper lesson: a canary is only evidence when the state it constructs is one the
+    product can actually reach.
+    (`github-reconciler.server.ts`, `goal-actions.server.ts`, `goal-file.schema.ts`,
+    `run-recovery.server.ts`, `user-homes.server.ts`, `runbook.md`, `deployment.md`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

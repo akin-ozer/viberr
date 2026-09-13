@@ -62,8 +62,8 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
       onFailure: "pause",
       description: "",
       links: [
-        { index: 1, title: "Needs base B", goal: "C.", taskKey: "JC-9", status: "active", note: null, blockedBy: ["goal-1 link 2", "JC-6"] },
-        { index: 2, title: "Free", goal: "D.", taskKey: null, status: "pending", note: null, blockedBy: [] },
+        { index: 1, title: "Needs base B", goal: "C.", taskKey: "JC-9", status: "active", note: null, redeclared: false, blockedBy: ["goal-1 link 2", "JC-6"] },
+        { index: 2, title: "Free", goal: "D.", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
       ],
       currentIndex: 1,
       createdAt: null,

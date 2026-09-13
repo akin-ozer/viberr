@@ -132,9 +132,9 @@ function notifyCappedTask(db: DatabaseSync, projectSlug: string, taskKey: string
       kind: "policy",
       title: `${taskKey} is waiting for you after a restart`,
       text:
-        "A restart interrupted this task's run, and Viberr did not re-invoke the operator: " +
+        "A restart interrupted this task's run, and Viberr did not re-invoke the operator for it: " +
         `it had already done so ${RECOVERY_REINVOKE_CAP} times within 30 minutes, which is its ` +
-        "crash-loop guard. Nothing further happens on its own — run the operator from the task page.",
+        "crash-loop guard. Run the operator from the task page when you are ready.",
       projectSlug,
       taskKey,
     });
@@ -231,6 +231,13 @@ export function finalizeOrphanedRuns(
   // "agent"` with no agent alive, and nothing ever revisited it: live, SHOP-7
   // sat that way for two hours with the board and the review queue both
   // showing "agent working".
+  //
+  // The note says what THIS decision was and stops there. It does not say
+  // "nothing further happens on its own", which the first draft did and which
+  // is not Viberr's to promise: `recoverUnreactedAgentRuns` below runs the
+  // completion effects of a finished-but-unreacted run — including an
+  // `agent-reply` operator turn — under its own separate cap, so the same boot
+  // can still coordinate a task this loop skipped.
   // Re-invoke the operator only for tasks under the crash-loop cap. The gate is resolved
   // synchronously — each pass records its own audit row so the NEXT boot counts
   // it — then the (costly) operator runs fire-and-forget for the survivors.
@@ -314,9 +321,9 @@ export function finalizeOrphanedRuns(
               : // Ruling 198: the honest other half. Say what Viberr decided,
                 // why, and what the person can do — the cap is a guard
                 // against a crash loop, not a judgement about this task.
-                ". Viberr did NOT re-invoke the operator: it had already done so " +
+                ". Viberr did NOT re-invoke the operator for it: it had already done so " +
                 `${RECOVERY_REINVOKE_CAP} times for this task within the last 30 minutes, which is its ` +
-                "crash-loop guard. Nothing further happens on its own — run the operator from this page when you are ready."),
+                "crash-loop guard. Run the operator from this page when you are ready."),
           toAgent: false,
           evidence: null,
         });
