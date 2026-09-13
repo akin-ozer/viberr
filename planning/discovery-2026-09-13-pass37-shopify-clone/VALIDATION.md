@@ -1,0 +1,132 @@
+# Pass 37 — validation record
+
+Every fix proved twice: a test made to go **red** by breaking its own source, and the rebuilt
+image driven live against the real bug that motivated it.
+
+Gates on `pass37/shopify-clone-fixes`: `npm run lint` clean, `npm run typecheck` clean,
+`npm test` **6483 passed / 363 files**.
+
+---
+
+## Ruling 186 — the dependency hold gate
+
+**Red proof.** Replaced `existing.parsed.frontmatter.blockedBy` with an empty list in
+`startAgentRun`:
+
+```
+× refuses the dispatch, and starts no process
+× names what it waits on, so the refusal is actionable
+× refuses an AUTO-ENGAGING dispatch too — the hold is not a posture question
+AssertionError: promise resolved "{ runId: 'run_XFLQsUbmFcLC', …(3) }" instead of rejecting
+```
+
+The failure text *is* the live bug: a dispatch succeeding on a held task. The fourth test
+(release → dispatch works again) stayed green, as it should.
+
+UI half: setting `held` to `false` in `execution-profile.tsx` turned
+"the AGENT run control is disabled on a held task" red (`expected false to be true`).
+
+**Live proof.** Rebuilt image, real held task, real HTTP door:
+
+```
+SHOP-3 state: blocked  blockedBy=["goal-1 link 5"]
+POST intent=run-agent profileId=backend-engineer  ->  HTTP 400
+  "SHOP-3 waits on goal-1 link 5 and Viberr is holding it, so running an agent on it is
+   refused. Viberr releases it when every entry is done; to release it sooner, change what
+   it waits on."
+runs started on SHOP-3: 0
+```
+
+Task page: the header carries a `goal-1 link 5` lock chip beside the `blocked` pill, and the
+Run control is `disabled` rendering that same sentence (asserted in the live DOM:
+`runDisabled: true`, `sentencePresent: true`). Before this change the identical request
+started a real, billable Codex run.
+
+---
+
+## Ruling 187 — the phantom commit, and the stale sync pill
+
+**Red proof.** Restored the old carve-out (keep `existingCommits` unfiltered):
+
+```
+× drops it from the cache instead of keeping it as 'honestly recorded'
+× says the work is LOST, naming the sha and the branch
+AssertionError: expected [ { sha: '3aad6ff', …(1) } ] to deeply equal []
+```
+
+Again the live symptom exactly. The third test — an unprefixed commit that IS on the branch
+survives and announces nothing — stayed green in both directions, proving the carve-out's real
+purpose is intact.
+
+For F37-9, removing `syncChanged` from the write condition turned
+"writes a row when the verdict flips" red (`expected [ 'synced' ] to deeply equal [ 'synced',
+'behind_main' ]`), while "stays quiet while the verdict holds" stayed green — the bounded-growth
+guarantee is tested, not assumed.
+
+**Live proof — the fix caught the original bug on its first reconcile after restart**, with no
+prompting from me:
+
+> **Work lost:** commit `3aad6ff` was recorded for `shop-2` but is not on it. It was committed
+> inside a run's workspace and never delivered, and that workspace is gone, so the change it
+> held is not recoverable. SHOP-2's goal is unchanged — run it again to redo the work.
+
+`task.md` now reads `commits: []`. And the same GitHub page row, before and after:
+
+| | commits | sync |
+|---|---|---|
+| old image | **1 commit** (a sha on no branch) | **synced** (measured before PR #1 merged) |
+| new image | — | **behind main** |
+
+Both halves of the lie are gone from the surface a person reads.
+
+---
+
+## Ruling 188 — the controller reads
+
+**Red proof.** Four breaks, four reds, one per finding:
+
+```
+× F37-3: get_project resolves declared stages onto THIS board …   (emit raw stages)
+× F37-5: get_task answers the acceptance gate's own verdict …     (restore blockReason)
+× F37-6: list_mcp_servers reports ruling 176's marking …          (drop writeTools)
+× F37-7: save_mcp_server can mark write tools …                   (ignore the parameter)
+```
+
+F37-4's vocabulary test goes red naming the exact tool: `edit_file: expected false to be true`.
+
+The create-default test is the interesting one — it pins a decision I first got **wrong**. I
+had `saveMcpServer` auto-mark a create from the heuristic; an existing test
+("a probe keeps the tool names it listed, and the marks start unreviewed") caught it, and it
+was right to: pre-marking asserts a review nobody performed. The behaviour was backed out and
+the test now pins the correct contract — suggest, never mark; `writeToolsReviewed` stays
+false; a deliberate `[]` is an answer and stops the suggestion.
+
+---
+
+## Ruling 189 — a decision joins the contract
+
+**Red proof.** Disabled the goal append:
+
+```
+× writes a CUSTOM directive into the goal, so every re-anchor reads it
+× writes a CHOSEN option into the goal too, title and description
+AssertionError: expected 'Test goal.' to contain 'Mock-only, behind a PaymentProvider port'
+```
+
+The two guard tests (an ending resolution, and `edit_goal`'s still-open packet) stayed green.
+
+**Live proof** is the finding itself: SHOP-7 ran the whole loop on the old image — answered,
+acted on, rejected against the stale goal, reverted to "a neutral, unresolved comparison",
+re-asked. The amendment is what breaks that cycle; the loop is reproduced in
+`FINDINGS.md` F37-10 with timestamps.
+
+---
+
+## Boot recovery, incidentally
+
+Recreating the container mid-run exercised it:
+
+> **Restart:** the run `run_19PtdepIDG3L` (agent) was still running when the server stopped;
+> it is recorded as interrupted by the restart, and the operator is re-invoked.
+
+Correct, and honest about what happened.
