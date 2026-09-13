@@ -499,7 +499,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
    * that cannot be wrong and an answer that cannot be right. The share is a
    * measurement only when its complement could have been observed.
    */
-  it("ruling 190: the share is null when no DELIVERY run reported a cost — never a fake 100%", () => {
+  it("ruling 190: the share is null when a side RAN and reported nothing — no fake 100%, no fake 0%", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // The live shape: Claude controller turns cost money, every Codex delivery
@@ -509,10 +509,10 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertRun(db, { kind: "primary", cost: null });
     insertRun(db, { kind: "reviewer", cost: null });
     const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: drop `&& costedDeliveryRuns > 0` from the share and this is 1 —
-    // the card prints "100%" off a denominator delivery never entered.
+    // CANARY: drop the `unobserved` guard from the share and this is 1 — the
+    // card prints "100%" off a denominator delivery never entered.
     expect(g.coordination.share).toBeNull();
-    expect(g.coordination.costedDeliveryRuns).toBe(0);
+    expect(g.coordination.unobserved).toBe("delivery");
     // The dollar figure that IS real survives: the card still reports it.
     expect(g.coordination.coordinationCostUsd).toBeCloseTo(4.0, 5);
     expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
@@ -521,7 +521,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     // the share comes back — including a real, earned 100%-adjacent figure.
     insertRun(db, { kind: "primary", cost: 1.0 });
     const seen = getInsightsSummary(db, NOW).oversight;
-    expect(seen.coordination.costedDeliveryRuns).toBe(1);
+    expect(seen.coordination.unobserved).toBeNull();
     expect(seen.coordination.share).toBeCloseTo(0.8, 5);
 
     // A delivery run reporting a genuine $0.00 is an observation, not a gap:
@@ -531,8 +531,49 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertRun(free, { kind: "controller", cost: 2.0 });
     insertRun(free, { kind: "primary", cost: 0 });
     const g3 = getInsightsSummary(free, NOW).oversight;
-    expect(g3.coordination.costedDeliveryRuns).toBe(1);
+    expect(g3.coordination.unobserved).toBeNull();
     expect(g3.coordination.share).toBeCloseTo(1, 5);
+  });
+
+  /**
+   * Self-review of ruling 190's first draft, which guarded only the delivery
+   * side. The mirror is just as reachable — a Codex operator and controller
+   * under a Claude delivery fleet — and reads **0%**, which claims coordination
+   * is free when it merely never reported. Same defect, opposite sign.
+   */
+  it("ruling 190: coordination that ran and reported nothing is a gap too, not a free 0%", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "operator", cost: null });
+    insertRun(db, { kind: "controller", cost: null });
+    insertRun(db, { kind: "primary", cost: 3.0 });
+    insertRun(db, { kind: "reviewer", cost: 1.0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: guard only the delivery side and this reads 0 — "coordination
+    // costs you nothing", off runs that never reported a figure.
+    expect(g.coordination.share).toBeNull();
+    expect(g.coordination.unobserved).toBe("coordination");
+    expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
+  });
+
+  it("ruling 190: a side that never RAN contributes a real zero, not a gap", () => {
+    // No delivery runs at all is not an unobserved side — this instance really
+    // did spend everything it spent on coordination, and 100% is the answer.
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "controller", cost: 2.0 });
+    insertRun(db, { kind: "operator", cost: 1.0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.coordination.unobserved).toBeNull();
+    expect(g.coordination.share).toBeCloseTo(1, 5);
+
+    // And the mirror: no coordination runs at all, so 0% is earned.
+    const none = ctx.makeDb();
+    insertProject(none, "gp");
+    insertRun(none, { kind: "primary", cost: 2.0 });
+    const g2 = getInsightsSummary(none, NOW).oversight;
+    expect(g2.coordination.unobserved).toBeNull();
+    expect(g2.coordination.share).toBeCloseTo(0, 5);
   });
 
   it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {

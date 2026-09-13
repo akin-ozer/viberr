@@ -112,12 +112,15 @@ export interface OversightSummary {
   coordination: {
     coordinationCostUsd: number;
     totalCostUsd: number;
-    /** Ruling 190: how many `primary`/`reviewer` runs reported a cost. Zero
-     *  means nothing but coordination is in the denominator, so there is no
-     *  share to take — the card names the gap instead of printing 100%. */
-    costedDeliveryRuns: number;
-    /** coordination / total over cost-reporting runs; null when none, and null
-     *  when no delivery run reported a cost (ruling 190). */
+    /** Ruling 190: the side that RAN and reported no cost at all, so the share
+     *  it would produce is an artefact of which backend bills rather than a
+     *  measurement — `"delivery"` (the live case: a Codex delivery fleet under
+     *  a Claude controller reads 100%), `"coordination"` (the mirror, which
+     *  reads 0% and claims coordination is free), or null when both sides were
+     *  observed or a side never ran at all. The card names it. */
+    unobserved: "delivery" | "coordination" | null;
+    /** coordination / total over cost-reporting runs; null when nothing
+     *  reported, and null when a side that ran reported nothing (ruling 190). */
     share: number | null;
   };
 }
@@ -169,9 +172,13 @@ const totalsSchema = z.object({
    *  rows under the same scope, so a second full aggregate over `agent_runs`
    *  bought nothing but another table scan. */
   coordination_cost: z.number().nullable(),
-  /** Ruling 190: how many NON-coordination runs put a figure into the
-   *  denominator. Zero means the share's complement was never observed. */
+  /** Ruling 190: each side's runs, and how many of them put a figure into the
+   *  share. A side with runs but no figures was never observed, whichever side
+   *  it is; a side with no runs at all contributes a real zero. */
+  delivery_runs: z.number().nullable(),
   costed_delivery_runs: z.number().nullable(),
+  coordination_runs: z.number().nullable(),
+  costed_coordination_runs: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
@@ -506,8 +513,15 @@ export function getInsightsSummary(
                 COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
                                   THEN total_cost_usd END), 0) AS coordination_cost,
                 COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
+                                  THEN 1 ELSE 0 END), 0) AS delivery_runs,
+                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
                                    AND total_cost_usd IS NOT NULL
                                   THEN 1 ELSE 0 END), 0) AS costed_delivery_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                  THEN 1 ELSE 0 END), 0) AS coordination_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                   AND total_cost_usd IS NOT NULL
+                                  THEN 1 ELSE 0 END), 0) AS costed_coordination_runs,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
@@ -520,21 +534,35 @@ export function getInsightsSummary(
 
   // F31-D6: the share is read off the totals pair — both sides come from the
   // same scan, so they can never disagree about what "all reported spend" is.
-  // Ruling 190 (F37-12): a share is a measurement only when its complement
-  // could have been seen. On a fleet whose delivery runs report no cost at all
-  // — every Codex-backed instance — the denominator holds nothing BUT
-  // coordination, so the quotient is 1 by construction and "100%" answers a
-  // question ("how much of my spend is coordination?") that this data cannot
-  // answer. Same failure as a fake 0%, pointed the other way, so it gets the
-  // same answer: null, and the card says why.
+  //
+  // Ruling 190 (F37-12): a share is a measurement only when BOTH sides could
+  // have been seen. Live, a Codex delivery fleet reported no cost at all, so
+  // the denominator held nothing but the four Claude controller turns and the
+  // quotient was 1 by construction — "100%" answering a question ("how much of
+  // my spend is coordination?") this data cannot answer. The mirror is just as
+  // wrong and just as reachable (a Codex operator and controller under a Claude
+  // delivery fleet reads 0%, claiming coordination is free when it merely never
+  // reported), so the rule is symmetric: a side that RAN and reported nothing
+  // was not observed, and the share is null. A side that never ran contributes
+  // a real zero and is not a gap — an instance with no delivery runs at all
+  // genuinely spent everything on coordination.
   const coordinationCost = totals.coordination_cost ?? 0;
   const totalCost = totals.cost ?? 0;
+  const deliveryRuns = totals.delivery_runs ?? 0;
   const costedDeliveryRuns = totals.costed_delivery_runs ?? 0;
+  const coordinationRuns = totals.coordination_runs ?? 0;
+  const costedCoordinationRuns = totals.costed_coordination_runs ?? 0;
+  const unobserved: "delivery" | "coordination" | null =
+    deliveryRuns > 0 && costedDeliveryRuns === 0
+      ? "delivery"
+      : coordinationRuns > 0 && costedCoordinationRuns === 0
+        ? "coordination"
+        : null;
   const coordination = {
     coordinationCostUsd: coordinationCost,
     totalCostUsd: totalCost,
-    costedDeliveryRuns,
-    share: totalCost > 0 && costedDeliveryRuns > 0 ? coordinationCost / totalCost : null,
+    unobserved,
+    share: totalCost > 0 && unobserved === null ? coordinationCost / totalCost : null,
   };
 
   const outcomeRows = z.array(outcomeSchema).parse(

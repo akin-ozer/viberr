@@ -56,7 +56,7 @@ const FULL: InsightsSummary = {
     coordination: {
       coordinationCostUsd: 0.6,
       totalCostUsd: 1.2,
-      costedDeliveryRuns: 3,
+      unobserved: null,
       share: 0.5,
     },
     clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
@@ -203,7 +203,7 @@ describe("InsightsPage", () => {
         coordination: {
           coordinationCostUsd: 4.34,
           totalCostUsd: 4.34,
-          costedDeliveryRuns: 0,
+          unobserved: "delivery" as const,
           share: null,
         },
       },

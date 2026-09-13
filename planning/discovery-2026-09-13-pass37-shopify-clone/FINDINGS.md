@@ -771,8 +771,16 @@ F31-D6 already gives for zero reported spend — and the card reads:
 
 The test is the **count of runs**, not the dollars: a delivery run that genuinely reported
 $0.00 *was* observed, so a 100% earned that way is real and is still shown. Proven red both
-ways — drop `&& costedDeliveryRuns > 0` and the query hands back `1`; hand the card
-`share ?? 1` and "100%" comes back on screen.
+ways — drop the guard and the query hands back `1`; hand the card `share ?? 1` and "100%"
+comes back on screen.
+
+**Self-review caught a half-fix.** The first version guarded only the delivery side. The
+mirror is just as reachable — a Codex operator and controller under a Claude delivery fleet —
+and reads **0%**, which claims coordination is free when it merely never reported. Same
+defect, opposite sign, and a reader would act on it the same wrong way. The rule is now
+symmetric, and it distinguishes *reported nothing* from *never ran*: an instance with no
+delivery runs at all genuinely did spend everything on coordination, and 100% there is the
+answer rather than a gap.
 
 ## F37-13 · Nobody who plans against the shell is told what the shell contains — HIGH
 

@@ -4161,8 +4161,14 @@ by rewriting those paragraphs:*
     so it gets the same answer: when no `primary`/`reviewer` run reported a cost, the
     share is null and the card gives the figure that IS real ("operator and controller
     runs spent $4.34; no delivery run reported a cost, so there is no share to take").
-    The test is the COUNT of cost-reporting delivery runs, not the dollars: a delivery run
-    that genuinely reported $0.00 was observed, so 100% is earned there and is shown.
+    The rule is SYMMETRIC, which the first draft of it was not: the mirror — a Codex
+    operator and controller under a Claude delivery fleet — reads **0%** and claims
+    coordination is free when it merely never reported, and it is just as reachable. So a
+    side that RAN and reported nothing makes the share null whichever side it is, and the
+    card names which one. The test is runs, not dollars, and it separates a side that
+    reported nothing from a side that never ran: a delivery run that genuinely reported
+    $0.00 was observed (100% is earned there and is shown), and an instance with no delivery
+    runs at all really did spend everything it spent on coordination.
     (`insights-query.server.ts`, `insights-page.tsx`.)
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,

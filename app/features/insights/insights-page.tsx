@@ -254,7 +254,9 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
           the work, so the sub-text names both instead of implying the
           controller's turns are free. Share over COST-REPORTING runs only;
           null when nothing reported a cost (never a fake 0%) and null when
-          no DELIVERY run reported one (ruling 190 — never a fake 100%). */}
+          EITHER side ran and reported nothing (ruling 190 — never a 100% that
+          only means "delivery doesn't bill", never a 0% that only means
+          "coordination doesn't"). */}
       <StatCard
         label="Coordination overhead"
         value={fmtPercent(g.coordination.share)}
@@ -262,12 +264,11 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         sub={
           g.coordination.totalCostUsd <= 0
             ? "no run has reported a cost yet"
-            : g.coordination.costedDeliveryRuns === 0
-              ? // Ruling 190 (F37-12): every reported dollar came from
-                // coordination because nothing else reported one, so a share
-                // would be 100% by construction. Give the figure that IS real
-                // and name what is missing from the other side.
-                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)}; no delivery run reported a cost, so there is no share to take`
+            : g.coordination.unobserved !== null
+              ? // Ruling 190 (F37-12): one side ran and reported nothing, so the
+                // share it would produce is an artefact of which backend bills.
+                // Give the figure that IS real and name the side that is missing.
+                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)}; no ${g.coordination.unobserved === "delivery" ? "delivery" : "operator or controller"} run reported a cost, so there is no share to take`
               : // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
                 // only, the way "Total cost" above discloses its subset.
                 `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
