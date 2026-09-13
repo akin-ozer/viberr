@@ -9,14 +9,42 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | twenty findings — eight high, one withdrawn with its measurements |
+| [`FINDINGS.md`](FINDINGS.md) | forty findings — one withdrawn with its measurements |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–199** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–220** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
+
+## Day three, in one paragraph
+
+The third day's findings came from one habit: **read a sentence viberr shows a human, then
+check whether the mechanism can keep it.** Viberr's own turn doctrine told the operator to put
+a question to a reviewer "in ONE comment" — and a comment reaches no agent, so the question was
+never read, and viberr's stall detector then scored the asking as inaction and paused a task six
+others were waiting behind (**F37-34**). The note it wrote there says "run the operator manually
+when the hold should end"; running the operator manually was the one remedy on its list that did
+not end it (**F37-36**). A restart that landed one second after a transition left a task
+claiming an agent nobody could see, because all three boot recoveries key on a RUN and the
+damage was keyed on a TASK (**F37-33**) — and the fix's own first deploy then wrote a second,
+false restart note beside the true one (**F37-35**), which is the pass's cleanest lesson about
+live proof: it covers the state the board happened to be in, never the one it was not.
+
+Then the store broke underneath everything, and that turned out to be the richest seam of the
+pass. For twelve minutes every projection rebuild failed, every task page 500ed and a run sat
+`running` with no process — while `/resources/health` answered `{"ok":true,"status":"ok",
+"degraded":[]}`, honestly, because the row COUNTS still read fine (**F37-37**). Ninety seconds
+after that was repaired, one transient `disk I/O error` left a card reading "waiting on you"
+against a file that said `waiting: agent`, and nothing on earth would ever have retried it
+(**F37-38**) — the latch I had shipped two hours earlier said the instance was healthy, because
+a different file had rebuilt in between. And the reason a task had been stranded at all was a
+catch that wrote its "this failed" note to the store that had just failed, so `rebuildPath` threw
+after all and took `resolvePacket`'s operator re-invoke with it (**F37-39**). The store's
+corruption was my own doing — the host `sqlite3` CLI against a live container's database over
+VirtioFS — and every one of those four findings is about what viberr did with it, not how it got
+there.
 
 ## Day two, in one paragraph
 
@@ -70,6 +98,18 @@ with a circuit breaker (closed/open/half-open, injectable clock), `packages/db` 
 migration runner and a Testcontainers harness, `packages/testing` with a contract-test harness.
 PR #1 merged after a real request-changes round — the reviewer caught `--passWithNoTests`
 faking a test suite, and a root export pointing at `src/index.ts` that Node 22 cannot load.
+
+**Where it stands at the end of day three:** 17 tasks across 7 chained goals, 6 through the
+whole six-stage board to Done, **6 merged pull requests** and 2 closed on purpose — one a
+deliberate rejection, one a branch collision against a pre-existing ref. On `main`: the
+monorepo, the shared packages, the frozen cross-service contracts, the local process-supervisor
+stack with per-service SQLite and `make up`, the payment provider integration, and a CI pipeline
+whose job matrix is derived at runtime from `pnpm -r list --json` so adding a workspace needs no
+workflow edit. In flight: the storefront (PR #9) and the service template (PR #8), the latter
+the critical path with six tasks declaring `blockedBy: SHOP-10` behind it.
+
+Nothing in that repository was written by me. Every commit, branch and pull request went through
+viberr's own delivery; every merge went through the human acceptance gate on its task page.
 
 ## How the findings were found
 
