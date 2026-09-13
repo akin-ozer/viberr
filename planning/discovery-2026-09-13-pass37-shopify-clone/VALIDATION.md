@@ -58,6 +58,17 @@ Again the live symptom exactly. The third test — an unprefixed commit that IS 
 survives and announces nothing — stayed green in both directions, proving the carve-out's real
 purpose is intact.
 
+**A defect in my own fix, found by self-review and fixed.** The first version treated the
+remote's commit list as authoritative whenever the compare succeeded. But `getBranchCompare`
+reads the payload *tolerantly* and reports `droppedCommits` when GitHub sends entries it
+cannot decode, and GitHub's compare caps its list besides. On a short list a genuinely pushed
+commit would look absent — and announcing **that** as lost work is a worse lie than the one
+the rule fixes: it tells a person their work is gone while it sits on the branch. The rule now
+requires `compare.droppedCommits === 0`, and an incomplete list falls back to the old
+conservative behaviour: keep the cache, announce nothing. Pinned by its own test, red when the
+guard is removed (`expected [] to deeply equal [ { sha: '3aad6ff', … } ]` — the cached commit
+wrongly dropped).
+
 For F37-9, removing `syncChanged` from the write condition turned
 "writes a row when the verdict flips" red (`expected [ 'synced' ] to deeply equal [ 'synced',
 'behind_main' ]`), while "stays quiet while the verdict holds" stayed green — the bounded-growth

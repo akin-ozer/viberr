@@ -758,8 +758,18 @@ async function reconcileTaskUnlocked(
   // non-null) the remote's commit list is authoritative about what exists. An
   // entry it does not contain is not one our filter missed; it is one that is
   // not there. Keep only the keepable, and let the caller announce the rest.
+  //
+  // AUTHORITATIVE means COMPLETE. `getBranchCompare` reads the payload
+  // tolerantly and reports `droppedCommits` when GitHub sent entries it could
+  // not decode; GitHub's compare also caps its commit list. A short list would
+  // make a genuinely pushed commit look absent, and announcing THAT as lost
+  // work is a worse lie than the one this fixes — it tells a person their work
+  // is gone when it is sitting on the branch. So an incomplete list falls back
+  // to the old conservative behaviour: keep the cache, announce nothing.
+  const compareComplete =
+    compare !== null && provenBranchHead && compare.droppedCommits === 0;
   const remoteShas = new Set<string>();
-  if (compare && provenBranchHead) {
+  if (compareComplete && compare) {
     for (const c of compare.commits) {
       remoteShas.add(c.sha);
       remoteShas.add(c.fullSha);
@@ -768,14 +778,12 @@ async function reconcileTaskUnlocked(
   const remoteHas = (sha: string): boolean =>
     remoteShas.has(sha) ||
     [...remoteShas].some((r) => r.startsWith(sha) || sha.startsWith(r));
-  const keepableCommits =
-    compare && provenBranchHead
-      ? existingCommits.filter((c) => remoteHas(c.sha))
-      : existingCommits;
-  const vanishedCommits =
-    compare && provenBranchHead
-      ? existingCommits.filter((c) => !remoteHas(c.sha))
-      : [];
+  const keepableCommits = compareComplete
+    ? existingCommits.filter((c) => remoteHas(c.sha))
+    : existingCommits;
+  const vanishedCommits = compareComplete
+    ? existingCommits.filter((c) => !remoteHas(c.sha))
+    : [];
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && keepableCommits.length > 0
       ? keepableCommits

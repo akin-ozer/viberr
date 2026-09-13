@@ -3862,6 +3862,41 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
     expect(lost!.text).toContain("run it again");
   });
 
+  it("keeps everything when the compare list is INCOMPLETE — a short list must not read as lost work", async () => {
+    const { store, actor } = setup();
+    seedPhantom(store);
+    // GitHub sent an entry the tolerant reader could not decode, so
+    // `droppedCommits > 0` and the list is short. A genuinely pushed commit
+    // would be missing from it, and announcing that as lost work is a worse
+    // lie than the one this rule fixes.
+    const routes = phantomRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 0,
+        behind_by: 3,
+        status: "behind",
+        commits: [null, { sha: "f6166a9ffff", commit: { message: "Initialize the project" } }],
+      },
+    };
+    const gh = fakeGithubFetch(routes);
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // The cached commit survives, and nothing claims it is gone.
+    expect(file.frontmatter.github?.commits).toEqual([
+      { sha: "3aad6ff", msg: "[VIB-301] Define identity service slice" },
+    ]);
+    expect(file.timeline.some((e) => e.text.includes("Work lost"))).toBe(false);
+  });
+
   it("keeps a cached commit the remote DOES have, prefix or no prefix", async () => {
     const { store, actor } = setup();
     // The carve-out's real case: the agent skipped the `[KEY]` prefix, so the
