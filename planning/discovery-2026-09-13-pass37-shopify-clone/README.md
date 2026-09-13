@@ -9,14 +9,33 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | ten findings — two high, one withdrawn with its measurements |
+| [`FINDINGS.md`](FINDINGS.md) | eighteen findings — four high, one withdrawn with its measurements |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
-| [`DECISIONS.md`](DECISIONS.md) | the two owner decisions taken mid-pass |
+| [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–189** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–197** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
+
+## Day two, in one paragraph
+
+The second day's findings all came from one root the first day had walked past: **the
+container every agent runs in holds `node`, `npm` and `git` and nothing else**, while the
+clone the controller designed is a pnpm + turbo monorepo with a root `Makefile` and a Docker
+Compose stack. Viberr had measured that since ruling 182 and kept the reading behind an
+opt-in tool the controller never called — which omitted `make`, `docker` and every package
+manager but npm anyway (**F37-13**). Downstream of it: a required reviewer chartered to
+`make up` a stack that cannot exist, ten rework rounds on a one-file document because the
+turn doctrine has exactly one answer to a request-changes (**F37-14**), and a Code Reviewer
+verdict claiming a pnpm validation run that never happened. Alongside, three more from
+disbelieving what the product showed me: a coordination-overhead metric reading **100%** off
+a denominator delivery never entered (**F37-12**), a task reading "agent working" with **zero
+runs in 75 minutes** while ten tasks waited behind it (**F37-17**), and the controller
+refusing — correctly — to edit an agent template because Viberr would not show it what it was
+about to overwrite (**F37-18**). The owner chose to fix the environment rather than
+re-platform the clone, so `make`, `curl` and a pinned `pnpm` are in the image and Docker
+deliberately is not.
 
 ## The one-paragraph version
 
