@@ -772,3 +772,29 @@ nothing.
 
 What was NOT true is the list the admin reads, which stated the position only for a gated server
 — that is F37-40 / ruling 220.
+
+## The dependency release, fired for five tasks at once — CORRECT
+
+SHOP-10 (the service template) was the pass's critical path: six tasks declared `blockedBy:
+SHOP-10`. It took **eight** rounds of `request_changes` before ruling 214 let the operator ask
+the reviewer for a complete list, got one, had it fixed in a single round, and both required
+reviewers approved. On acceptance, PR #8 merged and viberr released everything behind it in one
+move:
+
+```
+SHOP-2  Released: everything this task waited on is done (SHOP-9, SHOP-10, goal-1 link 3).
+SHOP-3  Released: everything this task waited on is done (SHOP-9, SHOP-10, goal-1 link 3).
+SHOP-11 Released: everything this task waited on is done (SHOP-9, SHOP-10, goal-1 link 3).
+SHOP-12 Released: everything this task waited on is done (SHOP-9, SHOP-10, goal-1 link 3).
+SHOP-17 Released: everything this task waited on is done (SHOP-10).
+```
+
+Each note names **which** entries cleared, not just "unblocked", and each adds the fact the
+released work actually needs: *"the base branch has changed since the hold, so the work re-reads
+it before continuing."* Five operator drives started on the same second, each on its own task.
+
+The promise being kept here was written on those tasks the moment they were created, hours
+earlier: *"Created waiting on SHOP-10. Held until every entry is done; Viberr releases it then."*
+It is the `dependencies-released` trigger (ruling 131(e)), and the turn it produces is a distinct
+one — the operator is told what cleared and that the base moved, rather than being dropped into a
+generic re-read.
