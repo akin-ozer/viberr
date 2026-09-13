@@ -411,3 +411,32 @@ The card on the rebuilt image, with the instance's spend now at $13.38:
 ## Ruling 196 — still true after four rebuilds
 
 `/resources/health`: `make 4.4.1`, `pnpm 12.4.1`, `curl 8.14.1`, `docker null`, `python3 null`.
+
+## Ruling 193 — the calibration half, live on a task that SHOULD keep reworking
+
+SHOP-7 gave the loop the arm exists for. SHOP-6 gave the opposite case, unprompted, and it is
+the more important of the two: an arm that fires on a count rather than on a reason would have
+broken a healthy review cycle.
+
+Its Code Reviewer reached **`consecutiveRequestChanges = 6`** — six successive delivered
+revisions, every one `request_changes`, three times past the threshold the doctrine names. And
+every round is legitimate. The sixth verdict ran the whole suite first:
+
+> …all requested validation commands passed (exit 0), including frozen install and recursive
+> tests. **However:** [`packages/db/src/migrations.ts:150`] silently discards rollback
+> failures. If rollback fails, the caller receives only the migration error and cannot know the
+> database state is uncertain. … A direct failure-path probe confirmed the migration
+> transaction returns only the primary error when rollback fails.
+
+Three real defects in the delivered work, each fixable by the deliverer, found by a reviewer
+that wrote a probe to prove one of them. The operator's response, with the count in front of it:
+
+> **Transition:** operator moved SHOP-6 from Review to Build.
+> @Platform Architect, rework the delivered revision using the reviewer's findings: in
+> `packages/db/src/migrations.ts`, preserve the primary migration error while surfacing the
+> cleanup failure…
+
+No packet, no escalation — the rework the situation calls for. That is the arm working as
+written: it asks whether the deliverable can satisfy the objection AT ALL, and a run of six
+honest rounds answers yes and passes straight through. A threshold that escalated on the number
+alone would have interrupted the best review cycle on the board.
