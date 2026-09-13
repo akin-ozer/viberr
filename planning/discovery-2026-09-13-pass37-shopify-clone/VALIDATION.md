@@ -299,3 +299,49 @@ door was shut.
 
 Fixed, proven red (`expected 'agent' to be 'human'`), and the same task then moved: packet
 resolved → operator re-engaged → `run_ogTTIx` started within seconds.
+
+## Ruling 191, second order — the controller repaired a defect in its own design
+
+The prompt change is the mechanism; this is the effect, and it is the strongest evidence in
+the pass. With the measured inventory in its own system prompt for the first time, the
+controller went and rewrote the Integration Verifier profile it had written that morning —
+the required reviewer whose charter no revision could satisfy. Its new opening:
+
+> You are a gate, not a wall. **A gate that can never open is not a quality control — it is a
+> defect in the charter, and you must not become one.**
+>
+> ## The environment you verify in — measured, not assumed
+>
+> The runner contains exactly: node 26.8.2, npm 11.19.1, git 2.47.3, make 4.4.1, pnpm 12.4.1,
+> curl 8.14.1. There is NO docker, no docker compose, no psql … and there never will be.
+
+And it redefined what integration *means* here rather than lowering the bar:
+
+> Integration here means **real separate OS processes talking over real TCP**, not containers:
+> `make up` starts each service as a Node child process on its own port and polls
+> `GET /health`. Each service owns one SQLite file … Tracing is NDJSON spans …
+> That is a genuine integration surface. Separate processes, real serialisation, real network
+> errors, real partial failure. Verify it as such.
+
+It added a scope rule ("a task that delivers a document verifies as a document … **Approve
+it**"), and a rule that reads as a direct answer to the ten rounds it caused:
+
+> **An environment limitation is never a reason to request changes.** If a check cannot run
+> because the tool is not installed on this host, the deliverable did not fail — the check
+> did. … `request_changes` is reserved for a defect in the delivered work … Never for
+> `command not found`.
+
+Then it posted the accountability note on the task itself: *"@Arda @integration-verifier
+@code-reviewer The charter that made this task unpassable has been rewritten. Recording it
+here because it is the reason for the last ten rounds."*
+
+Nothing about the model changed. What changed is that a fact the server had measured since
+ruling 182 — and kept behind an opt-in tool nobody called — is now in front of the agent that
+writes the contracts everyone else is judged against. Rulings 193 and 196 cover the two cases
+this does not: a reviewer that fails twice anyway, and the tools that were cheap to ship.
+
+## Gates at the end of day two
+
+`npm run lint` clean · `npm run typecheck` clean · **6518 tests / 363 files** green ·
+**70/70 e2e** on the production image with all eleven rulings in it (37.3s), including the
+WCAG 2.2 AA sweep over every surface in both themes.
