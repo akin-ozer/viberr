@@ -4499,6 +4499,28 @@ by rewriting those paragraphs:*
     its own words, and the same-backend retry takes the recommendation.
     (`run-failure.ts`, `run-failure-remedy.server.ts`.)
 
+213. **A restart that lands between a run's end and its consequence leaves the board
+    claiming an agent nobody can see (owner, 2026-09-13, pass 37; F37-33).** SHOP-4 sat at
+    `waiting: agent` for six minutes with no live run. The container had stopped one second
+    after the operator's own `Review -> Build` transition: the operator run was already
+    `finished`, so every existing boot pass had a reason to skip it. `finalizeOrphanedRuns`
+    looks for non-terminal runs, `recoverUnreactedAgentRuns` for a finished run with no
+    reply, `recoverStrandedOperatorPlans` for a plan nobody executed - this run had replied,
+    had executed, and had died only in the step AFTER all of that, the settle that flips
+    `waiting` and backstops a stranded stage. All three passes are keyed on a RUN; the
+    damage here is keyed on a TASK, and no pass was looking at tasks. The board's own
+    sentence, "waiting on an agent", was false, with no run page to open and no button to
+    press: the only way out was for a human to guess that a comment would wake the
+    operator. So `reconcileRestartedWork` gains a fourth pass, `settleAbandonedWaits`, that
+    asks the question the other three cannot - which live tasks claim an agent while no run
+    of theirs is `running` or `queued`? Each one gets a timeline note in its own words
+    ("Left waiting on an absent agent") and a fresh operator invocation, which re-reads the
+    task and decides. If the operator cannot start - none deployed, a refusal, a throw - the
+    task is settled to `waiting: human` instead, because a board that cannot name who it is
+    waiting for must not name an agent. It runs after the three run-keyed passes, so a run
+    those can still repair is repaired by its owner and never double-handled.
+    (`run-recovery.server.ts`, `boot.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

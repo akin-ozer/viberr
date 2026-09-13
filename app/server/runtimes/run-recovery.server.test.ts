@@ -18,6 +18,7 @@ import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
+  settleAbandonedWaits,
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
@@ -352,6 +353,67 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     });
     await expect(res.reaped).resolves.toBeUndefined();
     expect(res.finalized).toBe(1);
+  });
+});
+
+/**
+ * Ruling 213 (live on SHOP-4). Every other boot path keys on a RUN — the ones
+ * still running, the finished ones whose reply never landed, the Codex plans
+ * that never executed. None covers an operator drive that COMPLETED cleanly and
+ * whose settle was still in flight when the process died: the run row is
+ * `finished`, its reply is not missing, its plan ran, and the only trace is a
+ * board that says an agent is working while every run on the task is over.
+ * SHOP-4's operator moved it Review → Build at 18:57:34 and the container
+ * restarted at 18:57:35; six minutes later nothing had looked at it.
+ */
+describe("settleAbandonedWaits (ruling 213)", () => {
+  it("re-invokes the operator for a task waiting on an agent that is not there, and says so", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // A run that FINISHED — the shape no other boot pass selects.
+    seedRun("run_settled", {
+      kind: "primary",
+      role: "Primary specialist",
+      agentProfileId: "developer",
+      state: "finished",
+      finishedAt: new Date().toISOString(),
+    });
+
+    // CANARY: drop the sweep from `reconcileRestartedWork` (or narrow its SELECT
+    // to live runs) and this returns 0 — the board keeps claiming an agent.
+    const settled = await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot });
+    expect(settled).toBe(1);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const note = parsed.timeline.find((e) => e.title === "Left waiting on an absent agent");
+    expect(note, "the record must say why a run started").toBeTruthy();
+    expect(note!.text).toContain("no run was live when the server came back");
+    // …and the operator was actually re-invoked, which is the remedy: it
+    // re-reads the task and decides, exactly as it does for an orphaned run.
+    const operatorRuns = store.db
+      .prepare(`SELECT id FROM agent_runs WHERE task_key = ? AND kind = 'operator'`)
+      .all("VIB-1");
+    expect(operatorRuns.length).toBeGreaterThan(0);
+  });
+
+  it("leaves a task alone while a run is actually live", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedRun("run_live", {
+      kind: "primary",
+      role: "Primary specialist",
+      agentProfileId: "developer",
+      state: "running",
+    });
+    expect(await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot })).toBe(0);
   });
 });
 

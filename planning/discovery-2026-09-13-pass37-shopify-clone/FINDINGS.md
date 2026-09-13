@@ -1833,3 +1833,41 @@ click. Both tasks were running again inside a minute.
 Canaries: strip the new alternatives and the DNS text classifies `unknown` with the auth
 sentence; restore `recommended: true` on the cross-backend arm and viberr's default answer to a
 local network fault is a model change.
+
+---
+
+## F37-33 · A restart one second after a transition left the board waiting on an agent that no longer existed — HIGH
+
+**Found by watching, not by reading.** SHOP-4 sat at `waiting: agent` with no live run for six
+minutes. The board said an agent was on it. Nothing was.
+
+The log puts the container stop at **18:57:35**, one second after the operator's own
+`Review -> Build` transition at **18:57:34**. So the operator run had already reached `finished`,
+and that is exactly why nothing repaired it:
+
+| boot pass | selects | why it skipped this run |
+| --- | --- | --- |
+| `finalizeOrphanedRuns` | runs still `running`/`queued` | the run was `finished` |
+| `recoverUnreactedAgentRuns` | finished runs with no `task.agent.replied` | it had replied |
+| `recoverStrandedOperatorPlans` | plans never executed | it had executed |
+
+The step that died was the one AFTER all of those: the settle that flips `waiting` and backstops
+a stranded stage. All three existing passes are keyed on a **run**; this damage is keyed on a
+**task**, and nobody was looking at tasks.
+
+What that costs a human: the board makes a factual claim ("waiting on an agent") that is false,
+with no run page to open, no failure to retry, and no button that means "there is nobody there."
+The only exit is to guess that posting a comment re-wakes the operator. That is the blocking-with-
+no-way-out bar, not a cosmetic one.
+
+**Fix (ruling 213).** `reconcileRestartedWork` gains a fourth pass, `settleAbandonedWaits`, asking
+the task-keyed question: which live tasks claim an agent while no run of theirs is `running` or
+`queued`? Each gets a note in viberr's own words — *"Left waiting on an absent agent … the run
+finished just before the stop and the follow-up that would have moved the task went with the
+process. Nothing was lost from the record."* — and a fresh operator invocation. If the operator
+cannot start (none deployed, a refusal, a throw), the task settles to `waiting: human`, because a
+board that cannot name who it is waiting for must not name an agent. It runs last, so a run the
+other three can still repair is repaired by its owner.
+
+Canaries (both proved red): flip the `NOT EXISTS` to `EXISTS` — the sweep returns 0 and the board
+keeps claiming an agent; rename the note title — the record no longer says why a run started.

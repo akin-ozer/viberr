@@ -12,6 +12,7 @@ import {
   finishCodexRunHome,
   userBackendHome,
 } from "./user-homes.server";
+import type { TaskFileRef } from "~/server/files/task-writer.server";
 
 /**
  * Crash-loop backstop for the boot recovery re-invoke (F7-BOOT1). A boot that
@@ -419,6 +420,106 @@ export function finalizeOrphanedRuns(
  *    run within `RECOVERY_WINDOW_MS`, further boots SKIP that run (logged) instead
  *    of re-firing. A restart after the window elapses sees a clean count.
  */
+/**
+ * Ruling 213: settle a task the restart left waiting on an agent that is not
+ * there.
+ *
+ * Every other boot path keys on a RUN: `finalizeOrphanedRuns` takes the ones
+ * still `running`/`queued`, `recoverUnreactedAgentRuns` the finished ones whose
+ * reply never landed, `recoverStrandedOperatorPlans` the Codex plans that never
+ * executed. None of them covers the window this closes — an operator drive that
+ * COMPLETED cleanly and whose settle (the waiting flip, and the stranded-stage
+ * backstop that would have nudged it) was still in flight when the process
+ * died. The run row is `finished`, its reply is not missing, its plan ran. The
+ * only trace is a task whose board says an agent is working and whose runs are
+ * all over.
+ *
+ * Live: SHOP-4's operator moved it Review → Build at 18:57:34 and the container
+ * restarted at 18:57:35. Six minutes later the board still said "agent
+ * working", nothing was running, and no boot sweep had any reason to look at
+ * it.
+ *
+ * The remedy is the one `finalizeOrphanedRuns` already uses for its own case:
+ * say so on the timeline and re-invoke the operator, which re-reads the task
+ * and decides. A project with no operator deployed settles the flag instead, so
+ * the board stops claiming work that is not happening.
+ */
+export async function settleAbandonedWaits(
+  db: DatabaseSync,
+  ctx: TaskMutationContext = {},
+): Promise<number> {
+  // SAFETY: `project_slug` and `task_key` are NOT NULL TEXT on
+  // `task_projections` (0001_baseline.sql); the WHERE clause adds no columns.
+  const rows = db
+    .prepare(
+      `SELECT t.project_slug AS slug, t.task_key AS key
+         FROM task_projections t
+         JOIN projects p ON p.slug = t.project_slug
+        WHERE p.archived = 0
+          AND t.archived = 0
+          AND t.waiting = 'agent'
+          AND NOT EXISTS (
+            SELECT 1 FROM agent_runs r
+             WHERE r.project_slug = t.project_slug
+               AND r.task_key = t.task_key
+               AND r.state IN ('running', 'queued')
+          )`,
+    )
+    .all() as { slug: string; key: string }[];
+  if (rows.length === 0) return 0;
+  logger.info("settling tasks the restart left waiting on an absent agent", {
+    tasks: rows.length,
+  });
+  const [{ appendTimelineEvent }, { runOperator }, { clearWaitingToHuman }] =
+    await Promise.all([
+      import("~/server/files/task-writer.server"),
+      import("./operator-run.server"),
+      import("~/server/tasks/task-actions.server"),
+    ]);
+  for (const row of rows) {
+    const ref: TaskFileRef = { projectSlug: row.slug, taskKey: row.key };
+    if (ctx.dataRoot) ref.dataRoot = ctx.dataRoot;
+    try {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Left waiting on an absent agent",
+        text:
+          "**Restart:** this task was waiting on an agent, and no run was live when the server " +
+          "came back — the run finished just before the stop and the follow-up that would have " +
+          "moved the task went with the process. Nothing was lost from the record. The operator " +
+          "is re-invoked to decide what happens next.",
+        toAgent: false,
+        evidence: null,
+      });
+      const drive: Parameters<typeof runOperator>[1] = {
+        projectSlug: row.slug,
+        taskKey: row.key,
+        trigger: "manual",
+      };
+      if (ctx.dataRoot) drive.dataRoot = ctx.dataRoot;
+      const result = await runOperator(db, drive);
+      // The operator may REFUSE rather than throw (none deployed, a closed
+      // task, an open packet, the task waiting on other work). Either way no
+      // run started, so the board must stop claiming an agent — the whole
+      // reason this sweep exists.
+      if (!result.runId) {
+        await clearWaitingToHuman(db, ctx, row.slug, row.key);
+      }
+    } catch (error) {
+      logger.warn("abandoned-wait settle failed", {
+        taskKey: row.key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      // The operator could not run (none deployed, a refusal): the board must
+      // still stop claiming an agent is on it.
+      await clearWaitingToHuman(db, ctx, row.slug, row.key).catch(() => {});
+    }
+  }
+  return rows.length;
+}
+
 export async function recoverUnreactedAgentRuns(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},

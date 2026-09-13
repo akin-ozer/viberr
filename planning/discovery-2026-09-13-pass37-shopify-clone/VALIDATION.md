@@ -489,3 +489,39 @@ and one of them — 187(b) — reproduced first as a failing test before the fix
 Refuted findings are recorded too rather than quietly dropped: 34 of 41, including several
 plausible-sounding ones about ruling 186's dispatch gate and ruling 193's `open_packet`
 naming that did not survive being asked to demonstrate themselves.
+
+---
+
+## Ruling 213 — proved on the shape that produced it
+
+`settleAbandonedWaits` has two behaviour tests in
+[`run-recovery.server.test.ts`](../../app/server/runtimes/run-recovery.server.test.ts), and the
+fixture is deliberately the shape **no other boot pass selects**: a `finished` primary run that
+already replied, on a task still at `waiting: agent`. If any of the three existing passes could
+have repaired this, the test would be measuring them instead.
+
+Both canaries were run, and both went red:
+
+```
+# NOT EXISTS -> EXISTS  (the sweep stops seeing tasks with no live run)
+AssertionError: expected +0 to be 1
+AssertionError: expected 1 to be +0     <- and the live-run test inverts, proving the
+                                           clause is what separates the two cases
+
+# title "Left waiting on an absent agent" -> "Restart note"
+AssertionError: the record must say why a run started: expected undefined to be truthy
+```
+
+The ordering assertion lives in `boot.server.test.ts`: the sweep must be the **fourth** step of
+`reconcileRestartedWork`, after the three run-keyed passes, so a run they can still repair is
+repaired by its owner and never double-handled.
+
+One correction worth recording, because it is the same class of error as the vacuous canaries
+above. My first version of the behaviour test asserted `waiting` was no longer `agent`, with the
+comment *"this store deploys no operator, so the re-invoke cannot run."* The premise was false —
+the log said `operator run started (real)` — so the assertion was measuring a fallback that never
+fired, and it failed for a reason that had nothing to do with the fix. The test now asserts what
+actually happens: the note is written and an operator run exists.
+
+Gates after 211-213: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6570 tests passed**,
+`build` green.

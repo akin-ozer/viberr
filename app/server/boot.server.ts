@@ -54,6 +54,7 @@ import {
 import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
+  settleAbandonedWaits,
   recoverUnreactedAgentRuns,
 } from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
@@ -435,6 +436,7 @@ interface ReconcileRestartedWorkDeps {
   finalizeOrphanedRuns: typeof finalizeOrphanedRuns;
   recoverUnreactedAgentRuns: typeof recoverUnreactedAgentRuns;
   recoverStrandedOperatorPlans: typeof recoverStrandedOperatorPlans;
+  settleAbandonedWaits: typeof settleAbandonedWaits;
   activeRunCount: typeof activeRunCount;
   reclaimTerminalTaskWorkspaces: typeof reclaimTerminalTaskWorkspaces;
 }
@@ -473,6 +475,7 @@ export async function reconcileRestartedWork(
     finalizeOrphanedRuns,
     recoverUnreactedAgentRuns,
     recoverStrandedOperatorPlans,
+    settleAbandonedWaits,
     activeRunCount,
     reclaimTerminalTaskWorkspaces,
   },
@@ -505,6 +508,17 @@ export async function reconcileRestartedWork(
     await deps.recoverStrandedOperatorPlans(db);
   } catch (error) {
     logger.error("codex operator plan recovery failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  try {
+    // Ruling 213: LAST of the four, deliberately. The three above all key on a
+    // run and may themselves set `waiting: agent` by starting one; this sweep
+    // asks the leftover question — which tasks claim an agent that no run
+    // backs — so it has to see the board they leave behind.
+    await deps.settleAbandonedWaits(db);
+  } catch (error) {
+    logger.error("abandoned-wait settle failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }

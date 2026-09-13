@@ -62,6 +62,12 @@ const finalizeOrphanedRuns = vi.fn(() => {
     notes: Promise.resolve(),
   };
 });
+/** Ruling 213: the fourth recovery, and the only one that keys on the BOARD
+ *  rather than on a run — it must land after the three that may start one. */
+const settleAbandonedWaits = vi.fn(async () => {
+  calls.push("settle-abandoned-waits");
+  return 0;
+});
 /** Runs queued or running when the chain reaches its reclaim. Zero by default;
  *  a test that wants the guard to bite returns one. */
 const activeRunCount = vi.fn(() => 0);
@@ -75,6 +81,7 @@ const reconcileDeps = {
   finalizeOrphanedRuns,
   recoverUnreactedAgentRuns,
   recoverStrandedOperatorPlans,
+  settleAbandonedWaits,
   activeRunCount,
   reclaimTerminalTaskWorkspaces,
 };
@@ -242,6 +249,11 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
       "reply-recovery:end",
       "plan-recovery:start",
       "plan-recovery:end",
+      // Ruling 213: the board sweep runs after all three run-keyed passes, so
+      // it sees the board they leave behind — a pass that STARTS a run sets
+      // `waiting: agent`, and sweeping before it would settle a task that is
+      // about to be worked.
+      "settle-abandoned-waits",
       "reclaim",
     ]);
   });
