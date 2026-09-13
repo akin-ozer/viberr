@@ -16,6 +16,35 @@ Numbers continue from 185.
   never renders the second as the first (F37-8).
 - **188** — A controller read returns what the equivalent human surface renders (F37-3, F37-5,
   F37-6, F37-7).
+- **189** — A person's decision joins the task's contract, not just its timeline (F37-10).
+- **190** — A share whose complement was never observed is not a measurement (F37-12).
+- **191** — Everyone who plans against the shell is told what the shell contains (F37-13).
+- **192** — A retry rebuilds from the task, not the link's frozen copy (F37-15, amends 155).
+- **193** — A reviewer that cannot pass is a decision, not a defect (F37-14).
+- **194** — A retry that starts nothing says so (F37-16).
+- **195** — A refusal always leaves `waiting` honest, the packet arm included (F37-17).
+- **196** — The image ships `make`, `curl` and a pinned `pnpm`; Docker stays out (owner
+  decision D37-3, answering F37-13's other half).
+- **197** — A template's persona is readable, and the tool says which omissions are safe
+  (F37-18, completes F33-7).
+
+### Day two — how these were sequenced
+
+The day-two rulings are not independent items; they are one root and its consequences, and
+they were fixed in that order deliberately:
+
+1. **191 first** — put the measured inventory in front of the planner and the agents. Nothing
+   else can be judged while the people making the decisions cannot see the environment.
+2. **196 second**, once the owner had chosen (D37-3) — close the part of the gap that is cheap
+   to close, and leave Docker's absence explicit rather than accidental.
+3. **193 third** — because 191 and 196 together still leave a reviewer that legitimately
+   cannot pass, and the doctrine had no answer for that but another rework.
+4. **190, 192, 194, 195, 197** — the independent honesty defects found alongside, each with
+   its own red-proof.
+
+Two of them were self-review catches on my own fixes, recorded rather than quietly amended:
+**190** shipped guarding one side of a symmetric problem, and **191**'s advice paragraph was
+two hardcoded sentences that both went stale or false under 196.
 
 ---
 
