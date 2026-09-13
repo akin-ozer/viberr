@@ -1599,3 +1599,106 @@ that agrees with the defect is how a defect survives.
 keep it, and every one carries a canary. Where the honest answer is "viberr cannot know", it
 now says so — (l) reports its own last reading rather than asserting live GitHub state, and (k)
 names the uncertainty instead of promising the push will land.
+
+## F37-28 · A decision packet whose options cannot produce the thing it asks for — med
+
+> **CORRECTED, twenty minutes later: I blamed the wrong layer.** I resolved this packet by
+> telling the operator to move the task back to Review — and viberr refused the move: *"**No
+> allowed transition from Verify to Review.**"* The operator had not failed to offer the
+> obvious option; viberr had taken that option away from it. The disease is **F37-29**, and
+> the paragraphs below describe its symptom. What stands: the packet's two options could not
+> produce the verdict it asked for. What falls: the claim that the operator should have known
+> better, and the fix I proposed for it (a doctrine line about writing packets). The fix is
+> ruling 208, in the mechanism.
+
+**Live on SHOP-15**, after the Integration Verifier approved revision `b0b3628` at Verify:
+
+> **Required Code Reviewer verdict is missing**
+> @Arda, @Integration Verifier reported a fresh approve for revision b0b3628 … The live
+> acceptance gate still reports one required reviewer approval missing: code-reviewer remains
+> null, **with no live run available at Verify**. …resolve the missing Review-stage verdict
+> before acceptance.
+>
+> 1. **Hold at Verify pending Code Reviewer** — *Keep the task blocked until the required
+>    approval is recorded.* (operator pick)
+> 2. **Archive without acceptance** — *Close the incomplete task while preserving its remote
+>    branch.*
+
+The state is legitimate and viberr's own rules produced it: the Code Reviewer approved
+`c97ac22`; the verifier's request-changes produced `b0b3628`; ruling 179 binds verdicts to
+revisions, so the older approval no longer counts; and ruling 133 scopes a supporting profile
+to its declared stages, so the Code Reviewer cannot run at Verify. Every rule is right.
+
+**What is wrong is the packet.** Option 1 waits for an approval that nothing can produce —
+the operator's own sentence says there is no live run available at Verify — and option 2 throws
+the work away. The move that resolves it was not offered: **change the stage**. Back to Review,
+run the Code Reviewer on `b0b3628`, forward to Verify, where the verifier's approve still
+stands. A human can do that from the task page's stage control, and the operator can do it with
+`transition_stage`.
+
+So it is not a path with no way out — the way out exists and is one click from the packet — but
+a person who reads the two options as the available answers will hold a task forever or bin it,
+and the recommended option is the one that holds.
+
+**What I did, and why it is the fix I want tested:** I resolved it with the packet's own
+*"Write your own directive"* option, telling the operator exactly that. The record now carries
+the correction in my words and the operator re-engaged with it. The durable fix belongs in the
+turn doctrine that tells the operator how to write a blocked packet: **when a required reviewer
+cannot run at the stage the task is on, the STAGE is the thing to change, and an option that
+only holds is not a resolution.** Ruling 208 states it beside ruling 193's arm, which already
+handles the other half of this family (a reviewer that cannot pass).
+
+## F37-29 · A task that cannot reach the only stage its missing reviewer can run at — HIGH
+
+**Found by acting on F37-28 and being refused.** I told the operator, through the packet's own
+"write your own directive" option, to move SHOP-15 back to Review so the Code Reviewer could
+judge the current revision. The operator tried, and viberr answered:
+
+> **Coordination stopped:** the `transition_stage` step failed (**No allowed transition from
+> Verify to Review.**). The remaining plan was not executed.
+
+**The state, all of it legitimate.** The board the controller designed declares two required
+reviewers at two different stages, and two profiles whose declared stages differ:
+
+| | required at | declared stages |
+|---|---|---|
+| `code-reviewer` | review | build, review |
+| `integration-verifier` | verify | review, verify |
+
+SHOP-15 sat at **Verify** with `validation: changed`: the Integration Verifier had approved
+revision `b0b3628`, and the Code Reviewer's approval was on `c97ac22` — stale under ruling 179,
+which binds a verdict to the revision it judged. So the acceptance gate correctly reported one
+required approval missing, and ruling 133 correctly refused to run the Code Reviewer at Verify,
+which is not one of its stages.
+
+**The way out is a backward move, and viberr had closed it.** `verdictStageFor` is the function
+that names the stage a task goes back to for a re-verdict, and it decides with:
+
+```ts
+const eligibleAt = (stageId) => reviewerSpecs.some((spec) => stageEligible(spec, stageId, …));
+if (eligibleAt(fm.stage)) return null;          // "a verdict can be given here"
+```
+
+`reviewerSpecs` is **every** required reviewer. The Integration Verifier is eligible at Verify
+— so `eligibleAt("verify")` is true, the function returns null, `reworkStages` comes back
+empty, and `transitionStage` refuses the backward move as off-graph. The reviewer that could
+give a verdict here had already given it. The one the task is waiting on could not be reached.
+
+**What was left.** No operator move. No human move (the stage control offers the same graph).
+Acceptance blocked on a gate that is genuinely unmet. The exits were **archive**, or an **admin
+force-accept past a legitimately unmet gate** — which is the board lying to itself to get
+unstuck. Below admin there was no exit at all. That is the bar's "blocking a path with no way
+out", reached without anyone doing anything wrong.
+
+**Why it survived until now.** Every board this codebase had been tested on declares its
+required reviewers at ONE stage, where "is any required reviewer eligible here?" and "is the
+one we are waiting on eligible here?" are the same question. The shopify-clone board is the
+first with two, and the controller built it that way on its own — which is precisely the value
+of letting it design its own workflow.
+
+**Fix — ruling 208.** The scan considers only the required reviewers whose approve on the
+CURRENT revision is missing. A reviewer that already approved cannot be the reason a re-verdict
+is needed, so its eligibility must not answer for one that has not approved. Three cases pinned:
+the missing reviewer is elsewhere (move back to its stage), the missing reviewer is eligible
+here (no move — the old rule got this right and keeps getting it right), and nobody owes a
+verdict (no move). Canary: restore "any required reviewer" and the first goes null.

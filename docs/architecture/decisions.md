@@ -4368,6 +4368,29 @@ by rewriting those paragraphs:*
     `reconcile-poller.server.ts`, `specialist-run.server.ts`, `task-actions.server.ts`,
     `task-file.schema.ts`, `user-display-name.server.ts`, `agent-catalog.server.ts`.)
 
+208. **The reviewers who still OWE a verdict decide where a task goes back to (owner,
+    2026-09-13, pass 37; F37-29).** `verdictStageFor` names the stage a task whose revision
+    changed after a verdict returns to, and it asked whether ANY required reviewer is eligible
+    at the current stage — "a verdict can be given here". On a board with required reviewers at
+    TWO stages that answers for the wrong reviewer. Live on SHOP-15: `code-reviewer` (declared
+    build+review) held no approve on the delivered revision, `integration-verifier` (declared
+    review+verify) held one and is eligible at Verify — so the scan returned null,
+    `reworkStages` came back empty, and `transitionStage` refused "No allowed transition from
+    Verify to Review". The task could not reach the only stage where the reviewer it was
+    waiting on may run: not by the operator, not by a human, because the stage control offers
+    the same graph. Acceptance was blocked on a gate that was genuinely unmet, and the exits
+    were archive or an admin force-accept past it — the board lying to itself to move. Below
+    admin there was no exit. Every rule involved was right: ruling 179 staled the older
+    approval, ruling 133 refused to run a profile outside its stages, the gate reported the
+    truth. The defect was one premise inside the scan. So it now considers only the required
+    reviewers whose approve on the CURRENT revision is missing: a reviewer that already
+    approved cannot be the reason a re-verdict is needed, and its eligibility must not answer
+    for one that has not. It survived this long because every board the codebase had been
+    tested on declares its required reviewers at ONE stage, where the two questions coincide —
+    the shopify-clone board is the first with two, and the controller designed it that way
+    itself.
+    (`verdict-stage.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`
