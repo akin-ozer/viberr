@@ -340,6 +340,17 @@ ruling 182 — and kept behind an opt-in tool nobody called — is now in front 
 writes the contracts everyone else is judged against. Rulings 193 and 196 cover the two cases
 this does not: a reviewer that fails twice anyway, and the tools that were cheap to ship.
 
+## Ruling 187's negative stamp — observed true, never observed false, and that is the expected state
+
+Every commit on every branch in the record carries `pushed: true`, stamped from the remote
+compare, and the GitHub page shows no "not pushed" marker anywhere. `pushed: false` has not
+occurred since the fix landed, and a watcher looking for one across a full delivery cycle
+found none. That is what the field is for: it marks an abnormality — a commit the record
+claims and the remote does not have — and the one live instance of that abnormality is the
+SHOP-2 phantom that produced the ruling in the first place. The false arm is covered by
+`github-reconciler.server.test.ts`; claiming a live sighting of it would mean manufacturing a
+phantom on a real branch, which buys a screenshot and costs the record's integrity.
+
 ## Gates at the end of day two
 
 `npm run lint` clean · `npm run typecheck` clean · **6518 tests / 363 files** green ·
