@@ -684,3 +684,23 @@ refused went through on the operator's own authority — no human transition, no
 
 The task is back at Review with the Code Reviewer running on the delivered revision, which is
 where it needed to be an hour ago.
+
+## Ruling 206, fired live — the project's first compaction marker
+
+Deployed at 17:08Z; SHOP-15's next write compacted it. The first `Compacted` marker this
+project has ever carried:
+
+> _9 earlier routine comments compacted to keep the task readable — human comments are never
+> compacted._
+
+Checked the file it rewrote, not just the marker:
+
+| | |
+|---|---|
+| events | 89, newest-first ordering **intact** |
+| typed events | all present: 14 transition, 11 github, 10 note, 7 quality, 1 blocked, 1 policy, 1 assign |
+| human comments | still on the record, every one |
+| agent replies | the newest older one kept verbatim, the tail behind it folded |
+
+Nine routine comments became one marker in a single write, on a task that had been over its
+40-event threshold for hours without the old adjacency rule ever folding a thing.
