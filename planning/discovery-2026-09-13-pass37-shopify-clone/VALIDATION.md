@@ -133,6 +133,21 @@ acted on, rejected against the stale goal, reverted to "a neutral, unresolved co
 re-asked. The amendment is what breaks that cycle; the loop is reproduced in
 `FINDINGS.md` F37-10 with timestamps.
 
+**A second defect in my own fix, found by watching it work.** The first version appended
+*every* resolution, so SHOP-7's goal promptly collected two blocks: the provider decision
+(contract) and "Work stalled: pick a recovery path → Redirect with sharper guidance" (not).
+A recovery choice decides what happens *next*, not what the work *is*, and letting process
+accumulate in the very text every future run re-anchors on is the noise the ruling exists to
+prevent. Recovery kinds are now excluded — `request_edit`, `redirect`, `retry_other_backend`,
+`hold_runtime_debug`, `archive_task`, `discard_branch`, `resolve_remote_collision`,
+`move_stage` — while a typed **custom directive always binds**, whatever packet it was typed
+on, because a person wrote it. Both arms pinned; the exclusion goes red when removed
+(`expected 'Test goal.\n\n---\n\n**Decision — 202…' to be 'Test goal.'`).
+
+The fixture moved from `redirect` to `custom` options in the same change, which is what a real
+agent question carries — SHOP-7's live packet offered Stripe / Adyen / Mock-only as `custom`,
+and my first fixture had quietly got that wrong.
+
 ---
 
 ## Boot recovery, incidentally
