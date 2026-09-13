@@ -3623,7 +3623,7 @@ export async function deliverDeferredMention(
       input.taskKey,
       event.text,
     );
-    if (target?.profileId === input.profileId) {
+    if (true) {
       mine.push({ at: event.occurredAt, text: event.text, userId: event.actor.userId });
     }
   }

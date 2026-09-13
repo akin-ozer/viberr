@@ -704,3 +704,24 @@ Checked the file it rewrote, not just the marker:
 
 Nine routine comments became one marker in a single write, on a task that had been over its
 40-event threshold for hours without the old adjacency rule ever folding a thing.
+
+## The model policy, read back off the record
+
+The owner's rule for this pass was: *"The controller runs on opus high; every other agent —
+operator, reviewers, every delivery specialist — runs on luna max."* Every surface let me set
+it, so there was no finding there; what is worth recording is that the RECORD agrees, checked
+at 322 runs:
+
+```
+kind        backend  model           runs
+----------  -------  --------------  ----
+operator    codex    gpt-5.6-luna     205
+primary     codex    gpt-5.6-luna      60
+reviewer    codex    gpt-5.6-luna      51
+controller  claude   opus[1m]           6
+```
+
+No run on any other model, in either direction, across the whole pass. The specialist
+definitions carry `effort: max` (nine profiles); the controller's own settings carry opus at
+high. The policy was configured once, through the controller's own agent editor, and has held
+without a single exception since.
