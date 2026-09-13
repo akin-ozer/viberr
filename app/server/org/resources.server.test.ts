@@ -1906,3 +1906,134 @@ describe("ruling 176: an org MCP server's write tools", () => {
     expect(retested.mcp.discoveredTools).toEqual(["get_issue", "push_files", "delete_file"]);
   });
 });
+
+/**
+ * Ruling 188 (pass 37, F37-7): an MCP server created through any non-UI door
+ * is governed the same way one created in the Org settings dialog is.
+ *
+ * Live, the controller created two filesystem servers through
+ * `save_mcp_server` and both landed with a NULL tool policy — every tool,
+ * mutations included, reaching every run that mounted them — while a server
+ * made in the dialog had `write_file` and `create_directory` pre-ticked from
+ * the same discovered list. The controller reported the gap itself and asked a
+ * person to go and fix it by hand.
+ */
+describe("ruling 188: a CREATE takes the editor's own write-tool suggestion", () => {
+  const FS_TOOLS = [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "create_directory",
+    "list_directory",
+    "move_file",
+    "search_files",
+    "get_file_info",
+  ];
+
+  it("SUGGESTS the write tools without marking them — suggesting is not reviewing", async () => {
+    const { db } = setup();
+    const saved = await saveMcpServer(
+      db,
+      { name: "kb-files", transport: "HTTP", target: "https://x.dev/mcp", cred: "" },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
+    );
+    // Nothing is marked and nothing is claimed: a create is not a review, and
+    // `writeToolsReviewed` stays false so every surface can say so.
+    expect(saved.mcp.writeTools).toEqual([]);
+    expect(saved.mcp.writeToolsReviewed).toBe(false);
+    // But the caller is no longer blind: the suggestion is returned so a non-UI
+    // door (the controller) can mark the server in its next call instead of
+    // leaving it ungoverned in silence. These are the four the widened
+    // vocabulary (F37-4) catches on a stock filesystem server — the original
+    // seven verbs found only two of them.
+    expect([...saved.writeToolsSuggestion].sort()).toEqual(
+      ["create_directory", "edit_file", "move_file", "write_file"].sort(),
+    );
+    expect(saved.writeToolsSuggestion).not.toContain("read_file");
+    expect(saved.writeToolsSuggestion).not.toContain("list_directory");
+  });
+
+  it("stops suggesting once a person has reviewed", async () => {
+    const { db } = setup();
+    const reviewed = await saveMcpServer(
+      db,
+      {
+        name: "reviewed-none",
+        transport: "HTTP",
+        target: "https://x.dev/mcp",
+        cred: "",
+        writeTools: [],
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
+    );
+    // A deliberate "mark none" is an answer, not an absence: re-suggesting
+    // would nag a person who already decided.
+    expect(reviewed.mcp.writeToolsReviewed).toBe(true);
+    expect(reviewed.writeToolsSuggestion).toEqual([]);
+  });
+
+  it("an EXPLICIT list overrules the guess, and [] really means none", async () => {
+    const { db } = setup();
+    const explicit = await saveMcpServer(
+      db,
+      {
+        name: "narrow",
+        transport: "HTTP",
+        target: "https://x.dev/mcp",
+        cred: "",
+        writeTools: ["write_file"],
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
+    );
+    expect(explicit.mcp.writeTools).toEqual(["write_file"]);
+
+    const none = await saveMcpServer(
+      db,
+      {
+        name: "unmarked-on-purpose",
+        transport: "HTTP",
+        target: "https://x.dev/mcp",
+        cred: "",
+        writeTools: [],
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
+    );
+    expect(none.mcp.writeTools).toEqual([]);
+    expect(none.mcp.writeToolsReviewed).toBe(true);
+  });
+
+  it("an UPDATE that omits the field leaves a person's marking alone", async () => {
+    const { db } = setup();
+    const created = await saveMcpServer(
+      db,
+      {
+        name: "keepme",
+        transport: "HTTP",
+        target: "https://x.dev/mcp",
+        cred: "",
+        writeTools: ["write_file"],
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
+    );
+    const updated = await saveMcpServer(
+      db,
+      {
+        id: created.mcp.id,
+        name: "keepme",
+        transport: "HTTP",
+        target: "https://x.dev/mcp2",
+        cred: "",
+      },
+      ACTOR,
+      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
+    );
+    // The create-time guess must not re-fire on an edit and widen what a person
+    // deliberately narrowed.
+    expect(updated.mcp.writeTools).toEqual(["write_file"]);
+  });
+});

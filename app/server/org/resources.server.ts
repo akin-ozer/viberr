@@ -44,7 +44,7 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { slugify } from "~/shared/ids/slugify";
 import { isReservedMcpName } from "~/shared/mcp-reserved";
-import { MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/shared/mcp-tools";
+import { looksLikeWriteTool, MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/shared/mcp-tools";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
 
@@ -1611,7 +1611,7 @@ export async function saveMcpServer(
   actor: AuditActor,
   options: McpProbeOptions = {},
   ctx: OrgSeedContext = {},
-): Promise<{ mcp: McpView; toast: string }> {
+): Promise<{ mcp: McpView; toast: string; writeToolsSuggestion: string[] }> {
   const name = slugify(input.name);
   const target = input.target.trim();
   const transport = input.transport === "stdio" ? "stdio" : "HTTP";
@@ -1722,9 +1722,18 @@ export async function saveMcpServer(
     (priorRow?.heuristicWarmups ?? 0) < 1;
   const warmable =
     disc.kind === "down" && (disc.installing === true || heuristicWarmable);
+  // Ruling 188 (pass 37, F37-7) deliberately does NOT auto-mark on create. The
+  // marking is a REVIEW, and `writeToolsReviewed` says whether one happened;
+  // pre-marking would make Viberr assert a review nobody did, which is the same
+  // class of lie the finding is about, pointed the other way. What the ruling
+  // fixes instead is the controller's BLINDNESS: `save_mcp_server` now takes
+  // `writeTools`, `list_mcp_servers` reports the marking and whether it was
+  // reviewed, and the save reply carries the suggestion below so a model can
+  // mark a server in its next call instead of leaving it ungoverned in silence.
+  const effectiveWriteTools = writeTools;
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
-  const writeNote = writeTools?.length
-    ? ` · ${writeTools.length} marked as write tool${writeTools.length === 1 ? "" : "s"}`
+  const writeNote = effectiveWriteTools?.length
+    ? ` · ${effectiveWriteTools.length} marked as write tool${effectiveWriteTools.length === 1 ? "" : "s"}`
     : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
@@ -1776,7 +1785,7 @@ export async function saveMcpServer(
       name, transport, target, cred, tools, up, checkedAt, lastError,
       up === 1 ? now : null,
       toolNames === null ? null : JSON.stringify(toolNames),
-      writeTools === undefined ? null : toolPolicyJson(writeTools),
+      effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
       now, id,
     );
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
@@ -1819,7 +1828,7 @@ export async function saveMcpServer(
       id, name, transport, target, cred, tools, up, checkedAt, lastError,
       up === 1 ? now : null,
       disc.kind === "up" ? JSON.stringify(disc.toolNames) : null,
-      writeTools === undefined ? null : toolPolicyJson(writeTools),
+      effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
       now, now,
     );
     recordAudit(db, {
@@ -1850,7 +1859,15 @@ export async function saveMcpServer(
       { ...options, heuristic: heuristicWarmable },
     );
   }
-  return { mcp: getMcpServer(db, id)!, toast };
+  // Ruling 188: the marking Viberr WOULD suggest for the tools this probe
+  // listed, so a non-UI caller can mark the server in its next call instead of
+  // leaving it ungoverned and silent. Never applied here — suggesting is not
+  // reviewing (see `effectiveWriteTools` above).
+  const row = getMcpServer(db, id)!;
+  const writeToolsSuggestion = row.writeToolsReviewed
+    ? []
+    : (row.discoveredTools ?? []).filter(looksLikeWriteTool);
+  return { mcp: row, toast, writeToolsSuggestion };
 }
 
 export async function testMcpServer(

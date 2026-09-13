@@ -2208,3 +2208,97 @@ describe("set_required_reviewers (ruling 178)", () => {
     expect(row?.text).toContain("(via the controller) set the required reviewers to **Reviewer at Review**.");
   });
 });
+
+/**
+ * Ruling 188 (pass 37): a controller read returns what the equivalent HUMAN
+ * surface renders. Three reads returned less-resolved data than the UI with no
+ * marker saying so, and live in pass 37 each one changed what the controller
+ * said or did: it told its owner two live profiles were "effectively
+ * unselectable" (F37-3), it repeated a Review-stage acceptance sentence about a
+ * Design-stage task (F37-5), and it refused an MCP grant that was in fact safe
+ * because it could not observe ruling 176's marking (F37-6/F37-7).
+ */
+describe("ruling 188: the controller reads what the human surfaces render", () => {
+  interface AgentRow {
+    profileId: string;
+    stages: string[];
+    declaredStages: string[];
+  }
+  interface ProjectRead {
+    agents: AgentRow[];
+  }
+
+  it("F37-3: get_project resolves declared stages onto THIS board, and keeps the raw declaration beside them", async () => {
+    // `billing-service` is the demo's CUSTOM 3-stage board (todo / doing /
+    // done) carrying the stock deployments, whose declared stages come from the
+    // governed-5 template — `impl` and `review`, NEITHER of which exists there.
+    // This is the exact shape pass 37 met live: a project whose stages were
+    // changed after the stock profiles were seeded. Ruling R14-1 remaps by
+    // structural role rather than disabling the profile, and the Agents page
+    // renders the resolved list; this read used to hand the model the raw ids,
+    // and the controller duly reported to its owner that the profile was
+    // "effectively unselectable" while the audit trail showed it being selected.
+    // SAFETY: `get_project` always answers `json(...)` and its `agents` array
+    // is built from the roster with these exact keys; a shape change breaks the
+    // assertions below rather than passing silently.
+    const read = JSON.parse(
+      await call(ids.orgAdminOutsider, "get_project", {}, "billing-service"),
+    ) as ProjectRead;
+    const row = read.agents.find((a) => a.profileId === "reviewer")!;
+    // The raw declaration is preserved, so a remap is visible rather than silent.
+    expect(row.declaredStages).toEqual(["impl", "review"]);
+    // …and the resolved list is this board's own ids, never the template's.
+    expect(row.stages).not.toContain("impl");
+    expect(row.stages).not.toContain("review");
+    for (const id of row.stages) expect(["todo", "doing", "done"]).toContain(id);
+    expect(row.stages.length).toBeGreaterThan(0);
+  });
+
+  it("F37-5: get_task answers the acceptance gate's own verdict, not the stage-unaware column", async () => {
+    // SAFETY: `get_task` always answers `json({ task, schedules, newestEvents })`;
+    // the two property assertions below are the whole point of the test, so a
+    // shape change fails here rather than passing.
+    const read = JSON.parse(
+      await call(ids.projectAdmin, "get_task", { taskKey: "VIB-142" }),
+    ) as { task: { notAcceptableReason?: string | null; blockReason?: unknown } };
+    // The projected `validation_block_reason` is documented as stage-unaware —
+    // "every consumer filters rows on `archived = 0` and on the resolved review
+    // stage before it ever looks at this column" — so it must not reach a model
+    // raw. `notAcceptableReason` carries every gate, the stage one included.
+    expect(read.task).not.toHaveProperty("blockReason");
+    expect(read.task).toHaveProperty("notAcceptableReason");
+  });
+
+  it("F37-6: list_mcp_servers reports ruling 176's marking and what it means", async () => {
+    await call(ids.orgAdminOutsider, "save_mcp_server", {
+      name: "policy-probe",
+      transport: "HTTP",
+      target: "https://mcp.invalid/sse",
+      writeTools: ["write_file", "edit_file"],
+    });
+    // SAFETY: `list_mcp_servers` answers a JSON array of the row shape mapped
+    // immediately above it in the toolkit; the row is asserted to exist below.
+    const listed = JSON.parse(
+      await call(ids.orgAdminOutsider, "list_mcp_servers"),
+    ) as { name: string; writeTools: string[]; writeToolsNote: string }[];
+    const row = listed.find((m) => m.name === "policy-probe")!;
+    expect(row.writeTools).toEqual(["write_file", "edit_file"]);
+    expect(row.writeToolsNote).toContain("withheld");
+    expect(row.writeToolsNote).toContain("ruling 176");
+  });
+
+  it("F37-7: save_mcp_server can mark write tools, and says which marking landed", async () => {
+    const reply = await call(ids.orgAdminOutsider, "save_mcp_server", {
+      name: "marked-probe",
+      transport: "HTTP",
+      target: "https://mcp.invalid/sse",
+      writeTools: ["create_directory"],
+    });
+    expect(reply).toContain("[done]");
+    // The reply states the marking that actually landed, so a model never has
+    // to assert an enforcement it cannot observe.
+    expect(reply).toContain("create_directory");
+    expect(reply).toContain("withheld from every run without execute-code-or-write-repo");
+    expect(reply).toContain("ruling 176");
+  });
+});

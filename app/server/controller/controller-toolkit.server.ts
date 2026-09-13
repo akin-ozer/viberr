@@ -13,6 +13,7 @@ import {
   capabilityById,
   type CapabilityKind,
 } from "~/shared/capabilities";
+import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { capabilityPatchRefusal,
   OPERATOR_CAP_MODES,
   SPECIALIST_CAP_MODES,
@@ -110,6 +111,7 @@ import {
   type UpdateGoalOp,
 } from "~/server/tasks/goal-actions.server";
 import {
+  acceptanceRefusalFor,
   createTask,
   loadProjectContext,
   releaseOwner,
@@ -670,6 +672,20 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             tools: m.tools,
             hasCredential: m.hasCred,
             lastError: m.lastError,
+            // Ruling 188 (pass 37, F37-6): ruling 176's marking, which the Org
+            // settings row states ("N write tools withheld from read-only
+            // runs") and this read did not carry at all. Live, the controller
+            // reasoned correctly from what it could see — "if Viberr enforces
+            // that marking, it does so somewhere I cannot read, and I won't
+            // assert that it does" — and refused a grant that was in fact safe.
+            writeTools: m.writeTools,
+            writeToolsReviewed: m.writeToolsReviewed,
+            writeToolsNote:
+              m.writeTools.length > 0
+                ? `${m.writeTools.length} write ${m.writeTools.length === 1 ? "tool is" : "tools are"} withheld from every run without execute-code-or-write-repo, and from every operator run (ruling 176).`
+                : m.writeToolsReviewed
+                  ? "Reviewed: no tool on this server is marked as a write tool, so none is withheld."
+                  : "Not reviewed yet: nothing is withheld. Viberr makes no claim about the tools nobody has marked.",
           })),
         );
       }),
@@ -680,31 +696,58 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_mcp_server",
-      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Org settings, then test the server.",
+      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Org settings, then test the server. `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
       {
         id: z.string().optional().describe("Existing server id to update; omit to create."),
         name: z.string(),
         transport: z.enum(["HTTP", "stdio"]),
         target: z.string().describe("HTTP endpoint, or the stdio command line."),
+        writeTools: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Tool names to withhold from read-only runs. Omit on create for the heuristic default; omit on update to leave the marking unchanged; pass [] to mark none.",
+          ),
       },
       runWith(
-        async (args: { id?: string; name: string; transport: "HTTP" | "stdio"; target: string }) => {
+        async (args: {
+          id?: string;
+          name: string;
+          transport: "HTTP" | "stdio";
+          target: string;
+          writeTools?: string[];
+        }) => {
           requireOrgAdmin("manage MCP connections");
-          const saved = await saveMcpServer(
-            db,
-            {
-              id: args.id ?? null,
-              name: args.name,
-              transport: args.transport,
-              target: args.target,
-              cred: "",
-            },
-            auditActor,
-            {},
-            { dataRoot },
-          );
+          // Ruling 188 (pass 37, F37-7): this tool could create an MCP server
+          // but never govern one. It took no `writeTools`, so every server the
+          // controller made landed with a NULL tool policy — ungoverned — while
+          // the human editor pre-ticked a default. Live, the controller created
+          // two servers, reported "they were created unmarked" and asked a
+          // person to go and fix them by hand.
+          // `writeTools` is a SENTINEL field for the writer: absent means "leave
+          // the marking alone" on an update and "mark nothing" on a create, so
+          // it is set only when the caller actually named a list.
+          const input: Parameters<typeof saveMcpServer>[1] = {
+            id: args.id ?? null,
+            name: args.name,
+            transport: args.transport,
+            target: args.target,
+            cred: "",
+          };
+          if (args.writeTools !== undefined) input.writeTools = args.writeTools;
+          const saved = await saveMcpServer(db, input, auditActor, {}, { dataRoot });
+          // `saveMcpServer` answers with the row it wrote, so the reply states
+          // the marking that actually landed rather than the one we asked for.
+          const policy = saved.mcp.writeTools;
+          const suggestion = saved.writeToolsSuggestion;
           return (
-            `[done] ${saved.toast}. If it needs a credential, the admin adds it in ` +
+            `[done] ${saved.toast}. ` +
+            (policy.length > 0
+              ? `${policy.length} write ${policy.length === 1 ? "tool" : "tools"} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
+              : suggestion.length > 0
+                ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
+                : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
+            "If it needs a credential, the admin adds it in " +
             "Org settings (secrets never travel through this chat)."
           );
         },
@@ -1084,7 +1127,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               name: row.name,
               kind: row.kind,
               backends: row.backends,
-              stages: row.stages,
+              // Ruling 188 (pass 37, F37-3): the stages this profile may work
+              // ON THIS BOARD, resolved through the SAME `resolveDeclaredStages`
+              // the Agents page, the task page's run control and the dispatch
+              // gate use (ruling R14-1: a declared id absent from this board is
+              // remapped by structural role, and a declaration that resolves to
+              // nothing is unrestricted). The raw declaration rides alongside so
+              // a remap is visible rather than silent. Live in pass 37 this read
+              // returned the raw ids and the controller reported to its owner
+              // that two deployed profiles were "effectively unselectable" while
+              // the audit trail showed one of them being selected.
+              stages: resolveDeclaredStages(row.stages, project.stages, project.workflow),
+              declaredStages: row.stages,
+              spanAll: row.spanAll,
               model: row.model,
               modelLabel: row.modelLabel,
               effort: row.effort,
@@ -1197,7 +1252,30 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             prompt: s.prompt,
             status: s.status,
           }));
-        return json({ task: summary, schedules, newestEvents: events });
+        // Ruling 188 (pass 37, F37-5): `summary.blockReason` is the projected
+        // `validation_block_reason`, whose own docstring says every consumer
+        // "filters rows on `archived = 0` and on the resolved review stage
+        // before it ever looks at this column". The board does exactly that
+        // (`boardAcceptRefusal` asks `atAcceptanceBoundary` FIRST); this read
+        // did not, so a Design-stage task reported "Required reviewer … has not
+        // approved revision …  Run the review at Review, or an admin can
+        // force-accept" — a Review-stage sentence recommending an action that
+        // makes no sense three stages early. It is replaced by the acceptance
+        // gate's OWN verdict, the same `acceptanceRefusalFor` the operator's
+        // `notAcceptableReason` carries: every gate included, the stage one
+        // among them.
+        const { blockReason: _projectedBlockReason, ...task } = summary;
+        return json({
+          task: {
+            ...task,
+            notAcceptableReason: acceptanceRefusalFor(
+              { projectSlug: slug, taskKey: key },
+              { dataRoot },
+            ),
+          },
+          schedules,
+          newestEvents: events,
+        });
       }),
     ),
     "get_task",
