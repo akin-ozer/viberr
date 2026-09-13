@@ -226,6 +226,84 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(n).toBe(RECOVERY_REINVOKE_CAP);
   });
 
+  /**
+   * Ruling 198 (F37-19, live): the restart note promised "the operator is
+   * re-invoked to decide what to do next" on EVERY orphaned task, and it was
+   * written before the cap loop had even run — so a capped task carried a
+   * promise Viberr had already decided not to keep, kept `waiting: "agent"`
+   * with no agent alive, and nothing revisited it. SHOP-7 sat that way for two
+   * hours while the board and the review queue both said "agent working".
+   */
+  it("ruling 198: a capped task's note says what actually happened, and stops claiming an agent", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        // What a cut delivery leaves behind.
+        waiting: "agent",
+        ownerUserId: "u-arda",
+      }),
+    });
+    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+      recordAudit(store.db, {
+        action: "run.recovery.reinvoked",
+        actor: SYSTEM_ACTOR,
+        subjectKind: "task",
+        subjectId: "VIB-1",
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        details: { attempt: i + 1 },
+      });
+    }
+    seedRun("run_capped", { state: "running", kind: "primary", role: "Implementation" });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    expect(res.capped).toBe(1);
+    expect(res.reinvoked).toBe(0);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const note = parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
+    // CANARY: write the note before the cap loop again and this promise comes
+    // back on a task nothing is coming for.
+    expect(note.text).not.toMatch(/the operator is re-invoked/);
+    expect(note.text).toContain("Viberr did NOT re-invoke the operator");
+    expect(note.text).toContain("crash-loop guard");
+    expect(note.text).toContain("run the operator from this page");
+    // CANARY: drop the `clearWaitingToHuman` call and the board keeps saying an
+    // agent is working on a task with no run alive.
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // And the owner is told, rather than left to notice.
+    // SAFETY: `SELECT COUNT(*) AS n` always yields exactly one integer row.
+    const n = (
+      store.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM notifications WHERE user_id = 'u-arda' AND task_key = 'VIB-1'`,
+        )
+        .get() as { n: number }
+    ).n;
+    expect(n).toBe(1);
+  });
+
+  it("ruling 198: an UNCAPPED task keeps the promise, because a turn really is coming", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    seedRun("run_uncapped", { state: "running", kind: "primary", role: "Implementation" });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    expect(res.reinvoked).toBe(1);
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
+    expect(note.text).toMatch(/the operator is re-invoked/);
+    expect(note.text).not.toContain("crash-loop guard");
+  });
+
   it("leaves already-terminal runs untouched and is idempotent", () => {
     seedRun("run_done", { state: "finished", finishedAt: new Date().toISOString() });
     seedRun("run_live", { state: "running" });

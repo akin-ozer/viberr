@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
+import { createNotification } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
 import { patchRun } from "./run-store.server";
@@ -108,6 +109,43 @@ export interface FinalizeOrphanedRunsDeps {
  * still alive, so a CLI the dead server left running stops before its row is
  * reported interrupted and its workspace reclaimed.
  */
+/**
+ * Ruling 198: tell the task's OWNER that the crash-loop guard stopped, so a
+ * stranded task is a message rather than a silence. Best-effort by design — a
+ * task with no owner has nobody to tell, and a failure here must never take
+ * boot recovery down with it.
+ */
+function notifyCappedTask(db: DatabaseSync, projectSlug: string, taskKey: string): void {
+  try {
+    // SAFETY: `owner_user_id` is a declared column of `task_projections`
+    // (0001_baseline); the SELECT names it and nothing else, and `.get`
+    // returns undefined when the row is absent.
+    const row = db
+      .prepare(
+        `SELECT owner_user_id FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+      )
+      .get(projectSlug, taskKey) as { owner_user_id: string | null } | undefined;
+    const userId = row?.owner_user_id;
+    if (!userId) return;
+    createNotification(db, {
+      userId,
+      kind: "policy",
+      title: `${taskKey} is waiting for you after a restart`,
+      text:
+        "A restart interrupted this task's run, and Viberr did not re-invoke the operator: " +
+        `it had already done so ${RECOVERY_REINVOKE_CAP} times within 30 minutes, which is its ` +
+        "crash-loop guard. Nothing further happens on its own — run the operator from the task page.",
+      projectSlug,
+      taskKey,
+    });
+  } catch (error) {
+    logger.warn("capped-recovery notification failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 export function finalizeOrphanedRuns(
   db: DatabaseSync,
   deps: FinalizeOrphanedRunsDeps = {},
@@ -185,52 +223,21 @@ export function finalizeOrphanedRuns(
     });
     runsByTask.set(taskId, [...(runsByTask.get(taskId) ?? []), { id: run.id, kind: run.kind }]);
   }
-  // Ruling 177 / U36-8 (pass 36): the task file said NOTHING about a restart
-  // cutting its runs — the re-fired operator's directive was the first trace.
-  // One policy note per task names every run the restart ended, before the
-  // operator is re-invoked below (so the note precedes the turn it explains).
-  const notes: Promise<void> = (async () => {
-    if (realTasks.size === 0) return;
-    const { appendTimelineEvent } = await import("~/server/files/task-writer.server");
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { resolveTaskFilePath } = await import("~/server/files/task-writer.server");
-    for (const [taskId, t] of realTasks) {
-      const runs = runsByTask.get(taskId) ?? [];
-      const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
-      const list = runs
-        .map((r) => `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`)
-        .join(", ");
-      try {
-        await appendTimelineEvent(ref, {
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: "Interrupted by a restart",
-          text:
-            `**Restart:** ${runs.length === 1 ? "the run" : `${runs.length} runs`} ${list} ` +
-            `${runs.length === 1 ? "was" : "were"} still running when the server stopped; ` +
-            `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart, and the operator is re-invoked to decide what to do next.`,
-          toAgent: false,
-          evidence: null,
-        });
-        rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
-      } catch (error) {
-        logger.warn("restart note failed", {
-          taskKey: t.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
-      }
-    }
-  })();
-  logger.info("finalized non-terminal runs at boot", {
-    total: orphans.length,
-  });
-
+  // Ruling 198 (F37-19): the cap decision is taken BEFORE the restart note is
+  // written, because the note used to promise "the operator is re-invoked to
+  // decide what to do next" on EVERY orphaned task — including the ones this
+  // loop had already decided to skip. A capped task therefore carried a
+  // promise Viberr had structurally chosen not to keep, kept `waiting:
+  // "agent"` with no agent alive, and nothing ever revisited it: live, SHOP-7
+  // sat that way for two hours with the board and the review queue both
+  // showing "agent working".
   // Re-invoke the operator only for tasks under the crash-loop cap. The gate is resolved
   // synchronously — each pass records its own audit row so the NEXT boot counts
   // it — then the (costly) operator runs fire-and-forget for the survivors.
   const windowStart = new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString();
   const toReinvoke: { projectSlug: string; taskKey: string }[] = [];
+  /** Ruling 198: the tasks a turn IS coming for, keyed as `realTasks` keys it. */
+  const reinvoking = new Set<string>();
   let capped = 0;
   for (const t of realTasks.values()) {
     // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
@@ -274,7 +281,72 @@ export function finalizeOrphanedRuns(
       details: { attempt: priorReinvokes + 1 },
     });
     toReinvoke.push(t);
+    reinvoking.add(`${t.projectSlug}/${t.taskKey}`);
   }
+
+  // Ruling 177 / U36-8 (pass 36): the task file said NOTHING about a restart
+  // cutting its runs — the re-fired operator's directive was the first trace.
+  // One policy note per task names every run the restart ended, before the
+  // operator is re-invoked below (so the note precedes the turn it explains).
+  const notes: Promise<void> = (async () => {
+    if (realTasks.size === 0) return;
+    const { appendTimelineEvent } = await import("~/server/files/task-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    for (const [taskId, t] of realTasks) {
+      const runs = runsByTask.get(taskId) ?? [];
+      const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
+      const list = runs
+        .map((r) => `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`)
+        .join(", ");
+      try {
+        await appendTimelineEvent(ref, {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Interrupted by a restart",
+          text:
+            `**Restart:** ${runs.length === 1 ? "the run" : `${runs.length} runs`} ${list} ` +
+            `${runs.length === 1 ? "was" : "were"} still running when the server stopped; ` +
+            `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart` +
+            (reinvoking.has(taskId)
+              ? ", and the operator is re-invoked to decide what to do next."
+              : // Ruling 198: the honest other half. Say what Viberr decided,
+                // why, and what the person can do — the cap is a guard
+                // against a crash loop, not a judgement about this task.
+                ". Viberr did NOT re-invoke the operator: it had already done so " +
+                `${RECOVERY_REINVOKE_CAP} times for this task within the last 30 minutes, which is its ` +
+                "crash-loop guard. Nothing further happens on its own — run the operator from this page when you are ready."),
+          toAgent: false,
+          evidence: null,
+        });
+        rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
+        if (!reinvoking.has(taskId)) {
+          // Ruling 198: the note alone would still leave the BOARD claiming an
+          // agent is on it. `clearWaitingToHuman` is a no-op unless the flag is
+          // `agent`, and with no packet and a live stage it settles to
+          // `human` — which is the truth: nobody is coming until a person acts.
+          const { clearWaitingToHuman } = await import("~/server/tasks/task-actions.server");
+          await clearWaitingToHuman(
+            db,
+            deps.dataRoot ? { dataRoot: deps.dataRoot } : {},
+            t.projectSlug,
+            t.taskKey,
+          );
+          rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
+          notifyCappedTask(db, t.projectSlug, t.taskKey);
+        }
+      } catch (error) {
+        logger.warn("restart note failed", {
+          taskKey: t.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+  })();
+  logger.info("finalized non-terminal runs at boot", {
+    total: orphans.length,
+  });
 
   let reinvokes: Promise<void> = Promise.resolve();
   if (toReinvoke.length > 0) {

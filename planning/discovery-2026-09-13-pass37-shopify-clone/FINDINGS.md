@@ -1021,3 +1021,50 @@ The controller could see the problem, had the authority to fix it, and was corre
 persona unchanged, so editing a summary alone is safe"). Proven red both ways: drop
 `persona: g.persona` from the list mapping and the read is `undefined`; make an omitted persona
 write through and a blurb edit flattens the agent's entire system prompt.
+
+## F37-19 · A second stranded task, through the door ruling 195 did not cover — HIGH
+
+**Found by re-reading the review queue** after fixing F37-17, and disbelieving it the same way.
+The queue said:
+
+> **Still in review 2** · SHOP-6 … `agent working` · SHOP-7 … `agent working`
+
+SHOP-6 genuinely had a reviewer running. SHOP-7 had not had a run of any kind for **two
+hours**:
+
+```
+SHOP-7  stage=review  readiness=ready  waiting=agent
+last run: run_YHJaUzOn (primary) INTERRUPTED 10:19:50 — by my restart
+audit:    run.recovery.reinvoked · SHOP-7 · {"attempt":3}  at 10:15:50
+          …and nothing at all after the 10:19 boot
+```
+
+**The mechanism.** `RECOVERY_REINVOKE_CAP` is 3 in a 30-minute window (F7-BOOT1, a
+boot→orphan→crash-loop guard). My rebuild cadence tripped it honestly: five restarts inside
+half an hour while I deployed fixes. The 10:19 boot therefore finalized SHOP-7's orphan and
+**skipped** the operator re-invoke — correctly.
+
+What was not correct is everything around that decision:
+
+1. The restart note on the task was written **before** the cap loop ran, and says, on every
+   orphaned task: *"…recorded as interrupted by the restart, **and the operator is re-invoked
+   to decide what to do next**."* On a capped task that is a promise the code had already
+   decided to break. It is in the canonical file, in the timeline a human reads.
+2. `waiting: "agent"` was left standing. The board card, the review queue and the "waiting on
+   a human" count all took it at face value — so the one surface that could have shown a
+   person this task needed them showed the opposite.
+3. The only trace of the decision was `logger.warn("recovery re-invoke capped …")` in the
+   server's own log, which no product surface reads.
+
+**This is F37-17's defect through a different door**, and it is worth stating that plainly:
+ruling 195 fixed a refusal that skipped its settle; this is a *decision not to act* that skips
+the same settle and additionally leaves a written promise behind. Two tasks, both gating
+work — SHOP-6 held ten tasks, SHOP-7 held its own chain — both stranded, both invisible,
+within three hours of each other.
+
+**Fix — ruling 198.** The cap decision moves above the note. A capped task's note says what
+Viberr decided and why, and names the way on ("run the operator from this page when you are
+ready"); its `waiting` is settled off `agent` through the same `clearWaitingToHuman` ruling 195
+uses; and its owner gets a notification. An uncapped task keeps the original sentence, because
+a turn really is coming. Proven red both ways — put the promise back and it appears on a task
+nothing is coming for; drop the settle and the board keeps claiming an agent.

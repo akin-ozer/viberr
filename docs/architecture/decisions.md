@@ -4317,6 +4317,23 @@ by rewriting those paragraphs:*
     omission: it is the difference between an edit and a refusal.
     (`controller-toolkit.server.ts`.)
 
+198. **Boot recovery does not promise a turn it has already decided not to take (owner,
+    2026-09-13, pass 37; F37-19, the other door into ruling 195's defect).** The restart note
+    was written for every orphaned task and ended "and the operator is re-invoked to decide
+    what to do next" — written BEFORE the crash-loop cap (F7-BOOT1) had even been evaluated.
+    So a capped task carried a promise Viberr had structurally decided not to keep, kept
+    `waiting: "agent"` with no agent alive, and nothing ever revisited it: the cap logged a
+    warning to the server's own log and stopped. Live, SHOP-7 sat exactly there for **two
+    hours** — `readiness: ready`, `waiting: agent`, zero runs — while the board card and the
+    review queue both said "agent working" and the timeline said a turn was coming. The cap
+    itself is right; it exists so a boot→orphan→crash loop cannot re-run paid coordination on
+    every restart. What was wrong is that firing it was invisible. The decision is now taken
+    first, and a capped task gets the honest half of the sentence (what Viberr decided, why,
+    and that running the operator from the page is the way on), a `waiting` flag settled off
+    `agent` by the same `clearWaitingToHuman` ruling 195 uses, and a notification to its owner.
+    A guard that fires in silence is indistinguishable from a system that forgot.
+    (`run-recovery.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
