@@ -4477,6 +4477,28 @@ by rewriting those paragraphs:*
     `specialist-run.server.ts`, `operator-actions.server.ts`, `insights-page.tsx`,
     `developer-expertise.skill.md`, `copy-ban.test.ts`.)
 
+212. **A transport failure is a transport failure, and switching providers is not a fix for
+    the path they share (owner, 2026-09-13, pass 37; F37-32).** Two live recovery packets from
+    transient host network faults, wrong in two different ways.
+    (a) The Codex CLI reported `failed to lookup address information: Name does not resolve`,
+    and viberr answered "Codex execution failed. **Review its authentication and runtime
+    configuration**", recommending "Redirect with sharper guidance" — a rewritten directive, to
+    fix DNS. `LOCAL_NETWORK_FAILURE_RE` was written against Node's error codes and Node's prose;
+    the Codex CLI is Rust and says it differently, so this matched nothing and fell to
+    `unknown`, whose sentence is the credential one. (Its TLS sibling matched only by accident,
+    through `\btls\b` inside a `close_notify` message.) The patterns now carry the CLI's own
+    prose: `failed to lookup address information`, `name does not resolve`, `nodename nor
+    servname`, `temporary failure in name resolution`, `peer closed connection`, `close_notify`.
+    (b) The packet that DID classify the fault correctly then recommended "Retry on the other
+    backend now", whose own detail says "Later runs on this task stay on {other} until another
+    retry moves them". The fault is this deployment's network path — the other provider is
+    reached over the same path — so switching is not a remedy, and it permanently moves the
+    task off the model its profile declares (on the live board, off the owner's standing luna
+    policy onto `sonnet`, in one recommended click). It stays OFFERED, because the owner may
+    want it, and it is no longer RECOMMENDED when the fault was local; the option says why in
+    its own words, and the same-backend retry takes the recommendation.
+    (`run-failure.ts`, `run-failure-remedy.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

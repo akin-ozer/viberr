@@ -1777,3 +1777,59 @@ comment was invisible before any profile comparison happened. Only v3, posting t
 written into the test.
 
 **Fix — ruling 211(a)–(i).** Nine parts, nine canaries.
+
+## F37-32 · A DNS failure told the owner to check their credentials, and the recommended fix was a permanent model change — HIGH
+
+**Two live packets, both from transient host network faults, both wrong in a different way.**
+
+**SHOP-10.** The Codex CLI reported:
+
+> `Reconnecting... 2/5 (stream disconnected before completion: failed to lookup address
+> information: Name does not resolve)`
+
+Viberr's packet said:
+
+> The Code Reviewer agent run failed: **Codex run failed: Codex execution failed. Review its
+> authentication and runtime configuration.**
+
+and offered exactly one recommendation: **"Redirect with sharper guidance."** The guidance was
+never the problem — a name-resolution failure is not fixed by rewriting a directive, and the
+credential it points at was never at fault.
+
+Why: `LOCAL_NETWORK_FAILURE_RE` was written against Node's error codes and Node's prose
+(`ECONNREFUSED`, `getaddrinfo`, `fetch failed`). The Codex CLI is Rust and says it differently,
+so this matched nothing, fell through to `unknown`, and `unknown`'s sentence is the auth one.
+Its TLS sibling on SHOP-16 matched only by accident — through `\btls\b` inside a `close_notify`
+message.
+
+**SHOP-16.** That one WAS classified correctly as a local network fault… and then recommended:
+
+> **Retry @infrastructure-engineer on Claude now** *(recommended)* — The owner has Claude
+> connected; re-run the same agent there on `sonnet` (Claude's default: the profile's
+> `gpt-5.6-luna` is a Codex model) and continue. **Later runs on this task stay on Claude until
+> another retry moves them.**
+
+Two things wrong with that being the default answer. The fault is **this deployment's own
+network path** — the other provider is reached over the same path, so switching is not a remedy.
+And it permanently moves the task off the model its profile declares: on this board the owner's
+standing policy is luna max for every non-controller agent, and the recommended click would have
+migrated the task to `sonnet` silently. The copy is honest about the consequence; the
+recommendation ignores it.
+
+**What I did.** Took the non-recommended option on both — `request_edit` ("Retry on Codex now:
+this deployment could not reach the provider") on SHOP-16, and "Send back for another attempt"
+on SHOP-10 — and said why on each decision, so the record carries the reason and not just the
+click. Both tasks were running again inside a minute.
+
+**Fix — ruling 212.**
+- The transport patterns learn the Codex CLI's own prose: `failed to lookup address
+  information`, `name does not resolve`, `nodename nor servname`, `temporary failure in name
+  resolution`, `peer closed connection`, `close_notify`. A DNS failure now reads as one.
+- When the fault is local, the other-backend retry is still OFFERED (the owner may want it) but
+  is no longer RECOMMENDED, and the option says why in its own text: *"This failure was on this
+  deployment's own network path, which the other provider is reached over too, so this is a
+  change of model rather than a fix."* The same-backend retry takes the recommendation.
+
+Canaries: strip the new alternatives and the DNS text classifies `unknown` with the auth
+sentence; restore `recommended: true` on the cross-backend arm and viberr's default answer to a
+local network fault is a model change.

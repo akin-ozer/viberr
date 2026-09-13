@@ -328,10 +328,20 @@ function specialistOptions(
       const retry: OperatorPacketOptionInput = {
         kind: "retry_other_backend",
         title: `Retry ${handle} on ${BACKEND_NAME[other]} now`,
-        detail: `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.`,
-        recommended: true,
+        detail:
+          `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. ` +
+          `Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.` +
+          // Ruling 212: when the fault is THIS deployment's network path, the
+          // other provider is reached over the same path, so switching is not a
+          // remedy — and it permanently moves the task off the model its
+          // profile declares. Offered, never recommended, and the reason is on
+          // the option rather than left for the reader to work out.
+          (localNetwork
+            ? ` This failure was on this deployment's own network path, which the other provider is reached over too, so this is a change of model rather than a fix.`
+            : ""),
         backend: other,
       };
+      if (!localNetwork) retry.recommended = true;
       if (profileId) retry.profileId = profileId;
       options.push(retry);
     }
@@ -353,7 +363,11 @@ function specialistOptions(
             ? "Closes this decision and re-runs the agent on the same account with the same directive. If the deployment still cannot reach the provider you get a new decision packet."
             : "Closes this decision and re-runs the agent on the same account with the same directive. If the provider is still overloaded you get a new decision packet."
           : "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
-      recommended: !ownerHasOther,
+      // Ruling 212: the same-backend retry is the recommendation whenever the
+      // other backend is not a real alternative — either the owner does not
+      // have it, or the fault was local and switching would only change the
+      // model.
+      recommended: !ownerHasOther || localNetwork,
       ev:
         kind === "quota"
           ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."

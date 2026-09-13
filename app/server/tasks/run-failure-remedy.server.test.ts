@@ -319,7 +319,17 @@ describe("describeRunFailure", () => {
     expect(op.options[0]).toMatchObject({ kind: "block_on_policy", title: "Re-run the operator now", recommended: true });
 
     const sp = describe_(store, { failure: local(), role: "specialist", agentHandle: "jc-developer", profileId: "jc-developer" });
-    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex", recommended: true });
+    // Ruling 212: the other backend is still OFFERED — the owner has it — but it
+    // is no longer the recommendation, because this fault was on the
+    // deployment's own network path and the other provider is reached over the
+    // same path. Taking it would change the task's model permanently to work
+    // around a DNS or TLS problem that is still there.
+    // CANARY: restore `recommended: true` on the retry_other_backend arm and
+    // viberr's default answer to a local network fault is a model change.
+    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex" });
+    expect(sp.options[0]!.recommended).toBeUndefined();
+    expect(sp.options[0]!.detail).toContain("a change of model rather than a fix");
+    expect(sp.options[1]).toMatchObject({ recommended: true });
     expect(sp.options[1]).toMatchObject({
       kind: "request_edit",
       title: "Retry @jc-developer on Claude now: this deployment could not reach the provider, nothing was changed",

@@ -966,6 +966,33 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(tls?.text).toContain("(UNKNOWN_CERTIFICATE_VERIFICATION_ERROR)");
   });
 
+  /**
+   * Ruling 212, live on SHOP-10 and SHOP-16. The local-network patterns were
+   * written against Node's error codes and Node's prose; the Codex CLI is Rust
+   * and says it differently, so a NAME RESOLUTION failure matched nothing and
+   * fell through to `unknown` — whose sentence is "Review its authentication
+   * and runtime configuration", sending the owner at a credential that was
+   * never at fault, for a DNS problem. Its TLS sibling matched only by
+   * accident, through `\btls\b` inside a `close_notify` message.
+   */
+  it("ruling 212: the Codex CLI's own transport prose is a LOCAL network failure, not an auth problem", async () => {
+    for (const text of [
+      // Verbatim from the live packet on SHOP-10.
+      "Reconnecting... 2/5 (stream disconnected before completion: failed to lookup address information: Name does not resolve)",
+      "stream error: temporary failure in name resolution",
+      "IO error: peer closed connection without sending TLS close_notify",
+    ]) {
+      // CANARY: drop the new alternatives from LOCAL_NETWORK_FAILURE_RE and the
+      // first two classify `unknown` and tell the reader to check their auth.
+      const reason = await classifyThrownFailure(text);
+      expect(reason?.kind, text).toBe("overloaded");
+      expect(reason?.text, text).toContain(
+        "Codex could not be reached from this deployment",
+      );
+      expect(reason?.text, text).not.toMatch(/review .*(authentication|runtime configuration)/i);
+    }
+  });
+
   it("a provider overload / 5xx classifies as 'overloaded' (parity with the Claude adapter's structural class), never 'unknown'", async () => {
     // Codex streams no structured status, so the leg is prose-only, on the
     // signatures the run projection has always read as backend unavailability.
