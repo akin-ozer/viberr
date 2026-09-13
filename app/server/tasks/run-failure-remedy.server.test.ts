@@ -390,6 +390,37 @@ describe("describeRunFailure", () => {
       expect(retry?.recommended).not.toBe(true);
     });
 
+    it("does the same on the OPERATOR's own packet", () => {
+      const store = setupTestStore(ctx);
+      // The operator packet is a different builder with the same defect: its
+      // recommended option asked the human to assert the window had reset.
+      const d = describe_(store, {
+        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: FUTURE }),
+      });
+      expect(d.options[0]).toMatchObject({
+        kind: "wait_for_window",
+        recommended: true,
+        dueAt: FUTURE,
+      });
+      const assertReset = d.options.find((o) => o.kind === "block_on_policy");
+      expect(assertReset).toBeTruthy();
+      // CANARY: leave `recommended: true` on it and viberr recommends the one
+      // statement on this packet that is false at the moment it is offered.
+      expect(assertReset!.recommended).not.toBe(true);
+      expect(d.options.filter((o) => o.recommended)).toHaveLength(1);
+    });
+
+    it("leaves the operator packet alone when the window has no dated reopening", () => {
+      const store = setupTestStore(ctx);
+      const d = describe_(store, {
+        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+      expect(d.options.find((o) => o.recommended)).toMatchObject({
+        kind: "block_on_policy",
+      });
+    });
+
     it("offers nothing of the kind when the window has no dated reopening", () => {
       const store = setupTestStore(ctx);
       // A quota refusal with no reset instant: there is no moment to schedule,

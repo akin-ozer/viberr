@@ -2449,3 +2449,12 @@ All three restraints have their own tests.
 Canaries (both proved red): remove the option and the recommendation falls back to the permanent
 model change; remove the schedule effect and the decision promises an automatic resume that
 nothing performs.
+
+**And the same defect, one builder over.** Deploying the fix and re-triggering the stall proved
+it live — and produced the OPERATOR's own quota packet, which is a separate builder
+(`operatorOptions`) that the specialist fix never touched. Its recommended option was *"The usage
+window has reset… or I switched the Codex account: re-run"*, recommended at 23:43 for a window
+the provider had dated 02:27. It now carries the same wait, and the assert-it-reset option keeps
+its place but loses the recommendation. Worth recording as its own lesson: the live re-trigger is
+what found the second half, because the first fix's tests only ever exercised the builder it
+changed.

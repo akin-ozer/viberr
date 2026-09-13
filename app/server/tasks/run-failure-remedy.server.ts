@@ -219,7 +219,7 @@ export function describeRunFailure(
   }
 
   const options = input.role === "operator"
-    ? operatorOptions(kind, backend, input.backend, resetLabel)
+    ? operatorOptions(kind, backend, input.backend, resetLabel, facts?.resetsAt ?? null)
     : specialistOptions(
         kind,
         backend,
@@ -248,6 +248,8 @@ function operatorOptions(
    *  backend's exhaustion record on the strength of the assertion. */
   failed: RealBackend,
   resetLabel: string | null,
+  /** Ruling 224: the provider's own reset instant, when it gave one. */
+  resetsAt: string | null = null,
 ): OperatorPacketOptionInput[] {
   const rerun: OperatorPacketOptionInput = {
     kind: "block_on_policy",
@@ -266,18 +268,40 @@ function operatorOptions(
     detail: "Closes this decision and starts NO run. The task stays blocked and waiting on you; use Run operator when you are ready.",
   };
   if (kind === "quota") {
-    return [
-      {
-        kind: "block_on_policy",
-        title: `The usage window has reset${resetLabel ? ` (${resetLabel})` : ""}, or I switched the ${backend} account: re-run`,
-        detail: "Closes this decision and starts a fresh operator run on the owner's current account. If it fails again you get a new decision packet.",
+    // Ruling 224 (F37-44): the operator's packet had the same defect as the
+    // specialist's — its recommended option asks a human to ASSERT the window
+    // has reset, which at the moment it is offered is the one statement on the
+    // packet that is false. When the provider dated the reopening, waiting for
+    // it is the answer, and it takes the recommendation.
+    const waitUntil =
+      resetsAt && Date.parse(resetsAt) > Date.now() ? resetsAt : null;
+    const assertReset: OperatorPacketOptionInput = {
+      kind: "block_on_policy",
+      title: `The usage window has reset${resetLabel ? ` (${resetLabel})` : ""}, or I switched the ${backend} account: re-run`,
+      detail:
+        "Closes this decision and starts a fresh operator run on the owner's current account. If it fails again you get a new decision packet.",
+      backend: failed,
+      ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No project policy was changed.",
+    };
+    if (!waitUntil) assertReset.recommended = true;
+    const options: OperatorPacketOptionInput[] = [];
+    if (waitUntil) {
+      options.push({
+        kind: "wait_for_window",
+        title: `Wait for the window and pick the task back up automatically${resetLabel ? ` (${resetLabel})` : ""}`,
+        detail:
+          `Closes this decision and schedules an operator run for just after ${resetLabel ?? "the window reopens"}, ` +
+          `on the same account and the same model. Nothing runs until then and the board says so. ` +
+          `No account, model or project policy changes.`,
         recommended: true,
-        backend: failed,
-        ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No project policy was changed.",
-      },
-      redirect,
-      hold,
-    ];
+        dueAt: waitUntil,
+        ev:
+          `**Decision:** wait for the ${backend} window to reopen${resetLabel ? ` (${resetLabel})` : ""}. ` +
+          `An operator run is scheduled to pick the task back up on the same account. No account or project policy was changed.`,
+      });
+    }
+    options.push(assertReset, redirect, hold);
+    return options;
   }
   if (kind === "auth") {
     return [

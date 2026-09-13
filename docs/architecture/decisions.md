@@ -4745,7 +4745,10 @@ by rewriting those paragraphs:*
     the same agent: hours pass, the board may have moved, and every other timed resume viberr
     has - the dependency release, the restart recoveries - re-invokes the operator for that
     reason. A schedule that cannot be written says so on the timeline and names the manual
-    fallback, and never un-resolves the decision the human made.
+    fallback, and never un-resolves the decision the human made. The OPERATOR's own quota
+    packet is a second builder with the same defect and gets the same arm: its recommended
+    option asked a human to assert the window had reset, which is the one statement on that
+    packet that is false at the moment it is offered.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 
