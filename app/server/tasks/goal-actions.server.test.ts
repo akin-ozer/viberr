@@ -1617,6 +1617,41 @@ describe("ruling 192: a live chain can be renamed", () => {
     expect(after.history[0]!.text).toContain("keep the old name in their chain header");
   });
 
+  it("a description-only edit does not claim anything about names", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Steady name",
+        description: "Old prose.",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        action: { op: "rename", description: "New prose." },
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.title).toBe("Steady name");
+    expect(after.description).toBe("New prose.");
+    // CANARY: append the clause unconditionally and the history tells a reader
+    // the chain was renamed when only its prose moved.
+    expect(after.history[0]!.text).toBe(
+      "Goal description rewritten by arda@viberr.dev.",
+    );
+  });
+
   it("refuses an empty title and a rename that names nothing, and no-ops a rename that changes nothing", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const actor = actorOf(orgAdminId, "arda@viberr.dev");

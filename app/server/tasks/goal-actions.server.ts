@@ -466,8 +466,15 @@ export async function updateGoal(
           message = `Goal ${fm.id} ${parts.join(" and ")}.`;
           // Every link task already carries the OLD title in its chain header,
           // written at create time. Say so rather than implying a rename
-          // reaches back into work that has already started.
-          return `Goal ${parts.join(" and ")} by ${by}. Link tasks created before now keep the old name in their chain header.`;
+          // reaches back into work that has already started — and say it only
+          // when the NAME moved, because a description edit reaches nothing.
+          const renamed = fm.title === title;
+          return (
+            `Goal ${parts.join(" and ")} by ${by}.` +
+            (renamed
+              ? " Link tasks created before now keep the old name in their chain header."
+              : "")
+          );
         }
         case "pause": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
