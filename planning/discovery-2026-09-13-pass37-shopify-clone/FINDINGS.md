@@ -659,3 +659,51 @@ completely erased from the deliverable. Separately and correctly, ruling 160 hel
 after I closed PR #2 by hand, viberr refused to route around it — "No pull request was opened
 for SHOP-7: PR #2 was closed without merging. A closed pull request is a person's decision
 about the task, so Viberr opens no new PR for this branch."
+
+---
+
+## F37-11 · The operator plans a branch update it cannot know is unnecessary — low
+
+**What happened.** Nine of the pass's 156 timeline events (6%) are
+"**The operator's plan was not carried out in full.**" Eight of the nine are the same step,
+on every delivery, on every task:
+
+```
+4 × - `update_branch_from_base` — `shop-7` is already up to date with `main`
+2 × - `update_branch_from_base` — `shop-6-efd4` is already up to date with `main`
+2 × - `update_branch_from_base` — `shop-1` is already up to date with `main`
+1 × - `open_packet` — A decision packet is already open on SHOP-7
+```
+
+**The mechanism.** The operator's snapshot (`operator-actions.server.ts`, the `get_task`
+payload) carries `branch`, `pr` with `mergeable` and `unpushedRevisionSentence`, `unownedPr`,
+`foreignHead`, `notAcceptableReason` — but **nothing about whether the branch is behind
+`main`**. The reconciler measures exactly that on every pass and records `behindBy` in its
+provenance row (`createReconcileBehindByLookup` exists to read it, and the GitHub page's sync
+pill already does). The operator cannot see it, so it plans the update defensively every time,
+and the server honestly reports that the step did not apply.
+
+**Correction, after reading the tool description.** This is weaker than I first wrote it, and
+the weakening is the interesting part. `update_branch_from_base` tells the operator, in so
+many words:
+
+> It is idempotent and cheap: an already-current branch changes nothing and says so, **so call
+> it when you are unsure rather than guessing.**
+
+So the redundant call is *deliberate and documented*: viberr prefers a wasted no-op to a
+missed update, which is the right trade — a stale base is how a reviewer ends up reading a
+diff against a base that no longer exists. The operator is obeying its instructions, and the
+"did not apply" note is the honest report of a step working exactly as designed. This is not
+viberr getting something wrong.
+
+**What is still worth doing.** The operator has no way to *stop* being unsure, even though the
+reconciler measures the answer on every pass and records it where the GitHub page's sync pill
+already reads it. Handing it that reading removes 8 of the pass's 9 "plan not carried out"
+notes without weakening the posture at all: the tool stays available, and an absent or stale
+reading still means "call it". Kept in the ledger as **low**, and fixed, because it is the
+same shape as F37-3/5/6 — *a fact the server holds is absent from the agent's read* — and the
+fix costs one field.
+
+**Fix.** `baseBehindBy` on the operator's snapshot, read through
+`createReconcileBehindByLookup`, the same lookup the sync pill uses; `null` means no pass has
+compared this task yet and is explicitly never a reason to skip the call.

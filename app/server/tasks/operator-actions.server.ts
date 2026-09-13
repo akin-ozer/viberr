@@ -93,6 +93,8 @@ import {
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { createReconcileBehindByLookup } from "~/server/provenance/provenance-query.server";
+import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
@@ -1798,6 +1800,12 @@ export interface OperatorTaskSnapshot {
    *  too. Null when the head is this task's or was never read. Optional only
    *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
   foreignHead?: ForeignBranchHead | null;
+  /** F37-11 (pass 37): how many commits the BASE is ahead of this task's
+   *  branch, from the reconciler's last compare — the same reading the GitHub
+   *  page's sync pill renders. `0` = level with the base, `null` = no pass has
+   *  compared this task yet. Informational: a stale or absent reading must
+   *  never stop an update, it only stops the step being planned blind. */
+  baseBehindBy?: number | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -2022,6 +2030,9 @@ export function operatorSnapshot(
   if (!project) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
   const fm = file.parsed.frontmatter;
+  // F37-11: the reconciler's own last compare, read the same way the GitHub
+  // page's sync pill reads it.
+  const behindByLookup = createReconcileBehindByLookup(db);
   const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
@@ -2220,6 +2231,19 @@ export function operatorSnapshot(
     unownedPr: fm.github?.unownedPr ?? null,
     // Ruling 161: what origin's branch holds when it is not this task's work.
     foreignHead: fm.github?.foreignHead ?? null,
+    // F37-11 (pass 37): how the branch stands against the base, read from the
+    // reconciler's own last compare — the same row the GitHub page's sync pill
+    // renders. Without it the operator planned `update_branch_from_base` on
+    // EVERY delivery and the server answered "already up to date" every time:
+    // eight of the pass's nine "plan was not carried out in full" notes were
+    // this one step. `null` means no pass has compared this task yet, which is
+    // "unknown" and never an excuse to skip the call.
+    baseBehindBy: behindByLookup(
+      storeRelativePath(
+        resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)),
+        ctx.dataRoot,
+      ),
+    ),
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.

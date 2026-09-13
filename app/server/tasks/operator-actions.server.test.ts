@@ -4840,3 +4840,74 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
     ]);
   });
 });
+
+/**
+ * F37-11 (pass 37): the operator could not tell whether its branch was behind
+ * the base, so it planned `update_branch_from_base` on every delivery and the
+ * server answered "already up to date" every time — eight of the pass's nine
+ * "plan was not carried out in full" notes were that one step.
+ *
+ * The redundant call was DELIBERATE ("call it when you are unsure rather than
+ * guessing", and a stale base is how a reviewer reads a diff against a base
+ * that no longer exists), so the posture is unchanged: the field only lets the
+ * operator BE less unsure. `null` is "nothing has compared them yet" and is
+ * never a reason to skip the call.
+ */
+describe("F37-11: the operator snapshot carries the base compare", () => {
+  function snapOf(): ReturnType<typeof operatorSnapshot> {
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+  }
+
+  /** One `github.reconcile` observation row, shaped exactly as the reconciler
+   *  writes it — the same three fields `latestReconcileSync` and
+   *  `createReconcileBehindByLookup` read back. */
+  function seedCompare(behindBy: number): void {
+    const details = {
+      branch: "vib-1",
+      sync: behindBy > 0 ? "behind_main" : "synced",
+      behindBy,
+    };
+    store.db
+      .prepare(
+        `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
+         VALUES (?, NULL, ?, 'github.reconcile', ?)`,
+      )
+      .run(
+        `projects/${store.slug}/tasks/VIB-1/task.md`,
+        new Date().toISOString(),
+        JSON.stringify(details),
+      );
+  }
+
+  it("reports null when no pass has compared this task", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapOf().baseBehindBy).toBeNull();
+  });
+
+  it("reports the reconciler's reading once one exists", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedCompare(3);
+    expect(snapOf().baseBehindBy).toBe(3);
+  });
+
+  it("reports 0 for a branch level with the base — the case that was being re-planned", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedCompare(0);
+    expect(snapOf().baseBehindBy).toBe(0);
+  });
+});

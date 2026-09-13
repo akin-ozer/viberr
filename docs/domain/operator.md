@@ -1,5 +1,11 @@
 # The operator
 
+> Updated 2026-09-13 for F37-11 (pass 37): the operator's snapshot carries `baseBehindBy` —
+> how far the base is ahead of the task's branch, from the reconciler's last compare, the same
+> reading the GitHub page's sync pill renders. `0` is level, `null` is "nothing has compared
+> them yet" and is never a reason to skip `update_branch_from_base`. The call-when-unsure
+> posture is unchanged; the operator can now simply be less unsure.
+
 > The per-task coordination agent: what wakes it, what it may do, how its
 > authority is gated, and the packets it opens. Source of truth:
 > `app/server/runtimes/operator-run.server.ts`, `app/server/tasks/operator-actions.server.ts`,
