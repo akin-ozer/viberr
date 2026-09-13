@@ -665,3 +665,22 @@ The merge commit's two parents are exactly the two things the sentence names, or
 it, and the drift line's "0 authored commits since review" matches a rework that had just been
 reviewed. Contrast F37-9, where the same pill went stale precisely when `main` moved — this is
 that path working after the fix, on the first real base move the board has had.
+
+## Ruling 208, proven on the task it was found on — the same move, ten minutes apart
+
+**17:00:36Z, before the fix.** The operator, acting on my directive:
+
+> **Coordination stopped:** the `transition_stage` step failed (**No allowed transition from
+> Verify to Review.**). The remaining plan was not executed.
+
+**17:10:04Z, after deploying ruling 208**, same task, same stage, same directive:
+
+> **Transition:** operator moved SHOP-15 from Verify to Review.
+
+Nothing else changed: same board, same two required reviewers, same revision, same missing
+Code Reviewer verdict. `verdictStageFor` stopped letting the reviewer that had already approved
+answer for the one that had not, `reworkStages` offered Review, and the move the graph had
+refused went through on the operator's own authority — no human transition, no force-accept.
+
+The task is back at Review with the Code Reviewer running on the delivered revision, which is
+where it needed to be an hour ago.
