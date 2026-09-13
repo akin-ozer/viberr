@@ -773,7 +773,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_global_agents",
-      "List the org's global agent templates (specialists a project can deploy), each with the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 156). Org admins only. Read this before save_global_agent so an edit is not blind.",
+      "List the org's global agent templates (specialists a project can deploy), each with its full persona, the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 156). Org admins only. Read this before save_global_agent so an edit is not blind.",
       {},
       run(() => {
         requireOrgAdmin("read the global agent templates");
@@ -789,6 +789,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             model: g.model,
             effort: g.effort,
             summary: g.summary,
+            // Ruling 197 (F37-18): F33-7 put the GRANTS here so an edit was not
+            // blind, and left out the biggest field of all. Live pass 37 the
+            // controller needed to correct three stale summaries, would not
+            // risk the personas it could not read, and left summaries
+            // advertising Testcontainers and Docker Compose on a host with
+            // neither — to the operator, which selects agents by that text.
+            persona: g.persona,
             stages: g.stages,
             skills: g.skills,
             mcps: g.mcps,
@@ -809,13 +816,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_global_agent",
-      "Create or update a global agent template (name, backend, summary, persona, eligible stages, default model and effort, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Grant merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged, and an empty list clears them — read list_global_agents first, and grant by grantKey, never by id. A project deployment keeps its own copy of the grants; the reply names every copy that now differs and how to update it.",
+      "Create or update a global agent template (name, backend, summary, persona, eligible stages, default model and effort, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged and an empty list clears them; an omitted or empty PERSONA leaves the stored persona unchanged, so editing a summary alone is safe — read list_global_agents first, which returns the persona and the grants, and grant by grantKey, never by id. A project deployment keeps its own copy of the grants; the reply names every copy that now differs and how to update it.",
       {
         id: z.string().optional().describe("Existing template id to update; omit to create."),
         name: z.string(),
         backend: z.enum(["claude", "codex"]),
         summary: z.string().describe("One scannable paragraph the operator selects by."),
-        persona: z.string().optional().describe("The long persona/system-prompt body."),
+        persona: z
+          .string()
+          .optional()
+          .describe(
+            "The long persona/system-prompt body. Same merge rule as the grants above: omit it (or pass \"\") and the stored persona is KEPT, so a summary-only edit is safe and cannot flatten an agent's system prompt. `list_global_agents` returns the current one.",
+          ),
         stages: z.array(z.string()).min(1).describe("Eligible stage ids, e.g. ready, impl."),
         model: z
           .string()

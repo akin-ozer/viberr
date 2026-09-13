@@ -1054,6 +1054,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     const rows = await listJson<{
       id: string;
       summary: string;
+      persona: string;
       skills: string[];
       mcps: string[];
       kbs: string[];
@@ -2300,5 +2301,86 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
     expect(reply).toContain("create_directory");
     expect(reply).toContain("withheld from every run without execute-code-or-write-repo");
     expect(reply).toContain("ruling 176");
+  });
+});
+
+/**
+ * Ruling 197 (F37-18, live): F33-7 put the GRANTS into `list_global_agents`
+ * because "the model had no way to see what an edit was about to replace, and
+ * the controller (rightly) refused to edit blind" — and left out the biggest
+ * field of all. Pass 37 the controller needed to correct three stale template
+ * summaries (they advertised Testcontainers, a Docker Compose stack and
+ * Playwright journeys on a host with none of those, to the operator, which
+ * selects agents by that text) and refused, for the same reason, two rulings
+ * later: "`save_global_agent` gives me no way to edit a summary without also
+ * supplying a persona, and I cannot read the personas I'd be replacing."
+ *
+ * The writer was innocent — a blank persona has always kept the stored one —
+ * but nothing said so while the same paragraph spelled the rule out for three
+ * other fields, and nothing let the caller check. Both halves are fixed here.
+ */
+describe("ruling 197: a template's persona is readable, and a summary-only edit keeps it", () => {
+  it("returns the persona from list_global_agents and keeps it across a summary edit", async () => {
+    await call(ids.orgAdmin, "save_global_agent", {
+      name: "Persona Probe",
+      backend: "codex",
+      summary: "Verifies with Testcontainers and a Docker Compose stack.",
+      persona: "PERSONA-MARKER-11: you are the probe. Do the probing.",
+      stages: ["impl"],
+    });
+
+    const listed = async () => {
+      const text = await call(ids.orgAdmin, "list_global_agents");
+      // SAFETY: `list_global_agents` answers through the toolkit's `json()`
+      // over the object literal its `.map` builds; these are its fields.
+      const rows = JSON.parse(text) as {
+        id: string;
+        name: string;
+        summary: string;
+        persona: string;
+      }[];
+      return rows.find((r) => r.name === "Persona Probe");
+    };
+
+    // CANARY: drop `persona: g.persona` from the list mapping and this is
+    // undefined — which is the state that made the controller refuse.
+    expect((await listed())?.persona).toContain("PERSONA-MARKER-11");
+
+    // The whole point: correct the stale blurb WITHOUT restating the persona.
+    const existingId = (await listed())!.id;
+    await call(ids.orgAdmin, "save_global_agent", {
+      id: existingId,
+      name: "Persona Probe",
+      backend: "codex",
+      summary: "Verifies real processes over real TCP. No containers on this host.",
+      stages: ["impl"],
+    });
+
+    const after = await listed();
+    expect(after?.summary).toContain("real processes over real TCP");
+    // CANARY: make an omitted persona write "" through and this is empty — an
+    // agent whose entire system prompt was flattened by a blurb edit.
+    expect(after?.persona).toContain("PERSONA-MARKER-11");
+  });
+
+  // The description is this door's only contract for the model calling it, and
+  // the silence beside three spelled-out merge rules is what made a careful
+  // caller refuse the edit entirely.
+  it("says the merge rule in the tool's own description, beside the grants' rule", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const admin = findUserById(app.db, ids.orgAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: admin.id, email: admin.email, name: admin.name },
+      projectSlug: SLUG,
+    });
+    const save = toolkit.tools.find((t) => t.name === "save_global_agent")!;
+    expect(save.description).toContain(
+      "an omitted or empty PERSONA leaves the stored persona unchanged",
+    );
+    const list = toolkit.tools.find((t) => t.name === "list_global_agents")!;
+    expect(list.description).toContain("its full persona");
   });
 });

@@ -963,3 +963,41 @@ That comment states an invariant the product does not hold. The closed arm and t
 **Fix — ruling 195.** The packet arm settles like the other two. `settleWaitingAfterOperator` is already a no-op unless the flag is `agent` with nothing live, and `clearWaitingToHuman` settles to `human` — not `none` — precisely because a packet is open. Proven red by deleting the call: `expected 'agent' to be 'human'`.
 
 **Correction to my own notes.** I first recorded "SHOP-6 has no packet" after grepping the task frontmatter for `packet:`. Packets live in a `## Packet` markdown section, not in frontmatter. The controller's report was right and my check was wrong; the finding is what my wrong check led me to.
+
+## F37-18 · The controller refused to edit an agent template, correctly, because viberr would not show it what it was about to overwrite — med
+
+**Reported by the controller itself**, in the last paragraph of a board-wide repair I had asked
+for, under a heading it wrote: *"What I did not do"*.
+
+> I deliberately left the **Backend / Frontend / Infrastructure Engineer** templates alone.
+> Their one-line summaries still say "Testcontainers", "Docker Compose stack" and "Playwright
+> journeys", but `save_global_agent` gives me no way to edit a summary without also supplying a
+> persona, and I cannot read the personas I'd be replacing. I would rather flag a stale blurb
+> than clobber a prompt unread.
+
+**Half of that is wrong, and the half that is wrong is viberr's fault.** The writer has always
+kept a blank persona: `description: persona || existing.description` in `gagents.server.ts`.
+Omitting it was safe. Nothing told the caller:
+
+- `save_global_agent`'s description spells the merge rule out for three fields — *"an omitted
+  skills/mcps/kbs list leaves the stored grants unchanged, and an empty list clears them"* —
+  and says nothing about `persona`, whose parameter description was the bare *"The long
+  persona/system-prompt body."* Beside three explicit rules, silence reads as "this one is
+  different".
+- `list_global_agents` did not return the persona, so the caller could not check. The field is
+  right there in `GagentView` (`persona: parsed.description`); the toolkit's `.map` dropped it.
+
+**This is F33-7 repeating.** That finding added the grants to the same list tool for the same
+reason, and its comment in the source says so in as many words: *"the model had no way to see
+what an edit was about to replace, and the controller (rightly) refused to edit blind."* The
+fix covered the three small list fields and skipped the big prose one.
+
+**The cost, concretely.** Three agent templates still advertise a toolchain this host does not
+have, to the **operator**, which is the component that picks an agent by reading that summary.
+The controller could see the problem, had the authority to fix it, and was correct to stop.
+
+**Fix — ruling 197.** `list_global_agents` returns the persona; `save_global_agent` and
+`list_global_agents` both state the rule ("an omitted or empty PERSONA leaves the stored
+persona unchanged, so editing a summary alone is safe"). Proven red both ways: drop
+`persona: g.persona` from the list mapping and the read is `undefined`; make an omitted persona
+write through and a blurb edit flattens the agent's entire system prompt.

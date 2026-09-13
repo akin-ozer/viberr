@@ -4289,6 +4289,25 @@ by rewriting those paragraphs:*
     The owner chose this over re-platforming the pass-37 clone onto npm workspaces.
     (`Dockerfile`, pinned by `toolchain.server.test.ts`.)
 
+197. **A template's persona is readable, and the tool says which fields an omission keeps
+    (owner, 2026-09-13, pass 37; F37-18, completes F33-7).** F33-7 put the resource GRANTS
+    into `list_global_agents` for a stated reason — "`save_global_agent` rewrites every field
+    it is given and this was the only read of a template; the model had no way to see what an
+    edit was about to replace, and the controller (rightly) refused to edit blind" — and left
+    out the largest field of all. Two rulings later the same thing happened for the same
+    reason: the controller needed to correct three template summaries that advertised
+    Testcontainers, a Docker Compose stack and Playwright journeys on a host with none of
+    them — text the OPERATOR selects agents by — and refused, saying "`save_global_agent`
+    gives me no way to edit a summary without also supplying a persona, and I cannot read the
+    personas I'd be replacing." The writer was innocent: a blank persona has always kept the
+    stored one (`description: persona || existing.description`). The tool never said so, while
+    the same paragraph spelled the merge rule out for skills, mcps and kbs — so the one field
+    whose loss destroys an agent's whole system prompt was the one field left to inference, and
+    a careful caller correctly refused to guess. `list_global_agents` now returns the persona,
+    and both descriptions state the rule. Silence about a destructive default is not a neutral
+    omission: it is the difference between an edit and a refusal.
+    (`controller-toolkit.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
