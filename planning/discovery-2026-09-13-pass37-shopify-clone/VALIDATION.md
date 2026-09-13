@@ -688,3 +688,37 @@ still answers happily with the fault standing, because that is exactly why count
 never enough.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6581 tests passed**, `build` green.
+
+### Rulings 214 and 216, proved live on SHOP-10 — the same task, the same question, 46 minutes apart
+
+SHOP-10 is where both were found, and after the deploy both were exercised on it in one press of
+Run operator. Its timeline now carries the before and the after within twenty lines of each
+other:
+
+```
+19:11:57 · comment · operator
+    @Code Reviewer, before another rework run, name everything you would still block on …
+19:11:57 · note · system:policy-engine
+    the operator held it twice in a row without advancing, dispatching, or opening a packet
+    — treating that as a deliberate hold. Coordination is paused here …
+
+  ── ruling 216 ──
+19:57:21 · note · system:policy-engine · Hold lifted
+    Arda started an operator run, so the hold recorded at Build no longer stands.
+
+  ── ruling 214 ──
+19:57:51 · comment · operator
+    to: agent
+    @Code Reviewer, before any further rework, name everything you would still block on …
+19:58:12 · agent · operator
+    Started a Codex run for the Code Reviewer agent — streaming to the agent logs.
+```
+
+The two questions are nearly word for word the same. Everything that differs is mechanism: the
+first was a `post_comment` that reached nobody and was scored as inaction 49 milliseconds later;
+the second carries `to: agent` because it rode a `run_agent`, and twenty-one seconds after it a
+reviewer was actually reading it. `heldAtStage` is `null`, `waiting` is `agent`, and the five
+tasks declaring `blockedBy: SHOP-10` are behind a task that is moving again.
+
+The hold note also names the stage the way the board does — "the hold recorded at **Build**" —
+which is what the unit test pinned rather than the stage id it is stored under.
