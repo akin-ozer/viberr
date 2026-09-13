@@ -212,3 +212,90 @@ reported it honestly and opened a recovery packet. Before ruling 189 that fallba
 a fresh run "re-anchors on this task file", and the task file did not carry the human's
 answer. Now it does. The two mechanisms compose — an expired transcript costs a round trip
 instead of the decision.
+
+## Ruling 190 — live, on the instance's own Insights page
+
+Before (screenshotted, dark, desktop):
+
+> **100%** · Coordination overhead
+> *operator and controller runs spent $4.34 of $4.34 reported by cost-reporting runs*
+
+After the rebuild, the same card, same instance, both themes and both widths:
+
+> **n/a** · Coordination overhead
+> *operator and controller runs spent $7.90; no delivery run reported a cost, so there is
+> no share to take*
+
+The dollar figure that IS real survived the fix and moved with the instance ($4.34 → $7.90 as
+the controller kept working). The share is gone because nothing measured it. Light and dark
+both render the `n/a` value in the muted `.stat-val.na` treatment the other unmeasured stats
+use, and the mobile grid (375×812) wraps the longer sub-text without clipping.
+
+## Ruling 191 — live, and the verdict text changed
+
+The probe, read off `/resources/health` on the rebuilt image before ruling 196 landed:
+
+```json
+{"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
+ "make":null,"docker":null,"pnpm":null,"yarn":null,"curl":null,
+ "codexCli":"0.153.4","claudeAgentSdk":"0.3.261"}
+```
+
+Exactly the absences I had measured by hand with `command -v` inside the container, now
+reported by the product's own probe — and, for the first time, carried into every specialist,
+operator and controller prompt.
+
+**The behaviour changed on the next real verdict.** The Integration Verifier's verdict
+BEFORE ruling 191 opened with the failure and left the reader to infer its nature:
+
+> Mandatory Step 1 failed: `make up` returned `/bin/bash: line 1: make: command not found`
+> (127) … Steps 2–5 could not run because the checkout has no services or compose stack.
+
+The first verdict AFTER it separates the two explicitly, in the reviewer's own words:
+
+> The Integration Verifier gate cannot pass: cold start failed at `make up` with exit 127
+> … **This is an environment/repository-baseline blocker, not a discovered document-scope
+> defect.**
+
+That sentence is the inversion the fix was aimed at. It also shows the limit of ruling 191
+on its own: the reviewer still (correctly) returns `request_changes`, because its charter
+says approve only from a stack it brought up — which is what ruling 193 and ruling 196 are
+for.
+
+## Ruling 196 — live
+
+`/resources/health` on the rebuilt image:
+
+```json
+"make":"4.4.1", "pnpm":"12.4.1", "curl":"8.14.1", "docker":null
+```
+
+Docker null is the ruling working, not a gap: it is the one the owner and I deliberately
+left out, and every run is now told so in the same paragraph.
+
+## Ruling 189 — a second live proof, and the narrowing held
+
+SHOP-6's "Lockfile ownership" packet, answered with a typed custom directive, appended a
+`**Decision — 2026-09-13, Arda answered "Lockfile ownership":**` block to the task's goal —
+the second task this pass where a human's answer joined the contract instead of scrolling
+away in the timeline.
+
+Minutes later the same task threw a `Work stalled: pick a recovery path` packet (its Codex
+session had expired), and I resolved it with **Redirect with sharper guidance**. The goal
+still carries exactly **one** decision block. That is `PROCESS_ONLY_OPTION_KINDS` doing its
+job live: a recovery choice decides what happens next, not what the work IS, and ruling 189's
+first draft — which appended every resolution — would have put "Work stalled: pick a recovery
+path → Redirect with sharper guidance" into the contract of a task about shared packages.
+
+## Ruling 195 — the finding and the fix, both live
+
+Found by disbelieving the board: SHOP-6 read `readiness: ready, waiting: agent` with **zero**
+runs in 75 minutes while ten tasks waited behind it. Pressing the page's own **Run operator**
+answered why — *"Operator not started · resolve the open decision to continue"* — and the
+audit showed viberr had recorded a boot re-invoke for it (`run.recovery.reinvoked · SHOP-6 ·
+{"attempt":1}`) that started nothing. The refusal skipped its settle on an invariant the
+product does not hold, so the board kept claiming an agent was working on a task whose every
+door was shut.
+
+Fixed, proven red (`expected 'agent' to be 'human'`), and the same task then moved: packet
+resolved → operator re-engaged → `run_ogTTIx` started within seconds.
