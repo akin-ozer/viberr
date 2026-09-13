@@ -1966,6 +1966,27 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     // And it points at the inventory the same prompt now carries (ruling 191)
     // rather than asking the model to intuit what is installed.
     expect(prompt).toContain("your shell inventory says is not installed on this host");
+
+    // And the number the arm names must actually REACH the model — the whole
+    // bug class this pass is about is a fact the server holds and the agent
+    // cannot see. A Codex operator gets the snapshot inline as JSON; a Claude
+    // one reads the same object through `get_task`, whose description points at
+    // the field by name.
+    const withReviewer = operatorPrompts.buildCodexOperatorPrompt(
+      snap({
+        reviewers: [
+          {
+            profileId: "reviewer",
+            role: "Review & validation",
+            backend: "codex",
+            verdict: "request_changes",
+            consecutiveRequestChanges: 3,
+          },
+        ],
+      }),
+      "agent-reply",
+    );
+    expect(withReviewer).toContain('"consecutiveRequestChanges": 3');
   });
 
   it("F15-14: the entry stage carries the gate — no forward move on a vague goal", () => {
