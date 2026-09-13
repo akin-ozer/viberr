@@ -274,3 +274,22 @@ loss is on the timeline in words.
 against branch *heads* and PR head SHAs, and flagged three "phantoms" that were simply
 ancestors of a head. Ancestry is the test (`git for-each-ref --contains <sha>`), not equality.
 Anyone repeating this check should start there — a head-only comparison manufactures findings.
+
+## What was NOT exercised, and why
+
+Recorded honestly rather than claimed:
+
+- **Browser capability.** Granted to all eight specialist profiles and enforced at mount, but
+  no agent has used it: there is no storefront to drive yet (that is goal-4, still blocked
+  behind the foundation chain). Tool census across the pass: 733 `exec`, **26 `web_search`**
+  (so `use-web-search-fetch` *is* in real use — the Platform Architect researched Stripe and
+  Adyen docs), 12 `ToolSearch`, and the controller's own tools. Zero browser calls.
+- **Guardrails.** `meaningful-comment`, `no-duplicate-summary`, `compression-threshold` and
+  `evidence-separation` are all on. Only the last one has visibly fired (agents write
+  validation output to `attachments/` rather than the timeline). The other three reject
+  chatter, and no agent has produced any — which is a good sign about the agents rather than
+  evidence about the guardrails.
+- **Force-accept.** No task has reached the acceptance boundary with a failing or missing
+  verdict, which is the only state where force-accept means anything. The RBAC probe did
+  confirm the door is admin-only (maintainer → 403 "Your project role (maintainer) cannot
+  force-accept past the review gate", admin → reaches the acceptance ceremony).

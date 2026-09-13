@@ -70,7 +70,9 @@ prompting from me:
 > inside a run's workspace and never delivered, and that workspace is gone, so the change it
 > held is not recoverable. SHOP-2's goal is unchanged — run it again to redo the work.
 
-`task.md` now reads `commits: []`. And the same GitHub page row, before and after:
+`task.md` now reads `commits: []`, and the announcement is **idempotent**: one `Work lost`
+event on SHOP-2 across the four reconcile passes that have run since, because the drop
+persists into the cache the next pass reads. And the same GitHub page row, before and after:
 
 | | commits | sync |
 |---|---|---|
