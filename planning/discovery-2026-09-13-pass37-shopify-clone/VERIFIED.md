@@ -236,3 +236,41 @@ Recreating the container while an agent run was live:
 
 > **Restart:** the run `run_19PtdepIDG3L` (agent) was still running when the server stopped;
 > it is recorded as interrupted by the restart, and the operator is re-invoked.
+
+## "Files are truth" — tested three ways, not assumed
+
+The owner's ask was literal: *files-are-truth means the record is testable, so test it.* Three
+legs, run against the live store after the ruling-187 fix.
+
+**1. SQLite projection vs the canonical markdown.** Every task, six fields each
+(`stage`, `waiting`, `archived`, `branch`, `pr.number`, `blockedBy`), read independently from
+`task_projections` and from `task.md`'s frontmatter:
+
+```
+42 comparisons across 7 tasks — MISMATCHES: 0
+```
+
+**2. The record vs GitHub.** Every `github.commits[]` entry, every branch, every PR state
+checked against the real repository:
+
+```
+SHOP-1  de2c195   reachable from origin/main, origin/shop-1, pr/1   ok
+SHOP-1  68807cf   reachable from origin/main, pr/1                  ok
+SHOP-6  15d4c0a   reachable from origin/shop-6-efd4, pr/3           ok
+SHOP-7  f104c66   reachable from origin/shop-7, pr/2                ok
+SHOP-7  b92d818   reachable from origin/shop-7, pr/2                ok
+SHOP-7  9467d83   reachable from origin/shop-7, pr/2                ok
+SHOP-7  f01c963   reachable from origin/shop-7                      ok
+
+GENUINE PHANTOMS: 0
+```
+
+Branch and PR states agree too (`pr #1 merged` ↔ GitHub `closed`+merged, `#2 closed` ↔
+`closed`, `#3 review` ↔ `open`). Before ruling 187 this leg had one real phantom — `3aad6ff`
+on `shop-2`, an object that existed in no repository and no workspace. It is gone, and the
+loss is on the timeline in words.
+
+**A method note, because I got it wrong first.** My initial version compared recorded commits
+against branch *heads* and PR head SHAs, and flagged three "phantoms" that were simply
+ancestors of a head. Ancestry is the test (`git for-each-ref --contains <sha>`), not equality.
+Anyone repeating this check should start there — a head-only comparison manufactures findings.
