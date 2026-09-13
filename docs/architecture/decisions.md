@@ -4563,6 +4563,49 @@ by rewriting those paragraphs:*
     what it needed was not a different position but the one fact it could not read off the
     board.
     (`run-recovery.server.ts`, `boot.server.ts`.)
+216. **A person's own operator run ends the deliberate stage hold, because that is
+    what its note tells them to do (owner, 2026-09-13, pass 37; F37-36).** The stranded
+    backstop's durable marker, `heldAtStage`, comes with this sentence: "Coordination is
+    paused here: run the operator manually when the hold should end, adjust the goal, or
+    loosen the boundary in Policy → Workflow rules." Live on SHOP-10 I did the first one.
+    The operator ran, took a real action (`update_branch_from_base`, 8 commits), and the
+    marker was still standing afterwards with the board still reading "Coordination is
+    paused here" - so of the three remedies the sentence offers, the one it names first was
+    the one that did nothing. Every other human re-litigation clears the marker already: a
+    goal edit (V18), a stage transition, a packet resolution, acceptance, a dependency
+    release. A press of Run operator did not, which also means the drive that person paid
+    for got no nudge when it stranded, since the backstop reads the standing hold and
+    returns before it. The same branch that already lifts ruling 157's packet-less hold now
+    lifts this one, with the same discriminator it already computed: a `manual` trigger
+    carrying an `actor` is a person and nothing else is. A SCHEDULE deliberately does not -
+    an hourly schedule re-arming the nudge forever is the exact thing V18 stopped.
+    (`operator-run.server.ts`, `task-actions.server.ts`.)
+
+217. **An instance whose projection stopped tracking its own files reported itself
+    healthy for twelve minutes (owner, 2026-09-13, pass 37; F37-37).** The projection store
+    went to `SQLITE_CORRUPT` under a running process. Every rebuild threw
+    ("database disk image is malformed"), the watcher's rebuilds threw, an operator's plan
+    execution threw halfway through and took its decision with it, `clearWaitingToHuman`
+    threw behind it, the task page answered 500 to the human, and a run sat `running` for
+    twenty minutes with no process behind it. Throughout, `/resources/health` answered
+    `{"ok": true, "status": "ok", "degraded": []}`. It was not lying about anything it
+    checked: the row COUNTS still read fine, because the damage was in particular btree
+    pages, and a count is not a verdict about whether the mirror still follows the record.
+    Viberr knew the whole time - `rebuildPath`'s catch wrote the store's own error to the
+    log on every single failure - and had nowhere to put the fact. `boot.server.ts` already
+    names this exact shape for the one cause it probes for: "the task stops projecting and
+    its row goes stale, with nothing on any surface saying why." So that catch now sets a
+    process latch (`store-health.server.ts`) carrying the failing file, the store's own
+    sentence and a count, and the next rebuild that WRITES clears it. Health reports it as
+    `degraded: ["projections"]` with the reading in `projectionStore`, so readiness answers
+    503 and an orchestrator can act. A latch, never a probe: no `PRAGMA integrity_check` on
+    an 87MB file every few seconds, and no alarm that outlives its fault - which is the
+    same thing ruling 146 refused to let this endpoint do. "Files are truth" is only worth
+    anything while SQLite follows them, so a projection that cannot be rebuilt from the
+    canonical files is the one fault this product must never report as healthy.
+    (`store-health.server.ts`, `rebuilder.server.ts`, `health-snapshot.server.ts`,
+    `resources.health.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

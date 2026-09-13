@@ -59,6 +59,7 @@ import {
   commentToAgent,
   forceAcceptCompletion,
   liftHoldForRun,
+  liftStageHoldForPerson,
   OPERATOR_TASK_ACTOR,
   reorderTask,
   resolvePacket,
@@ -4873,6 +4874,61 @@ describe("pass 35: operator and task actions", () => {
       );
       expect(result.changed).toBe(false);
       expect(file(store).timeline).toHaveLength(before);
+    });
+  });
+
+  /**
+   * Ruling 216 (F37-36). `heldAtStage` is the stranded backstop's durable
+   * marker, and its note tells the reader: "Coordination is paused here: run
+   * the operator manually when the hold should end, adjust the goal, or loosen
+   * the boundary." Live on SHOP-10 I did the first one. The operator ran, took
+   * a real action (`update_branch_from_base`, 8 commits), and the marker was
+   * still there afterwards with the board still saying coordination was paused
+   * — so the remedy the sentence names was the one thing on its list that did
+   * not work. Every other human re-litigation clears it: a goal edit, a packet
+   * resolution, a transition, acceptance.
+   */
+  describe("ruling 216 (F37-36): liftStageHoldForPerson", () => {
+    function stageHeld(store: TestStore): void {
+      seed(store, { stage: "review", heldAtStage: "review" });
+    }
+
+    it("a person's operator run clears the stage hold, names them, and audits it", async () => {
+      const store = prepared();
+      stageHeld(store);
+      // CANARY: return true without clearing `heldAtStage` and the board keeps
+      // saying coordination is paused while a person is coordinating it.
+      const lifted = await liftStageHoldForPerson(
+        store.db,
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "VIB-1",
+        { byName: "Arda", by: { userId: store.users.arda.id, label: "arda" } },
+      );
+      expect(lifted).toBe(true);
+      expect(file(store).frontmatter.heldAtStage).toBeNull();
+      const note = file(store).timeline[0]!;
+      expect(note).toMatchObject({ type: "note", title: "Hold lifted" });
+      expect(note.text).toContain("Arda started an operator run");
+      // The stage is named as the BOARD names it, not by its id.
+      expect(note.text).toContain("the hold recorded at Review no longer stands");
+      const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ previous: "stage-hold", stage: "review" });
+    });
+
+    it("finds nothing to lift when no stage hold stands, and writes no note", async () => {
+      const store = prepared();
+      seed(store, { stage: "review" });
+      const lifted = await liftStageHoldForPerson(
+        store.db,
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "VIB-1",
+        { byName: "Arda", by: { userId: store.users.arda.id, label: "arda" } },
+      );
+      expect(lifted).toBe(false);
+      expect(file(store).timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
     });
   });
 

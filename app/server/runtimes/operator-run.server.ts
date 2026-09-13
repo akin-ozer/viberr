@@ -1715,9 +1715,8 @@ export async function runOperator(
   // "working" for the duration of the drive, not "waiting on you" (the
   // specialist starters do the same). Settled back to human on lease release
   // once nothing is live (settleWaitingAfterOperator).
-  const { liftHoldForRun, markWaitingAgent, userName } = await import(
-    "~/server/tasks/task-actions.server"
-  );
+  const { liftHoldForRun, liftStageHoldForPerson, markWaitingAgent, userName } =
+    await import("~/server/tasks/task-actions.server");
   // Ruling 157 (pass 35, F35-8): a person starting the operator (Run operator,
   // an `@operator` comment, the controller; every one of them carries `actor`)
   // or a schedule they set lifts a packet-less hold on the record. A bare
@@ -1732,12 +1731,21 @@ export async function runOperator(
       by: null,
     });
   } else if ((input.trigger ?? "manual") === "manual" && input.actor) {
+    const byName =
+      input.humanCommentBy ??
+      (input.actor.userId ? userName(db, input.actor.userId) : null);
     await liftHoldForRun(db, ctx, input.projectSlug, input.taskKey, {
       kind: "operator-run",
       trigger: "manual",
-      byName:
-        input.humanCommentBy ??
-        (input.actor.userId ? userName(db, input.actor.userId) : null),
+      byName,
+      by: input.actor,
+    });
+    // Ruling 216 (F37-36): the SAME press also re-litigates the deliberate
+    // STAGE hold, which is the one the "Coordination is paused here" note
+    // tells the reader to end by running the operator manually. Only a
+    // person's press: a schedule re-arming this is exactly what V18 stopped.
+    await liftStageHoldForPerson(db, ctx, input.projectSlug, input.taskKey, {
+      byName,
       by: input.actor,
     });
   }

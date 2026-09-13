@@ -629,3 +629,62 @@ deploy, from the identical starting state, both counts rose. Each task then got 
 operator re-invoke (`run_g1x6UM`, `run_VOGPEB`) instead of two, and both resumed their
 interrupted work — the reviewer restarted on PR #9's delivered revision, the infrastructure
 engineer resumed SHOP-16.
+
+---
+
+## Ruling 216 — the lift, and the thing that must NOT lift it
+
+Four tests, two of them about restraint.
+
+`task-actions.server.test.ts` proves the unit: a task with `heldAtStage: "review"` is cleared by
+a person, the note names them, and — the detail worth asserting — it names the stage **as the
+board names it**, "the hold recorded at Review no longer stands", not by its id. A second test
+proves it finds nothing and writes nothing when no hold stands, so the note can never appear
+without a hold behind it.
+
+`operator-run.server.test.ts` proves the wiring twice over: a person's `manual` run with an
+`actor` clears it; a `scheduled` run leaves `heldAtStage: "impl"` exactly where it was and writes
+no note. That second one is the whole of V18 in one assertion — an hourly schedule re-arming the
+nudge is the bug the marker exists to prevent, and a fix that lifted it "when work starts" would
+have quietly restored it.
+
+Canaries, both red:
+
+```
+# drop the liftStageHoldForPerson call in runOperator
+AssertionError: expected 'impl' to be null
+# return true without clearing the marker
+AssertionError: expected 'review' to be null
+```
+
+---
+
+## Ruling 217 — canaried on a real broken store, not on the latch
+
+The temptation here was to test the latch by calling `recordProjectionFault` and asserting health
+degrades. That proves the plumbing and nothing about the seam that actually failed. So the
+behaviour test in `rebuilder.server.test.ts` produces a **genuinely failing rebuild** using the
+crash technique F28-D3 already established — `ALTER TABLE task_events RENAME TO task_events_gone`
+— and drives it through `rebuildPath`, the same entry point the watcher and `reprojectTask` use.
+
+One detail that would have made it vacuous: the task file has to CHANGE between the two rebuilds.
+Without a new comment in the timeline the second rebuild short-circuits as "unchanged", never
+reaches the write, never throws, and the test passes against code with no latch at all. The test
+writes a second event for exactly that reason, and says so in a comment.
+
+Three canaries, three reds:
+
+```
+# no recordProjectionFault in the catch
+AssertionError: expected null not to be null
+# no clear on a rebuild that wrote
+AssertionError: expected { Object (at, sourcePath, ...) } to be null
+# no degraded.push("projections")
+AssertionError: expected 'ok' to be 'degraded'
+```
+
+The health test asserts the other half of the live reading: that `projections` (the row counts)
+still answers happily with the fault standing, because that is exactly why counting rows was
+never enough.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6581 tests passed**, `build` green.

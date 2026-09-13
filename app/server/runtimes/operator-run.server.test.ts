@@ -3261,6 +3261,52 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
+  /**
+   * Ruling 216 (F37-36): the SAME press, against the OTHER hold. `heldAtStage`
+   * is the stranded backstop's durable marker and its note names running the
+   * operator manually as the remedy — live on SHOP-10 that remedy left the
+   * marker standing, so the board kept reading "Coordination is paused here"
+   * while a person was manually coordinating the task, and the drive they paid
+   * for got no nudge when it stranded.
+   */
+  describe("ruling 216: a person's run ends the deliberate STAGE hold too", () => {
+    const stageHeld = (): void => {
+      writeTask(store5.dataRoot, store5.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          waiting: "human",
+          heldAtStage: "impl",
+          ownerUserId: store5.users.arda.id,
+        }),
+        goal: "Ship the parser.",
+      });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    };
+    const arda2 = () => ({ userId: store5.users.arda.id, label: store5.users.arda.email });
+
+    it("clears heldAtStage and says who ended it", async () => {
+      deployAgents([operatorAgent()]);
+      stageHeld();
+      // CANARY: drop the `liftStageHoldForPerson` call in runOperator and the
+      // marker survives the one action its own note tells a human to take.
+      const result = await drive({ trigger: "manual", actor: arda2() });
+      expect(result.refused).toBeUndefined();
+      expect(task().frontmatter.heldAtStage).toBeNull();
+      expect(
+        task().timeline.find((e) => e.title === "Hold lifted")?.text,
+      ).toContain("no longer stands");
+    });
+
+    it("a SCHEDULE does not — re-arming the nudge hourly is what V18 stopped", async () => {
+      deployAgents([operatorAgent()]);
+      stageHeld();
+      const result = await drive({ trigger: "scheduled" });
+      expect(result.refused).toBeUndefined();
+      expect(task().frontmatter.heldAtStage).toBe("impl");
+      expect(task().timeline.some((e) => e.title === "Hold lifted")).toBe(false);
+    });
+  });
+
   describe("ruling 130: a failed operator run's packet", () => {
     const RESET = "2026-09-07T11:50:00.000Z";
     const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";

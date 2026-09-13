@@ -24,6 +24,10 @@ import {
 } from "~/server/tasks/required-reviewers.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
+  clearProjectionFault,
+  recordProjectionFault,
+} from "./store-health.server";
+import {
   getDataRoot,
   goalFilePath,
   projectFilePath,
@@ -995,15 +999,15 @@ export function rebuildPath(
   try {
     const taskMatch = TASK_PATH_RE.exec(rel);
     if (taskMatch) {
-      return rebuildTaskFile(db, taskMatch[1]!, taskMatch[2]!, options);
+      return succeeded(rebuildTaskFile(db, taskMatch[1]!, taskMatch[2]!, options));
     }
     const projectMatch = PROJECT_PATH_RE.exec(rel);
     if (projectMatch) {
-      return rebuildProjectFile(db, projectMatch[1]!, options);
+      return succeeded(rebuildProjectFile(db, projectMatch[1]!, options));
     }
     const goalMatch = GOAL_PATH_RE.exec(rel);
     if (goalMatch) {
-      return rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options);
+      return succeeded(rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options));
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
@@ -1011,6 +1015,14 @@ export function rebuildPath(
       sourcePath: rel,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+    // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
+    // cannot take the process down — and for the twelve minutes the store was
+    // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
+    // `degraded: []`. The log line stays; the FACT now has somewhere to live.
+    recordProjectionFault(
+      rel,
+      error instanceof Error ? error.message : String(error),
+    );
     recordProvenance(db, {
       sourcePath: rel,
       contentHash: null,
@@ -1019,6 +1031,14 @@ export function rebuildPath(
     });
     return { action: "error", kind: "other" };
   }
+}
+
+/** Ruling 217: a rebuild that WROTE clears the latch — the mirror tracks the
+ *  files again. An `ignored` path is not a projection source and says nothing
+ *  either way, so it never clears. */
+function succeeded(result: RebuildFileResult): RebuildFileResult {
+  if (result.action !== "error") clearProjectionFault();
+  return result;
 }
 
 // --------------------------------------------------------- scoped rescan

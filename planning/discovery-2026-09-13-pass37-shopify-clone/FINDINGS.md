@@ -1985,3 +1985,101 @@ the one fact it could not read off a board step 1 had already rewritten.
 Canaries (both proved red): drop the filter and the sweep settles the orphan sweep's own task,
 writing "no run was live" under "was still running when the server stopped"; drop the third
 argument at the call site and the wiring test sees `undefined` where the set should be.
+
+---
+
+## F37-36 · The remedy the "coordination is paused" note names first is the one that does not work — MEDIUM
+
+`heldAtStage` is the stranded backstop's durable marker. When the operator holds a stage twice
+running, viberr records it and writes:
+
+> **Note:** this stage auto-advances, but the operator held it twice in a row without
+> advancing, dispatching, or opening a packet — treating that as a deliberate hold.
+> **Coordination is paused here: run the operator manually when the hold should end**, adjust
+> the goal, or loosen the boundary in Policy → Workflow rules.
+
+SHOP-10 carried that note, at `waiting: human`, with SHOP-2, SHOP-3, SHOP-11, SHOP-12 and
+SHOP-13 declared blocked behind it. I did the first thing on its list: pressed Run operator.
+
+The operator ran and did real work — `update_branch_from_base`, eight commits merged in, pushed
+to origin. Afterwards `heldAtStage: build` was still in the frontmatter and the board still read
+"Coordination is paused here."
+
+Every other human re-litigation clears that marker: a goal edit (V18's own reasoning — "the hold
+was the operator honoring the OLD goal"), a stage transition, a packet resolution, acceptance, a
+dependency release. A person pressing the button the note points at did not. And because the
+backstop reads the standing marker and returns before it, the drive that person paid for also
+got no nudge when it stranded — so a manual run on a held task is quietly weaker than an
+ordinary trigger on an unheld one.
+
+**Fix (ruling 216).** The same branch in `runOperator` that already lifts ruling 157's
+packet-less hold now lifts this one, using the discriminator it had already computed: a `manual`
+trigger carrying an `actor` is a person. A "Hold lifted" note names them and the stage.
+
+A **schedule deliberately does not** lift it. V18 exists because "every external trigger (a
+schedule firing hourly, an `@operator` aside) started an unmarked drive, the backstop paid ONE
+fresh nudge, and the second stranding appended a byte-identical hold note — two drives and a
+duplicate note per trigger, forever." Both halves are tested.
+
+---
+
+## F37-37 · The projection stopped tracking the files, every task page 500ed, and health said `ok` — HIGH
+
+**Cause first, because it was mine.** I had been reading the live `projection.sqlite` from the
+macOS host with the `sqlite3` CLI while the container wrote to it over VirtioFS — the dual-writer
+hazard this repo already has a memory note about. At 19:36:04 the store returned `disk I/O
+error`, and 150ms later `database disk image is malformed`. That part is an environment fact and
+an operator error, not a viberr defect.
+
+**What viberr did with it is the finding.** For the next twelve minutes, on a running instance:
+
+```
+error  run line persist failed                 database disk image is malformed
+error  run divergence marker could not be persisted
+error  codex operator completion handling failed   ← the operator's decision, lost mid-execution
+warn   clearWaitingToHuman failed                  ← and the fallback behind it
+error  projection rebuild failed   sourcePath: projects/…/SHOP-10/task.md
+error  watcher rebuild failed      path: /data/projects/…/SHOP-10/task.md
+error  request handler error       GET /projects/…/SHOP-10.data   ← a 500 to the human
+```
+
+and, the whole time:
+
+```json
+{"ok":true,"status":"ok","degraded":[],"projections":{"projects":1,"tasks":16},"watcher":true}
+```
+
+`run_Sapz5OGTRDpW` sat `running` for twenty minutes with no process behind it (confirmed by
+`ps` inside the container: two codex processes, neither its). The operator turn a human had
+paid for was executed and then thrown away, because `fullReplyTextForRun` could not read the
+run's own log lines back.
+
+Health was not lying about anything it checked. The damage was in particular btree pages, so
+`SELECT COUNT(*)` on `task_projections` still answered 16 — **a count is not a verdict about
+whether the mirror still follows the record.** And the one condition the route's contract calls
+fatal, "the database cannot be read", was false: it could be read, just not written or rebuilt.
+
+Viberr knew the whole time. `rebuildPath`'s catch wrote the store's own sentence to the log on
+every single failure. It had nowhere to put the fact. `boot.server.ts` already names this exact
+shape for the one cause it probes for at boot:
+
+> the task stops projecting and its row goes stale, **with nothing on any surface saying why**
+
+**Fix (ruling 217).** That catch sets a process latch (`store-health.server.ts`) holding the
+failing file, the store's own message and a failure count; the next rebuild that WRITES clears
+it. `healthSnapshot` reports it as `degraded: ["projections"]` with the reading in
+`projectionStore`, so `?probe=readiness` answers 503 and the controller's `instance_health` sees
+it too. A latch, never a probe — no `PRAGMA integrity_check` on an 87MB file every few seconds,
+and no alarm that outlives the fault, which is what ruling 146 refused to let this endpoint do.
+
+Canaries (all three proved red, on a REAL failing rebuild produced by pulling `task_events` out
+from under it, not by calling the latch by hand): drop `recordProjectionFault` and the fault
+reads null while the rebuild still fails; drop the clear and the instance alarms forever after
+one bad write; drop the `degraded.push` and health reports `ok` with the fault standing.
+
+**Recovery, recorded because it is the product's own claim under test.** `sqlite3 .recover`
+rebuilt the store: integrity `ok`, 16 tasks, 355 of 367 runs, 245 notifications, 16210 run-log
+lines. `audit_events` came back as **0** — its rows had landed in `lost_and_found`, and 2128 of
+them were reinserted by matching the `evt_` id prefix against the table's ten columns. The
+canonical markdown was untouched throughout, which is the point: the board, the timelines and
+every verdict came back exactly as they were.

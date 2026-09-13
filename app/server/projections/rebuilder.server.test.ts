@@ -1,4 +1,5 @@
 import { rmSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -26,6 +27,7 @@ import {
   rebuildTaskFile,
 } from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
+import { projectionFault } from "./store-health.server";
 import { getTaskDetail } from "./task-query.server";
 
 /** A second project alongside the store's default, for scope tests. */
@@ -1136,6 +1138,72 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     });
     expect(healed.action).toBe("projected");
     expect(eventCount()).toBe(3);
+  });
+
+  /**
+   * Ruling 217 (F37-37). `rebuildPath`'s catch is deliberately quiet so one bad
+   * file cannot take the process down. Live on pass 37 the store went to
+   * `SQLITE_CORRUPT` and quiet is exactly what it stayed: every rebuild threw,
+   * every task page 500ed, and `/resources/health` answered `degraded: []` for
+   * twelve minutes. Viberr logged the store's own error on every failure and
+   * had nowhere to put the fact. This is that place, and the test uses the
+   * crash technique above to produce a REAL failing rebuild rather than calling
+   * the latch by hand.
+   */
+  it("latches a failing rebuild for health, and clears it on the next one that writes", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "Do the thing.",
+      timeline: [mkEvent(store.users.arda.id, "2026-08-26T10:00:00.000Z", "first")],
+    });
+    const taskPath = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "task.md",
+    );
+    expect(rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot }).action).not.toBe(
+      "error",
+    );
+    expect(projectionFault()).toBeNull();
+
+    // A store that cannot take the write — the same way the crash test above
+    // produces one, and the same shape SQLITE_CORRUPT produced live.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    // The file must differ, or the rebuild short-circuits as "unchanged" and
+    // never reaches the write. (Without this the test passes against broken
+    // code, because nothing throws.)
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "Do the thing.",
+      timeline: [
+        mkEvent(store.users.arda.id, "2026-08-26T10:00:00.000Z", "first"),
+        mkEvent(store.users.arda.id, "2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+    // CANARY: drop `recordProjectionFault` from the catch and this is null —
+    // the rebuild still fails, the log line is still written, and every surface
+    // still reports a healthy instance.
+    expect(rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot }).action).toBe(
+      "error",
+    );
+    const fault = projectionFault();
+    expect(fault).not.toBeNull();
+    expect(fault!.sourcePath).toContain("VIB-1");
+    // The STORE's own words, not viberr's paraphrase of them.
+    expect(fault!.message).toContain("task_events");
+    expect(fault!.failures).toBe(1);
+
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    expect(rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot }).action).not.toBe(
+      "error",
+    );
+    // CANARY: drop the `succeeded()` clear and the instance alarms forever
+    // after one bad write, which is what ruling 146 refused to let it do.
+    expect(projectionFault()).toBeNull();
   });
 });
 

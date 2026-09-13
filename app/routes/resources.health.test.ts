@@ -33,6 +33,8 @@ interface HealthBody {
   ok: boolean;
   status: "ok" | "degraded" | "down";
   degraded?: string[];
+  projectionStore?: { sourcePath: string; message: string; failures: number } | null;
+  projections?: { projects: number; tasks: number };
   watcher?: boolean;
   kbWatcher?: boolean;
   lock?: unknown;
@@ -124,6 +126,62 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.ok).toBe(true);
     expect(body.status).toBe("ok");
     expect(body.degraded).toEqual([]);
+  });
+
+  /**
+   * Ruling 217 (F37-37). Live on pass 37 the projection store went to
+   * `SQLITE_CORRUPT` under a running process: every rebuild threw, every task
+   * page 500ed, and a run sat `running` for twenty minutes with no process
+   * behind it. For the twelve minutes that lasted, this endpoint answered
+   * `{"ok":true,"status":"ok","degraded":[]}` — because the row COUNTS still
+   * read fine, and nothing else was asked. Viberr wrote the store's own error
+   * to the log on every failed rebuild and had nowhere to put the fact.
+   */
+  it("names a projection that cannot be rebuilt from the files (ruling 217)", async () => {
+    const { recordProjectionFault, clearProjectionFault } = await import(
+      "~/server/projections/store-health.server"
+    );
+    try {
+      recordProjectionFault(
+        "projects/shop/tasks/SHOP-10/task.md",
+        "database disk image is malformed",
+      );
+      // CANARY: drop the `degraded.push("projections")` and this instance
+      // reports itself healthy while its mirror has stopped following the
+      // record — the exact twelve minutes this ruling is named for.
+      const { body, status } = await probe();
+      expect(body.status).toBe("degraded");
+      expect(body.degraded).toContain("projections");
+      expect(body.projectionStore).toMatchObject({
+        sourcePath: "projects/shop/tasks/SHOP-10/task.md",
+        message: "database disk image is malformed",
+        failures: 1,
+      });
+      // The row counts keep reading fine through it, which is the reason a
+      // count was never enough on its own.
+      expect(body.projections).toBeTruthy();
+      // Liveness stays 200 (the process CAN still serve pages that only read);
+      // readiness is what an orchestrator acts on.
+      expect(status).toBe(200);
+      const ready = await probe("?probe=readiness");
+      expect(ready.status).toBe(503);
+    } finally {
+      clearProjectionFault();
+    }
+  });
+
+  it("clears the projection fault once a rebuild writes again (ruling 217)", async () => {
+    const { recordProjectionFault, clearProjectionFault } = await import(
+      "~/server/projections/store-health.server"
+    );
+    recordProjectionFault("projects/shop/tasks/SHOP-10/task.md", "disk I/O error");
+    clearProjectionFault();
+    const { body } = await probe();
+    // A latch that outlived its fault would alarm forever, which is the thing
+    // ruling 146 refused to let this endpoint do.
+    expect(body.status).toBe("ok");
+    expect(body.degraded).toEqual([]);
+    expect(body.projectionStore).toBeNull();
   });
 
   it("names a dead store watcher in the payload and downgrades the verdict", async () => {

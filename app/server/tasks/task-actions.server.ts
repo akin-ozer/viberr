@@ -4906,6 +4906,84 @@ export async function liftHoldForRun(
   }
 }
 
+/**
+ * Ruling 216 (F37-36): a person's own operator run re-litigates the DELIBERATE
+ * STAGE hold, the way every other human re-litigation already does.
+ *
+ * `heldAtStage` is the stranded backstop's durable marker (V18): the operator
+ * held this stage twice running, so stop paying nudges for it. Its note tells
+ * the human "run the operator manually when the hold should end" — and running
+ * the operator was the one listed remedy that did not end it. Goal edits,
+ * packet resolutions, transitions and acceptance all clear the marker; a person
+ * pressing Run operator did not, so the board kept saying "Coordination is
+ * paused here" while that person was manually coordinating it, and the drive
+ * they paid for got no nudge if it stranded.
+ *
+ * Deliberately NOT lifted by a schedule or by any machine trigger: V18 exists
+ * because an hourly schedule and a stray `@operator` re-armed the nudge forever.
+ * The caller's own discriminator is reused unchanged — a `manual` trigger
+ * carrying an `actor` is a person and nothing else is.
+ */
+export async function liftStageHoldForPerson(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  cause: { byName: string | null; by: AuditActor },
+): Promise<boolean> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const held = existing?.parsed.frontmatter.heldAtStage ?? null;
+    if (!held) return false;
+    const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+    const stageName =
+      project?.parsed.frontmatter.stages.find((st) => st.id === held)?.name ?? held;
+    let lifted = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked under the lock: a transition since the read above already
+      // cleared it, and this must not resurrect a note for a hold that is gone.
+      if (parsed.frontmatter.heldAtStage !== held) return;
+      parsed.frontmatter.heldAtStage = null;
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Hold lifted",
+        text:
+          `**Hold lifted:** ${cause.byName ?? "A person"} started an operator run, so the ` +
+          `hold recorded at ${stageName} no longer stands. Coordination resumes here. If the ` +
+          `operator holds this stage twice in a row again, Viberr records a new hold.`,
+        toAgent: false,
+        evidence: null,
+      });
+      lifted = true;
+    });
+    if (!lifted) return false;
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.hold.lifted",
+      actor: cause.by,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: {
+        cause: "operator-run",
+        previous: "stage-hold",
+        stage: held,
+        byUserId: cause.by.userId ?? null,
+      },
+    });
+    return true;
+  } catch (error) {
+    logger.warn("liftStageHoldForPerson failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return false;
+  }
+}
+
 export async function operatorPromptAgent(
   db: DatabaseSync,
   input: {
