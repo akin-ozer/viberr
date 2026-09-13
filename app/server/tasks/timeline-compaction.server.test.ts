@@ -136,6 +136,48 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect([...times].sort().reverse()).toEqual(times);
   });
 
+  /**
+   * Ruling 206 (F37-26, measured on the live board). Every fixture above puts
+   * the foldable comments NEXT TO each other, and the adjacency requirement is
+   * invisible under that shape. Viberr's own timeline never has it: a typed
+   * `agent` / `quality` / `github` / `transition` event lands between every pair
+   * of agent replies, and the operator's prompt in between is excluded as a
+   * `toAgent` hand-off. Live, the longest consecutive routine-comment run on the
+   * six tasks past their threshold was TWO, and not one compaction marker
+   * existed anywhere — while the foldable comments were 29% of SHOP-7's
+   * timeline bytes and 34% of SHOP-6's.
+   */
+  it("ruling 206: folds routine comments that are SEPARATED by typed events", () => {
+    // The live shape: reply, typed, reply, typed, reply… for the whole tail.
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
+      ...Array.from({ length: 8 }, (_, i) => [
+        agent(60 - i * 2),
+        typed(59 - i * 2, "quality"),
+      ]).flat(),
+    ];
+    // CANARY: restore the adjacency grouping (collapse each run of CONSECUTIVE
+    // routine comments) and this returns `events` unchanged — every run has
+    // length 1, so nothing ever folds.
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    expect(out.length).toBeLessThan(events.length);
+
+    // Every typed event survives, in place.
+    expect(out.filter((e) => e.type === "quality")).toHaveLength(8);
+    // The newest agent reply outside the recent window is kept verbatim; the
+    // seven behind it fold into one marker.
+    const replies = out.filter((e) => e.actor.kind === "agent");
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.text).toBe("routine comment 60");
+    const markers = out.filter((e) => e.title === COMPACTION_TITLE);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]!.text).toContain("7 earlier routine comments");
+
+    // And the file stays newest-first, which is what the marker's placement is for.
+    const times = out.map((e) => e.occurredAt);
+    expect([...times].sort().reverse()).toEqual(times);
+  });
+
   it("stays idempotent with agent replies in the mix", () => {
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),

@@ -4275,6 +4275,32 @@ by rewriting those paragraphs:*
     cut it, so only the directive could carry it, and the test then failed for the real reason.
     (`task-actions.server.ts`.)
 
+206. **Anti-noise compaction folds routine comments wherever they sit, not only where they
+    happen to be adjacent (owner, 2026-09-13, pass 37; F37-26).** The guardrail was on,
+    configured at 40 events, counted by Insights as managing six tasks — and had never removed
+    a single event from any task in the project. `compactTimelineEvents` collapsed each run of
+    CONSECUTIVE routine comments, and viberr's own event stream never produces one: a typed
+    `agent`, `quality`, `github` or `transition` event lands between every pair of agent
+    replies, and the operator's prompt in between is excluded as a `toAgent` governance
+    hand-off. Measured live, the longest consecutive run on the six tasks past the threshold was
+    **two** (and a two-run folds nothing either, since the newest reply is kept and one event
+    replaced by one marker is no saving), while the foldable comments were 29% of SHOP-7's
+    timeline bytes and 34% of SHOP-6's. The module's own note says agent replies were brought
+    into the foldable set precisely because "an agent-heavy timeline — the flood case anti-noise
+    exists for — never compacted at all"; the adjacency requirement cancelled that change on
+    exactly that workload. So folding is now position-independent within the older region: every
+    typed event stays in place, the newest older agent reply stays verbatim, and ONE marker
+    takes the oldest folded event's slot so the file stays newest-first. Running the real
+    function over the real files: SHOP-7 200→174 events and 27% fewer text bytes, SHOP-6
+    134→118 and 32%, SHOP-15 23%, SHOP-9 19%, SHOP-10 9%, SHOP-1 (at the threshold, not over)
+    untouched. Every pre-existing compaction test still passes — all of them place the foldable
+    comments next to each other, which is why the defect was invisible for six passes. Also
+    corrected: the rule's comment cited `hasReworkSinceLastRejection` as the reason to keep the
+    newest reply, and no such function exists; what reads a previous reply today is
+    `latestAgentReplyText`, which looks before the CURRENT run — inside the untouched recent
+    window.
+    (`timeline-compaction.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

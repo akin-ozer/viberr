@@ -1483,3 +1483,71 @@ operator lease already does with a person's burst: one question, not N governed 
 several authors keep their names inline, because the directive can only tell the agent to tag
 one person back (NEW-4) and the others must at least be visible in what it is answering. The
 person who has waited longest is the one it is told to tag.
+
+## F37-26 · The anti-noise guardrail is on, configured, counted by Insights — and has never removed one event — med
+
+**What viberr says.** Policy, `compression-threshold`, `on: true`, `value: 40 events`:
+
+> Long timelines compress once routine events pass the threshold; typed events are always kept.
+
+Insights, Delivery oversight: **6 · Long timelines · tasks past their project's compression
+threshold**. The card's own code calls them "long-running records the readability machinery is
+actively managing".
+
+**What is on disk.** No compaction marker exists on any task in the project:
+
+```
+$ grep -l "Compacted" SHOP-*/task.md      →  (nothing)
+```
+
+while the six tasks the card counts are at 200, 134, 82, 63, 58 and 40 events against a
+threshold of 40. SHOP-7 is five times over.
+
+**Why nothing folds.** `compactTimelineEvents` collapses each run of **CONSECUTIVE** routine
+comments outside the newest 24. On viberr's own event stream that run is essentially never
+longer than one: a typed `agent`, `quality`, `github` or `transition` event lands between every
+pair of agent replies, and the operator's prompt in between is explicitly excluded as a
+`toAgent` governance hand-off. Measured on the live board:
+
+| task | events | foldable routine comments (older region) | longest CONSECUTIVE run | their share of timeline bytes |
+|---|---|---|---|---|
+| SHOP-7 | 200 | 28 | **2** | 29% |
+| SHOP-6 | 134 | 18 | **2** | 34% |
+| SHOP-15 | 82 | — | **1** | — |
+| SHOP-10 | 63 | — | **1** | — |
+| SHOP-9 | 58 | — | **1** | — |
+
+A run of two folds nothing either, because the newest agent reply in a run is kept and
+`folded.length <= 1` is "no saving". So the guardrail's reachable output on this board is zero,
+and that is what it produced.
+
+**It is a documented intent, silently cancelled.** The module's own note says agent replies were
+brought INTO the foldable set on purpose: *"Excluding agents outright meant an agent-heavy
+timeline — the flood case anti-noise exists for — never compacted at all."* The adjacency
+requirement cancels that change on exactly the workload it was written for. (The same note cites
+`hasReworkSinceLastRejection` as the reason to keep the newest reply. **No such function
+exists** — what reads a previous reply today is `latestAgentReplyText`, and it looks for the
+reply before the CURRENT run, which is inside the untouched recent window.)
+
+**Why it matters.** `task.md` is the canonical artifact every agent re-anchors on and every
+write re-parses. It grows without bound while the mechanism that exists to bound it reports
+itself active. Nothing is lost and no path is blocked — this is not a HIGH — but viberr is
+stating something about its own behaviour that is not true, and the PRD names this exact risk.
+
+**Fix — ruling 206.** Fold routine comments wherever they sit in the older region, not only when
+adjacent; keep every typed event in place, keep the newest older agent reply verbatim, and put
+the single marker in the OLDEST folded event's slot so newest-first ordering is unchanged.
+Measured by running the real function over the real files:
+
+```
+SHOP-7 : 200 -> 174 events, 69231 -> 50336 text bytes  (27% smaller)
+SHOP-6 : 134 -> 118 events, 45737 -> 31123 text bytes  (32% smaller)
+SHOP-15:  82 ->  76 events, 22503 -> 17259 text bytes  (23% smaller)
+SHOP-10:  63 ->  58 events, 24680 -> 22346 text bytes  ( 9% smaller)
+SHOP-9 :  58 ->  55 events, 16266 -> 13138 text bytes  (19% smaller)
+SHOP-1 :  40 ->  40 events (at the threshold, not over — untouched, correctly)
+```
+
+Every existing compaction test still passes: all of them put the foldable comments next to each
+other, which is precisely why the defect was invisible. The new test uses the live shape —
+reply, typed, reply, typed — and goes red against the adjacency rule.
