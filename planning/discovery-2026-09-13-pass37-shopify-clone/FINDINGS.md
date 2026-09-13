@@ -932,3 +932,34 @@ Both are canonical files. They disagree about who owns a directory.
 The sibling arm right below it — the one that runs when `startLinkTask` *throws* — has carried exactly this correction since it was written ("flaps it back, re-notifying and recording a retry that never started"). The silent decline had no arm at all.
 
 **Fix — ruling 194.** A declined retry re-parks to `attention`, notes the link ("The retry did not start: the chain was redirected while it ran."), records the decline in the goal's timeline saying to retry again, and notifies the creator. Proven with the product's own `goal-start` lock held open across the window — a deliberate pause where the live system has a race — and red without the arm.
+
+## F37-17 · A task waiting on a human showed "agent working" and sat for 75 minutes, holding ten tasks behind it — HIGH
+
+**How I found it.** The controller told me SHOP-6 gates the whole board and that its open "Lockfile ownership" packet is the only thing stopping it. I checked the board and disbelieved it: `readiness: ready`, `waiting: agent`. Then I checked the runs.
+
+```
+runs on SHOP-6 since 09:02 ……… 0          (last: an INTERRUPTED primary at 09:00:25)
+runs on SHOP-7 in the same window … 32
+audit 09:02:22.212 ……………… run.recovery.reinvoked · SHOP-6 · {"attempt":1}
+audit 09:02:22.212 ……………… run.recovery.reinvoked · SHOP-7 · {"attempt":1}
+runtime.run.started 09:02:22.401 … SHOP-7 operator          ← the only one
+```
+
+Viberr recorded a re-invoke for SHOP-6 and started nothing. Pressing **Run operator** on the task page myself answered why:
+
+> Operator not started · resolve the open decision to continue
+
+**The mechanism.** The packet was opened mid-work by the Platform Architect at 08:55:40. An open packet refuses only the *human-ish* triggers (`manual`, `scheduled`); machine triggers legitimately keep running — ruling 17's `pr-diverged` withdrawal and the `agent-reply` reaction both depend on it. So the operator carried on: moved SHOP-6 to Review at 08:56, back to Build at 09:00, and dispatched the architect again at 09:00:26 — setting `waiting: agent`. At 09:02 my restart killed that run. Boot finalized the orphan and re-invoked the operator with the **`manual`** trigger, which landed in the open-packet refusal:
+
+```ts
+// The packet already owns `waiting: "human"`, so there is no settle to do here.
+if (PACKET_REFUSED_TRIGGERS.has(input.trigger ?? "manual")) { … return { refused: "open-packet" }; }
+```
+
+That comment states an invariant the product does not hold. The closed arm and the blocked-by arm directly above and below it *both* settle, each with a comment explaining that a refusal must leave the waiting state honest. This one asserted it did not need to.
+
+**What the user sees.** A board card saying an agent is working. A task page whose every button refuses. No notification, no timeline note, no decision surfaced. Ten tasks (SHOP-9 through SHOP-14 and the four they gate) held behind a question nobody was shown. It stayed that way until I went looking — and nothing in the product would have ended it, because every path back in is refused and the only signal that a human is needed is the one field that was never corrected.
+
+**Fix — ruling 195.** The packet arm settles like the other two. `settleWaitingAfterOperator` is already a no-op unless the flag is `agent` with nothing live, and `clearWaitingToHuman` settles to `human` — not `none` — precisely because a packet is open. Proven red by deleting the call: `expected 'agent' to be 'human'`.
+
+**Correction to my own notes.** I first recorded "SHOP-6 has no packet" after grepping the task frontmatter for `packet:`. Packets live in a `## Packet` markdown section, not in frontmatter. The controller's report was right and my check was wrong; the finding is what my wrong check led me to.

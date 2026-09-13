@@ -3297,6 +3297,58 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(operatorRuns()).toHaveLength(0);
   });
 
+  /**
+   * Ruling 195 (F37-17, live): a packet opened mid-work does not stop the
+   * MACHINE triggers, so the operator kept coordinating on SHOP-6 and
+   * dispatched a deliverer — `waiting: agent`. The server restarted, boot
+   * finalized that orphan and re-invoked the operator as `manual`, straight
+   * into this refusal, which skipped its settle on the belief that "the packet
+   * already owns waiting: human". It did not. SHOP-6 sat at `waiting: agent`
+   * with nothing running and a decision nobody was told about for 75 minutes,
+   * holding ten downstream tasks, while the board showed an agent working.
+   */
+  it("ruling 195: a refusal over a packet settles `waiting` off a dead agent, onto the human the packet is for", async () => {
+    deployAgents([operatorAgent()]);
+    writeTask(store5.dataRoot, store5.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        // The state the restart leaves: an agent was dispatched WITH the packet
+        // open, and its run is gone.
+        waiting: "agent",
+        ownerUserId: store5.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+      packet: {
+        type: "input",
+        kind: "Agent question",
+        from: "agent:codex/developer (Dev)",
+        title: "Lockfile ownership",
+        body: "Who regenerates the lockfile?",
+        observations: [],
+        options: [{ kind: "custom", t: "Coordinate root fix", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+
+    const result = await drive({ trigger: "manual" });
+    expect(result.refused).toBe("open-packet");
+    expect(operatorRuns()).toHaveLength(0);
+
+    // The settle is fire-and-forget; let it land.
+    await vi.waitFor(() => {
+      const fm = readTaskFile({
+        projectSlug: store5.slug,
+        taskKey: "VIB-1",
+        dataRoot: store5.dataRoot,
+      })!.parsed.frontmatter;
+      // CANARY: drop the `settleWaitingAfterOperator` call and this stays
+      // "agent" forever — a board claiming an agent is working on a task whose
+      // every trigger is refused.
+      expect(fm.waiting).toBe("human");
+    });
+  });
+
   it("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue says so on the task and writes its final row", async () => {
     // Canary: restore the bare `.catch(...)` at the drain site (drop the
     // `.then` that chains on the result) — the refusal exists only in the log.

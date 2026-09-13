@@ -1566,8 +1566,21 @@ export async function runOperator(
   // re-run is the same turn with nobody watching, so it takes the same refusal.
   // Machine reaction triggers still run with a packet open — `pr-diverged`
   // recovery WITHDRAWS a moot packet (ruling 17), and `agent-reply` reacts to a
-  // run that was already in flight. The packet already owns `waiting: "human"`,
-  // so there is no settle to do here.
+  // run that was already in flight.
+  //
+  // Ruling 195 (F37-17): this arm used to say "the packet already owns
+  // `waiting: human`, so there is no settle to do here". That is not an
+  // invariant — it is usually true, and SHOP-6 showed how it breaks. A packet
+  // opened mid-work does NOT stop the machine triggers, so the operator kept
+  // coordinating and dispatched a deliverer, which set `waiting: agent`. The
+  // server restarted, boot finalized that orphaned run and re-invoked the
+  // operator as `manual` — straight into this refusal. No settle ran, so the
+  // task sat at `waiting: agent` with nothing running and a decision nobody
+  // was told about: 75 minutes, ten downstream tasks held behind it, and a
+  // board that said an agent was working. The other two refusal arms settle
+  // for exactly this reason; so does this one now. It is a no-op unless the
+  // flag is `agent` with nothing live, and with a packet open
+  // `clearWaitingToHuman` settles to `human` — the packet's own owner.
   if (PACKET_REFUSED_TRIGGERS.has(input.trigger ?? "manual")) {
     const openPacket = readTaskFile(taskFileRef(input))?.parsed.packet ?? null;
     if (openPacket) {
@@ -1576,6 +1589,7 @@ export async function runOperator(
         taskKey: input.taskKey,
         packet: openPacket.title,
       });
+      settleWaitingAfterOperator(db, taskFileRef(input));
       return {
         runId: null,
         queued: false,

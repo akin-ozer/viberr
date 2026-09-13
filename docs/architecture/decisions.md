@@ -4255,6 +4255,24 @@ by rewriting those paragraphs:*
     produce a task until the archive hook was allowed to settle first.
     (`goal-actions.server.ts`.)
 
+195. **A refusal always leaves `waiting` honest — the packet arm included (owner,
+    2026-09-13, pass 37; F37-17).** The open-packet refusal skipped its settle on a stated
+    invariant: "The packet already owns `waiting: "human"`, so there is no settle to do
+    here." It is not an invariant. A packet opened MID-WORK does not stop the machine
+    triggers — by design, ruling 17 and the `agent-reply` arm depend on that — so on SHOP-6
+    the operator kept coordinating after its architect asked "Lockfile ownership", moved the
+    task through review and back, and dispatched the deliverer again: `waiting: agent`. Then
+    the server restarted. Boot finalized that orphaned run and re-invoked the operator with
+    the `manual` trigger, straight into this refusal, which returned without settling. The
+    result was a task at `waiting: agent` with no run alive, every trigger refused ("Operator
+    not started · resolve the open decision to continue"), a decision nobody had been told
+    about, and ten downstream tasks held behind it — for 75 minutes, while the board said an
+    agent was working. The closed and blocked-by arms have always settled for exactly this
+    reason; this one does too. The call is a no-op unless the flag is `agent` with nothing
+    live, and with a packet open `clearWaitingToHuman` settles to `human`, which is the
+    packet's own owner.
+    (`operator-run.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
