@@ -207,6 +207,33 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect(kept!.evidence![0]!.add).toContain("1 attachment");
   });
 
+  /**
+   * Ruling 211(e), from the adversarial self-review of 209: `attachments` is a
+   * SECOND, separate pointer list on the same event — the browser captures a run
+   * saved into `attachments/` — and 209 excluded only `evidence`. The files
+   * survive in the directory either way; what folding deletes permanently from
+   * canonical task.md is the chips AND the prose saying what each capture shows.
+   */
+  it("ruling 211(e): never folds a comment carrying ATTACHMENTS either", () => {
+    const withFiles = (i: number): TaskFileEvent => ({
+      ...agent(i),
+      attachments: ["shop-15-checkout.png", "shop-15-orders.png"],
+    });
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
+      ...Array.from({ length: 4 }, (_, i) => agent(60 - i)),
+      withFiles(55),
+      ...Array.from({ length: 4 }, (_, i) => agent(50 - i)),
+    ];
+    // CANARY: drop the `attachments` clause and the chips vanish into the
+    // marker's count while the PNGs stay on disk, unexplained.
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    expect(out.length).toBeLessThan(events.length);
+    const kept = out.find((e) => (e.attachments?.length ?? 0) > 0);
+    expect(kept, "the attachment-bearing reply must survive verbatim").toBeTruthy();
+    expect(kept!.attachments).toEqual(["shop-15-checkout.png", "shop-15-orders.png"]);
+  });
+
   it("stays idempotent with agent replies in the mix", () => {
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),

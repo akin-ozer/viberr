@@ -4428,6 +4428,55 @@ by rewriting those paragraphs:*
     because the round count is the expensive thing.
     (`specialist-run.server.ts`, `operator-run.server.ts`.)
 
+211. **Nine defects the adversarial self-review found in rulings 201-208 (owner, 2026-09-13,
+    pass 37; F37-31).** Five lenses over the pass's own diff, each candidate handed to a
+    skeptic told to refute it: 21 candidates, 13 survivors, 9 distinct, every one in code
+    written the same day. They are one ruling because they share the pass's central lesson —
+    a fix is a change like any other, and the fix for a lie can tell a smaller one.
+    (a) **Ruling 203's window opened at the wrong instant.** The single-flight guard that
+    refuses a mention keys on `state IN ('running','queued')`, which begins at the run row's
+    INSERT; the redelivery scanned from `started_at`, which a run admitted behind a
+    concurrency cap does not have for minutes. Every comment refused during that wait was
+    filtered out, silently, under a note promising delivery. The window now opens at
+    `created_at`.
+    (b) **Ruling 203's hop sat after two early returns** — the `error` branch and the
+    closed-task branch — so a busy run that ended in error, or a task that closed underneath
+    it, dropped the person's instruction. It runs before both now, and when the delivery
+    cannot start at all, the promise is WITHDRAWN on the record ("Not delivered: … the
+    delivery promised when the comment was refused has not happened"), because silence there
+    is the same defect one layer in.
+    (c) **Boot recovery is not the live completion.** It replays a finished run's lost effects
+    possibly days later, and it handed the redelivery the ORIGINAL run's window — so a comment
+    a human had since had answered by its own run was re-delivered as a fresh directive,
+    starting a duplicate paid run on a stale instruction. The replay path now skips it.
+    (d) **Ruling 202 stamped `delivered` on ENTRY to `performDelivery`**, counting the arms
+    where nothing reaches the remote (`grant_withheld`, `no_workspace`, `bootstrap_failed`) as
+    operator progress. A nudged drive whose only action was an impossible delivery looked like
+    it had moved, so the stranded backstop skipped its durable `heldAtStage` marker and every
+    later trigger re-armed the nudge — F31-11's fourteen-drive loop, reached through the fix
+    for ruling 202. The stamp moved to after the push is attempted; a refused push still
+    counts, a refusal that never reached the remote does not.
+    (e) **Ruling 209 was incomplete**: `attachments` is a second, separate pointer list on the
+    same event, and 209 excluded only `evidence`. Both are excluded now.
+    (f) **Ruling 207(f) overstated itself** — "corrected in all six places" — while a
+    specialist prompt branch and a seeded skill doc still said delivery happens on the Review
+    transition. (The copy-ban allowlist row that pinned the old sentence went with it.)
+    (g) **Ruling 201's suppression sentence** attached a count of the WHOLE cost-silent
+    population to a clause naming only delivery. When the other side is partly silent too it
+    now says so, and labels the count as the total.
+    (h) **Ruling 207(e) was half-done**: the prompt got the resolved display name, and the cc
+    line the completion pipeline appends when the model forgets to tag still carried the raw
+    email — the fallback that exists precisely because the model forgot.
+    (i) **Ruling 204's JSDoc** still stated the rule 204 reversed, and argued for it.
+    **A third vacuous test, also mine.** The cross-agent guard test took three versions to
+    reach the guard: v1 named nobody (a different branch); v2 named a real agent but posted
+    through `appendComment`, which does not set `toAgent` — the flag the scan filters on — so
+    the comment was invisible before any profile comparison happened. Only v3, through
+    `commentToAgent` with two busy agents, goes red when the guard is relaxed.
+    (`task-actions.server.ts`, `run-recovery.server.ts`, `timeline-compaction.server.ts`,
+    `specialist-run.server.ts`, `operator-actions.server.ts`, `insights-page.tsx`,
+    `developer-expertise.skill.md`, `copy-ban.test.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

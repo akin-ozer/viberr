@@ -1731,3 +1731,49 @@ every long task instead of almost never.
 **Fix — ruling 209.** A comment carrying an evidence reference is not disposable prose and is
 never folded. One clause, one canary: drop it and the attachment reference disappears into the
 marker's count.
+
+## F37-31 · The adversarial self-review of rulings 201–208 — nine defects in my own fixes
+
+Five lenses over `git diff 9a5c9786..HEAD` (rulings 201–208, 51 files, ~2800 added lines),
+each candidate handed to a skeptic told to refute it, base commit set correctly this time.
+**21 candidates, 13 survived, 9 distinct.** Every one is in code I wrote today.
+
+**The cluster that matters most — ruling 203's deferred @mention, four separate holes:**
+
+| hole | what happens |
+|---|---|
+| the completion hop sat AFTER the `error` early-return | a busy run that ends in error drops the person's instruction |
+| …and after the closed-task return | a task that closed underneath it drops it too |
+| the window opened at `started_at` | a mention refused while the run was QUEUED behind a concurrency cap is filtered out |
+| a redelivery that cannot start said nothing | the written promise stands on the record, uncontradicted, forever |
+
+Each is the same failure ruling 203 exists to stop, reachable through the fix for it.
+
+**And in the others:**
+
+- **202**: `delivered` stamped on ENTRY to `performDelivery`, so `grant_withheld` / `no_workspace`
+  / `bootstrap_failed` — arms where nothing reaches the remote — counted as operator progress.
+  A nudged drive whose only action was an impossible delivery then looked like it moved, the
+  stranded backstop skipped its durable `heldAtStage` marker, and every later trigger re-armed
+  the nudge: F31-11's fourteen-drive loop, reached through the fix for ruling 202.
+- **207(a) × 203**: boot recovery replays an old run's effects and handed the redelivery the
+  ORIGINAL run's window, so a comment a human already had answered starts a duplicate paid run.
+- **209 was incomplete**: `attachments` is a second, separate pointer list on the same event and
+  I had excluded only `evidence`.
+- **207(e) half-done**: the prompt got the resolved display name; the cc line the pipeline
+  appends when the model forgets still carried the raw email — the fallback that exists
+  precisely because the model forgot.
+- **207(f) overstated**: I wrote "corrected in all six places". Two remained — a specialist
+  prompt branch and a seeded skill doc.
+- **201's sentence**: the "(N on Codex)" count spans both sides while the clause it rides names
+  only delivery.
+- **204's JSDoc** still stated the rule ruling 204 reversed, and argued for it.
+
+**And a third vacuous test, mine.** The cross-agent guard test took three versions to actually
+reach the guard: v1 named nobody (a different branch), v2 named a real agent but posted through
+`appendComment`, which does not set `toAgent` — the flag the redelivery scan filters on — so the
+comment was invisible before any profile comparison happened. Only v3, posting through
+`commentToAgent` with two busy agents, goes red when the guard is relaxed. The lesson is now
+written into the test.
+
+**Fix — ruling 211(a)–(i).** Nine parts, nine canaries.

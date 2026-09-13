@@ -3604,11 +3604,12 @@ export async function deliverDeferredMention(
      *  start) means there is no honest window, so nothing is claimed. */
     runStartedAt: string | null;
   },
-): Promise<boolean> {
+): Promise<{ started: boolean; pending: number }> {
+  const none = { started: false, pending: 0 };
   const startedAt = input.runStartedAt;
-  if (!startedAt) return false;
+  if (!startedAt) return none;
   const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  if (!file) return false;
+  if (!file) return none;
   const { resolveMentionedAgent } = await import("./agent-reply.server");
   const mine: { at: string; text: string; userId: string }[] = [];
   for (const event of file.parsed.timeline
@@ -3623,12 +3624,12 @@ export async function deliverDeferredMention(
       input.taskKey,
       event.text,
     );
-    if (true) {
+    if (target?.profileId === input.profileId) {
       mine.push({ at: event.occurredAt, text: event.text, userId: event.actor.userId });
     }
   }
   const oldest = mine[0];
-  if (!oldest) return false;
+  if (!oldest) return none;
   // One author (the ordinary case: one person typing twice) reads as one
   // message. Several authors keep their names inline, because the directive
   // can only tell the agent to tag ONE person back (NEW-4) and the others must
@@ -3660,7 +3661,50 @@ export async function deliverDeferredMention(
     { userId: oldest.userId, label: userName(db, oldest.userId) },
     ctx,
   );
-  return result.triggered !== null;
+  // Ruling 211(b): the caller needs to know a delivery was OWED, not only
+  // whether one started — a refused redelivery leaves a written promise on the
+  // record and, before this, nothing anywhere contradicted it.
+  return { started: result.triggered !== null, pending: mine.length };
+}
+
+/**
+ * Ruling 211(b): withdraw, on the record, a delivery promise that cannot be
+ * kept. `commentToAgent`'s single-flight refusal writes "Viberr starts it on
+ * this comment as soon as that run finishes" onto the timeline; when the
+ * completion hop cannot start that run — the task closed underneath it, the
+ * stage stopped admitting the profile, a credential went away — the person is
+ * owed the correction in the same place they were given the promise.
+ */
+async function appendUndeliveredMentionNote(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; agentHandle: string },
+  owed: number,
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Mention still not delivered",
+        text:
+          `**Not delivered:** ${owed === 1 ? "a comment" : `${owed} comments`} addressed to ` +
+          `@${input.agentHandle} could not be started when its run finished, so the delivery ` +
+          `promised when the comment was refused has not happened. ` +
+          `${owed === 1 ? "It stays" : "They stay"} on the record; mention the agent again once ` +
+          `the task can run one.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.warn("undelivered-mention note failed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 /** Register the single completion pipeline: record, reconcile, and continue coordination. */
@@ -3848,6 +3892,12 @@ export async function applyAgentCompletionEffects(
     dispatchedByName?: string;
     dispatchedByUserId?: string;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    /** Ruling 211(c): set by boot recovery, which replays a run's lost effects
+     *  possibly days later. The deferred-@mention redelivery is a promise made
+     *  by the LIVE refusal and belongs to the live completion; replaying it from
+     *  an old run's window would re-deliver a comment a human has since had
+     *  answered, starting a duplicate paid run on a stale instruction. */
+    replayed?: boolean;
   },
   finished: { id: string; state: string },
 ): Promise<void> {
@@ -3866,7 +3916,15 @@ export async function applyAgentCompletionEffects(
   const fullText = fullReplyTextForRun(db, finished.id);
   // The prior reply must predate THIS run so a mid-run post_comment from this
   // same run can't be mistaken for it (corrupting no-progress detection).
-  const thisRunStartedAt = getRun(db, finished.id)?.started_at ?? null;
+  const thisRunRow = getRun(db, finished.id);
+  const thisRunStartedAt = thisRunRow?.started_at ?? null;
+  // Ruling 211(a): the redelivery window must open when the single-flight guard
+  // STARTED refusing, not when the provider process launched. That guard keys on
+  // `state IN ('running','queued')` (commentToAgent), which begins at the row's
+  // INSERT — and a run admitted behind a concurrency cap sits queued for minutes
+  // with no `started_at` at all. Using the launch instant dropped every comment
+  // refused during that wait, silently, under a note promising delivery.
+  const deferredWindowFrom = thisRunRow?.created_at ?? thisRunStartedAt;
   // Files this run saved into the task's attachments/ dir (browser captures):
   // everything written at-or-after the run started. Stamped onto the producing
   // event below so the panel can say who added each file and from which
@@ -4219,6 +4277,34 @@ export async function applyAgentCompletionEffects(
   //     event, escalate a recovery packet so it reaches a human's queue, and stop
   //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
   //     human action and are handled elsewhere, so only `error` lands here.
+  // Ruling 203, moved EARLIER by ruling 211(b): a person's @mention refused by
+  // the single-flight guard is delivered when the busy run completes —
+  // whatever state it completed in. The call used to sit after the `error`
+  // branch's return and after the closed-task branch's return, so a run that
+  // ended in error (or a task that closed underneath it) dropped the person's
+  // instruction silently, under a note promising the opposite. It runs here
+  // instead, and the operator react below is still skipped only when a run
+  // actually started.
+  let deferredStarted = false;
+  let deferredOwed = 0;
+  try {
+    const outcome = await deliverDeferredMention(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      runStartedAt: input.replayed === true ? null : deferredWindowFrom,
+    });
+    deferredStarted = outcome.started;
+    deferredOwed = outcome.pending;
+  } catch (error) {
+    // A delivery that cannot start must never swallow the completion pipeline.
+    logger.warn("deferred @mention delivery failed", {
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
   if (finished.state === "error") {
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
@@ -4567,25 +4653,16 @@ export async function applyAgentCompletionEffects(
   // question exists nowhere else, and coordination can wait one hop. The
   // operator is re-invoked by THAT run's completion, so nothing is skipped,
   // only ordered.
-  let deferred = false;
-  try {
-    deferred = await deliverDeferredMention(db, ctx, {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      profileId: input.profileId,
-      runStartedAt: thisRunStartedAt,
-    });
-  } catch (error) {
-    // A delivery that cannot start must never swallow the completion pipeline:
-    // the operator react below is the fallback, and the comment stays on the
-    // record either way.
-    logger.warn("deferred @mention delivery failed", {
-      taskKey: input.taskKey,
-      profileId: input.profileId,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
+  if (deferredOwed > 0 && !deferredStarted) {
+    // Ruling 211(b): the refusal wrote "Viberr starts it on this comment as
+    // soon as that run finishes" onto the canonical record. When that cannot
+    // happen — the task closed underneath it, the stage no longer admits the
+    // profile, a credential is gone — the promise has to be withdrawn where it
+    // was made. Silence here is the same defect ruling 203 was written to stop,
+    // one layer further in.
+    await appendUndeliveredMentionNote(db, ctx, input, deferredOwed);
   }
-  if (deferred) return;
+  if (deferredStarted) return;
 
   // Dispatch-completion contract (2026-08-29): a manually/schedule-dispatched
   // run's completion ALWAYS hands back to the operator — that is the "to let the
@@ -6008,11 +6085,6 @@ export async function performDelivery(
   actor: TaskActor,
 ): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
-  // Ruling 202: stamped BEFORE the first await. Delivery is the operator's
-  // most consequential non-transition act and it is the one whose effect can
-  // outlive the run row, so the stranded backstop has to learn about it here
-  // rather than from the timeline event the push eventually writes.
-  if (ctx.operatorRun) ctx.operatorRun.delivered = true;
   try {
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
@@ -6046,6 +6118,21 @@ export async function performDelivery(
       canCommitPush,
       ...dataCtx,
     });
+    // Ruling 202, corrected by ruling 211(d): the drive DELIVERED — stamped
+    // once the push has actually been attempted, not on entry. Stamping on
+    // entry counted the arms that do nothing at all as progress
+    // (`grant_withheld`, `no_workspace`, `bootstrap_failed`), so a nudged drive
+    // whose only action was a delivery that could never leave the machine
+    // looked like it had moved, the stranded backstop skipped its durable
+    // `heldAtStage` marker, and every later trigger re-armed the nudge from
+    // scratch — F31-11's fourteen-drives loop, reached through the fix for
+    // ruling 202. It still stamps BEFORE the PR call and before the result is
+    // classified, because a refused push is a drive that acted; what it no
+    // longer covers is a refusal that never reached the remote.
+    if (ctx.operatorRun && push.status !== "grant_withheld" && push.status !== "no_workspace") {
+      ctx.operatorRun.delivered = true;
+    }
+
     // Ruling 134: `up_to_date` is an ordinary delivery (origin already carries
     // the head); only a real non-push is worth a log line.
     if (push.status !== "pushed" && push.status !== "up_to_date") {

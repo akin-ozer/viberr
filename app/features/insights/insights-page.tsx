@@ -314,13 +314,33 @@ function costSilence(c: OversightSummary["coordination"]): string {
     .join(" and ");
   const silent = c.uncosted.delivery + c.uncosted.coordination;
   const total = c.runs.delivery + c.runs.coordination;
-  const whole =
+  // Ruling 211(g): the parenthetical counts the WHOLE cost-silent population,
+  // so it may only ride a clause that names the whole population. Attached to
+  // "no delivery run reported a cost" it told the reader a number that belongs
+  // to both sides while blaming one — and hid that coordination was partly
+  // silent too, which is the very thing ruling 201 exists to disclose.
+  const wholeSideSilent =
     c.runs.delivery > 0 && c.uncosted.delivery === c.runs.delivery
       ? "no delivery run reported a cost"
       : c.runs.coordination > 0 && c.uncosted.coordination === c.runs.coordination
         ? "no operator or controller run reported a cost"
         : null;
-  const counted = whole ?? `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost`;
+  // Only when the OTHER side is partly silent too does the count span more than
+  // the clause names; when the named side owns every silent run, the original
+  // single clause is exact.
+  const otherPartlySilent =
+    wholeSideSilent === "no delivery run reported a cost"
+      ? c.uncosted.coordination > 0
+      : c.uncosted.delivery > 0;
+  if (wholeSideSilent !== null && otherPartlySilent) {
+    // One side is entirely silent AND the other is partly silent: say both, and
+    // keep the backend breakdown on the total where it belongs.
+    const rest = `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost in total`;
+    return backends
+      ? `${wholeSideSilent}, and ${rest} (${backends})`
+      : `${wholeSideSilent}, and ${rest}`;
+  }
+  const counted = wholeSideSilent ?? `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost`;
   return backends ? `${counted} (${backends})` : counted;
 }
 

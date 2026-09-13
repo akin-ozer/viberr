@@ -44,7 +44,7 @@ import {
   runFailureReason,
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
-import { appendComment, commentToAgent, deliverDeferredMention } from "./task-actions.server";
+import { commentToAgent, deliverDeferredMention } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -93,6 +93,34 @@ function deployDevSpecialist(): void {
           kind: "specialist",
           name: "dev",
           role: "developer",
+          backends: ["claude"],
+          model: "claude-sonnet",
+        },
+      },
+    ],
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+/** Ruling 211(h): a SECOND deployed profile, so a test can mention an agent
+ *  that is real and is not the one under test — the state the cross-agent guard
+ *  in `deliverDeferredMention` actually exists for. */
+function deployReviewerSpecialist(): void {
+  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  const fm = file.parsed.frontmatter;
+  writeProject(store.dataRoot, {
+    ...fm,
+    repo: null,
+    agents: [
+      ...fm.agents,
+      {
+        profileId: "reviewer",
+        capabilities: [],
+        extras: [],
+        definition: {
+          kind: "specialist",
+          name: "reviewer",
+          role: "reviewer",
           backends: ["claude"],
           model: "claude-sonnet",
         },
@@ -1410,7 +1438,7 @@ describe("commentToAgent", () => {
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", runStartedAt: startedAt },
     );
-    expect(delivered).toBe(true);
+    expect(delivered).toMatchObject({ started: true });
 
     // A run for THAT agent, carrying the person's words — not a re-anchor and a
     // hope. CANARY: make `deliverDeferredMention` stop at the resolve (return
@@ -1535,7 +1563,7 @@ describe("commentToAgent", () => {
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", runStartedAt: startedAt },
     );
-    expect(delivered).toBe(true);
+    expect(delivered).toMatchObject({ started: true });
 
     // CANARY: return after the first match (ruling 203's first implementation)
     // and the second instruction never reaches the agent — there is no later
@@ -1553,45 +1581,66 @@ describe("commentToAgent", () => {
     ).toHaveLength(1);
   }, 30_000);
 
+  /**
+   * Ruling 211(h): this test's first two versions never reached the guard they
+   * claimed to pin. v1 posted a comment naming NOBODY (resolves to null, a
+   * different branch); v2 named a real agent but posted it with `appendComment`,
+   * which does not set `toAgent` — and the redelivery scan filters on exactly
+   * that flag, so the comment was invisible before any profile comparison
+   * happened. The real path is `commentToAgent`, which sets `forceToAgent` when
+   * it resolves a named agent, so the fixture has to go through the same door a
+   * person does.
+   */
   it("ruling 203: a comment addressed to a DIFFERENT agent is not delivered to this one", async () => {
     deployDevSpecialist();
+    deployReviewerSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-      startedAt,
-    });
-    // A plain human comment naming nobody: not addressed to this agent, so the
-    // completion hop must leave it alone rather than treating every comment
-    // posted during a run as an instruction for whoever just finished.
-    await appendComment(
+    for (const [id, profile, thread] of [
+      ["run_live_dev", "dev", "primary"],
+      ["run_live_rev", "reviewer", "support"],
+    ] as const) {
+      upsertRun(store.db, {
+        id,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: thread,
+        role: profile,
+        kind: profile === "dev" ? "primary" : "reviewer",
+        backend: "claude",
+        model: "sonnet",
+        sdk: "claude",
+        sessionId: null,
+        agentName: profile,
+        agentProfileId: profile,
+        state: "running",
+        startedAt,
+      });
+    }
+
+    // A person mentions the REVIEWER while both agents are busy. Single-flight
+    // refuses it, so it becomes a deferred delivery owed to `reviewer`.
+    const refused = await commentToAgent(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: "noting this for the record" },
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@reviewer please re-check the migration" },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    patchRun(store.db, "run_live_primary", { state: "finished" });
+    expect(refused.agent).toMatchObject({ profileId: "reviewer" });
+    expect(refused.triggered).toBeNull();
 
+    // DEV's run finishes first. Its completion must not take the reviewer's mail.
+    patchRun(store.db, "run_live_dev", { state: "finished" });
+    // CANARY: relax the guard to `target !== null` and dev's completion picks up
+    // a question addressed to the reviewer.
     const delivered = await deliverDeferredMention(
       store.db,
       { dataRoot: store.dataRoot },
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", runStartedAt: startedAt },
     );
-    expect(delivered).toBe(false);
+    expect(delivered).toMatchObject({ started: false, pending: 0 });
     expect(
       listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
-        (r) => r.agent_profile_id === "dev" && r.id !== "run_live_primary",
+        (r) => r.agent_profile_id === "dev" && r.id !== "run_live_dev",
       ),
     ).toHaveLength(0);
   });

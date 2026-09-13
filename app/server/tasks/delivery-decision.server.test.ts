@@ -246,6 +246,36 @@ describe("ruling 202: a delivering drive marks itself as having acted", () => {
     // not the one the backstop is asking.
     expect(ctx.operatorRun.delivered).toBe(true);
   });
+
+  /**
+   * Ruling 211(d) — the correction to 202's own fix, from the adversarial
+   * self-review. Stamping on ENTRY counted the arms that do nothing at all as
+   * progress, so a nudged drive whose only action was a delivery that could
+   * never leave the machine looked like it had moved: the stranded backstop
+   * then skipped its durable `heldAtStage` marker and every later trigger
+   * re-armed the nudge from scratch — F31-11's fourteen-drives loop, reached
+   * through the fix for ruling 202.
+   */
+  it("ruling 211(d): a delivery REFUSED before the remote is not progress", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "grant_withheld",
+      reason: "the delivering agent's repo-write capability is withheld",
+    });
+    const ctx = dataCtx();
+    ctx.operatorRun = { backend: "codex", autonomy: "supervised", reactDepth: 0 };
+    // CANARY: stamp on entry (ruling 202's first version) and this reads true —
+    // a drive that did nothing at all counts as having delivered.
+    const outcome = await performDelivery(
+      store.db,
+      ctx,
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome.status).toBe("grant_withheld");
+    expect(ctx.operatorRun.delivered).toBeUndefined();
+  });
 });
 
 describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed push", () => {

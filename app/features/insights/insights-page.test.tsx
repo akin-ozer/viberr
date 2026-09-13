@@ -274,6 +274,42 @@ describe("InsightsPage", () => {
     ).toBeTruthy();
   });
 
+  /**
+   * Ruling 211(g), from the adversarial self-review of ruling 201. The
+   * parenthetical counts the WHOLE cost-silent population, so it may only ride
+   * a clause that names the whole population. Attached to "no delivery run
+   * reported a cost" while coordination was ALSO partly silent, it handed the
+   * reader a number belonging to both sides under a sentence blaming one — and
+   * hid the partly-silent coordination side, which is the very thing ruling 201
+   * exists to disclose.
+   */
+  it("ruling 211(g): when BOTH sides are silent, the sentence says so and the count is labelled as the total", () => {
+    const { getByText } = renderPage({
+      ...FULL,
+      oversight: {
+        ...FULL.oversight,
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
+        coordination: {
+          ...FULL.oversight.coordination,
+          coordinationCostUsd: 13.38,
+          totalCostUsd: 13.38,
+          share: null,
+          runs: { delivery: 32, coordination: 143 },
+          uncosted: { delivery: 32, coordination: 137 },
+          uncostedByBackend: [{ backend: "codex", runs: 169 }],
+        },
+      },
+    });
+    // CANARY: attach "(169 on Codex)" to the delivery-only clause (ruling 201's
+    // shipped text) and the reader is told 169 delivery runs went silent when
+    // there are only 32 of them.
+    expect(
+      getByText(
+        "operator and controller runs reported $13.38; no delivery run reported a cost, and 169 of 175 runs report no cost in total (169 on Codex), so there is no share to take",
+      ),
+    ).toBeTruthy();
+  });
+
   it("renders the backend quota readings — and a neutral 'no reading yet' for a silent backend", () => {
     const { getByText } = renderPage(FULL);
     expect(getByText("Backend quota")).toBeTruthy();

@@ -2365,7 +2365,16 @@ async function dispatchAgentRun(
   // completion pipeline appends the missing @tags to the report and ALWAYS
   // re-invokes the operator, bypassing the react heuristic (still depth-capped).
   if (input.triggeredByName?.trim()) {
-    completion.dispatchedByName = input.triggeredByName.trim();
+    // Ruling 211(i): the same resolution the PROMPT half got (ruling 207(e)).
+    // This is the mechanical fallback — the cc line the pipeline appends when
+    // the model did not tag the dispatcher itself — and it was still carrying
+    // the raw `TaskActor.label`, which for a schedule is an email. So the
+    // guaranteed ping reached nobody in exactly the path that exists because
+    // the model forgot, which is the one that most needs to work.
+    completion.dispatchedByName = taggableName(
+      input.triggeredByUserId,
+      input.triggeredByName.trim(),
+    );
     if (input.triggeredByUserId) {
       completion.dispatchedByUserId = input.triggeredByUserId;
     }
@@ -3168,7 +3177,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
         // may still say "push updates" — the contract must override it, or the
         // agent obeys the directive into denied `git commit` attempts (XS-4,
         // observed live on VIB-1).
-        prompt += `- Repo delivery is HUMAN-gated for your profile: do NOT run \`git commit\` / \`git push\` or open a PR — even if a directive tells you to. Make the changes in the workspace and report exactly what you changed (files + summary); the governed Review transition (or a human) delivers them to the branch/PR.\n`;
+        prompt += `- Repo delivery is HUMAN-gated for your profile: do NOT run \`git commit\` / \`git push\` or open a PR — even if a directive tells you to. Make the changes in the workspace and report exactly what you changed (files + summary); the operator's delivery decision (or a human) publishes them to the branch/PR (ruling 211(f): R15-2 deleted the Review-transition hook).\n`;
       }
       prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
     }

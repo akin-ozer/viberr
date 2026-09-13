@@ -2025,11 +2025,18 @@ const liveRunRowsSchema = z.array(
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
 /**
- * Ruling 193: successive delivered revisions `profileId` has requested changes
- * on, newest first, stopping at its first `approve` (or at the start of its
- * history). REVISIONS are counted, not verdicts: a reviewer re-run twice on the
- * same revision has objected once, and inflating that would read a retry as an
- * escalation.
+ * Ruling 193, as amended by ruling 204: successive OBJECTIONS `profileId` has
+ * raised, newest first, stopping at its first `approve` (or at the start of its
+ * history).
+ *
+ * ROUNDS are summed, not revisions. Ruling 193 counted distinct revisions on
+ * the reasoning that "a reviewer re-run twice on the same revision has objected
+ * once" — and live on SHOP-9 that was exactly backwards: in a deadlock the
+ * deliverer commits nothing, so no new revision is ever minted and the count sat
+ * at 1 while the loop ran. The distinction 193 was reaching for survives in the
+ * `rounds` field itself, which the verdict upsert increments only when a
+ * completed review returns the SAME result again; a re-DISPATCH that records no
+ * verdict still counts for nothing.
  */
 export function consecutiveRequestChanges(
   fm: { verdicts: readonly ReviewVerdict[] },

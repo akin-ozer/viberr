@@ -560,6 +560,12 @@ export async function recoverUnreactedAgentRuns(
           completion.dispatchedByUserId = row.dispatched_by_user_id;
         }
       }
+      // Ruling 211(c): a replay is not the live completion. The deferred
+      // @mention redelivery is a promise the LIVE refusal made, and this hop
+      // may be running days later — re-delivering from the old run's window
+      // would start a duplicate paid run on an instruction a human has since
+      // had answered through a run of its own.
+      completion.replayed = true;
       await applyAgentCompletionEffects(db, ctx, completion, {
         id: row.id,
         state: "finished",

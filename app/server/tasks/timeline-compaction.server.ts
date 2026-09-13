@@ -100,7 +100,13 @@ export function compactTimelineEvents(
     // Reachable on the live board: an Infrastructure Engineer's reply carrying
     // "1 attachment: …" rows is agent-authored, not `toAgent`, and matched
     // every other clause here.
-    (e.evidence === null || e.evidence.length === 0);
+    (e.evidence === null || e.evidence.length === 0) &&
+    // Ruling 211(e): `attachments` is a SECOND, separate pointer list on the
+    // same event (browser captures the run saved into `attachments/`), and 209
+    // excluded only `evidence`. The files survive in the directory either way,
+    // but folding deletes the chips AND the prose that says what each capture
+    // shows, permanently, from canonical task.md.
+    (e.attachments === undefined || e.attachments.length === 0);
 
   // `older` is newest-first, so the FIRST agent-authored routine comment in it
   // is the newest one still outside the recent window: kept verbatim.

@@ -510,11 +510,6 @@ const ALLOWED_LITERALS: ReadonlyArray<{
     why: "specialist prompt section header for MCP tool policy",
   },
   {
-    file: "server/tasks/specialist-run.server.ts",
-    contains: "the governed Review transition",
-    why: "specialist prompt — human-gated delivery instruction",
-  },
-  {
     file: "shared/workflow/templates.ts",
     contains: "governed-5",
     why: "workflow-template ID — machinery; its rendered label is 'Standard'",
