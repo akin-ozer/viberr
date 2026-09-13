@@ -4208,8 +4208,17 @@ by rewriting those paragraphs:*
     carries the failed task's own title and goal, with the chain header rebuilt rather
     than stacked (the link count and the previous link's carrier have both moved on), and
     the goal's timeline says when it did: a silent substitution is the defect in either
-    direction. A FIRST start is unchanged — there is nothing to carry.
-    (`goal-actions.server.ts`.)
+    direction. A FIRST start is unchanged — there is nothing to carry. Two more arms on the
+    same drift: `getGoalView` — the DETAIL read a planner acts on, and `get_goal`'s payload —
+    carries `liveGoal`, the task's current goal, whenever it has moved past the declared text
+    (the declared text stays: it is what the chain declared and what the history means; only
+    the goal, because a task's TITLE is immutable and a `title` half would be a field nothing
+    can set). And a chain can now be RENAMED, title and description, while it is not terminal:
+    pass 37's `goal-2` still read "Identity and Catalog services" hours after catalog moved to
+    its own chain, and the only correction on offer was to cancel the chain and rebuild every
+    link. The rename says what it does not reach — link tasks created before it keep the old
+    name in their chain header, written at create time and never re-read.
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
 
 193. **A reviewer that cannot pass is a decision, not a defect (owner, 2026-09-13, pass 37;
     F37-14).** The turn doctrine had exactly one answer to a request-changes: "the deliverer

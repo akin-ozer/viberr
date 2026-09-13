@@ -1518,3 +1518,155 @@ describe("ruling 194: a retry that starts nothing says so", () => {
     expect(after.links[0]!.note).toContain("The retry did not start");
   });
 });
+
+/**
+ * Ruling 192, second half: the DETAIL read is what a planner acts on, and it
+ * was handing back a contract the work had moved past with nothing saying so.
+ */
+describe("ruling 192: getGoalView carries the task's live goal beside the declared one", () => {
+  it("adds `liveGoal` only when the task's goal has actually moved", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const { updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Live contract chain",
+        links: [
+          { title: "Declared title", goal: "DECLARED-GOAL-9. Done when merged." },
+          { title: "Untouched link", goal: "Stays as declared." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    // Nothing has moved yet: no `liveGoal` anywhere.
+    const fresh = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(fresh.links[0]!.liveGoal).toBeUndefined();
+    expect(fresh.links[1]!.liveGoal).toBeUndefined();
+
+    await updateTaskGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        taskKey: chain.activeTaskKey!,
+        goal: "MOVED-GOAL-4: ownership changed hands.",
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    // CANARY: drop the `liveGoal` mapping and a planner reads DECLARED-GOAL-9
+    // as the current contract, which is what happened live on goal-2 link 1.
+    expect(after.links[0]!.liveGoal).toBe("MOVED-GOAL-4: ownership changed hands.");
+    // The declared text is NOT overwritten — it is what the chain declared and
+    // what the history and the link record mean.
+    expect(after.links[0]!.title).toBe("Declared title");
+    expect(after.links[0]!.goal).toContain("DECLARED-GOAL-9");
+    // A link with no task of its own has nothing live to report.
+    expect(after.links[1]!.liveGoal).toBeUndefined();
+  });
+});
+
+/**
+ * Ruling 192, third half: a chain outlives the sentence it was created with.
+ * Pass 37's `goal-2` still read "Identity and Catalog services" hours after
+ * catalog moved to its own chain, and the only correction on offer was to
+ * cancel the chain and rebuild every link.
+ */
+describe("ruling 192: a live chain can be renamed", () => {
+  it("renames the chain, rewrites the description, and says what a rename does NOT reach", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Identity and Catalog services",
+        description: "Both read-side foundations.",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        action: { op: "rename", title: "Identity service", description: "Identity only now." },
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.title).toBe("Identity service");
+    expect(after.description).toBe("Identity only now.");
+    // The already-created link task keeps the old name in its chain header, and
+    // the history says so rather than implying the rename reached back.
+    const task = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: chain.activeTaskKey!,
+      dataRoot: app.dataRoot,
+    })!;
+    expect(task.parsed.goal).toContain("Identity and Catalog services");
+    expect(after.history[0]!.text).toContain("keep the old name in their chain header");
+  });
+
+  it("refuses an empty title and a rename that names nothing, and no-ops a rename that changes nothing", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Stable chain",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const args = { projectSlug: SLUG, goalId: chain.goalId };
+    await expect(
+      updateGoal(app.db, { ...args, action: { op: "rename", title: "   " } }, actor, ctx),
+    ).rejects.toThrow(/title cannot be empty/i);
+    await expect(
+      updateGoal(app.db, { ...args, action: { op: "rename" } }, actor, ctx),
+    ).rejects.toThrow(/needs a title or a description/i);
+    const before = getGoalView(SLUG, chain.goalId, ctx)!;
+    const same = await updateGoal(
+      app.db,
+      { ...args, action: { op: "rename", title: "Stable chain" } },
+      actor,
+      ctx,
+    );
+    expect(same.message).toContain("unchanged");
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.history).toHaveLength(before.history.length);
+  });
+
+  it("refuses to rename a settled chain", async () => {
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Doomed chain",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const args = { projectSlug: SLUG, goalId: chain.goalId };
+    await updateGoal(app.db, { ...args, action: { op: "cancel" } }, actor, ctx);
+    await expect(
+      updateGoal(app.db, { ...args, action: { op: "rename", title: "Too late" } }, actor, ctx),
+    ).rejects.toThrow(/cancelled/i);
+  });
+});

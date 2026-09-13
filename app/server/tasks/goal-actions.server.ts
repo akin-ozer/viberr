@@ -298,6 +298,13 @@ export async function createGoal(
 // ------------------------------------------------------------------ update
 
 export type UpdateGoalOp =
+  /** Ruling 192: rename the CHAIN (and re-describe it). A chain outlives the
+   *  sentence it was created with — pass 37's `goal-2` still read "Identity and
+   *  Catalog services" hours after catalog moved to its own chain — and until
+   *  now the only way to correct that was to cancel the chain and rebuild every
+   *  link. Neither field steers any work: the title appears in each link task's
+   *  chain header at CREATE time and is never re-read. */
+  | { op: "rename"; title?: string; description?: string }
   | { op: "pause" }
   | { op: "resume" }
   | { op: "cancel"; reason?: string }
@@ -433,6 +440,35 @@ export async function updateGoal(
       const terminal = fm.status === "completed" || fm.status === "cancelled";
       const by = actor.label;
       switch (op.op) {
+        case "rename": {
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const title = op.title?.trim();
+          const description = op.description?.trim();
+          if (title === undefined && description === undefined) {
+            throw AppError.validation("rename needs a title or a description.");
+          }
+          if (title !== undefined && title.length === 0) {
+            throw AppError.validation("A goal title cannot be empty.");
+          }
+          const parts: string[] = [];
+          if (title !== undefined && title !== fm.title) {
+            parts.push(`renamed from "${fm.title}" to "${title}"`);
+            fm.title = title;
+          }
+          if (description !== undefined && description !== goal.description) {
+            parts.push("description rewritten");
+            goal.description = description;
+          }
+          if (parts.length === 0) {
+            message = `Goal ${fm.id} is unchanged.`;
+            return;
+          }
+          message = `Goal ${fm.id} ${parts.join(" and ")}.`;
+          // Every link task already carries the OLD title in its chain header,
+          // written at create time. Say so rather than implying a rename
+          // reaches back into work that has already started.
+          return `Goal ${parts.join(" and ")} by ${by}. Link tasks created before now keep the old name in their chain header.`;
+        }
         case "pause": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           if (fm.status === "paused") {
@@ -1229,6 +1265,22 @@ export function startGoalRunner(db: DatabaseSync): void {
 
 // -------------------------------------------------------------------- views
 
+/**
+ * Ruling 192: a link as READ, which is not always a link as stored. Ruling 155
+ * settles an active link's `title` and `goal` in the goal file while the task's
+ * are still editable, so the stored copy can be a contract the work has moved
+ * past — live, `goal-2` link 1 said SHOP-2 owns `packages/contracts` while
+ * SHOP-2's own goal said it must not touch it. The stored text stays (it is
+ * what the chain declared, and the history means it); `liveGoal` is the task's
+ * current goal, present only when it has actually moved. Only the goal: a
+ * task's TITLE is immutable — nothing in the product writes one after create,
+ * `update_task` says so in as many words — so a `title` half here would be a
+ * field that can never be set.
+ */
+export type GoalLinkView = GoalLink & {
+  liveGoal?: string;
+};
+
 export interface GoalView {
   id: string;
   title: string;
@@ -1237,7 +1289,7 @@ export interface GoalView {
   createdByLabel: string;
   onFailure: "pause" | "continue";
   description: string;
-  links: GoalLink[];
+  links: GoalLinkView[];
   currentIndex: number | null;
   createdAt: string | null;
   updatedAt: string | null;
@@ -1252,7 +1304,23 @@ export function getGoalView(
 ): GoalView | null {
   const read = readGoalFile(goalRef(ctx, projectSlug, goalId));
   if (!read) return null;
-  return toGoalView(read.parsed);
+  const view = toGoalView(read.parsed);
+  // Ruling 192: the DETAIL read is the one a planner acts on, so it carries the
+  // live contract beside the declared one. `listGoals` (the board card) shows
+  // titles and waits only and reads the projection, so it is left alone.
+  view.links = view.links.map((link) => {
+    if (!link.taskKey) return link;
+    const task = readTaskFile({
+      projectSlug,
+      taskKey: link.taskKey,
+      dataRoot: ctx.dataRoot,
+    });
+    if (!task) return link;
+    const goal = stripChainHeader(task.parsed.goal);
+    if (goal === link.goal.trim()) return link;
+    return { ...link, liveGoal: goal };
+  });
+  return view;
 }
 
 export function toGoalView(parsed: ParsedGoalFile): GoalView {

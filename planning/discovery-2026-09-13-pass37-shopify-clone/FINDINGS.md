@@ -915,7 +915,13 @@ Both are canonical files. They disagree about who owns a directory.
 - *"The Goals panel still shows each link's original text."* It does not — `controller-page.tsx` renders `l.title`, `l.blockedBy`, `l.taskKey` and `l.note`, never `l.goal`. The stale `goal` reaches the controller through `get_goal`, not a human through the UI.
 - *"Removing a pending link renumbers the rest, so `goal-3 link 4` silently means something new."* Not silently: `referencesToLinksFrom` refuses the removal when this goal's own links, a sibling goal's pending links, or any task's `blockedBy` point at or after the removed index, naming the holders. The controller *saw that guard fire* ("the server correctly refused one removal until I repointed goal-7 link 4") and filed it as fragile anyway.
 
-**Fix — ruling 192.** A retry carries the failed task's own title and goal, with the chain header rebuilt rather than stacked, and the goal's timeline records that it did so. A first start is unchanged.
+**Fix — ruling 192.** Three arms:
+
+1. A retry carries the failed task's own contract, chain header rebuilt rather than stacked, and the goal's timeline records that it did.
+2. `getGoalView` — the detail read, and `get_goal`'s payload — carries `liveGoal` whenever the task's goal has moved past the declared text. The declared text stays beside it: it is what the chain declared and what the history means. Goal only, no title: **a task's title is immutable** — nothing in the product writes one after create, and `update_task` says so ("Never edits the title") — so a `title` half would be a field nothing can ever set.
+3. A non-terminal chain can be **renamed** (title and description). `goal-2` still read "Identity and Catalog services" hours after catalog moved to `goal-6`, and the only correction on offer was to cancel the chain and rebuild every link. The rename says what it does not reach: link tasks created before it keep the old name in their chain header, written at create time and never re-read.
+
+**Noted, not filed** (below the bar for this pass): a task's title cannot be changed by anything, ever. That is odd next to a freely editable goal, but a stale title neither loses work nor blocks a path.
 
 ## F37-16 · A retry that starts nothing still writes "retried" into the goal's history — med
 

@@ -2430,7 +2430,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_goal",
-      "One goal chain in full: description, every link with its task and status, and the chain's history. Membership gated.",
+      "One goal chain in full: description, every link with its task and status, and the chain's history. A link that has a task carries `liveGoal` — that task's CURRENT goal — whenever it has moved past the text the link was declared with; the link's own `title`/`goal` are what the chain declared, which is what a retry used to rebuild from. Membership gated.",
       { projectSlug: z.string().optional(), goalId: z.string() },
       runWith((args: { projectSlug?: string; goalId: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -2446,11 +2446,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_goal",
-      "Redirect a goal chain: pause, resume, cancel, skip a link, retry a failed link (a fresh task), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable; nothing is deleted.",
+      "Redirect a goal chain: rename it (title and/or description), pause, resume, cancel, skip a link, retry a failed link (a fresh task, rebuilt from that task's own current text), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable; nothing is deleted.",
       {
         projectSlug: z.string().optional(),
         goalId: z.string(),
         op: z.enum([
+          "rename",
           "pause",
           "resume",
           "cancel",
@@ -2463,6 +2464,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         index: z.number().int().min(1).optional().describe("The link the op targets."),
         title: z.string().optional(),
         goal: z.string().optional(),
+        description: z
+          .string()
+          .optional()
+          .describe("rename: the chain's description prose. `title` renames the chain itself."),
         reason: z.string().optional(),
         blockedBy: z
           .array(z.string())
@@ -2474,6 +2479,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           projectSlug?: string;
           goalId: string;
           op:
+            | "rename"
             | "pause"
             | "resume"
             | "cancel"
@@ -2485,6 +2491,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           index?: number;
           title?: string;
           goal?: string;
+          description?: string;
           reason?: string;
           blockedBy?: string[];
         }) => {
@@ -2496,6 +2503,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           }
           let action: UpdateGoalOp;
           switch (args.op) {
+            case "rename": {
+              // Ruling 192: a chain outlives the sentence it was created with.
+              // Built as a typed local rather than a conditional spread (the
+              // lint rule) so an omitted field stays omitted.
+              const renamed: Extract<UpdateGoalOp, { op: "rename" }> = { op: "rename" };
+              if (args.title !== undefined) renamed.title = args.title;
+              if (args.description !== undefined) renamed.description = prose(args.description);
+              action = renamed;
+              break;
+            }
             case "pause":
               action = { op: "pause" };
               break;
