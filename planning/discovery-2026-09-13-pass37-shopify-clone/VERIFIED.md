@@ -311,3 +311,31 @@ reached for npx.
 
 The visible cost: SHOP-7 spent a review round on a Prettier formatting failure the delivering
 agent could not check for itself before delivering.
+
+## Work-revision drift after review — CORRECT
+
+Deliberately diverged, as the owner asked: after the Code Reviewer had recorded a verdict on
+SHOP-6, I pushed a commit to `shop-6-efd4` **by hand**, as a human hotfixing a reviewed
+branch would.
+
+Viberr caught it on the next reconcile and said exactly what it meant:
+
+> **Revision moved after review (ruling 179):** PR #3's head is now `d84a354`, **1 authored
+> commit since review merges unreviewed**. The verdict on `5729a38` no longer binds: the new
+> head is the revision under review and needs a fresh verdict before SHOP-6 can be accepted.
+
+The record carries the structured form, and crucially distinguishes the two ways a head can
+move:
+
+```yaml
+pr:
+  headSha: d84a35429538bf4f272c200f6eb678525c0186ef
+  revisionDrift:
+    headSha: d84a35429538bf4f272c200f6eb678525c0186ef
+    authored: 1          # a commit somebody wrote — merges unreviewed
+    baseRefresh: null    # not a base merge, which would be innocuous
+```
+
+So an approval cannot be laundered onto code nobody reviewed by pushing after the verdict, and
+a routine base refresh is not mistaken for smuggled work. This was the one part of the GitHub
+pipeline I most expected to find soft, and it is not.
