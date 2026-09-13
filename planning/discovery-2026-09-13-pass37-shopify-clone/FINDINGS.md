@@ -2177,3 +2177,55 @@ ruling 217/218 latch — instead of by dying.
 
 Canary (proved red): remove the inner try and the test throws `no such table: provenance` out
 of `rebuildPath`, which is exactly the line `resolvePacket` died on.
+
+---
+
+## F37-40 · The MCP list is silent about the servers that withhold nothing — MEDIUM
+
+**Found by testing a sentence the controller wrote.** Reading the Controller page, I hit this,
+about an MCP server the owner had asked it to grant:
+
+> **I cannot withhold the write tools.** There is no per-tool filter anywhere in my surface …
+> Granting `kb-files` grants all 14 tools, including the 4 write ones. Nothing about the
+> marking in Org settings propagates into the agent's runtime through any control I hold — **if
+> Viberr enforces that marking, it does so somewhere I cannot read, and I won't assert that it
+> does.**
+
+I went to check whether viberr keeps that promise. **It does**, on both transports and both
+backends: `specialist-mcp.server.ts` computes the denials, Claude gets them as
+`disallowedTools` (`mcp__<server>__<tool>`, applied after the auto-approval so the deny wins
+even under `bypassPermissions`), Codex gets them as per-server `disabled_tools`, and HTTP servers
+additionally carry `permission_policy: "always_deny"`. The controller's caution was right about
+its own visibility and wrong about the product — and ruling 188, earlier in this same pass, had
+already fixed the read it was missing. That message predates the fix. **Recorded as verified,
+not as a finding.**
+
+The finding is what I saw next, in Org settings:
+
+```
+kb-files          stdio · …server-filesystem /data/kb
+                  14 tools · checked yesterday · stale, retest · 4 write tools withheld from read-only runs
+kb-architecture   stdio · …server-filesystem /data/kb/shopify-clone-architecture
+                  14 tools · checked yesterday · stale, retest · 3 templates
+kb-conventions    stdio · …server-filesystem /data/kb/shopify-clone-conventions
+                  14 tools · checked yesterday · stale, retest · 3 templates
+```
+
+The gated server announces itself. The two that withhold **nothing** — same stock
+`server-filesystem`, same 14 tools, each granted to **three agent templates** — say nothing at
+all, because the row renders the write-tool line only when `writeTools.length > 0`.
+
+So the state a reader most needs to see is the one state the list does not show: tools that look
+like writes, nobody reviewed them, nothing is withheld. And what those two servers actually hand
+out is write access to the knowledge bases viberr injects into every other agent's prompt as
+trusted configuration — the exact hazard the controller reasoned about for the third server and
+declined. It could not see that it had already granted it twice.
+
+**Fix (ruling 220).** The row states which of the three cases a server is in — gated and how
+many, reviewed with nothing withheld, or N write-looking tools with nothing withheld and nobody
+having reviewed them. It is the human's half of the sentence ruling 188 gave the controller. A
+server whose discovered tool names contain nothing write-shaped stays quiet: there is no
+position to state, and a row that alarms on everything is a row nobody reads.
+
+Canary (proved red): render "" for the unreviewed case and the row goes back to saying nothing
+about a server three templates can rewrite the knowledge bases with.

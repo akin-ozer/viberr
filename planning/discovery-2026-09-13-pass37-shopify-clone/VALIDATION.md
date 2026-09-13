@@ -794,3 +794,27 @@ and each task got exactly one note, the right one:
 | SHOP-4 | "this task was waiting on an agent, and **no run was live** when the server came back" |
 
 Before ruling 215 all three would have carried both sentences and been driven twice.
+
+---
+
+## Ruling 220 — three cases, three assertions, and one deliberate silence
+
+`org-settings-page.test.tsx` renders an MCP row for each state a server can be in and reads the
+WHOLE row, not a fragment, so an assertion cannot pass on a matched substring elsewhere:
+
+- unreviewed with write-looking tools → "3 tools look like a write and nothing is withheld: not reviewed"
+- reviewed with nothing marked → "reviewed: none of its 3 write-looking tools is withheld"
+- gated → ruling 176's original sentence, unchanged
+- a read-only server → the row says nothing about writes at all (`not.toMatch(/write/i)`)
+
+That last one is asserted on purpose. The easy version of this fix warns on every server, and a
+row that alarms on everything is a row nobody reads — so "quiet when there is nothing to say" is
+part of the behaviour, not an omission from it.
+
+```
+# the unreviewed case rendered "" again (the old behaviour)
+AssertionError: expected 'github-mcpHTTP · https://mcp.internal…'
+  to contain '3 tools look like a write and nothing…'
+```
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6588 tests passed**, `build` green.

@@ -750,3 +750,25 @@ record is markdown and SQLite is only a mirror.
 The one row that had NOT matched was SHOP-4's, twenty minutes earlier, and that was found by the
 same method: read the file, read the board, compare, then press Re-scan and watch the chip
 disappear. It is now rulings 218 and 219.
+
+## Ruling 176's write-tool marking is really enforced, on both transports and both backends — CORRECT
+
+The controller declined a grant because it could not verify this, and said so honestly rather
+than asserting it ("if Viberr enforces that marking, it does so somewhere I cannot read, and I
+won't assert that it does"). Traced end to end:
+
+| step | where |
+|---|---|
+| the marks are stored per server | `tool_policy_json`, `resources.server.ts` |
+| they bind only on a run withholding repo write (and every operator run) | `specialist-mcp.server.ts` — `options.withholdWriteTools ? row.writeTools : []` |
+| Claude: denied by name, after auto-approval, so the deny wins under `bypassPermissions` | `run-service.server.ts` — `disallowedTools += mcp__<server>__<tool>` |
+| Codex: per-server `disabled_tools`, stdio and HTTP alike | `codex-runtime.server.ts` |
+| HTTP additionally | `permission_policy: "always_deny"` |
+| the agent is told what was removed, by tool and by server | `specialist-run.server.ts` system prompt |
+
+Both stdio and HTTP are covered, which matters here because every MCP server on this instance is
+stdio. The denial list is also filtered to servers the run actually mounts, so a stale mark names
+nothing.
+
+What was NOT true is the list the admin reads, which stated the position only for a gated server
+— that is F37-40 / ruling 220.

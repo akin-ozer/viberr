@@ -4642,6 +4642,26 @@ by rewriting those paragraphs:*
     one warn line; the return is `{ action: "error" }` on every path.
     (`rebuilder.server.ts`.)
 
+220. **The MCP list states where every server stands on write tools, not only the gated
+    ones (owner, 2026-09-13, pass 37; F37-40).** Ruling 176 lets an admin mark a server's
+    write tools, and Viberr withholds them from every run that holds no repo write and from
+    every operator run. The Org settings row said so - but only when a server WAS gated.
+    A server nobody had reviewed rendered nothing at all, so the one state worth seeing was
+    the state the list was silent about. Live on this instance: `kb-architecture` and
+    `kb-conventions` are stock `server-filesystem` rooted at a knowledge base, 14 tools each,
+    granted to three agent templates each, and unmarked - which means those agents can
+    rewrite the knowledge bases Viberr injects into every other agent's prompt as trusted
+    configuration. The controller reasoned about exactly that hazard for a THIRD such server
+    and granted it to nobody; for the two it had already created and granted, the list gave
+    it, and the admin, no standing signal. Ruling 188 gave the controller's own read all
+    three cases ("Not reviewed yet: nothing is withheld. Viberr makes no claim about the
+    tools nobody has marked."); this is the human's half of that sentence. The row now says
+    which of the three it is: gated and how many; reviewed with nothing withheld; or N tools
+    that look like writes with nothing withheld and nobody having reviewed them. A server
+    whose discovered tools contain nothing write-shaped stays quiet, because there is no
+    position to state and a row that alarms on everything is a row nobody reads.
+    (`resource-rows.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

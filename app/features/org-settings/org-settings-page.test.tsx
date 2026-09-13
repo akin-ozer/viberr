@@ -2067,6 +2067,80 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
 
 /* ------------- ruling 176: the MCP editor's "Write tools" section --------- */
 
+/**
+ * Ruling 220 (F37-40). The MCP row stated the write-tool position only when a
+ * server was GATED, so the one state worth seeing — tools that look like
+ * writes, nobody has reviewed them, so nothing is withheld — was the state the
+ * list was silent about. Live on this instance, `kb-architecture` and
+ * `kb-conventions` are `server-filesystem` rooted at a knowledge base, 14 tools
+ * each, granted to three agent templates each, unmarked: those agents can
+ * rewrite the knowledge bases that are injected into every other agent's prompt
+ * as configuration. The controller reasoned about that exact hazard for a third
+ * such server and granted nothing; the list gave it and the admin nothing.
+ */
+describe("MCP rows state where a server stands on write tools (ruling 220)", () => {
+  const FS_TOOLS = ["read_file", "list_directory", "write_file", "edit_file", "move_file"];
+
+  function rowText(m: McpView): string {
+    // Two rows in one test would make `getByText` ambiguous; each reading is
+    // its own render.
+    cleanup();
+    const { getByText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={[m]}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+    // The posture rides the row's meta line, beside the transport and target —
+    // read the whole row so the assertion cannot pass on a fragment.
+    const row = getByText(m.name).closest("li, .rsrc-row, div");
+    return row?.textContent ?? "";
+  }
+
+  it("names the unreviewed write-looking tools and says nothing is withheld", () => {
+    // CANARY: render "" for the unreviewed case (the old behaviour) and the
+    // row goes back to saying nothing about a server three templates can write
+    // the knowledge bases with.
+    const text = rowText({
+      ...MCPS[0]!,
+      discoveredTools: FS_TOOLS,
+      writeTools: [],
+      writeToolsReviewed: false,
+    });
+    expect(text).toContain("3 tools look like a write and nothing is withheld: not reviewed");
+  });
+
+  it("says so when an admin reviewed the server and withheld nothing", () => {
+    const text = rowText({
+      ...MCPS[0]!,
+      discoveredTools: FS_TOOLS,
+      writeTools: [],
+      writeToolsReviewed: true,
+    });
+    expect(text).toContain("reviewed: none of its 3 write-looking tools is withheld");
+    expect(text).not.toContain("not reviewed");
+  });
+
+  it("keeps ruling 176's sentence for a gated server, and stays quiet when nothing looks like a write", () => {
+    expect(
+      rowText({ ...MCPS[0]!, discoveredTools: FS_TOOLS, writeTools: ["write_file"] }),
+    ).toContain("1 write tool withheld from read-only runs");
+    // A read-only server has no position to state, and a row that alarms on
+    // everything is a row nobody reads.
+    const quiet = rowText({
+      ...MCPS[0]!,
+      discoveredTools: ["read_file", "list_directory"],
+      writeTools: [],
+      writeToolsReviewed: false,
+    });
+    expect(quiet).not.toMatch(/write/i);
+  });
+});
+
 describe("McpModal — write tools (ruling 176)", () => {
   const LISTED = ["get_issue", "create_pull_request", "merge_pull_request", "list_commits"];
 
