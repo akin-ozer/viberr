@@ -1297,3 +1297,79 @@ on entry rather than on GitHub's answer is the point: a refused push is still a 
 acted, and the settle will not wait for the answer. Two canaries proven red — the obvious
 wrong version (stamp on the `delivered` return, "record it once GitHub said yes") leaves a
 failed push unstamped, and dropping the predicate's new arm puts the note and the marker back.
+
+## F37-23 · Viberr promised a human's comment would reach the agent it named, through a channel that could not carry it — HIGH
+
+**What viberr said.** SHOP-6, 13:21:57.181Z — I posted a correction to the Platform Architect
+in the middle of a seven-round review loop. 72 milliseconds later, the policy engine wrote:
+
+> **Not started:** @Platform Architect was mentioned, but its run did not start: This agent
+> already has a run in progress on this task — **it will see the comment when it next
+> re-anchors**, or mention it again once the run finishes. The comment stays on the record.
+
+The refusal itself is right: one agent, one live run per task, or two processes share a
+checkout. What follows it is the problem.
+
+**What the channel actually is.** "Re-anchoring" is `canonicalTaskAnchor`, built by a FRESH
+run (`specialist-run.server.ts:1906` — "EVERY fresh run re-anchors"). Its timeline section is
+
+```ts
+const ANCHOR_EVENT_COUNT = 5;
+const recent = timeline.slice(0, input.events ?? ANCHOR_EVENT_COUNT);
+```
+
+— the **five** most recent events, each clamped to `ANCHOR_EVENT_MAX_CHARS`. So the promise
+holds only if (a) that agent gets another fresh run on that task, and (b) the comment is still
+inside a five-event window when it does. Viberr checks neither, and knows neither.
+
+Compare what the mention normally does: the un-refused path hands the agent the comment as its
+**directive** — `directive: input.text.trim(), directiveFrom: commenterName` — the whole
+instruction, verbatim, as the reason the run exists. The refused path replaces that with a hope
+that a clamped one-line summary is still in a five-slot list.
+
+**What happened.** SHOP-6's timeline after my comment:
+
+```
+13:21:57.181  comment   Arda → @Platform Architect   (the instruction)
+13:21:57.253  note      "it will see the comment when it next re-anchors"
+13:22:01.924  comment   Platform Architect           (its in-flight run finishing, 4s later)
+13:22:38.003  github
+13:22:42.490  github
+13:22:42.565  transition
+13:22:42.640  note
+13:23:06.294  comment   operator
+13:23:12.994  agent     operator → Code Reviewer started
+```
+
+Within **75 seconds** my comment was eight events back — three past the window. And the
+Platform Architect never had another run on SHOP-6: the task went Review → Verify → Done and
+was accepted at 13:51. The agent viberr named as the recipient never received it, and nothing
+anywhere says so.
+
+**Why it is a finding and not a nitpick.** It is both halves of the bar at once. Viberr *lies*
+— it states a delivery it has no mechanism for — and it *loses work*: a person's typed
+instruction, accepted with a 200, rendered on the timeline, addressed to a named agent, and
+silently never delivered. The person has no way to know: the note reads as reassurance, and
+the failure leaves no trace. The advice it offers instead ("mention it again once the run
+finishes") asks a human to poll a run they cannot see the end of.
+
+**Viberr has already solved this exact problem, one layer up.** The operator lease keeps a
+queue for precisely this case, and says why:
+
+> a human `@operator …` comment carries a question that exists NOWHERE else in the run's
+> input, so human triggers are kept in a queue and drained oldest-first ahead of the machine
+> trigger (B-OP2: a transition landing behind a queued question used to overwrite it, and the
+> person was never answered).
+
+Specialists got the refusal and the sentence, and never got the queue.
+
+**Fix — ruling 203.** Keep the promise instead of making it. At a specialist run's completion,
+`deliverDeferredMention` looks for a human comment addressed to that agent posted after that
+run started — which, because the single-flight guard is the only thing that could have refused
+it, is by construction an undelivered one — and starts the run for it, carrying the person's
+words as the directive, ahead of the operator's own react trigger (a person's instruction goes
+first, exactly as B-OP2 ordered it). Nothing is queued in memory: the comment IS the record,
+and "undelivered" is derived from it, so a restart cannot drop it. The refusal copy now says
+what viberr will do rather than what it hopes the agent will notice. Three canaries proven red,
+including the end-to-end one that unwires the completion hook — the helper's own test cannot
+prove its caller exists, so it does not claim to.

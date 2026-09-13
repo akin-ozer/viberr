@@ -22,13 +22,14 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
-import { installFakeRuntime, startedRunSpecs } from "../../../test-support/fake-runtime";
+import { installFakeRuntime, queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { userBackendHome } from "~/server/runtimes/user-homes.server";
 import { probeSessionContinuity } from "~/server/runtimes/session-export.server";
 import {
   insertRunLine,
   listRunsForTaskRows,
+  patchRun,
   upsertRun,
 } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -43,7 +44,7 @@ import {
   runFailureReason,
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
-import { commentToAgent } from "./task-actions.server";
+import { appendComment, commentToAgent, deliverDeferredMention } from "./task-actions.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -1358,6 +1359,169 @@ describe("commentToAgent", () => {
       (e) => e.type === "comment" && e.actor.kind === "human",
     );
     expect(humanComment?.text).toContain("@dev take a look");
+  });
+
+  /**
+   * Ruling 203 (F37-23, live on SHOP-6). A8's refusal used to end with a
+   * promise — "it will see the comment when it next re-anchors" — that nothing
+   * kept. The anchor holds the last five timeline events, clamped, and only a
+   * FRESH run builds one, so the comment survived only if that agent happened
+   * to run again on that task before five more events landed. Live, an owner's
+   * correction was eight events back within 75 seconds and the agent it named
+   * never ran on that task again.
+   */
+  it("ruling 203: the @mention refused while the agent was busy is delivered when that run finishes", async () => {
+    deployDevSpecialist();
+    const startedAt = "2026-09-13T10:00:00.000Z";
+    upsertRun(store.db, {
+      id: "run_live_primary",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: null,
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "running",
+      startedAt,
+    });
+
+    const refused = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev stop patching symptoms — fix the class" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(refused.triggered).toBeNull();
+    // The refusal now states what viberr will DO, not what it hopes the agent
+    // will notice. CANARY: put the old sentence back and this fails.
+    expect(refused.runNotStarted).toContain(
+      "Viberr starts it on this comment as soon as that run finishes",
+    );
+
+    // The busy run ends. This is the hop `applyAgentCompletionEffects` makes.
+    patchRun(store.db, "run_live_primary", { state: "finished" });
+    const delivered = await deliverDeferredMention(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", runStartedAt: startedAt },
+    );
+    expect(delivered).toBe(true);
+
+    // A run for THAT agent, carrying the person's words — not a re-anchor and a
+    // hope. CANARY: make `deliverDeferredMention` stop at the resolve (return
+    // false without calling `commentToAgent`) and no second run for `dev`
+    // exists. The WIRING — that a real completion calls this at all — is proved
+    // by the end-to-end test below, because a test that calls the helper itself
+    // cannot prove the caller does.
+    const runs = listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
+      (r) => r.agent_profile_id === "dev" && r.id !== "run_live_primary",
+    );
+    expect(runs).toHaveLength(1);
+
+    // And the comment is on the timeline exactly ONCE — the redelivery is the
+    // same comment being acted on, not a new one. CANARY: drop the
+    // `redelivered` branch around `appendComment` and this reads 2.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(
+      file.parsed.timeline.filter((e) => e.text.includes("fix the class")),
+    ).toHaveLength(1);
+  }, 30_000);
+
+  it("ruling 203, end to end: a real run's completion delivers the mention it was too busy to take", async () => {
+    deployDevSpecialist();
+    // A run that stays live, so the mention below meets the single-flight guard
+    // the way a person's comment meets it on a working board.
+    queueFakeRun({ lines: [], keepRunning: true });
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await waitFor(() =>
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+        (r) => r.agent_profile_id === "dev" && r.state === "running",
+      ),
+    );
+    const live = listRunsForTaskRows(store.db, store.slug, "VIB-1").find(
+      (r) => r.agent_profile_id === "dev" && r.state === "running",
+    )!;
+    const before = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
+
+    const refused = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing before you finish" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(refused.triggered).toBeNull();
+
+    // The run ends. Nothing else happens: no second comment, no operator, no
+    // person. CANARY: delete the `deliverDeferredMention` call from
+    // `applyAgentCompletionEffects` and this waitFor times out — which is the
+    // state the promise shipped in.
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: live.id, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+    await waitFor(
+      () => listRunsForTaskRows(store.db, store.slug, "VIB-1").length > before,
+    );
+    const started = startedRunSpecs().at(-1)!;
+    expect(started.prompt).toContain("one more thing before you finish");
+  }, 30_000);
+
+  it("ruling 203: a comment addressed to a DIFFERENT agent is not delivered to this one", async () => {
+    deployDevSpecialist();
+    const startedAt = "2026-09-13T10:00:00.000Z";
+    upsertRun(store.db, {
+      id: "run_live_primary",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: null,
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "running",
+      startedAt,
+    });
+    // A plain human comment naming nobody: not addressed to this agent, so the
+    // completion hop must leave it alone rather than treating every comment
+    // posted during a run as an instruction for whoever just finished.
+    await appendComment(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "noting this for the record" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    patchRun(store.db, "run_live_primary", { state: "finished" });
+
+    const delivered = await deliverDeferredMention(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", runStartedAt: startedAt },
+    );
+    expect(delivered).toBe(false);
+    expect(
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
+        (r) => r.agent_profile_id === "dev" && r.id !== "run_live_primary",
+      ),
+    ).toHaveLength(0);
   });
 
   it("RESUMES the agent's existing session (reusing its session_id) on a later comment", async () => {

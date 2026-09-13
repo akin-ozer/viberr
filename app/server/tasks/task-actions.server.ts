@@ -1587,6 +1587,12 @@ export async function commentToAgent(
      *  (it falls back to the operator), so no "Mention not started" note is
      *  written for it. Never set by a route. */
     relayed?: boolean;
+    /** Ruling 203: this comment is ALREADY on the timeline — viberr is keeping
+     *  the promise it made when the agent was busy, not recording a new one.
+     *  Skips the append (and its mention fan-out, which already happened) and
+     *  skips the "Mention not started" note on a second failure, because the
+     *  first attempt's note already says why. Never set by a route. */
+    redelivered?: boolean;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -1612,12 +1618,18 @@ export async function commentToAgent(
 
   // 1. Record the comment (existing behavior, incl. mention fan-out). Flag
   //    the routed tint when an agent was resolved.
-  const base = await appendComment(
-    db,
-    target ? { ...input, forceToAgent: true } : input,
-    actor,
-    ctx,
-  );
+  const base = input.redelivered
+    ? {
+        task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+        toAgent: true,
+        mentionedUserIds: [],
+      }
+    : await appendComment(
+        db,
+        target ? { ...input, forceToAgent: true } : input,
+        actor,
+        ctx,
+      );
 
   if (!target) {
     // B-AG2: `@claude` on a project running two claude profiles engages NOBODY
@@ -1867,8 +1879,15 @@ export async function commentToAgent(
       throw new AppError({
         code: ERROR_CODES.CONFLICT,
         status: 409,
+        // Ruling 203: this used to promise that the agent "will see the comment
+        // when it next re-anchors". It carried no such comment: the anchor
+        // holds the last five timeline events, clamped, and only a FRESH run
+        // builds one — live, an owner's correction was eight events back
+        // within 75 seconds and the agent it named never ran on that task
+        // again. Viberr now keeps the promise instead of making it
+        // (`deliverDeferredMention`, on that run's completion).
         userMessage:
-          "This agent already has a run in progress on this task — it will see the comment when it next re-anchors, or mention it again once the run finishes.",
+          "This agent already has a run in progress on this task — Viberr starts it on this comment as soon as that run finishes. The comment stays on the record.",
       });
     }
     if (target.session) {
@@ -2043,7 +2062,10 @@ export async function commentToAgent(
     // now carries the same note + audit shape the ambiguous-handle branch
     // writes. A packet decision the server RELAYS through this door reports
     // to its resolver instead (`relayed`), which owns the follow-up.
-    if (!input.relayed) {
+    // Ruling 203: a REDELIVERY that fails needs no second note — the first
+    // attempt's note already names the agent and the reason, and repeating it
+    // on every completion would turn one honest refusal into a drumbeat.
+    if (!input.relayed && !input.redelivered) {
       await noteMentionNotStarted(db, ctx, input, actor, target.name, target.profileId, reason);
     }
     return {
@@ -3531,6 +3553,83 @@ export async function recordAgentCompletion(
   }
 }
 
+/**
+ * Ruling 203 (F37-23): deliver the @mention that could not start while this
+ * agent was running.
+ *
+ * The single-flight guard refuses a mention of an agent that already has a live
+ * run on the task — correctly; two processes in one checkout is the thing it
+ * exists to prevent. What was wrong was what viberr said next: "it will see the
+ * comment when it next re-anchors". The anchor carries the last five timeline
+ * events, clamped, and only a FRESH run builds one, so the promise held only if
+ * that agent happened to run again on that task before five more events landed.
+ * Live on SHOP-6 neither held: an owner's correction was eight events back
+ * within 75 seconds, and the Platform Architect it named never ran on the task
+ * again before it was accepted.
+ *
+ * Nothing is queued in memory. The comment IS the record, and "undelivered"
+ * is derivable from it: a human comment addressed to this agent, posted after
+ * this run started, cannot have started a run of its own — the single-flight
+ * guard is the only thing that could have refused it. Oldest first, one per
+ * completion, which drains a burst in order the way a queued human `@operator`
+ * trigger does (B-OP2) — the next one rides the next completion.
+ *
+ * Returns true when a run started, and the caller then leaves the operator's
+ * own react trigger alone: a person's instruction goes first.
+ */
+export async function deliverDeferredMention(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    /** The completed run's start, the window's lower bound. Null (no recorded
+     *  start) means there is no honest window, so nothing is claimed. */
+    runStartedAt: string | null;
+  },
+): Promise<boolean> {
+  const startedAt = input.runStartedAt;
+  if (!startedAt) return false;
+  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!file) return false;
+  const { resolveMentionedAgent } = await import("./agent-reply.server");
+  const pending = file.parsed.timeline
+    .filter((e) => e.type === "comment" && e.toAgent && e.actor.kind === "human")
+    .filter((e) => e.occurredAt > startedAt)
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+  for (const event of pending) {
+    if (event.actor.kind !== "human") continue;
+    const target = resolveMentionedAgent(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      event.text,
+    );
+    if (!target || target.profileId !== input.profileId) continue;
+    logger.info("delivering the @mention that was refused while the agent was running", {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      commentedAt: event.occurredAt,
+    });
+    const result = await commentToAgent(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        text: event.text,
+        redelivered: true,
+      },
+      { userId: event.actor.userId, label: userName(db, event.actor.userId) },
+      ctx,
+    );
+    return result.triggered !== null;
+  }
+  return false;
+}
+
 /** Register the single completion pipeline: record, reconcile, and continue coordination. */
 export async function registerAgentCompletion(
   db: DatabaseSync,
@@ -4427,6 +4526,34 @@ export async function applyAgentCompletionEffects(
     stripCcLine(prevReply),
     currentDepth,
   );
+  // Ruling 203 (F37-23): a person's @mention that landed while this agent was
+  // running was refused by the single-flight guard, and viberr told them the
+  // agent would see it. This is where that promise is kept — ahead of the
+  // operator's own react trigger below, for the same reason a queued human
+  // `@operator` comment drains ahead of the machine trigger (B-OP2): the
+  // question exists nowhere else, and coordination can wait one hop. The
+  // operator is re-invoked by THAT run's completion, so nothing is skipped,
+  // only ordered.
+  let deferred = false;
+  try {
+    deferred = await deliverDeferredMention(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      runStartedAt: thisRunStartedAt,
+    });
+  } catch (error) {
+    // A delivery that cannot start must never swallow the completion pipeline:
+    // the operator react below is the fallback, and the comment stays on the
+    // record either way.
+    logger.warn("deferred @mention delivery failed", {
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  if (deferred) return;
+
   // Dispatch-completion contract (2026-08-29): a manually/schedule-dispatched
   // run's completion ALWAYS hands back to the operator — that is the "to let the
   // operator run again" half of the owner's contract, so the react heuristic

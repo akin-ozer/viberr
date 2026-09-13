@@ -4196,6 +4196,36 @@ by rewriting those paragraphs:*
     gets the same answer: the record has to say what happened.
     (`task-actions.server.ts`, `task-mutation.server.ts`, `operator-run.server.ts`.)
 
+203. **A refusal may not promise a delivery viberr has no way to make (owner, 2026-09-13,
+    pass 37; F37-23).** An @mention of an agent that already has a live run on the task is
+    refused by the single-flight guard — correctly; two processes in one checkout is what it
+    exists to prevent. The sentence that followed was not: "it will see the comment when it
+    next re-anchors". Re-anchoring is `canonicalTaskAnchor`, built only by a FRESH run, whose
+    timeline section is the **five** most recent events, each clamped. So the promise held
+    only if that agent ran again on that task before five more events landed, and viberr
+    checks neither condition and knows neither. Live on SHOP-6 both failed: an owner's
+    correction was eight events back within 75 seconds, and the Platform Architect it named
+    never ran on that task again before the task was accepted. Meanwhile the un-refused path
+    hands the agent the comment as its DIRECTIVE (`directive`, `directiveFrom`) — the whole
+    instruction, verbatim, as the reason the run exists — so the refused path was not a
+    degraded delivery but a different thing wearing the same words. This is the bar's two
+    halves at once: viberr states a delivery it cannot make, and a person's typed instruction
+    is accepted, rendered, addressed to a named agent and then silently dropped, with the note
+    reading as reassurance. Viberr had already ruled on this one layer up — the operator lease
+    keeps queued human `@operator` comments and drains them oldest-first ahead of the machine
+    trigger, "because the question exists NOWHERE else in the run's input" (B-OP2) — and the
+    specialists got the refusal without the queue. So: at a specialist run's completion,
+    `deliverDeferredMention` finds a human comment addressed to that agent posted after that
+    run started (by construction undelivered: the single-flight guard is the only thing that
+    could have refused it), and starts the run for it with the person's words as the
+    directive, BEFORE the operator's own react trigger — a person's instruction goes first,
+    and the operator is re-invoked by that run's completion, so nothing is skipped, only
+    ordered. Oldest first, one per completion, which drains a burst in order. **Nothing is
+    queued in memory**: the comment is the record and "undelivered" is derived from it, so a
+    restart cannot lose it. The refusal copy now states what viberr will do. A redelivery that
+    fails writes no second note — the first one already named the agent and the reason.
+    (`task-actions.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`
