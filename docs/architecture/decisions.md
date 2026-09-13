@@ -4171,6 +4171,31 @@ by rewriting those paragraphs:*
     runs at all really did spend everything it spent on coordination.
     (`insights-query.server.ts`, `insights-page.tsx`.)
 
+202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
+    stranded-operator backstop judges a finished drive by whether it moved the stage, and on
+    SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
+    `shop-10` and opened PR #8 — and wrote: "the operator held it twice in a row without
+    advancing, dispatching, or opening a packet … **Coordination is paused here: run the
+    operator manually**". Both halves were false. The first of the two drives had
+    *advanced* (Design → Build) and the second had *delivered*; and coordination was not
+    paused — the next operator drive had started **two milliseconds before the note was
+    written**, moved the task to Review 23 seconds later and engaged a reviewer, with no
+    person involved. Three of the four things a drive can do were already covered: a
+    transition by `movedToStageId`, a dispatch by the live-run check in
+    `settleWaitingAfterOperator`, a packet or a recommendation by `operatorLeftTaskStranded`.
+    Delivery was covered by nothing — and it is the one act whose effect can outlive the run
+    row, because the push and the PR call answer after the row is `finished` (live: an
+    eight-second window, and the settle ran inside it). So `performDelivery` stamps
+    `ctx.operatorRun.delivered` on ENTRY, before its first await, and the backstop counts
+    delivery as progress beside a transition. On entry and not on GitHub's answer: a refused
+    push is still a drive that acted, and the question the backstop asks is what the operator
+    did, not what GitHub allowed. The cost of the old reading was not only a false sentence:
+    the note also writes the durable `heldAtStage` marker, which silences the nudge at that
+    stage until a human re-litigates it, so a task whose delivery is its last event would sit
+    with a manufactured pause and a person told to end it. This is F37-17's mirror, and it
+    gets the same answer: the record has to say what happened.
+    (`task-actions.server.ts`, `task-mutation.server.ts`, `operator-run.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

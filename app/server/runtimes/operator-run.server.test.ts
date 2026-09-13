@@ -42,6 +42,7 @@ import {
 import { defaultModelFor } from "./model-catalog.server";
 import {
   executeStrandedCodexPlan,
+  maybeResumeStrandedOperator,
   operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   runOperator,
@@ -1732,6 +1733,104 @@ describe("stranded auto-stage resume", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(2);
+    });
+
+    /**
+     * Ruling 202 (F37-22, live on SHOP-10). A nudged drive whose single action
+     * was `deliver_for_review` — it pushed the branch and opened PR #8 — was
+     * recorded by this backstop as having "held it twice in a row without
+     * advancing, dispatching, or opening a packet", and the note told a human
+     * "Coordination is paused here: run the operator manually". It was not
+     * paused: a drive was starting 2ms before the note was written, and it
+     * moved the task to Review 23 seconds later with nobody touching anything.
+     *
+     * The other three ways a drive can act were already covered — a transition
+     * by `movedToStageId`, a dispatch by the live-run check in
+     * `settleWaitingAfterOperator`, a packet or recommendation by
+     * `operatorLeftTaskStranded`. Delivery was covered by nothing.
+     *
+     * Driven through the real backstop with a hand-written finished run row,
+     * because this fixture's project has no repo and a real `deliver_for_review`
+     * would be refused before `performDelivery` ever stamps anything.
+     */
+    it("ruling 202: a nudged drive that DELIVERED is not a deliberate hold", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(
+            id,
+            taskKey,
+            store2.slug,
+            `t_${id}`,
+            "2026-09-13T00:00:00.000Z",
+            "2026-09-13T00:00:00.000Z",
+          );
+      };
+      const held = (taskKey: string) =>
+        readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
+
+      // Control: the same shape WITHOUT the delivery still records the hold,
+      // so this test cannot pass by disabling the backstop.
+      finishedRun("run_ctl", "VIB-1");
+      const heldAgain = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        dataRoot: store2.dataRoot,
+        runId: "run_ctl",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          movedToStageId: "triage",
+        },
+      });
+      expect(heldAgain).toBe(false);
+      expect(held("VIB-1").frontmatter.heldAtStage).toBe("triage");
+      expect(held("VIB-1").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(true);
+
+      // The delivering drive, on a task of its own.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-2", {
+          title: "ship the parser",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Ship it.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_del", "VIB-2");
+      // CANARY: drop `|| ref.ownRun?.delivered === true` from nudgeMadeProgress
+      // and this returns false, `heldAtStage` is stamped, and the note claiming
+      // coordination is paused lands on a task that was just delivered.
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-2",
+        dataRoot: store2.dataRoot,
+        runId: "run_del",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          movedToStageId: "triage",
+          delivered: true,
+        },
+      });
+      expect(resumed).toBe(true);
+      expect(held("VIB-2").frontmatter.heldAtStage).toBeNull();
+      expect(held("VIB-2").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
     });
 
     /**

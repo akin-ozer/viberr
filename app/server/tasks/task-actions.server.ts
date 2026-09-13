@@ -5848,6 +5848,11 @@ export async function performDelivery(
   actor: TaskActor,
 ): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
+  // Ruling 202: stamped BEFORE the first await. Delivery is the operator's
+  // most consequential non-transition act and it is the one whose effect can
+  // outlive the run row, so the stranded backstop has to learn about it here
+  // rather than from the timeline event the push eventually writes.
+  if (ctx.operatorRun) ctx.operatorRun.delivered = true;
   try {
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 

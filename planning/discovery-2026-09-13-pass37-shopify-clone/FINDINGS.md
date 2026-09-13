@@ -1222,3 +1222,78 @@ which of three shapes the card should take (see DECISIONS).
 **Viberr already holds the fact it needs to say this well.** `agent_runs.backend` is on every
 row, so the card can name the excluded population precisely — "209 Codex runs report no cost"
 — rather than gesturing at "cost-reporting runs".
+
+## F37-22 · Viberr called a delivery a refusal to act, told the owner coordination was paused, and kept coordinating 23 seconds later — HIGH
+
+**What the timeline says**, SHOP-10, in the order it happened:
+
+```
+14:48:21.046  transition   operator moved SHOP-10 from Design to Build
+14:48:56.005  github       Opened PR #8 for review
+14:48:56.118  note         **Note:** this stage auto-advances, but the operator held it
+                           twice in a row without advancing, dispatching, or opening a
+                           packet — treating that as a deliberate hold. Coordination is
+                           paused here: run the operator manually when the hold should
+                           end, adjust the goal, or loosen the boundary in
+                           Policy → Workflow rules.
+14:49:19.131  transition   operator moved SHOP-10 from Build to Review
+14:49:40.600  comment      @Code Reviewer Review delivered revision PR #8 for SHOP-10…
+14:49:45.527  agent        Started a Codex run for the Code Reviewer agent
+```
+
+Nobody touched anything between those lines. The last human event on the task was 35 minutes
+earlier.
+
+**What the drive it is describing actually did.** `run_qSexX41pVhAb`, 14:48:21 → 14:48:48, one
+action, the whole plan:
+
+```json
+{"reasoning":"The delivering agent reports a committed, plausible implementation on branch
+  shop-10 (fb09eb4). Deliver it for review now.",
+ "actions":[{"tool":"deliver_for_review",
+   "reason":"Push the committed shop-10 revision and open the review PR."}]}
+```
+
+It pushed the branch and opened PR #8. That is the operator's most consequential act short of
+accepting a task, and viberr recorded it as "held … without advancing, dispatching, or opening
+a packet".
+
+**Two false statements, not one.**
+
+1. *"held it twice in a row without advancing, dispatching, or opening a packet."* The first
+   drive **advanced** (Design → Build). The second **delivered**. Neither held.
+2. *"Coordination is paused here: run the operator manually."* The next operator drive
+   (`run_U1UkQ4yTT5fU`) started at **14:48:56.116** — two milliseconds **before** the note was
+   written — and moved the task to Review at 14:49:19. A person who read that note and did
+   what it says would have pressed Run operator on a task that was already coordinating.
+
+**Why the rule could not see it.** `maybeResumeStrandedOperator` judges a drive by
+`ownRun.movedToStageId`. Of the four things an operator drive can do, three are covered:
+
+| act | how the backstop sees it |
+|---|---|
+| transition | `ownRun.movedToStageId`, stamped by `transitionStage` |
+| dispatch an agent | `settleWaitingAfterOperator` returns early on `inFlightAgentRun` |
+| open a packet / recommendation | `operatorLeftTaskStranded` returns false |
+| **deliver** | **nothing** |
+
+Delivery is also the one act whose effect can outlive the run row: the drive was marked
+`finished` at 14:48:48 and its PR event reached the timeline at 14:48:56, an **eight-second**
+window in which the task looked untouched to anything asking "did this drive change
+something?".
+
+**Why it is a finding and not a nitpick.** It writes a durable `heldAtStage` marker (V18) that
+suppresses the backstop's own nudge at that stage until a human re-litigates it, and it tells
+the owner in plain words that the machine has stopped and needs them. Here an unrelated
+trigger — the delivery event itself — happened to re-arm coordination, so the lie was visible
+within 23 seconds. On a task where the delivery IS the last event, the same note stands with
+nothing behind it: no nudge, and a human told to intervene in a pause that the record
+manufactured. It is F37-17's mirror — that one showed "agent working" while waiting on a
+person; this one shows "paused, act now" while working.
+
+**Fix — ruling 202.** `performDelivery` stamps `ctx.operatorRun.delivered` on ENTRY, before
+its first await, and the backstop counts delivery as progress alongside a transition. Stamping
+on entry rather than on GitHub's answer is the point: a refused push is still a drive that
+acted, and the settle will not wait for the answer. Two canaries proven red — the obvious
+wrong version (stamp on the `delivered` return, "record it once GitHub said yes") leaves a
+failed push unstamped, and dropping the predicate's new arm puts the note and the marker back.

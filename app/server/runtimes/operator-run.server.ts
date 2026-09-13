@@ -995,9 +995,18 @@ export async function maybeResumeStrandedOperator(
   // next `auto` stage made progress; its transition queued no re-trigger any
   // more, so the chain continues with a fresh nudge, bounded by the chain cap
   // below. Only a nudge that ends where it started is the deliberate hold.
+  // Ruling 202 (F37-22): DELIVERY is progress too. The three other ways a drive
+  // can act are already covered — a transition by `movedToStageId`, a dispatch
+  // by the live-run check in `settleWaitingAfterOperator`, a packet or a
+  // recommendation by `operatorLeftTaskStranded` — and delivery was covered by
+  // nothing, so a drive that pushed a branch and opened a review PR was
+  // recorded as having "held the stage without advancing, dispatching, or
+  // opening a packet" and coordination was declared paused on a task that was
+  // being delivered.
   const nudgeMadeProgress =
-    ref.ownRun?.movedToStageId !== undefined &&
-    ref.ownRun.movedToStageId !== ref.stageAtStart;
+    (ref.ownRun?.movedToStageId !== undefined &&
+      ref.ownRun.movedToStageId !== ref.stageAtStart) ||
+    ref.ownRun?.delivered === true;
   if (ref.strandedResume && !nudgeMadeProgress) {
     const { updateTaskFile, resolveTaskFilePath } = await import(
       "~/server/files/task-writer.server"

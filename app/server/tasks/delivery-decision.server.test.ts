@@ -209,6 +209,44 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
   });
 });
 
+/**
+ * Ruling 202 (F37-22). The stranded-operator backstop judges a drive by what it
+ * changed, and delivery changed nothing it could see: a drive whose single
+ * action was `deliver_for_review` was recorded as having "held the stage
+ * without advancing, dispatching, or opening a packet", and coordination was
+ * declared paused on a task that was at that moment being delivered. The stamp
+ * has to land on ENTRY, because the push and the PR call can outlive the run
+ * row — live, the PR event reached the timeline 8 seconds after the drive was
+ * marked finished, and 111ms before that the settle had already called it a
+ * hold.
+ */
+describe("ruling 202: a delivering drive marks itself as having acted", () => {
+  it("stamps `delivered` on entry, whatever GitHub then answers", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "push_failed",
+      reason: "the remote rejected the push",
+    });
+    const ctx = dataCtx();
+    ctx.operatorRun = { backend: "codex", autonomy: "supervised", reactDepth: 0 };
+    // CANARY: stamp on the `delivered` return instead of on entry — the
+    // obvious wrong version, "record it once GitHub said yes" — and this goes
+    // red. A refused push is still a drive that ACTED, and the whole point of
+    // the stamp is that it cannot wait for an answer the settle will not.
+    const outcome = await performDelivery(
+      store.db,
+      ctx,
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome.status).toBe("push_failed");
+    // The drive ACTED. Whether GitHub accepted it is a different question, and
+    // not the one the backstop is asking.
+    expect(ctx.operatorRun.delivered).toBe(true);
+  });
+});
+
 describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed push", () => {
   it("push_conflict: no PR is opened, the event names a history conflict — never the credential", async () => {
     seed({ stage: "review", branch: "vib-1" });
