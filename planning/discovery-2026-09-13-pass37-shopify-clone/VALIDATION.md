@@ -610,3 +610,22 @@ lesson is not "validate live", which I did; it is that a live proof covers the s
 happened to be in, and the state it was not in is still untested.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6574 tests passed**, `build` green.
+
+### Ruling 215, proved live on the very next deploy — the same shape, the opposite outcome
+
+The bug appeared on a deploy that caught two tasks with live runs. The fix was deployed onto
+the same board in the same state, deliberately: `run_mAzC9x` (SHOP-16 primary) and
+`run_MVGtqk` (SHOP-4 reviewer) both `running`, both tasks at `waiting: agent`.
+
+Note counts in the task files, before and after:
+
+| task | "Interrupted by a restart" | "Left waiting on an absent agent" |
+|---|---|---|
+| SHOP-4 | 5 → **6** | 2 → **2** |
+| SHOP-16 | 3 → **4** | 2 → **2** |
+
+The orphan sweep took both tasks and said so; the board sweep added nothing. On the previous
+deploy, from the identical starting state, both counts rose. Each task then got exactly one
+operator re-invoke (`run_g1x6UM`, `run_VOGPEB`) instead of two, and both resumed their
+interrupted work — the reviewer restarted on PR #9's delivered revision, the infrastructure
+engineer resumed SHOP-16.
