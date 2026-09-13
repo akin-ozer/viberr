@@ -461,6 +461,39 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
     expect(result).toEqual({ status: "already_gone", branch: BRANCH });
   });
 
+  /**
+   * Ruling 207(d) (claim audit). GitHub answers 422 for two opposite outcomes:
+   * "Reference does not exist" (the branch is gone) and "Reference cannot be
+   * deleted: …" (a branch-protection rule or repository ruleset refused, and the
+   * branch is still there). The classifier read the STATUS only, so a refusal
+   * was recorded on the timeline, in the audit row and in the collision
+   * ceremony as "already gone on GitHub. Nothing was left to clean up."
+   */
+  it("ruling 207(d): a 422 REFUSAL is not 'already gone' — GitHub's own words are reported", async () => {
+    const { store, actor } = setup({
+      pr: { number: 318, state: "closed", title: "Attach execution workspace" },
+    });
+    const fake = fakeGithubFetch({
+      [`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`]: {
+        status: 422,
+        body: {
+          message: `Reference cannot be deleted: refs/heads/${BRANCH} is protected`,
+        },
+      },
+    });
+    // CANARY: classify on `del.status === 422` alone (the shipped rule) and this
+    // returns `already_gone` — viberr reporting a cleanup GitHub refused.
+    const result = await deleteTaskRemoteBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "refused", reason: "github_refused" });
+    expect(refusalMessage(result)).toMatch(/cannot be deleted/);
+    expect(refusalMessage(result)).toMatch(/is protected/);
+  });
+
   it("degrades typed on an unreachable GitHub", async () => {
     const { store, actor } = setup({
       pr: { number: 318, state: "closed", title: "Attach execution workspace" },

@@ -403,6 +403,51 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(countReplayAudits("run_dropped")).toBe(1);
   });
 
+  /**
+   * Ruling 207(a) (claim audit). `noteCompletionEffectsLost` writes, in ONE
+   * update, `waiting = "human"` and a note saying "Run recovery replays the
+   * effects on the next restart" — while this reconciler selected on
+   * `t.waiting = 'agent'`. The note's own write made the replay it promised
+   * unreachable, and the effects it names include a required reviewer's VERDICT,
+   * so the acceptance gate stayed shut on a review that had actually happened.
+   */
+  it("ruling 207(a): a run whose completion effects were LOST is still replayed, though its task now waits on a human", async () => {
+    seedDroppedReplyRun("run_lost");
+    // Exactly what noteCompletionEffectsLost leaves behind: the honest board
+    // state, and the marker that says why.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "human" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    recordAudit(store.db, {
+      action: "run.completion.effects_lost",
+      actor: { userId: null, label: "system" },
+      subjectKind: "task",
+      subjectId: "VIB-1",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      details: { runId: "run_lost", kind: "primary" },
+    });
+
+    // CANARY: drop the `run.completion.effects_lost` arm from the SELECT and
+    // this recovers 0 — which is what the note promised would not happen.
+    const res = await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+    expect(res.recovered).toBe(1);
+    expect(countReplayAudits("run_lost")).toBe(1);
+  });
+
+  it("ruling 207(a): a task waiting on a human with NO effects-lost marker is still left alone", async () => {
+    // The scope the original `waiting = 'agent'` filter was protecting: old
+    // history, not a live stall. Widening the selection must not sweep it in.
+    seedDroppedReplyRun("run_old");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "human" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+    expect(res.recovered).toBe(0);
+  });
+
   it("consumes a persisted staged report_outcome envelope on recovery (AO-1)", async () => {
     seedDroppedReplyRun("run_staged");
     // Simulate a run whose completion was registered (outcome_key persisted to

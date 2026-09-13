@@ -200,6 +200,7 @@ import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
+import { userDisplayName } from "./user-display-name.server";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
@@ -436,7 +437,7 @@ function requireDecisionAuthority(
 
 /** `.get()` hands back an undeclared row, so each reader decodes the one column
  *  it selected and falls back when the user (or the column) is not there. */
-const userNameRowSchema = z.object({ name: z.string() });
+
 const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
 
 /** The user's DISPLAY name — what the `@operator` mention path passes as
@@ -444,10 +445,7 @@ const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
  *  knows (NEW-4: an email tag chips nothing and notifies nobody). Exported for
  *  the steered manual run, which must speak the same name. */
 export function userName(db: DatabaseSync, userId: string): string {
-  const row = userNameRowSchema.safeParse(
-    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
-  );
-  return row.success ? row.data.name : userId;
+  return userDisplayName(db, userId);
 }
 
 /** The user's avatar tint for a notification's `from` render; "" when the user
@@ -1513,7 +1511,7 @@ export function specialistReplyDirective(input: {
     input.delivers === false
       ? "You do not modify the repository at all."
       : "Do not push, and do not open a pull request — Viberr performs delivery " +
-        "on the Review transition.";
+        "when the operator decides to deliver.";
   return (
     (input.anchor ? `${input.anchor}\n\n---\n\n` : "") +
     `A human (${input.commenterName}) commented on task ${input.taskKey} ` +

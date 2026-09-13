@@ -162,7 +162,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
-    "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary. Viberr pushes it and opens the review PR on the Review transition.",
+    "Implements stage work on the task-key branch: writes code, runs local validation, and commits with traceable messages. Hands the committed branch back to the operator at the review boundary. Viberr pushes it and opens the review PR when the operator delivers.",
   ),
   profile(
     {

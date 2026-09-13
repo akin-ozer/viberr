@@ -400,7 +400,12 @@ export function finalizeOrphanedRuns(
  * operator to react — exactly what the lost callback would have done.
  *
  * Safe by construction:
- *  - Only tasks currently `waiting = 'agent'` (a live stall, not old history).
+ *  - Only a live stall, not old history: the task is `waiting = 'agent'`, OR the
+ *    run carries a `run.completion.effects_lost` audit row (ruling 207(a)). That
+ *    second arm exists because `noteCompletionEffectsLost` flips the task to
+ *    `waiting = "human"` in the SAME write as the note promising this replay —
+ *    honest about the board, and self-defeating about the recovery, until the
+ *    selection stopped keying on the flag alone.
  *  - Idempotent: `postAgentReplyComment` writes the `task.agent.replied` audit
  *    row, so a recovered run is not reprocessed on the next boot.
  *  - Fire-and-forget per run; one failure never blocks the others or boot.
@@ -433,7 +438,14 @@ export async function recoverUnreactedAgentRuns(
         WHERE r.kind IN ('primary', 'reviewer')
           AND r.state = 'finished'
           AND r.agent_profile_id IS NOT NULL
-          AND t.waiting = 'agent'
+          AND (
+            t.waiting = 'agent'
+            OR EXISTS (
+              SELECT 1 FROM audit_events e
+               WHERE e.action = 'run.completion.effects_lost'
+                 AND e.details_json LIKE '%"runId":"' || r.id || '"%'
+            )
+          )
           AND NOT EXISTS (
             SELECT 1 FROM audit_events a
              WHERE a.action = 'task.agent.replied'

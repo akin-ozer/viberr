@@ -627,6 +627,49 @@ describe("startSpecialistRun", () => {
     expect(started?.details).toMatchObject({ profileId: "dev", delivers: true, stageEligibility: "engaged-deliverer" });
   });
 
+  /**
+   * Ruling 207(e) (claim audit). The dispatch-completion contract tells the
+   * agent to close its report by tagging "@<dispatcher>" "so they are
+   * notified". A schedule carries `createdByLabel`, which is whatever
+   * `TaskActor.label` was when it was created — documented as "e.g. the email"
+   * — and the mention ladder matches an email's LOCAL PART, a full name or a
+   * first name, never a whole address. The agent tagged `@a.kaya@hepapi.com`,
+   * which chips nothing, notifies nobody, and leaves no trace that the person
+   * who scheduled the run was never told it finished.
+   */
+  it("ruling 207(e): a dispatcher passed as an EMAIL is tagged by the name the mention ladder can resolve", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+      goal: "Report back to whoever scheduled this.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Exactly what schedule.server.ts hands over: the label, plus the id.
+    await startAgentRun(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        triggeredByName: store.users.arda.email,
+        triggeredByUserId: store.users.arda.id,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const prompt = startedRunSpecs().at(-1)!.prompt;
+    // CANARY: pass `input.triggeredByName` straight through (the shipped code)
+    // and the prompt instructs a tag on the raw address.
+    expect(prompt).toContain(`"@${store.users.arda.name}"`);
+    expect(prompt).not.toContain(store.users.arda.email);
+  });
+
   it("ruling 133: a SUPPORTING engagement stays stage-scoped at the run boundary, and a NEW delivering engagement is still gated", async () => {
     // Canaries: return ok for every engaged profile in `runEligibilityFor`
     // (the supporting run starts); delete the `assertStageEligible` call in

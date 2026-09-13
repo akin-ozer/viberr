@@ -2162,8 +2162,23 @@ export async function deleteTaskRemoteBranch(
 
   // GitHub answers "Reference does not exist" with a 422 — someone already
   // cleaned it up. That is the state the human asked for, reported honestly.
+  //
+  // Ruling 207(d): 422 is NOT a synonym for "gone". GitHub also answers 422
+  // "Reference cannot be deleted: …" when a branch-protection rule or a
+  // repository ruleset restricts deletions, and the ref is still there. The old
+  // classifier read every 422 as `already_gone`, so the timeline, the audit row
+  // and the collision ceremony all reported a stale branch removed while GitHub
+  // had refused. The message is the only signal the API gives, so the default
+  // flips: only an explicit "does not exist" is `already_gone`, and anything
+  // else is a refusal carrying GitHub's own words.
   if (del.kind === "http" && del.status === 422) {
-    return { status: "already_gone", branch };
+    if (/does not exist/i.test(del.message)) return { status: "already_gone", branch };
+    return {
+      status: "refused",
+      reason: "github_refused",
+      branch,
+      message: `GitHub refused the deletion (${del.message}).`,
+    };
   }
   return {
     status: "refused",

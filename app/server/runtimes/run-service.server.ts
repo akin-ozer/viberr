@@ -1362,6 +1362,21 @@ export async function noteCompletionEffectsLost(
     taskKey: run.task_key,
   };
   if (dataRoot) ref.dataRoot = dataRoot;
+  // Ruling 207(a): the marker that makes the sentence below TRUE. The same
+  // write flips `waiting` to "human" — honest, nothing is running — and boot
+  // recovery selects on `t.waiting = 'agent'`, so the note promised a replay
+  // its own write had just made unreachable. Recovery now also matches a run
+  // carrying this row, which is the module's existing idiom: it already keys
+  // idempotency and its crash-loop cap on audit rows, not on task state.
+  recordAudit(db, {
+    action: "run.completion.effects_lost",
+    actor: SYSTEM_ACTOR,
+    subjectKind: "task",
+    subjectId: run.task_key,
+    projectSlug: run.project_slug,
+    taskKey: run.task_key,
+    details: { runId: run.id, kind: run.kind },
+  });
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.frontmatter.waiting = "human";
