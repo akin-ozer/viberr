@@ -1939,3 +1939,49 @@ stayed silent:
 Canaries (both proved red): restore "in ONE comment" and the arm's only named action is one
 that reaches nobody; drop the disclosure and the comment reads as a question put to the
 reviewer on a timeline where nothing was ever sent to it.
+
+---
+
+## F37-35 · The fix for F37-33 lied on its own first deploy — HIGH, and mine
+
+**Found by reading the notification stream for the deploy I had just made.** Rulings 211-214
+went out; twenty seconds later both live tasks reported this:
+
+```
+[EVT] SHOP-4  note :: **Restart:** this task was waiting on an agent, and no run was live
+                      when the server came back — …
+[EVT] SHOP-16 note :: **Restart:** this task was waiting on an agent, and no run was live
+                      when the server came back — …
+[EVT] SHOP-16 note :: **Restart:** the run `run_xbkO35zoCEAg` (agent) was still running when
+                      the server stopped; it is recorded as interrupted by the restart …
+[EVT] SHOP-4  note :: **Restart:** the run `run_JFvmbzdPmEZH` (reviewer) was still running
+                      when the server stopped; it is recorded as interrupted by the restart …
+```
+
+Two notes on each task, one second apart, contradicting each other. A run WAS live. The one
+that says otherwise is mine, from ruling 213.
+
+**Why.** The boot chain runs `finalizeOrphanedRuns` first, and its entire job is to move
+`running`/`queued` rows to `interrupted`. It does that synchronously and returns promises for
+its re-invokes, which the chain awaits at the END. `settleAbandonedWaits` runs at step 4 and
+asks "which tasks claim an agent while no run of theirs is running or queued?" — a question
+step 1 has already made unanswerable, because it just erased the only evidence that separates
+an abandoned wait from an interrupted one. Every genuinely-orphaned task now reads as abandoned.
+
+Cost: a false sentence in the canonical record, sitting next to the true one; and a second
+operator drive for a single restart (the lease coalesces them, but both were paid for).
+
+I had verified ruling 213 live and it was a real proof — two tasks stranded for over a minute
+with zero live runs, settled correctly. That case was genuine. What I never exercised was the
+case where a run IS live at the stop, because the first deploy happened to catch a quiet
+board. The second one did not.
+
+**Fix (ruling 215).** `finalizeOrphanedRuns` returns `claimedTasks` — every task it took,
+capped ones included, since a capped task is still one that pass decided about — and
+`settleAbandonedWaits` withholds them. The ordering does not change and was never the problem:
+the sweep runs last precisely because the passes above it may START a run. What it needed was
+the one fact it could not read off a board step 1 had already rewritten.
+
+Canaries (both proved red): drop the filter and the sweep settles the orphan sweep's own task,
+writing "no run was live" under "was still running when the server stopped"; drop the third
+argument at the call site and the wiring test sees `undefined` where the set should be.

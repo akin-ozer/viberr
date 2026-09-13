@@ -51,6 +51,8 @@ let orphanReinvokes: Promise<void> = Promise.resolve();
 /** The sweep of the orphans' surviving processes (ruling 174) — still
  *  signalling when the chain reaches its reclaim. Reassigned per test. */
 let orphanReaped: Promise<void> = Promise.resolve();
+/** Ruling 215: what step 1 says it took this boot. Reassigned per test. */
+let orphanClaimed: ReadonlySet<string> = new Set<string>();
 const finalizeOrphanedRuns = vi.fn(() => {
   calls.push("orphan-finalize");
   return {
@@ -60,11 +62,12 @@ const finalizeOrphanedRuns = vi.fn(() => {
     reinvokes: orphanReinvokes,
     reaped: orphanReaped,
     notes: Promise.resolve(),
+    claimedTasks: orphanClaimed,
   };
 });
 /** Ruling 213: the fourth recovery, and the only one that keys on the BOARD
  *  rather than on a run — it must land after the three that may start one. */
-const settleAbandonedWaits = vi.fn(async () => {
+const settleAbandonedWaits = vi.fn(async (..._args: unknown[]) => {
   calls.push("settle-abandoned-waits");
   return 0;
 });
@@ -122,6 +125,7 @@ beforeEach(() => {
   // A pending re-invoke promise left by one test must not steer the next.
   orphanReinvokes = Promise.resolve();
   orphanReaped = Promise.resolve();
+  orphanClaimed = new Set<string>();
   finalizeOrphanedRuns.mockClear();
   recoverUnreactedAgentRuns.mockClear();
   activeRunCount.mockClear();
@@ -256,6 +260,26 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
       "settle-abandoned-waits",
       "reclaim",
     ]);
+  });
+
+  /**
+   * Ruling 215 (F37-35). The deploy that shipped 213 wrote BOTH restart notes
+   * on SHOP-4 and SHOP-16: "the run … was still running when the server
+   * stopped" and, beside it, "no run was live when the server came back". Step
+   * 1's job is to move those live runs to `interrupted`, and its own re-invokes
+   * are launched after step 4 runs — so step 4 saw a board with no live runs
+   * and claimed tasks that were never abandoned. Contradicting itself in two
+   * consecutive timeline entries is the "viberr lying" bar, and the second
+   * re-invoke spent a coordination run on top of it.
+   */
+  it("tells the board sweep which tasks the orphan sweep already took (ruling 215)", async () => {
+    orphanClaimed = new Set(["shop/SHOP-4"]);
+
+    await reconcileRestartedWork(db, reconcileDeps);
+
+    // CANARY: drop the third argument at the call site and this is `undefined`
+    // — the sweep then re-claims every task step 1 just finalized.
+    expect(settleAbandonedWaits).toHaveBeenCalledWith(db, {}, orphanClaimed);
   });
 
   it("reclaims only after the orphan sweep's own re-invokes have finished", async () => {

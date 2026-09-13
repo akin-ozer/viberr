@@ -76,6 +76,16 @@ export interface OrphanFinalization {
    * after they landed. Never rejects: each note is caught per task.
    */
   notes: Promise<void>;
+  /**
+   * Ruling 215: the tasks this sweep took, `<projectSlug>/<taskKey>` keyed.
+   *
+   * These tasks HAD a live run when the server stopped, and this pass owns
+   * their recovery — including its own re-invoke, which is launched after the
+   * later passes run. It flips their runs terminal first, so without this list
+   * `settleAbandonedWaits` sees "waiting on an agent, no live run", which is
+   * the one thing that was NOT true of them.
+   */
+  claimedTasks: ReadonlySet<string>;
 }
 
 export interface FinalizeOrphanedRunsDeps {
@@ -178,6 +188,7 @@ export function finalizeOrphanedRuns(
       reinvokes: Promise.resolve(),
       reaped: Promise.resolve(),
       notes: Promise.resolve(),
+      claimedTasks: new Set<string>(),
     };
   }
 
@@ -384,6 +395,10 @@ export function finalizeOrphanedRuns(
     reinvokes,
     reaped,
     notes,
+    // Ruling 215: EVERY task this sweep took, capped ones included. A capped
+    // task is one this pass decided about; it is still not a task that had no
+    // run when the server came back.
+    claimedTasks: new Set(realTasks.keys()),
   };
 }
 
@@ -447,6 +462,13 @@ export function finalizeOrphanedRuns(
 export async function settleAbandonedWaits(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
+  /**
+   * Ruling 215: `<projectSlug>/<taskKey>` for every task the orphan sweep took
+   * this boot. Those tasks DID have a live run at the stop and that pass owns
+   * them; it just flipped their rows terminal, so the SELECT below would see
+   * them as abandoned and write a note saying the one thing that was not true.
+   */
+  claimedByOrphanSweep: ReadonlySet<string> = new Set<string>(),
 ): Promise<number> {
   // SAFETY: `project_slug` and `task_key` are NOT NULL TEXT on
   // `task_projections` (0001_baseline.sql); the WHERE clause adds no columns.
@@ -466,9 +488,13 @@ export async function settleAbandonedWaits(
           )`,
     )
     .all() as { slug: string; key: string }[];
-  if (rows.length === 0) return 0;
+  const abandoned = rows.filter(
+    (r) => !claimedByOrphanSweep.has(`${r.slug}/${r.key}`),
+  );
+  if (abandoned.length === 0) return 0;
   logger.info("settling tasks the restart left waiting on an absent agent", {
-    tasks: rows.length,
+    tasks: abandoned.length,
+    claimedByOrphanSweep: rows.length - abandoned.length,
   });
   const [{ appendTimelineEvent }, { runOperator }, { clearWaitingToHuman }] =
     await Promise.all([
@@ -476,7 +502,7 @@ export async function settleAbandonedWaits(
       import("./operator-run.server"),
       import("~/server/tasks/task-actions.server"),
     ]);
-  for (const row of rows) {
+  for (const row of abandoned) {
     const ref: TaskFileRef = { projectSlug: row.slug, taskKey: row.key };
     if (ctx.dataRoot) ref.dataRoot = ctx.dataRoot;
     try {

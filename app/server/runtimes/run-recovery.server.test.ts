@@ -402,6 +402,51 @@ describe("settleAbandonedWaits (ruling 213)", () => {
     expect(operatorRuns.length).toBeGreaterThan(0);
   });
 
+  /**
+   * Ruling 215 (F37-35). The deploy that shipped 213 produced two restart notes
+   * on the same task, one second apart: "the run `run_JFvmbz…` (reviewer) was
+   * still running when the server stopped" and "no run was live when the server
+   * came back". Both cannot be true. `finalizeOrphanedRuns` runs first and its
+   * whole job is to move live runs to `interrupted`, so by the time this sweep
+   * asks its question the evidence is already gone — and its re-invoke raced the
+   * orphan sweep's own, two coordination drives for one restart.
+   */
+  it("does not re-claim a task the orphan sweep already took (ruling 215)", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // The shape the orphan sweep leaves behind: its run WAS live at the stop
+    // and it has just been finalized, so the board looks identical to an
+    // abandoned wait and is not one.
+    seedRun("run_orphaned", {
+      kind: "reviewer",
+      role: "Code Reviewer",
+      agentProfileId: "code-reviewer",
+      state: "interrupted",
+      finishedAt: new Date().toISOString(),
+    });
+
+    // CANARY: drop the filter and this settles 1, writing "no run was live"
+    // under the orphan sweep's own "was still running when the server stopped".
+    const settled = await settleAbandonedWaits(
+      store.db,
+      { dataRoot: store.dataRoot },
+      new Set([`${store.slug}/VIB-1`]),
+    );
+    expect(settled).toBe(0);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(
+      parsed.timeline.find((e) => e.title === "Left waiting on an absent agent"),
+      "the orphan sweep owns this task and already said what happened",
+    ).toBeUndefined();
+  });
+
   it("leaves a task alone while a run is actually live", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),

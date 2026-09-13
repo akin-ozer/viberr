@@ -488,10 +488,13 @@ export async function reconcileRestartedWork(
   // reclaim waits for that too — a CLI the dead server left running could still
   // be writing a tree the reclaim deletes. Never rejects either.
   let orphanReaped: Promise<void> = Promise.resolve();
+  /** Ruling 215: the tasks step 1 took, withheld from step 4 (see below). */
+  let orphanTasks: ReadonlySet<string> = new Set<string>();
   try {
     const finalization = deps.finalizeOrphanedRuns(db);
     orphanReinvokes = finalization.reinvokes;
     orphanReaped = finalization.reaped;
+    orphanTasks = finalization.claimedTasks;
   } catch (error) {
     logger.error("orphaned-run finalize failed", {
       err: error instanceof Error ? error : new Error(String(error)),
@@ -516,7 +519,16 @@ export async function reconcileRestartedWork(
     // run and may themselves set `waiting: agent` by starting one; this sweep
     // asks the leftover question — which tasks claim an agent that no run
     // backs — so it has to see the board they leave behind.
-    await deps.settleAbandonedWaits(db);
+    //
+    // Ruling 215: which is exactly why it must be told what step 1 took. That
+    // step's whole job is to move live runs to `interrupted`, and its own
+    // re-invokes are launched below, AFTER this line — so on the deploy that
+    // shipped 213 two tasks got both notes at once, the second one saying "no
+    // run was live when the server came back" about runs that had been live and
+    // had their own "Interrupted by a restart" note two lines above. Same
+    // board, two contradictory sentences, and two operator drives for one
+    // event.
+    await deps.settleAbandonedWaits(db, {}, orphanTasks);
   } catch (error) {
     logger.error("abandoned-wait settle failed", {
       err: error instanceof Error ? error : new Error(String(error)),

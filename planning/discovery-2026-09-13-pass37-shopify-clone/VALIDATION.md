@@ -580,3 +580,33 @@ mention-delivery into operator comments, the behaviour test goes red and the doc
 sentence stops being true in the same commit.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6572 tests passed**, `build` green.
+
+---
+
+## Ruling 215 — two canaries, because there are two ways to lose the fact
+
+The defect needs both a producer and a consumer, so both are pinned.
+
+**The wiring** (`boot.server.test.ts`): step 1's mock reports it took `shop/SHOP-4`, and the
+chain must hand that set to step 4. Dropping the third argument at the call site:
+
+```
+AssertionError: expected "vi.fn()" to be called with arguments: [ {}, {}, Set{ 'shop/SHOP-4' } ]
+```
+
+**The sweep** (`run-recovery.server.test.ts`): a task at `waiting: agent` whose only run is
+`interrupted` — the exact board `finalizeOrphanedRuns` leaves behind — must settle to 0 and
+write no note when that task is in the withheld set. Removing the filter:
+
+```
+AssertionError: expected 1 to be +0
+```
+
+This one is worth naming plainly: the bug was mine, in the fix I had validated live four hours
+earlier, and the live validation was real. Two tasks had been stranded for over a minute with
+zero live runs and the sweep settled them correctly. What that deploy could not show me is the
+case it did not contain — a run still live at the stop — and the very next deploy did. The
+lesson is not "validate live", which I did; it is that a live proof covers the state the board
+happened to be in, and the state it was not in is still untested.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6574 tests passed**, `build` green.

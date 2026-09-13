@@ -4544,6 +4544,26 @@ by rewriting those paragraphs:*
     S5-G3's rule one audience over: a visible non-delivery beats a silent one.
     (`operator-run.server.ts`, `operator-toolkit.server.ts`, `operator-actions.server.ts`.)
 
+215. **Ruling 213's own deploy wrote both restart notes on the same task, and one of them
+    was false (owner, 2026-09-13, pass 37; F37-35).** The deploy that shipped 213 landed on
+    two tasks with live runs, and each came back carrying two system notes one second apart:
+    "the run `run_JFvmbz...` (reviewer) was still running when the server stopped, it is
+    recorded as interrupted by the restart" and, directly beside it, "no run was live when
+    the server came back". Both cannot be true, and the second is the wrong one. Step 1 of
+    the boot chain, `finalizeOrphanedRuns`, exists to move live runs to `interrupted`; it
+    does that synchronously and launches its re-invokes at the END of the chain. So the
+    board `settleAbandonedWaits` reads at step 4 has already had exactly the evidence it
+    keys on erased by step 1, and every genuinely-orphaned task looks abandoned. The cost is
+    two contradictory sentences in the canonical record and a second operator drive for one
+    event. The sweep that was written to stop viberr claiming an agent that is not there
+    spent its first deploy claiming a restart that did not happen. So step 1 now reports the
+    tasks it took - all of them, capped ones included, since a capped task is still one this
+    pass decided about - and step 4 withholds them. Its ordering is unchanged and still
+    right: a pass that STARTS a run must be seen by the sweep, which is why it runs last;
+    what it needed was not a different position but the one fact it could not read off the
+    board.
+    (`run-recovery.server.ts`, `boot.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`
