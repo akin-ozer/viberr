@@ -3771,3 +3771,214 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
     expect(pr!.closure).toBeUndefined();
   });
 });
+
+/**
+ * Ruling 187 (pass 37, F37-8): the cache never claims a commit the remote does
+ * not have, and a commit that vanished with its workspace is announced as lost.
+ *
+ * Live: SHOP-2's `github.commits` held `3aad6ff` — the agent's workspace
+ * commit, committed while the task was held (F37-2) and never delivered.
+ * Origin's `shop-2` held only the bootstrap commit, whose message carries no
+ * `[SHOP-2]` prefix, so the prefix filter found nothing and the "agents don't
+ * always follow the prefix convention" carve-out KEPT the phantom. The GitHub
+ * page then rendered "1 commit · synced" for a change that existed nowhere:
+ * the run's workspace had been disposed, so it was not pending push, it was
+ * gone.
+ */
+describe("ruling 187: a workspace commit the remote does not have", () => {
+  /** The exact live shape: a cached commit, and a remote whose only commit is
+   *  unprefixed so the filter yields nothing. */
+  function phantomRoutes(): FakeRoutes {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 0,
+        behind_by: 3,
+        status: "behind",
+        commits: [{ sha: "f6166a9ffff", commit: { message: "Initialize the project" } }],
+      },
+    };
+    return routes;
+  }
+
+  function seedPhantom(store: ReturnType<typeof setup>["store"]): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+        github: {
+          commits: [{ sha: "3aad6ff", msg: "[VIB-301] Define identity service slice" }],
+          changed: null,
+          unownedPr: null,
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("drops it from the cache instead of keeping it as 'honestly recorded'", async () => {
+    const { store, actor } = setup();
+    seedPhantom(store);
+    const gh = fakeGithubFetch(phantomRoutes());
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    // The canonical record stops claiming a commit that is on no branch.
+    expect(fm.github?.commits ?? []).toEqual([]);
+  });
+
+  it("says the work is LOST, naming the sha and the branch", async () => {
+    const { store, actor } = setup();
+    seedPhantom(store);
+    const gh = fakeGithubFetch(phantomRoutes());
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const timeline = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    const lost = timeline.find((e) => e.text.includes("Work lost"));
+    expect(lost, "the reconciler must announce the loss").toBeTruthy();
+    expect(lost!.text).toContain("3aad6ff");
+    expect(lost!.text).toContain("vib-301-workspace");
+    // The two facts a person needs: it is not recoverable, and the goal stands.
+    expect(lost!.text).toContain("not recoverable");
+    expect(lost!.text).toContain("run it again");
+  });
+
+  it("keeps a cached commit the remote DOES have, prefix or no prefix", async () => {
+    const { store, actor } = setup();
+    // The carve-out's real case: the agent skipped the `[KEY]` prefix, so the
+    // filter yields nothing — but the commit is genuinely on the branch and
+    // must survive.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace" },
+        github: {
+          commits: [{ sha: "f6166a9", msg: "unprefixed but really pushed" }],
+          changed: null,
+          unownedPr: null,
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const gh = fakeGithubFetch(phantomRoutes());
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(file.frontmatter.github?.commits).toEqual([
+      { sha: "f6166a9", msg: "unprefixed but really pushed" },
+    ]);
+    expect(file.timeline.some((e) => e.text.includes("Work lost"))).toBe(false);
+  });
+});
+
+/**
+ * F37-9 (pass 37): the sync pill reads the newest `github.reconcile`
+ * observation row, and `changed` compares only the task file's `pr`/`github`
+ * blocks — the compare verdict is in neither. So a pass whose only change was
+ * "`main` moved" wrote no row and the pill kept rendering the stale verdict.
+ *
+ * Live: SHOP-2's row said `synced` (recorded 06:34) while the 07:19 pass's own
+ * audit row said `behind_main` and git agreed — the pill went wrong the moment
+ * PR #1 merged, and stayed wrong. "Behind main" is only interesting BECAUSE
+ * main moved, which was the one transition it could not see.
+ */
+describe("F37-9: a sync verdict that changes is recorded, even on a quiet poll", () => {
+  const syncRows = (store: ReturnType<typeof setup>["store"]): string[] => {
+    // SAFETY: the SELECT names the one nullable TEXT column, and every
+    // `github.reconcile` row the reconciler writes carries a details payload.
+    const rows = store.db
+      .prepare(
+        `SELECT details_json FROM provenance WHERE action = 'github.reconcile' ORDER BY id ASC`,
+      )
+      .all() as { details_json: string | null }[];
+    return rows.map((r) => String(JSON.parse(r.details_json ?? "{}").sync));
+  };
+
+  it("writes a row when the verdict flips, with nothing else changed", async () => {
+    const { store, actor } = setup();
+    // Pass 1: level with main.
+    const level = happyRoutes();
+    level[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(level).fetchImpl },
+    );
+    expect(syncRows(store)).toEqual(["synced"]);
+
+    // Pass 2: main moved. NOTHING in the task file changes — same PR, same
+    // commit cache — so `changed` is false and the poller skips unchanged
+    // provenance. The verdict must still be recorded.
+    const behind = happyRoutes();
+    behind[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 3, status: "behind", commits: [] },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(behind).fetchImpl,
+        skipUnchangedProvenance: true,
+      },
+    );
+    expect(syncRows(store)).toEqual(["synced", "behind_main"]);
+  });
+
+  it("stays quiet while the verdict holds, so a healthy poller adds no rows", async () => {
+    const { store, actor } = setup();
+    const behind = happyRoutes();
+    behind[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 3, status: "behind", commits: [] },
+    };
+    for (let i = 0; i < 3; i += 1) {
+      await reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: fakeGithubFetch(behind).fetchImpl,
+          skipUnchangedProvenance: true,
+        },
+      );
+    }
+    // One row for the first (changing) pass; the two repeats add nothing. The
+    // "grow unboundedly" concern the original condition names is untouched.
+    expect(syncRows(store)).toEqual(["behind_main"]);
+  });
+});

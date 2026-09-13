@@ -77,6 +77,7 @@ import {
 } from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { latestReconcileSync } from "~/server/provenance/provenance-query.server";
 import {
   canAcceptFromStage,
   isTerminalStage,
@@ -743,9 +744,41 @@ async function reconcileTaskUnlocked(
           .map((c) => ({ sha: c.sha, msg: c.msg }))
       : null;
   const existingCommits = existingGithub?.commits ?? [];
+  // Ruling 187 (pass 37, F37-8): the carve-out above keeps a workspace-captured
+  // cache when the prefix filter finds nothing, because "agents don't always
+  // follow the prefix convention". It could not tell that case from the other
+  // one — the commit was never PUSHED — so it kept claiming a sha the remote
+  // does not have. Live, SHOP-2's `github.commits` held `3aad6ff` (the agent's
+  // workspace commit, never delivered), origin's `shop-2` held only the
+  // bootstrap commit, and the GitHub page rendered "1 commit · synced" for work
+  // that existed nowhere: its workspace had been disposed, so the change was
+  // GONE while the record said it was banked.
+  //
+  // Once the compare is PROVEN (the same condition that makes `prefixCommits`
+  // non-null) the remote's commit list is authoritative about what exists. An
+  // entry it does not contain is not one our filter missed; it is one that is
+  // not there. Keep only the keepable, and let the caller announce the rest.
+  const remoteShas = new Set<string>();
+  if (compare && provenBranchHead) {
+    for (const c of compare.commits) {
+      remoteShas.add(c.sha);
+      remoteShas.add(c.fullSha);
+    }
+  }
+  const remoteHas = (sha: string): boolean =>
+    remoteShas.has(sha) ||
+    [...remoteShas].some((r) => r.startsWith(sha) || sha.startsWith(r));
+  const keepableCommits =
+    compare && provenBranchHead
+      ? existingCommits.filter((c) => remoteHas(c.sha))
+      : existingCommits;
+  const vanishedCommits =
+    compare && provenBranchHead
+      ? existingCommits.filter((c) => !remoteHas(c.sha))
+      : [];
   const branchCommits =
-    prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
-      ? existingCommits
+    prefixCommits !== null && prefixCommits.length === 0 && keepableCommits.length > 0
+      ? keepableCommits
       : prefixCommits;
   const ownedChanged = pr && ownsAPr ? pr.changed : undefined;
   // The cache a pass that derived nothing falls back to — empty when the task
@@ -1086,6 +1119,29 @@ async function reconcileTaskUnlocked(
         evidence: null,
       });
     }
+    // Ruling 187 (pass 37, F37-8): a commit the record claimed and the remote
+    // does not have is DROPPED above — and saying so is the whole point. The
+    // work was committed in a run's workspace and never delivered; that
+    // workspace is disposed when the run settles, so the change is not
+    // "pending push", it is gone. A record that quietly shrinks by one row is
+    // the same lie one step quieter.
+    if (vanishedCommits.length > 0) {
+      const shas = vanishedCommits.map((c) => `\`${c.sha}\``).join(", ");
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: POLICY_ENGINE_ACTOR,
+        title: null,
+        text:
+          `**Work lost:** ${vanishedCommits.length === 1 ? "commit" : "commits"} ${shas} ` +
+          `${vanishedCommits.length === 1 ? "was" : "were"} recorded for \`${branch}\` but ${vanishedCommits.length === 1 ? "is" : "are"} not on it. ` +
+          `${vanishedCommits.length === 1 ? "It was" : "They were"} committed inside a run's workspace and never delivered, and that workspace is gone, ` +
+          `so the ${vanishedCommits.length === 1 ? "change it held is" : "changes they held are"} not recoverable. ` +
+          `${fm.key}'s goal is unchanged — run it again to redo the work.`,
+        toAgent: false,
+        evidence: null,
+      });
+    }
     if (divergenceText) {
       const supersededNote =
         supersededRecs.length > 0
@@ -1263,7 +1319,18 @@ async function reconcileTaskUnlocked(
 
   // DG-3: skip the no-change heartbeat row on poller ticks so provenance doesn't
   // grow unboundedly; still record every observation for a human-triggered reconcile.
-  if (changed || !ctx.skipUnchangedProvenance) {
+  // Ruling 187's sibling (pass 37, F37-9): the sync pill reads the newest
+  // observation row, and `changed` only compares the task FILE's `pr`/`github`
+  // blocks — the compare verdict lives nowhere in them. So a pass whose only
+  // change was "`main` moved" wrote no row, and the pill kept rendering the
+  // stale verdict. Live, SHOP-2 rendered **synced** while this same pass's
+  // audit row said `behind_main`. A verdict CHANGE is a change worth
+  // recording; an unchanged verdict still writes nothing on a poller tick, so
+  // the table stays bounded by real changes exactly as before.
+  const syncChanged =
+    latestReconcileSync(db, storeRelativePath(resolveTaskFilePath(ref), ctx.dataRoot)) !==
+    sync;
+  if (changed || syncChanged || !ctx.skipUnchangedProvenance) {
     const details: GithubProvenanceDetails = {
       repo: gh.repo,
       branch,
