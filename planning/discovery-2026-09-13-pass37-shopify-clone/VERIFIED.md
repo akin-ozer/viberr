@@ -296,6 +296,20 @@ Recorded honestly rather than claimed:
 
 ## Environment fact for the next pass — pnpm is not on an agent workspace's PATH
 
+> **CORRECTED LATER THE SAME DAY — I got this call wrong.** I wrote "not a finding" below and
+> filed it as an environment quirk that cost one review round. It was the visible edge of
+> **F37-13**, which cost the pass far more than a round: 75 `command not found` lines, a root
+> `Makefile` whose every target exits 127, an architecture built on a Docker Compose stack that
+> cannot come up, and a REQUIRED reviewer chartered to `make up` that could therefore never
+> approve anything — ten rework rounds on a one-file document, and a Code Reviewer verdict
+> that claimed a pnpm validation run which never happened. What I missed was not the symptom
+> but the three things around it: viberr's own toolchain probe (ruling 182, built to answer
+> "what would an agent's shell actually find here") did not probe `make`, `docker` or any
+> package manager but npm; the reading was reachable only through the controller's opt-in
+> `instance_health`, which it never called; and no agent prompt carried it at all. Rulings 191
+> and 196 are the fix. The paragraphs below stand as written — they are what I actually
+> observed — and the judgment attached to them does not.
+
 Not a finding; worth writing down because it cost this pass a review round. The clone is a
 pnpm monorepo, and agent workspaces have `node` and `npm` but no `pnpm` binary. Agents have to
 reach it through `npx --yes pnpm@9.15.4 …`, which needs npm-registry egress and sometimes an
@@ -339,6 +353,35 @@ pr:
 So an approval cannot be laundered onto code nobody reviewed by pushing after the verdict, and
 a routine base refresh is not mistaken for smuggled work. This was the one part of the GitHub
 pipeline I most expected to find soft, and it is not.
+
+## PR adoption (R16-1) — CORRECT
+
+The one GitHub path still unexercised at the end of the first day, probed deliberately.
+Adoption exists for exactly one case — *Viberr lost track of a PR it had opened* — so I
+produced that case: SHOP-7 had a delivered revision `8a437ec` and PR #5 at the same head, and
+I wiped its `pr:` block out of `task.md` by hand, which is the scenario the rule names.
+
+The reconciler's next pass (≈2 minutes; it polls every 5) restored it, and said what it was
+doing and why:
+
+> Adopted **PR #5** (head `8a437ec`, the delivered revision) as SHOP-7's review PR. **Viberr
+> did not open it**; it was found on branch `shop-7` with this task's delivered head.
+
+The record came back complete (number, state, title, mergeable, headSha) and the audit row
+carries the provenance rather than implying viberr had opened it all along:
+
+```json
+{"repo":"akin-ozer/shopify-clone","branch":"shop-7","prNumber":5,
+ "previousPrNumber":null,"previousState":null,
+ "headSha":"8a437ec567a94b1d9b253c455e1ab8616be57922","source":"reconciler"}
+```
+
+That is the identity rule working: it adopted a PR whose head **is** the delivered revision.
+I did not force the refusal arms live — a merged or head-mismatched PR must be reported as a
+branch COLLISION rather than adopted (the H8 live bug: a fresh VIB-4 adopted a week-old merged
+PR #113 and wore a green "merged" badge for work never delivered). Those arms are covered by
+`pr-adoption.server.test.ts` and by the recorded history that produced the rule; forcing them
+here would have meant corrupting a live task's `workRevision`, which buys less than it costs.
 
 ## Archive and restore — CORRECT
 
