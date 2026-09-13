@@ -4606,6 +4606,26 @@ by rewriting those paragraphs:*
     (`store-health.server.ts`, `rebuilder.server.ts`, `health-snapshot.server.ts`,
     `resources.health.ts`.)
 
+218. **A projection rebuild that fails is retried, and a fault belongs to the file that
+    has it (owner, 2026-09-13, pass 37; F37-38).** Ninety seconds after the corrupt store of
+    ruling 217 was replaced, a transient `disk I/O error` hit SHOP-4's rebuild - once, during
+    `resolvePacket`, and once more a second later from the watcher. The card then read
+    "waiting on you" while the file it mirrors said `waiting: agent`, and it stayed that way
+    until a human pressed Re-scan. Two things were wrong, and one of them was mine.
+    (a) **Nothing retries.** A projection is rebuilt when its file CHANGES; if that one
+    rebuild fails, the file does not change again, so the row keeps whatever it held before,
+    forever, with no surface saying to press anything. The watcher's own debounce queue now
+    re-arms a failed path on a backoff (2s, 5s, 15s, 45s, 120s), resets on the first success
+    and gives up after the last step - past that it is not transient, it stands in the latch,
+    and health calls the instance degraded, which is a person's problem and not a timer's.
+    (b) **Ruling 217's latch held one slot**, so the next file that rebuilt cleared it. That
+    is how health was back to `ok` while SHOP-4's row disagreed with its own file: SHOP-16
+    had projected fine in between. A fault is a fact about ONE file and is over only when
+    THAT file projects again, so the latch is a map, `projectionStore` reports how many files
+    are failing alongside the most recent one, and a success clears only its own path.
+    (`file-watch.service.server.ts`, `store-health.server.ts`, `rebuilder.server.ts`,
+    `health-snapshot.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

@@ -722,3 +722,35 @@ tasks declaring `blockedBy: SHOP-10` are behind a task that is moving again.
 
 The hold note also names the stage the way the board does — "the hold recorded at **Build**" —
 which is what the unit test pinned rather than the stage id it is stored under.
+
+---
+
+## Ruling 218 — the retry is proved by NOT touching the file again
+
+The retry test in `file-watch.service.server.test.ts` is built around the one condition that
+makes the defect real: **after the failure, nothing writes the file again.** A test that
+re-saved the task would pass against code with no retry at all, because the watcher would simply
+rebuild on the new change. So the sequence is:
+
+1. project a task with a one-comment timeline through a live watcher;
+2. take `task_events` out from under the store (a transient write failure's shape) and save a
+   second comment — the rebuild fails and the latch catches it, and the projection is now one
+   comment behind its file;
+3. put `task_events` back and **touch nothing**;
+4. wait for the projection to reach two comments on its own.
+
+```
+# scheduleRetry deleted from rebuildFile
+Error: timed out waiting for: the retry to heal the stale projection
+```
+
+It is asserted on `task_events` rather than on the `waiting` column deliberately: `rebuildTaskFile`
+upserts `task_projections` BEFORE it rewrites the events (F28-D3's own finding), so a failure in
+the events rewrite leaves `waiting` already correct and the timeline stale. Asserting the column
+that happens to be written first would have measured nothing.
+
+The per-file half is canaried twice — once in the rebuilder against two real files where one
+fails and the other succeeds, once at the health body — because 217's version passed its own
+tests while holding a single slot.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6584 tests passed**, `build` green.

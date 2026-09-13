@@ -27,7 +27,11 @@ import {
   rebuildTaskFile,
 } from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
-import { projectionFault } from "./store-health.server";
+import {
+  projectionFault,
+  projectionFaultCount,
+  resetProjectionFaultsForTests,
+} from "./store-health.server";
 import { getTaskDetail } from "./task-query.server";
 
 /** A second project alongside the store's default, for scope tests. */
@@ -1204,6 +1208,59 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     // CANARY: drop the `succeeded()` clear and the instance alarms forever
     // after one bad write, which is what ruling 146 refused to let it do.
     expect(projectionFault()).toBeNull();
+    resetProjectionFaultsForTests();
+  });
+
+  /**
+   * Ruling 218 (F37-38): 217's latch held ONE slot, so any later rebuild that
+   * wrote cleared it. Live, ninety seconds after the corrupt store was
+   * replaced, a transient `disk I/O error` on SHOP-4 left its card reading
+   * "waiting on you" while its file said `waiting: agent` — and health was back
+   * to `ok`, because SHOP-16's file had rebuilt fine in between.
+   */
+  it("keeps one file's fault when a DIFFERENT file projects (ruling 218)", () => {
+    const store = setupTestStore(ctx);
+    resetProjectionFaultsForTests();
+    const uid = store.users.arda.id;
+    const write = (key: string, events: number) =>
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl" }),
+        goal: "Do the thing.",
+        timeline: Array.from({ length: events }, (_, i) =>
+          mkEvent(uid, `2026-08-26T10:0${i}:00.000Z`, `e${i}`),
+        ),
+      });
+    const pathOf = (key: string) =>
+      path.join(store.dataRoot, "projects", store.slug, "tasks", key, "task.md");
+    write("VIB-1", 1);
+    write("VIB-2", 1);
+    rebuildPath(store.db, pathOf("VIB-1"), { dataRoot: store.dataRoot });
+    rebuildPath(store.db, pathOf("VIB-2"), { dataRoot: store.dataRoot });
+
+    // VIB-1 fails against a store that cannot take the write…
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    write("VIB-1", 2);
+    expect(rebuildPath(store.db, pathOf("VIB-1"), { dataRoot: store.dataRoot }).action).toBe(
+      "error",
+    );
+    expect(projectionFaultCount()).toBe(1);
+
+    // …and VIB-2 then projects fine. VIB-1's row is still stale.
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    write("VIB-2", 2);
+    expect(
+      rebuildPath(store.db, pathOf("VIB-2"), { dataRoot: store.dataRoot }).action,
+    ).not.toBe("error");
+    // CANARY: clear the latch wholesale instead of per path and this is 0,
+    // which is the instance reporting itself healthy over a stale row.
+    expect(projectionFaultCount()).toBe(1);
+    expect(projectionFault()!.sourcePath).toContain("VIB-1");
+
+    // Only VIB-1's own success ends it.
+    expect(
+      rebuildPath(store.db, pathOf("VIB-1"), { dataRoot: store.dataRoot }).action,
+    ).not.toBe("error");
+    expect(projectionFaultCount()).toBe(0);
   });
 });
 

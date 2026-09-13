@@ -51,6 +51,9 @@ interface WatcherHandle {
   watcher: FSWatcher;
   fileTimers: Map<string, ReturnType<typeof setTimeout>>;
   dirTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Ruling 218: the per-file rebuild RETRIES in flight, cancelled with the
+   *  rest so a retired watcher cannot rebuild against a retired root. */
+  retryTimers: Map<string, ReturnType<typeof setTimeout>>;
   root: string;
 }
 
@@ -145,6 +148,7 @@ export function startFileWatcher(
     lc.generation += 1;
     cancelAll(existing.fileTimers);
     cancelAll(existing.dirTimers);
+    cancelAll(existing.retryTimers);
     void existing.watcher.close();
   }
 
@@ -152,9 +156,45 @@ export function startFileWatcher(
   const watchedDir = projectsDir(options.dataRoot);
   const fileTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const dirTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Ruling 218 (F37-38): a rebuild that failed is retried, because nothing else
+   * will ever ask again.
+   *
+   * A projection is rebuilt when its file CHANGES. If that one rebuild fails —
+   * a transient `disk I/O error`, a locked store, a full disk — the file does
+   * not change again, so the row keeps whatever it held before, forever, and
+   * "files are truth" quietly stops being true for that task. Live: ninety
+   * seconds of `disk I/O error` left SHOP-4's card reading "waiting on you"
+   * while its file said `waiting: agent`, and it stayed that way until a human
+   * pressed Re-scan. Nobody would have, because nothing said to.
+   *
+   * The backoff is per file and resets on the first success. It gives up after
+   * the last step rather than retrying forever: past that the fault is not
+   * transient, it stands in `projectionFault` and health reports the instance
+   * degraded, which is a person's problem and not a timer's.
+   */
+  const retries = new Map<string, ReturnType<typeof setTimeout>>();
+  const attempts = new Map<string, number>();
+  const RETRY_BACKOFF_MS = [2_000, 5_000, 15_000, 45_000, 120_000];
   const rebuildFile = (absPath: string) => {
+    const failed = (err: Error) => {
+      logger.error("watcher rebuild failed", { path: absPath, err });
+      scheduleRetry(absPath);
+    };
     try {
       const result = rebuildPath(resolveDb(), absPath, { dataRoot: root });
+      // `rebuildPath` catches its own throw and reports `error` rather than
+      // raising — both outcomes leave the row stale, so both retry.
+      if (result.action === "error") {
+        scheduleRetry(absPath);
+        return;
+      }
+      attempts.delete(absPath);
+      const retry = retries.get(absPath);
+      if (retry) {
+        clearTimeout(retry);
+        retries.delete(absPath);
+      }
       if (result.action !== "ignored" && result.action !== "unchanged") {
         logger.info("watcher reprojected file", {
           path: absPath,
@@ -164,12 +204,31 @@ export function startFileWatcher(
         });
       }
     } catch (error) {
-      logger.error("watcher rebuild failed", {
-        path: absPath,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
+      failed(error instanceof Error ? error : new Error(String(error)));
     }
   };
+  function scheduleRetry(absPath: string): void {
+    const attempt = attempts.get(absPath) ?? 0;
+    const delay = RETRY_BACKOFF_MS[attempt];
+    if (delay === undefined) {
+      logger.warn("giving up on a projection rebuild — health reports it instead", {
+        path: absPath,
+        attempts: attempt,
+      });
+      return;
+    }
+    attempts.set(absPath, attempt + 1);
+    const existing = retries.get(absPath);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      retries.delete(absPath);
+      rebuildFile(absPath);
+    }, delay);
+    // Never hold the process open for a retry: a shutdown between attempts is
+    // fine, boot's own rebuild covers it.
+    timer.unref?.();
+    retries.set(absPath, timer);
+  }
 
   /**
    * E13 — a directory vanished. Map it onto the projection rows it backed:
@@ -304,6 +363,7 @@ export function startFileWatcher(
     const current = cache[WATCHER_KEY];
     if (current && current.watcher === watcher) {
       cancelAll(current.fileTimers);
+      cancelAll(current.retryTimers);
       cancelAll(current.dirTimers);
       cache[WATCHER_KEY] = undefined;
     }
@@ -341,7 +401,7 @@ export function startFileWatcher(
   // A successful (re)start supersedes any pending re-arm and is a new generation.
   cancelPendingReArm(lc);
   lc.generation += 1;
-  cache[WATCHER_KEY] = { watcher, fileTimers, dirTimers, root };
+  cache[WATCHER_KEY] = { watcher, fileTimers, dirTimers, retryTimers: retries, root };
   logger.info("file watcher started", { dir: watchedDir, debounceMs: WATCH_DEBOUNCE_MS });
   return watcher;
 }
@@ -367,6 +427,7 @@ export function stopFileWatcher(): void {
   if (!existing) return;
   cancelAll(existing.fileTimers);
   cancelAll(existing.dirTimers);
+  cancelAll(existing.retryTimers);
   void existing.watcher.close();
   cache[WATCHER_KEY] = undefined;
 }

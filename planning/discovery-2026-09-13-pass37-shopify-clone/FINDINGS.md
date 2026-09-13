@@ -2083,3 +2083,56 @@ lines. `audit_events` came back as **0** — its rows had landed in `lost_and_fo
 them were reinserted by matching the `evt_` id prefix against the table's ten columns. The
 canonical markdown was untouched throughout, which is the point: the board, the timelines and
 every verdict came back exactly as they were.
+
+---
+
+## F37-38 · A projection that failed to rebuild once stays wrong forever, and ruling 217's own latch hid it — HIGH
+
+**Found by disbelieving my own fix, ninety seconds after deploying it.** The board's list view
+showed SHOP-4 with the chip **"waiting on you"**. Its file said:
+
+```
+SHOP-4   stage=build    waiting=agent   readiness=ready   validation=failing
+```
+
+The file had been written at 19:58:57. The board still disagreed with it at 20:00:13. Pressing
+**Re-scan** made the chip disappear, which is what proved it was the projection and not the
+renderer.
+
+The log named the cause exactly:
+
+```
+19:58:57  request handler error         disk I/O error  at recordProvenance
+                                                        ← rebuildPath ← reprojectTask ← resolvePacket
+19:58:58  projection rebuild failed     disk I/O error  at agentNamesByProfile
+                                        sourcePath: projects/…/SHOP-4/task.md
+19:58:58  watcher rebuild failed        disk I/O error  at recordProvenance
+```
+
+Two defects, and the second one is mine.
+
+**(a) Nothing retries a failed rebuild.** A projection is rebuilt when its file CHANGES. If that
+single rebuild fails — a transient I/O error, a locked store, a full disk — the file does not
+change again, so the row keeps whatever it held before, indefinitely. "Files are truth" quietly
+stops being true for that task, and the only cure is a human happening to press Re-scan on a
+board that gives them no reason to.
+
+**(b) Ruling 217's latch held one slot.** So health was back to `ok` with `projectionStore: None`
+the whole time SHOP-4's row disagreed with its file — because SHOP-16's file had rebuilt fine in
+between and cleared the slot. The fix I shipped two hours earlier reported the instance healthy
+over exactly the state it was written to catch.
+
+**Fix (ruling 218).**
+
+1. The watcher's own debounce queue re-arms a failed path on a backoff — 2s, 5s, 15s, 45s, 120s
+   — resetting on the first success and giving up after the last step. Past that the fault is
+   not transient: it stands in the latch and health reports the instance degraded, which is a
+   person's problem and not a timer's. Retries are tracked in the watcher handle and cancelled
+   with everything else on stop, so a retired watcher can never rebuild against a retired root.
+2. The latch is a map keyed by source path. A success clears only its own file;
+   `projectionStore` reports `{files, latest}` so a reader can tell one flaky write from a store
+   that stopped accepting them.
+
+Canaries (all proved red): delete `scheduleRetry` and the retry test never converges — the
+timeline stays one comment behind its own file, exactly as SHOP-4 did; clear the latch wholesale
+instead of per path and one file's success reports a healthy instance over another's stale row.

@@ -999,15 +999,15 @@ export function rebuildPath(
   try {
     const taskMatch = TASK_PATH_RE.exec(rel);
     if (taskMatch) {
-      return succeeded(rebuildTaskFile(db, taskMatch[1]!, taskMatch[2]!, options));
+      return succeeded(rel, rebuildTaskFile(db, taskMatch[1]!, taskMatch[2]!, options));
     }
     const projectMatch = PROJECT_PATH_RE.exec(rel);
     if (projectMatch) {
-      return succeeded(rebuildProjectFile(db, projectMatch[1]!, options));
+      return succeeded(rel, rebuildProjectFile(db, projectMatch[1]!, options));
     }
     const goalMatch = GOAL_PATH_RE.exec(rel);
     if (goalMatch) {
-      return succeeded(rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options));
+      return succeeded(rel, rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options));
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
@@ -1033,11 +1033,12 @@ export function rebuildPath(
   }
 }
 
-/** Ruling 217: a rebuild that WROTE clears the latch — the mirror tracks the
- *  files again. An `ignored` path is not a projection source and says nothing
- *  either way, so it never clears. */
-function succeeded(result: RebuildFileResult): RebuildFileResult {
-  if (result.action !== "error") clearProjectionFault();
+/** Ruling 217/218: a rebuild that WROTE clears THIS FILE's fault — the mirror
+ *  tracks it again. An `ignored` path is not a projection source and says
+ *  nothing either way, so it never clears. Nor does a success here speak for
+ *  any other file: that was ruling 217's own defect, fixed by 218. */
+function succeeded(rel: string, result: RebuildFileResult): RebuildFileResult {
+  if (result.action !== "error") clearProjectionFault(rel);
   return result;
 }
 

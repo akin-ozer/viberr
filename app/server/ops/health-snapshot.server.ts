@@ -15,6 +15,7 @@ import { maintenanceState, type MaintenanceState } from "./maintenance.server";
 import { cachedToolchain, type Toolchain } from "./toolchain.server";
 import {
   projectionFault,
+  projectionFaultCount,
   type ProjectionFault,
 } from "~/server/projections/store-health.server";
 
@@ -68,7 +69,7 @@ export interface HealthSnapshot {
    * minutes every write was failing, which is exactly why a count is not a
    * verdict about whether the mirror still follows the record.
    */
-  projectionStore: ProjectionFault | null;
+  projectionStore: { files: number; latest: ProjectionFault } | null;
   watcher: boolean;
   kbWatcher: boolean;
   /** Who holds the single-writer lock on this data root (B-FD1/F18-5).
@@ -145,7 +146,10 @@ export function healthSnapshot(
   // the one fault this product cannot afford to report as healthy — "files are
   // truth" is only useful while the mirror follows them. Live: `SQLITE_CORRUPT`
   // under the process, every task page 500ing, and this array empty.
-  const projectionStore = projectionFault();
+  const latestFault = projectionFault();
+  const projectionStore = latestFault
+    ? { files: projectionFaultCount(), latest: latestFault }
+    : null;
   if (projectionStore) degraded.push("projections");
 
   // Ruling 146 (owner, 2026-09-06) — SUPERSEDES the F32-4/F32-9 entries that

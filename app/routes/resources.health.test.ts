@@ -33,7 +33,10 @@ interface HealthBody {
   ok: boolean;
   status: "ok" | "degraded" | "down";
   degraded?: string[];
-  projectionStore?: { sourcePath: string; message: string; failures: number } | null;
+  projectionStore?: {
+    files: number;
+    latest: { sourcePath: string; message: string; failures: number };
+  } | null;
   projections?: { projects: number; tasks: number };
   watcher?: boolean;
   kbWatcher?: boolean;
@@ -138,7 +141,7 @@ describe("/resources/health — honest status (gap 17)", () => {
    * to the log on every failed rebuild and had nowhere to put the fact.
    */
   it("names a projection that cannot be rebuilt from the files (ruling 217)", async () => {
-    const { recordProjectionFault, clearProjectionFault } = await import(
+    const { recordProjectionFault, resetProjectionFaultsForTests } = await import(
       "~/server/projections/store-health.server"
     );
     try {
@@ -153,9 +156,12 @@ describe("/resources/health — honest status (gap 17)", () => {
       expect(body.status).toBe("degraded");
       expect(body.degraded).toContain("projections");
       expect(body.projectionStore).toMatchObject({
-        sourcePath: "projects/shop/tasks/SHOP-10/task.md",
-        message: "database disk image is malformed",
-        failures: 1,
+        files: 1,
+        latest: {
+          sourcePath: "projects/shop/tasks/SHOP-10/task.md",
+          message: "database disk image is malformed",
+          failures: 1,
+        },
       });
       // The row counts keep reading fine through it, which is the reason a
       // count was never enough on its own.
@@ -166,7 +172,38 @@ describe("/resources/health — honest status (gap 17)", () => {
       const ready = await probe("?probe=readiness");
       expect(ready.status).toBe(503);
     } finally {
-      clearProjectionFault();
+      resetProjectionFaultsForTests();
+    }
+  });
+
+  /**
+   * Ruling 218 (F37-38): the defect in 217's own first version. It held ONE
+   * slot, so the next file that projected fine cleared it — and ninety seconds
+   * after the corruption above was repaired, a transient `disk I/O error` left
+   * SHOP-4's card reading "waiting on you" while its file said `waiting:
+   * agent`, with health back to `ok` because some other file had rebuilt in
+   * between. A fault is a fact about ONE file.
+   */
+  it("a different file projecting does not clear another file's fault (ruling 218)", async () => {
+    const { recordProjectionFault, clearProjectionFault, resetProjectionFaultsForTests } =
+      await import("~/server/projections/store-health.server");
+    try {
+      recordProjectionFault("projects/shop/tasks/SHOP-4/task.md", "disk I/O error");
+      // CANARY: make `clearProjectionFault` ignore its argument and clear
+      // everything, and this instance calls itself healthy while SHOP-4's row
+      // still says the opposite of its file.
+      clearProjectionFault("projects/shop/tasks/SHOP-16/task.md");
+      const { body } = await probe();
+      expect(body.status).toBe("degraded");
+      expect(body.projectionStore).toMatchObject({
+        files: 1,
+        latest: { sourcePath: "projects/shop/tasks/SHOP-4/task.md" },
+      });
+      // …and the file's OWN success is what ends it.
+      clearProjectionFault("projects/shop/tasks/SHOP-4/task.md");
+      expect((await probe()).body.status).toBe("ok");
+    } finally {
+      resetProjectionFaultsForTests();
     }
   });
 
@@ -175,7 +212,7 @@ describe("/resources/health — honest status (gap 17)", () => {
       "~/server/projections/store-health.server"
     );
     recordProjectionFault("projects/shop/tasks/SHOP-10/task.md", "disk I/O error");
-    clearProjectionFault();
+    clearProjectionFault("projects/shop/tasks/SHOP-10/task.md");
     const { body } = await probe();
     // A latch that outlived its fault would alarm forever, which is the thing
     // ruling 146 refused to let this endpoint do.

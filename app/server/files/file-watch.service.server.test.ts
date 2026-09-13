@@ -8,6 +8,10 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import {
+  projectionFaultCount,
+  resetProjectionFaultsForTests,
+} from "~/server/projections/store-health.server";
 import { projectDir, taskDir } from "./file-store-root.server";
 import {
   isFileWatcherAlive,
@@ -19,6 +23,7 @@ import {
 const ctx = createTestDbContext();
 afterEach(() => {
   stopFileWatcher();
+  resetProjectionFaultsForTests();
   ctx.cleanup();
 });
 
@@ -164,6 +169,73 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
       "task.md reprojected after edit",
     );
   }, 15000);
+});
+
+/**
+ * Ruling 218 (F37-38). A projection is rebuilt when its file CHANGES. If that
+ * one rebuild fails, the file does not change again — so the row keeps whatever
+ * it held before, forever. Live: ninety seconds of `disk I/O error` left
+ * SHOP-4's card reading "waiting on you" while its own file said `waiting:
+ * agent`, and it stayed wrong until a human pressed Re-scan. Nobody would have,
+ * because nothing on any surface said to.
+ */
+describe("a failed rebuild is retried (ruling 218)", () => {
+  it("heals a stale projection whose ONE rebuild failed, with no further file change", async () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.arda.id;
+    const comment = (at: string, text: string) => ({
+      occurredAt: at,
+      type: "comment" as const,
+      actor: { kind: "human" as const, userId: uid, nameHint: null },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text,
+    });
+    const events = (): number =>
+      Number(
+        store.db
+          .prepare(
+            `SELECT count(*) AS c FROM task_events WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(store.slug, "VIB-1")!.c,
+      );
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [comment("2026-08-26T10:00:00.000Z", "first")],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(events()).toBe(1);
+
+    await startWatcherReady(store);
+
+    // The store cannot take the events rewrite for the whole first attempt —
+    // the shape a transient `disk I/O error` has. `content_hash` is written
+    // LAST (F28-D3), so the row is left stale AND re-readable.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [
+        comment("2026-08-26T10:00:00.000Z", "first"),
+        comment("2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+    await waitFor(
+      () => projectionFaultCount() > 0,
+      "the failing rebuild to be latched",
+      () => pokeDir(taskDir(store.slug, "VIB-1", store.dataRoot)),
+    );
+
+    // The store recovers. NOTHING touches the file again — that is the whole
+    // point: only the retry can bring this row back to the record.
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    // CANARY: delete `scheduleRetry` from `rebuildFile` and this never
+    // converges — the timeline stays one comment behind its own file, which is
+    // exactly what SHOP-4 did until a human pressed Re-scan.
+    await waitFor(() => events() === 2, "the retry to heal the stale projection");
+    expect(projectionFaultCount()).toBe(0);
+  });
 });
 
 describe("watcher liveness (E8)", () => {
