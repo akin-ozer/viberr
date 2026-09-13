@@ -725,3 +725,28 @@ No run on any other model, in either direction, across the whole pass. The speci
 definitions carry `effort: max` (nine profiles); the controller's own settings carry opus at
 high. The policy was configured once, through the controller's own agent editor, and has held
 without a single exception since.
+
+## "Files are truth" — re-tested after a corrupt store, a `.recover`, and six restarts — CORRECT
+
+The strongest version of this test the pass has had, because of what the projection had been
+through: `SQLITE_CORRUPT` under a live process (F37-37), a rebuild with `sqlite3 .recover`, 2128
+audit rows reinserted by hand out of `lost_and_found`, a transient `disk I/O error` that left one
+row stale (F37-38), and a `resolvePacket` that died inside a catch (F37-39).
+
+Viberr's own scoped rescan reprojects every canonical file in a project and reports what changed.
+If the mirror already matches the files, nothing changes:
+
+```
+project projection rescan complete
+  slug: shopify-clone-platform
+  projects: 1  tasks: 16  changed: 0  unchanged: 24  removed: 0  errors: 0  durationMs: 14
+```
+
+**24 files, 0 changed, 0 errors.** Every task row, the project row and all seven goal rows already
+agreed with the markdown they are derived from. The board, the timelines, every verdict and every
+`rounds` count came back exactly as the files hold them — which is the whole reason the canonical
+record is markdown and SQLite is only a mirror.
+
+The one row that had NOT matched was SHOP-4's, twenty minutes earlier, and that was found by the
+same method: read the file, read the board, compare, then press Re-scan and watch the chip
+disappear. It is now rulings 218 and 219.
