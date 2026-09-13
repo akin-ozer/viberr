@@ -584,3 +584,48 @@ github.branch_update.acceptance {"status":"already_current"}
 
 — then Triage → Design with the Platform Architect engaged. The dependency engine did what the
 acceptance implied, with no human step in between.
+
+## A host-level crash nobody planned, and the two recoveries it exercised
+
+At 16:11:58 the container process exited — cleanly (`exit=0`, `oom=false`, `RestartCount=1`),
+with no shutdown log, mid-request. Not viberr: there is no `process.exit(0)` anywhere in
+`app/` (only `exit(1)` on a boot refusal), and at that moment this host was running a 14-agent
+workflow beside a full `npm test`. The same pressure shows up inside the app a moment later as
+`Codex Exec exited with signal SIGBUS`. Recorded as an ENVIRONMENT event, not a finding — but it
+made two recovery paths run for real, unplanned, which is better evidence than a probe.
+
+**Boot recovery, second time today.** Three in-flight runs (SHOP-4 primary, SHOP-15 reviewer,
+SHOP-10 primary) were finalized as interrupted, each with its own note naming its own run id,
+and each task's operator was re-invoked. The stale writer lock was taken over with the previous
+holder's identity logged rather than silently stolen:
+
+```
+warn  taking over a stale data-root writer lock  holder={pid:7,bootId:bd6ab826…,startedAt:15:24:09}  force:false
+info  data-root writer lock acquired             bootId=38021821…
+```
+
+**The failure packet, and `block_on_policy` end to end.** SHOP-4's re-invoked operator hit the
+SIGBUS and viberr opened a blocked packet that says what happened, what it did NOT do, and what
+each option will do:
+
+> The operator run did not complete: Codex execution failed. … **No coordination was
+> performed.** Re-run it; if it fails the same way, read the run's console for the cause.
+> *What the provider reported:* `Codex Exec exited with signal SIGBUS:`
+
+with the provider's line also carried as a typed observation (`k: Provider said`, `code: true`),
+and three options: **Re-run the operator now** (recommended — "Closes this decision and starts a
+fresh operator run. If it fails again you get a new decision packet"), Redirect with new
+guidance, Hold.
+
+I picked the recommendation on the task page. The record then read:
+
+> **Decision:** re-run the operator. No policy or credential was changed.
+
+and a fresh operator run started. That is ruling 200(h) working on a live task: `block_on_policy`
+is a RECOVERY choice, so it is in `PROCESS_ONLY_OPTION_KINDS` and wrote no contract amendment —
+the task's goal is untouched, because "I fixed the environment, carry on" is not a change to what
+the work is.
+
+**A number I checked instead of trusting.** The board badge in a 0.7-scale screenshot read as
+"34" against 15 task files. Read from the DOM it is `Board14`: 15 rows in `task_projections`, one
+archived, 14 active. The projection and the files agree; the screenshot did not.
