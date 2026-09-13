@@ -4911,3 +4911,111 @@ describe("F37-11: the operator snapshot carries the base compare", () => {
     expect(snapOf().baseBehindBy).toBe(0);
   });
 });
+
+/**
+ * Ruling 193 (F37-14, live): a required reviewer chartered to bring a Docker
+ * stack up ran on a host with no `make` and no Docker. It said so in its own
+ * words — "an environment/repository-baseline blocker, not a discovered
+ * document-scope defect" — and the turn doctrine had exactly one answer to a
+ * request-changes, so the deliverer was sent back to rework a one-file document
+ * round after round over a wall no revision could move. The snapshot showed
+ * only the CURRENT revision's verdict, so every round looked like the first.
+ */
+describe("ruling 193: the snapshot counts a reviewer's successive request_changes", () => {
+  const head = "a".repeat(40);
+
+  function writeVerdicts(
+    verdicts: { revisionId: string; result: "approve" | "request_changes"; at: string }[],
+  ): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        workRevision: {
+          id: verdicts.at(-1)?.revisionId ?? "rev_1",
+          headSha: head,
+          treeSha: "t".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-13T09:00:00.000Z",
+          sourceProfileId: "dev",
+        },
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        verdicts: verdicts.map((v) => ({
+          profileId: "reviewer",
+          revisionId: v.revisionId,
+          headSha: head,
+          result: v.result,
+          reason: "r",
+          at: v.at,
+        })),
+      }),
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function reviewerRow() {
+    const snap = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+    return snap.reviewers.find((r) => r.profileId === "reviewer");
+  }
+
+  it("counts nothing before the reviewer has weighed in", () => {
+    writeVerdicts([]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(0);
+  });
+
+  it("counts one for an ordinary first request_changes", () => {
+    writeVerdicts([{ revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" }]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
+  });
+
+  it("counts the REVISIONS, so a re-run on the same revision is still one objection", () => {
+    // CANARY: count verdict rows instead of revision ids and this reads 2 —
+    // a retry of the same reviewer on the same revision would escalate.
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:20:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
+  });
+
+  it("reaches 2 when the objection survives a rework — the escalation signal", () => {
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_2", result: "request_changes", at: "2026-09-13T09:30:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(2);
+  });
+
+  it("an approve resets the run — history before it is not held against the work", () => {
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_2", result: "approve", at: "2026-09-13T09:30:00.000Z" },
+      { revisionId: "rev_3", result: "request_changes", at: "2026-09-13T09:50:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
+  });
+
+  it("a standing approval counts zero", () => {
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_2", result: "approve", at: "2026-09-13T09:30:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(0);
+  });
+});

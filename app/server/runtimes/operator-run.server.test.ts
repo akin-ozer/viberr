@@ -1945,6 +1945,29 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     ...over,
   });
 
+  /**
+   * Ruling 193 (F37-14, live): the doctrine had ONE answer to a
+   * request-changes — re-prompt the deliverer — and a reviewer can request
+   * changes for a reason no revision can satisfy. A required reviewer
+   * chartered to bring a Docker stack up ran on a host with no `make` and no
+   * Docker, said so plainly, and the work went back for rework round after
+   * round. The missing arm is here.
+   */
+  it("ruling 193: a second rework on the same reviewer stops being a rework", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    // CANARY: delete the arm and the line above it — "the deliverer owes NEW
+    // work" — is the only instruction the turn carries for a request-changes.
+    expect(prompt).toContain("consecutiveRequestChanges");
+    expect(prompt).toContain("the deliverer owes NOTHING");
+    expect(prompt).toContain("`open_packet` for the person who owns the task");
+    // It names the three real exits, so the packet is not an empty escalation.
+    expect(prompt).toContain("drop or replace that required reviewer");
+    expect(prompt).toContain("A reviewer that cannot pass is a decision, not a defect.");
+    // And it points at the inventory the same prompt now carries (ruling 191)
+    // rather than asking the model to intuit what is installed.
+    expect(prompt).toContain("your shell inventory says is not installed on this host");
+  });
+
   it("F15-14: the entry stage carries the gate — no forward move on a vague goal", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
     expect(prompt).toContain("TRIAGE QUALITY GATE");

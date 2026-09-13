@@ -41,6 +41,7 @@ import {
   type PacketOptionKind,
   type Recommendation,
   type RecommendationKind,
+  type ReviewVerdict,
   type TaskFileEvent,
   type TaskPacket,
   unpushedRevisionOf,
@@ -1637,6 +1638,14 @@ export interface OperatorTaskSnapshot {
     role: string;
     backend: string;
     verdict: "approve" | "request_changes" | null;
+    /** Ruling 193: successive delivered revisions this reviewer has requested
+     *  changes on, counted back from its newest verdict and stopping at its
+     *  first `approve`. `0` when its newest verdict is an approval or it has
+     *  not weighed in. Two or more means the same objection survived a rework,
+     *  which is when re-prompting the deliverer stops being the move. Optional
+     *  so hand-built fixtures need not restate it; `operatorSnapshot` always
+     *  sets it. */
+    consecutiveRequestChanges?: number;
   }[];
   /** Ruling 178: the reviewers the PROJECT requires, per review stage,
    *  resolved to the names the acceptance gate prints. Each must hold an
@@ -2014,6 +2023,27 @@ const liveRunRowsSchema = z.array(
 );
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
+/**
+ * Ruling 193: successive delivered revisions `profileId` has requested changes
+ * on, newest first, stopping at its first `approve` (or at the start of its
+ * history). REVISIONS are counted, not verdicts: a reviewer re-run twice on the
+ * same revision has objected once, and inflating that would read a retry as an
+ * escalation.
+ */
+export function consecutiveRequestChanges(
+  fm: { verdicts: readonly ReviewVerdict[] },
+  profileId: string,
+): number {
+  const mine = fm.verdicts.filter((v) => v.profileId === profileId);
+  const revisions = new Set<string>();
+  for (let i = mine.length - 1; i >= 0; i -= 1) {
+    const v = mine[i]!;
+    if (v.result !== "request_changes") break;
+    revisions.add(v.revisionId);
+  }
+  return revisions.size;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2117,6 +2147,13 @@ export function operatorSnapshot(
         role: r.role,
         backend: r.backend,
         verdict: verdictOf(r.profileId),
+        // Ruling 193: how many successive DELIVERED REVISIONS this reviewer
+        // has requested changes on. One is ordinary review. A run of them on
+        // revisions that keep changing is the shape of an objection the work
+        // cannot satisfy, and the operator could not see it: the snapshot
+        // showed only the current revision's verdict, so every round looked
+        // like the first.
+        consecutiveRequestChanges: consecutiveRequestChanges(fm, r.profileId),
       }));
     })(),
     // Ruling 178: from the project file, resolved the way the gate prints it.

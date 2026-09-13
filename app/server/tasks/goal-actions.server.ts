@@ -112,13 +112,26 @@ function linkGoalText(
   goal: GoalFrontmatter,
   link: GoalLink,
   previous: GoalLink | null,
+  /** Ruling 192: the body to carry forward instead of the link's frozen copy —
+   *  a retry's own task text, which is the contract everyone has been working
+   *  to. Absent (a first start) leaves the declared text. */
+  body?: string,
 ): string {
   const head =
     `Part of goal ${goal.id} (${goal.title}), link ${link.index} of ${goal.links.length}.` +
     (previous?.taskKey
       ? ` The previous link was carried by ${previous.taskKey} (${previous.status}).`
       : "");
-  return `${head}\n\n${link.goal.trim() || link.title}`;
+  return `${head}\n\n${(body ?? "").trim() || link.goal.trim() || link.title}`;
+}
+
+/** The chain header `linkGoalText` prepends, so a task's goal can be carried
+ *  into a NEW task without stacking a second one (the count, and which task
+ *  carried the previous link, have both moved on). */
+const CHAIN_HEADER_RE = /^Part of goal [^\n]*\n\n/;
+
+export function stripChainHeader(goal: string): string {
+  return goal.replace(CHAIN_HEADER_RE, "").trim();
 }
 
 // ------------------------------------------------------------------ create
@@ -624,7 +637,7 @@ export async function updateGoal(
   // shape as reconcileGoal's advance path.
   if (retryLinkIndex !== null) {
     try {
-      await startLinkTask(
+      const started = await startLinkTask(
         db,
         input.projectSlug,
         input.goalId,
@@ -633,6 +646,35 @@ export async function updateGoal(
         ctx,
         "retry",
       );
+      if (started === null) {
+        // Ruling 194 (F37-16): `startLinkTask` declines silently when the
+        // chain is no longer active — and a reconcile fired by the very
+        // archive that failed this link lands exactly there, because it is
+        // fire-and-forget. The timeline already carries "Link N retried by X";
+        // without this the record claims a retry that started nothing, no task
+        // exists, and nobody is told. The THROW arm below has said so since it
+        // was written; the decline had no arm at all.
+        await updateGoalFile(goalRef(ctx, input.projectSlug, input.goalId), (goal) => {
+          const link = goal.frontmatter.links.find((l) => l.index === retryLinkIndex);
+          if (!link || link.taskKey !== null) return;
+          if (goal.frontmatter.status === "active") goal.frontmatter.status = "attention";
+          link.note = "The retry did not start: the chain was redirected while it ran.";
+          return (
+            `Retry of link ${retryLinkIndex} did NOT start a task — the chain stopped being ` +
+            `active while the retry ran. The link is still failed; retry it again.`
+          );
+        });
+        const declined = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
+        if (declined) {
+          notifyCreator(
+            db,
+            declined.parsed.frontmatter,
+            input.projectSlug,
+            "A link retry did not start its task. Retry the link again.",
+          );
+        }
+        rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
+      }
     } catch (error) {
       logger.error("goal link retry task creation failed", {
         goalId: input.goalId,
@@ -780,10 +822,23 @@ async function startLinkTaskLocked(
   const previous =
     fm.links.filter((l) => l.index < linkIndex).sort((a, b) => b.index - a.index)[0] ??
     null;
+  // Ruling 192: a RETRY re-materialises the work from the task that just
+  // failed, not from the link's frozen copy. An active link's title and goal
+  // are settled in the goal file (ruling 155) while the TASK's are not — a
+  // decision packet, an operator edit or a person can rewrite them — so on a
+  // board where those diverge the old behaviour handed the retry a contract
+  // everyone had moved past, silently, with nothing in the timeline saying a
+  // correction had been dropped. Live pass 37 the two copies of SHOP-2's
+  // contract disagreed about which task owns `packages/contracts`.
+  const priorTask =
+    mode === "retry" && link.taskKey
+      ? readTaskFile({ projectSlug, taskKey: link.taskKey, dataRoot: ctx.dataRoot })
+      : null;
+  const carried = priorTask ? stripChainHeader(priorTask.parsed.goal) : "";
   const linkInput: CreateTaskInput = {
     projectSlug,
-    title: link.title,
-    goal: linkGoalText(fm, link, previous),
+    title: priorTask ? priorTask.parsed.frontmatter.title : link.title,
+    goal: linkGoalText(fm, link, previous, carried),
     goalRef: { goalId, linkIndex },
   };
   // Ruling 131(c): the link's declared wait is copied onto the task and
@@ -804,7 +859,13 @@ async function startLinkTaskLocked(
     target.taskKey = created.key;
     target.status = "active";
     target.note = null;
-    return `Link ${linkIndex} (${target.title}) started as ${created.key}${target.blockedBy.length > 0 ? `, waiting on ${target.blockedBy.join(", ")}` : ""}.`;
+    // Ruling 192: say so when the retry carried the failed task's own text
+    // rather than the link's — a silent substitution either way is the defect.
+    const carriedNote =
+      priorTask && carried && carried !== link.goal.trim()
+        ? `, carrying ${priorTask.parsed.frontmatter.key}'s own text rather than the link's original`
+        : "";
+    return `Link ${linkIndex} (${target.title}) started as ${created.key}${target.blockedBy.length > 0 ? `, waiting on ${target.blockedBy.join(", ")}` : ""}${carriedNote}.`;
   });
   if (!attached) {
     // The chain went non-active mid-create. The task exists and carries a

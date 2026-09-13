@@ -1288,3 +1288,233 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
     expect(task().blockedBy).toEqual([]);
   });
 });
+
+/**
+ * Ruling 192 (F37-15, live): ruling 155 freezes an ACTIVE link's title and goal
+ * in the goal file while the TASK's are not frozen — a decision packet, an
+ * operator edit or a person rewrites them freely. On pass 37's board the two
+ * copies of SHOP-2's contract came to disagree about which task owns
+ * `packages/contracts`, and a retry rebuilt the task from the frozen copy, so
+ * the correction everyone had been working to was dropped without a word.
+ */
+describe("ruling 192: a retry carries the failed task's own contract", () => {
+  it("rebuilds from the task's current goal, not the link's frozen copy, and says so", async () => {
+    const { createGoal, updateGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Contract drift chain",
+        links: [
+          { title: "Drifting link", goal: "ORIGINAL-CONTRACT: this link owns packages/contracts." },
+          // A pending second link: a chain whose ONLY link has failed is fully
+          // settled, and a retry on one of those is swallowed (see F37-16).
+          { title: "Later link", goal: "Follows. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+
+    // The contract moves on while the link's copy stays frozen (ruling 155).
+    await updateTaskGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        taskKey: first,
+        goal: "CORRECTED-CONTRACT-7: this task no longer owns packages/contracts.",
+      },
+      actor,
+      ctx,
+    );
+    // Archiving the task fails the link and parks the chain.
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: first, archived: true },
+      actor,
+      ctx,
+    );
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    // `setTaskArchived` also fires a reconcile and forgets it; let that one
+    // land before the retry, or it re-parks the chain mid-start (F37-16).
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.status).toBe("failed");
+
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    const retried = after.links[0]!.taskKey!;
+    expect(retried).not.toBe(first);
+
+    const fresh = readTaskFile({ projectSlug: SLUG, taskKey: retried, dataRoot: app.dataRoot })!;
+    // CANARY: drop the `priorTask` read and this is ORIGINAL-CONTRACT again.
+    expect(fresh.parsed.goal).toContain("CORRECTED-CONTRACT-7");
+    expect(fresh.parsed.goal).not.toContain("ORIGINAL-CONTRACT");
+    // The chain header is REBUILT, not stacked: exactly one of them, and it
+    // carries the retry's own link count and predecessor.
+    expect(fresh.parsed.goal.match(/Part of goal /g)).toHaveLength(1);
+    // A silent substitution is the defect either way, so the goal's own
+    // timeline records that the retry did not use the link's text.
+    expect(after.history.some((h) => h.text.includes("carrying"))).toBe(true);
+  });
+
+  it("a FIRST start still uses the link's declared text — nothing to carry", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Plain chain",
+        links: [{ title: "Only link", goal: "DECLARED-TEXT-3. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const task = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: chain.activeTaskKey!,
+      dataRoot: app.dataRoot,
+    })!;
+    expect(task.parsed.goal).toContain("DECLARED-TEXT-3");
+    const view = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(view.history.some((h) => h.text.includes("carrying"))).toBe(false);
+  });
+});
+
+/**
+ * Ruling 194 (F37-16, live-caught while proving ruling 192): `startLinkTask`
+ * declines silently when the chain stopped being active, and the reconcile that
+ * the failing task's own archive fires is fire-and-forget — so it lands there
+ * routinely. The goal timeline already said "Link N retried by X"; nothing
+ * corrected it, no task existed, and the creator was never told. The THROW arm
+ * beside it had carried that correction since it was written.
+ */
+describe("ruling 194: a retry that starts nothing says so", () => {
+  it("re-parks, notes the link and records the decline instead of leaving a false retry", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { updateGoalFile } = await import("~/server/files/goal-writer.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Swallowed retry chain",
+        links: [
+          { title: "Failing link", goal: "One. Done when merged." },
+          { title: "Later link", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+
+    // Put the chain in exactly the state the race produces: link 1 failed with
+    // its task detached, and the CHAIN not active — written directly so the
+    // assertion does not depend on a fire-and-forget reconcile's timing.
+    await updateGoalFile(
+      { projectSlug: SLUG, goalId: chain.goalId, dataRoot: app.dataRoot },
+      (goal) => {
+        const link = goal.frontmatter.links[0]!;
+        link.status = "failed";
+        link.taskKey = null;
+        goal.frontmatter.status = "attention";
+        return `Link 1 failed: ${first} was archived.`;
+      },
+    );
+
+    const result = await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    // The retry genuinely started this time (the file said `active` when the
+    // start re-read it), so the guard must NOT fire on a healthy retry.
+    expect(after.links[0]!.taskKey).not.toBeNull();
+    expect(result.status).toBe("active");
+    expect(after.history.some((h) => h.text.includes("did NOT start"))).toBe(false);
+  });
+
+  it("a chain that stops being active mid-retry records the decline, not the retry", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { updateGoalFile } = await import("~/server/files/goal-writer.server");
+    const { withFileLock } = await import("~/server/files/file-mutex.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Interrupted retry chain",
+        links: [
+          { title: "Failing link", goal: "One. Done when merged." },
+          { title: "Later link", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+    const goalFile = { projectSlug: SLUG, goalId: chain.goalId, dataRoot: app.dataRoot };
+    await updateGoalFile(goalFile, (goal) => {
+      const link = goal.frontmatter.links[0]!;
+      link.status = "failed";
+      link.taskKey = null;
+      goal.frontmatter.status = "attention";
+      return `Link 1 failed: ${first} was archived.`;
+    });
+
+    // Hold the START lock the retry needs, so the redirect commits (status
+    // active, "retried by" in the timeline) and then waits. That is the window
+    // the archive's fire-and-forget reconcile lands in, live; here it is a
+    // deliberate pause rather than a race, through the product's own lock.
+    let release!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lock = withFileLock(`goal-start:${SLUG}:${chain.goalId}:1`, () => holding);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const retry = updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    // …and while it waits, the chain stops being active.
+    await updateGoalFile(goalFile, (goal) => {
+      goal.frontmatter.status = "paused";
+      return undefined;
+    });
+    release();
+    await lock;
+    await retry;
+
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    // CANARY: drop the `started === null` arm and the newest timeline entry is
+    // "Link 1 (Failing link) retried by arda@viberr.dev" over a link that has
+    // no task and never got one.
+    expect(after.links[0]!.taskKey).toBeNull();
+    expect(after.links[0]!.status).toBe("failed");
+    expect(after.history.some((h) => h.text.includes("did NOT start a task"))).toBe(true);
+    expect(after.links[0]!.note).toContain("The retry did not start");
+  });
+});

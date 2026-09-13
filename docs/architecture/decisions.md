@@ -4194,6 +4194,58 @@ by rewriting those paragraphs:*
     (`toolchain.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
     `controller-run.server.ts`.)
 
+192. **A retry rebuilds the work from the task that failed, not from the link's frozen
+    copy (owner, 2026-09-13, pass 37; F37-15, amends ruling 155).** Ruling 155 settles an
+    ACTIVE link's title and goal in the goal file the moment work starts — correctly: a
+    goal edit must not redirect work in flight. The TASK's title and goal are not settled
+    by anything: a decision packet (ruling 189), an operator's `set_goal`, or a person
+    rewrites them whenever the contract moves. So the two copies drift, and pass 37's
+    board drifted far: `goal-2` link 1 still said SHOP-2 owns `packages/contracts` and
+    publishes the identity schemas there, while SHOP-2's own goal — rewritten when the
+    controller gave that ownership to SHOP-9 — said it must not edit `packages/contracts`
+    at all. `retry_link` then rebuilt the task from the link, so the correction everyone
+    had been working to was dropped, silently, at the worst possible moment. A retry now
+    carries the failed task's own title and goal, with the chain header rebuilt rather
+    than stacked (the link count and the previous link's carrier have both moved on), and
+    the goal's timeline says when it did: a silent substitution is the defect in either
+    direction. A FIRST start is unchanged — there is nothing to carry.
+    (`goal-actions.server.ts`.)
+
+193. **A reviewer that cannot pass is a decision, not a defect (owner, 2026-09-13, pass 37;
+    F37-14).** The turn doctrine had exactly one answer to a request-changes: "the deliverer
+    owes NEW work — `run_agent` the delivering profile with that steer as its prompt." A
+    reviewer can request changes for a reason no revision can satisfy, and pass 37's did:
+    a required Integration Verifier chartered to bring a Docker stack up, on a host with
+    neither `make` nor Docker, reporting in its own words "an environment/repository-baseline
+    blocker, not a discovered document-scope defect". The coordinator followed the doctrine
+    and sent the deliverer back to rework a one-file document, round after round, past the
+    point where a second reviewer had already approved the same revision. Two things were
+    missing. The operator's snapshot showed only the CURRENT revision's verdicts, so every
+    round looked like the first — it now carries `consecutiveRequestChanges` per reviewer,
+    counting REVISIONS and not verdict rows (a reviewer re-run on the same revision has
+    objected once, and inflating that would read a retry as an escalation), reset by that
+    reviewer's first `approve`. And the doctrine gains the arm it lacked: at two or more,
+    ask whether the deliverable can satisfy the objection AT ALL, and when the reviewer
+    names something outside the work — a tool the shell inventory says is absent (ruling
+    191), a baseline the repository does not have, a decision nobody has made — say so in
+    one comment and `open_packet`, naming the three real exits: drop or replace the
+    required reviewer, accept past the gate, or fund the missing baseline as its own task.
+    (`operator-actions.server.ts`, `operator-run.server.ts`.)
+
+194. **A retry that starts nothing says so (owner, 2026-09-13, pass 37; F37-16).**
+    `startLinkTask` declines silently when the chain is no longer active, and the reconcile
+    fired by the very archive that failed the link is fire-and-forget — so it lands in that
+    window as a matter of course. The redirect had already committed "Link N retried by X"
+    to the goal's timeline. The result was a record of a retry that created no task, over a
+    link still marked failed, with the creator never told; the sibling THROW arm had carried
+    exactly that correction since it was written, and the decline had no arm at all. A
+    declined retry now re-parks the chain to `attention`, notes the link ("The retry did not
+    start: the chain was redirected while it ran."), records the decline in the goal's
+    timeline naming what to do (retry it again), and notifies the creator. Found while
+    proving ruling 192, not by reading the code: the ruling-192 test could not get a retry to
+    produce a task until the archive hook was allowed to settle first.
+    (`goal-actions.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

@@ -867,3 +867,62 @@ controller turn**. Three details are deliberate:
 
 Proven red four ways — delete the probe entries and the absences stop being named; delete
 each of the three injections and that surface's test fails.
+
+## F37-14 · Viberr's turn doctrine has one answer to a request-changes, so a reviewer that cannot pass loops the work forever — HIGH
+
+**What happened.** SHOP-7 is a **document-only** task: one file, `docs/decisions/payment-provider.md`, with `services/**`, `apps/**` and `packages/**` explicitly barred. The Code Reviewer approved revision `522e640`. The **Integration Verifier** — a *required* reviewer, so its verdict gates acceptance — then requested changes on that same revision, and on `fa207b2`, and on `5f1a6d5`:
+
+> The Integration Verifier gate cannot pass: cold start failed at `make up` with exit 127
+> (`make` not found); `make test` and `make e2e` failed identically. Docker and the service
+> stack are also absent… **This is an environment/repository-baseline blocker, not a
+> discovered document-scope defect.**
+
+The reviewer could not have been clearer. The operator's response, every single time, was to send the **deliverer** back to rework the document. By the tenth round its own brief said the quiet part out loud — *"The Integration Verifier requested changes only because `make up`, `make test`…"* — and it re-prompted the architect anyway.
+
+**Why the operator did that.** It is following viberr's written instruction. The turn doctrine (`operator-run.server.ts`) says:
+
+> Work stage where a human steer, rework decision, or **request-changes** arrived AFTER the deliverer's last report: the deliverer owes NEW work — `run_agent` the delivering profile with that steer as its prompt.
+
+Unconditional. There is no arm for "the request-changes names something no revision can fix". The operator is not misbehaving; it is doing what viberr told it.
+
+**The second half: the operator could not see the loop.** `OperatorTaskSnapshot.reviewers[]` carried each reviewer's verdict **on the current revision only**. Nine rounds in, the snapshot looked exactly like round one. The fact that would have told it something was wrong — *this reviewer has now rejected three successive revisions for the same reason* — was in the task file all along (`verdicts[]` keeps every verdict with its `revisionId`) and was never put in front of it.
+
+**Cost, measured.** SHOP-7 burned 10 verdict rounds, 3 of them against a wall no revision could move, on a one-file document. Each round is a deliverer run, a reviewer run and two or three operator runs.
+
+**Related lie, worth its own line.** SHOP-7's *first* Code Reviewer verdict ends: *"Tests, lint, and typecheck passed; validation ran with the locked dependencies via pnpm 9.15.4."* pnpm is not installed on this host (F37-13). That validation did not happen. The second verdict is honest about it (*"pnpm/Corepack and node_modules are unavailable in this checkout"*). Ruling 191's closing clause — never report an unrun check as a pass — is aimed squarely at this.
+
+**Fix — ruling 193.** `consecutiveRequestChanges` per reviewer on the operator's snapshot (counting **revisions**, not verdict rows, so a re-run on one revision is one objection; reset by that reviewer's first approve), plus the missing doctrine arm: at two or more, ask whether the deliverable can satisfy the objection at all, and when the reviewer names something outside the work — a tool the shell inventory says is absent, a baseline the repo does not have, a decision nobody has made — say so in one comment and open a packet naming the three real exits (drop or replace the required reviewer, accept past the gate, fund the baseline as its own task).
+
+## F37-15 · A goal link and its task hold two copies of one contract, and a retry silently ships the stale one — med
+
+**What I verified.** Ruling 155 freezes an **active** link's `title` and `goal` in the goal file. The task's title and goal are frozen by nothing — a decision packet (ruling 189), an operator `set_goal`, or a person edits them freely. So they drift. On this board they drifted into a contradiction:
+
+`goals/goal-2.md`, link 1 (frozen at creation):
+
+> Publish the request/response zod schemas in `packages/contracts/identity.ts` and export them from the package index.
+> Owned paths: `services/identity/**`, **`packages/contracts/identity.ts`** and the one export line it needs in `packages/contracts/index.ts`…
+
+`tasks/SHOP-2/task.md` (rewritten when the controller moved contracts ownership to SHOP-9):
+
+> Implement against `packages/contracts/identity.ts` exactly as frozen by SHOP-9 … **this task does not edit `packages/contracts`**.
+
+Both are canonical files. They disagree about who owns a directory.
+
+**Where it bites.** `retry_link` rebuilds the task from `link.goal`. A link fails (its task archived), someone retries it, and the fresh task is created from the **superseded** contract — no warning, no timeline entry, and the correction is simply gone. That is the "losing work" case, and it is the one moment a chain is most likely to be retried.
+
+**What I checked and found NOT to be a problem** (the controller reported both; I disagree with it on the evidence):
+
+- *"The Goals panel still shows each link's original text."* It does not — `controller-page.tsx` renders `l.title`, `l.blockedBy`, `l.taskKey` and `l.note`, never `l.goal`. The stale `goal` reaches the controller through `get_goal`, not a human through the UI.
+- *"Removing a pending link renumbers the rest, so `goal-3 link 4` silently means something new."* Not silently: `referencesToLinksFrom` refuses the removal when this goal's own links, a sibling goal's pending links, or any task's `blockedBy` point at or after the removed index, naming the holders. The controller *saw that guard fire* ("the server correctly refused one removal until I repointed goal-7 link 4") and filed it as fragile anyway.
+
+**Fix — ruling 192.** A retry carries the failed task's own title and goal, with the chain header rebuilt rather than stacked, and the goal's timeline records that it did so. A first start is unchanged.
+
+## F37-16 · A retry that starts nothing still writes "retried" into the goal's history — med
+
+**Found while proving F37-15's fix**, not by reading code: the ruling-192 test could not get `retry_link` to produce a task at all until the archive's fire-and-forget reconcile was allowed to settle first.
+
+**The mechanism.** `updateGoal(retry_link)` commits the redirect — chain back to `active`, `Link N (title) retried by X` in the goal's timeline — and *then* calls `startLinkTask`. That function re-reads the goal under its own lock and **returns null silently** when the chain is no longer active. `setTaskArchived` fires a reconcile and forgets it, and that reconcile re-parks a chain whose links are all settled — landing squarely in that window. Result: a goal whose history says a link was retried, over a link still marked `failed`, with no task, and the creator never told.
+
+The sibling arm right below it — the one that runs when `startLinkTask` *throws* — has carried exactly this correction since it was written ("flaps it back, re-notifying and recording a retry that never started"). The silent decline had no arm at all.
+
+**Fix — ruling 194.** A declined retry re-parks to `attention`, notes the link ("The retry did not start: the chain was redirected while it ran."), records the decline in the goal's timeline saying to retry again, and notifies the creator. Proven with the product's own `goal-start` lock held open across the window — a deliberate pause where the live system has a race — and red without the arm.
