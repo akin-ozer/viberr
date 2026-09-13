@@ -798,3 +798,51 @@ earlier: *"Created waiting on SHOP-10. Held until every entry is done; Viberr re
 It is the `dependencies-released` trigger (ruling 131(e)), and the turn it produces is a distinct
 one — the operator is told what cleared and that the base moved, rather than being dropped into a
 generic re-read.
+
+## The coordination test, and what actually collided — CORRECT, after the controller was told
+
+This is the part of the goal that could only be answered by running it: *"A monorepo of many
+services is a coordination test too — several agents in one repo at once — let the controller
+sequence that, and watch what collides."*
+
+**What the controller got right up front.** It invented an anti-collision design of its own —
+four named hot spots made *additive* so two agents never edit the same line — and it worked.
+Six service tasks ran concurrently in one repository, each with its own branch, its own
+workspace and its own PR, and none of the four collided.
+
+**What collided instead were the files it could not see when it wrote the plan.** Two of them,
+and both had the same shape: a root artifact every service task must change and no task owns.
+
+| surface | how it surfaced |
+|---|---|
+| `scripts/stack.test.mjs` | hard-codes the two fixture services, so every task that adds a service to the default stack breaks it. **Five tasks** stopped and asked a human the same question: SHOP-3, SHOP-16, SHOP-17, SHOP-12, and a sixth via SHOP-19. |
+| `pnpm-lock.yaml` | every new service adds an importer, and a peer-qualified snapshot fails the frozen install. **Four tasks took the identical `request_changes` inside forty minutes** — SHOP-3, SHOP-11, SHOP-12, SHOP-17 — then each regenerated the same root file on its own branch. |
+
+Neither is a viberr defect: the ownership map is the controller's to write, and viberr surfaced
+every collision honestly — the reviewers caught each one as a boundary violation, and the
+`request_changes` verdicts named the file every time.
+
+**What the controller did when told.** I gave it the two facts and asked for the *rule* rather
+than another patch. Inside one turn it:
+
+- posted an explicit **merge order** on both colliding branches ("SHOP-3 merges first, SHOP-17
+  second") and on the reviewers, because SHOP-17's architect had already written an equivalent
+  fix rather than wait;
+- added the missing `blockedBy` edge to SHOP-19 so the next task cannot repeat it, with its own
+  reasoning on the record: *"two branches must not edit that file at once — the very failure it
+  exists to end"*;
+- narrowed owned paths on four pending goal links from directory globs to named files, flagging
+  where two tasks could still meet;
+- reconciled a downstream link to the scope decision taken on SHOP-18;
+- created **SHOP-20**, held on all five in-flight service tasks, to make `.env.example` DERIVED
+  from the stack manifests and split the root `Makefile` into includes — the next two surfaces
+  of the same shape, *before* either had broken. Its words: "`.env.example` and the root
+  `Makefile` have exactly the same shape and have not broken yet."
+- and refused one question rather than answering it for me: whether a `packages/contracts`
+  amendment gets a standing owner or a fresh task each time, "because its shape depends on a
+  call that is yours."
+
+The honest reading is that the controller sequences well and generalises well **once a pattern
+is named**, and that naming the pattern took a human watching five identical packets go by. What
+it could not do was see the hot spot before it had a victim — which is exactly what the goal
+asked to find out.
