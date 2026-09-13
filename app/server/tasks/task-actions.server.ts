@@ -8197,6 +8197,34 @@ export async function resolvePacket(
     }
   }
 
+  // Ruling 189 (pass 37, F37-10): the sentence a person's decision adds to the
+  // task's goal, or null when this resolution is not an answer that binds
+  // future work.
+  //
+  // Skipped for a resolution that ENDS the task (an acceptance, an archive):
+  // there is no future run to bind, and a closed task's goal should read as it
+  // did when the work was done. Skipped for the operator's own withdrawal,
+  // which is not a person's answer. Everything else — a chosen option, a custom
+  // directive — is an instruction the next run must see, and the last clause
+  // says which way the contradiction it may create resolves.
+  const goalAmendment: string | null =
+    acceptsInto !== null || !clearPacket
+      ? null
+      : (() => {
+          const when = now.slice(0, 10);
+          const answer = customDirective
+            ? customDirective
+            : [option.t, option.d].filter((part) => part.trim()).join(" — ");
+          return (
+            `---\n\n` +
+            `**Decision — ${when}, ${human.nameHint} answered “${packet.title}”:**\n\n` +
+            `${answer}\n\n` +
+            `This decision is part of the task's contract from here on. Where anything ` +
+            `above contradicts it, the decision wins — it was made by the person the ` +
+            `question was put to, and it is not an agent overstepping.`
+          );
+        })();
+
   // U3 (NFR16): set when the acceptance arm found the task already terminal
   // under the lock — the write, and the audit row that belongs to it, are the
   // racing acceptance's, not this call's.
@@ -8229,6 +8257,23 @@ export async function resolvePacket(
       );
     }
     mutate(parsed.frontmatter);
+    // Ruling 189 (pass 37, F37-10): a person's decision joins the task's
+    // CONTRACT, not just its timeline.
+    //
+    // Live on SHOP-7: the goal said "the agent must not select a provider …
+    // ask Arda to choose". Arda chose. The agent recorded the choice, the
+    // required reviewer re-anchored on the canonical file — as its prompt tells
+    // it to — found the deliverable contradicting the goal, and requested
+    // changes; the operator then told the agent to "remove every claim that
+    // mock-only was selected", and a second packet asked Arda the same question
+    // again. Answer → act → rejected against the stale goal → reverted → asked
+    // again, with no exit inside the mechanism.
+    //
+    // The timeline is where the decision LIVED and the goal is what every fresh
+    // run READS, so the goal won. Appending it here, in the same locked write
+    // that clears the packet, needs no model judgement and cannot be forgotten
+    // by a turn that fails or is interrupted.
+    if (goalAmendment) parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
     if (clearPacket) parsed.packet = null;
     // Ruling 160 (pass 35, F35-11): a PERSON answering a packet while the
     // task's pull request stands closed without merging is the answer to that

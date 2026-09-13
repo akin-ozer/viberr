@@ -3506,3 +3506,109 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     ).toBe("impl");
   });
 });
+
+/**
+ * Ruling 189 (pass 37, F37-10): a person's decision joins the task's CONTRACT.
+ *
+ * Live on SHOP-7, the goal said "the agent must not select a provider … ask
+ * Arda to choose". Arda chose; the agent recorded the choice; the required
+ * reviewer re-anchored on the canonical file — as its prompt tells it to —
+ * found the deliverable contradicting the goal and requested changes; the
+ * operator told the agent to "remove every claim that mock-only was selected";
+ * and a second packet asked Arda the same question again. The decision lived in
+ * the timeline, the contract lived in the goal, and the goal is what a fresh
+ * run reads.
+ */
+describe("ruling 189: a resolved decision amends the task goal", () => {
+  const QUESTION: TaskPacket = {
+    type: "input",
+    kind: "Agent question",
+    from: "agent:codex/architect (Architect)",
+    title: "Choose the payment provider",
+    body: "Stripe, Adyen or mock-only?",
+    observations: [],
+    options: [
+      { kind: "redirect", t: "Stripe", d: "Hosted Stripe Checkout.", rec: true },
+      { kind: "redirect", t: "Mock-only", d: "Deterministic, non-monetary.", rec: false },
+    ],
+  };
+
+  const goalOf = (store: TestStore): string =>
+    readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.goal;
+
+  it("writes a CUSTOM directive into the goal, so every re-anchor reads it", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        custom: "Mock-only, behind a PaymentProvider port. No provider SDK.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const goal = goalOf(store);
+    expect(goal).toContain("Mock-only, behind a PaymentProvider port");
+    expect(goal).toContain("Choose the payment provider");
+    // The clause that settles the contradiction the amendment may create — the
+    // reviewer must not read the answer as an agent overstepping.
+    expect(goal).toContain("the decision wins");
+  });
+
+  it("writes a CHOSEN option into the goal too, title and description", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const goal = goalOf(store);
+    expect(goal).toContain("Mock-only");
+    expect(goal).toContain("Deterministic, non-monetary");
+  });
+
+  it("keeps the original goal above it — the amendment adds, never replaces", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store).startsWith(before.trimEnd())).toBe(true);
+  });
+
+  it("does NOT amend when the packet stays open for a human to edit the goal", async () => {
+    const store = prepared();
+    // `edit_goal` is the one kind that KEEPS its packet open: the person is
+    // about to rewrite the goal themselves, so appending a line saying they
+    // chose to rewrite it would be noise in the text they are editing.
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        options: [{ kind: "edit_goal", t: "Refine the goal", d: "", rec: true }],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store)).toBe(before);
+  });
+});
