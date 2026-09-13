@@ -10,7 +10,10 @@ import type {
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { isMissingRefAnswer } from "~/server/github/github-client.server";
+import {
+  isMissingCommitAnswer,
+  isMissingRefAnswer,
+} from "~/server/github/github-client.server";
 import {
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
@@ -10002,7 +10005,11 @@ async function evaluateAcceptancePrHead(
           `/repos/${gh.repo}/commits/${rev.headSha}`,
           commitShaSchema,
         );
-        if (!probe.ok && isMissingRefAnswer(probe)) {
+        // Ruling 223: the COMMIT read's own vocabulary — GitHub answers a
+        // well-formed but unknown 40-char SHA with 422 "No commit found for
+        // SHA", never 404, so `isMissingRefAnswer` here confirmed nothing and
+        // this refusal was unreachable on the real API.
+        if (!probe.ok && isMissingCommitAnswer(probe)) {
           return {
             refusal:
               `${taskKey}'s delivered revision \`${rev.headSha.slice(0, 7)}\` is not on GitHub: ` +

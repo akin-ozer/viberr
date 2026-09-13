@@ -864,3 +864,36 @@ exactly what the owner saw on screen. The test also asserts the owner was notifi
 asserting who from, so "attributed correctly" can never pass by silently delivering nothing.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6593 tests passed**, `build` green.
+
+---
+
+## Ruling 223 — the canary that was wrong, and the fact pinned so it cannot be wrong again
+
+This fix has two tests because the defect had two halves: a predicate that could not match, and
+a fixture asserting a fact about GitHub that is false.
+
+**The gate** (`delivery-decision.server.test.ts`). The fixture's commit read is now GitHub's real
+answer — `422` with `No commit found for SHA: <sha>` — instead of the invented `404` carrying
+that same sentence. With the 422 arm removed:
+
+```
+AssertionError: promise resolved "{ projectSlug: 'viberr-core', …(42) }" instead of rejecting
+```
+
+That resolution IS the live event: the acceptance succeeds, the task goes Done, and the merge
+lands on a PR head nobody reviewed.
+
+**The fact** (`github-client.server.test.ts`). A separate unit test states what the API does,
+so the next person does not have to rediscover it from a merged-wrong-revision incident:
+
+- `422 "No commit found for SHA: …"` → missing, **and** `isMissingRefAnswer` must still say
+  false for the same input — the assertion that keeps the two predicates from being merged
+  "for tidiness" later;
+- `404` and the empty-repository `409` → still missing;
+- `422 "Validation Failed"`, a `403`, and any successful answer → **not** missing.
+
+The last group is the one that matters for restraint: 422 is GitHub's answer to a great many
+things, and a predicate that read every 422 as a vanished ref would turn unrelated API failures
+into false "the revision is not on GitHub" refusals across the product.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6596 tests passed**, `build` green.

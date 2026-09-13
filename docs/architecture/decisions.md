@@ -4700,6 +4700,30 @@ by rewriting those paragraphs:*
     not on a hunch.
     (`agent-toolkit.server.ts`.)
 
+223. **The never-pushed guard could not fire, because GitHub answers an unknown commit with
+    422 and viberr only knew 404 (owner, 2026-09-13, pass 37; F37-43).** Ruling 135 gave the
+    acceptance gate a containment check: if the delivered revision is not on GitHub, the
+    compare 404s, one direct commit read confirms it, and the acceptance is REFUSED because
+    "it cannot be accepted until the PR carries the reviewed revision." The confirming read
+    asked `isMissingRefAnswer`, which knows 404 and the empty-repository 409.
+    `GET /repos/{repo}/commits/{sha}` does not 404 a well-formed 40-character SHA it cannot
+    find: it answers **422** with `No commit found for SHA: <sha>`. So the probe never
+    confirmed anything, the refusal was unreachable on the real API, and a never-pushed
+    revision degraded to an `unverifiable` head - which acceptance deliberately lets through
+    with a disclosure. Live on SHOP-17 that cost exactly what the gate exists to prevent:
+    both required reviewers approved `1f99f68`, that revision was never pushed, and the
+    acceptance merged PR #12 whose head was `9104562` - **the revision the Code Reviewer had
+    rejected** - then deleted the branch. `1f99f68` exists nowhere on the remote. The
+    completion note said only that the head "could not be verified". Ruling 135's own test
+    hid it: the fixture stubbed the commit read as a **404 carrying GitHub's 422 sentence**, a
+    combination the endpoint never returns, so the canary passed against a fact that was
+    wrong. A commit read now has its own predicate, `isMissingCommitAnswer`, which accepts
+    404, the empty-repository 409, and a 422 whose message names a missing commit; it is kept
+    SEPARATE from `isMissingRefAnswer` because 422 is GitHub's generic validation status and
+    widening the shared predicate would make unrelated failures everywhere read as "the ref is
+    gone". The real answer is pinned as its own test, not as a fixture's guess.
+    (`github-client.server.ts`, `task-actions.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

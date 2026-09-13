@@ -5,6 +5,9 @@ import {
   createGithubClient,
   githubFailureMessage,
   githubWebHost,
+  isMissingCommitAnswer,
+  isMissingRefAnswer,
+  type GithubResponse,
 } from "./github-client.server";
 
 function client(routes: Parameters<typeof fakeGithubFetch>[0]) {
@@ -260,5 +263,65 @@ describe("githubWebHost (B11: browse-link host derivation)", () => {
 
   it("falls back to github.com on an unparseable base", () => {
     expect(githubWebHost("not a url")).toBe("https://github.com");
+  });
+});
+
+/**
+ * Ruling 223 (F37-43): the fact this predicate exists to encode, pinned as a
+ * test rather than as a fixture's guess.
+ *
+ * `GET /repos/{repo}/commits/{sha}` does NOT 404 a well-formed 40-character SHA
+ * it cannot find — it answers 422 with "No commit found for SHA: <sha>",
+ * verified against the live API. Ruling 135's never-pushed probe asked
+ * `isMissingRefAnswer`, which knows only 404 and the empty-repository 409, so
+ * the refusal it guards was unreachable and a never-pushed revision read as an
+ * "unverifiable" head that acceptance merges anyway. On SHOP-17 that merged the
+ * revision the required reviewer had rejected and discarded the one both
+ * required reviewers had approved.
+ */
+describe("isMissingCommitAnswer (ruling 223)", () => {
+  const http = (status: number, message: string): GithubResponse<unknown> => ({
+    ok: false,
+    kind: "http",
+    status,
+    message,
+    data: null,
+    rateLimit: { limit: null, remaining: null, reset: null },
+  });
+
+  it("reads GitHub's real 422 answer for an unknown commit as missing", () => {
+    const real = http(422, `No commit found for SHA: ${"a".repeat(40)}`);
+    // CANARY: drop the 422 arm and this is false — which is the state the
+    // product shipped in, with a passing test above it.
+    expect(isMissingCommitAnswer(real)).toBe(true);
+    // …and the SHARED predicate must still say false, which is exactly why
+    // this one is separate: 422 is GitHub's generic validation status, and
+    // widening `isMissingRefAnswer` would make unrelated failures on every
+    // other endpoint read as "the ref is gone".
+    expect(isMissingRefAnswer(real)).toBe(false);
+  });
+
+  it("still reads a 404 and an empty-repository 409 as missing", () => {
+    expect(isMissingCommitAnswer(http(404, "Not Found"))).toBe(true);
+    expect(isMissingCommitAnswer(http(409, "Git Repository is empty."))).toBe(true);
+  });
+
+  it("does not read an unrelated 422 as a missing commit", () => {
+    // A 422 is GitHub's answer to a great many things. Only the sentence that
+    // endpoint returns for an unknown commit counts.
+    expect(isMissingCommitAnswer(http(422, "Validation Failed"))).toBe(false);
+    expect(isMissingCommitAnswer(http(403, "Resource not accessible"))).toBe(false);
+    // An answer that SUCCEEDED is never a missing commit, whatever its status.
+    expect(
+      isMissingCommitAnswer({
+        ok: true,
+        status: 200,
+        data: null,
+        etag: null,
+        rateLimit: { limit: null, remaining: null, reset: null },
+        scopesHeader: null,
+        tokenExpiration: null,
+      }),
+    ).toBe(false);
   });
 });

@@ -427,3 +427,29 @@ export function isMissingRefAnswer(result: GithubResponse<unknown>): boolean {
   if (result.status === 404) return true;
   return result.status === 409 && /empty/i.test(result.message);
 }
+
+/**
+ * Ruling 223 (F37-43): "this commit is not in the repository", as
+ * `GET /repos/{repo}/commits/{sha}` actually answers it.
+ *
+ * That endpoint does NOT 404 a well-formed 40-character SHA it cannot find. It
+ * answers **422 Unprocessable Entity** with `No commit found for SHA: <sha>`.
+ * Ruling 135's never-pushed probe asked {@link isMissingRefAnswer}, which knows
+ * 404 and the empty-repository 409 — so on the real API the probe could never
+ * confirm a missing commit, the refusal it guards was unreachable, and a
+ * never-pushed revision degraded to an "unverifiable" head that acceptance lets
+ * through. Live on SHOP-17 that merged the revision the required reviewer had
+ * REJECTED and discarded the one both reviewers had APPROVED, which existed
+ * nowhere but a workspace.
+ *
+ * Kept separate from `isMissingRefAnswer` rather than folded into it: 422 is
+ * GitHub's generic validation status and means something else on most
+ * endpoints, so widening the shared predicate would make unrelated failures
+ * read as "the ref is gone". This one is scoped to the commit read and to the
+ * sentence that endpoint returns.
+ */
+export function isMissingCommitAnswer(result: GithubResponse<unknown>): boolean {
+  if (isMissingRefAnswer(result)) return true;
+  if (result.ok || result.kind !== "http") return false;
+  return result.status === 422 && /no commit found/i.test(result.message);
+}

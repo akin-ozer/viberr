@@ -2318,3 +2318,82 @@ narrowing it further belongs to a surface caught getting it wrong, not to a hunc
 
 Canary (proved red): drop the `from` and the notification reads
 `{ kind: "agent", name: "Operator" }` — the fallback every un-attributed notice lands on.
+
+---
+
+## F37-43 · Viberr merged the revision its reviewer REJECTED and lost the one both reviewers approved — CRITICAL
+
+**The worst thing found in this pass, and it was found by reading one sentence in an acceptance
+note.** SHOP-17 (the API gateway) reached Done and merged PR #12. The completion record said:
+
+> Human acceptance recorded. SHOP-17 transitioned to **Done** and the review PR was merged.
+>
+> Note: PR #12's head could not be verified against the delivered revision before the merge
+> (GitHub could not be reached for the check). It was accepted without that containment check.
+
+That note is honest, and it is also the whole story compressed into one sentence nobody would
+act on. Checking what actually merged:
+
+| fact | value |
+|---|---|
+| revision **Code Reviewer approved** | `1f99f68504f3` |
+| revision **Integration Verifier approved** | `1f99f68504f3` |
+| `workRevision.headSha` in `task.md` | `1f99f68504f3` — and **no `pushedAt`** |
+| `pr.headSha` | `9104562baccf` |
+| what the Code Reviewer said about `9104562` | **`request_changes`** |
+| what merged into `main` | `9104562baccf`, as merge commit `5fd18eb` |
+| does `1f99f68` exist on the remote? | `fatal: remote error: upload-pack: not our ref` |
+| does the lockfile-repair commit `7d58fb5` exist? | `not our ref` |
+
+So viberr merged the revision its own required reviewer had **rejected**, discarded the revision
+both required reviewers had **approved** — it lives nowhere but a disposable workspace — deleted
+the remote branch, and marked the task Done.
+
+**Why the guard did not fire.** Ruling 135 built exactly this containment check, and its
+reasoning is right: a compare whose base is a never-pushed sha 404s, so one direct commit read
+confirms it and the acceptance is refused with *"it cannot be accepted until the PR carries the
+reviewed revision."* The confirming read asked `isMissingRefAnswer`, which knows `404` and the
+empty-repository `409`. Measured against the live API:
+
+```
+GET /repos/akin-ozer/shopify-clone/compare/1f99f68…...9104562…   → 404 Not Found          ✅ matched
+GET /repos/akin-ozer/shopify-clone/commits/1f99f68…              → 422 "No commit found
+                                                                       for SHA: 1f99f68…"  ❌ not matched
+```
+
+`/commits/{sha}` does **not** 404 a well-formed 40-character SHA it cannot find. The probe
+confirmed nothing, execution fell through to `unverifiable`, and `unverifiable` is deliberately
+allowed through — "the merge's own honesty covers unreachability" (A9). The disclosure a human
+reads then blames GitHub reachability for what was actually a classification miss.
+
+**And the test hid it.** Ruling 135's canary stubs the commit read as:
+
+```ts
+{ status: 404, body: { message: "No commit found for SHA" } }
+```
+
+GitHub's real *sentence* with an invented *status*. The fixture copied the message and guessed
+the code, so the canary went red for the right reason on a shape the API never produces, and the
+guard has been unreachable since the day it shipped.
+
+**Fix (ruling 223).** The commit read gets its own predicate, `isMissingCommitAnswer` — 404, the
+empty-repository 409, or a 422 whose message names a missing commit. Kept separate from
+`isMissingRefAnswer` on purpose: 422 is GitHub's generic validation status, and widening the
+shared predicate would make unrelated failures on every other endpoint read as "the ref is gone".
+The fixture is corrected to the real answer, and GitHub's actual response is pinned in its own
+unit test rather than left as a fixture's guess.
+
+Canary (proved red): remove the 422 arm and the acceptance **resolves instead of rejecting** —
+`AssertionError: promise resolved … instead of rejecting` — which is precisely the live event:
+the task goes Done and the merge lands.
+
+**What is deliberately NOT changed, and is the owner's call.** An `unverifiable` head still
+merges with a disclosure. That is A9's documented trade — refusing on every transient GitHub
+failure has its own cost — and with the classification fixed, the live failure mode is closed.
+But the sentence a human reads in that case is worth re-ruling: it names the check that did not
+run and not the consequence, which is that unreviewed or rejected code may now be on `main`.
+
+**Repository state after the finding.** `main` carries the gateway at `9104562`, which is
+functional (it is the revision that passed everything except a lockfile repair and the shared
+stack-test generalisation) but is NOT the reviewed revision. SHOP-19, which the controller
+created to own that generalisation, waits on SHOP-17 and SHOP-3 and can absorb it.

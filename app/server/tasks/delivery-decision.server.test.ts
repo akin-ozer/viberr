@@ -1214,9 +1214,17 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(mergeMock).not.toHaveBeenCalled();
   });
 
-  it("ruling 135: a compare GitHub answers 404 to, confirmed by a 404 commit read, is a REFUSAL, not unverifiable", async () => {
+  it("ruling 135 + 223: a 404 compare, confirmed by GitHub's real 422 commit read, is a REFUSAL, not unverifiable", async () => {
     // Canary: restore the plain `unverifiable` return on `!cmp.ok` and the
     // never-pushed revision is accepted with an "unverified head" note.
+    //
+    // Ruling 223 (F37-43): this fixture used to stub the commit read as a 404
+    // carrying GitHub's 422 SENTENCE — a status the endpoint does not return
+    // for a well-formed unknown SHA. The test passed and the guard could never
+    // fire on the real API. Live on SHOP-17 that merged the revision the
+    // required reviewer had REJECTED and lost the one both reviewers approved.
+    // The status below is what `gh api repos/<repo>/commits/<unknown-sha>`
+    // actually answers.
     healthySeed();
     const patActor = actor(store.users.arda);
     const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0135" }, patActor);
@@ -1225,7 +1233,10 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
       [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${head}`]: { status: 404, body: { message: "Not Found" } },
-      [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: { status: 404, body: { message: "No commit found for SHA" } },
+      [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: {
+        status: 422,
+        body: { message: `No commit found for SHA: ${"a".repeat(40)}` },
+      },
     });
     await expect(
       transitionStage(
