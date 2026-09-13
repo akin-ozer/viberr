@@ -237,6 +237,23 @@ Recreating the container while an agent run was live:
 > **Restart:** the run `run_19PtdepIDG3L` (agent) was still running when the server stopped;
 > it is recorded as interrupted by the restart, and the operator is re-invoked.
 
+## "Files are truth" — re-tested at the end of day two: 98 comparisons, 0 mismatches
+
+After a day of churn — a board re-plan that rewrote nine goals, six new tasks, two resolved
+packets, a hand-wiped `pr:` block and four image rebuilds — I re-ran the projection-versus-file
+comparison across all 14 tasks: `stage`, `readiness`, `waiting`, `branch`, `title`, `archived`
+and the whole `blockedBy` list. **98 comparisons, 0 mismatches.**
+
+**A tooling error worth recording, because it looked exactly like a finding.** My first run
+reported 10 mismatches — every held task's `readiness`, file `input_required`/`ready` against
+db `blocked`. That was my bug, not viberr's: `task_projections` carries BOTH `readiness` (the
+derived, display value) and `stored_readiness` (what the file says), and I compared the file
+to the derived column. The derivation is documented at length in `task.server.ts` and exists
+so a card never says "blocked" and "agent working" at once. Comparing against
+`stored_readiness` gives zero. Third time this pass my own instrumentation has manufactured a
+false finding; the discipline that catches it every time is checking the product's own
+definition of the field before believing the diff.
+
 ## "Files are truth" — tested three ways, not assumed
 
 The owner's ask was literal: *files-are-truth means the record is testable, so test it.* Three
@@ -284,11 +301,20 @@ Recorded honestly rather than claimed:
   behind the foundation chain). Tool census across the pass: 733 `exec`, **26 `web_search`**
   (so `use-web-search-fetch` *is* in real use — the Platform Architect researched Stripe and
   Adyen docs), 12 `ToolSearch`, and the controller's own tools. Zero browser calls.
-- **Guardrails.** `meaningful-comment`, `no-duplicate-summary`, `compression-threshold` and
-  `evidence-separation` are all on. Only the last one has visibly fired (agents write
-  validation output to `attachments/` rather than the timeline). The other three reject
-  chatter, and no agent has produced any — which is a good sign about the agents rather than
-  evidence about the guardrails.
+- **Guardrails — UPDATED, two of four now observed.** `meaningful-comment`,
+  `no-duplicate-summary`, `compression-threshold` and `evidence-separation` are all on.
+  `evidence-separation` fires routinely (agents write validation output to `attachments/`
+  rather than the timeline). `no-duplicate-summary` fired for the first time on SHOP-5 at
+  11:34, during the board-wide re-plan, and the refusal is exactly the right shape — it
+  names the rule, says nothing was written, and rides the same "plan was not carried out in
+  full" note every other refused step uses:
+
+  > `post_comment` — NOT posted — identical to your previous comment
+  > (no-duplicate-summary guardrail). Nothing was added to the timeline.
+
+  `meaningful-comment` and `compression-threshold` still have zero firings across the pass.
+  No agent has produced chatter and no timeline has crossed the compression threshold —
+  which is a fact about this workload, not evidence about those two rules.
 - **Force-accept.** No task has reached the acceptance boundary with a failing or missing
   verdict, which is the only state where force-accept means anything. The RBAC probe did
   confirm the door is admin-only (maintainer → 403 "Your project role (maintainer) cannot
