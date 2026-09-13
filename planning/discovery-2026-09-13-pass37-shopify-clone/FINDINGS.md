@@ -1068,3 +1068,63 @@ ready"); its `waiting` is settled off `agent` through the same `clearWaitingToHu
 uses; and its owner gets a notification. An uncapped task keeps the original sentence, because
 a turn really is coming. Proven red both ways — put the promise back and it appears on a task
 nothing is coming for; drop the settle and the board keeps claiming an agent.
+
+## F37-20 · Every Codex conversation on the instance was unresumable, and viberr blamed the provider — HIGH
+
+**The symptom, three times.** All three of the pass's run errors — 100% of them — were the
+same line:
+
+> The Platform Architect agent run did not complete: **the agent's stored Codex session no
+> longer exists**, so its history could not be resumed. No changes were delivered.
+> `Error: thread/resume: thread/resume failed: no rollout found for thread id
+> 01a099ff-1a74-71d2-90d6-d695d4e8c923 (code -32600)`
+
+I read that as an expired provider session and nearly filed it as an environment fact. Then I
+looked for the file:
+
+```
+/data/runtimes/users/u_GNlpg-djnF8n/codex-home/sessions/2026/09/13/
+  rollout-2026-09-13T09-00-27-01a099ff-1a74-71d2-90d6-d695d4e8c923.jsonl   ← it is right there
+```
+
+**The mechanism.** Ruling 181 gives every Codex run a private `CODEX_HOME` at
+`codex-home/runs/<runId>/`, with `sessions/` symlinked to the shared directory so transcripts
+outlive the run — and `CODEX_SQLITE_HOME` pinned to the shared home so the thread index does
+too. Both halves work. What nobody checked is what the CLI *writes into* that index:
+
+```
+threads.rollout_path =
+  /data/runtimes/users/u_…/codex-home/runs/run_ArTNpQB-_O_w/sessions/2026/09/13/rollout-….jsonl
+```
+
+The path it saw — through the symlink, not the symlink's target. Ruling 181 then deletes
+`runs/<runId>/` at settle. The file survives; the pointer does not.
+
+**Measured across the whole instance:**
+
+```
+threads:                                     137
+rollout_path under a per-run home:           137   ← all of them
+…those paths that no longer exist:           135   (the 2 left were runs still in flight)
+…whose file IS in the shared sessions dir:   135   (every single one)
+```
+
+**Every Codex conversation viberr has ever recorded here is unresumable**, and has been since
+ruling 181 shipped. The cost is not only the three errored runs: every re-prompt of a Codex
+agent silently starts from zero, re-reading the task file instead of continuing its own
+reasoning — which is a large part of why ruling 189 (put the human's decision in the goal)
+mattered so much on SHOP-7. And twice, the failure escalated into a decision packet putting a
+"Work stalled: pick a recovery path" question to a person over a file that was never lost.
+
+**The honesty failure is separable from the bug.** "The agent's stored Codex session no longer
+exists" is viberr's sentence, not the provider's, and it is false: the session exists.
+Viberr deleted the directory that made it findable and then reported the consequence as
+someone else's fault.
+
+**Fix — ruling 199.** The settle re-points that run's threads at the shared path before
+removing the directory, and a boot pass repairs the 135 already stranded. Both are fail-soft
+against a vendor artefact: the schema is parsed rather than asserted, an unrecognised shape is
+skipped whole, a path is only moved onto a file that exists, and a live run keeps its own path.
+Proven red both ways — drop the settle call and the recorded path still points into the removed
+home; drop the in-flight guard and the sweep re-points a running agent's thread out from under
+it.

@@ -19,6 +19,7 @@ import {
 } from "./db/data-root-lock.server";
 import { getDb, getProjectionDbPath } from "./db/sqlite.server";
 import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
+import { repairCodexRolloutPaths } from "./runtimes/user-homes.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
 import {
@@ -741,6 +742,22 @@ export async function bootServer(): Promise<void> {
   // once here, then on a timer for the deployment that never restarts.
   // Best-effort; canonical task files (source of truth) untouched.
   startStoreMaintenance(db);
+
+  // Ruling 199: the Codex CLI records each rollout under the PER-RUN home it
+  // was written through, and that home is removed when the run settles — so
+  // every thread recorded before the settle learned to re-point is aimed at a
+  // path that no longer exists, and every `thread/resume` fails. The transcripts
+  // themselves are in the shared `sessions/` directory all along. One idempotent
+  // pass restores them; it never throws and it only ever moves a path onto a
+  // file that is really there.
+  {
+    const repaired = repairCodexRolloutPaths();
+    if (repaired > 0) {
+      logger.info("re-pointed Codex rollout paths left behind by removed run homes", {
+        threads: repaired,
+      });
+    }
+  }
 
   // Fire-and-forget: the chain finalizes restart-orphaned runs, recovers what a
   // restart stranded, joins the re-invokes it launched and only then reclaims

@@ -15,6 +15,7 @@ import {
   type Dirent,
 } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
@@ -262,6 +263,12 @@ export function finishCodexRunHome(home: CodexRunHome): void {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+  // Ruling 199: BEFORE the directory goes, re-point the CLI's own index at the
+  // path the transcript actually occupies. The rollout is written THROUGH the
+  // `sessions` symlink, so the bytes land in the shared home and survive — but
+  // the CLI recorded the path it saw, `…/runs/<runId>/sessions/…`, and this
+  // removal invalidates it. See `repointRunRollouts`.
+  repointRunRollouts(home);
   try {
     // `rm` unlinks the links; it never descends into the shared directories.
     rmSync(home.dir, { recursive: true, force: true });
@@ -270,6 +277,146 @@ export function finishCodexRunHome(home: CodexRunHome): void {
       runId: home.runId,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+  }
+}
+
+/**
+ * Ruling 199: the run home's removal leaves the CLI's thread index pointing at
+ * a path that no longer exists, so every later `thread/resume` fails with
+ * "no rollout found for thread id" — and Viberr reported that as "the agent's
+ * stored Codex session no longer exists" while the transcript sat in the shared
+ * `sessions/` directory, one path segment away.
+ *
+ * Measured live before the fix: **137 of 137** threads on the instance had a
+ * `rollout_path` under a per-run home, **135** of those paths were gone, and
+ * **135 of 135** of their files were present at the shared path. Every Codex
+ * conversation the instance had ever recorded was unresumable, and all three of
+ * the pass's run errors were resume attempts.
+ *
+ * The repair is one UPDATE against the CLI's own state database, which
+ * `CODEX_SQLITE_HOME` already pins to the SHARED home so it outlives the run.
+ * Everything here is fail-soft and best-effort by construction: the database is
+ * a vendor artefact whose name carries a schema version (`state_5.sqlite`), so
+ * a shape this does not recognise is skipped with a log line rather than
+ * guessed at, and a settle must never throw.
+ */
+function repointRunRollouts(home: CodexRunHome): void {
+  const marker = `${path.sep}${CODEX_RUN_HOMES_DIR}${path.sep}${home.runId}${path.sep}`;
+  for (const dbFile of codexStateDatabases(home.sharedHome)) {
+    try {
+      const db = new DatabaseSync(dbFile);
+      try {
+        db.exec("PRAGMA busy_timeout = 5000");
+        // The vendor's schema is parsed, never asserted: an unrecognised shape
+        // is skipped whole rather than half-read.
+        const columns = columnNamesSchema.safeParse(db.prepare(`PRAGMA table_info(threads)`).all());
+        if (!columns.success || !columns.data.some((c) => c.name === "rollout_path")) continue;
+        const parsed = threadRowsSchema.safeParse(
+          db.prepare(`SELECT id, rollout_path FROM threads WHERE rollout_path LIKE ?`).all(`%${marker}%`),
+        );
+        if (!parsed.success) continue;
+        const update = db.prepare(`UPDATE threads SET rollout_path = ? WHERE id = ?`);
+        let repointed = 0;
+        for (const row of parsed.data) {
+          const shared = row.rollout_path.replace(marker, path.sep);
+          // Only ever point at a file that is really there: a rollout the
+          // symlink did not carry over stays recorded where it was, because a
+          // wrong path is worse than a stale one.
+          if (!existsSync(shared)) continue;
+          update.run(shared, row.id);
+          repointed += 1;
+        }
+        if (repointed > 0) {
+          logger.info("codex rollout paths re-pointed at the shared home", {
+            runId: home.runId,
+            threads: repointed,
+          });
+        }
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      logger.warn("codex rollout paths could not be re-pointed", {
+        runId: home.runId,
+        dbFile,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+}
+
+/**
+ * Ruling 199, the retroactive half: every thread recorded BEFORE the settle
+ * learned to re-point is still aimed at a run home that is long gone. Live,
+ * that was 135 of 137 threads — every Codex conversation the instance had —
+ * and each one's transcript was sitting at the shared path all along. One
+ * boot-time pass restores them; it is idempotent, it only ever moves a path to
+ * a file that exists, and like the settle it never throws.
+ *
+ * Returns how many threads it re-pointed, for the boot line.
+ */
+export function repairCodexRolloutPaths(dataRoot?: string): number {
+  const runMarker = new RegExp(
+    `${path.sep}${CODEX_RUN_HOMES_DIR}${path.sep}[^${path.sep === "\\" ? "\\\\" : path.sep}]+${path.sep}`,
+  );
+  let repaired = 0;
+  for (const { userId } of listUserRuntimeRoots(dataRoot)) {
+    const sharedHome = userBackendHome(userId, "codex", dataRoot);
+    if (!existsSync(sharedHome)) continue;
+    for (const dbFile of codexStateDatabases(sharedHome)) {
+      try {
+        const db = new DatabaseSync(dbFile);
+        try {
+          db.exec("PRAGMA busy_timeout = 5000");
+          const columns = columnNamesSchema.safeParse(
+            db.prepare(`PRAGMA table_info(threads)`).all(),
+          );
+          if (!columns.success || !columns.data.some((c) => c.name === "rollout_path")) continue;
+          const parsed = threadRowsSchema.safeParse(
+            db.prepare(`SELECT id, rollout_path FROM threads`).all(),
+          );
+          if (!parsed.success) continue;
+          const update = db.prepare(`UPDATE threads SET rollout_path = ? WHERE id = ?`);
+          for (const row of parsed.data) {
+            if (!runMarker.test(row.rollout_path)) continue;
+            // A run still in flight owns its path: leave it until its settle.
+            if (existsSync(row.rollout_path)) continue;
+            const shared = row.rollout_path.replace(runMarker, path.sep);
+            if (!existsSync(shared)) continue;
+            update.run(shared, row.id);
+            repaired += 1;
+          }
+        } finally {
+          db.close();
+        }
+      } catch (error) {
+        logger.warn("codex rollout paths could not be repaired at boot", {
+          dbFile,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+  }
+  return repaired;
+}
+
+/** The two vendor shapes ruling 199 reads, parsed at the boundary. A row that
+ *  does not match is not this schema's business — the whole read is skipped. */
+const columnNamesSchema = z.array(z.object({ name: z.string() }).loose());
+const threadRowsSchema = z.array(
+  z.object({ id: z.string(), rollout_path: z.string() }).loose(),
+);
+
+/** The CLI's state databases in one person's home. The file name carries a
+ *  schema version the vendor bumps (`state_5.sqlite`), so this matches the
+ *  family rather than pinning one. */
+function codexStateDatabases(sharedHome: string): string[] {
+  try {
+    return readdirSync(sharedHome)
+      .filter((name) => /^state(_\d+)?\.sqlite$/.test(name))
+      .map((name) => path.join(sharedHome, name));
+  } catch {
+    return [];
   }
 }
 

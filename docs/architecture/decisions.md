@@ -4334,6 +4334,29 @@ by rewriting those paragraphs:*
     A guard that fires in silence is indistinguishable from a system that forgot.
     (`run-recovery.server.ts`.)
 
+199. **A settled run's transcripts stay findable: Viberr re-points the index it invalidated
+    (owner, 2026-09-13, pass 37; F37-20, amends ruling 181).** The Codex CLI writes each
+    rollout THROUGH the run home's `sessions` symlink, so the bytes land in the person's
+    shared home and survive the run — exactly as ruling 181 intended. But the CLI records in
+    its own thread index the path it SAW, `…/codex-home/runs/<runId>/sessions/…`, and ruling
+    181 removes that directory when the run settles. So every later `thread/resume` answers
+    `no rollout found for thread id … (code -32600)`, and Viberr passed that to a human as
+    "**the agent's stored Codex session no longer exists**" — about a transcript sitting one
+    path segment away, in a directory Viberr had deliberately preserved. Measured on the live
+    instance: **137 of 137** threads recorded under a per-run home, **135** of those paths
+    gone, and **135 of 135** of their files present at the shared path. Every Codex
+    conversation the instance had ever held was unresumable; all three of the pass's run
+    errors were resume attempts, each costing a run, an error state, an operator turn, and
+    twice a decision packet put to a person. Ruling 181 fixed a real race (F36-3) and broke
+    conversation continuity for every Codex agent on the way past, invisibly, because the
+    failure wore the provider's name. The settle now re-points that run's threads at the
+    shared path before the directory goes, and a boot pass repairs the ones already stranded.
+    Both are fail-soft against a vendor artefact whose file name carries a schema version
+    (`state_5.sqlite`): the shape is PARSED, never asserted, an unrecognised one is skipped
+    whole, a path is only ever moved onto a file that is really there, and a run still in
+    flight owns its own path until it settles.
+    (`user-homes.server.ts`, `boot.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`
