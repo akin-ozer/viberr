@@ -178,6 +178,35 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect([...times].sort().reverse()).toEqual(times);
   });
 
+  /**
+   * Ruling 209. The evidence-separation guardrail takes an agent's raw output
+   * OFF the timeline and onto disk, leaving a reference behind. A comment
+   * carrying one is therefore not disposable prose: folding it keeps a count
+   * and drops the pointer, orphaning a file that is still there and still the
+   * proof behind a verdict. Live shape on SHOP-15: an Infrastructure
+   * Engineer's reply with "1 attachment: …" rows — agent-authored, not
+   * `toAgent`, matching every other foldable clause.
+   */
+  it("ruling 209: never folds a comment that carries an evidence reference", () => {
+    const withEvidence = (i: number): TaskFileEvent => ({
+      ...agent(i),
+      evidence: [{ label: "Timed lifecycle log", detail: "1 attachment: SHOP-15-run.log", url: null }],
+    });
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
+      ...Array.from({ length: 4 }, (_, i) => agent(60 - i)),
+      withEvidence(55),
+      ...Array.from({ length: 4 }, (_, i) => agent(50 - i)),
+    ];
+    // CANARY: drop the `evidence` clause from `isRoutineComment` and the
+    // attachment reference disappears into the marker's count.
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    expect(out.length).toBeLessThan(events.length); // the rest still folds
+    const kept = out.find((e) => (e.evidence?.length ?? 0) > 0);
+    expect(kept, "the evidence-bearing reply must survive verbatim").toBeTruthy();
+    expect(kept!.evidence![0]!.detail).toContain("1 attachment");
+  });
+
   it("stays idempotent with agent replies in the mix", () => {
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),

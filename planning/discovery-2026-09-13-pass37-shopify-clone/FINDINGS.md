@@ -1702,3 +1702,32 @@ is needed, so its eligibility must not answer for one that has not approved. Thr
 the missing reviewer is elsewhere (move back to its stage), the missing reviewer is eligible
 here (no move — the old rule got this right and keeps getting it right), and nobody owes a
 verdict (no move). Canary: restore "any required reviewer" and the first goes null.
+
+## F37-30 · Compaction can fold the pointer to a file it does not delete — med
+
+Found by checking ruling 206's first live firing rather than trusting it. SHOP-15 compacted
+nine routine comments into one marker; the file came back sound (ordering intact, every typed
+event present, every human comment present). Then I looked at what else those comments could
+have been carrying.
+
+**Evidence rows.** The `evidence-separation` guardrail takes an agent's raw output OFF the
+timeline and onto disk, leaving a reference behind:
+
+```
+### 2026-09-13T16:35:27.194Z · comment · agent:codex/infrastructure-engineer (Infrastructure Engineer)
+evidence:
+- Timed lifecycle acceptance log · 1 attachment: S… · —
+- Timed verification log · 1 attachment: S… · —
+```
+
+Agent-authored, not `toAgent`, no title — it matches every clause of `isRoutineComment`. It
+survived this firing only because it sat inside the untouched recent-24 window.
+
+Folding it would keep a count and drop the pointer: the attachment stays on disk, unreferenced,
+and the proof behind a verdict becomes a file nobody can find from the record. Ruling 206 did
+not create this — the old adjacency rule folded agent replies too — but it made it reachable on
+every long task instead of almost never.
+
+**Fix — ruling 209.** A comment carrying an evidence reference is not disposable prose and is
+never folded. One clause, one canary: drop it and the attachment reference disappears into the
+marker's count.

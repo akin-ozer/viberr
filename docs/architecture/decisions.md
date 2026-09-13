@@ -4391,6 +4391,19 @@ by rewriting those paragraphs:*
     itself.
     (`verdict-stage.ts`.)
 
+209. **A comment that carries evidence is a pointer, not prose (owner, 2026-09-13, pass 37;
+    F37-30).** Found by checking ruling 206's first live firing instead of trusting it. The
+    `evidence-separation` guardrail takes an agent's raw output OFF the timeline and onto disk,
+    leaving a reference behind — and such a comment is agent-authored, untitled and not
+    `toAgent`, so it matched every clause of compaction's foldable test. Folding it keeps a
+    count and drops the pointer: the attachment stays on disk, unreferenced, and the proof
+    behind a verdict becomes a file nobody can reach from the record. Ruling 206 did not create
+    this (the old adjacency rule folded agent replies too) but it made it reachable on every
+    long task instead of almost never. So a comment with a non-empty `evidence` list is never
+    folded, beside the two exclusions that were already there — a person's prose (B-FD9) and a
+    to-agent hand-off.
+    (`timeline-compaction.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

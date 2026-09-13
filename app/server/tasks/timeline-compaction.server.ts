@@ -92,7 +92,15 @@ export function compactTimelineEvents(
     // a to-agent prompt is a governance hand-off, not routine chatter
     !e.toAgent &&
     // B-FD9: a person's prose is never deleted from canonical task.md.
-    e.actor.kind !== "human";
+    e.actor.kind !== "human" &&
+    // Ruling 209: a comment carrying EVIDENCE is not prose — it is the pointer
+    // to files the evidence-separation guardrail moved out of the timeline and
+    // onto disk. Folding it keeps a count and drops the reference, orphaning
+    // an attachment that is still there and still the proof behind a verdict.
+    // Reachable on the live board: an Infrastructure Engineer's reply carrying
+    // "1 attachment: …" rows is agent-authored, not `toAgent`, and matched
+    // every other clause here.
+    (e.evidence === null || e.evidence.length === 0);
 
   // `older` is newest-first, so the FIRST agent-authored routine comment in it
   // is the newest one still outside the recent window: kept verbatim.
