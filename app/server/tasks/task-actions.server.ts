@@ -3580,9 +3580,17 @@ export async function recordAgentCompletion(
  * Nothing is queued in memory. The comment IS the record, and "undelivered"
  * is derivable from it: a human comment addressed to this agent, posted after
  * this run started, cannot have started a run of its own — the single-flight
- * guard is the only thing that could have refused it. Oldest first, one per
- * completion, which drains a burst in order the way a queued human `@operator`
- * trigger does (B-OP2) — the next one rides the next completion.
+ * guard is the only thing that could have refused it.
+ *
+ * Ruling 205: EVERY such comment goes into ONE directive, not the oldest one
+ * into one run. The first draft delivered the oldest and claimed the rest would
+ * "ride the next completion"; they cannot. The window is "newer than the run
+ * that was busy", so the moment the oldest starts a redelivery run, the others
+ * are older than THAT run's start and no later completion can see them again —
+ * a two-message burst lost its second message, silently, which is the failure
+ * this whole function exists to stop. Merging also matches what the operator
+ * lease already does with a person's consecutive comments: one burst is one
+ * question, not N governed drives.
  *
  * Returns true when a run started, and the caller then leaves the operator's
  * own react trigger alone: a person's instruction goes first.
@@ -3604,11 +3612,11 @@ export async function deliverDeferredMention(
   const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!file) return false;
   const { resolveMentionedAgent } = await import("./agent-reply.server");
-  const pending = file.parsed.timeline
+  const mine: { at: string; text: string; userId: string }[] = [];
+  for (const event of file.parsed.timeline
     .filter((e) => e.type === "comment" && e.toAgent && e.actor.kind === "human")
     .filter((e) => e.occurredAt > startedAt)
-    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
-  for (const event of pending) {
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))) {
     if (event.actor.kind !== "human") continue;
     const target = resolveMentionedAgent(
       db,
@@ -3617,27 +3625,44 @@ export async function deliverDeferredMention(
       input.taskKey,
       event.text,
     );
-    if (!target || target.profileId !== input.profileId) continue;
-    logger.info("delivering the @mention that was refused while the agent was running", {
+    if (target?.profileId === input.profileId) {
+      mine.push({ at: event.occurredAt, text: event.text, userId: event.actor.userId });
+    }
+  }
+  const oldest = mine[0];
+  if (!oldest) return false;
+  // One author (the ordinary case: one person typing twice) reads as one
+  // message. Several authors keep their names inline, because the directive
+  // can only tell the agent to tag ONE person back (NEW-4) and the others must
+  // at least be visible in what it is answering.
+  const authors = new Set(mine.map((m) => m.userId));
+  const text =
+    mine.length === 1
+      ? oldest.text
+      : mine
+          .map((m) => (authors.size > 1 ? `${userName(db, m.userId)}: ${m.text}` : m.text))
+          .join("\n\n");
+  logger.info("delivering the @mention(s) refused while the agent was running", {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    profileId: input.profileId,
+    comments: mine.length,
+    oldestAt: oldest.at,
+  });
+  const result = await commentToAgent(
+    db,
+    {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      profileId: input.profileId,
-      commentedAt: event.occurredAt,
-    });
-    const result = await commentToAgent(
-      db,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        text: event.text,
-        redelivered: true,
-      },
-      { userId: event.actor.userId, label: userName(db, event.actor.userId) },
-      ctx,
-    );
-    return result.triggered !== null;
-  }
-  return false;
+      text,
+      redelivered: true,
+    },
+    // The person who has been waiting longest is the one the agent is told to
+    // tag back.
+    { userId: oldest.userId, label: userName(db, oldest.userId) },
+    ctx,
+  );
+  return result.triggered !== null;
 }
 
 /** Register the single completion pipeline: record, reconcile, and continue coordination. */

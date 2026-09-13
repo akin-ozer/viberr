@@ -1443,3 +1443,43 @@ missed by using revisions as its proxy. **Ruling 193's revision-counting is reve
 out loud, and re-ruled** — along with the two prose descriptions that taught the reader the old
 meaning (`get_task`'s field note and the turn doctrine), because a field whose description and
 behaviour disagree is the defect ruling 200(i) was about.
+
+## F37-25 · Ruling 203's own fix dropped the second message of a burst, silently — HIGH (self-review)
+
+Found by testing ruling 203's own claim an hour after writing it. The doc comment said:
+
+> Oldest first, one per completion, which drains a burst in order the way a queued human
+> `@operator` trigger does (B-OP2) — **the next one rides the next completion.**
+
+It does not. The window is `occurredAt > runStartedAt`: comments posted after the busy run
+started. Deliver the oldest, and the redelivery run starts *now* — so at ITS completion the
+window begins after every other comment in the burst, and no later completion can ever see
+them again.
+
+```
+run R starts            t0
+comment C1              t1   (refused: single-flight)
+comment C2              t1.5 (refused: single-flight)
+R completes             t2   → deliver C1, run R2 starts at t3
+R2 completes            t4   → window is "> t3". C1 < t3. C2 < t3. Nothing pending.
+                                 C2 is gone.
+```
+
+Two messages typed thirty seconds apart, the second one silently discarded — which is the
+failure ruling 203 exists to stop, reintroduced by ruling 203's own fix, under a comment
+claiming the opposite.
+
+**The first version of the test passed against the broken code.** It posted two short comments
+and asserted the run's prompt contained both — and it did, because the canonical anchor quotes
+the last five timeline events, so the second comment appeared in the *summary* while never
+reaching the *directive*. Rewritten with each comment padded past `ANCHOR_EVENT_MAX_CHARS`
+(220) and carrying a unique tail token, the clamp cuts the token off and only the directive can
+carry it. Then it failed, for the real reason. Second vacuous test of the pass caught before it
+was believed; both were mine.
+
+**Fix — ruling 205.** Every pending comment for that agent goes into ONE directive, not the
+oldest into one run. One author's consecutive messages read as one message (which is what the
+operator lease already does with a person's burst: one question, not N governed drives);
+several authors keep their names inline, because the directive can only tell the agent to tag
+one person back (NEW-4) and the others must at least be visible in what it is answering. The
+person who has waited longest is the one it is told to tag.

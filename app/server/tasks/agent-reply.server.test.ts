@@ -1481,6 +1481,78 @@ describe("commentToAgent", () => {
     expect(started.prompt).toContain("one more thing before you finish");
   }, 30_000);
 
+  /**
+   * Ruling 203's own claim, tested: "Oldest first, one per completion, which
+   * drains a burst in order — the next one rides the next completion." It does
+   * not. The window is `occurredAt > runStartedAt`, so once the FIRST comment
+   * starts a redelivery run, the second comment is older than that run's start
+   * and the next completion cannot see it. A burst of two loses the second,
+   * silently — the exact failure ruling 203 exists to stop, reintroduced by its
+   * own fix.
+   */
+  it("ruling 205: a BURST posted while the agent was busy is delivered whole, not just its first", async () => {
+    deployDevSpecialist();
+    const startedAt = "2026-09-13T10:00:00.000Z";
+    upsertRun(store.db, {
+      id: "run_live_primary",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: null,
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "running",
+      startedAt,
+    });
+
+    // Each comment is longer than ANCHOR_EVENT_MAX_CHARS (220) and carries a
+    // unique tail token, so the canonical anchor's clamped timeline summary
+    // CANNOT be what puts the token in the prompt. Only the directive can. The
+    // first draft of this test asserted on short strings and passed against the
+    // broken code, because the anchor happened to quote both comments.
+    const pad = "x".repeat(240);
+    for (const text of [
+      `@dev first: stop patching symptoms ${pad} TAIL-FIRST-INSTRUCTION`,
+      `@dev second: and add the regression test ${pad} TAIL-SECOND-INSTRUCTION`,
+    ]) {
+      const refused = await commentToAgent(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", text },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(refused.triggered).toBeNull();
+    }
+
+    patchRun(store.db, "run_live_primary", { state: "finished" });
+    const delivered = await deliverDeferredMention(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", runStartedAt: startedAt },
+    );
+    expect(delivered).toBe(true);
+
+    // CANARY: return after the first match (ruling 203's first implementation)
+    // and the second instruction never reaches the agent — there is no later
+    // completion whose window can still see it.
+    const started = startedRunSpecs().at(-1)!;
+    expect(started.prompt).toContain("TAIL-FIRST-INSTRUCTION");
+    expect(started.prompt).toContain("TAIL-SECOND-INSTRUCTION");
+
+    // One run, not two: a person's consecutive messages are one question, the
+    // way a queued human `@operator` burst is (B-OP2).
+    expect(
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
+        (r) => r.agent_profile_id === "dev" && r.id !== "run_live_primary",
+      ),
+    ).toHaveLength(1);
+  }, 30_000);
+
   it("ruling 203: a comment addressed to a DIFFERENT agent is not delivered to this one", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";

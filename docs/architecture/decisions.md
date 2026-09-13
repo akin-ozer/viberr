@@ -4253,6 +4253,28 @@ by rewriting those paragraphs:*
     (`task-file.schema.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `operator-toolkit.server.ts`, `operator-run.server.ts`.)
 
+205. **A person's burst is one message, and none of it may be dropped (owner, 2026-09-13,
+    pass 37; F37-25 — self-review of ruling 203, one hour old).** Ruling 203 delivers the
+    @mention that the single-flight guard refused, at the busy run's completion, and its own
+    doc said: "Oldest first, one per completion, which drains a burst in order — the next one
+    rides the next completion." It does not. The window is "posted after the busy run started",
+    so the instant the oldest comment starts a redelivery run, every other comment in the burst
+    is older than THAT run's start and no later completion can ever see it. Two messages typed
+    thirty seconds apart, the second silently discarded: ruling 203's own failure mode,
+    reintroduced by ruling 203's fix, under a comment claiming the opposite. So every pending
+    comment for that agent now goes into ONE directive. One author's consecutive messages read
+    as one message — which is what the operator lease already does with a person's burst, "one
+    person's three-message burst is one question, not three governed drives" — and several
+    authors keep their names inline, because the directive can only tell the agent to tag one
+    person back (NEW-4) and the others must at least be visible in what it is answering; the
+    person who has waited longest is the one it is told to tag. **The test that found this
+    passed against the broken code on its first writing**: it asserted the run's prompt
+    contained both comments, and it did, because the canonical anchor quotes the last five
+    timeline events — the second comment was in the SUMMARY while never reaching the DIRECTIVE.
+    Padding each comment past `ANCHOR_EVENT_MAX_CHARS` with a unique tail token made the clamp
+    cut it, so only the directive could carry it, and the test then failed for the real reason.
+    (`task-actions.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`
