@@ -171,3 +171,68 @@ fresh run re-anchors on it — nothing was lost to the expired session but time.
 Packet kinds exercised this pass: `blocked` (agent question), `blocked` (run failure
 recovery), with option kinds `redirect`, `request_edit`, `hold_runtime_debug` offered and a
 custom directive resolved.
+
+## Attachments and the evidence-separation guardrail — CORRECT
+
+Agents write raw validation output to `attachments/`, not the timeline — the
+`evidence-separation` guardrail working without being asked. SHOP-1 alone carries six real
+logs (`…-install.log`, `…-typecheck.log`, `…-lint.log`, `…-test.log`, `…-structure.log`,
+`SHOP-1-validation.log`), and the content is genuine (`$ npx --yes pnpm@9.15.4 install
+--frozen-lockfile --offline …`).
+
+The raw-bytes route (R19-19) is gated exactly as specified — member-only, not role-graded:
+
+| caller | result |
+|---|---|
+| arda (project admin) | 200, 3992 bytes, `text/plain` |
+| sam (project **viewer**) | 200 — a member may read evidence |
+| zoe (**non-member**) | **404** |
+| unauthenticated | 302 → `/login` |
+| `…/attachments/..%2f..%2f..%2ftask.md` | **404** — traversal refused |
+
+## Schedules, and ruling 131(d)'s working half — CORRECT
+
+Scheduled an operator re-run one minute out on SHOP-5, a **held** task. The record, in order:
+
+```
+08:18:58  Scheduled: an operator re-run for SHOP-5 at 08:19:58 — "Scheduled probe: report
+          status." It runs on the profile deployed when it fires.
+08:20:09  Scheduled action starting: running the scheduled operator re-run for SHOP-5 …
+08:20:09  Scheduled action skipped: SHOP-5 waits on other work (goal-3 link 6) — no operator
+          run was started; Viberr releases the task when every entry is done.
+```
+
+Runs started on SHOP-5: **0**. So `HELD_TRIGGERS`' `scheduled` arm really does refuse, and
+says so rather than failing quietly. This is worth recording precisely because it bounds
+F37-2: ruling 131(d) was doing its job for the three operator triggers it covers, and the
+hole was only the *specialist dispatch*, which ruling 186 now closes.
+
+## Ruling 160 — a person's PR close is respected — CORRECT
+
+I closed PR #2 by hand on GitHub, without merging, to reject SHOP-7 deliberately. The
+reconciler caught it and viberr refused to route around it:
+
+> **Divergence:** PR #2 was closed on GitHub without merging, but SHOP-7 is still active.
+> Decide whether to rework and reopen, or archive the task.
+
+and, when the operator next tried to deliver:
+
+> No pull request was opened for SHOP-7: PR #2 was closed without merging. A closed pull
+> request is a person's decision about the task, so Viberr opens no new PR for this branch.
+
+## Scope violations — CAUGHT, by the mechanism the controller designed
+
+The Code Reviewer rejected SHOP-6's delivery with, among other findings:
+
+> 1. `pnpm-lock.yaml` is outside the declared owned paths. Remove it or explicitly expand task
+>    ownership.
+
+The path-set ownership the controller invented in its conventions KB is being enforced by the
+required reviewer it deployed, against a real diff.
+
+## Boot recovery — CORRECT
+
+Recreating the container while an agent run was live:
+
+> **Restart:** the run `run_19PtdepIDG3L` (agent) was still running when the server stopped;
+> it is recorded as interrupted by the restart, and the operator is re-invoked.

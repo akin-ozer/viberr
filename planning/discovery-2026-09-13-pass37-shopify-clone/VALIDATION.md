@@ -130,3 +130,36 @@ Recreating the container mid-run exercised it:
 > it is recorded as interrupted by the restart, and the operator is re-invoked.
 
 Correct, and honest about what happened.
+
+---
+
+## Ruling 189 — live, on the task that produced the finding
+
+SHOP-7 still carried its open packet when the rebuilt image came up, so the fix could be
+proved against the original bug rather than a reconstruction. Resolving it with the
+`Mock-only` option appended this to the task's **goal** — the contract every fresh run
+re-anchors on, and the exact place the answer was missing before:
+
+```
+---
+
+**Decision — 2026-09-13, Arda answered “Arda: choose the payment provider”:**
+
+Mock-only — Deterministic non-monetary integration now; no live checkout until a later
+real-provider decision and implementation.
+
+This decision is part of the task's contract from here on. Where anything above contradicts
+it, the decision wins — it was made by the person the question was put to, and it is not an
+agent overstepping.
+```
+
+The goal above it is untouched, so the original brief still reads as written and the decision
+sits under it with the precedence spelled out. A reviewer re-anchoring on this file now finds
+the answer in the contract instead of finding the deliverable contradicting it.
+
+**An unplanned second benefit.** The Codex session expired again on the re-engage — the same
+provider fact as before (`no rollout found for thread id … (code -32600)`), and viberr again
+reported it honestly and opened a recovery packet. Before ruling 189 that fallback was weak:
+a fresh run "re-anchors on this task file", and the task file did not carry the human's
+answer. Now it does. The two mechanisms compose — an expired transcript costs a round trip
+instead of the decision.
