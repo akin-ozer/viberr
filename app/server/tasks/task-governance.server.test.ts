@@ -3527,9 +3527,11 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     title: "Choose the payment provider",
     body: "Stripe, Adyen or mock-only?",
     observations: [],
+    // `custom` is what a real agent question carries — SHOP-7's live packet
+    // offered Stripe / Adyen / Mock-only as `custom` options.
     options: [
-      { kind: "redirect", t: "Stripe", d: "Hosted Stripe Checkout.", rec: true },
-      { kind: "redirect", t: "Mock-only", d: "Deterministic, non-monetary.", rec: false },
+      { kind: "custom", t: "Stripe", d: "Hosted Stripe Checkout.", rec: true },
+      { kind: "custom", t: "Mock-only", d: "Deterministic, non-monetary.", rec: false },
     ],
   };
 
@@ -3587,6 +3589,61 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       { dataRoot: store.dataRoot },
     );
     expect(goalOf(store).startsWith(before.trimEnd())).toBe(true);
+  });
+
+  it("does NOT amend for a RECOVERY choice — that decides what happens next, not what the work is", async () => {
+    const store = prepared();
+    // Live on SHOP-7 the goal collected "Work stalled: pick a recovery path →
+    // Redirect with sharper guidance" beside the real provider decision. A
+    // recovery choice is process, and process accumulating in the text every
+    // future run re-anchors on is the noise this exclusion prevents.
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "Work stalled: pick a recovery path",
+        options: [
+          { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: true },
+          { kind: "request_edit", t: "Send back for another attempt", d: "", rec: false },
+        ],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store)).toBe(before);
+  });
+
+  it("DOES amend when a person types a directive, whatever packet they typed it on", async () => {
+    const store = prepared();
+    // A typed directive is content a person wrote; it binds the work even when
+    // the option beside it is a recovery choice.
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "Work stalled: pick a recovery path",
+        options: [{ kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: true }],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        custom: "Drop the Redis dependency entirely; use Postgres advisory locks.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store)).toContain("Postgres advisory locks");
   });
 
   it("does NOT amend when the packet stays open for a human to edit the goal", async () => {

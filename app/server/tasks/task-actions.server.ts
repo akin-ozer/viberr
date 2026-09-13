@@ -8207,8 +8207,29 @@ export async function resolvePacket(
   // which is not a person's answer. Everything else — a chosen option, a custom
   // directive — is an instruction the next run must see, and the last clause
   // says which way the contradiction it may create resolves.
+  //
+  // Only an answer that binds future WORK belongs in the contract. A recovery
+  // choice — "try again", "redirect", "retry on the other backend", "hold while
+  // I debug", "clear the stale remote branch" — decides what happens NEXT, not
+  // what the work IS, and appending those accumulates process noise in the text
+  // every future run re-anchors on. Live on SHOP-7 the goal collected two
+  // blocks: the provider decision (contract) and "Work stalled: pick a recovery
+  // path → Redirect with sharper guidance" (not). A typed CUSTOM directive
+  // always binds, whatever packet it was typed on, because a person wrote it.
+  const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
+    "request_edit",
+    "hold_runtime_debug",
+    "redirect",
+    "retry_other_backend",
+    "archive_task",
+    "discard_branch",
+    "resolve_remote_collision",
+    "move_stage",
+  ]);
   const goalAmendment: string | null =
-    acceptsInto !== null || !clearPacket
+    acceptsInto !== null ||
+    !clearPacket ||
+    (!customDirective && PROCESS_ONLY_OPTION_KINDS.has(option.kind))
       ? null
       : (() => {
           const when = now.slice(0, 10);

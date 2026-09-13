@@ -4127,9 +4127,15 @@ by rewriting those paragraphs:*
     and it is not an agent overstepping." Doing it in the WRITER rather than asking the
     operator to remember `set_goal` is deliberate: it needs no model judgement and cannot be
     lost to a turn that fails, is interrupted, or resumes into an expired session — all three
-    of which happened on this task. Two resolutions are excluded, both because no future run
-    is bound: one that ENDS the task, and `edit_goal`, whose packet stays open because the
-    person is about to rewrite the goal themselves.
+    of which happened on this task. Exclusions, all because no future run's WORK is bound: a
+    resolution that ENDS the task; `edit_goal`, whose packet stays open because the person is
+    about to rewrite the goal themselves; and a RECOVERY choice (`request_edit`, `redirect`,
+    `retry_other_backend`, `hold_runtime_debug`, `archive_task`, `discard_branch`,
+    `resolve_remote_collision`, `move_stage`), which decides what happens NEXT rather than what
+    the work IS — live, SHOP-7's goal collected "Work stalled: pick a recovery path → Redirect
+    with sharper guidance" beside the real provider decision before this exclusion existed. A
+    typed CUSTOM directive always binds, whatever packet it was typed on, because a person
+    wrote it.
     (`task-actions.server.ts`.)
 
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
