@@ -101,6 +101,7 @@ import {
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   defaultModelFor,
   resolveRunModel,
@@ -2895,12 +2896,27 @@ export async function operatorDispatchAgent(
   // The retry is already on the task's schedule, so the message ends the
   // subject rather than inviting a packet.
   const heldNoop = (error: DispatchHeldError): OperatorActionResult => {
-    const other = error.hold.backend === "codex" ? "Claude" : "Codex";
+    // Ruling 207(h): the hold is scoped to (backend, TASK OWNER) — every run on
+    // this task bills that one person (ruling 127) — so "pick a <other>
+    // profile" only helps when the OWNER has the other backend connected. When
+    // they do not, the operator follows the advice, the dispatch is refused on
+    // the owner's credential, and the failure opens the very packet this
+    // sentence forbade. So the alternative is offered only when it exists.
+    const otherBackend: RealBackend = error.hold.backend === "codex" ? "claude" : "codex";
+    const other = otherBackend === "claude" ? "Claude" : "Codex";
+    const ownerId =
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter
+        .ownerUserId ?? null;
+    const fallbackReachable =
+      ownerId !== null && isBackendAvailableFor(db, ownerId, otherBackend);
     return {
       outcome: "noop",
       message:
         `${error.userMessage} Do not open a packet for this; ` +
-        `pick a ${other} profile if the work cannot wait.`,
+        (fallbackReachable
+          ? `pick a ${other} profile if the work cannot wait.`
+          : `there is no ${other} fallback either — this task's runs bill its owner, ` +
+            `who has no ${other} account connected. The retry is already scheduled.`),
     };
   };
   if (prompt) {

@@ -105,7 +105,14 @@ async function nudgeMergePendingTasks(
         taskKey: row.key,
         kind: "policy",
         title,
-        text: `${row.key} was accepted into Done, but PR #${pr.number} is still open on GitHub. Merge it to finish delivery. (The completion was accepted with the merge still pending: a full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused; a human completes it from the task's Complete-merge button or via GitHub.)`,
+        // Ruling 207(l): this used to assert "PR #N is still open on GitHub" —
+        // a live fact — from `task_projections.pr_json`, which is a CACHE. The
+        // thing that kept that cache honest was the 5-minute reconcile poll,
+        // and ruling 177 excludes terminal-stage tasks from every budgeted
+        // pass: an accepted task IS terminal, so the exact rows this nudge
+        // describes are the rows nothing refreshes. The figure is still worth
+        // sending; it just has to say whose reading it is.
+        text: `${row.key} was accepted into Done with its merge still pending. The last state Viberr read for PR #${pr.number} was open — Viberr stops polling a task once it reaches Done (ruling 177), so that is the last thing it saw, not a live reading. If the PR is still open, merge it from the task's Complete-merge button or on GitHub. (A full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused.)`,
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,

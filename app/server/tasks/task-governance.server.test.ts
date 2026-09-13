@@ -1129,7 +1129,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
+      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. **Run operator** on the task page restarts it — that control belongs to a maintainer or an admin, so ask one if you do not see it.",
     );
     // A repeat confirm on the resolved packet is refused.
     await expect(

@@ -1287,7 +1287,7 @@ describe("resumeRun — continuity recovery", () => {
    * (one fresh run re-anchored on task.md) is the honest outcome.
    */
   it("a resume for a DIFFERENT principal re-anchors instead of borrowing the session", async () => {
-    const { specs, resume } = await startThenResume();
+    const { specs, resume, firstRunId } = await startThenResume();
     // The session IS on disk — in the ORIGINAL owner's home.
     await withTranscriptStore("sess-gone");
     // This new owner HAS run agents here before (their store exists). The
@@ -1308,6 +1308,29 @@ describe("resumeRun — continuity recovery", () => {
       store.users.murat.id,
     );
     expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.murat.id);
+
+    // Ruling 207(j): and the record says WHY. The owner-change branch decides
+    // continuity before any filesystem is consulted, so the transcript is
+    // intact in the previous owner's home — reporting it as "no longer has a
+    // provider transcript … retention sweep or a wiped runtime volume" sent an
+    // admin hunting a storage fault that does not exist, for a condition viberr
+    // chose.
+    // CANARY: emit the single transcript-gone sentence (the shipped note) and
+    // both of these fail.
+    const { readTaskFile: readTask } = await import("~/server/files/task-writer.server");
+    const note = readTask({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.type === "continuity");
+    expect(note!.text).toContain("belongs to the account that held the seat");
+    expect(note!.text).toContain("The transcript is not missing");
+    expect(note!.text).not.toMatch(/retention sweep|wiped runtime volume/);
+
+    const marker = listRunLines(store.db, firstRunId).find(
+      (l) => l.display.tag === "run·session_missing",
+    );
+    expect(marker!.display.text).toMatch(/belongs to the account that owned this task/);
   });
 
   /**

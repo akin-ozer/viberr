@@ -8054,7 +8054,15 @@ export async function resolvePacket(
           option.ev ??
           `**Decision:** hold for runtime debug. ${key} stays blocked while the provider-native ` +
             `session is inspected. Coordination is paused and no operator run was started. ` +
-            `Use **Run operator** on the task page when the inspection is done.`,
+            // Ruling 207(i): `run-agents` is admin/maintainer only (shared/rbac),
+            // so a CONTRIBUTOR who owns the task — who may resolve this packet
+            // through the owner exception — never sees that control, and the
+            // @operator door is gated on the same role. Naming the control
+            // without naming who holds it left an owner looking for a button
+            // that is not rendered for them, on a task now blocked with the
+            // packet cleared.
+            `**Run operator** on the task page restarts it — that control belongs to a ` +
+            `maintainer or an admin, so ask one if you do not see it.`,
         toAgent: false,
         evidence: null,
       };

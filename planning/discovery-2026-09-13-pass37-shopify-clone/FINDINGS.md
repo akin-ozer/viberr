@@ -1551,3 +1551,51 @@ SHOP-1 :  40 ->  40 events (at the threshold, not over — untouched, correctly)
 Every existing compaction test still passes: all of them put the foldable comments next to each
 other, which is precisely why the defect was invisible. The new test uses the live shape —
 reply, typed, reply, typed — and goes red against the adjacency rule.
+
+## F37-27 · Twelve more claims viberr makes that its own code refuses — a systematic audit
+
+F37-21 through F37-26 all came from one move: read a sentence viberr shows a human, then check
+whether the code behind it can keep that promise. That is repeatable, so I ran it as a
+14-agent audit — seven claim-emitting surfaces, each candidate handed to a skeptic told to
+refute it, default refuted when uncertain. **20 candidates, 13 survived** (two were the same
+defect found from two surfaces), and I verified each survivor against the code myself before
+touching anything.
+
+The shape recurs: the sentence is confident, the mechanism has a hole, and the hole is usually
+in **the state the sentence is most about**.
+
+| # | the claim | what the code does |
+|---|---|---|
+| a | "Run recovery replays the effects on the next restart" | the SAME write sets `waiting: "human"`; recovery selects `t.waiting = 'agent'` |
+| b | "writes to it are refused" (Codex operator) | ruling 185 removed the OS sandbox; every Codex thread is `danger-full-access` |
+| c | "Supervised → ONE recommendation card" | the `dispatch-agents` GRANT decides; `direct` is the seeded default and runs it |
+| d | "Branch was already gone on GitHub" | every 422 was read that way, including "Reference cannot be deleted" |
+| e | tag "@<dispatcher>" "so they are notified" | the dispatcher arrives as an EMAIL; the ladder matches a local part, never an address |
+| f | "Viberr … opens the review PR when the task enters Review" | R15-2 deleted that hook in July |
+| g | "The thread stays resumable" | a run with no `session_id` is skipped by `latestSessionRun` |
+| h | "pick a Codex profile if the work cannot wait" | the hold is scoped to the task OWNER, who may have no Codex account |
+| i | "Use **Run operator** on the task page" | `run-agents` is admin/maintainer; a contributor-owner never sees it |
+| j | "no longer has a provider transcript (retention sweep or a wiped runtime volume)" | on an owner change the transcript is intact, in the previous owner's home |
+| k | "Deliver the branch to push it" on `relation: "unknown"` | `unknown` means the compare could not be READ — the remote may be diverged |
+| l | "PR #N is still open on GitHub" | read from a projection cache that ruling 177 bars the poller from refreshing |
+
+**The two worst are (a) and (b).**
+
+(a) is self-defeating in one write: the effects it fails to apply include a required reviewer's
+**verdict**, so the acceptance gate stays shut on a review that actually happened and is sitting
+readable in the run log — while the note tells the supervisor to wait for a restart that will
+never select the task. The more faithfully they follow it, the longer it sits.
+
+(b) is the dangerous direction: it tells a model the machine will refuse an action the machine
+now permits. A model that reasons "the sandbox stops this anyway, so trying is harmless" will
+try.
+
+**Three of the twelve were caught by tests that had to be updated, not written** — the fixtures
+encoded the old claim as correct (152(c)'s owner has only Claude connected, which is exactly
+the shape the advice ignored). That is the same pattern as F37-26's compaction fixtures: a test
+that agrees with the defect is how a defect survives.
+
+**Fix — ruling 207(a)–(l).** Each part either makes the sentence true or makes the mechanism
+keep it, and every one carries a canary. Where the honest answer is "viberr cannot know", it
+now says so — (l) reports its own last reading rather than asserting live GitHub state, and (k)
+names the uncertainty instead of promising the push will land.

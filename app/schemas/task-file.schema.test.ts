@@ -1100,7 +1100,16 @@ describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () =
     expect(behind).toContain("`6004958`");
     expect(behind).toContain("Deliver the branch to push it");
     expect(behind).not.toMatch(/rebase/i);
-    expect(unpushedRevisionBlockedReason(pr("unknown"), rev, "JC-3")).toContain("Deliver the branch");
+    // Ruling 207(k): `unknown` used to take the `behind` sentence, whose
+    // premise ("a behind or absent remote reaches the PR by a plain push") it
+    // does not satisfy — it is written when the compare could not be READ, so
+    // the remote may be diverged. CANARY: fall through to the behind arm and
+    // the uncertainty disappears behind a promise that the push will land.
+    const unknown = unpushedRevisionBlockedReason(pr("unknown"), rev, "JC-3")!;
+    expect(unknown).toContain("could not read how the two relate");
+    expect(unknown).toContain("Deliver the branch to try the push");
+    expect(unknown).toContain("if the remote has diverged it will refuse");
+    expect(unknown).not.toMatch(/rebase/i);
     const diverged = unpushedRevisionBlockedReason(pr("diverged"), rev, "JC-3")!;
     expect(diverged).toContain("holds commits this workspace does not");
     expect(diverged).toContain("Resolve the branch history, then deliver the branch");

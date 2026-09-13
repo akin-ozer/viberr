@@ -1231,10 +1231,22 @@ export function backendUnavailableMessage(
  */
 const SESSION_MISSING_TAG = "run·session_missing";
 
-/** What the user is told when provider-side history is gone. Never "review your
- *  authentication" — the credential is fine; the transcript is not. */
-function sessionMissingMessage(backend: RealBackend, sessionId: string): string {
+/** Ruling 207(j): WHY a resume could not reach its session. The two causes look
+ *  identical downstream and read completely differently to a human: one is a
+ *  storage fault worth investigating, the other is a decision viberr made. */
+export type ContinuityLossReason = "transcript_gone" | "owner_changed";
+
+/** What the user is told when a session could not be resumed. Never "review your
+ *  authentication" — the credential is fine. */
+function sessionMissingMessage(
+  backend: RealBackend,
+  sessionId: string,
+  reason: ContinuityLossReason,
+): string {
   const label = backend === "claude" ? "Claude" : "Codex";
+  if (reason === "owner_changed") {
+    return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
+  }
   return `The ${label} session ${sessionId} no longer exists on this machine. Its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
 }
 
@@ -1245,9 +1257,13 @@ function sessionMissingMessage(backend: RealBackend, sessionId: string): string 
  * `latestSessionRun` reads to skip the row, and the console shows it exactly
  * where the thread stopped.
  */
-function recordSessionMissing(db: DatabaseSync, run: AgentRunRow): void {
+function recordSessionMissing(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  reason: ContinuityLossReason,
+): void {
   const now = new Date().toISOString();
-  const text = sessionMissingMessage(run.backend, run.session_id ?? "");
+  const text = sessionMissingMessage(run.backend, run.session_id ?? "", reason);
   const raw = JSON.stringify({
     type: "error",
     source: "viberr",
@@ -1307,6 +1323,7 @@ function continuityResetPreamble(backend: RealBackend, kind?: string): string {
 async function noteContinuityReset(
   db: DatabaseSync,
   run: AgentRunRow,
+  reason: ContinuityLossReason,
   dataRoot?: string,
 ): Promise<void> {
   // Ruling 99: a controller conversation has no task file to note on — its
@@ -1326,7 +1343,16 @@ async function noteContinuityReset(
         type: "continuity",
         actor: { kind: "system", systemId: "runtime-continuity" },
         title: null,
-        text: `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
+        // Ruling 207(j): the owner-change branch decides continuity BEFORE any
+        // filesystem is consulted (see resumeRun), so the transcript is intact
+        // in the previous owner's home. Reporting that as "no provider
+        // transcript … retention sweep or a wiped runtime volume" sent an admin
+        // hunting a storage fault that does not exist, and hid the one fact
+        // that explains it.
+        text:
+          reason === "owner_changed"
+            ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+            : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
         toAgent: false,
         evidence: null,
       });
@@ -1584,8 +1610,11 @@ export async function resumeRun(
       backend,
       sessionId: prev.session_id,
     });
-    recordSessionMissing(db, prev);
-    await noteContinuityReset(db, prev, input.dataRoot);
+    const lossReason: ContinuityLossReason = ownerChanged
+      ? "owner_changed"
+      : "transcript_gone";
+    recordSessionMissing(db, prev, lossReason);
+    await noteContinuityReset(db, prev, lossReason, input.dataRoot);
     const freshTurn: StartRunInput = {
       projectSlug: prev.project_slug,
       taskKey: prev.task_key,
@@ -2128,7 +2157,17 @@ async function noteInterrupt(
         type: "note",
         actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
         title: null,
-        text: `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`,
+        // Ruling 207(g): "the thread stays resumable" is true only when a
+        // provider session was ever reported. `reserveRun` writes a `running`
+        // row minutes before any provider process exists, and that row is what
+        // the Live-run strip's Stop button acts on — the deliberate
+        // minutes-long window a person actually presses Stop in. A run with no
+        // `session_id` is skipped by `latestSessionRun` (agent-reply.server.ts),
+        // so "re-run the agent to continue" hands back a fresh agent with no
+        // memory of the turn it stopped, silently re-spending the budget.
+        text: run.session_id
+          ? `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`
+          : `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}) before ${backend} reported a session, so there is no thread to resume. Re-running the agent starts a fresh one, re-anchored on \`task.md\`.`,
         toAgent: false,
         evidence: null,
       });

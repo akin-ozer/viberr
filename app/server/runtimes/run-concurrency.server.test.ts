@@ -23,6 +23,7 @@ import {
   startRun,
 } from "./run-service.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 
 /**
  * The instance run-concurrency cap: `handles.size` (live adapters) is the ground
@@ -113,6 +114,41 @@ describe("run concurrency cap", () => {
       live: 1,
       queued: 1,
     });
+  });
+
+  /**
+   * Ruling 207(g) (claim audit). The interrupt note said "The thread stays
+   * resumable; re-run the agent to continue" for every run. A QUEUED run — and
+   * a running row in the minutes-long window `reserveRun` opens before any
+   * provider process exists, which is the window a person actually presses Stop
+   * in — has no `session_id`, and `latestSessionRun` skips exactly those. The
+   * person who stopped a long run believed its reasoning survived and got a
+   * fresh agent that re-derived the work and re-spent the budget.
+   */
+  it("ruling 207(g): interrupting a run with NO provider session says so instead of promising a resume", async () => {
+    setMaxConcurrentRuns(store.db, 1);
+    await startHeldRun("r0");
+    const queued = await startHeldRun("r1");
+    await settle();
+    expect(getRun(store.db, queued)?.state).toBe("queued");
+    expect(getRun(store.db, queued)?.session_id).toBeNull();
+
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: queued, dataRoot: store.dataRoot },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
+
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.type === "note" && e.text.includes(queued));
+    // CANARY: emit the single unconditional sentence (the shipped note) and
+    // this promises a resume that `latestSessionRun` will never perform.
+    expect(note!.text).toContain("there is no thread to resume");
+    expect(note!.text).not.toContain("stays resumable");
   });
 
   it("drains the oldest queued run when a live run finishes", async () => {

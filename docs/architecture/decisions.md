@@ -4301,6 +4301,73 @@ by rewriting those paragraphs:*
     window.
     (`timeline-compaction.server.ts`.)
 
+207. **Twelve claims viberr makes that its own code refuses (owner, 2026-09-13, pass 37;
+    F37-27).** F37-21 to F37-26 all came from one move — read a sentence viberr shows a human,
+    then check whether the mechanism behind it can keep the promise — so it was run as a
+    14-agent audit over seven claim-emitting surfaces, each candidate handed to a skeptic told
+    to refute it. Twenty candidates, thirteen survived (two were one defect found twice), each
+    re-verified against the code by hand. They are one ruling because they share a lesson: a
+    sentence that names a mechanism is a claim about that mechanism, and the hole is usually in
+    the state the sentence is most about.
+    (a) **"Run recovery replays the effects on the next restart"** — written by
+    `noteCompletionEffectsLost`, in the SAME update that sets `waiting: "human"`, while boot
+    recovery selects `t.waiting = 'agent'`. The note's own write made its promise unreachable,
+    and the effects include a required reviewer's VERDICT, so the acceptance gate stayed shut on
+    a review that happened and is readable in the run log. Recovery now also matches a run
+    carrying a `run.completion.effects_lost` audit row — the module's existing idiom, since it
+    already keys idempotency and its crash-loop cap on audit rows rather than task state.
+    (b) **"writes to it are refused"** — the Codex operator's prompt describing its scratch
+    folder. Ruling 185 removed the OS sandbox; every Codex thread starts `danger-full-access`.
+    The prompt promised a wall that does not exist, in the one direction that invites a model to
+    test it. It now states the rule as a rule and says plainly that nothing will stop the write.
+    (c) **"Supervised → ONE recommendation card; full autonomy → runs directly"** — `run_agent`'s
+    description. `gate()` returns `direct` for a `direct` GRANT whatever the autonomy, and
+    `direct` is `dispatch-agents`' seeded default, so a supervised operator narrated a card it
+    had not filed while the agent was already writing.
+    (d) **"Branch was already gone on GitHub"** — recorded for every 422 on the ref DELETE.
+    GitHub answers 422 "Reference cannot be deleted" for branch protection and rulesets too,
+    with the branch still there. Only an explicit "does not exist" is `already_gone` now.
+    (e) **tag "@<dispatcher>" so they are notified** — the dispatcher reaches the prompt as
+    `TaskActor.label`, documented as "e.g. the email", and the mention ladder matches a local
+    part, a full name or a first name, never a whole address. Resolved through the display-name
+    lookup that exists for this, extracted to its own module to keep specialist-run out of a
+    cycle with task-actions.
+    (f) **"Viberr … pushes the branch + opens the review PR when the task enters Review"** — told
+    to every delivering agent. R15-2 deleted that hook on 2026-07-28; delivery is an operator
+    decision. Corrected in all six places, the seeded developer profile's description included.
+    (g) **"The thread stays resumable"** — on every interrupt. `reserveRun` writes a running row
+    minutes before a provider process exists, which is the window a person actually presses Stop
+    in, and `latestSessionRun` skips a run with no `session_id`. That case now says there is no
+    thread to resume.
+    (h) **"pick a <other> profile if the work cannot wait"** — after a quota hold. The hold is
+    scoped to (backend, task OWNER), because every run bills the owner (ruling 127), so the
+    advice only helps when the owner has that backend connected; otherwise it sends the operator
+    into a refused dispatch whose failure opens the packet the same sentence forbids. Offered
+    only when it exists.
+    (i) **"Use Run operator on the task page"** — in the hold-for-runtime-debug resolution.
+    `run-agents` is admin/maintainer, so a CONTRIBUTOR who owns the task (and may resolve the
+    packet through the owner exception) never sees that control, and the `@operator` door is
+    gated on the same role. The sentence now names who holds it.
+    (j) **"no longer has a provider transcript … retention sweep or a wiped runtime volume"** —
+    written on an OWNER CHANGE, which `resumeRun` decides before any filesystem is consulted.
+    The transcript is intact, in the previous owner's home. An admin was sent hunting a storage
+    fault for a condition viberr chose; the two causes now read differently.
+    (k) **"Deliver the branch to push it"** on `relation: "unknown"` — whose premise ("a behind
+    or absent remote reaches the PR by a plain push") `unknown` does not satisfy: it is written
+    when the compare could not be READ, so the remote may be diverged. It now names the
+    uncertainty instead of promising the push will land.
+    (l) **"PR #N is still open on GitHub"** — asserted from `task_projections.pr_json`, a cache.
+    The 5-minute reconcile poll kept it honest, and ruling 177 excludes terminal-stage tasks
+    from every budgeted pass — an accepted task IS terminal, so the exact rows this nudge
+    describes are the rows nothing refreshes. It now reports its own last reading and says why.
+    Three of the twelve were pinned by tests that had to be UPDATED rather than written: the
+    fixtures encoded the old claim as correct. A test that agrees with the defect is how a
+    defect survives.
+    (`run-service.server.ts`, `run-recovery.server.ts`, `operator-run.server.ts`,
+    `operator-toolkit.server.ts`, `operator-actions.server.ts`, `github-reconciler.server.ts`,
+    `reconcile-poller.server.ts`, `specialist-run.server.ts`, `task-actions.server.ts`,
+    `task-file.schema.ts`, `user-display-name.server.ts`, `agent-catalog.server.ts`.)
+
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
     nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`

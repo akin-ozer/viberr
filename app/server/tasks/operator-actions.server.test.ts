@@ -520,9 +520,31 @@ describe("operatorDispatchAgent", () => {
     );
     expect(bare.outcome).toBe("noop");
     expect(bare.message).toContain("Claude is out of quota until");
+    // Ruling 207(h): this fixture's owner has ONLY Claude connected — which is
+    // the shape the advice used to ignore. The hold is scoped to (backend,
+    // owner) because every run bills the owner (ruling 127), so telling the
+    // operator to "pick a Codex profile" would send it into a dispatch that is
+    // refused on the owner's credential, and THAT failure opens the very packet
+    // this sentence forbids.
+    // CANARY: restore the unconditional "pick a Codex profile" and this reads
+    // as advice on a fixture where no Codex account exists.
     expect(bare.message).toContain(
+      "there is no Codex fallback either — this task's runs bill its owner, who has no Codex account connected",
+    );
+    // …and with the other backend actually reachable for the owner, the
+    // fallback is real and is offered. Both arms of ruling 207(h) in one test,
+    // because the sentence is only honest when it tracks this fact.
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    const withFallback = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    expect(withFallback.message).toContain(
       "Do not open a packet for this; pick a Codex profile if the work cannot wait.",
     );
+
     // The prompt arm is the same door and answers the same way.
     const prompted = await operatorDispatchAgent(
       store.db,

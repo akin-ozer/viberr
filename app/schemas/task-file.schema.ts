@@ -585,6 +585,15 @@ export function unpushedRevisionBlockedReason(
   if (record.relation === "diverged") {
     return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number}, whose head ${head} holds commits this workspace does not. Resolve the branch history, then deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
   }
+  // Ruling 207(k): `unknown` is not `behind`. It is written when the compare
+  // could not be READ at all (the reconciler's `compare()` failing, a mirror
+  // that could not be built), so the remote may well be diverged — and the old
+  // sentence handed that case the plain-push remedy the `diverged` arm exists
+  // to replace. Naming the uncertainty is the honest answer: the same first
+  // move, without the promise that it will land.
+  if (record.relation === "unknown") {
+    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}), and Viberr could not read how the two relate. Deliver the branch to try the push — if the remote has diverged it will refuse, and the history has to be resolved first. It cannot be accepted until the PR carries the reviewed revision.`;
+  }
   return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
 }
 
