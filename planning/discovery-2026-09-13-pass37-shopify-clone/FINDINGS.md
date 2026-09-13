@@ -715,6 +715,18 @@ fix costs one field.
 `createReconcileBehindByLookup`, the same lookup the sync pill uses; `null` means no pass has
 compared this task yet and is explicitly never a reason to skip the call.
 
+**Outcome, measured after the fix shipped — it is INERT, and I am recording that rather than
+claiming the win.** The count over the whole pass is 16 of 19 refused plan steps, and the
+notes kept arriving after the fix was live (11:34 and 12:02 on SHOP-6, with `behindBy: 0`
+sitting in a reconcile row from 11:38 and `baseBehindBy: 0` therefore in the snapshot the
+operator read). The tool description says `0` means the call is a no-op — and it also says
+"it is idempotent and cheap … call it when you are unsure rather than guessing", which is the
+stronger instruction and, on balance, the right one: a stale base is how a reviewer ends up
+reading a diff against a base that no longer exists, and the cost of being wrong the other way
+is one honest "did not apply" note. So the fact is delivered, the description explains it, and
+the model correctly keeps choosing the cheap call. The field stays because it makes the
+behaviour a choice instead of a blind spot; the note count is not evidence of anything wrong.
+
 ## F37-12 · "Coordination overhead 100%" is arithmetic that cannot be wrong and an answer that cannot be right — med
 
 **What Insights showed.** On the live instance, in the Delivery-oversight band:
