@@ -1116,10 +1116,31 @@ reasoning — which is a large part of why ruling 189 (put the human's decision 
 mattered so much on SHOP-7. And twice, the failure escalated into a decision packet putting a
 "Work stalled: pick a recovery path" question to a person over a file that was never lost.
 
+**Why viberr's own graceful recovery never fired — the sharpest part.** Viberr already has a
+designed answer for a vanished transcript: `resumeRun` calls `probeSessionContinuity` BEFORE
+handing the id to the SDK, and on `missing` it recovers in one shot — stamps the dead run,
+writes the `continuity` typed event, and re-enters `startRun` with no resume and a
+canonical-anchor preamble. No human is asked anything. That path was bypassed every time,
+because the probe is *right*:
+
+```ts
+function codexSessionDirs(userId, dataRoot) {
+  const dir = path.join(userBackendHome(userId, "codex", dataRoot), "sessions");  // the SHARED tree
+  return existsSync(dir) ? [dir] : [];
+}
+```
+
+It looks where the bytes actually are, finds the rollout, and answers `present`. So two halves
+of viberr disagree about where a Codex transcript lives — **viberr's probe and exporter say the
+shared `sessions/` tree, which is correct; the CLI's resume says `threads.rollout_path`, which
+viberr itself invalidated** — and the disagreement converts a case the product handles
+gracefully into an errored run and a packet put to a person. The fix makes them agree, which is
+why it belongs in the path that broke the agreement rather than in the probe.
+
 **The honesty failure is separable from the bug.** "The agent's stored Codex session no longer
-exists" is viberr's sentence, not the provider's, and it is false: the session exists.
-Viberr deleted the directory that made it findable and then reported the consequence as
-someone else's fault.
+exists" is viberr's sentence, not the provider's, and it is false: the session exists, and
+viberr's own probe had just found it. Viberr deleted the directory that made it findable to the
+CLI and then reported the consequence as someone else's fault.
 
 **Fix — ruling 199.** The settle re-points that run's threads at the shared path before
 removing the directory, and a boot pass repairs the 135 already stranded. Both are fail-soft

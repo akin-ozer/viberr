@@ -4347,7 +4347,13 @@ by rewriting those paragraphs:*
     gone, and **135 of 135** of their files present at the shared path. Every Codex
     conversation the instance had ever held was unresumable; all three of the pass's run
     errors were resume attempts, each costing a run, an error state, an operator turn, and
-    twice a decision packet put to a person. Ruling 181 fixed a real race (F36-3) and broke
+    twice a decision packet put to a person. Viberr's OWN graceful recovery never fired, and
+    the reason is the finding in miniature: `resumeRun` probes the stored id with
+    `probeSessionContinuity` first and, on `missing`, starts fresh with a canonical anchor and
+    tells nobody — but the probe looks in the SHARED `sessions/` tree, where the bytes really
+    are, so it answers `present` every time. Two halves of Viberr disagreed about where a Codex
+    transcript lives: the probe and the exporter were right, and the CLI's index was pointing at
+    a path Viberr had deleted. The repair belongs in the path that broke the agreement. Ruling 181 fixed a real race (F36-3) and broke
     conversation continuity for every Codex agent on the way past, invisibly, because the
     failure wore the provider's name. The settle now re-points that run's threads at the
     shared path before the directory goes, and a boot pass repairs the ones already stranded.
