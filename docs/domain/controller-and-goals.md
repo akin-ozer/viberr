@@ -1,5 +1,14 @@
 # The controller and chained goals
 
+> Updated 2026-09-13 for ruling 188 (pass 37): a controller read answers with what the
+> equivalent human surface renders. `get_project` reports board-RESOLVED eligible stages
+> (plus `declaredStages`, so a ruling-R14-1 remap is visible); `get_task` reports
+> `notAcceptableReason` — the acceptance gate's own verdict — instead of the stage-unaware
+> `blockReason` column; `list_mcp_servers` reports ruling 176's `writeTools`,
+> `writeToolsReviewed` and what the marking does; and `save_mcp_server` takes `writeTools`,
+> answering with the marking that landed and, when none is set, naming the tools that look
+> like writes so a server is never left ungoverned in silence.
+
 > The instance-level conversational agent, its governed toolkit, its built-in
 > diagnostics server, its deployment locks, and the goal chains it can define.
 > Source of truth: `app/server/controller/*`, `app/server/tasks/goal-actions.server.ts`,

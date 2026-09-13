@@ -4024,6 +4024,114 @@ by rewriting those paragraphs:*
     `boot.server.ts`; `specialist-run.server.ts`; `specialist-tool-policy.ts`;
     `app/shared/capabilities.ts`; `compose.yml`; `docs/operations/deployment.md`.)
 
+186. **A dependency hold refuses every agent dispatch (owner, 2026-09-13, pass 37; D37-1,
+    F37-2).** `blockedBy` held nothing. Ruling 131(d) refused three operator triggers
+    (`create`, `transition`, `scheduled`) and then ASKED the model, in the held doctrine's
+    prompt paragraph, not to "dispatch delivery work"; `startAgentRun` checked nothing at
+    all, so every other door — the operator's `run_agent`, the controller's `run_agent`, the
+    task page's Run-an-agent control — started a real, billable run on a held task. Live
+    (pass 37, SHOP-2): Viberr wrote "Held until every entry is done; Viberr releases it
+    then", started a Codex run **1.9 seconds later**, and let it design and commit the whole
+    identity service onto a pushed branch cut from a base that predated the foundation it
+    waited on — the exact collision the hold existed to prevent, manufactured by the
+    mechanism meant to prevent it. Asked what a hold should gate, the owner chose the hard
+    gate, one spelling, with no supporting-run carve-out and no advisory mode: *"the words on
+    the board become true"*, at the cost of a held task doing no preparatory work at all.
+    **(a)** `holdRefusal` lives in `app/shared/dependencies.ts` beside the vocabulary it
+    reads — pure and client-safe, so the server gate and the pre-click control cannot drift.
+    **(b)** `startAgentRun` refuses a non-empty `blockedBy` beside ruling 177's closure gate,
+    AHEAD of the auto-engage, so no engagement seat lands on a held task either. **(c)** The
+    task page's agent control renders that same sentence and disables Run; a SCHEDULED run
+    stays offerable, because a hold can clear on its own and the gate refuses again at fire
+    time if it has not. **(d)** The held doctrine stops claiming a responsibility the server
+    has taken: it now tells the operator that `run_agent` and `deliver_for_review` are
+    refused, rather than asking it not to try. **(e)** Operator triggers are deliberately NOT
+    narrowed — the reactive ones exist to answer people and react to facts, and with dispatch
+    gated they can no longer cause work. **(f)** Ruling 157 is untouched: its subject is a
+    packet-less, LIST-less stored hold, and it already deferred to ruling 131's floor for a
+    dependency list; the third arm of its test asserted that a dispatch on a
+    dependency-held task SUCCEEDED, which was the ambient behaviour of the day and never
+    that ruling's subject, and it now asserts the refusal.
+    (`app/shared/dependencies.ts`; `specialist-run.server.ts`; `operator-run.server.ts`;
+    `app/features/task-detail/execution-profile.tsx`.)
+
+187. **The record never claims a commit the remote does not have, and work that vanished
+    with its workspace is announced as lost (owner, 2026-09-13, pass 37; F37-8, F37-9).**
+    SHOP-2's `task.md` recorded `3aad6ff` on `shop-2`; origin's `shop-2` held only the
+    bootstrap commit, `git cat-file` found the object nowhere, and no workspace under `/data`
+    held it. The commit was made inside a run's workspace, never delivered, and disposed with
+    the workspace — and the GitHub page rendered "1 commit · synced" for a change that
+    existed nowhere. The carve-out that kept it was written for a different case ("agents
+    don't always follow the prefix convention, so an EMPTY filtered list must not wipe a
+    non-empty cache") and could not tell "our filter missed it" from "it was never pushed".
+    **(a)** Once the compare is PROVEN, the remote's list is authoritative about what exists:
+    cached entries it does not contain are dropped. **(b)** The drop is announced as a typed
+    `github` event that uses the word — "**Work lost:** commit … was recorded for … but is
+    not on it … that workspace is gone, so the change it held is not recoverable … run it
+    again to redo the work" — because a record that quietly shrinks by one row is the same
+    lie one step quieter. The carve-out's real case is preserved and pinned: an unprefixed
+    commit that IS on the branch survives and announces nothing. **(c)** F37-9, the same
+    family: the sync pill reads the newest `github.reconcile` provenance row, and `changed`
+    compares only the task file's `pr`/`github` blocks, so a pass whose only change was
+    "`main` moved" wrote no row and the pill kept the stale verdict — live, SHOP-2 rendered
+    **synced** while the same pass's audit row said `behind_main`. A changed verdict now
+    writes a row; an unchanged one still writes nothing on a poller tick, so the
+    "grow unboundedly" concern the original condition names is untouched.
+    (`github-reconciler.server.ts`; `provenance-query.server.ts`.)
+
+188. **A controller read returns what the equivalent human surface renders (owner,
+    2026-09-13, pass 37; F37-3, F37-5, F37-6, F37-7).** Four reads handed the model
+    less-resolved data than the UI with no marker saying so, and each changed what the
+    controller said or did. **(a)** `get_project` returned RAW declared stage ids; ruling
+    R14-1 remaps a declared id absent from a board onto the stage filling the same
+    structural role, and the Agents page renders the resolved list. The controller read the
+    raw ids and told its owner two deployed profiles were "effectively unselectable" while
+    the audit trail showed one of them being selected. It now emits the board-resolved list
+    through the SAME `resolveDeclaredStages` the Agents page, the task page and the dispatch
+    gate share, with `declaredStages` beside it so a remap is visible rather than silent.
+    **(b)** `get_task` leaked `validation_block_reason`, whose own docstring says every
+    consumer filters on the resolved review stage first — the board does, this read did not,
+    so a Design-stage task reported a Review-stage acceptance sentence recommending
+    force-accept three stages early. Replaced by `notAcceptableReason` via
+    `acceptanceRefusalFor`, the verdict the operator already reads. **(c)**
+    `list_mcp_servers` omitted ruling 176's write-tool marking entirely, so the controller
+    refused a grant that was in fact safe — reasoning correctly from what it could see: *"if
+    Viberr enforces that marking, it does so somewhere I cannot read, and I won't assert that
+    it does."* It now reports `writeTools`, `writeToolsReviewed` and what the marking does.
+    **(d)** `save_mcp_server` could create a server but never govern one, so both servers the
+    controller created landed with a NULL policy; it now takes `writeTools`. **(e)**
+    Auto-marking a create from the name heuristic was considered and REFUSED: the marking is
+    a review, `writeToolsReviewed` says whether one happened, and pre-marking would make
+    Viberr assert a review nobody performed — the same class of lie pointed the other way.
+    `saveMcpServer` returns `writeToolsSuggestion` instead, and the reply states plainly that
+    nothing is withheld and names the tools that look like writes. **(f)** F37-4, adjacent:
+    `WRITE_VERBS` grew from seven words to nineteen, having missed `edit_file` and `move_file`
+    on a stock filesystem MCP server.
+    (`controller-toolkit.server.ts`; `agents-query.server.ts`; `org/resources.server.ts`;
+    `app/shared/mcp-tools.ts`.)
+
+189. **A person's decision joins the task's contract, not just its timeline (owner,
+    2026-09-13, pass 37; F37-10).** SHOP-7's goal said "the agent must not select a provider
+    … ask Arda to choose". Arda chose, through the packet Viberr opened for exactly that.
+    The agent recorded the choice; the required reviewer re-anchored on the canonical file —
+    as its prompt tells it to — found the deliverable contradicting the goal and requested
+    changes; the operator told the agent to "remove every claim that mock-only was selected";
+    the agent "restore[d] a neutral, unresolved comparison"; and a second packet asked the
+    same question again. Nobody misbehaved — enforcing the declared contract is precisely
+    what a required reviewer is for. The defect is that resolving a packet wrote a timeline
+    event and a tagged comment and did not touch the goal, and the goal is what every fresh
+    run reads while a timeline entry twenty events back is not. Resolving a packet now
+    appends the decision to the goal, in the same locked write that clears the packet, with
+    the clause that settles the contradiction it may create: "Where anything above
+    contradicts it, the decision wins — it was made by the person the question was put to,
+    and it is not an agent overstepping." Doing it in the WRITER rather than asking the
+    operator to remember `set_goal` is deliberate: it needs no model judgement and cannot be
+    lost to a turn that fails, is interrupted, or resumes into an expired session — all three
+    of which happened on this task. Two resolutions are excluded, both because no future run
+    is bound: one that ENDS the task, and `edit_goal`, whose packet stays open because the
+    person is about to rewrite the goal themselves.
+    (`task-actions.server.ts`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

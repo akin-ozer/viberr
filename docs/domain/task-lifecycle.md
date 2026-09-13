@@ -1,5 +1,14 @@
 # Task lifecycle
 
+> Updated 2026-09-13 for rulings 186 and 189 (pass 37): a task with a non-empty `blockedBy`
+> refuses **every** agent dispatch at `startAgentRun`, beside ruling 177's closure gate and
+> in the same shape (`holdRefusal`, shared with the task page so the words before the click
+> are the words the server answers with); ruling 131(d)'s three-trigger operator refusal
+> stands and the held doctrine now states the dispatch refusal rather than asking for it. And
+> resolving a decision packet APPENDS the decision to the task's goal, so the contract every
+> fresh run re-anchors on carries the human's answer — the timeline alone did not, and the
+> stale goal overruled it.
+
 > How a task is born, moves, waits, gets reviewed, is delivered and is closed;
 > and which server invariants hold at each step. Source of truth:
 > `app/server/tasks/task-actions.server.ts`, `app/schemas/task-file.schema.ts`,

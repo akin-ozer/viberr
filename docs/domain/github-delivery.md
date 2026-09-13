@@ -1,5 +1,13 @@
 # GitHub integration and governed delivery
 
+> Updated 2026-09-13 for ruling 187 (pass 37): once a branch compare is PROVEN, the remote's
+> commit list is authoritative about what exists — a cached `github.commits` entry the remote
+> does not contain is dropped and announced as a typed "**Work lost**" event naming the sha,
+> the branch, and that the change is not recoverable. The prefix-convention carve-out that
+> used to keep such an entry survives only for commits the remote really has. The sync pill's
+> observation row is now also written when the compare VERDICT changes, so a branch that goes
+> behind `main` because main moved stops rendering a stale `synced`.
+
 > Credentials, repository attachment, the delivery pipeline, the revision and
 > verdict model, reconciliation, and scope violations. Source of truth:
 > `app/server/github/*`, `app/server/secrets/*`, `app/server/org/connections.server.ts`,
