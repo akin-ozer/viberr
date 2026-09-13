@@ -3748,7 +3748,7 @@ function operatorTurnDoctrine(
       // Ruling 131(d): a question on a held task is answered, and the hold
       // still binds what the answer may do.
       (snapshot.blockedBy.length > 0
-        ? ` This task waits on other work (${heldEntries(snapshot)}) and Viberr is holding it: answer them, but do not advance the stage, dispatch delivery work, or open a packet about the wait; \`set_dependencies\` is the only way the wait changes.`
+        ? ` This task waits on other work (${heldEntries(snapshot)}) and Viberr is holding it: answer them, but do not advance the stage or open a packet about the wait, and know that \`run_agent\` and \`deliver_for_review\` are REFUSED while it is held (ruling 186); \`set_dependencies\` is the only way the wait changes.`
         : "")
     );
   }
@@ -3984,7 +3984,11 @@ function heldDoctrine(snapshot: OperatorTaskSnapshot): string {
   const entries = heldEntries(snapshot);
   return (
     `This task WAITS ON OTHER WORK and Viberr is holding it: ${entries}. ` +
-    "While the list is non-empty: do NOT advance the stage, do NOT dispatch delivery work (no `run_agent` for a deliverer, no `deliver_for_review`), and do NOT open a decision packet about the wait; Viberr releases the task itself the moment every entry is done and re-invokes you then. " +
+    "While the list is non-empty: do NOT advance the stage and do NOT open a decision packet about the wait; Viberr releases the task itself the moment every entry is done and re-invokes you then. " +
+    // Ruling 186 (pass 37): dispatch is no longer something to ask for — it is
+    // REFUSED at the chokepoint. Saying so stops a turn being spent discovering
+    // it, and stops the prompt claiming a responsibility the server has taken.
+    "`run_agent` and `deliver_for_review` are REFUSED by the server while the task is held, so do not attempt either; there is no phrasing that gets past it. " +
     "The wait is a fact on the task, changed only with `set_dependencies` (the full list; `[]` clears it): use it if an entry is wrong, already satisfied by other means, or can never complete (an archived entry needs a person's or your edit). " +
     "If a person asked you something, answer it in ONE concise comment and tag them. Otherwise state in ONE concise comment that the task is held and what it waits on, and stop. Ending this turn with nothing else done is correct here."
   );

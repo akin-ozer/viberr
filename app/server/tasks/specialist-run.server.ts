@@ -30,6 +30,7 @@ import {
   resolveAgentCollab,
 } from "./agent-outcome.server";
 import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
+import { holdRefusal } from "~/shared/dependencies";
 import {
   resolveDeclaredStages,
   stageEligible,
@@ -1239,6 +1240,26 @@ async function dispatchAgentRun(
     if (closure.closed && dispatchBoard) {
       throw AppError.validation(
         closureRefusal(input.taskKey, closure, dispatchBoard.stages, "running an agent on it"),
+      );
+    }
+  }
+
+  // Ruling 186 (pass 37, F37-2): a task waiting on other work is HELD, and the
+  // hold is a GATE here — beside closure, in the same chokepoint, for the same
+  // reason. Ruling 131(d) refused three operator triggers and then asked the
+  // model not to "dispatch delivery work"; asking is not a gate. Live, SHOP-2
+  // was marked "Held until every entry is done; Viberr releases it then" and a
+  // Codex run started 1.9 seconds later, designed and committed the whole
+  // identity service, and pushed a branch cut from a base that predated the
+  // foundation it waited on. Every dispatch door lands here, so every one of
+  // them refuses: the operator's `run_agent`, the controller's `run_agent`, and
+  // the task page's Run-an-agent control (which shows the same sentence before
+  // the click, `holdRefusal` being shared and client-safe).
+  {
+    const held = existing.parsed.frontmatter.blockedBy;
+    if (held.length > 0) {
+      throw AppError.validation(
+        holdRefusal(input.taskKey, held, "running an agent on it"),
       );
     }
   }

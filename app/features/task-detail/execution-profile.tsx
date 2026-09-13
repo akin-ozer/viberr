@@ -5,7 +5,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
-import type { DependencyRender } from "~/shared/dependencies";
+import { holdRefusal, type DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -542,6 +542,8 @@ function OperatorRunControl({
  */
 function AgentRunControl({
   agents,
+  taskKey,
+  blockedBy,
   stage,
   stages,
   workflow,
@@ -558,6 +560,11 @@ function AgentRunControl({
   onCancelSchedule,
 }: {
   agents: DeployedSpecialistView[];
+  /** Ruling 186 (pass 37): the task key and what it waits on, so a dispatch
+   *  onto a HELD task is refused before the click with the server's own
+   *  sentence — `holdRefusal` is shared and client-safe for exactly this. */
+  taskKey: string;
+  blockedBy: readonly DependencyRender[];
   /** U36-10 (pass 36): the task's stage and the board it sits on, so a
    *  stage-ineligible pick is refused BEFORE the click with the server's
    *  own sentence (ruling 133), and never promises a delivering posture. */
@@ -663,14 +670,30 @@ function AgentRunControl({
             .join(", "),
         )
       : null;
+  // Ruling 186 (pass 37, F37-2): a held task refuses EVERY dispatch server-side,
+  // so the control says so before the click. Unlike the per-pick refusals this
+  // one does not depend on which agent is chosen — the hold is a fact about the
+  // task — so it stands even with nothing picked.
+  const held =
+    blockedBy.length > 0
+      ? holdRefusal(
+          taskKey,
+          blockedBy.map((e) => e.label),
+          "running an agent on it",
+        )
+      : null;
   const runRefusal = selected
-    ? (ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
-    : null;
+    ? (held ?? ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
+    : held;
   // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
   // live run on this very profile, or the owner-credential refusal (ruling 127),
   // each of which renders its own reason. An empty pick is validation, so it is
   // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
   // are both false with nothing picked, so this collapses to `busy` there.
+  // `held` rides `runRefusal`, which only bites for a run NOW: a hold can clear
+  // on its own (Viberr releases it when the entries finish), so a SCHEDULED run
+  // stays offerable exactly as it does for an unconnected backend. If the hold
+  // still stands when it fires, `startAgentRun` refuses it there.
   const off = busy || selectedRunning || (delay === "now" && !!runRefusal) || !!ineligible;
   const pickRefused = refused > 0 && !selected;
   const run = () => {
@@ -1087,6 +1110,8 @@ export function ExecutionProfile({
             {canRunAgents ? (
               <AgentRunControl
                 agents={deployedSpecialists}
+                taskKey={task.key}
+                blockedBy={task.blockedBy}
                 stage={task.stage}
                 stages={stages}
                 workflow={workflow}

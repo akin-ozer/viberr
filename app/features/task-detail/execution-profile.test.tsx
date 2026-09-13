@@ -234,6 +234,40 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(container.textContent).toContain("Open decision. Resolve it before running the operator.");
     expect(runButton(container).disabled).toBe(true);
   });
+
+  /**
+   * Ruling 186 (pass 37, F37-2). The OPERATOR control stays enabled on a held
+   * task — a manual run still answers a person. The AGENT control does not:
+   * since ruling 186 the server refuses every dispatch onto a held task, so the
+   * words before the click have to be the words the server answers with.
+   */
+  const agentRunButton = (root: HTMLElement) =>
+    [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => (b.textContent ?? "").trim() === "Run" && /agent/i.test(b.title),
+    );
+
+  it("ruling 186: the AGENT run control is disabled on a held task and says why", () => {
+    const { container } = renderExec({
+      task: waits(),
+      runPrincipal: connectedPrincipal(),
+    });
+    const btn = agentRunButton(container);
+    expect(btn).toBeTruthy();
+    expect(btn!.disabled).toBe(true);
+    // The server's own sentence, from the shared `holdRefusal`.
+    expect(container.textContent).toContain(
+      "waits on goal-1 link 2 and JC-3 and Viberr is holding it",
+    );
+    expect(container.textContent).toContain("running an agent on it is refused");
+  });
+
+  it("ruling 186: a task that waits on nothing leaves the agent control alone", () => {
+    const { container } = renderExec({
+      task: { ...waits(), blockedBy: [], readiness: "ready", displayReadiness: "ready" },
+      runPrincipal: connectedPrincipal(),
+    });
+    expect(container.textContent).not.toContain("Viberr is holding it");
+  });
 });
 
 describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => {

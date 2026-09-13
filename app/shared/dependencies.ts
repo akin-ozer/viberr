@@ -137,3 +137,42 @@ export interface DependencyReleasePayload {
   entries: string[];
   clearedBy: string | null;
 }
+
+/**
+ * Ruling 186 (pass 37, F37-2): ONE spelling of "this task is held".
+ *
+ * A task with a non-empty `blockedBy` refuses every agent dispatch, the same
+ * way ruling 177's closure refuses one — and for the same reason. Before this,
+ * the hold was enforced by ASKING the model: `runOperator` refused three
+ * triggers (`create`, `transition`, `scheduled`) and every reactive trigger ran
+ * on with a prompt paragraph telling it not to "dispatch delivery work", while
+ * `startAgentRun` checked nothing at all. Live (pass 37, SHOP-2) Viberr wrote
+ * "Held until every entry is done; Viberr releases it then", started a Codex
+ * run 1.9 seconds later, and let it design and commit a whole service onto a
+ * branch cut from a base that predated the work it waited on.
+ *
+ * Every door reads the list and refuses with THIS wording: the operator's
+ * `run_agent`, the controller's `run_agent`, and the task page's Run-an-agent
+ * control (which renders the same sentence before the click, so the words a
+ * person meets are the words the server answers with).
+ *
+ * `verb` completes "…so <verb> is refused", e.g. "running an agent on it".
+ */
+export function holdRefusal(
+  taskKey: string,
+  entries: readonly string[],
+  verb: string,
+): string {
+  return (
+    `${taskKey} waits on ${joinDependencyEntries(entries)} and Viberr is holding it, ` +
+    `so ${verb} is refused. Viberr releases it when every entry is done; ` +
+    `to release it sooner, change what it waits on.`
+  );
+}
+
+/** "A", "A and B", "A, B and C" — the list as a sentence reads it. */
+export function joinDependencyEntries(entries: readonly string[]): string {
+  if (entries.length === 0) return "other work";
+  if (entries.length === 1) return entries[0]!;
+  return `${entries.slice(0, -1).join(", ")} and ${entries[entries.length - 1]!}`;
+}

@@ -745,19 +745,27 @@ describe("startSpecialistRun", () => {
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
     await stop(second.runId);
 
-    // A dependency list is ruling 131's own floor.
+    // A dependency list is ruling 131's own floor — and since ruling 186 that
+    // floor is a GATE, not just a readiness that refuses to lift. This arm used
+    // to let the dispatch through and assert only that the readiness stayed
+    // `blocked`; the dispatch succeeding was the ambient behaviour of the day
+    // (nothing checked the list), never ruling 157's subject, which is a
+    // packet-less, LIST-less stored hold. That subject is untouched: the two
+    // arms above still pass unchanged.
     seedHeld({ engagements: [], blockedBy: ["VIB-2"] });
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const third = await startAgentRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
     expect(fm().frontmatter.readiness).toBe("blocked");
+    // Nothing ran, so nothing lifted: still the one row from the first arm.
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
-    await stop(third.runId);
   });
 
   it("creates a run row with the specialist backend and streams output", async () => {
@@ -5089,5 +5097,128 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     // ...and the disclosure rides the same `refreshed` field the run contract
     // already renders ("Before this run Viberr ...").
     expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");
+  });
+});
+
+/**
+ * Ruling 186 (pass 37, F37-2). The hold was enforced by ASKING the model: three
+ * operator triggers were refused and a prompt paragraph told every reactive
+ * turn not to "dispatch delivery work", while `startAgentRun` checked nothing.
+ * Live, SHOP-2 was marked "Held until every entry is done; Viberr releases it
+ * then" and a Codex run started 1.9 seconds later, designed and committed a
+ * whole service, and pushed a branch cut from a base predating its dependency.
+ */
+describe("ruling 186: a held task refuses every agent dispatch", () => {
+  /** Make VIB-1 wait on a second task that is nowhere near done. */
+  async function hold(entries: string[] = ["VIB-2"]): Promise<void> {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "The work VIB-1 waits on",
+      }),
+      goal: "Unfinished, so the wait stands.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { setTaskDependencies } = await import("./dependencies.server");
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: entries },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+  }
+
+  it("refuses the dispatch, and starts no process", async () => {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await hold();
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // The whole point: no billable run, no workspace, no commit that outlives it.
+    expect(startedRunSpecs()).toHaveLength(0);
+  });
+
+  it("names what it waits on, so the refusal is actionable", async () => {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await hold();
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("VIB-2"),
+    });
+  });
+
+  it("refuses an AUTO-ENGAGING dispatch too — the hold is not a posture question", async () => {
+    // No prior engagement: this is the dispatch that would create one. A gate
+    // placed after the auto-engage would leave a seat on a held task.
+    await hold();
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(startedRunSpecs()).toHaveLength(0);
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.engagements).toHaveLength(0);
+  });
+
+  it("dispatches again once the wait is cleared", async () => {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await hold();
+    // Clearing the list is the release; the gate must read the LIVE file.
+    const { setTaskDependencies } = await import("./dependencies.server");
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: [] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    queueFakeRun({ lines: [], backend: "claude" });
+    const runId = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(runId).toBeTruthy();
   });
 });
