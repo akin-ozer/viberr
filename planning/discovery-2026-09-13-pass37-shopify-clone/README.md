@@ -9,13 +9,13 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | eighteen findings — four high, one withdrawn with its measurements |
+| [`FINDINGS.md`](FINDINGS.md) | twenty findings — eight high, one withdrawn with its measurements |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–197** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–199** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
 
 ## Day two, in one paragraph
@@ -36,6 +36,17 @@ refusing — correctly — to edit an agent template because Viberr would not sh
 about to overwrite (**F37-18**). The owner chose to fix the environment rather than
 re-platform the clone, so `make`, `curl` and a pinned `pnpm` are in the image and Docker
 deliberately is not.
+
+Then two more, both from disbelieving a surface a second time. A guard doing its job in
+silence — the boot re-invoke cap — left SHOP-7 reading "agent working" with **no run for two
+hours**, under a timeline note promising a turn the code had already decided not to take
+(**F37-19**). And the one I nearly filed as an environment quirk: all three of the pass's run
+errors said "the agent's stored Codex session no longer exists", so I went and found the file.
+**138 of 140** Codex threads on the instance pointed at a per-run home Viberr deletes at
+settle, while **138 of 138** of their transcripts sat intact in the shared directory one path
+segment away — every conversation the instance had ever held, unresumable, and reported as the
+provider's fault (**F37-20**). The boot after the fix re-pointed all 138; the instance went
+from 2 of 140 resumable to 140 of 140.
 
 ## The one-paragraph version
 
