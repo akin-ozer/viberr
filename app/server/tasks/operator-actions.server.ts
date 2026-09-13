@@ -1003,6 +1003,9 @@ export interface OperatorPacketOptionInput {
   /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
    *  editor opens with when the human confirms. Refused on any other kind. */
   goalDraft?: string;
+  /** wait_for_window only — ruling 224: the provider's own reset instant, ISO.
+   *  The resolution schedules the agent's re-dispatch just after it. */
+  dueAt?: string;
 }
 
 export interface OperatorOpenPacketInput {
@@ -1339,6 +1342,32 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 224: a wait_for_window with no instant resolves into a schedule
+  // with no due time, so it is refused by name like every other option whose
+  // payload its kind requires.
+  const strayWait = rawOptions.find(
+    (o) => o.kind === "wait_for_window" && !(o.dueAt ?? "").trim(),
+  );
+  if (strayWait) {
+    return {
+      outcome: "noop",
+      message:
+        `A wait_for_window option needs the instant the window reopens — "${strayWait.title}" carries none. ` +
+        "Pass dueAt as an ISO timestamp, or offer a different recovery.",
+    };
+  }
+  const strayDue = rawOptions.find(
+    (o) => o.kind !== "wait_for_window" && (o.dueAt ?? "").trim() !== "",
+  );
+  if (strayDue) {
+    return {
+      outcome: "noop",
+      message:
+        `dueAt only fits a wait_for_window option — "${strayDue.title}" is ${strayDue.kind}. ` +
+        "Drop it, or offer the wait as its own option.",
+    };
+  }
+
   // Exactly one recommended option (the parser expects this): honour the first
   // one the operator marked, else default to the first option.
   let recSeen = false;
@@ -1377,6 +1406,10 @@ export async function operatorOpenPacket(
     if (o.rework && o.kind === "redirect") option.rework = true;
     // Ruling 164: the stage a move_stage resolution moves to, validated above.
     if (o.kind === "move_stage" && o.toStage) option.toStage = o.toStage.trim();
+    // Ruling 224: only a wait_for_window carries the reset instant, and it is
+    // useless without one — an option promising to resume "when the window
+    // reopens" with no instant would resolve into a schedule with no due time.
+    if (o.kind === "wait_for_window" && o.dueAt) option.dueAt = o.dueAt;
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();

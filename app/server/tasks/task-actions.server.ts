@@ -8481,6 +8481,32 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "wait_for_window": {
+      // Ruling 224 (F37-44): the decision IS the wait. The packet closes and
+      // the task settles on a human, because nothing is running and nothing
+      // should look like it is; the schedule written after this write is what
+      // brings the agent back. Authored only on a quota refusal whose reset
+      // instant the provider gave us.
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. Nothing runs until the window reopens; the scheduled run brings the agent back.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        // Not `waiting: agent`: no agent is coming for the next few hours, and
+        // a board that claims one is the F37-33 lie by another road.
+        fm.waiting = "human";
+        if (fm.readiness === "blocked") fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       // Ruling 163 (pass 35, F35-13 (b)): a redirect the branch-conflict
@@ -9309,6 +9335,63 @@ export async function resolvePacket(
     };
     if ("ack" in input) forced.ack = input.ack ?? null;
     await forceAcceptCompletion(db, forced, actor, ctx);
+  }
+
+  // wait_for_window (ruling 224, pass 37, F37-44): write the schedule the
+  // decision promised. Best-effort like every sibling ceremony — a refused
+  // schedule never un-resolves the packet, and its outcome lands on the
+  // timeline in plain words instead of as a thrown error over a decision that
+  // already stands. A minute past the provider's own instant, because a window
+  // that reopens "at 02:27" is not open at 02:27:00.
+  if (option.kind === "wait_for_window" && option.dueAt) {
+    const dueMs = Date.parse(option.dueAt);
+    const runAt = new Date(
+      Math.max(Number.isFinite(dueMs) ? dueMs : Date.now(), Date.now()) + 60_000,
+    ).toISOString();
+    try {
+      const { scheduleTaskAction } = await import("./schedule.server");
+      // The OPERATOR, never the agent directly: a gap of hours is exactly when
+      // the board may have moved — a dependency landed, a reviewer changed, the
+      // work was superseded — and re-dispatching the same agent blind would
+      // resume a decision nobody re-made. Every other timed resume viberr has
+      // (the dependency release, the restart recoveries) re-invokes the
+      // operator for the same reason.
+      await scheduleTaskAction(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          dueAt: runAt,
+          action: "run-operator",
+          prompt:
+            `The usage window that stopped this task has reopened. Pick it back up from where it ` +
+            `stopped; nothing about the task or the guidance changed while it waited, but re-read ` +
+            `the board before you dispatch — hours passed.`,
+        },
+        actor,
+        ctx,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("wait_for_window resolution could not schedule the resume", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `${input.taskKey} was **not** scheduled to resume when the window reopens: ${message} ` +
+            `Nothing is waiting on this task automatically — run it yourself when the window is back.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
   }
 
   // move_stage (ruling 164, pass 35, F35-14): the decision IS the move, made

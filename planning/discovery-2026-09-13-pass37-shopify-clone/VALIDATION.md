@@ -897,3 +897,37 @@ things, and a predicate that read every 422 as a vanished ref would turn unrelat
 into false "the revision is not on GitHub" refusals across the product.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6596 tests passed**, `build` green.
+
+---
+
+## Ruling 224 — four restraint tests for one new option
+
+The option is easy; not offering it wrongly is the part worth testing. Six tests across two
+files:
+
+**The offer** (`run-failure-remedy.server.test.ts`) — the wait is first, recommended, carries the
+instant, names an *operator* resume, and carries no `profileId`; exactly one option is
+recommended and neither the cross-backend retry nor the send-back is it. Then three restraints:
+no wait when the window has **no dated reopening**, none when the window has **already
+reopened**, and none for an **auth** failure carrying a reset instant — waiting fixes nothing
+about a rejected credential.
+
+**The resolution** (`task-governance.server.test.ts`) — confirming clears the packet, lifts the
+block it held down, settles `waiting: human`, and writes exactly one `run-operator` schedule due
+**after** the provider's instant with a prompt that says why it exists. A second test drives the
+failure path on an archived task (a closed task refuses a schedule, ruling 177): the decision
+still stands, no schedule is written, and the timeline says *"was **not** scheduled to resume …
+run it yourself"* rather than leaving a promise nothing will keep.
+
+```
+# the wait arm removed
+AssertionError: expected { kind: 'request_edit', …(5) } to match object { kind: 'wait_for_window', …(3) }
+# the schedule effect removed
+AssertionError: expected [] to have a length of 1 but got +0
+AssertionError: expected false to be true          ← and the disclosure note is gone too
+```
+
+The doc-sync test caught the count in `file-formats.md` on the same commit, which is the
+mechanism working: a new packet-option kind cannot land without the reference enumerating it.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6602 tests passed**, `build` green.

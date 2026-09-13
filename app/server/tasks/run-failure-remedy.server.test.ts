@@ -351,6 +351,83 @@ describe("describeRunFailure", () => {
   });
 
   /**
+   * Ruling 224 (F37-44). Live on pass 37 the Codex window went at 23:28 with
+   * the provider naming its own reopening ("try again at Sep 14th, 2026 2:27
+   * AM"), and every option on the packet was wrong at the moment it was
+   * offered: the RECOMMENDED one moved the task permanently off the model its
+   * profile declares ("Later runs on this task stay on Claude"), and the
+   * alternative asked a human to assert the window had reset three hours
+   * before it would. Six tasks stalled that way at once.
+   */
+  describe("a spent window the provider dated (ruling 224)", () => {
+    const FUTURE = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+
+    it("offers the wait first, takes the recommendation, and carries the instant", () => {
+      const store = setupTestStore(ctx);
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        profileId: "developer",
+        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: FUTURE }),
+      });
+      // CANARY: drop the wait arm and the recommendation falls back to an
+      // option that changes the deployment's model policy in one click.
+      expect(d.options[0]).toMatchObject({
+        kind: "wait_for_window",
+        recommended: true,
+        dueAt: FUTURE,
+      });
+      expect(d.options[0]!.detail).toContain("the same account and the same model");
+      // The resume is an OPERATOR run, not a blind re-dispatch: hours pass,
+      // and the board may have moved while the task waited.
+      expect(d.options[0]!.detail).toContain("operator run");
+      expect(d.options[0]!.profileId).toBeUndefined();
+      // Exactly one recommendation, and nothing else holds it.
+      expect(d.options.filter((o) => o.recommended)).toHaveLength(1);
+      const sendBack = d.options.find((o) => o.kind === "request_edit");
+      expect(sendBack?.recommended).not.toBe(true);
+      const retry = d.options.find((o) => o.kind === "retry_other_backend");
+      expect(retry?.recommended).not.toBe(true);
+    });
+
+    it("offers nothing of the kind when the window has no dated reopening", () => {
+      const store = setupTestStore(ctx);
+      // A quota refusal with no reset instant: there is no moment to schedule,
+      // so the old options and the old recommendation stand unchanged.
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+      expect(d.options.find((o) => o.recommended)).toBeTruthy();
+    });
+
+    it("offers nothing of the kind for a window that has already reopened", () => {
+      const store = setupTestStore(ctx);
+      // RESET is in the past: waiting for it is not a remedy, it is a no-op.
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+    });
+
+    it("offers nothing of the kind for a failure that is not a spent window", () => {
+      const store = setupTestStore(ctx);
+      // An auth refusal has a reset instant on its facts too in principle, and
+      // waiting fixes nothing about a rejected credential.
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        failure: failure("auth", { resetsAt: FUTURE }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+    });
+  });
+
+  /**
    * Ruling 221 (F37-41): `session_missing` now has two roads into it, and the
    * difference is what a human does next. A vanished session heals itself on
    * the next fresh run; a session STORE that cannot be opened keeps failing

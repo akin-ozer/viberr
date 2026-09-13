@@ -4724,6 +4724,31 @@ by rewriting those paragraphs:*
     gone". The real answer is pinned as its own test, not as a fixture's guess.
     (`github-client.server.ts`, `task-actions.server.ts`.)
 
+224. **A spent usage window the provider dated has a remedy that is neither a model change
+    nor a false assertion (owner, 2026-09-13, pass 37; F37-44).** At 23:28 the Codex window
+    went, and six tasks stalled at once behind the same packet. The provider named its own
+    reopening - "try again at Sep 14th, 2026 2:27 AM" - and viberr parsed it, stored it, and
+    printed it. Every option it then offered was wrong at the moment it was offered. The
+    RECOMMENDED one, "Retry on Claude now", says in its own detail that it moves the task
+    permanently off the model its profile declares ("Later runs on this task stay on Claude")
+    - on a deployment whose owner had set every specialist to one model on purpose. The
+    alternative asks a human to assert "The window has reset", three hours before it would.
+    The remaining two freeze coordination or re-prompt an agent that cannot run. And the
+    packet cannot simply be left open, because an open packet refuses the operator: the only
+    exits were a policy change, a false statement, or being awake at 02:27.
+    Viberr already had the machinery for the true answer - a schedule runner that fires an
+    unattended run at an instant. So a quota refusal whose reset instant is KNOWN and still
+    in the future offers `wait_for_window`, and that option takes the recommendation: the
+    packet closes, the board settles to `waiting: human` (no agent is coming for hours, and
+    claiming one is F37-33's lie by another road), and a `run-operator` schedule is written
+    for one minute past the provider's instant. The OPERATOR, never a blind re-dispatch of
+    the same agent: hours pass, the board may have moved, and every other timed resume viberr
+    has - the dependency release, the restart recoveries - re-invokes the operator for that
+    reason. A schedule that cannot be written says so on the timeline and names the manual
+    fallback, and never un-resolves the decision the human made.
+    (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
+    `task-file.schema.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

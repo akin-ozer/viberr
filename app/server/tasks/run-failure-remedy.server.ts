@@ -231,6 +231,7 @@ export function describeRunFailure(
         input.profileId,
         input.profileModel,
         facts?.origin === "local",
+        facts?.resetsAt ?? null,
       );
 
   return { reason, remedy, resetLabel, owner, options };
@@ -313,6 +314,10 @@ function specialistOptions(
   profileModel: string | undefined,
   /** U35-11: the `overloaded` failure was this deployment's own network path. */
   localNetwork = false,
+  /** Ruling 224: the provider's own reset instant, when it gave one. A spent
+   *  window with a KNOWN reopening has a remedy that is neither a model change
+   *  nor a false assertion: wait for it, and come back by itself. */
+  resetsAt: string | null = null,
 ): OperatorPacketOptionInput[] {
   const handle = agentHandle ? `@${agentHandle}` : "the agent";
   // F36-8 (pass 36): the option says which MODEL the retry runs on. A profile
@@ -337,6 +342,34 @@ function specialistOptions(
     kind === "quota" || kind === "auth" || kind === "unavailable" || kind === "overloaded";
   if (backendFailure) {
     const options: OperatorPacketOptionInput[] = [];
+    // Ruling 224 (F37-44): a spent window the provider dated. Every other
+    // option on this packet is wrong at the moment it is offered — the
+    // cross-backend retry permanently moves the task off the model its profile
+    // declares, and the send-back asks a human to ASSERT a window has reset
+    // that the provider just said will not for hours. Waiting is the real
+    // remedy and viberr already has the runner for it, so it is offered first
+    // and it takes the recommendation.
+    const waitUntil =
+      kind === "quota" && resetsAt && Date.parse(resetsAt) > Date.now()
+        ? resetsAt
+        : null;
+    if (waitUntil) {
+      const wait: OperatorPacketOptionInput = {
+        kind: "wait_for_window",
+        title: `Wait for the window and pick ${handle} back up automatically${resetLabel ? ` (${resetLabel})` : ""}`,
+        detail:
+          `Closes this decision and schedules an operator run for just after ${resetLabel ?? "the window reopens"}, ` +
+          `on the same account and the same model. The operator re-reads the task then and continues it — which is ` +
+          `what a gap of hours needs, because the board may have moved while it waited. Nothing runs until then and ` +
+          `the board says so. No account, model or project policy changes.`,
+        recommended: true,
+        dueAt: waitUntil,
+        ev:
+          `**Decision:** wait for the ${backend} window to reopen${resetLabel ? ` (${resetLabel})` : ""}. ` +
+          `An operator run is scheduled to pick the task back up on the same account. No account or project policy was changed.`,
+      };
+      options.push(wait);
+    }
     if (ownerHasOther) {
       const retry: OperatorPacketOptionInput = {
         kind: "retry_other_backend",
@@ -354,7 +387,11 @@ function specialistOptions(
             : ""),
         backend: other,
       };
-      if (!localNetwork) retry.recommended = true;
+      // Ruling 212: not recommended when the fault is this deployment's own
+      // network path. Ruling 224: nor when waiting for a dated window is on the
+      // table — exactly one option is recommended, and a permanent model change
+      // is not it.
+      if (!localNetwork && !waitUntil) retry.recommended = true;
       if (profileId) retry.profileId = profileId;
       options.push(retry);
     }
@@ -380,7 +417,10 @@ function specialistOptions(
       // other backend is not a real alternative — either the owner does not
       // have it, or the fault was local and switching would only change the
       // model.
-      recommended: !ownerHasOther || localNetwork,
+      // Ruling 224: and never when the wait is offered — asking a human to
+      // assert the window has reset, minutes after the provider said it has
+      // hours to run, is the one thing on this packet that is simply false.
+      recommended: (!ownerHasOther || localNetwork) && !waitUntil,
       ev:
         kind === "quota"
           ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."

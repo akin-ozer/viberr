@@ -2397,3 +2397,55 @@ run and not the consequence, which is that unreviewed or rejected code may now b
 functional (it is the revision that passed everything except a lockfile repair and the shared
 stack-test generalisation) but is NOT the reviewed revision. SHOP-19, which the controller
 created to own that generalisation, waits on SHOP-17 and SHOP-3 and can absorb it.
+
+---
+
+## F37-44 · When the Codex window went, every option on the packet was wrong — HIGH
+
+**Found by having to answer it.** At 23:28 the owner's Codex account hit its usage limit and
+six tasks stalled inside two minutes — SHOP-3, SHOP-11, SHOP-12, SHOP-18, and two more behind
+them. Each opened the same packet, and viberr had all the right facts in it:
+
+> **Work stalled: pick a recovery path**
+> Codex refused the agent run: Arda's account is over its usage limit…
+> *Provider said:* `You've hit your usage limit… or try again at Sep 14th, 2026 2:27 AM.`
+
+It had parsed that instant (`exhausted.resetsAt`), stored it, and rendered it. Then it offered
+four ways out, at 23:28, with the window reopening at 02:27:
+
+| option | what it does at 23:28 |
+|---|---|
+| **Retry on Claude now** *(recommended)* | its own detail: *"Later runs on this task stay on Claude until another retry moves them"* — on `sonnet`, because the profile's `gpt-5.6-luna` is a Codex model. A permanent model-policy change, in one recommended click, on a deployment whose owner set every specialist to one model deliberately. |
+| **"The window has reset… send the agent back"** | asks the human to **assert** something the provider had just said would not be true for three hours. |
+| Redirect with sharper guidance | re-prompts an agent that cannot run. |
+| Hold for runtime debugging | freezes coordination and asks the human to come back. |
+
+And the packet cannot just be left open: an open packet refuses the operator, so nothing moves
+until it is answered. The real choices were **change your model policy, say something false, or
+be awake at 02:27** — times six tasks.
+
+This is ruling 212's lesson repeating. That one found viberr recommending a permanent model
+change as the fix for a DNS failure, and made it offered-but-not-recommended. The same option is
+still the recommendation here, for the one failure class where a better answer exists and viberr
+already owns the machinery: **a schedule runner that fires an unattended run at an instant.**
+
+**Fix (ruling 224).** A quota refusal whose reset instant is known and still in the future gets
+a `wait_for_window` option, and that option takes the recommendation:
+
+- the packet closes and the board settles to `waiting: human` — **not** `waiting: agent`, because
+  no agent is coming for hours and claiming one is F37-33's lie by another road;
+- a `run-operator` schedule is written for one minute past the provider's own instant (a window
+  that reopens "at 02:27" is not open at 02:27:00);
+- the **operator**, never a blind re-dispatch of the same agent: hours pass, the board may have
+  moved, and every other timed resume viberr has — the dependency release, the restart
+  recoveries — re-invokes the operator for exactly that reason;
+- a schedule that cannot be written says so on the timeline, names the manual fallback, and
+  never un-resolves the decision the human already made.
+
+Nothing is offered when there is no dated reopening, when the window has already reopened, or
+for a failure that is not a spent window — waiting fixes nothing about a rejected credential.
+All three restraints have their own tests.
+
+Canaries (both proved red): remove the option and the recommendation falls back to the permanent
+model change; remove the schedule effect and the decision promises an automatic resume that
+nothing performs.

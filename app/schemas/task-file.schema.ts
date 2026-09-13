@@ -180,6 +180,16 @@ export const PACKET_OPTION_KINDS = [
   // tier and the same transition event and audit row. Before it, "Move KNC-16
   // back to Review" was a `redirect` title and the resolution moved nothing.
   "move_stage",
+  // Ruling 224 (pass 37, F37-44): the remedy a SPENT USAGE WINDOW actually has
+  // — wait, and resume by itself when the window reopens. Payload: `dueAt`
+  // (the provider's own reset instant) plus `profileId` for the agent to
+  // re-dispatch. Resolution closes the packet and writes a `run-agent` schedule
+  // for that instant, which the existing runner fires unattended. Before it,
+  // every option on a quota packet was wrong at the moment it was offered: the
+  // recommended one permanently moved the task off the model its profile
+  // declares, and the alternative asked the human to ASSERT a window had reset
+  // when the provider had just said it would not for another three hours.
+  "wait_for_window",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -721,6 +731,11 @@ export const packetOptionSchema = z
      *  moves the task to, as a stage id of this project. Required on the kind
      *  (authoring refuses one without it) and refused on every other kind. */
     toStage: z.string().optional(),
+    /** wait_for_window — ruling 224: the instant the provider said its window
+     *  reopens, as an ISO timestamp. The resolution schedules the agent's
+     *  re-dispatch just after it. Required on the kind, refused on every
+     *  other. */
+    dueAt: z.string().optional(),
     /** redirect — ruling 163 (pass 35, F35-13): the resolution RETURNS the
      *  task to the review stage when it stands at or past it, so the reworked
      *  revision gets its verdict where the reviewers are eligible. Written by

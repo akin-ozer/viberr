@@ -3421,6 +3421,135 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     expect(moves[0]!.details!.manual).toBe(true);
   });
 
+  /**
+   * Ruling 224 (F37-44). The Codex window went at 23:28 with the provider
+   * naming its own reopening, and six tasks stalled at once behind a packet
+   * whose every option was wrong right then. The wait is the remedy, and
+   * viberr already had the runner for it — what it lacked was a way to say so
+   * that also closed the decision.
+   */
+  it("wait_for_window: the confirm closes the decision and schedules the resume (ruling 224)", async () => {
+    const store = prepared();
+    const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "agent",
+        readiness: "blocked",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Work stalled: pick a recovery path",
+        body: "Codex refused the agent run: over its usage limit.",
+        observations: [],
+        options: [
+          {
+            kind: "wait_for_window",
+            t: "Wait for the window and resume @dev automatically",
+            d: "",
+            rec: true,
+            dueAt: due,
+          },
+        ],
+      },
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.packet).toBeNull();
+    // The block the packet held down goes with it…
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    // …and the board must NOT claim an agent: none is coming for three hours,
+    // which is F37-33's lie by another road.
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // CANARY: drop the schedule effect and this is empty — the decision then
+    // promises an automatic resume that nothing performs.
+    expect(parsed.frontmatter.schedules).toHaveLength(1);
+    const sched = parsed.frontmatter.schedules[0]!;
+    // The OPERATOR, not the agent: after a gap of hours the board may have
+    // moved, and every other timed resume viberr has re-invokes the operator
+    // for exactly that reason.
+    expect(sched.action).toBe("run-operator");
+    expect(sched.status).toBe("pending");
+    // Just AFTER the provider's instant: a window that reopens "at 02:27" is
+    // not open at 02:27:00.
+    expect(Date.parse(sched.dueAt)).toBeGreaterThan(Date.parse(due));
+    expect(sched.prompt).toContain("has reopened");
+  });
+
+  it("wait_for_window: a schedule that cannot be written says so and leaves the decision resolved (ruling 224)", async () => {
+    const store = prepared();
+    const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "agent",
+        ownerUserId: store.users.arda.id,
+        archived: true, // a closed task refuses a schedule (ruling 177)
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Work stalled: pick a recovery path",
+        body: "b",
+        observations: [],
+        options: [
+          {
+            kind: "wait_for_window",
+            t: "Wait for the window and pick it back up automatically",
+            d: "",
+            rec: true,
+            dueAt: due,
+          },
+        ],
+      },
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // The decision stands — a refused side effect never un-resolves a decision
+    // a human made, exactly as the move_stage ceremony behaves.
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.schedules).toHaveLength(0);
+    // CANARY: swallow the failure silently and the timeline promises an
+    // automatic resume that will never come, which is worse than the stall.
+    expect(
+      parsed.timeline.some(
+        (e) =>
+          e.text.includes("was **not** scheduled to resume") &&
+          e.text.includes("run it yourself"),
+      ),
+    ).toBe(true);
+  });
+
   it("move_stage: resolving a BLOCKED packet lifts the block it was holding down", async () => {
     // Canary: restore `mutate = () => {}` in the move_stage arm. The packet
     // clears, `transitionStage` deliberately lets a stored `blocked` survive a

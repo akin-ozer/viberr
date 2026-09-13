@@ -351,8 +351,11 @@ F35-14 added `force_accept` (the admin override, run through the same path as th
 page's Force accept button) and `move_stage` (a manual board move to the option's own
 `toStage`, run through the stage picker's path), because an option title is a promise the
 resolution keeps and both acts were being written as `custom` and `redirect` titles that
-performed nothing. Thirteen is the count today — re-derive it from the schema rather than
-from here.)*
+performed nothing. Updated 2026-09-13, pass 37 — F37-44 added `wait_for_window`: a spent
+usage window the provider dated has a remedy that is neither a permanent model change nor a
+human asserting the window reopened three hours early, and viberr already had the schedule
+runner for it. Fourteen is the count today — re-derive it from the schema rather than from
+here.)*
 
 *(Corrected 2026-08-31, pass 31 — A3. The option sample below carried an `accept: true` field
 annotated "acceptance path marker — human-only". `packetOptionSchema` has no such field:
@@ -365,7 +368,10 @@ an `edit_goal` option, since pass 35 (ruling 163) `rework` on a `redirect` optio
 branch-conflict packet sets it when the task stands past the stage where its reviewers can
 run, and `resolvePacket` then returns the task to that stage in the same write), and since
 pass 35 (ruling 164) `toStage` on a `move_stage` option: the stage id the resolution moves
-the task to, required on that kind and refused on every other.)*
+the task to, required on that kind and refused on every other, and since pass 37 (ruling 224)
+`dueAt` on a `wait_for_window` option: the instant the provider said its window reopens, which
+the resolution turns into a scheduled operator run — required on that kind and refused on
+every other.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -378,13 +384,13 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 13 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 14 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
                                   #   edit_goal | archive_task | discard_branch |
                                   #   resolve_remote_collision | force_accept |
-                                  #   move_stage | custom
+                                  #   move_stage | wait_for_window | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
