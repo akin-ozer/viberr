@@ -639,3 +639,29 @@ not the derived column — the comparison that manufactured a false finding earl
 ```
 comparisons: 105   mismatches: 0
 ```
+
+## A branch-update claim, checked against the remote
+
+The most precise sentence viberr wrote today, on SHOP-10 after SHOP-9's merge moved `main`:
+
+> Brought `shop-10` up to date with `main` (3 commits merged in, merge commit `08ffb11`; the
+> push published it, so origin now carries the workspace head, **including the 1 workspace
+> commit origin was missing**). Drift re-measured: base refreshed · 1 merge commit · 3 base
+> commits · 0 authored commits since review.
+
+Every clause is checkable, so I checked it:
+
+```
+$ gh api .../branches/shop-10 --jq .commit.sha
+08ffb11667d3bedd346c7e5319cbe19d6b62545e          ← origin's head IS the merge commit
+
+$ gh api .../commits/08ffb11
+msg:     "[SHOP-10] merge main into shop-10"
+parents: ecda31ce…  (the workspace head)
+         f0b6d909…  (main's tip — the merge commit of PR #7, SHOP-9)
+```
+
+The merge commit's two parents are exactly the two things the sentence names, origin carries
+it, and the drift line's "0 authored commits since review" matches a rework that had just been
+reviewed. Contrast F37-9, where the same pill went stale precisely when `main` moved — this is
+that path working after the fix, on the first real base move the board has had.
