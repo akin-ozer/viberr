@@ -81,6 +81,8 @@ export interface BranchRowView {
   sync: SyncState;
   /** Task-key-associated commits from the github cache (VIB-142 seeds 3). */
   commitCount: number;
+  /** Ruling 187: how many of `commitCount` the remote does not have. */
+  unpushedCommitCount: number;
 }
 
 export interface GithubViewData {
@@ -214,6 +216,13 @@ export async function getGithubViewData(
               ? ("unknown" as const)
               : deriveSyncState({ prMerged: false, behindBy }),
         commitCount: t.commits.length,
+        // Ruling 187 (pass 37, F37-8): how many of those the REMOTE does not
+        // have. A commit an agent made in its workspace is real work and
+        // belongs in the count, but rendering it identically to a pushed one
+        // is what let SHOP-2 read "1 commit · synced" for a change that
+        // existed nowhere. `pushed: undefined` means no compare could judge
+        // it, which is not the same as false and is not counted here.
+        unpushedCommitCount: t.commits.filter((c) => c.pushed === false).length,
       };
     });
 

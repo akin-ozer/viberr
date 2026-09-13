@@ -1,12 +1,13 @@
 # GitHub integration and governed delivery
 
-> Updated 2026-09-13 for ruling 187 (pass 37): once a branch compare is PROVEN, the remote's
-> commit list is authoritative about what exists — a cached `github.commits` entry the remote
-> does not contain is dropped and announced as a typed "**Work lost**" event naming the sha,
-> the branch, and that the change is not recoverable. The prefix-convention carve-out that
-> used to keep such an entry survives only for commits the remote really has. The sync pill's
-> observation row is now also written when the compare VERDICT changes, so a branch that goes
-> behind `main` because main moved stops rendering a stale `synced`.
+> Updated 2026-09-13 for ruling 187 (pass 37): every `github.commits` entry carries `pushed`
+> — whether the remote has it — stamped from a COMPLETE branch compare, and the GitHub page's
+> branch row renders it ("1 commit · not pushed"). An absent `pushed` means no compare could
+> judge it and renders as neither answer; a short compare list judges nothing. Viberr does NOT
+> declare such a commit lost: at reconcile time a commit awaiting delivery and one whose
+> workspace is gone are indistinguishable. The sync pill's observation row is now also written
+> when the compare VERDICT changes, so a branch that goes behind `main` because main moved
+> stops rendering a stale `synced`.
 
 > Credentials, repository attachment, the delivery pipeline, the revision and
 > verdict model, reconciliation, and scope violations. Source of truth:

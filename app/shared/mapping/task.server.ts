@@ -263,7 +263,10 @@ export interface TaskSummary {
   /** P13-D-28: GitHub review verdict on an OPEN PR — feeds the review pill.
    *  Null = no PR / settled PR / never read / nothing outstanding. */
   prReview: PrReviewState | null;
-  commits: { sha: string; msg: string }[];
+  /** Ruling 187 (pass 37): `pushed` says whether the REMOTE has the commit,
+   *  stamped by the reconciler from a complete compare. Absent = not judged,
+   *  which is neither answer and must render as neither. */
+  commits: { sha: string; msg: string; pushed?: boolean }[];
   /** Ruling 179 (pass 36, F36-7): commits on the branch that are NOT this
    *  task's (no `[KEY]` prefix) — the moved head a person must see where the
    *  acceptance decision is made. Empty when none were recorded. */

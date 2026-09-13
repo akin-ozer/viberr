@@ -516,11 +516,18 @@ that matter.**
 So the concept exists and one analytics surface is honest about it. The canonical record, the
 board and the GitHub page are not.
 
-**Fix shape.** `github.commits` entries need a pushed/unpushed standing (the vocabulary
-already exists in `workspace-refresh.server.ts`), the reconciler must drop or mark an entry
-whose sha the remote does not have, and every surface that renders a commit count must say
-which kind it is counting. A phantom whose workspace is gone should be reported as lost, not
-as a commit.
+**Fix, and the wrong turn I took getting there.** The entry carries `pushed` — whether the
+remote has it — stamped from a **complete** compare, and every surface renders it ("1 commit ·
+not pushed"). An absent stamp means no compare could judge it and reads as neither answer.
+
+My first implementation instead **dropped** the entry and announced "**Work lost**". The live
+system refuted that within the hour: a reconcile landing between an agent committing in its
+workspace and delivery pushing it announced SHOP-7's `522e640` as lost — **seconds before
+Viberr pushed it**. The distinguisher I had assumed existed does not: at reconcile time
+SHOP-2's abandoned commit and SHOP-7's pending one were identical (neither on the remote,
+neither carrying `pushedAt`). So "lost" is a claim this code cannot make, and I replaced it
+with one it can. Recorded here because the wrong version would have told people their work was
+gone while it sat on the branch — a worse lie than the one this finding is about.
 
 ---
 

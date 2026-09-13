@@ -4064,13 +4064,21 @@ by rewriting those paragraphs:*
     existed nowhere. The carve-out that kept it was written for a different case ("agents
     don't always follow the prefix convention, so an EMPTY filtered list must not wipe a
     non-empty cache") and could not tell "our filter missed it" from "it was never pushed".
-    **(a)** Once the compare is PROVEN, the remote's list is authoritative about what exists:
-    cached entries it does not contain are dropped. **(b)** The drop is announced as a typed
-    `github` event that uses the word — "**Work lost:** commit … was recorded for … but is
-    not on it … that workspace is gone, so the change it held is not recoverable … run it
-    again to redo the work" — because a record that quietly shrinks by one row is the same
-    lie one step quieter. The carve-out's real case is preserved and pinned: an unprefixed
-    commit that IS on the branch survives and announces nothing. **(c)** F37-9, the same
+    **(a)** Every recorded commit carries `pushed` — whether the REMOTE has it — stamped by
+    the reconciler from a **complete** compare, and every surface renders it (the GitHub
+    page's branch row now reads "1 commit · not pushed" where it read "1 commit"). An absent
+    `pushed` means no compare could judge it, which is neither answer and must render as
+    neither: a short list (the tolerant reader's `droppedCommits > 0`, or GitHub's own cap)
+    judges nothing at all, because stamping a genuinely pushed commit `false` is the same lie
+    pointed the other way. **(b)** The first implementation DROPPED an unmatched entry and
+    announced it as "**Work lost**". That was wrong and the live system proved it within the
+    hour: a reconcile landing in the window between an agent committing in its workspace and
+    delivery pushing it announced SHOP-7's `522e640` as lost **seconds before Viberr pushed
+    it**. At reconcile time a commit awaiting delivery and one whose workspace is gone are
+    indistinguishable — neither is on the remote, neither carries `pushedAt` — so "lost" is a
+    claim this code cannot make. "Not pushed" is one it can, it is always true, and it is what
+    the reader needs. The carve-out's real case is preserved and pinned: an unprefixed commit
+    that IS on the branch survives and is stamped pushed. **(c)** F37-9, the same
     family: the sync pill reads the newest `github.reconcile` provenance row, and `changed`
     compares only the task file's `pr`/`github` blocks, so a pass whose only change was
     "`main` moved" wrote no row and the pill kept the stale verdict — live, SHOP-2 rendered

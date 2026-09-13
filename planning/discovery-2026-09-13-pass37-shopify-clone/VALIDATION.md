@@ -148,6 +148,13 @@ The fixture moved from `redirect` to `custom` options in the same change, which 
 agent question carries — SHOP-7's live packet offered Stripe / Adyen / Mock-only as `custom`,
 and my first fixture had quietly got that wrong.
 
+**Stated precisely, because it would be easy to overclaim here:** SHOP-7's goal still carries
+two decision blocks after the rebuild. Both were written by the *old* image; the exclusion
+prevents new ones and does not rewrite text already committed to a task file — pre-prod
+licenses schema changes, not retroactive edits to a person's record. The proof for the
+exclusion is therefore the unit tests, which go red when it is removed, not a live
+observation I do not have.
+
 ---
 
 ## Boot recovery, incidentally

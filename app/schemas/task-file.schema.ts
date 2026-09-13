@@ -619,7 +619,19 @@ export function revisionLeftWorkspace(fm: {
 /** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
 export const githubCommitSchema = z
-  .object({ sha: z.string(), msg: z.string() })
+  .object({
+    sha: z.string(),
+    msg: z.string(),
+    /** Ruling 187 (pass 37, F37-8): does the REMOTE have this commit? Stamped
+     *  by the reconciler from a complete branch compare. Absent means "not
+     *  judged" — no compare has been able to say — which every renderer must
+     *  treat as unknown rather than as either answer. A workspace commit that
+     *  delivery has not pushed yet reads `false` and is honest; so does one
+     *  whose workspace is gone. Distinguishing those two at reconcile time is
+     *  not possible (neither is on the remote, neither carries `pushedAt`), so
+     *  this says only what is knowable. */
+    pushed: z.boolean().optional(),
+  })
   .loose();
 export const githubCacheSchema = z
   .object({
