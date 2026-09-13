@@ -53,7 +53,12 @@ const FULL: InsightsSummary = {
     cost: i === 29 ? 1.2 : 0,
   })),
   oversight: {
-    coordination: { coordinationCostUsd: 0.6, totalCostUsd: 1.2, share: 0.5 },
+    coordination: {
+      coordinationCostUsd: 0.6,
+      totalCostUsd: 1.2,
+      costedDeliveryRuns: 3,
+      share: 0.5,
+    },
     clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
     traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
     packetResolution: {
@@ -180,6 +185,35 @@ describe("InsightsPage", () => {
     // D04-U12: the denominator is named — cost-reporting runs only.
     expect(
       getByText("operator and controller runs spent $0.60 of $1.20 reported by cost-reporting runs"),
+    ).toBeTruthy();
+  });
+
+  // Ruling 190 (F37-12, live): on a Codex-only delivery fleet the controller's
+  // turns were the ENTIRE denominator, and the card answered "100%" to a
+  // question the data cannot answer. A null share must not read as a measured
+  // extreme — it must read as the gap it is.
+  it("ruling 190: a share with nothing but coordination in it reads as a gap, not as 100%", () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      oversight: {
+        ...FULL.oversight,
+        // FULL's traceability is a real 100%; move it so the only card that
+        // could print "100%" here is the one under test.
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
+        coordination: {
+          coordinationCostUsd: 4.34,
+          totalCostUsd: 4.34,
+          costedDeliveryRuns: 0,
+          share: null,
+        },
+      },
+    });
+    // CANARY: hand `share: 1` back and "100%" appears on the card.
+    expect(queryByText("100%")).toBeNull();
+    expect(
+      getByText(
+        "operator and controller runs spent $4.34; no delivery run reported a cost, so there is no share to take",
+      ),
     ).toBeTruthy();
   });
 

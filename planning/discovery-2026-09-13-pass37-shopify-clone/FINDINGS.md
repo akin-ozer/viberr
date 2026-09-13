@@ -714,3 +714,62 @@ fix costs one field.
 **Fix.** `baseBehindBy` on the operator's snapshot, read through
 `createReconcileBehindByLookup`, the same lookup the sync pill uses; `null` means no pass has
 compared this task yet and is explicitly never a reason to skip the call.
+
+## F37-12 · "Coordination overhead 100%" is arithmetic that cannot be wrong and an answer that cannot be right — med
+
+**What Insights showed.** On the live instance, in the Delivery-oversight band:
+
+> **100%** — Coordination overhead
+> *operator and controller runs spent $4.34 of $4.34 reported by cost-reporting runs*
+
+**What the data is.** Every run on the instance, grouped by kind and backend:
+
+```
+kind        backend  runs  costed  cost
+----------  -------  ----  ------  ------
+controller  claude   4     4       4.3373
+operator    codex    59    0       0.0
+primary     codex    19    0       0.0
+reviewer    codex    13    0       0.0
+```
+
+Only Claude's result envelope carries a cost. The delivery fleet is Codex (the owner's
+model policy: controller on opus high, **everything else** on luna max), so **not one
+delivery run reports a cost** — and neither does the operator, the other half of the thing
+being measured. The denominator of "coordination / all reported spend" contained nothing
+but four controller turns. The quotient was 1 **by construction**: on this instance no
+sequence of events could have produced any other number.
+
+**Why it is a finding and not a nitpick.** The card exists (F31-D6, pass 31) to answer
+"how much of my spend is coordination?" — a real question with a real action attached:
+if coordination is eating the budget, tune the operator and the controller. Here the
+question has no answer in the data, and the card answers it anyway, at the maximum. A
+supervisor reading 100% concludes that coordination is out of control; the truth is that
+coordination cost $4.34 and **delivery's cost is unknown, not zero**. Viberr is stating a
+measurement it did not make — the ledger's standing bar for this pass ("viberr lying") —
+and it is stating the one that most invites a wrong move.
+
+It is also a defect viberr has *already ruled on, at the other end*. F31-D6's own comment
+says: "null when nothing reported a cost (**never a fake 0%**)". The degenerate low end was
+guarded because a 0% would claim coordination is free when nothing was seen. The degenerate
+high end is the same claim, mirrored, and was unguarded. Nothing in the honest sub-text
+rescues the headline: the number is what gets read, and "of $4.34 … of $4.34" is a disclosure
+a reader has to *decode* before they can distrust the figure above it.
+
+**Not the same as the operator's $0.** The sub-text credits the $4.34 to "operator and
+controller runs" when the operator contributed exactly nothing. That phrasing (D04-U12,
+pass 32) is about the union of the two kinds and is not false, so it stays for the normal
+case; in the degenerate case the replacement text names only what was actually spent.
+
+**Fix — ruling 190.** Count the cost-reporting **delivery** runs in the same aggregate pass
+(`costed_delivery_runs`); when that count is zero the share is `null` — the same answer
+F31-D6 already gives for zero reported spend — and the card reads:
+
+> **n/a** — Coordination overhead
+> *operator and controller runs spent $4.34; no delivery run reported a cost, so there is
+> no share to take*
+
+The test is the **count of runs**, not the dollars: a delivery run that genuinely reported
+$0.00 *was* observed, so a 100% earned that way is real and is still shown. Proven red both
+ways — drop `&& costedDeliveryRuns > 0` and the query hands back `1`; hand the card
+`share ?? 1` and "100%" comes back on screen.

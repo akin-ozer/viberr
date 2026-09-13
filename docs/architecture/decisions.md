@@ -4146,6 +4146,25 @@ by rewriting those paragraphs:*
     wrote it.
     (`task-actions.server.ts`.)
 
+190. **A share whose complement was never observed is not a measurement (owner,
+    2026-09-13, pass 37; F37-12).** "Coordination overhead" read **100%** on the live
+    instance, under the sub-text "operator and controller runs spent $4.34 of $4.34
+    reported by cost-reporting runs". Every word of that is true and the headline is
+    worthless: only Claude's result envelope carries a cost, the whole delivery fleet ran
+    on Codex, and the instance's four CONTROLLER turns were therefore the entire
+    denominator. The quotient was 1 by construction — it could not have been anything
+    else — while the question the card exists to answer ("how much of my spend is
+    coordination?") had no answer in this data at all. A reader sees a metric pegged at
+    its maximum and goes to tune the operator; the truth is that coordination cost $4.34
+    and delivery's cost is UNKNOWN, not zero. This is the same defect the card already
+    guards at the other end — F31-D6 refuses a fake 0% when nothing has reported a cost —
+    so it gets the same answer: when no `primary`/`reviewer` run reported a cost, the
+    share is null and the card gives the figure that IS real ("operator and controller
+    runs spent $4.34; no delivery run reported a cost, so there is no share to take").
+    The test is the COUNT of cost-reporting delivery runs, not the dollars: a delivery run
+    that genuinely reported $0.00 was observed, so 100% is earned there and is shown.
+    (`insights-query.server.ts`, `insights-page.tsx`.)
+
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a
 `failing` or pending verdict withholds it with a `github.delivery.next_step {withheld}`

@@ -112,7 +112,12 @@ export interface OversightSummary {
   coordination: {
     coordinationCostUsd: number;
     totalCostUsd: number;
-    /** coordination / total over cost-reporting runs; null when none. */
+    /** Ruling 190: how many `primary`/`reviewer` runs reported a cost. Zero
+     *  means nothing but coordination is in the denominator, so there is no
+     *  share to take — the card names the gap instead of printing 100%. */
+    costedDeliveryRuns: number;
+    /** coordination / total over cost-reporting runs; null when none, and null
+     *  when no delivery run reported a cost (ruling 190). */
     share: number | null;
   };
 }
@@ -164,6 +169,9 @@ const totalsSchema = z.object({
    *  rows under the same scope, so a second full aggregate over `agent_runs`
    *  bought nothing but another table scan. */
   coordination_cost: z.number().nullable(),
+  /** Ruling 190: how many NON-coordination runs put a figure into the
+   *  denominator. Zero means the share's complement was never observed. */
+  costed_delivery_runs: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
@@ -497,6 +505,9 @@ export function getInsightsSummary(
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
                 COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
                                   THEN total_cost_usd END), 0) AS coordination_cost,
+                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
+                                   AND total_cost_usd IS NOT NULL
+                                  THEN 1 ELSE 0 END), 0) AS costed_delivery_runs,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
@@ -509,12 +520,21 @@ export function getInsightsSummary(
 
   // F31-D6: the share is read off the totals pair — both sides come from the
   // same scan, so they can never disagree about what "all reported spend" is.
+  // Ruling 190 (F37-12): a share is a measurement only when its complement
+  // could have been seen. On a fleet whose delivery runs report no cost at all
+  // — every Codex-backed instance — the denominator holds nothing BUT
+  // coordination, so the quotient is 1 by construction and "100%" answers a
+  // question ("how much of my spend is coordination?") that this data cannot
+  // answer. Same failure as a fake 0%, pointed the other way, so it gets the
+  // same answer: null, and the card says why.
   const coordinationCost = totals.coordination_cost ?? 0;
   const totalCost = totals.cost ?? 0;
+  const costedDeliveryRuns = totals.costed_delivery_runs ?? 0;
   const coordination = {
     coordinationCostUsd: coordinationCost,
     totalCostUsd: totalCost,
-    share: totalCost > 0 ? coordinationCost / totalCost : null,
+    costedDeliveryRuns,
+    share: totalCost > 0 && costedDeliveryRuns > 0 ? coordinationCost / totalCost : null,
   };
 
   const outcomeRows = z.array(outcomeSchema).parse(

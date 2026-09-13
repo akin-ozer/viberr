@@ -253,17 +253,24 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
           controller: both decide what the working agents do rather than doing
           the work, so the sub-text names both instead of implying the
           controller's turns are free. Share over COST-REPORTING runs only;
-          null when nothing reported a cost (never a fake 0%). */}
+          null when nothing reported a cost (never a fake 0%) and null when
+          no DELIVERY run reported one (ruling 190 — never a fake 100%). */}
       <StatCard
         label="Coordination overhead"
         value={fmtPercent(g.coordination.share)}
         icon="shield"
         sub={
-          g.coordination.totalCostUsd > 0
-            ? // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
-              // only, the way "Total cost" above discloses its subset.
-              `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
-            : "no run has reported a cost yet"
+          g.coordination.totalCostUsd <= 0
+            ? "no run has reported a cost yet"
+            : g.coordination.costedDeliveryRuns === 0
+              ? // Ruling 190 (F37-12): every reported dollar came from
+                // coordination because nothing else reported one, so a share
+                // would be 100% by construction. Give the figure that IS real
+                // and name what is missing from the other side.
+                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)}; no delivery run reported a cost, so there is no share to take`
+              : // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
+                // only, the way "Total cost" above discloses its subset.
+                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
         }
       />
       </div>

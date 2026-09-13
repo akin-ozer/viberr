@@ -492,6 +492,49 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(getInsightsSummary(empty, NOW).oversight.coordination.share).toBeNull();
   });
 
+  /**
+   * Ruling 190 (F37-12, live): a Codex-only delivery fleet reports no cost at
+   * all, so the instance's four Claude CONTROLLER runs were the entire
+   * denominator and the card read "Coordination overhead 100%" — arithmetic
+   * that cannot be wrong and an answer that cannot be right. The share is a
+   * measurement only when its complement could have been observed.
+   */
+  it("ruling 190: the share is null when no DELIVERY run reported a cost — never a fake 100%", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // The live shape: Claude controller turns cost money, every Codex delivery
+    // run reports nothing.
+    insertRun(db, { kind: "controller", cost: 4.0 });
+    insertRun(db, { kind: "operator", cost: null });
+    insertRun(db, { kind: "primary", cost: null });
+    insertRun(db, { kind: "reviewer", cost: null });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop `&& costedDeliveryRuns > 0` from the share and this is 1 —
+    // the card prints "100%" off a denominator delivery never entered.
+    expect(g.coordination.share).toBeNull();
+    expect(g.coordination.costedDeliveryRuns).toBe(0);
+    // The dollar figure that IS real survives: the card still reports it.
+    expect(g.coordination.coordinationCostUsd).toBeCloseTo(4.0, 5);
+    expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
+
+    // One delivery run reporting a cost makes the complement observable, and
+    // the share comes back — including a real, earned 100%-adjacent figure.
+    insertRun(db, { kind: "primary", cost: 1.0 });
+    const seen = getInsightsSummary(db, NOW).oversight;
+    expect(seen.coordination.costedDeliveryRuns).toBe(1);
+    expect(seen.coordination.share).toBeCloseTo(0.8, 5);
+
+    // A delivery run reporting a genuine $0.00 is an observation, not a gap:
+    // the complement was seen, it was just free, so 100% is earned and shown.
+    const free = ctx.makeDb();
+    insertProject(free, "gp");
+    insertRun(free, { kind: "controller", cost: 2.0 });
+    insertRun(free, { kind: "primary", cost: 0 });
+    const g3 = getInsightsSummary(free, NOW).oversight;
+    expect(g3.coordination.costedDeliveryRuns).toBe(1);
+    expect(g3.coordination.share).toBeCloseTo(1, 5);
+  });
+
   it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
