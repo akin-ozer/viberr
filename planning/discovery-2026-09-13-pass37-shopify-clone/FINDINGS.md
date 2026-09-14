@@ -3930,3 +3930,56 @@ Not filed as a defect: the dock is `position: fixed` at both breakpoints by deli
 bottom sheet on mobile), the user opened it, can see it, and Escape closes it. No lie, no lost work,
 no dead end. It is a product question about whether a surface meant for heavy use should reserve its
 space instead of overlaying — raised rather than decided.
+
+## F37-73 · A recommended packet option promised a branch deletion it could not perform — HIGH
+
+**Found by driving the board through the controller**, which is where the goal for this stretch
+pointed me. Third time this pass that a packet consumed a decision and did nothing (F37-68, F37-71,
+this) — and the first where the person had already passed a destructive-action confirmation.
+
+**What happened, in order.** The Backend Engineer rebased `shop-11` (a branch with an open PR),
+which diverged it from PR #15's remote. Viberr's delivery refused the push, non-fast-forward, and
+said so precisely. The operator raised a packet whose recommended option read:
+
+> **Clear the stale remote `shop-11` and re-deliver the rebased work** — "Closes PR #15, deletes the
+> remote branch it tracks, and re-delivers the local rebased branch as a fresh review PR. Cost: PR
+> #15's thread and its approval record close with it."
+
+I confirmed it. Viberr then showed a second ceremony — *"Delete this task's remote branch? …
+Confirming removes this task's own remote branch"* — and I confirmed that too. The result:
+
+> **No collision to clear: PR #15 on `shop-11` is SHOP-11's own review PR.** The delivery that would
+> push the delivered revision to it did not complete … **The block stays.**
+
+Packet consumed, decision on the contract, consent given for a deletion, nothing done.
+
+**Where it lives.** `resolve_remote_collision` is ruling 122's door: it clears a FOREIGN remote, an
+unrelated branch or an unowned PR under this task's branch name. V19 added `unownedPr` to the
+operator's snapshot *because* "the operator was structurally blind to the collision at the exact
+moment it must author a `resolve_remote_collision` packet". SHOP-11 recorded `unownedPr: null` — no
+collision — so ruling 136(b)'s `own_pr_open` arm ran and correctly refused.
+
+**Every layer below the authoring behaved well**, which is why this survived: the push refusal named
+the cause and the remedy; the packet distinguished the agent's reported facts from the operator's
+own push result; ruling 136(b) anticipated this exact arm and its comment even says "the packet's
+premise was false"; and the resolution reported the outcome honestly instead of claiming success.
+The one thing missing was a refusal at the point the option was WRITTEN.
+
+**And viberr already had that rule.** The `accept_completion` arm refuses an incoherent option in
+the same function, with the rationale spelled out: *"the acceptance gate refuses the very decision
+the option offers … and the human is left confirming a card that cannot succeed."* It was never
+applied to its sibling. Same shape as F37-71, where UX19-3's gate was wired into one of two sibling
+queries.
+
+**Fix (ruling 244).** `operatorOpenPacket` refuses `resolve_remote_collision` when
+`github.unownedPr` is null, names what the branch actually carries ("its own review PR #15"), and
+points at the kinds that fit — `custom` naming what a person must do to the history, or
+`archive_task` with `deleteBranch`.
+
+**Test.** Both directions canaried: dropping the arm lets the incoherent packet open (the shipped
+state), and refusing on the option kind alone kills ruling 122's real case, where a recorded
+`unownedPr` must still author.
+
+**Not a dead end, checked.** SHOP-11 re-read `readiness: ready`, `waiting: agent` with an operator
+and a deliverer running — the machinery recovered on its own. The cost was the wasted decision and
+the false consent, not a stranded task.

@@ -4758,6 +4758,83 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 
+  /**
+   * Ruling 244 (pass 37, F37-73). `resolve_remote_collision` clears a FOREIGN
+   * remote — ruling 122's case. With no collision recorded, the resolution
+   * takes ruling 136(b)'s `own_pr_open` arm and answers "no collision to
+   * clear", leaving the block untouched.
+   *
+   * Live on SHOP-11: a rebase diverged the branch from its OWN PR #15, the
+   * operator offered this as the recommended option promising to close PR #15
+   * and delete the remote, a person confirmed it through the ceremony that
+   * names deleting a branch, and the answer was "The block stays." The decision
+   * was spent and the packet was gone. The sibling `accept_completion` arm
+   * refuses exactly this shape, for exactly this reason.
+   */
+  it("ruling 244: refuses resolve_remote_collision when no FOREIGN collision is recorded", async () => {
+    packetsRoster();
+    seedTask("review");
+    // The task's own PR on its own branch, and no unowned PR: the SHOP-11 shape.
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.branch = "vib-1";
+        parsed.frontmatter.pr = { number: 15, state: "review", title: "VIB-1" };
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "`vib-1` push refused",
+        options: [
+          { kind: "resolve_remote_collision", title: "Clear the stale remote and re-deliver", recommended: true },
+        ],
+      },
+      authority("full"),
+    );
+    // CANARY: delete the ruling 244 arm and the packet opens, promising a
+    // deletion the resolution will refuse after spending the decision.
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("only fits a FOREIGN remote");
+    expect(refused.message).toContain("its own review PR #15");
+    expect(task().packet).toBeNull();
+
+    // With a real collision recorded, the same option is authored. CANARY:
+    // refuse on the option kind alone and ruling 122's actual case dies.
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        // The github block always exists on a delivered task; set the field on
+        // it rather than spreading a fallback that would drop its required keys.
+        if (parsed.frontmatter.github) parsed.frontmatter.github.unownedPr = 99;
+        else parsed.frontmatter.github = { commits: [], changed: null, unownedPr: 99 };
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const allowed = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "`vib-1` is squatted",
+        options: [
+          { kind: "resolve_remote_collision", title: "Clear the stale remote and re-deliver", recommended: true },
+        ],
+      },
+      authority("full"),
+    );
+    expect(allowed.outcome).not.toBe("noop");
+    expect(task().packet?.options[0]?.kind).toBe("resolve_remote_collision");
+  });
+
   it("ruling 237: refuses a question_reviewer that names no reviewer, or names one this task does not have", async () => {
     // The option's whole promise is "ask THIS agent". Unchecked, the resolution
     // would dispatch nobody, or dispatch the deliverer with a prompt telling it

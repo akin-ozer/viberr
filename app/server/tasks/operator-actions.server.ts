@@ -1274,6 +1274,39 @@ export async function operatorOpenPacket(
       };
     }
   }
+  // Ruling 244 (pass 37, F37-73): the same rule the `accept_completion` arm
+  // above applies, applied to its sibling. `resolve_remote_collision` clears a
+  // FOREIGN remote — ruling 122's case, an unrelated branch or an unowned PR
+  // squatting this task's branch name — and V19 put `unownedPr` in the
+  // operator's own snapshot precisely so it can tell. With no collision
+  // recorded, the resolution takes ruling 136(b)'s `own_pr_open` arm, answers
+  // "No collision to clear: PR #N on `branch` is TASK's own review PR", and
+  // leaves the block exactly where it was.
+  //
+  // Live on SHOP-11: a rebase diverged the branch from its own PR #15, the
+  // operator offered this as the RECOMMENDED option promising to close PR #15
+  // and delete the remote, a person confirmed it through the destructive-action
+  // ceremony that names deleting a branch, and the answer was "The block
+  // stays." The decision was spent, the packet was gone, and nothing had
+  // happened — which is what the accept_completion refusal exists to prevent:
+  // "the human is left confirming a card that cannot succeed."
+  if (rawOptions.some((o) => o.kind === "resolve_remote_collision")) {
+    const fm = existing.parsed.frontmatter;
+    const unowned = fm.github?.unownedPr ?? null;
+    if (unowned === null) {
+      const own = fm.pr?.number ? `its own review PR #${fm.pr.number}` : "no unowned PR";
+      return {
+        outcome: "noop",
+        message:
+          `resolve_remote_collision only fits a FOREIGN remote under ${input.taskKey}'s branch name ` +
+          `(an unrelated branch, or a pull request this task does not own). ` +
+          `${input.taskKey} records no collision — the branch carries ${own} — so the resolution ` +
+          `would answer "no collision to clear" and leave the block where it is. ` +
+          "For a branch whose history diverged from its own PR, a person resolves the history: " +
+          "offer custom naming what they must do, or archive_task with deleteBranch to abandon it.",
+      };
+    }
+  }
   // B3: one open decision at a time, the same refusal every sibling packet
   // writer makes (`openStuckLoopPacket`, `openAgentQuestionPacket`). This
   // writer alone assigned `parsed.packet` unconditionally, so a second packet

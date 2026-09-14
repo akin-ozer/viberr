@@ -5385,6 +5385,28 @@ by rewriting those paragraphs:*
     name only one).
     (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
 
+244. **A packet option whose premise is false is refused where it is WRITTEN (2026-09-15, pass 37;
+    F37-73). Extends the `accept_completion` authoring rule to its sibling.** The
+    `accept_completion` arm already refuses an option the acceptance gate would reject, for a
+    stated reason: "the human is left confirming a card that cannot succeed."
+    `resolve_remote_collision` had no such check. It clears a FOREIGN remote — ruling 122's
+    case, an unrelated branch or an unowned PR squatting the task's branch name — and V19 put
+    `unownedPr` into the operator's own snapshot precisely so it can tell one exists. With no
+    collision recorded, ruling 136(b)'s `own_pr_open` arm answers "No collision to clear: PR
+    #N on `branch` is TASK's own review PR" and leaves the block where it was.
+    Live on SHOP-11: a rebase diverged the branch from its own PR #15, the operator offered
+    this as the RECOMMENDED option, promising in its own description to close PR #15, delete
+    the remote branch and re-deliver. A person confirmed it through the destructive-action
+    ceremony that names deleting a branch and closing a pull request — and the answer was
+    "The block stays." The decision was spent, the packet was gone, the consent had been given
+    for a cost never paid, and nothing had happened.
+    The server behaved honestly at every step; the defect was upstream, in accepting an option
+    whose premise the authoring context already disproves. `operatorOpenPacket` now refuses it
+    when `github.unownedPr` is null, names what the branch actually carries, and points at the
+    kinds that fit: `custom` naming what a person must do to the history, or `archive_task`
+    with `deleteBranch`.
+    (`operator-actions.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is
