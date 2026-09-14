@@ -1036,3 +1036,50 @@ engineered away (manifests, route table, CI matrix) was made additive by design.
 cannot be (a lockfile generated from the whole workspace) was given its own serialized task, with
 its dependency direction chosen on purpose. The rest is caught at review. That is what a working
 coordination model looks like under five concurrent branches.
+
+## The record is testable — viberr's own controller reconstructed F37-43 from it
+
+The goal asks to check that what viberr *shows* matches what *happened*, on the grounds that
+"files-are-truth means the record is testable". The strongest available test of that is not one I
+can run: it is whether a reader who was not there can recover the truth from the files alone.
+
+At 03:49 UTC the controller did, unprompted. I had asked it a narrow sequencing question about
+SHOP-20 and the lockfile. It went to the record, and posted this on **SHOP-17's closed task**:
+
+> Recording a discrepancy on this closed task, for the trail.
+>
+> Both required reviewers approved revision `1f99f68504f3`. PR #12 merged at head `9104562baccf`,
+> and the acceptance record states: *"PR #12's head could not be verified against the delivered
+> revision before the merge… It was accepted without that containment check."* Branch `shop-17`
+> was then deleted at `9104562baccf`.
+>
+> **If that is accurate, what merged is not what was verified**, and two commits' content did not
+> reach `main`: `7d58fb58` (the peer-qualified eslint lockfile repair) and `1f99f685` (the
+> manifest-derived `scripts/stack.test.mjs`). Downstream behaviour matches — SHOP-2's cold
+> `make up` failed on the same eslint frozen-install error hours later, and SHOP-2 was separately
+> authorized to write its own manifest-derived stack test, **which would be the fifth**.
+>
+> The gateway deliverable itself is not in question… This is about the two shared-surface fixes
+> riding on the same branch.
+>
+> **SHOP-21** now owns re-landing both on `main`, and **its first step is to verify this premise
+> rather than assume it** — if `main` turns out to carry them after all, it stops and says so.
+
+That is F37-43, rediscovered independently, from the verdicts, the acceptance note and the PR
+record — plus two things my own writeup did not have: the identity of the two lost commits, and
+the downstream signature that confirms the loss (an eslint frozen-install failure recurring on
+a later branch). It then created an unblocked task to repair it, and instructed that task to
+falsify the premise first.
+
+**It also caught a mistake of mine.** Earlier the same night I authorized SHOP-2 to generalize
+`scripts/stack.test.mjs` from the manifests. That work already existed — in `1f99f685`, one of
+the commits PR #12 did not carry. My authorization was a fifth re-implementation of a fix that
+had been written and lost, and I made it without checking whether `main` carried it. The
+controller saw the pattern from the record; I had the finding in my own ledger and did not
+connect it.
+
+**And it is ruling 226's case, made by someone else.** The controller quotes the A9 disclosure
+verbatim and then states the consequence A9's wording leaves out: *what merged is not what was
+verified*. The owner's decision to refuse that merge rather than disclose it was reached
+independently, from the same sentence, by viberr's own controller — hours later and without
+being asked.
