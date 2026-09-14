@@ -3215,3 +3215,63 @@ incompatible ways within one project.
 persona (shipped asset plus the fallback definition) and the specialist directive block that
 introduces `directiveFrom`. Use "they" unless the person has stated otherwise; a name is not
 evidence.
+
+---
+
+## F37-57 · Ruling 210's operator arm is a prompt paragraph, and the model walked past it — MEDIUM
+
+**Found by watching the exact condition the ruling was written for.** SHOP-5 took its THIRD
+consecutive `request_changes` from the same reviewer, each on a different revision, each finding
+something real the last round had not mentioned. That is ruling 210's case verbatim.
+
+The mechanism is correct. Three verdicts, all `code-reviewer`, all `request_changes`, all
+`rounds: 1`, none followed by an approve, so `consecutiveRequestChanges` sums to **3** — the
+counter ruling 204 was written to fix is reading the situation exactly right. And the doctrine
+is genuinely in the operator's turn instruction:
+
+> SAME reviewer, a DIFFERENT objection each round (`consecutiveRequestChanges` ≥ 2 with the
+> earlier findings actually fixed) … Ask the reviewer which, and require the answer before the
+> next rework: `run_agent` THE REVIEWER with `delivers: false` … **Do not send the deliverer back
+> into another round until the reviewer has answered.**
+
+What happened instead, from the task's own timeline:
+
+```
+12:07:41  code-reviewer   request_changes (third consecutive)
+12:08:27  operator        Transition: Review → Build
+12:08:43  operator        to: agent  "@Infrastructure Engineer — SHOP-5 is back at Build…"
+12:08:44  operator        Started a Codex run for the Infrastructure Engineer
+```
+
+Forty-six seconds, no question to the reviewer, straight into round four. The condition held on
+every clause: the counter was ≥2, the objections differed each round, and the earlier findings
+WERE fixed — the reviewer says so itself ("The requested unwritable-file probe passes"). Nor did
+the reviewer claim the escape hatch; ruling 210 reserves "this is genuinely new" for the reviewer
+to state, and it stated nothing of the kind. It also never wrote the sentence its own half of the
+ruling requires — that the list is complete and a fix addressing all of it should pass.
+
+**Viberr has already ruled that this shape is not good enough.** Ruling 186, six sessions earlier,
+found `blockedBy` holding nothing because ruling 131(d) "refused three operator triggers and then
+*asked* the model, in a prompt paragraph, not to 'dispatch delivery work'; `startAgentRun` checked
+nothing." The owner's call there was a hard gate. Ruling 210's operator arm is the same
+construction: a paragraph asking the model not to re-dispatch, with nothing checking that it
+didn't.
+
+**The cost is the reason the ruling exists, and it is measurable.** Review rounds on this board:
+
+```
+SHOP-5    26 runs (6 primary, 10 reviewer+operator rounds), 97 turns — still climbing
+SHOP-6    55 runs (11 primary, 10 reviewer), 51 turns — took SEVEN rounds
+SHOP-10   72 runs (13 primary, 14 reviewer), 64 turns — took FIVE
+```
+
+Ruling 210's own words: "Finding one defect, returning the work, and finding the next one next
+round is not review; it is a queue, paid for a round at a time."
+
+**Fix shape, and why it needs the owner.** The mechanical part is small: `operatorPromptAgent`
+already knows the task, so a gate could refuse a delivering re-dispatch while a verdict-capable
+engagement sits at `consecutiveRequestChanges >= 2` and has not answered since — the same shape as
+ruling 186's hold gate, with the refusal naming the reviewer question that clears it. But it is a
+GATE on the operator's own judgement in a case with a legitimate exception (the reviewer may
+genuinely have hit something new), and ruling 186's carve-out question went to the owner. This one
+should too.
