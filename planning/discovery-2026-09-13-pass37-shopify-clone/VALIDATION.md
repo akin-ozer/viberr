@@ -1005,3 +1005,43 @@ says `waiting: human`, which is true: nothing is running and nothing is pretendi
 
 Before the ruling the same four tasks had three exits: change the deployment's model policy,
 assert a window had reset three hours early, or come back at 02:27 and press four buttons.
+
+### …and the window actually reopened
+
+`2026-09-14T02:28:19Z`, unattended, with nobody awake for it:
+
+```
+{"msg":"scheduled actions fired","fired":5,"skipped":0}
+{"msg":"operator run started (codex structured output)","taskKey":"SHOP-3","runId":"run_VN9wvi3QS3KL","autonomy":"full"}
+{"msg":"operator run started (codex structured output)","taskKey":"SHOP-11","runId":"run_t3Enau3IcMhU","autonomy":"full"}
+{"msg":"operator run started (codex structured output)","taskKey":"SHOP-12","runId":"run_qTzDE-avMHdO","autonomy":"full"}
+{"msg":"operator run started (codex structured output)","taskKey":"SHOP-18","runId":"run_IQMCy-HU5cA1","autonomy":"full"}
+{"msg":"operator run queued — one already in flight (process lease)","taskKey":"SHOP-18","trigger":"scheduled"}
+```
+
+19 seconds after the due instant (the runner ticks at 60s), all four `pending` occurrences went
+`fired` with `firedAt` stamped, all four tasks flipped `waiting: human → agent`, and the board's
+subtitle fell from **"5 waiting on a human"** to **"2 waiting on a human"** — the two that
+really are. SHOP-18's SECOND occurrence did not double-run: it queued behind the first on the
+process lease, and when it reached the front it read the board and declined to duplicate the
+handoff — *"The scheduled re-check found the delivering Frontend Engineer run still in flight
+for the review-requested rework; wait for its report and do not duplicate the handoff."*
+
+Within a minute SHOP-18's operator had dispatched the Frontend Engineer for the rework the Code
+Reviewer asked for. Three hours of board time were recovered by a mechanism viberr already had
+and had never offered.
+
+The whole arc is on one timeline, in order, with no gaps:
+
+```
+23:27:21  blocked  agent    Codex refused the agent run: over usage limit
+23:27:21  blocked  operator Work stalled: pick a recovery path
+00:14:32  transition        Decision: Redirect with sharper guidance
+00:14:39  blocked  operator Operator run failed: pick a recovery path
+00:14:57  transition        Decision: wait for the Codex window to reopen (02:27 UTC)
+00:14:57  note     human    Scheduled: an operator re-run at 2026-09-14T02:28:00.000Z
+02:28:19  note     system:schedule-runner  Scheduled action starting
+```
+
+Files are truth, and the record is testable: every line above is in `task.md`, and the two
+`fired`/`firedAt` stamps in the frontmatter agree with the container log to the millisecond.
