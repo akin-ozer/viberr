@@ -1,3 +1,4 @@
+import { type ReviewSubject, reviewSubjectSha } from "~/shared/revision-drift";
 import { execFile } from "node:child_process";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import {
@@ -1739,8 +1740,18 @@ async function dispatchAgentRun(
           support,
           // Ruling 179: a supporting checkout judges the revision under review;
           // the delivering one follows origin's copy of the task branch.
-          pinRevision: support
-            ? (activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha ?? null)
+          // Ruling 238: with ONE exception, computed from facts already on the
+          // task — a head that moved only because Viberr refreshed the base
+          // carries the same deliverable on a newer base, and pinning behind it
+          // is what left SHOP-18's verifier re-reading a defect that had been
+          // fixed and merged.
+          pinSubject: support
+            ? reviewSubjectSha({
+                reviewedSha:
+                  activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha ?? null,
+                prHeadSha: existing.parsed.frontmatter.pr?.headSha ?? null,
+                drift: existing.parsed.frontmatter.pr?.revisionDrift ?? null,
+              })
             : null,
           taskBranch: existing.parsed.frontmatter.branch ?? null,
           // F27-U1: turn the cold first-task network clone from a silent
@@ -3796,9 +3807,21 @@ function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string
  *
  * Exported for its test: the behaviour is real git, not a string.
  */
-export async function pinSupportCheckout(dir: string, sha: string | null): Promise<string | null> {
+export async function pinSupportCheckout(
+  dir: string,
+  subject: ReviewSubject | null,
+): Promise<string | null> {
+  const sha = subject?.sha ?? null;
   if (!sha) return null;
   const short = sha.slice(0, 7);
+  // Ruling 238: when the subject moved past the reviewed revision, every
+  // sentence below has to say so. A reviewer told only "checked out at the
+  // revision under review" while standing on a different commit would report
+  // against a sha it never read, and the record would be a lie with a git
+  // object id in it.
+  const what = subject?.rePinned
+    ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${subject.rePinned.baseRefresh.merges === 1 ? "1 merge commit" : `${subject.rePinned.baseRefresh.merges} merge commits`}, ${subject.rePinned.baseRefresh.commits === 1 ? "1 base commit" : `${subject.rePinned.baseRefresh.commits} base commits`}, and no authored work since the review \u2014 ruling 238)`
+    : `the revision under review \`${short}\``;
   try {
     await execFileAsync("git", ["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeout: 5_000 });
   } catch {
@@ -3806,20 +3829,20 @@ export async function pinSupportCheckout(dir: string, sha: string | null): Promi
       dir,
       revision: sha,
     });
-    return `the revision under review \`${short}\` is not in this checkout (origin has not been read since it appeared); HEAD was left as it is`;
+    return `${what} is not in this checkout (origin has not been read since it appeared); HEAD was left as it is`;
   }
   try {
     const head = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"], { timeout: 5_000 })).stdout.trim();
-    if (head === sha) return `checked out at the revision under review \`${short}\``;
+    if (head === sha) return `checked out at ${what}`;
     await execFileAsync("git", ["-C", dir, "checkout", "-q", "--detach", sha], { timeout: 30_000 });
-    return `detached at the revision under review \`${short}\` (the delivering tree stood at \`${head.slice(0, 7)}\`)`;
+    return `detached at ${what} (the delivering tree stood at \`${head.slice(0, 7)}\`)`;
   } catch (error) {
     logger.warn("support checkout: could not detach at the revision under review", {
       dir,
       revision: sha,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    return `the revision under review \`${short}\` could not be checked out; HEAD was left as it is`;
+    return `${what} could not be checked out; HEAD was left as it is`;
   }
 }
 
@@ -3849,7 +3872,7 @@ async function cloneRepo(
      *  keeps it read-only). Live (HLC-18, 19:46Z): the external revision the
      *  reconciler minted was never in the reviewer's clone of the delivering
      *  tree, and the reviewer could not check it out. */
-    pinRevision?: string | null;
+    pinSubject?: ReviewSubject | null;
     /** Ruling 179: the task branch, for the delivering refresh's fast-forward
      *  to origin's copy (`refreshWorkspaceFromMirror`). */
     taskBranch?: string | null;
@@ -3915,7 +3938,7 @@ async function cloneRepo(
           await refreshWorkspaceFromMirror(db, supportRefresh);
           await setIdentity(dir);
           await stripUngovernedRepoCatalog(dir);
-          const pinned = await pinSupportCheckout(dir, input.pinRevision ?? null);
+          const pinned = await pinSupportCheckout(dir, input.pinSubject ?? null);
           return pinned ? { dir, refreshed: pinned } : { dir };
         } finally {
           if (!existsSync(path.join(dir, ".git", "HEAD"))) {
@@ -3995,7 +4018,7 @@ async function cloneRepo(
       // Ruling 179: a supporting run that reached here (no delivering checkout
       // to clone from) still judges the revision under review when the fresh
       // clone carries it.
-      const freshPin = input.support ? await pinSupportCheckout(dir, input.pinRevision ?? null) : null;
+      const freshPin = input.support ? await pinSupportCheckout(dir, input.pinSubject ?? null) : null;
       return freshPin ? { dir, refreshed: freshPin } : { dir };
     } finally {
       // A clone killed mid-transfer can leave a partial tree behind. Left in

@@ -169,3 +169,62 @@ export function classifyRevisionDrift(input: ClassifyDriftInput): RevisionDrift 
     baseRefresh: merges > 0 || commits > 0 ? { merges, commits } : null,
   };
 }
+
+/** The commit a re-review should read, and why it is not always the reviewed
+ *  one (ruling 238). Client-safe: every field is a fact already on the task. */
+export interface ReviewSubject {
+  /** The sha to check the reviewer's tree out at. */
+  sha: string;
+  /** Set only when {@link sha} is NOT the reviewed revision: the revision the
+   *  verdict still binds to, and the refresh that moved the subject past it. */
+  rePinned: {
+    reviewedSha: string;
+    baseRefresh: { merges: number; commits: number };
+  } | null;
+}
+
+/**
+ * Ruling 238 (pass 37, F37-58): which commit a re-review reads.
+ *
+ * Ruling 179 pins a supporting checkout at the revision under review, so a
+ * reviewer judges what it was asked to judge and never a head that moved under
+ * it. That is right whenever the head moved because someone AUTHORED something.
+ *
+ * It is wrong for a base refresh, and the case is not hypothetical. A reviewer
+ * whose surface reaches outside the task's owned paths — any stack or
+ * integration reviewer — can block on a defect in the BASE. Viberr's own
+ * `update_branch` then merges the fixed base in, `classifyRevisionDrift` reads
+ * `authored: 0` and `describeRevisionDrift` says the review still stands
+ * (correctly: the deliverable's tree is untouched). But the pin puts the
+ * re-review back on the pre-refresh base, where the defect is still there, so
+ * it objects again — on SHOP-18 twice, and the only way out was an admin
+ * force-accept over a gate that had wedged because the task did exactly what it
+ * was asked to do.
+ *
+ * So the subject moves to the refreshed head when the drift is base-refresh
+ * ONLY, and the disclosure says it did. One authored commit anywhere in the
+ * drift keeps the pin: that is unreviewed work, and reading it unasked is the
+ * failure ruling 179 exists to prevent.
+ *
+ * The drift must have been measured AT the head being offered — a measurement
+ * against an older head says nothing about this one, and acting on it would
+ * re-pin onto commits nobody has classified.
+ */
+export function reviewSubjectSha(input: {
+  /** The reviewed revision's head — what ruling 179 pins to. */
+  reviewedSha: string | null;
+  /** The pull request's live head, or null when there is no PR. */
+  prHeadSha: string | null;
+  /** The drift the reconciler last measured. */
+  drift: RevisionDrift | null | undefined;
+}): ReviewSubject | null {
+  const { reviewedSha, prHeadSha, drift } = input;
+  if (!reviewedSha) return null;
+  const stand: ReviewSubject = { sha: reviewedSha, rePinned: null };
+  if (!prHeadSha || !drift) return stand;
+  if (drift.headSha !== prHeadSha || prHeadSha === reviewedSha) return stand;
+  const refresh = drift.baseRefresh;
+  if (drift.authored !== 0 || !refresh) return stand;
+  if (refresh.merges === 0 && refresh.commits === 0) return stand;
+  return { sha: prHeadSha, rePinned: { reviewedSha, baseRefresh: refresh } };
+}

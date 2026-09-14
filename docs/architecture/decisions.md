@@ -5178,6 +5178,38 @@ by rewriting those paragraphs:*
     `task-file.schema.ts`, `operator-toolkit.server.ts`, `operator-run.server.ts`,
     `activity-feed.server.ts`.)
 
+238. **A re-review follows a base refresh, because the defect it blocked on may be in the
+    base (owner, 2026-09-14, pass 37; F37-58).** Three correct mechanisms composed into a
+    task no rework could unblock. A verdict binds to a work revision. A base refresh mints
+    no new revision and `describeRevisionDrift` reports it as not unreviewed, which is
+    right: on SHOP-18 the deliverable's own tree sha was identical across the refresh, and
+    I checked that with `git rev-parse` before overriding anything. And
+    `pinSupportCheckout` detached every re-review at the reviewed revision, so it re-read
+    the base it had already objected to.
+    The Integration Verifier's two blockers were defects on `main`, outside SHOP-18's owned
+    paths. They were routed to SHOP-21, fixed, and merged into the branch by Viberr's own
+    `update_branch` (`1 merge commit, 20 base commits, 0 authored`). The verifier objected
+    to the same revision a second time, its report asking for a re-run on the merged head,
+    and the operator opened a packet saying plainly that no tool of its own could make that
+    happen. It was right. The task escaped by an admin force-accept over a gate that wedged
+    because a task did exactly what it was asked to do.
+    `reviewSubjectSha` now decides what a re-review reads, and the subject moves to the PR
+    head when the drift is base-refresh ONLY. One authored commit anywhere in the drift
+    keeps the pin: that is unreviewed work, and reading it unasked is the failure ruling 179
+    exists to prevent. The drift must also have been measured AT the head being offered, or
+    it classifies none of the commits on it.
+    The disclosure changes with the subject. A reviewer standing on a different commit from
+    the one its verdict binds to is told so in the same sentence, naming both shas and the
+    refresh between them, because a reviewer told only "the revision under review" while
+    standing elsewhere would report against a tree it never read. The verdict still binds to
+    the reviewed revision: the revision is the DELIVERABLE's identity, which the refresh did
+    not change, and that is the same fact ruling 132 already asserts.
+    The owner's alternatives were an option on ruling 237's packet and minting a revision for
+    every base refresh. The second was rejected as the most disruptive: it would stale
+    passing approvals too, so a refresh on a task that was ready to accept would cost a full
+    re-review round.
+    (`revision-drift.ts`, `specialist-run.server.ts`, `operator-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

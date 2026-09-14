@@ -5182,7 +5182,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     // `checkout --detach` and the first HEAD assertion fails — which is the
     // live state: the reviewer read the delivering tree while its contract
     // named another sha.
-    const moved = await pinSupportCheckout(dir, first);
+    const moved = await pinSupportCheckout(dir, { sha: first, rePinned: null });
     expect(await head()).toBe(first);
     expect(moved).toContain(`detached at the revision under review \`${first.slice(0, 7)}\``);
     expect(moved).toContain(`the delivering tree stood at \`${second.slice(0, 7)}\``);
@@ -5192,7 +5192,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     ).rejects.toBeTruthy();
     expect(existsSync(path.join(dir, "B.md"))).toBe(false);
 
-    const already = await pinSupportCheckout(dir, first);
+    const already = await pinSupportCheckout(dir, { sha: first, rePinned: null });
     expect(already).toBe(`checked out at the revision under review \`${first.slice(0, 7)}\``);
     expect(await head()).toBe(first);
 
@@ -5201,24 +5201,45 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     expect(await head()).toBe(first);
   });
 
+  it("ruling 238: a base-refreshed subject is checked out AND the sentence says which revision the verdict binds to", async () => {
+    // The reviewer is standing on a different commit from the one its verdict
+    // will be recorded against. A sentence that still said "the revision under
+    // review `<sha>`" would name a tree it never read.
+    // CANARY: pass `subject.sha` and drop the `rePinned` clause, and the
+    // disclosure reads exactly like an ordinary pin while the tree is someone
+    // else's base.
+    const said = await pinSupportCheckout(dir, {
+      sha: second,
+      rePinned: { reviewedSha: first, baseRefresh: { merges: 1, commits: 20 } },
+    });
+    expect(await head()).toBe(second);
+    expect(said).toContain(`the reviewed revision \`${first.slice(0, 7)}\` on its refreshed base`);
+    expect(said).toContain(`at \`${second.slice(0, 7)}\``);
+    expect(said).toContain("1 merge commit, 20 base commits");
+    expect(said).toContain("no authored work since the review");
+    // The base refresh brought a file the reviewed revision did not have; the
+    // point of the re-pin is that the reviewer can now see it.
+    expect(existsSync(path.join(dir, "B.md"))).toBe(true);
+  });
+
   it("a revision the clone does not carry is DISCLOSED, never thrown, and HEAD is left as it stands", async () => {
     // Canary: drop the `cat-file -e` probe and the call throws instead — a
     // reviewer that cannot be pinned must still run and say so.
     const missing = "b".repeat(40);
-    const said = await pinSupportCheckout(dir, missing);
+    const said = await pinSupportCheckout(dir, { sha: missing, rePinned: null });
     expect(said).toContain(`the revision under review \`${missing.slice(0, 7)}\` is not in this checkout`);
     expect(said).toContain("HEAD was left as it is");
     expect(await head()).toBe(second);
   });
 
   it("the supporting dispatch passes the task's ACTIVE work revision, and the delivering one passes none", () => {
-    // Canary: delete the `pinRevision` argument at the dispatch call site and
+    // Canary: delete the `pinSubject` argument at the dispatch call site and
     // the helper goes back to having no production caller — the state this
     // pass found live.
     const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(source).toContain("pinRevision: support");
+    expect(source).toContain("pinSubject: support");
     expect(source).toContain("activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha");
-    expect(source).toContain("await pinSupportCheckout(dir, input.pinRevision ?? null)");
+    expect(source).toContain("await pinSupportCheckout(dir, input.pinSubject ?? null)");
     // ...and the disclosure rides the same `refreshed` field the run contract
     // already renders ("Before this run Viberr ...").
     expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");
