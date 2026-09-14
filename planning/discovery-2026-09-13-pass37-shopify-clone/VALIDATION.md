@@ -1570,3 +1570,60 @@ only became a test of the fix once it could fail without it.
 
 Recorded rather than quietly counted: predicting a live proof and then finding the proof
 structurally unavailable is the kind of thing that otherwise turns into a green tick nobody earned.
+
+### Ruling 232's dangerous half IS proven live, by the packet answer at 07:41
+
+I answered SHOP-18's decision packet through the real UI, taking the operator's recommended
+option and naming SHOP-21 in the note. What came back, in one operator turn:
+
+```
+07:41:19  transition  Arda    Decision: Fix both on `main` in a separate shared-surface task...
+07:41:29  note        operator  Waits on SHOP-21 (added SHOP-21). Held until every entry is
+                                done; Viberr releases it then.
+07:41:36  comment     operator  @Arda - recorded: **SHOP-18 waits on SHOP-21** ...
+07:41:36  MENTION NOTIFICATION DELIVERED
+```
+
+That comment is `toAgent: false` and contains `@Arda`, and it **notified**. This is the half of
+ruling 232 that actually matters, and the half a unit test is worst at proving: the gate does not
+OVER-suppress. The owner's decision rested on the operator having "a separate human-directed
+comment path"; that path demonstrably still reaches a person after the change. Had the gate been
+keyed on the inferred flag rather than the declared audience, or applied one writer too wide, this
+is exactly where it would have gone silent - and the failure would have been invisible, because a
+notification that never arrives leaves no trace.
+
+Still unproven live: a `toAgent: true` directive carrying a real `@handle` and producing no row.
+No directive since the deploy has carried one. That half remains on its unit canaries, and the
+ledger keeps saying so.
+
+**Ruling 233's untouched branch, also live.** The quote reads:
+
+```
+mentioned you - "@Arda - recorded: **SHOP-18 waits on SHOP-21** ("Re-land the SHOP-17 content...
+```
+
+`@Arda` is at character 0, so the head window already covered the mention and ruling 233 left it
+byte-for-byte alone - no leading ellipsis, no re-windowing. The common case is unchanged, which is
+what the ruling promised and what a windowing change most easily breaks.
+
+### The packet kept its own promise, end to end
+
+The option's text was a commitment: *"Confirm with that task's key in your note and I will record
+the wait with `set_dependencies` - Viberr then holds SHOP-18 on the board and releases it
+automatically when that task is done."* Measured against the file afterwards:
+
+```
+stage: build     readiness: ready     waiting: none     blockedBy: [SHOP-21]
+```
+
+Recorded within seventeen seconds of the decision, with the operator quoting my note back and the
+dependency note spelling the release rule. SHOP-21 is chartered for exactly the two defects
+("lockfile repair and manifest-derived stack test") and its Infrastructure Engineer run is live,
+so the automatic release (ruling 131(e)) is now armed against a real blocker rather than a
+fixture. Watching for it.
+
+Worth naming: the operator VERIFIED the Frontend Engineer's claim itself against `origin/main`
+before asking, named the convention in play (shared surface #5, which it noted "has already
+stopped four tasks with the same question"), said why it was asking rather than acting (path
+ownership, no missing capability), and offered a third option whose own description admits it
+"does NOT unblock SHOP-18 on its own". That is a decision packet written for someone deciding.
