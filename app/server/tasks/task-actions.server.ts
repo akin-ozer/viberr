@@ -3672,17 +3672,35 @@ export async function recordAgentCompletion(
           actorRef: encodeActorRef(actorRef),
         },
       });
-      notifyTaskWatchers(
-        db,
-        {
-          projectSlug,
-          taskKey,
-          kind: "approval",
-          title: `${roleDisplay} asks: ${question!.title.trim()}`,
-          text: question!.body ?? "An engaged agent needs a human decision.",
-        },
-        ctx,
-      );
+      // F37-64: ruling 222 fixed ONE of the two question doors. Its words are
+      // "the notification says WHO is asking … an agent's own question reached
+      // the owner's inbox under the Operator's name and avatar, on the one
+      // surface whose chip IS the 'who wants something from you' signal" — and
+      // it was applied in `agent-toolkit.server.ts`, the CLAUDE `ask_human`
+      // tool. This is the CODEX outcome-envelope door, which copies that
+      // ruling's title format and never set `from`, so `notifyTaskWatchers`
+      // stamped `OPERATOR_NOTIFY_FROM` over it.
+      //
+      // Live on SHOP-5 at 16:52:12: title "Infrastructure Engineer asks:
+      // Gateway route proof", sender `{"kind":"agent","name":"Operator"}`, on a
+      // packet whose own `from` reads
+      // `agent:codex/infrastructure-engineer (Infrastructure Engineer)`.
+      const askNotice: TaskWatcherNotice = {
+        projectSlug,
+        taskKey,
+        kind: "approval",
+        title: `${roleDisplay} asks: ${question!.title.trim()}`,
+        text: question!.body ?? "An engaged agent needs a human decision.",
+      };
+      if (actorRef.kind === "agent") {
+        askNotice.from = {
+          kind: "agent",
+          backend: actorRef.backend,
+          name: roleDisplay,
+          role: roleDisplay,
+        };
+      }
+      notifyTaskWatchers(db, askNotice, ctx);
     } else if (questionDeferred) {
       logger.info("agent question held — a decision packet is already open", {
         taskKey,

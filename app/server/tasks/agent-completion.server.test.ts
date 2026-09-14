@@ -1021,6 +1021,67 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(approved[0]?.rounds).toBe(1);
   });
 
+  it("F37-64: a Codex-envelope question reaches the inbox under the AGENT's name, not the Operator's", async () => {
+    // Ruling 222 fixed the CLAUDE `ask_human` door in agent-toolkit.server.ts
+    // and left this one, the Codex outcome envelope, which copies its title
+    // format and never set `from` — so `notifyTaskWatchers` stamped
+    // OPERATOR_NOTIFY_FROM over it. Live on SHOP-5: title "Infrastructure
+    // Engineer asks: Gateway route proof", sender Operator, on a packet whose
+    // own `from` named the engineer.
+    // CANARY: drop the `askNotice.from` block.
+    writeReviewTask();
+    // The Codex door reads a JSON outcome envelope out of the reply text, so
+    // the question has to arrive that way rather than as prose.
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Blocked on a decision.",
+        question: {
+          title: "Gateway route proof",
+          body: "Should the scoped trace be accepted, or should validation wait for the route?",
+        },
+      }),
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // The envelope door is Codex-only: `parseAgentOutcomeJson` runs behind
+        // `input.backend === "codex"`.
+        backend: "codex",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(taskFile().parsed.packet?.kind).toBe("Agent question");
+    // SAFETY: `actor_json` is TEXT on `notifications`, written by
+    // `createNotification` from an `ActorRender`.
+    // SAFETY: `title` is nullable TEXT and `actor_json` TEXT NOT NULL on
+    // `notifications`; the rows were written by `createNotification` above.
+    const rows = store.db
+      .prepare(
+        `SELECT title, actor_json FROM notifications WHERE kind = 'approval' AND task_key = 'VIB-1'`,
+      )
+      .all() as { title: string | null; actor_json: string }[];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      // SAFETY: `createNotification` serialises an `ActorRender`, and every
+      // variant of that union carries `kind` and `name`.
+      const from = JSON.parse(r.actor_json) as { kind: string; name: string };
+      expect(from.name).not.toBe("Operator");
+      expect(from).toMatchObject({
+        kind: "agent",
+        backend: "codex",
+        name: "Review & validation",
+      });
+    }
+  });
+
   /**
    * Ruling 237 (F37-57, live on SHOP-5). Ruling 210 held that a second
    * consecutive objection from one reviewer is the point to stop reworking and

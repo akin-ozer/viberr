@@ -3518,3 +3518,31 @@ cause and a false one.
 
 *Reported by the adversarial sweep with the full five-step trace; every step re-verified here
 against the code before the fix.*
+
+## F37-64 · Ruling 222 taught one of the two question doors to name its asker — MEDIUM
+
+**What it is.** Ruling 222's own words: *"the notification says WHO is asking. `notifyTaskWatchers`
+stamps `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so an agent's own question reached
+the owner's inbox under the Operator's name and avatar, on the one surface whose chip IS the 'who
+wants something from you' signal."*
+
+It was applied in `agent-toolkit.server.ts` — the **Claude** `ask_human` tool. Viberr has a second
+question door: the **Codex** outcome envelope, in `recordAgentCompletion`. That one copies ruling
+222's title format verbatim and never sets `from`, so `notifyTaskWatchers` stamps the Operator over
+it.
+
+**Live, on the very packet I answered.** SHOP-5, 16:52:12:
+
+```
+title       "Infrastructure Engineer asks: Gateway route proof"
+actor_json  {"kind":"agent","name":"Operator"}
+packet.from agent:codex/infrastructure-engineer (Infrastructure Engineer)
+```
+
+The packet knows who asked. The title knows who asked. The sender — the part the inbox renders as
+the chip and avatar — says Operator.
+
+**Fix.** The Codex door sets `from` from its own `actorRef`, exactly as the Claude door does.
+Canary: drop it and the test reads `expected 'Operator' not to be 'Operator'`.
+
+*Reported by the adversarial sweep; confirmed against the live notification row before fixing.*
