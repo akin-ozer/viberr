@@ -1535,3 +1535,38 @@ such would be the fourth vacuous canary of this pass. Ruling 232 stands on its u
 every specialist dispatched in this window (Integration Verifier x3, Code Reviewer, Infrastructure
 Engineer, Frontend Engineer) started on Codex. Controller opus high, operator opus high after the
 owner's change, everything else luna max, exactly as set.
+
+### Ruling 231's live proof is unobtainable on this board, and the reason matters
+
+The react chain arrived. SHOP-18's Frontend Engineer replied at 07:35:24Z and the operator was
+re-invoked immediately, on `claude` / `opus[1m]`:
+
+```
+07:29:30  note      schedule-runner    scheduled operator re-run for SHOP-18
+07:30:59  comment   operator           to: agent  @Frontend Engineer: your 04:32 run was cut off...
+07:31:01  agent     operator           Started a Codex run for the Frontend Engineer agent
+07:35:24  comment   agent:codex/frontend-engineer   No storefront correction is warranted...
+07:35:24  REACT     operator           backend=claude  model=opus[1m]      <- run_eCkJAm
+```
+
+That is a genuine react, and it is consistent with ruling 231. **It is not evidence for it.**
+
+The bug was `reactBackend = input.operatorRun.backend` - the chain carried the backend of the
+drive that prompted the agent, as an override that beat the live deployment. Here the operator
+that prompted the Frontend Engineer at 07:30:59 was ITSELF the claude run from 07:29:31. So
+`input.operatorRun.backend` was `claude`, the live deployment is `claude`, and the old code and
+the new code produce the same answer. Nothing about this run could have come out differently.
+
+Falsifying it needs a chain whose PROMPTING operator ran on Codex while the deployment reads
+Claude - exactly the 04:31:44Z configuration that produced F37-51. That configuration no longer
+exists: the owner set the operator to `opus[1m]` high, so every chain on this board now starts on
+Claude. The precondition for the bug was removed by the same change that made the fix matter.
+
+Manufacturing it would mean flipping the operator profile back to Codex mid-flight, which
+contradicts a direct instruction from the owner, so it was not done. Ruling 231 rests on its unit
+canary - and that canary is the one that PASSED with the bug restored the first time it was
+written, because the override lives on `input.operatorRun` and the test had set it on `ctx`. It
+only became a test of the fix once it could fail without it.
+
+Recorded rather than quietly counted: predicting a live proof and then finding the proof
+structurally unavailable is the kind of thing that otherwise turns into a green tick nobody earned.
