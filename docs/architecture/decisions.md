@@ -4826,6 +4826,28 @@ by rewriting those paragraphs:*
     "GitHub unreachable" while its fixture answered the pull and failed the compare, which is
     this ruling's case, not A9's. The fixture, not the ruling, was what made the old behaviour
     look intended.
+
+227. **A refusal a person is waiting on is written on the task, not only in the log (owner,
+    2026-09-14, pass 37; F37-46).** Ruling 141 taught the operator's refusals to speak when a
+    trigger met them at the front of the LEASE QUEUE, on the reasoning that "the refusal used to
+    exist only in the server log while the timeline still said 'Scheduled action starting'". The
+    same three refusals AT THE DOOR stayed silent, and the door is where a person's instruction
+    arrives. Live on SHOP-2: someone wrote "@operator PR #13 conflicts with main, rebase and
+    re-review", the comment landed on the timeline with the mention rendered as routed, the
+    composer's own footer promised "@mentions route to agents", `runOperator` refused it at the
+    door because a decision packet was open, and nothing on any surface said so. The instruction
+    read as accepted and nobody was coming.
+    So a `manual` trigger refused at the door gets ruling 141's note, with the sentence about
+    how it arrived corrected (it never reached a queue) and the consequence stated plainly:
+    "no run was started, so nothing on this task has been acted on." The blocked-by silence —
+    a drained transition on a held task IS the ruling-131 hold, already on the record — does not
+    apply to a person, who is owed an answer to the thing they just typed.
+    Exactly one trigger, and the other two are the interesting part. `scheduled` is NOT added,
+    though ruling 141's reasoning covers it: the schedule runner already notes and retires its
+    own fire-time refusals, so this would have written the same note twice, and its tests are
+    what caught the duplicate. And the machine triggers (`create`, `transition`, `delivered`,
+    `agent-reply`) stay silent because they fire constantly and refuse routinely — noting each
+    would bury the one that means something, which is R16-2's failure applied to a timeline.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 

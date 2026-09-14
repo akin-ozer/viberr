@@ -3497,6 +3497,38 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(operatorRuns()).toHaveLength(0);
   });
 
+  it("ruling 227: a refused MANUAL turn says so on the task, not only in the log", async () => {
+    // Live on SHOP-2 at 02:44 UTC. A person wrote "@operator PR #13 conflicts
+    // with main, rebase and re-review", the comment landed on the timeline with
+    // the mention rendered as routed, the composer's footer said "@mentions
+    // route to agents" — and the operator was refused at the door because a
+    // packet was open. Nothing anywhere on the task said so. Ruling 141 had
+    // taught this refusal to speak at the front of the LEASE QUEUE and left the
+    // door silent.
+    //
+    // Canary: drop the `noteQueuedTriggerRefused` call from the open-packet arm.
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const result = await drive({ trigger: "manual" });
+    expect(result.refused).toBe("open-packet");
+
+    await vi.waitFor(() => {
+      const note = readTaskFile({
+        projectSlug: store5.slug,
+        taskKey: "VIB-1",
+        dataRoot: store5.dataRoot,
+      })!.parsed.timeline.find((e) => /An @operator turn was refused/.test(e.text));
+      expect(note).toBeTruthy();
+      // It names the cause, and says plainly that nothing was acted on — the
+      // sentence a person reading their own unanswered instruction needs.
+      expect(note!.text).toContain("a decision packet is open on VIB-1");
+      expect(note!.text).toContain("nothing on this task has been acted on");
+      // And NOT the queue sentence: this one never reached a queue.
+      expect(note!.text).not.toContain("front of the queue");
+    });
+  });
+
   it("ruling 141: a SCHEDULED run is refused like a manual one while a decision packet is open", async () => {
     // Canary: restore the manual-only guard (`=== "manual"`).
     deployAgents([operatorAgent()]);
@@ -3624,7 +3656,7 @@ describe("runOperator — authority, ordering, orphans", () => {
     await eventually(() => {
       expect(
         task().timeline.some((e) =>
-          e.text.startsWith("A queued @operator turn was refused when it reached the front of the queue: a decision packet is open on VIB-1"),
+          e.text.startsWith("An @operator turn was refused when it reached the front of the queue: a decision packet is open on VIB-1"),
         ),
       ).toBe(true);
     });

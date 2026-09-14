@@ -297,6 +297,28 @@ const HELD_TRIGGERS: ReadonlySet<string> = new Set(["create", "transition", "sch
 const PACKET_REFUSED_TRIGGERS: ReadonlySet<string> = new Set(["manual", "scheduled"]);
 
 /**
+ * Ruling 227 (F37-46): the triggers whose refusal AT THE DOOR is written on the
+ * task, not only logged. Exactly one — `manual`.
+ *
+ * `manual` is a PERSON: a mention, or the Run operator button. A person who is
+ * told nothing concludes their instruction was taken, and on SHOP-2 that is
+ * what happened — "@operator rebase and re-review" landed on the timeline with
+ * the mention rendered as routed, the composer's own footer promising
+ * "@mentions route to agents", and the refusal only in the server log.
+ *
+ * NOT `scheduled`, though ruling 141's reasoning covers it: the schedule runner
+ * already notes and retires its own fire-time refusals
+ * (`refusedTerminal`/`refusedHeld`/`refusedPacket` in `schedule.server.ts`), so
+ * adding it here would write the same note twice. Its tests are the proof, and
+ * they were the thing that caught the duplicate.
+ *
+ * Every other trigger is machine flow control (`create`, `transition`,
+ * `delivered`, `agent-reply`, …). Those fire constantly and refuse routinely;
+ * noting each would bury the one that means something under noise.
+ */
+const NOTED_DOOR_REFUSAL_TRIGGERS: ReadonlySet<string> = new Set(["manual"]);
+
+/**
  * Wall-clock ms at which THIS process started. A run row created before it
  * cannot be driven from here: run handles and completion callbacks are
  * process-local (run-service), and every operator drive holds the process
@@ -700,8 +722,23 @@ async function noteQueuedTriggerRefused(
   db: DatabaseSync,
   queued: RunOperatorInput,
   refused: NonNullable<RunOperatorResult["refused"]>,
+  /**
+   * Ruling 227 (F37-46): WHERE the refusal happened. Ruling 141 taught the
+   * refusal to speak when a trigger met it at the front of the lease queue, and
+   * left the three refusals at the DOOR silent — so a person who wrote
+   * "@operator do X" on a task with an open packet got a comment on the
+   * timeline, an accepted-looking mention, and nobody coming, with the refusal
+   * only in the server log. Live on SHOP-2 at 02:44. Same note, same reasons;
+   * only the sentence about how the trigger arrived differs.
+   */
+  arrival: "queue" | "door" = "queue",
 ): Promise<void> {
-  if (refused === "blocked-by" && !queued.scheduleId) return;
+  // At the door a `manual` trigger is a PERSON who just typed something and is
+  // owed an answer, so the blocked-by silence (a drained transition on a held
+  // task is the ruling-131 hold itself, already on the record) does not apply
+  // to it.
+  const owedAnyway = arrival === "door" && (queued.trigger ?? "manual") === "manual";
+  if (refused === "blocked-by" && !queued.scheduleId && !owedAnyway) return;
   logger.info("queued operator trigger refused at the front of the lease queue", {
     key: `${queued.projectSlug}/${queued.taskKey}`,
     trigger: queued.trigger ?? "manual",
@@ -732,9 +769,14 @@ async function noteQueuedTriggerRefused(
           : refused === "closed"
             ? `${queued.taskKey} is closed (${parsed.frontmatter.archived ? "archived" : "at its terminal stage"})`
             : `${queued.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")})`;
+      const arrived =
+        arrival === "door" ? "" : " when it reached the front of the queue";
       const text = queued.scheduleId
-        ? `**Scheduled action skipped:** the scheduled operator re-run for ${queued.taskKey} reached the front of the queue, but ${cause} — no run was started, and the occurrence spends no retry.`
-        : `A queued @operator turn was refused when it reached the front of the queue: ${cause} — no run was started. Resolve it, then run the operator again.`;
+        ? `**Scheduled action skipped:** the scheduled operator re-run for ${queued.taskKey} ` +
+          `${arrival === "door" ? "came due" : "reached the front of the queue"}, but ${cause} — ` +
+          `no run was started, and the occurrence spends no retry.`
+        : `An @operator turn was refused${arrived}: ${cause} — no run was started, so nothing ` +
+          `on this task has been acted on. Resolve it, then run the operator again.`;
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "note",
@@ -1528,6 +1570,13 @@ export async function runOperator(
       // It is a no-op unless the flag is `agent` and nothing else is live, and
       // it settles a closed task to `none` rather than "waiting on a human".
       settleWaitingAfterOperator(db, taskFileRef(input));
+      // Ruling 227: and SAY so, on the task, for a trigger somebody is waiting
+      // on — see `noteQueuedTriggerRefused`. Fire-and-forget: the refusal is
+      // the answer, and failing to record it must not turn into a thrown error
+      // for the caller.
+      if (NOTED_DOOR_REFUSAL_TRIGGERS.has(input.trigger ?? "manual")) {
+        void noteQueuedTriggerRefused(db, input, "closed", "door");
+      }
       return {
         runId: null,
         queued: false,
@@ -1558,6 +1607,9 @@ export async function runOperator(
       // `waiting: "agent"` on a task with no agent forever. A held task with
       // nothing else pending settles to `none` (`clearWaitingToHuman`).
       settleWaitingAfterOperator(db, taskFileRef(input));
+      if (NOTED_DOOR_REFUSAL_TRIGGERS.has(input.trigger ?? "manual")) {
+        void noteQueuedTriggerRefused(db, input, "blocked-by", "door");
+      }
       return {
         runId: null,
         queued: false,
@@ -1599,6 +1651,9 @@ export async function runOperator(
         packet: openPacket.title,
       });
       settleWaitingAfterOperator(db, taskFileRef(input));
+      if (NOTED_DOOR_REFUSAL_TRIGGERS.has(input.trigger ?? "manual")) {
+        void noteQueuedTriggerRefused(db, input, "open-packet", "door");
+      }
       return {
         runId: null,
         queued: false,

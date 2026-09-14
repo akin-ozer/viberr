@@ -331,6 +331,13 @@ blockedBy:                        # ruling 131: what this task WAITS ON, in exac
                                   # reserved taskPrefix: `GOAL-1` would read as
                                   # a goal reference missing its link
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
+headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
+  prNumber: 114                   # containment check GitHub refused to run. Pinned to all
+  revisionHeadSha: a1b2c3d…       # three: the gate re-reads the LIVE head and honours it only
+  liveHeadSha: f9e8d7c…           # while the triple still matches, so it cannot outlive the
+  at: 2026-09-14T02:40:00.000Z    # head it was granted for and become a standing permission.
+  byUserId: u_abc123
+  byLabel: Arda
 goalRef: null                     # ruling 99: { goalId, linkIndex } for a chained-goal task
 createdAt: 2026-07-03T06:00:00.000Z
 updatedAt: 2026-07-04T06:58:00.000Z

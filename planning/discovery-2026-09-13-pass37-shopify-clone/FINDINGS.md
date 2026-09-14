@@ -2571,3 +2571,55 @@ fixture for the next member), and the boot probe reads this column too.
 
 Had the canary not been written first, this would have deployed as four tasks that silently
 stopped projecting the moment they started resting on a clock.
+
+---
+
+## F37-46 · A human tagged the operator, viberr said nothing, and nobody came — MEDIUM
+
+**Found by using the product for its own purpose.** The owner chose "rebase and re-review" for
+SHOP-2, so I drove it the way a user would: opened the task and wrote
+
+> @operator PR #13 conflicts with main… bring shop-2 up to date with main, re-deliver, and put
+> the resulting revision back through both required reviewers.
+
+The comment posted. The mention rendered highlighted, the way a routed mention does. The
+composer's own footer says **"Every project member can comment · @mentions route to agents."**
+The task then sat there.
+
+The only trace of what actually happened is one line in the container log:
+
+```
+{"msg":"operator run refused — a decision packet is open","trigger":"manual",
+ "taskKey":"SHOP-2","packet":"Authorize shared stack-test amendment?"}
+```
+
+SHOP-2 had an open packet from 23:26, and an open packet refuses the operator. That refusal is
+correct. Saying nothing about it is not: the instruction reads as accepted, and the person who
+wrote it has no way to learn otherwise short of reading server logs.
+
+**Ruling 141 already fixed this exact shape, one layer over.** Its own words: *"a queued trigger
+that is REFUSED when it reaches the front of the lease queue says so on the task — the refusal
+used to exist only in the server log while the timeline still said 'Scheduled action starting'."*
+That covers a trigger refused at the front of the LEASE QUEUE. All three refusals at the DOOR —
+closed, blocked-by, open-packet — write nothing, and the door is where a person's instruction
+arrives.
+
+The code comment sitting directly above the silent refusal even names the danger, from a
+previous pass: *"a decision nobody was told about: 75 minutes, ten downstream tasks held behind
+it, and a board that said an agent was working."* The fix made then was to settle the waiting
+flag. Nobody was told then either.
+
+**Fixed as ruling 227** — a `manual` trigger refused at the door gets ruling 141's note, with the
+arrival sentence corrected (it never reached a queue) and the consequence stated: "no run was
+started, so nothing on this task has been acted on."
+
+**And the two triggers deliberately left out are the interesting half.** `scheduled` is not
+added, though ruling 141's reasoning covers it, because the schedule runner already notes and
+retires its own fire-time refusals — adding it here would have written the same note twice, and
+`schedule.server.test.ts` is what caught the duplicate before it shipped. The machine triggers
+stay silent because they fire constantly and refuse routinely; noting each would bury the one
+that means something, which is R16-2's failure applied to a timeline.
+
+**Confirmed by the sequel.** Once the packet was resolved, the identical comment on the identical
+task triggered an operator run within seconds — and the operator replied to it by name. The
+mechanism works. It just had no voice for the case where it declines.

@@ -41,8 +41,10 @@ async function waitFor(
   cond: () => boolean,
   what: string,
   nudge?: () => void,
+  /** Ruling 218's retry test needs its own budget — see the call site. */
+  budgetMs: number = WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
   let lastNudge = Date.now();
   while (Date.now() < deadline) {
     if (cond()) return;
@@ -233,9 +235,19 @@ describe("a failed rebuild is retried (ruling 218)", () => {
     // CANARY: delete `scheduleRetry` from `rebuildFile` and this never
     // converges — the timeline stays one comment behind its own file, which is
     // exactly what SHOP-4 did until a human pressed Re-scan.
-    await waitFor(() => events() === 2, "the retry to heal the stale projection");
+    // The budget has to clear the BACKOFF, not just "feel long enough". Ruling
+    // 218's ladder is 2s / 5s / 15s, so a repair that lands just after the
+    // second retry waits until 22s for the third — and the shared 12s budget
+    // made this test fail under full-suite load while passing alone. A flaky
+    // canary is a canary nobody trusts, which is worse than none.
+    await waitFor(
+      () => events() === 2,
+      "the retry to heal the stale projection",
+      undefined,
+      26_000,
+    );
     expect(projectionFaultCount()).toBe(0);
-  });
+  }, 35_000);
 });
 
 describe("watcher liveness (E8)", () => {
