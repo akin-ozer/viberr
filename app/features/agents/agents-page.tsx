@@ -313,19 +313,22 @@ function CapColumn({
             <div className="cap-item" key={x}>
               <Icon name={m.icon} />
               <span>{x}</span>
-              {claudeOnly && (
+              {/* Both conditions hold at once on the repo-write row, and each
+                  used to render its own span — so the row read "Execute code or
+                  write to the repo · advisory on Codex · advisory on Codex",
+                  the same four words twice, with the only difference buried in
+                  a tooltip. The card makes each claim ONCE (F15-09), and the
+                  carve-out's note is the specific one: it names WHY the
+                  withholding is advisory on this runtime, where the Claude-only
+                  note only says that it is. */}
+              {(claudeOnly || carveOut) && (
                 <span
                   className="fhint"
-                  title="Claude-enforced. On this profile's Codex runtime the tool layer does not bind it; the server-owned delivery gate is the real boundary."
-                >
-                  {" "}
-                  · advisory on Codex
-                </span>
-              )}
-              {carveOut && (
-                <span
-                  className="fhint"
-                  title={`On this profile's Codex runtime ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`}
+                  title={
+                    carveOut
+                      ? `On this profile's Codex runtime ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`
+                      : "Claude-enforced. On this profile's Codex runtime the tool layer does not bind it; the server-owned delivery gate is the real boundary."
+                  }
                 >
                   {" "}
                   · advisory on Codex

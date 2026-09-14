@@ -473,6 +473,54 @@ describe("ProfileDetail", () => {
    * now render GOVERNED policy only (the partition the matrix draws), and
    * advisory guidance says what it is.
    */
+  it("says 'advisory on Codex' once on the row where both reasons apply", () => {
+    // The repo-write row satisfies BOTH hint conditions on a Codex profile —
+    // the Claude-only-enforcement one and ruling 185's carve-out — and each
+    // used to render its own span, so the row read "Execute code or write to
+    // the repo · advisory on Codex · advisory on Codex". Same four words twice,
+    // with the only difference buried in a tooltip nobody opens. The card makes
+    // each claim ONCE (F15-09).
+    //
+    // Canary: restore the two separate `{claudeOnly && …}{carveOut && …}` spans.
+    const { container } = render(
+      <ProfileDetail
+        a={mkProfile({
+          id: "codex-dev",
+          name: "Codex developer",
+          role: "Implementation",
+          backends: ["codex"],
+          model: "gpt-5-codex",
+          actions: {
+            direct: [],
+            recommend: [],
+            forbidden: ["Execute code or write to the repo"],
+            off: [],
+          },
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "off" }],
+          resources: { skills: [], mcps: [], kb: [] },
+        })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const row = [...container.querySelectorAll(".cap-item")].find((el) =>
+      (el.textContent ?? "").includes("Execute code or write to the repo"),
+    );
+    expect(row).toBeTruthy();
+    expect(row!.querySelectorAll(".fhint")).toHaveLength(1);
+    // And the one that survives is the SPECIFIC one: it says why the
+    // withholding is advisory on this runtime, not merely that it is.
+    expect(row!.querySelector(".fhint")!.getAttribute("title")).toContain(
+      "ruling 185",
+    );
+  });
+
   it("a fresh minimal profile claims no verdict authority and no skills", () => {
     const { container, getByText, queryByText } = render(
       <ProfileDetail
