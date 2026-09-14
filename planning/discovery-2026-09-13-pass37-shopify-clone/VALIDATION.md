@@ -1770,3 +1770,28 @@ separate github events, each naming what it did.
   yes, minimally, naming the two surfaces. Viberr recorded the decision and put the packet into
   `awaiting: goal_edit` with *"Waiting for the edited goal; the packet clears as soon as it
   lands"* - ruling 138 doing exactly what it says.
+
+### The chip made a falsifiable claim about the future, and it was right
+
+The absence of a chip on SHOP-22 was a prediction: merging it puts nothing new into conflict.
+Checked against GitHub after the merge landed, once every `UNKNOWN` had resolved:
+
+```
+                        chip said        after merging SHOP-22
+PR #20  shop-5          no collision     MERGEABLE
+PR #19  shop-23         no collision     MERGEABLE
+PR #16  shop-18         no collision     MERGEABLE
+PR #18  shop-21         (already conflicting)   CONFLICTING
+PR #15  shop-11         (already conflicting)   CONFLICTING
+PR #14  shop-12         (already conflicting)   CONFLICTING
+PR #11  shop-3          (already conflicting)   CONFLICTING
+```
+
+**Zero newly-conflicted pull requests.** Every PR the chip called clean stayed clean, and the four
+it named as already colliding with each other were untouched by this merge because SHOP-22's diff
+shares no path with them.
+
+Set against the merge that produced the finding: accepting SHOP-2 flipped four of six open PRs to
+CONFLICTING within a minute, with nothing on any surface having said it would. The difference
+between those two merges is the whole point of the ruling - not that one was lucky, but that the
+queue could tell them apart beforehand and did.
