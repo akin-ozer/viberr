@@ -287,6 +287,10 @@ const AUDIT_ACTION_KINDS = {
   "task.acceptance.head_unpushed": "blockedact",
   // Ruling 177 (pass 36): acceptance ended the task's live runs.
   "task.acceptance.interrupted_runs": "audit",
+  // Ruling 237 (F37-57): a reviewer objected twice running and Viberr put the
+  // decision in front of a person. On the feed because the alternative is that
+  // "why did this task sit for a day" is only answerable by opening the task.
+  "task.review.deadlock": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
@@ -365,6 +369,9 @@ const auditDetailsSchema = z.object({
   prNumber: z.number().optional().catch(undefined),
   revisionHeadSha: detailText,
   liveHeadSha: detailText,
+  // Ruling 237: the reviewer whose objections deadlocked, and how many rounds.
+  rounds: z.number().optional().catch(undefined),
+  profileId: detailText,
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -521,6 +528,14 @@ function auditText(
       const reviewed = d.revisionHeadSha ? `\`${d.revisionHeadSha.slice(0, 7)}\`` : "the reviewed revision";
       const live = d.liveHeadSha ? ` (head \`${d.liveHeadSha.slice(0, 7)}\`)` : "";
       return `Acceptance refused: ${reviewed} is not on ${pr}${live}, so the merge would not have carried the reviewed work, on`;
+    }
+    case "task.review.deadlock": {
+      // Ruling 237. The actor is the policy engine, so this says what happened,
+      // not who did it. The reviewer is named by profile id, which is what the
+      // row stores; the task link beside it carries the rest.
+      const who = d.profileId ? `\`${d.profileId}\`` : "a reviewer";
+      const rounds = d.rounds ?? 0;
+      return `${who} requested changes ${rounds} times running, so a decision was raised on`;
     }
     case "task.acceptance.forced": {
       const bypassed = d.bypassed;

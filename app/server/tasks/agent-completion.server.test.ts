@@ -992,6 +992,206 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
+   * Ruling 237 (F37-57, live on SHOP-5). Ruling 210 held that a second
+   * consecutive objection from one reviewer is the point to stop reworking and
+   * ask, ruling 204 gave it a counter that reads the deadlock correctly, and
+   * both were spent on a paragraph in the operator's prompt. Live, the operator
+   * read the paragraph, took the third `request_changes`, and had the deliverer
+   * running again 62 seconds later with no question put to anyone.
+   *
+   * The owner's remedy was to escalate rather than gate: the operator keeps
+   * every move, and the second objection reaches a person by itself.
+   */
+  describe("ruling 237: the second consecutive objection escalates to a person", () => {
+    const reviewerInput = (profileId: string) => ({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId,
+      role: "Review & validation",
+      delivers: false,
+      workdir: null,
+      agentHandle: profileId,
+    });
+    const review = async (reply: string, profileId = "reviewer") => {
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput(profileId),
+        { id: runId, state: "finished" },
+      );
+    };
+    const blocks = (n: number) =>
+      `Verdict: request_changes\n\n@operator objection number ${n}.`;
+
+    it("opens the packet on the second, not the first", async () => {
+      writeReviewTask();
+
+      await review(blocks(1));
+      // CANARY: drop `rounds < REVIEW_DEADLOCK_ROUNDS` from `reviewDeadlockOf`
+      // and this is a packet on ordinary first-round review feedback, which
+      // would pause coordination on every task that ever got a note.
+      expect(taskFile().parsed.packet).toBeNull();
+
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet;
+      // CANARY: delete the `openReviewDeadlockPacket` call in
+      // `recordAgentCompletion` and this is null — the exact state SHOP-5 sat
+      // in for four rounds.
+      expect(packet).not.toBeNull();
+      expect(packet?.title).toContain("requested changes 2 times running");
+      expect(packet?.body).toContain("@reviewer");
+      // The deliverer is named, so the person reading the card knows who has
+      // been reworking against it.
+      expect(packet?.body).toContain("@dev");
+      expect(packet?.options.map((o) => o.kind)).toEqual([
+        "question_reviewer",
+        "custom",
+        "force_accept",
+      ]);
+      // The recommended option is the one that puts the question, and it names
+      // the reviewer it will actually start.
+      const recommended = packet?.options.find((o) => o.rec);
+      expect(recommended?.kind).toBe("question_reviewer");
+      expect(recommended?.profileId).toBe("reviewer");
+      // `input`, not `blocked`: nothing failed, so readiness must not read
+      // blocked over a review that is working and disagreeing.
+      expect(packet?.type).toBe("input");
+      expect(taskFile().parsed.frontmatter.readiness).not.toBe("blocked");
+      expect(taskFile().parsed.frontmatter.waiting).toBe("human");
+    });
+
+    it("counts per reviewer: one objection each from two reviewers is not a deadlock", async () => {
+      writeReviewTask({
+        engagements: [
+          DEV_DELIVERS_ENGAGEMENT,
+          REVIEWER_ENGAGEMENT,
+          {
+            profileId: "second",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+      });
+
+      await review(blocks(1), "reviewer");
+      await review(blocks(1), "second");
+
+      // Two objections on the task, one each. Nobody has outlived a rework, and
+      // the owner's threshold is explicitly per reviewer.
+      // CANARY: count `fm.verdicts` instead of this reviewer's own rows and
+      // this opens a packet the moment any two reviewers disagree once.
+      expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(2);
+      expect(taskFile().parsed.packet).toBeNull();
+    });
+
+    it("resets on that reviewer's own approve", async () => {
+      writeReviewTask();
+
+      await review(blocks(1));
+      await review("Verdict: approve\n\n@operator the blocker is gone.");
+      expect(taskFile().parsed.packet).toBeNull();
+
+      // A fresh objection after an approve is a FIRST objection again.
+      // CANARY: count every `request_changes` in the reviewer's history rather
+      // than stopping at its first approve, and this reads 2.
+      await review(blocks(2));
+      expect(taskFile().parsed.packet).toBeNull();
+    });
+
+    it("its recommended option starts the REVIEWER with the question, and nobody else", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet!;
+      expect(packet.options[0]?.kind).toBe("question_reviewer");
+
+      queueFakeRun({
+        lines: [
+          { t: "", ev: "init", tag: "system·init", text: "test session" },
+          { t: "", ev: "text", tag: "assistant", text: "Here is the full list." },
+          { t: "", ev: "result", tag: "result", text: "done" },
+        ],
+        occurredAt: [
+          new Date().toISOString(),
+          new Date().toISOString(),
+          new Date().toISOString(),
+        ],
+        sessionId: "t-question",
+      });
+      // SAFETY: COUNT(*) over a table this store owns is always an integer.
+      const runCount = () =>
+        (
+          store.db
+            .prepare(`SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ?`)
+            .get(store.slug) as { n: number }
+        ).n;
+      const before = runCount();
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+      // SAFETY: `agent_profile_id` is TEXT on `agent_runs`, and the row exists
+      // because the resolution above started it.
+      const started = store.db
+        .prepare(
+          `SELECT agent_profile_id AS pid FROM agent_runs
+           WHERE project_slug = ? AND kind <> 'operator'
+           ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+        )
+        .get(store.slug) as { pid: string };
+      // CANARY: remove the dispatch block and this stays flat — the packet
+      // would close having promised a run nobody started.
+      expect(runCount()).toBe(before + 1);
+      // What the dispatch actually SENT the runtime, not what the timeline
+      // narrates about it.
+      const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+      const directive = lastRunSpec()?.prompt ?? "";
+      // CANARY: drop `profileId: option.profileId` from the question_reviewer
+      // dispatch and this starts the DELIVERER — with a prompt telling it not
+      // to review, on a task whose card promised the reviewer would answer.
+      expect(started.pid).toBe("reviewer");
+      expect(directive).toContain("name EVERYTHING you would still block on");
+      expect(directive).toContain("do NOT return a verdict");
+      expect(taskFile().parsed.packet).toBeNull();
+      expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
+    });
+
+    it("never clobbers a packet that is already open", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.packet = {
+            id: "pkt_existing",
+            type: "input",
+            kind: "Decision required",
+            from: "operator",
+            title: "Something else entirely",
+            body: "",
+            observations: [],
+            options: [{ kind: "custom", t: "Carry on", d: "", rec: true }],
+          };
+        },
+      );
+
+      await review(blocks(2));
+      // One packet slot per task. The verdict itself still records — it is the
+      // record, and the escalation is only the thing on top of it.
+      expect(taskFile().parsed.packet?.title).toBe("Something else entirely");
+      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(2);
+    });
+  });
+
+  /**
    * R15-7 (owner ruling): a run whose profile cannot be resolved is fully
    * conservative. The RUN layer withholds its toolkit, but completion re-derived
    * the gates from `[]`, which the catalog defaults read as comment/ask/evidence

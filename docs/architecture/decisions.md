@@ -5138,6 +5138,46 @@ by rewriting those paragraphs:*
     (`task-file.schema.ts`, `pr-linker.server.ts`, `github-reconciler.server.ts`,
     `review-queue.server.ts`, `review-helpers.ts`, `review-page.tsx`.)
 
+237. **A reviewer that objects twice running is a decision for a person, and Viberr raises
+    it itself (owner, 2026-09-14, pass 37; F37-57).** SHOP-5 took three `request_changes`
+    verdicts from one reviewer on three revisions, each naming something real the last
+    round had not. Every mechanism built for exactly this worked: ruling 204's counter read
+    3, and ruling 210's doctrine sat in the operator's turn instruction ending "Do not send
+    the deliverer back into another round until the reviewer has answered." The operator
+    moved Review to Build 46 seconds after the third verdict and re-dispatched the
+    deliverer 16 seconds later, with no question put to the reviewer on any round. SHOP-6
+    took seven rounds, SHOP-10 five. It is the construction ruling 186 refused: a request
+    in a prompt, with nothing that notices when the model does something else.
+    The owner's choice was to ESCALATE rather than gate, and the reasoning is that a fresh
+    class of finding on round three is sometimes exactly right, so a gate would refuse
+    correct behaviour to stop the incorrect kind. The operator keeps every move it had.
+    What changed is that the second consecutive objection from one reviewer now opens a
+    decision packet by itself, written inside the verdict's own locked write so the two can
+    never land apart. The pause that follows is the one every packet has carried since
+    ruling 76, not a new constraint.
+    Threshold two, per reviewer, on the owner's call - which is what `consecutiveRequestChanges`
+    already computed, since it filters to one `profileId`: another reviewer's objections never
+    count toward this one and never keep it alive, and the counter resets on that reviewer's own
+    approve.
+    Written by the POLICY ENGINE, not through `operatorOpenPacket`, for ruling 226's reason:
+    that door checks the OPERATOR's `generate-packets` grant, and this packet is not the
+    operator's judgement. A project that told its operator to stop opening packets said nothing
+    about whether a person should hear that their reviewer has blocked the same work twice.
+    Three options, and each does what it says. `question_reviewer` is the 17th packet kind:
+    it carries the reviewer's `profileId` and its resolution STARTS that reviewer with the
+    standing question ruling 210 wrote, asking for a comment and forbidding a fresh verdict
+    (a verdict here would bind to the same revision and count as another objection, which is
+    the loop). Authoring refuses one that names no reviewer or names a non-reviewer, because
+    otherwise the card could promise "ask X" and dispatch the deliverer. The other two are
+    "let the rework continue" (a `custom`, whose resolution hands the task back unchanged) and
+    `force_accept`. Replacing the reviewer is named in the body as prose and is deliberately
+    NOT an option: the resolution cannot edit project settings, and ruling 164 already
+    established that an option whose title promises what its resolution does not do is worse
+    than no option.
+    (`review-deadlock.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
+    `task-file.schema.ts`, `operator-toolkit.server.ts`, `operator-run.server.ts`,
+    `activity-feed.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

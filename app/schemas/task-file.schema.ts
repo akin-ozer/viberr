@@ -216,6 +216,17 @@ export const PACKET_OPTION_KINDS = [
   // — whose resolution UNBLOCKS — and the record said "SHOP-11 is unblocked"
   // under an option titled "Hold SHOP-11 while…".
   "block_on_dependencies",
+  // Ruling 237 (pass 37, F37-57): "ask the reviewer what it would still block
+  // on, before anyone reworks anything". Payload: `profileId`, the reviewer to
+  // put the question to. Resolution closes the packet and starts THAT reviewer
+  // with the question as its directive and its own non-delivering posture
+  // intact. Ruling 210 already named this as the move at a second consecutive
+  // objection, and wrote it as a paragraph in the operator's turn instruction:
+  // live on SHOP-5 the operator read it and re-dispatched the deliverer forty
+  // six seconds after the third `request_changes` anyway. An option whose
+  // resolution merely re-runs the operator would have repeated that; this one
+  // starts the reviewer itself.
+  "question_reviewer",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -285,6 +296,40 @@ export function deliveringEngagement(fm: {
   engagements: Engagement[];
 }): Engagement | null {
   return fm.engagements.find((e) => e.delivers) ?? null;
+}
+
+/**
+ * Ruling 193, as amended by ruling 204: successive OBJECTIONS `profileId` has
+ * raised, newest first, stopping at its first `approve` (or at the start of its
+ * history).
+ *
+ * ROUNDS are summed, not revisions. Ruling 193 counted distinct revisions on
+ * the reasoning that "a reviewer re-run twice on the same revision has objected
+ * once" — and live on SHOP-9 that was exactly backwards: in a deadlock the
+ * deliverer commits nothing, so no new revision is ever minted and the count sat
+ * at 1 while the loop ran. The distinction 193 was reaching for survives in the
+ * `rounds` field itself, which the verdict upsert increments only when a
+ * completed review returns the SAME result again; a re-DISPATCH that records no
+ * verdict still counts for nothing.
+ */
+export function consecutiveRequestChanges(
+  fm: { verdicts: readonly ReviewVerdict[] },
+  profileId: string,
+): number {
+  const mine = fm.verdicts.filter((v) => v.profileId === profileId);
+  let rounds = 0;
+  for (let i = mine.length - 1; i >= 0; i -= 1) {
+    const v = mine[i]!;
+    if (v.result !== "request_changes") break;
+    // Ruling 204: ROUNDS, not distinct revisions. Live on SHOP-9 the Integration
+    // Verifier blocked the same revision twice — the deliverer had nothing it
+    // was allowed to change, because the blocker was another task's work — and
+    // the old count read 1, so the doctrine that exists to put exactly that
+    // deadlock in front of a human could not see it. The counter was keyed on
+    // the one signal that STOPS MOVING when the work gets stuck.
+    rounds += v.rounds;
+  }
+  return rounds;
 }
 
 /** Every non-delivering engagement (the former "reviewers" position). */
@@ -786,7 +831,8 @@ export const packetOptionSchema = z
     /** retry_other_backend — the backend to re-run the failed agent on. */
     backend: z.enum(["codex", "claude"]).optional(),
     /** retry_other_backend — a reviewer retry names its profile (the primary
-     *  specialist needs none). */
+     *  specialist needs none). Ruling 237: `question_reviewer` names the
+     *  reviewer the question goes to, and is refused without one. */
     profileId: z.string().optional(),
     /** archive_task — ALSO delete the task's remote branch when archiving
      *  (discard the rejected work entirely, not just the task's board row).

@@ -4686,6 +4686,53 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 
+  it("ruling 237: refuses a question_reviewer that names no reviewer, or names one this task does not have", async () => {
+    // The option's whole promise is "ask THIS agent". Unchecked, the resolution
+    // would dispatch nobody, or dispatch the deliverer with a prompt telling it
+    // not to review — either way the card said something that did not happen.
+    // Canary: remove either refusal.
+    packetsRoster();
+    seedTask("impl");
+    const nameless = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "The reviewer keeps objecting",
+        options: [{ kind: "question_reviewer", title: "Ask the reviewer", recommended: true }],
+      },
+      authority("full"),
+    );
+    expect(nameless.outcome).toBe("noop");
+    expect(nameless.message).toContain("needs the reviewer it asks");
+    expect(task().packet).toBeNull();
+
+    const stranger = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "The reviewer keeps objecting",
+        options: [
+          {
+            kind: "question_reviewer",
+            title: "Ask the reviewer",
+            profileId: "nobody-here",
+            recommended: true,
+          },
+        ],
+      },
+      authority("full"),
+    );
+    expect(stranger.outcome).toBe("noop");
+    expect(stranger.message).toContain("is not a reviewer engaged on VIB-1");
+    expect(task().packet).toBeNull();
+  });
+
   it("refuses a hold that names nothing to wait on, and blockedBy on any other kind", async () => {
     // Ruling 230: a block_on_dependencies with no entries resolves into a hold
     // that releases on nothing — no dependencies, no run, no owner. Canary:

@@ -23,6 +23,7 @@ import {
   unpushedRevisionBlockedReason,
   unpushedRevisionOf,
   activeWorkRevision,
+  consecutiveRequestChanges,
   deliveringEngagement,
   type Engagement,
   deriveValidation,
@@ -63,6 +64,14 @@ import type {
   OperatorOpenPacketInput,
   OperatorPacketOptionInput,
 } from "./operator-actions.server";
+import {
+  agentNamesOf,
+  buildReviewDeadlockPacket,
+  delivererNameOf,
+  REVIEW_DEADLOCK_QUESTION,
+  type ReviewDeadlockEscalation,
+  reviewDeadlockOf,
+} from "./review-deadlock.server";
 import {
   describeRunFailure,
   type DescribeRunFailureInput,
@@ -3117,6 +3126,20 @@ export function deliveredWorkEvidence(fm: {
 }
 
 /** Atomically record a finished run's reply, verdict, and human question. */
+/**
+ * Ruling 237 (F37-57): display names for the escalation card, read from the
+ * project file so a handle is a NAME even on a project whose run history was
+ * pruned. Empty when the project cannot be read — the card then falls back to
+ * the role, which is worse copy but never a crash inside a locked write.
+ */
+function deadlockAgentNames(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): ReadonlyMap<string, string> {
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  return file ? agentNamesOf(file.parsed.frontmatter) : new Map();
+}
+
 export async function recordAgentCompletion(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -3204,6 +3227,13 @@ export async function recordAgentCompletion(
   /** Set when the envelope's question could not open a packet (one already is)
    *  — recorded as a timeline note instead of being dropped (P13-RT-06). */
   let questionDeferred: string | null = null;
+  /** Ruling 237 (F37-57): the consecutive-objection escalation, written inside
+   *  the verdict's own lock and announced after it. A SLOT, the same idiom
+   *  `questionWithdrawal` uses below, because a plain `let` assigned only
+   *  inside the mutator reads to the compiler as never assigned at all — the
+   *  announcement block would type-check as dead code and quietly stop being
+   *  checked. */
+  const deadlockEscalation: ReviewDeadlockEscalation = { packet: null, deadlock: null };
   let validation: TaskFrontmatter["validation"] = "healthy";
   // The title/summary are computed from the RESOLVED (derived) validation, not
   // the raw verdict, so the event can never read "Review passed / Validation:
@@ -3312,6 +3342,44 @@ export async function recordAgentCompletion(
               rounds,
             },
           ];
+          // Ruling 237 (F37-57): a SECOND consecutive objection from this same
+          // reviewer is a decision for a person, and viberr raises it rather
+          // than asking the operator to. Read inside the lock, from the array
+          // just written, and acted on after it — a packet write cannot happen
+          // inside another file lock.
+          if (verdict === "request_changes" && !parsed.packet) {
+            const deadlock = reviewDeadlockOf(
+              parsed.frontmatter,
+              reviewerProfileId,
+              consecutiveRequestChanges(parsed.frontmatter, reviewerProfileId),
+            );
+            if (deadlock) {
+              const names = deadlockAgentNames(ctx, projectSlug);
+              parsed.packet = buildReviewDeadlockPacket({
+                taskKey,
+                packetId: newId("pkt"),
+                deadlock,
+                // The agent's NAME, never `roleDisplay`: the card writes it as
+                // an @handle, and ruling 232 is the standing rule that a handle
+                // is a name. "@Review & validation" names nobody and matches
+                // nothing a person can search for.
+                reviewerName: names.get(reviewerProfileId) ?? roleDisplay,
+                delivererName: delivererNameOf(parsed.frontmatter, names),
+              });
+              parsed.frontmatter.waiting = "human";
+              deadlockEscalation.packet = parsed.packet;
+              deadlockEscalation.deadlock = deadlock;
+              parsed.timeline.unshift({
+                occurredAt: new Date().toISOString(),
+                type: "comment",
+                actor: { kind: "system", systemId: "policy-engine" },
+                title: parsed.packet.title,
+                text: `**Decision packet:** ${parsed.packet.title}. Awaiting a human decision.`,
+                toAgent: false,
+                evidence: null,
+              });
+            }
+          }
         }
         validation = deriveValidation(parsed.frontmatter);
         parsed.frontmatter.validation = validation;
@@ -3461,6 +3529,37 @@ export async function recordAgentCompletion(
       }
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
+    // Ruling 237 (F37-57): the packet itself was written inside the verdict's
+    // own lock above, so the objection and the escalation it raised can never
+    // land apart. What is left is telling people — a decision nobody is
+    // notified about waits exactly as long as it takes someone to open the task
+    // by chance.
+    if (deadlockEscalation.packet && deadlockEscalation.deadlock) {
+      recordAudit(db, {
+        action: "task.review.deadlock",
+        actor: SYSTEM_ACTOR,
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: {
+          profileId: deadlockEscalation.deadlock.profileId,
+          rounds: deadlockEscalation.deadlock.rounds,
+        },
+      });
+      notifyTaskWatchers(
+        db,
+        {
+          projectSlug,
+          taskKey,
+          kind: "packet",
+          ptype: "input",
+          title: `Decision needed: ${deadlockEscalation.packet.title}`,
+          text: deadlockEscalation.packet.body,
+        },
+        ctx,
+      );
+    }
     // P13-RT-01 (NEW-4, broken on its PRIMARY path): a FINISHED agent's report
     // that tags a human ("@Arda …") must reach their inbox. Only the
     // interrupted/errored path (postAgentReplyComment) and Claude's mid-run
@@ -8322,6 +8421,30 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "question_reviewer": {
+      // Ruling 237 (F37-57): the decision is that the REVIEWER answers before
+      // anyone reworks anything. The run starts below; `waiting: agent` is
+      // honest about who the task is on, and the stage does not move — the
+      // reviewer is being asked a question about the revision where it stands,
+      // not sent to judge a new one.
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. No rework until the reviewer has answered.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.waiting = "agent";
+        fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
     case "archive_task": {
       // R14-3 authority, re-checked inside the case exactly like
       // accept_completion re-checks its own gate: packet resolution admits the
@@ -8773,6 +8896,10 @@ export async function resolvePacket(
     // `hold_runtime_debug` are here, and it was missed when the list was first
     // written.
     "block_on_policy",
+    // Ruling 237: "ask the reviewer what else it would block on" decides who
+    // runs next, and the answer that comes back is the reviewer's, not the
+    // person's. Nothing about the deliverable changed.
+    "question_reviewer",
   ]);
   // Ruling 189 excludes "a resolution that ENDS the task", and `acceptsInto`
   // catches only ONE of the two doors that do: `force_accept` closes the task
@@ -8977,6 +9104,12 @@ export async function resolvePacket(
     // same question — so answering the packet re-created it, in a loop. Live
     // on SHOP-18 at 00:05:50, seven seconds after the decision was recorded.
     "wait_for_window",
+    // Ruling 237 (F37-57): starts the reviewer's run below, exactly like
+    // `retry_other_backend`; its completion re-invokes the operator with the
+    // answer in hand. Re-invoking here would put the operator on the task
+    // while the question it is supposed to wait for is still unanswered, which
+    // is the behaviour this packet exists to interrupt.
+    "question_reviewer",
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
@@ -9667,6 +9800,58 @@ export async function resolvePacket(
         );
         reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       }
+    }
+  }
+
+  // question_reviewer (ruling 237, F37-57): actually put the question. Same
+  // shape as the retry below and for the same reason — the packet is the human
+  // decision, the dispatch is coordination machinery — with one difference that
+  // matters: the directive is the WHOLE point of the option, so a start failure
+  // means the promise on the card was not kept and has to say so.
+  if (option.kind === "question_reviewer" && option.profileId) {
+    const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
+    try {
+      const { startAgentRun } = await import("./specialist-run.server");
+      await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          // No `delivers` and no posture change: the reviewer is already
+          // engaged as a non-delivering reviewer, and this re-runs it exactly
+          // as it stands. A question that arrived with delivery rights would
+          // invite the reviewer to fix the thing itself.
+          profileId: option.profileId,
+          directive: REVIEW_DEADLOCK_QUESTION,
+          directiveFrom: actor.label,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("question_reviewer start failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        // `waiting` goes back to a person: the decision promised a reviewer run
+        // and there is none, so a board reading "waiting: agent" would be the
+        // F37-33 lie — claiming an agent nobody started.
+        parsed.frontmatter.waiting = "human";
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: { kind: "operator" },
+          title: null,
+          text:
+            `The question could not be put to the reviewer: ${message} ` +
+            "Nothing was asked and nothing is running.",
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 

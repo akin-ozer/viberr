@@ -869,13 +869,14 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * `comment` timeline event: a new one fails here until its author both wires
    * the fan-out and adds a row above.
    *
-   * `task-actions.server.ts` has 3 sites serving 4 writers — `postAgentReplyComment`
+   * `task-actions.server.ts` has 4 sites serving 4 writers — `postAgentReplyComment`
    * and `recordAgentCompletion` share `prepareAgentReplyEvent`'s single
    * construction and fan out separately, which is exactly why site count and
-   * writer count are pinned apart.
+   * writer count are pinned apart, and its fourth site announces ruling 237's
+   * deadlock packet (see `SITES_WITHOUT_MENTIONS`).
    */
   const COMMENT_WRITER_SITES = {
-    "server/tasks/task-actions.server.ts": 3,
+    "server/tasks/task-actions.server.ts": 4,
     "server/tasks/operator-actions.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
     // The ONE site that must NOT fan out: the compaction marker is synthesized
@@ -887,6 +888,17 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
   const NO_FANOUT_BY_DESIGN = new Set([
     "server/tasks/timeline-compaction.server.ts",
   ]);
+  /**
+   * Sites inside a fanning-out file whose event text cannot carry a human
+   * @mention, counted out of the writer floor below so it stays a real floor.
+   *
+   * Ruling 237's deadlock announcement is the only one: the text is built from
+   * a constant and the packet title, and the packet is announced to people
+   * through `notifyTaskWatchers` in the same breath. Per FILE is the wrong
+   * granularity for it — `task-actions.server.ts` fans out on three other
+   * sites, and exempting the file would stop checking them.
+   */
+  const SITES_WITHOUT_MENTIONS = 1;
 
   const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -928,7 +940,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     expect(WRITERS.length).toBeGreaterThanOrEqual(
       Object.entries(COMMENT_WRITER_SITES)
         .filter(([f]) => !NO_FANOUT_BY_DESIGN.has(f))
-        .reduce((n, [, c]) => n + c, 0),
+        .reduce((n, [, c]) => n + c, 0) - SITES_WITHOUT_MENTIONS,
     );
   });
 });

@@ -41,7 +41,6 @@ import {
   type PacketOptionKind,
   type Recommendation,
   type RecommendationKind,
-  type ReviewVerdict,
   type TaskFileEvent,
   type TaskPacket,
   unpushedRevisionOf,
@@ -49,6 +48,7 @@ import {
 } from "~/schemas/task-file.schema";
 import {
   activeWorkRevision,
+  consecutiveRequestChanges,
   PACKET_OPTION_KINDS,
   revisionLeftWorkspace,
   type ForeignBranchHead,
@@ -990,7 +990,8 @@ export interface OperatorPacketOptionInput {
   ev?: string;
   /** retry_other_backend — the backend to re-run the failed agent on. */
   backend?: "codex" | "claude";
-  /** retry_other_backend — a reviewer retry names its profile. */
+  /** retry_other_backend — a reviewer retry names its profile. Ruling 237:
+   *  question_reviewer names the reviewer the question is put to. */
   profileId?: string;
   /** archive_task — also delete the task's remote branch (discard the work). */
   deleteBranch?: boolean;
@@ -1369,6 +1370,39 @@ export async function operatorOpenPacket(
       message:
         `dueAt only fits a wait_for_window option — "${strayDue.title}" is ${strayDue.kind}. ` +
         "Drop it, or offer the wait as its own option.",
+    };
+  }
+
+  // Ruling 237 (F37-57): a question_reviewer names the reviewer it questions,
+  // and that reviewer must be one this task actually has. Without the check the
+  // resolution would promise "ask X" and then either dispatch nobody or, worse,
+  // start the DELIVERER with a prompt telling it not to review — and the person
+  // who chose the option would read a card that said otherwise.
+  const strayQuestion = rawOptions.find(
+    (o) => o.kind === "question_reviewer" && !(o.profileId ?? "").trim(),
+  );
+  if (strayQuestion) {
+    return {
+      outcome: "noop",
+      message:
+        `A question_reviewer option needs the reviewer it asks — "${strayQuestion.title}" names none. ` +
+        "Pass profileId, or put the question in a comment instead.",
+    };
+  }
+  const wrongQuestion = rawOptions.find(
+    (o) =>
+      o.kind === "question_reviewer" &&
+      !existing.parsed.frontmatter.engagements.some(
+        (e) => e.profileId === o.profileId && !e.delivers,
+      ),
+  );
+  if (wrongQuestion) {
+    return {
+      outcome: "noop",
+      message:
+        `"${wrongQuestion.profileId}" is not a reviewer engaged on ${input.taskKey}, so a question_reviewer ` +
+        `option cannot put a question to it — "${wrongQuestion.title}". ` +
+        "Name an engaged non-delivering agent, or engage one first.",
     };
   }
 
@@ -2135,40 +2169,6 @@ const liveRunRowsSchema = z.array(
 );
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
-/**
- * Ruling 193, as amended by ruling 204: successive OBJECTIONS `profileId` has
- * raised, newest first, stopping at its first `approve` (or at the start of its
- * history).
- *
- * ROUNDS are summed, not revisions. Ruling 193 counted distinct revisions on
- * the reasoning that "a reviewer re-run twice on the same revision has objected
- * once" — and live on SHOP-9 that was exactly backwards: in a deadlock the
- * deliverer commits nothing, so no new revision is ever minted and the count sat
- * at 1 while the loop ran. The distinction 193 was reaching for survives in the
- * `rounds` field itself, which the verdict upsert increments only when a
- * completed review returns the SAME result again; a re-DISPATCH that records no
- * verdict still counts for nothing.
- */
-export function consecutiveRequestChanges(
-  fm: { verdicts: readonly ReviewVerdict[] },
-  profileId: string,
-): number {
-  const mine = fm.verdicts.filter((v) => v.profileId === profileId);
-  let rounds = 0;
-  for (let i = mine.length - 1; i >= 0; i -= 1) {
-    const v = mine[i]!;
-    if (v.result !== "request_changes") break;
-    // Ruling 204: ROUNDS, not distinct revisions. Live on SHOP-9 the Integration
-    // Verifier blocked the same revision twice — the deliverer had nothing it
-    // was allowed to change, because the blocker was another task's work — and
-    // the old count read 1, so the doctrine that exists to put exactly that
-    // deadlock in front of a human could not see it. The counter was keyed on
-    // the one signal that STOPS MOVING when the work gets stuck.
-    rounds += v.rounds;
-  }
-  return rounds;
-}
-
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
