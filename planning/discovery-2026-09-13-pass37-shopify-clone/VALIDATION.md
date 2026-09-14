@@ -1267,6 +1267,16 @@ announcing a failure.
 Had the number climbed, the diagnosis was wrong and the monitor would have said so in those
 words. It did not climb.
 
+**Final reading at 05:04 UTC, an hour after the fix: still 58 / 52.** The monitor armed to shout
+"RULING 229 FALSIFIED" ran its full window and never fired.
+
+The honest shape of that evidence: roughly forty of those sixty minutes had five to seven tasks
+running, and the board went idle at 04:44 when the quota stalled everything until 07:28. So the
+hour is not sixty minutes of pressure. What carries the claim is the earlier window — where the
+rate had been about one new note every two minutes and became zero — plus the single instance
+watched directly at 04:13:41, where SHOP-22's `github` "already up to date" event was followed by
+a PR-opened event and a transition, and by no refusal note at all.
+
 ### Ruling 230 — red-proved in both halves, and a third path found by the canary
 
 The fix has two independent halves, each proved by reverting only itself:
