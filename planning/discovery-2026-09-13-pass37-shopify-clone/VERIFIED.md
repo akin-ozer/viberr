@@ -1219,3 +1219,48 @@ what a revision-bound verdict is for, working on real drift rather than a fixtur
 blocked / validation failing, names all three blockers as chips, and the page carries the copy
 that says the hold ends by itself ("Held until…", "Viberr releases it…"). The "Blocked decision"
 pill that looked like current state sits inside `.timeline` — history, correctly placed.
+
+## The concurrency collision, and four wrong findings caught before filing (2026-09-14, pass 37)
+
+The 07:29Z window ran six specialists at once in one repo, which is what the goal asked for
+("several agents in one repo at once... watch what collides"). It collided, and the machinery
+handled it correctly.
+
+**The collision.** SHOP-21's Infrastructure Engineer could not run `make stack-test` because
+ports 4101, 4102 and 8080 were held by SHOP-12's and SHOP-2's stacks. It refused to kill another
+task's processes and opened an `input` packet asking a human. The inbox's demand lane showed it as
+**1 decision** with the full body, even though the task itself read `waiting: agent` - the packet
+drives the demand independently of the task's waiting state, which is the honest arrangement.
+Meanwhile the operator advanced what it could (Build to Review, PR #18) and posted *"@Arda Your
+open question from @Infrastructure Engineer still stands and is yours to answer - I can't withdraw
+an agent's packet"*. Question kept alive, progress not blocked on it.
+
+**It was not a process leak, though it looked exactly like one.** One port-holder read
+`ppid 1` - reparented to init, the classic orphan signature - and I was one step from filing
+"viberr leaks the processes its agents spawn". A second measurement minutes later showed ports
+4101/4102/8080 free and the only `PPid 1` process being viberr's own server. The reparenting was
+transient teardown, not a leak. Answered the packet with that fact rather than the guess.
+
+**Four wrong findings caught before filing, in one session.** Worth recording as a group, because
+the pattern is the same each time: a measurement whose method could not see what it claimed to.
+
+| nearly filed | what was actually wrong |
+|---|---|
+| "viberr says *mentioned you* about comments that mention someone else" | the notification stores a 240-char CLIP; my regex searched the clip, not the comment |
+| "the operator claims it opened a packet but no packet exists" | the packet lives in a `## Packet` section; my `awk` read only the YAML frontmatter |
+| "viberr leaks agent-spawned processes" | `ppid 1` was transient teardown; a second reading showed the ports free |
+| "Accept silently does nothing" | the refusal toast DOES render; I sampled `body.innerText` at 4s and 6s, after it had gone |
+
+Each was caught by checking the mechanism rather than trusting the first measurement, and the
+fourth only because the network log showed a 409 the page had already stopped displaying.
+
+**The acceptance head check, live.** SHOP-2's reviewers approved `ea5f2ffd7493`, but PR #13's head
+was `913ce9d`: the reviewed revision had never been pushed. The Integration Verifier even said so
+in its own approval ("Reviewed HEAD `ea5f2ffd7493` with `913ce9d` as its ancestor"). Acceptance
+refused with a 409 and this toast:
+
+> SHOP-2's delivered revision `ea5f2ff` is not on GitHub: PR #13's head is `913ce9d`. Deliver the
+> branch to push it; it cannot be accepted until the PR carries the reviewed revision.
+
+Exact, names both shas, and states the remedy. A reviewer approving a revision the PR does not
+carry is precisely the drift this gate exists for, and it caught it on real work.
