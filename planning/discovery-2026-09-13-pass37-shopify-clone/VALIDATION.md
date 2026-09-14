@@ -1199,3 +1199,39 @@ committed.
 
 If ruling 229 is right, the second number stops growing while the first keeps pace with the
 sixth. If it keeps climbing, the diagnosis was wrong and the note is coming from somewhere else.
+
+### Ruling 227, proven live eight minutes after it deployed — and not by me trying to
+
+At 04:12:08 I posted an `@operator` comment on SHOP-11 while its decision packet was still open,
+to put the owner's instructions on the record before resolving. The door refused the trigger, as
+it should. **And it said so:**
+
+```
+### 2026-09-14T04:12:08.405Z · note · system:policy-engine
+
+An @operator turn was refused: a decision packet is open on SHOP-11 ("Resolve Verify blocker:
+out-of-scope baseline findings") and coordination is paused until it is resolved — no run was
+started, so nothing on this task has been acted on. Resolve it, then run the operator again.
+```
+
+Every detail of the ruling is in that one line: the door wording with no mention of a queue it
+never reached, the consequence stated plainly ("nothing on this task has been acted on"), and the
+`policy-engine` actor rather than `operator-lease`. Eleven hours earlier the identical action on
+SHOP-2 produced nothing at all — that was F37-46, and it cost me a comment I believed had been
+delivered.
+
+I did not stage this. I was doing something else, made the same move a user makes, and the fix
+caught it.
+
+### F37-50, proven in viberr's own words in the same second
+
+The packet option I then resolved read *"**Hold** SHOP-11 while gateway routing, tracing, and
+stack-test work lands… then rerun Verify."* Its kind is `block_on_policy`. The transition it
+wrote, 150ms before the note above:
+
+> **Decision:** Fund the missing baseline separately. **SHOP-11 is unblocked** and the operator
+> re-runs to re-check.
+
+Option says hold; record says unblocked; frontmatter agreed (`readiness: ready`,
+`waiting: agent`). No inference needed — the product wrote both halves itself, one after the
+other, on one timeline.
