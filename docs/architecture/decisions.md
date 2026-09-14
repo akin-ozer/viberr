@@ -5006,7 +5006,21 @@ by rewriting those paragraphs:*
     still reported, because they are facts about the text that the author's disclosure is written
     from, and the directive comment itself still lands on the timeline tagged to-agent: the ruling
     changes who hears about the hand-off, not whether it is on the record.
-    (`mention-notify.server.ts`, `task-actions.server.ts`.)
+    The OPERATOR had to be told, or the ruling is a trap rather than a rule. Its persona closed
+    with "When you answer or address a specific person, tag them by name with an @mention. The
+    mention is what notifies them" - no qualification, and now false for the comment the operator
+    writes most. An operator that believes a tag in a directive reaches a person keeps putting
+    questions there, and they reach nobody. The owner's words for this decision were that the
+    operator "already has a separate human-directed comment path and should use it", so the
+    persona now says which path is which: the @mention notifies in a COMMENT, and "a directive you
+    hand a specialist reaches only that specialist: naming a person inside one notifies nobody, so
+    put anything a person must see in a comment of its own."
+    The shipped asset changed, and the live store refreshed ITSELF on the next boot
+    (`a48b34db` to `b5f35eef`, matching the shipped bytes exactly) through the
+    `PRIOR_SHIPPED_HASHES` / `shipped-assets.json` path, which is what that machinery is for and
+    is the first time this pass exercised it. No instance file was edited by hand.
+    (`mention-notify.server.ts`, `task-actions.server.ts`, `operator.definition.md`,
+    `operator-run.server.ts`, `default-assets.server.ts`.)
 
 233. **A mention notification quotes the mention, not the opening of the comment (pass 37;
     F37-53).** The inbox row reads `mentioned you - "<first 240 characters>"`, and the head is the

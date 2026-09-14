@@ -16,6 +16,7 @@ import { projectDir, taskDir } from "./file-store-root.server";
 import {
   isFileWatcherAlive,
   shouldIgnoreWatchPath,
+  RETRY_BACKOFF_MS,
   startFileWatcher,
   stopFileWatcher,
 } from "./file-watch.service.server";
@@ -226,7 +227,21 @@ describe("a failed rebuild is retried (ruling 218)", () => {
     // is the variable, not the budget, so the canary drives a fast one: the
     // BEHAVIOUR under test is "a failed rebuild is retried at all", which the
     // interval does not change.
-    await startWatcherReady(store, [60, 60, 60, 60, 60]);
+    //
+    // The LENGTH matters as much as the delays, and getting it wrong is how
+    // this test was made flaky a third time. Every failed attempt consumes a
+    // rung, and `scheduleRetry` gives up after the last one. The latch wait
+    // below pokes until the fault is recorded, and each poke is another failed
+    // attempt — so a five-rung ladder was spent in about 300ms, long before the
+    // table came back, and the heal then waited on a retry that would never be
+    // scheduled. It passed alone and failed at 12,035ms under load, which is
+    // the same shape as the bug it replaced. The rungs are therefore many and
+    // short: ~20s of retry capacity at 40ms granularity outlasts any plausible
+    // latch delay while keeping the heal itself near-instant.
+    await startWatcherReady(
+      store,
+      Array.from({ length: 500 }, () => 40),
+    );
 
     // The store cannot take the events rewrite for the whole first attempt —
     // the shape a transient `disk I/O error` has. `content_hash` is written
@@ -239,10 +254,33 @@ describe("a failed rebuild is retried (ruling 218)", () => {
         comment("2026-08-26T10:01:00.000Z", "second"),
       ],
     });
+    // The nudge REWRITES `task.md`, and that is the fix for this test's third
+    // flake. `pokeDir` writes `poke-marker`, whose name is deliberately not a
+    // canonical basename — by its own contract the add "never [reaches] the
+    // projection handlers". So the latch depended on catching the ONE change
+    // event from the `writeTask` above, and when full-suite load let chokidar
+    // coalesce or miss it, no amount of poking could produce another: the file
+    // had not changed since. The failure was always "timed out waiting for: the
+    // failing rebuild to be latched", never the heal, which is why raising
+    // budgets and shortening the retry ladder both missed it.
+    //
+    // Rewriting the same bytes gives chokidar a `change` on a canonical
+    // basename, so the latch becomes recoverable instead of one-shot. It does
+    // not weaken the test: the "nothing touches the file again" invariant
+    // belongs to the HEAL below, which still passes no nudge at all.
+    const rewriteTask = () => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+        timeline: [
+          comment("2026-08-26T10:00:00.000Z", "first"),
+          comment("2026-08-26T10:01:00.000Z", "second"),
+        ],
+      });
+    };
     await waitFor(
       () => projectionFaultCount() > 0,
       "the failing rebuild to be latched",
-      () => pokeDir(taskDir(store.slug, "VIB-1", store.dataRoot)),
+      rewriteTask,
       12_000,
     );
 
@@ -260,6 +298,17 @@ describe("a failed rebuild is retried (ruling 218)", () => {
     );
     expect(projectionFaultCount()).toBe(0);
   }, 30_000);
+
+  /**
+   * The rung-exhaustion guard, pinned separately so the reason the ladder above
+   * is 500 long does not live only in a comment. `scheduleRetry` gives up after
+   * the last rung; a test ladder that runs out mid-wait stops retrying and the
+   * canary fails for a reason that has nothing to do with ruling 218.
+   */
+  it("ruling 218's ladder gives up after its last rung, which is why the test ladder is long", () => {
+    expect(RETRY_BACKOFF_MS).toEqual([2_000, 5_000, 15_000, 45_000, 120_000]);
+    expect(RETRY_BACKOFF_MS).toHaveLength(5);
+  });
 });
 
 describe("watcher liveness (E8)", () => {

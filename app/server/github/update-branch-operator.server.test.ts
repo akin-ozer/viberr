@@ -459,6 +459,24 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/never propose forcing the branch/i);
   });
 
+  /**
+   * Ruling 232: the persona used to close with "The mention is what notifies
+   * them" and no qualification, which the ruling made FALSE for the one comment
+   * the operator writes most — the directive it hands a specialist. An operator
+   * that believes a tag in a directive reaches a person will keep putting
+   * questions there, and they will now reach nobody. The owner's own words for
+   * this decision were that the operator "already has a separate human-directed
+   * comment path and should use it"; this is the sentence that tells it so.
+   *
+   * Canary: delete the directive sentence from the seed asset.
+   */
+  it("ruling 232: says a directive reaches only the specialist, so a person named in one is not notified", () => {
+    expect(seed).toMatch(/A directive you hand a specialist reaches only that specialist/);
+    expect(seed).toMatch(/naming a person inside one notifies nobody/);
+    // The instruction that remains true is still there, now scoped to a comment.
+    expect(seed).toMatch(/tag them by name with an @mention \(e\.g\. "@Arda"\) in a comment/);
+  });
+
   it("keeps the live store's copy in step when one is present (both copies or neither)", () => {
     if (live === null) return;
     expect(live).toBe(seed);

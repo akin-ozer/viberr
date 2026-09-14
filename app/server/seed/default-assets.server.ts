@@ -197,6 +197,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Pass 37 ruling 232: before the operator was told that a directive handed
+    // to a specialist reaches only that specialist, so a person named inside
+    // one notifies nobody. Until then it read "the mention is what notifies
+    // them" with no qualification, which the ruling made false for directives.
+    "a48b34dbaffc37bb7c1839fd8e7119f5554e5f28d423cd5df9759bd55452c7d8",
     // Pass 35 cluster review: before the ruling-85 clause stopped telling the
     // operator to OFFER the profile grant as an option the ruling-164 door
     // refuses, and before the acceptance-stage move was keyed on the pull
