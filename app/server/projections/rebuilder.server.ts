@@ -15,6 +15,7 @@ import {
   supportingEngagements,
   type TaskFrontmatter,
   type Validation,
+  type Waiting,
 } from "~/schemas/task-file.schema";
 import { verdictGateReason } from "~/server/github/pr-human-approval.server";
 import {
@@ -513,12 +514,65 @@ export function rebuildTaskFile(
   // — reads `task_projections`, so normalizing once here fixes all of them
   // consistently. The canonical task file is untouched: move the task back out
   // of the terminal stage and its stored `waiting` applies again.
-  const projectedWaiting = isTerminalStage(
+  // Why the acceptance gate is computed HERE and not inline in the upsert: the
+  // waiting derivation below needs to know whether a human could accept this
+  // task right now, and the projected column needs the same answer. One call,
+  // one answer — two calls could drift.
+  const acceptanceRefusal = acceptanceBlockReason(fm, {
+    validation: derivedValidation,
+    blockedPacket,
+    requiredReviewers,
+  });
+
+  // Ruling 225 (F37-45): a task resting on a CLOCK is not waiting on a person.
+  //
+  // `waiting: "human"` in a task file means "no agent is working; a human is
+  // next" — it is what `clearWaitingToHuman` writes when the last run ends.
+  // Every waiting-sensitive surface renders that as the sentence "waiting on a
+  // human", which was true while the only way forward was a person. Ruling 224
+  // made it false: a task whose quota window is shut now resolves its packet by
+  // writing a `run-operator` schedule and picks ITSELF back up when the window
+  // reopens. Live on pass 37 four tasks sat exactly there — packet resolved,
+  // schedule pending for 02:28 UTC, nothing asked of anybody — and the board
+  // said "waiting on a human" on all four cards while its header counted "5
+  // waiting on a human in this project". The packet that put them there had
+  // promised, in viberr's own words, "Nothing runs until then and the board
+  // says so." It did not.
+  //
+  // The narrow reading — only quota waits count — would be a second lie the
+  // day something else writes a schedule, so the predicate is about the STATE,
+  // not its cause: a pending occurrence exists, and nothing else is pending on
+  // a person.
+  //
+  // That last clause is the one that matters. A human-actionable decision
+  // OUTRANKS the clock: a task with an open packet, a live recommendation, or
+  // a completion a human could accept right now still reads "waiting on you",
+  // because the schedule does not take that work off anybody's hands — it only
+  // says the task will also move on its own if nobody gets to it. Getting this
+  // backwards would not soften a lie, it would HIDE a decision, and
+  // `decisionsRequiring` reads this very column.
+  //
+  // Derived, never stored: like LV-20's terminal-stage `"none"` above and
+  // `validation: "bypassed"`, the canonical file keeps saying `human`. Nothing
+  // authors `waiting: schedule`, so a file that somehow carries one projects as
+  // whatever it has actually earned here.
+  const restsOnSchedule =
+    fm.waiting !== "agent" &&
+    !parsed.packet &&
+    fm.recommendations.length === 0 &&
+    acceptanceRefusal !== null &&
+    fm.schedules.some((occurrence) => occurrence.status === "pending");
+
+  const projectedWaiting: Waiting = isTerminalStage(
     fm.stage,
     stageIds.map((id) => ({ id })),
   )
     ? "none"
-    : fm.waiting;
+    : restsOnSchedule
+      ? "schedule"
+      : fm.waiting === "schedule"
+        ? "human"
+        : fm.waiting;
 
   // Stored readiness is NULL when the field was missing/invalid in the file
   // (a readiness-path diagnostic exists in that case).
@@ -621,11 +675,7 @@ export function rebuildTaskFile(
     JSON.stringify(fm.blockedBy),
     fm.archived ? 1 : 0,
     derivedValidation,
-    acceptanceBlockReason(fm, {
-      validation: derivedValidation,
-      blockedPacket,
-      requiredReviewers,
-    }),
+    acceptanceRefusal,
     // N20-14 (§5c): the durable force-accept fact, projected for the display arm.
     fm.acceptance ?? null,
     // D4: runtime-continuity health, derived from the timeline above.

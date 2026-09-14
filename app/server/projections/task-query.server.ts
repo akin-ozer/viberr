@@ -253,6 +253,8 @@ export function getTaskDetail(
     terminal: isAcceptedDisplayState({ stage: summary.stage, stageIds }),
     runInFlight: facts.runInFlight,
     held: summary.blockedBy.length > 0,
+    // Ruling 225: the clock a schedule-resting task is measured against.
+    resumesAt: summary.resumesAt ?? null,
   };
   // Test-only clock override: left ABSENT when unset, so `isQuiet` reads the
   // real clock rather than being handed an explicit `undefined`.

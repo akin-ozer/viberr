@@ -50,6 +50,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
+import { LocalDayDotTime } from "~/ui/local-time";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill, validationLabel, validationQuiet } from "~/ui/pill";
 import {
@@ -308,6 +309,26 @@ function WaitTag({ task }: { task: TaskSummary }) {
       <span className="wait-tag human">
         <Icon name="hand" />
         {task.waitingOnMe ? "waiting on you" : "waiting on a human"}
+      </span>
+    );
+  }
+  // Ruling 225 (F37-45): resting on a clock, not on a person. The hand icon
+  // above is the demand this tag is NOT making, so it gets a clock instead.
+  // Without the instant the tag would be a worse "waiting on a human" than the
+  // one it replaces, so name it: the projection only ever sets this state from
+  // a pending occurrence, and the wordless fallback covers a schedules list
+  // that failed to parse at the read boundary rather than inventing a time.
+  if (task.waiting === "schedule") {
+    return (
+      <span className="wait-tag scheduled">
+        <Icon name="clock" />
+        {task.resumesAt ? (
+          <>
+            resumes <LocalDayDotTime iso={task.resumesAt} />
+          </>
+        ) : (
+          "resumes on its own"
+        )}
       </span>
     );
   }

@@ -2,7 +2,12 @@ import {
   describeRevisionDrift,
   type RevisionDrift,
 } from "~/shared/revision-drift";
-import type { PrState, TaskPriority, UnpushedRevision } from "~/schemas/task-file.schema";
+import type {
+  PrState,
+  TaskPriority,
+  UnpushedRevision,
+  Waiting,
+} from "~/schemas/task-file.schema";
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
 
@@ -22,7 +27,14 @@ export interface ReviewRowView {
   priority: TaskPriority;
   labels: string[];
   dueDate: string | null;
-  waiting: "human" | "agent" | "none";
+  /** The same lesson `PrState` below records: one vocabulary, one union. A
+   *  hand-copied triple here could not express ruling 225's derived
+   *  `schedule`, so a review row would have had to invent its own answer for a
+   *  state the projection already decided. */
+  waiting: Waiting;
+  /** Ruling 225: when `waiting` is `schedule`, the instant the task picks
+   *  itself back up. */
+  resumesAt?: string | null;
   packet: { kind: string; title: string } | null;
   /** Ruling 138: the packet is decided and waits for the edited goal. */
   goalEditPending: boolean;
@@ -205,6 +217,13 @@ export function reviewRowSub(t: ReviewRowView): string {
   // line: the row is at the boundary with no run and no decision behind it.
   if (t.waiting === "none") {
     return "At the review boundary: no agent is running and no decision is pending.";
+  }
+  // Ruling 225 (F37-45), and F19-31's lesson a second time: a value that falls
+  // through to the sentence below claims a live agent run that does not exist.
+  // A clock-resting row has neither a run nor a decision behind it; it has a
+  // time.
+  if (t.waiting === "schedule") {
+    return "At the review boundary: nothing is running, and a scheduled run picks this task back up.";
   }
   return "Agent working. The packet arrives at the boundary.";
 }

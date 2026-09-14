@@ -96,6 +96,9 @@ export interface ReviewQueueRow {
   labels: string[];
   dueDate: string | null;
   waiting: Waiting;
+  /** Ruling 225: the instant a clock-resting row picks itself back up, so the
+   *  queue names the time instead of a person who owes nothing. */
+  resumesAt: string | null;
   /** Pending packet header only — the queue reads kind + title, nothing else. */
   packet: { kind: string; title: string } | null;
   /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
@@ -277,6 +280,7 @@ export function getReviewQueue(
       labels: t.labels,
       dueDate: t.dueDate,
       waiting: t.waiting,
+      resumesAt: t.resumesAt ?? null,
       packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
       goalEditPending: t.packet?.awaiting === "goal_edit",
       latestEventText: latestByKey.get(t.key) ?? null,

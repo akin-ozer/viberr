@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
-import { LocalRelative } from "~/ui/local-time";
+import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
@@ -154,6 +154,18 @@ function RQRow({
           <span className="wait-tag human">
             <Icon name="hand" />
             waiting on a human
+          </span>
+        ) : t.waiting === "schedule" ? (
+          // Ruling 225: resting on a clock. Not a person, and not a run.
+          <span className="wait-tag scheduled">
+            <Icon name="clock" />
+            {t.resumesAt ? (
+              <>
+                resumes <LocalDayDotTime iso={t.resumesAt} />
+              </>
+            ) : (
+              "resumes on its own"
+            )}
           </span>
         ) : t.waiting === "agent" ? (
           <span className="wait-tag agent">

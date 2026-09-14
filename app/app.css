@@ -1357,6 +1357,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .wait-tag.you { color: var(--blue-pressed); }
 .rq-row .wait-tag.human { color: var(--muted); font-weight: 600; }
 .wait-tag.agent { color: var(--agent-dark); }
+/* Ruling 225: a clock rest is not a demand, so it reads at the same weight as
+   the muted review-row wait rather than the blue one that asks for a person. */
+.wait-tag.scheduled { color: var(--muted); }
+.by-schedule { color: var(--muted); }
 .wait-tag .ico { width: 13px; height: 13px; }
 .wait-tag .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
 @keyframes pulse-a {

@@ -4758,6 +4758,38 @@ by rewriting those paragraphs:*
     operator on resolution spends a run against the very quota the human chose to wait out,
     gets refused, and opens a NEW packet asking the same question - answering the decision
     re-created it. Live on SHOP-18, seven seconds after the decision was recorded.
+
+225. **A task resting on a clock stops claiming it rests on a person (owner, 2026-09-14,
+    pass 37; F37-45).** `waiting: human` in a task file means "no agent is working, a human
+    is next" - it is simply what `clearWaitingToHuman` writes when the last run ends. Every
+    waiting-sensitive surface renders that as the sentence "waiting on a human", which was
+    true while a person was the only way forward. Ruling 224 made it false. Four tasks
+    resolved their quota packet by scheduling their own resumption for 02:28 UTC, and the
+    board then showed "waiting on a human" on all four cards under a header counting "5
+    waiting on a human in this project" - while the packet that put them there had promised,
+    in viberr's own words, "Nothing runs until then and the board says so." It did not. So
+    the projection derives a fourth value, `schedule`, exactly as LV-20 derives the terminal
+    `none` and as `validation: bypassed` is derived: nothing authors it, the canonical file
+    keeps saying `human`, and one derivation moves every reader at once - the card, the
+    board subtitle and its filters, the review row and its subline, the task page's
+    "Waiting on" rail, and the controller's own board summary, which now counts clock rests
+    apart from human ones and carries the instant on the task line so it neither treats the
+    rest as work to unblock nor re-dispatches a task that is already coming back.
+    The predicate is about the STATE, not its cause - a quota-only reading would be a second
+    lie the day anything else writes a schedule - and its limit is the load-bearing half: a
+    human-actionable decision OUTRANKS the clock. An open packet, a live recommendation, or
+    a completion a human could accept right now all keep `human`, because the schedule takes
+    none of that off anybody's hands, and because `decisionsRequiring` reads this very
+    column: getting it backwards would not soften a lie, it would HIDE a decision. The
+    "no activity" cue follows the same care. A clock rest is not measured from its last
+    timeline event - the gap is hours by design, so the agent threshold would fire the cue
+    on the healthiest wait there is - but neither is it exempt, because a schedule that came
+    DUE and did not fire is a genuine stall in the runner. The idle clock restarts at the due
+    instant: silent until then, quiet on the human threshold after. Finally the store's own
+    CHECK constraint was widened to admit the value. It refused it at first, which is worth
+    recording: the refusal arrives as "projection rebuild failed" and a stale row, the exact
+    silent-staleness failure `boot.server.ts` probes this column for and ruling 217 built the
+    health latch for. The canary caught it before the deploy did.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 

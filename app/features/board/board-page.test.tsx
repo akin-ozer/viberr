@@ -186,6 +186,60 @@ function subtitle(container: HTMLElement): string {
   return container.querySelector(".board-head .sub")!.textContent!.replace(/\s+/g, " ").trim();
 }
 
+describe("ruling 225: the board says a clock rest is a clock rest", () => {
+  it("names the instant on the card instead of naming a person", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        waiting: "schedule",
+        resumesAt: "2026-09-14T02:28:00.000Z",
+      }),
+    ]);
+    const tag = container.querySelector(".card .wait-tag")!;
+    // The promise ruling 224's own packet copy made: "Nothing runs until then
+    // and the board says so." The INSTANT is rendered by `LocalDayDotTime`,
+    // which swaps to the viewer's zone after hydration and has its own tests —
+    // asserting a formatted string here would only assert this host's timezone.
+    // What this test owns is that the tag names a time at all, and that it
+    // stopped naming a person.
+    expect(tag.textContent!.trim()).toMatch(/^resumes \S/);
+    expect(tag.textContent).not.toContain("on its own");
+    expect(tag.querySelector(".ico")).not.toBeNull();
+    // Scoped to the card: the subtitle legitimately carries the phrase with a
+    // count of zero, which is the whole point.
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).not.toContain("waiting on a human");
+    expect(card.textContent).not.toContain("waiting on you");
+  });
+
+  it("keeps the card honest when the instant is missing", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl", waiting: "schedule", resumesAt: null }),
+    ]);
+    expect(
+      container.querySelector(".card .wait-tag")!.textContent!.trim(),
+    ).toBe("resumes on its own");
+  });
+
+  it("leaves the subtitle's human count to the humans", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        waiting: "schedule",
+        resumesAt: "2026-09-14T02:28:00.000Z",
+      }),
+      task({ key: "VIB-2", stage: "impl", waiting: "human" }),
+    ]);
+    // The live reading this replaces said "5 waiting on a human" with four of
+    // the five waiting on a clock.
+    expect(subtitle(container)).toBe(
+      "2 tasks · 1 waiting on a human in this project",
+    );
+  });
+});
+
 describe("LV-20 family: the board subtitle counts what the projection says", () => {
   it("does not count a done task whose projected waiting is none", () => {
     const { container } = renderBoard([

@@ -33,7 +33,15 @@ export const READINESS_VALUES = [
 ] as const;
 export type Readiness = (typeof READINESS_VALUES)[number];
 
-export const WAITING_VALUES = ["human", "agent", "none"] as const;
+// Ruling 225 (F37-45): `schedule` is a DERIVED display value, produced only by
+// the projection (`rebuildPath`) when a task is resting on a clock rather than
+// on a person — `waiting: human` in the file, no packet, no recommendation,
+// nothing a human could accept, and a pending schedule occurrence that will
+// pick the task back up on its own. It is never hand-authored and never
+// written to a task file, exactly like `validation: "bypassed"` below; it is a
+// member of the enum because it rides the same projected column, and the
+// round-trip that reads that column back must accept it.
+export const WAITING_VALUES = ["human", "agent", "none", "schedule"] as const;
 export type Waiting = (typeof WAITING_VALUES)[number];
 
 // N20-14 (§5c / C2): `bypassed` is a DERIVED display value produced only by

@@ -7,6 +7,7 @@ import {
   mapPrChecks,
   mapPrReview,
   mapTaskProjectionRow,
+  nextScheduleDueAt,
   withLiveAgentIdentities,
   type LiveAgentIdentity,
   type TaskProjectionRow,
@@ -23,6 +24,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     stage: "review",
     readiness: "ready",
     stored_readiness: "ready",
+    schedules_json: "[]",
     waiting: "human",
     urgent: 0,
     priority: "normal",
@@ -676,5 +678,51 @@ describe("withLiveAgentIdentities (live deployment wins over the engage-time sna
     const summary = summarize(row(), false);
     const live = identities([["developer", { backend: "claude", name: "Developer" }]]);
     expect(withLiveAgentIdentities(summary, live)).toBe(summary);
+  });
+});
+
+/**
+ * Ruling 225 (F37-45): the card names the instant a clock-resting task picks
+ * itself back up. The read boundary is where a corrupt value must stop, the
+ * same rule `parseTaskLabels` follows.
+ */
+describe("nextScheduleDueAt", () => {
+  const occurrence = (dueAt: string, status: string) => ({
+    id: `sch_${dueAt}`,
+    action: "run-operator",
+    dueAt,
+    status,
+  });
+
+  it("answers the occurrence that fires NEXT, not the one listed first", () => {
+    expect(
+      nextScheduleDueAt(
+        JSON.stringify([
+          occurrence("2026-09-14T06:00:00.000Z", "pending"),
+          occurrence("2026-09-14T02:28:00.000Z", "pending"),
+        ]),
+      ),
+    ).toBe("2026-09-14T02:28:00.000Z");
+  });
+
+  it("ignores occurrences that already fired", () => {
+    expect(
+      nextScheduleDueAt(
+        JSON.stringify([
+          occurrence("2026-09-13T08:19:58.271Z", "fired"),
+          occurrence("2026-09-14T02:28:00.000Z", "pending"),
+        ]),
+      ),
+    ).toBe("2026-09-14T02:28:00.000Z");
+    expect(
+      nextScheduleDueAt(JSON.stringify([occurrence("2026-09-13T08:19:58.271Z", "fired")])),
+    ).toBeNull();
+  });
+
+  it("yields no time rather than throwing on a value it cannot read", () => {
+    expect(nextScheduleDueAt("not json")).toBeNull();
+    expect(nextScheduleDueAt("[]")).toBeNull();
+    expect(nextScheduleDueAt(JSON.stringify([{ nonsense: true }]))).toBeNull();
+    expect(nextScheduleDueAt(JSON.stringify([occurrence("whenever", "pending")]))).toBeNull();
   });
 });

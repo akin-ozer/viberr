@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { VALIDATION_VALUES } from "~/schemas/task-file.schema";
+import { VALIDATION_VALUES, WAITING_VALUES } from "~/schemas/task-file.schema";
 import { NOTIFICATION_KINDS } from "~/shared/mapping/notification.server";
 import { runMigrations } from "./db/migration-runner.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
@@ -196,6 +196,16 @@ function notificationKindGaps(db: DatabaseSync): string[] {
 export function projectionCheckGaps(db: DatabaseSync): string[] {
   return [
     ...projectionValidationGaps(db).map((value) => `task_projections.validation: ${value}`),
+    // Ruling 225 (F37-45): the THIRD instance of this drift, and the one that
+    // shows the read above was a list of the columns someone had been bitten by
+    // rather than of the columns at risk. `waiting` is a CHECK over a TS enum
+    // the projector derives into, exactly like `validation` beside it, and when
+    // `schedule` joined the enum the live root refused it with the same
+    // swallowed "projection rebuild failed" and the same stale row. Every such
+    // column belongs here the day it is written, not the day it breaks.
+    ...checkListGaps(db, "task_projections", "waiting", WAITING_VALUES).map(
+      (value) => `task_projections.waiting: ${value}`,
+    ),
     ...notificationKindGaps(db).map((value) => `notifications.kind: ${value}`),
   ];
 }

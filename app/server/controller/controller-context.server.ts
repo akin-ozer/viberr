@@ -221,7 +221,12 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
     task.title,
     `stage ${stageNameOf(stages, task.stage)}`,
     task.readiness,
-    `waiting ${task.waiting}`,
+    // Ruling 225: `waiting schedule` alone would read as a state the controller
+    // has to do something about. It is the opposite — the task moves on its
+    // own — so the line carries the instant and says nothing else is needed.
+    task.waiting === "schedule" && task.resumesAt
+      ? `waiting on a schedule that runs at ${task.resumesAt}`
+      : `waiting ${task.waiting}`,
     `owner ${ownerName(task)}`,
     task.priority,
   ];
@@ -343,6 +348,10 @@ function boardContext(
       ? `, and ${roster.length - shownMembers.length} more; get_project lists them`
       : "");
   const waitingHuman = open.filter((t) => t.waiting === "human").length;
+  // Ruling 225: counted apart from the human wait, and named, so the controller
+  // neither treats a clock rest as work it must unblock nor re-dispatches a
+  // task that is already coming back on its own.
+  const waitingSchedule = open.filter((t) => t.waiting === "schedule").length;
   const sorted = [...open].sort((a, b) =>
     (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
   );
@@ -376,7 +385,7 @@ function boardContext(
     `repo: ${project.repo ?? "none"} · members: ${members || "none"}\n` +
     `stages: ${stages}\n` +
     `boundaries: ${boundaries || "none declared"}\n` +
-    `open tasks: ${open.length} (${waitingHuman} waiting on a human${archived ? `, ${archived} archived` : ""})\n` +
+    `open tasks: ${open.length} (${waitingHuman} waiting on a human${waitingSchedule > 0 ? `, ${waitingSchedule} resuming on a schedule` : ""}${archived ? `, ${archived} archived` : ""})\n` +
     (lines.length ? `${lines.join("\n")}\n` : "") +
     `goal chains: ${goals.length ? `\n${goals.join("\n")}` : "none"}`
   );

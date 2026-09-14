@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -17,6 +17,7 @@ import type {
   ParsedTaskFile,
   TaskFrontmatter,
   TaskPacket,
+  TaskSchedule,
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
@@ -1360,6 +1361,207 @@ describe("task dependencies projection (ruling 131)", () => {
         },
         { task_key: "VIB-8", readiness: "ready", stored_readiness: "ready", blocked_by_json: "[]" },
       ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});
+
+/**
+ * Ruling 225 (F37-45). The live failure: ruling 224 taught viberr to answer a
+ * shut quota window by scheduling its own resumption, and four pass-37 tasks
+ * did exactly that — packet resolved, `run-operator` pending for 02:28 UTC,
+ * nothing asked of anybody. Every card still read "waiting on a human" and the
+ * board header counted them, because `waiting: human` is simply what
+ * `clearWaitingToHuman` writes when the last run ends. The packet that put them
+ * there had promised "Nothing runs until then and the board says so."
+ *
+ * These assert the derivation and, just as hard, its LIMITS: a decision a human
+ * can act on always outranks the clock, because `decisionsRequiring` reads this
+ * same column and a wrong answer here would hide work rather than describe it.
+ */
+describe("ruling 225: a task resting on a clock", () => {
+  /**
+   * The live shape these four tasks were in: delivered work at the review
+   * boundary with no approving verdict, so no human can accept it either. That
+   * last clause is load-bearing — a task a human COULD accept is a decision,
+   * and stays one (see the packet and recommendation cases below).
+   */
+  const unaccepted: Partial<TaskFrontmatter> = {
+    stage: "review",
+    readiness: "ready",
+    waiting: "human",
+    validation: "changed",
+    engagements: [
+      {
+        profileId: "code-reviewer",
+        backend: "codex",
+        role: "Code Reviewer",
+        delivers: false,
+        verdictCapable: true,
+      },
+    ],
+    workRevision: {
+      id: "rev_1",
+      headSha: "b".repeat(40),
+      treeSha: "c".repeat(40),
+      branch: "vib-1",
+      createdAt: "2026-09-13T23:11:18.732Z",
+      sourceProfileId: "developer",
+      kind: "delivered",
+      pushedAt: "2026-09-13T23:11:54.461Z",
+    },
+    verdicts: [],
+  };
+
+  /** An open decision a human can act on, in the shape `decisions.server` counts. */
+  const OPEN_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Pick one",
+    body: "",
+    observations: [],
+    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+  };
+
+  const pending = (dueAt: string, patch: Partial<TaskSchedule> = {}): TaskSchedule => ({
+    id: `sch_${dueAt}`,
+    action: "run-operator" as const,
+    dueAt,
+    profileId: null,
+    prompt: "The usage window reopened.",
+    createdBy: "u_1",
+    createdByLabel: "Arda",
+    createdAt: "2026-09-14T00:14:57.815Z",
+    status: "pending" as const,
+    firedAt: null,
+    claimedAt: null,
+    retries: 0,
+    ...patch,
+  });
+
+  it("projects `schedule`, and names the earliest pending instant", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          // The LATER occurrence is written first on purpose: the answer is the
+          // one that fires next, not the one that happens to be listed first.
+          schedules: [
+            pending("2026-09-14T06:00:00.000Z"),
+            pending("2026-09-14T02:28:00.000Z"),
+          ],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).toBe("schedule");
+      expect(task.resumesAt).toBe("2026-09-14T02:28:00.000Z");
+      // The canonical file is untouched — this is a derived display value, the
+      // same contract LV-20's terminal `none` keeps.
+      expect(
+        readFileSync(taskFilePath(store.slug, "VIB-1", store.dataRoot), "utf8"),
+      ).toContain("waiting: human");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("leaves an already-fired schedule alone", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          schedules: [
+            pending("2026-09-13T08:19:58.271Z", {
+              status: "fired",
+              firedAt: "2026-09-13T08:20:09.950Z",
+            }),
+          ],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).toBe("human");
+      expect(task.resumesAt ?? null).toBeNull();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("lets an open packet outrank the clock", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          readiness: "input_required",
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+        packet: OPEN_PACKET,
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      // The schedule does not take the decision off anybody's hands, so the
+      // task still says a human is needed — and `decisionsRequiring`, which
+      // filters on this column, still counts it.
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("human");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("lets a pending recommendation outrank the clock", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+          recommendations: [
+            {
+              id: "rec_1",
+              kind: "transition" as const,
+              toStageId: "done",
+              label: "Move this to Done",
+              detail: "The work looks finished.",
+            },
+          ],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("human");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("never lets a hand-authored `schedule` claim a rest it has not earned", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          // Nothing authors this value; a file that carries it anyway must not
+          // be able to talk the board out of naming a human.
+          waiting: "schedule",
+          schedules: [],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("human");
     } finally {
       ctx.cleanup();
     }

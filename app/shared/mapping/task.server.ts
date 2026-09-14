@@ -31,6 +31,36 @@ export function parseTaskLabels(labelsJson: string): string[] {
     return [];
   }
 }
+
+/** Ruling 225: the pending occurrences of `schedules_json`, at this read
+ *  boundary and through a schema, for the same reason labels are — a corrupt
+ *  value yields no time rather than throwing on a loader path. Only `dueAt`
+ *  and `status` are read; the rest of the occurrence belongs to the schedule
+ *  runner, not to a card. */
+const PENDING_SCHEDULES_SCHEMA = z
+  .array(z.object({ dueAt: z.string(), status: z.string() }).loose())
+  .catch([]);
+
+/**
+ * The instant a clock-resting task picks itself back up: the EARLIEST pending
+ * occurrence, because that is the one that will fire first and therefore the
+ * only one a reader is owed. Null when nothing is pending — which the caller
+ * has already ruled out via `waiting`, so this is the belt to that braces.
+ */
+export function nextScheduleDueAt(schedulesJson: string): string | null {
+  let parsed: { dueAt: string; status: string }[];
+  try {
+    parsed = PENDING_SCHEDULES_SCHEMA.parse(JSON.parse(schedulesJson));
+  } catch {
+    return null;
+  }
+  const due = parsed
+    .filter((o) => o.status === "pending")
+    .map((o) => o.dueAt)
+    .filter((at) => !Number.isNaN(Date.parse(at)))
+    .sort();
+  return due[0] ?? null;
+}
 import {
   agentRoleDisplay,
   decodeActorRef,
@@ -60,6 +90,10 @@ export type TaskProjectionRow = {
   due_date: string | null;
   /** Ruling 131 (pass 34): the task file's `blockedBy` list, verbatim JSON. */
   blocked_by_json: string;
+  /** Ruling 225: the task file's `schedules` list, verbatim JSON. Read only to
+   *  answer WHEN a clock-resting task picks itself back up — the projected
+   *  `waiting` already answers WHETHER. */
+  schedules_json: string;
   archived: 0 | 1;
   validation: Validation;
   validation_block_reason: string | null;
@@ -199,6 +233,15 @@ export interface TaskSummary {
    * "Waiting on me" chip + per-card badge read this, member-scoped, instead of
    * the project-wide `waiting === "human"` enum. */
   waitingOnMe?: boolean;
+  /**
+   * Ruling 225 (F37-45): when this task rests on a clock (`waiting:
+   * "schedule"`), the instant it picks itself back up — so the card can say
+   * so instead of naming a person who has nothing to do. Null for every other
+   * waiting state, INCLUDING a task that carries a pending schedule while a
+   * human decision is also open: there the decision is the answer, and this
+   * would only compete with it.
+   */
+  resumesAt?: string | null;
   urgent: boolean;
   /** Pass-25 task metadata. */
   priority: TaskPriority;
@@ -725,6 +768,7 @@ export function mapTaskProjectionRow(
           row.stored_readiness === "blocked" && context.blockedBy.length === 0,
         ),
     waiting: row.waiting,
+    resumesAt: row.waiting === "schedule" ? nextScheduleDueAt(row.schedules_json) : null,
     urgent: row.urgent === 1,
     priority: row.priority,
     labels: parseTaskLabels(row.labels_json),

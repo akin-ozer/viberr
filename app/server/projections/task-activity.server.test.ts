@@ -140,6 +140,55 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
     ).toBe(false);
   });
 
+  /**
+   * Ruling 225 (F37-45). A task resting on a clock is between two moves, on
+   * purpose, and the gap can be hours — the agent threshold would light the
+   * "no activity" cue on the healthiest wait there is. But a schedule that came
+   * DUE and did not fire is a real stall (the runner is what broke), so the
+   * idle clock restarts at the due instant instead of being switched off.
+   */
+  it("measures a clock rest from its due instant, not its last event", () => {
+    // Silent for six hours, resuming in two: not quiet, whatever the timeline
+    // says — the agent threshold is one hour.
+    expect(
+      isQuiet({
+        ...base,
+        waiting: "schedule",
+        lastActivityAt: ago(6 * 60 * 60_000),
+        resumesAt: new Date(NOW.getTime() + 2 * 60 * 60_000).toISOString(),
+      }),
+    ).toBe(false);
+
+    // Due an hour ago and still sitting there: late, but a schedule runner is
+    // allowed to be late. Only past the human threshold is it a stall.
+    expect(
+      isQuiet({
+        ...base,
+        waiting: "schedule",
+        lastActivityAt: ago(6 * 60 * 60_000),
+        resumesAt: ago(60 * 60_000),
+      }),
+    ).toBe(false);
+    expect(
+      isQuiet({
+        ...base,
+        waiting: "schedule",
+        lastActivityAt: ago(6 * 60 * 60_000),
+        resumesAt: ago(QUIET_AFTER_HUMAN_MS + 1000),
+      }),
+    ).toBe(true);
+
+    // No instant to measure against: say nothing rather than guess.
+    expect(
+      isQuiet({
+        ...base,
+        waiting: "schedule",
+        lastActivityAt: ago(30 * 24 * 60 * 60_000),
+        resumesAt: null,
+      }),
+    ).toBe(false);
+  });
+
   it("leaves a human-waiting task alone overnight, and over a weekend", () => {
     // The explicit design constraint: a task waiting on a human overnight is
     // normal, and a Friday-evening decision picked up Monday morning (~60h) must

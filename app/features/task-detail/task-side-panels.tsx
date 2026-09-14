@@ -14,7 +14,7 @@ import { Icon } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
-import { LocalRelative } from "~/ui/local-time";
+import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
@@ -874,6 +874,23 @@ export function CurrentStatePanel({
                 title="A human decision is needed: see the decision packet, the stage control, or the acceptance action on this page."
               >
                 a human
+              </span>
+            ) : task.waiting === "schedule" ? (
+              // Ruling 225 (F37-45): the rail's job is to name who owes
+              // something. Nobody does — a schedule will pick this task back
+              // up. Saying "a human" here was the same false demand the board
+              // card made, one surface over.
+              <span
+                className="by-schedule"
+                title="No decision is needed: a scheduled run picks this task back up on its own. The Schedules panel below can change or cancel it."
+              >
+                {task.resumesAt ? (
+                  <>
+                    a schedule · <LocalDayDotTime iso={task.resumesAt} />
+                  </>
+                ) : (
+                  "a schedule"
+                )}
               </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>

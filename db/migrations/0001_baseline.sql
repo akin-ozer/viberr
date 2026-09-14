@@ -80,7 +80,12 @@ CREATE TABLE task_projections (
     ('ready', 'input_required', 'inconsistency_risk_detected', 'blocked')),
   -- Raw stored value from the file (NULL when missing/invalid there).
   stored_readiness TEXT,
-  waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none')),
+  -- Ruling 225: `schedule` is derived by the projector, never authored in a
+  -- task file. It belongs here anyway, because this CHECK is what the store
+  -- would have used to refuse the derived value — a refusal that surfaces as
+  -- "projection rebuild failed" and a stale row, which is precisely the
+  -- silent-staleness failure boot.server.ts probes this column for.
+  waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none', 'schedule')),
   urgent INTEGER NOT NULL DEFAULT 0,
   -- Pass-25 task metadata: graded priority (urgent is derived into `urgent`
   -- above for the existing board highlight), triage labels (JSON array), and an
