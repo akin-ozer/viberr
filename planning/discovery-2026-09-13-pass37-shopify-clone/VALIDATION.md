@@ -1877,3 +1877,42 @@ only visible by trying to break the test.
 
 The second is the more useful record. A test that cannot go red is not a weak test, it is a
 statement that the code under it does nothing.
+
+### Ruling 237 fired live on SHOP-24, and the firing exposed a defect in itself
+
+First live firing, 2026-09-14:
+
+```
+13:52:53.471Z  comment    Code Reviewer: "Request changes. 1. pnpm-lock.yaml … outside apps/storefront/**"
+13:52:53.476Z  quality    Validation: failing. Code Reviewer requested changes on 170001dacfbf
+13:52:53.476Z  comment    Decision packet: Code Reviewer has requested changes 2 times running
+13:52:53.488Z  audit      task.review.deadlock  {"profileId":"code-reviewer","rounds":2}
+13:52:53.585Z  run        run_eTkChvi66jaH  operator  running          ← 97ms after the packet
+```
+
+The card rendered exactly as designed — `from ⚙ policy-engine`, the reviewer and deliverer named
+as handles, `ROUNDS 2 consecutive request-changes verdicts, no approve between them`, the latest
+objection quoted, and "Ask Code Reviewer what else it would block on" recommended. Two rounds on
+two different revisions, which is the shape the threshold is for.
+
+**And the state panel beside it read `Waiting on: Agent work`.** The operator started 97ms after
+the packet opened, because the completion's own react is an `agent-reply` trigger and ruling 195
+records that carve-out in as many words: *"a packet opened mid-work does NOT stop the machine
+triggers, so the operator kept coordinating and dispatched a deliverer."* I had written
+"Coordination is paused until you say which" onto the card on the assumption that every packet
+pauses coordination, and had even written that assumption into the ruling's own module comment.
+
+That turn was benign in the event — it posted evidence for @Arda rather than re-dispatching — and
+that is worth saying plainly rather than dressing up: the failure was possible, not realised. But
+nothing constrained it, and the move it was free to make is the re-dispatch the packet exists to
+interrupt.
+
+Fixed two ways. The completion that raises the packet no longer reacts (canaried: remove the arm
+and a second operator run appears, `expected 2 to be 1`). And the copy now states what happened
+instead of promising a future the mechanism does not guarantee: "Nothing was dispatched on this
+objection: the task is on you."
+
+The canary is worth its own note. The first version of that test asserted the operator-run count
+and passed with the guard removed — because the fixture deploys no operator, so the react returned
+early and the assertion was vacuous. A test that passes when you break the code is not evidence,
+and the only way to find out was to try to break it.

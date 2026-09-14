@@ -20,10 +20,17 @@
  * every move it had, and nothing here inspects or refuses its dispatches: a
  * fresh class of finding on round three is sometimes exactly right, and a gate
  * would block that. What changes is that the second objection now reaches a
- * person by itself. The pause that follows is the one every decision packet
- * has carried since ruling 76 (`operator-run.server.ts`: a packet IS the
- * human's move, so coordination waits for it), not a new constraint invented
- * for this case.
+ * person by itself, and the completion that raises it does NOT then hand the
+ * task to the operator.
+ *
+ * That last clause is load-bearing and was nearly missed. Ruling 195 records
+ * that "a packet opened mid-work does NOT stop the machine triggers", and the
+ * react at the end of an agent completion is one (`agent-reply`). Live on
+ * SHOP-24 the packet's audit row landed at 13:52:53.488Z and an operator run
+ * started at 13:52:53.585Z — 97 milliseconds later — on a card telling a person
+ * the task was waiting for them. The card's copy states what HAPPENED rather
+ * than promising a future: the other machine triggers keep ruling 195's
+ * carve-out, and a packet is not a lock.
  *
  * Written by the POLICY ENGINE, not through `operatorOpenPacket`, and for
  * ruling 226's reason: that door checks the operator's own `generate-packets`
@@ -187,7 +194,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       ". " +
       "Two rounds is where another rework stops being the obvious move: either the reviewer is " +
       "paying out its findings one at a time, or it is asking for something this deliverable " +
-      "cannot give it. Coordination is paused until you say which.\n\n" +
+      "cannot give it. Nothing was dispatched on this objection: the task is on you.\n\n" +
       "If this reviewer can never pass the work, the door is the project's required reviewers " +
       "in project settings; change them there, then resolve this.",
     observations,

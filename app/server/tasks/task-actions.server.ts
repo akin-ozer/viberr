@@ -3161,7 +3161,10 @@ export async function recordAgentCompletion(
      *  the producing message names its own files. */
     attachments?: string[] | null;
   },
-): Promise<void> {
+  /** Ruling 237: reports whether this completion RAISED the review-deadlock
+   *  packet. The caller needs it to decide whether to hand the task back to the
+   *  operator — see the escalation arm in `applyAgentCompletionEffects`. */
+): Promise<{ escalated: boolean }> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
   const attachments = sanitizeEventAttachmentNames(input.attachments);
@@ -3210,7 +3213,7 @@ export async function recordAgentCompletion(
     if (suppressedReason) {
       recordAgentRepliedAudit(db, projectSlug, taskKey, runId, suppressedReason);
     }
-    return;
+    return { escalated: false };
   }
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
@@ -3692,6 +3695,9 @@ export async function recordAgentCompletion(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+  // Ruling 237: when the write above threw, nothing was escalated and the
+  // caller reacts exactly as it always did.
+  return { escalated: deadlockEscalation.packet !== null };
 }
 
 /**
@@ -4035,6 +4041,10 @@ export async function applyAgentCompletionEffects(
   finished: { id: string; state: string },
 ): Promise<void> {
   const { fullReplyTextForRun } = await import("./agent-reply.server");
+  /** Ruling 237: this completion's own verdict raised the review-deadlock
+   *  packet, so the operator react at the end of this function is suppressed —
+   *  see the arm that reads it. */
+  let raisedDeadlockPacket = false;
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
@@ -4317,7 +4327,7 @@ export async function applyAgentCompletionEffects(
       ...(collab.evidence ? (outcome?.evidence ?? []) : []),
       ...(completionFm ? deliveredWorkEvidence(completionFm) : []),
     ];
-    await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
+    const recorded = await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
       actorRef,
       runId: finished.id,
       replyText,
@@ -4326,6 +4336,7 @@ export async function applyAgentCompletionEffects(
       evidence,
       attachments: runAttachments,
     });
+    if (recorded.escalated) raisedDeadlockPacket = true;
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
     // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
     // verdict (no envelope, no classifiable prose). Validation is left unchanged
@@ -4791,6 +4802,23 @@ export async function applyAgentCompletionEffects(
       await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
       return;
     }
+  }
+  // Ruling 237: the verdict recorded above raised the deadlock packet, so the
+  // task belongs to a person now. The react below is a MACHINE trigger
+  // (`agent-reply`), which ruling 195 records as deliberately NOT refused by an
+  // open packet: "a packet opened mid-work does NOT stop the machine triggers,
+  // so the operator kept coordinating and dispatched a deliverer". That
+  // carve-out is right for a packet the operator opened mid-run and can
+  // withdraw, and exactly wrong for this one — the next thing the operator does
+  // is the re-dispatch the packet exists to interrupt, while the card tells a
+  // person coordination is paused. Same shape as the closed-task arm above: the
+  // report is on the record, and nothing follows it.
+  if (raisedDeadlockPacket) {
+    logger.info("operator react skipped — this completion raised the review-deadlock packet", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+    });
+    return;
   }
   const shouldReact = operatorShouldReactToReply(
     finished.state,

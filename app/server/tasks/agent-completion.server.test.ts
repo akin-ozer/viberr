@@ -159,6 +159,36 @@ function writeReviewTask(
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
+/** Add an operator deployment to the fixture project, so the completion react
+ *  actually reaches `runOperator` — with none deployed it returns early and any
+ *  assertion about the react is vacuous. */
+function deployOperator(): void {
+  const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...pf.parsed.frontmatter,
+    agents: [
+      ...pf.parsed.frontmatter.agents,
+      {
+        profileId: "operator",
+        capabilities: [
+          { capabilityId: "generate-packets", mode: "direct" },
+          { capabilityId: "append-typed-events", mode: "direct" },
+        ],
+        extras: [],
+        definition: {
+          kind: "operator",
+          name: "Operator",
+          role: "Task coordinator",
+          backends: ["claude"],
+          model: "sonnet",
+          autonomy: "supervised",
+        },
+      },
+    ],
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
 function taskFile() {
   return readTaskFile({
     projectSlug: store.slug,
@@ -1013,12 +1043,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       workdir: null,
       agentHandle: profileId,
     });
-    const review = async (reply: string, profileId = "reviewer") => {
+    const review = async (
+      reply: string,
+      profileId = "reviewer",
+      extra: { dispatchedByName?: string } = {},
+    ) => {
       const runId = await finishedRunWith(reply);
       await applyAgentCompletionEffects(
         store.db,
         { dataRoot: store.dataRoot },
-        reviewerInput(profileId),
+        { ...reviewerInput(profileId), ...extra },
         { id: runId, state: "finished" },
       );
     };
@@ -1162,6 +1196,35 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(directive).toContain("do NOT return a verdict");
       expect(taskFile().parsed.packet).toBeNull();
       expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
+    });
+
+    it("does NOT hand the task back to the operator on the completion that raised it", async () => {
+      // The packet says "Coordination is paused until you say which", and the
+      // react at the end of this very completion is an `agent-reply` trigger —
+      // which ruling 195 records as deliberately NOT refused by an open packet.
+      // Left alone, the operator gets a turn seconds after the packet opens and
+      // can do the exact re-dispatch the packet exists to interrupt, while the
+      // card tells a person nothing is moving.
+      // CANARY: delete the `raisedDeadlockPacket` arm and the operator runs.
+      deployOperator();
+      const operatorRuns = () =>
+        // SAFETY: COUNT(*) over this store's own table is always an integer.
+        (
+          store.db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ? AND kind = 'operator'`,
+            )
+            .get(store.slug) as { n: number }
+        ).n;
+      writeReviewTask();
+      await review(blocks(1));
+      const before = operatorRuns();
+
+      await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
+      expect(taskFile().parsed.packet).not.toBeNull();
+      expect(operatorRuns()).toBe(before);
+      // The task is on a person, which is what the card claims.
+      expect(taskFile().parsed.frontmatter.waiting).toBe("human");
     });
 
     it("ruling 177: no packet on a task that CLOSED while the reviewer was running", async () => {

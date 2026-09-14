@@ -5174,6 +5174,18 @@ by rewriting those paragraphs:*
     NOT an option: the resolution cannot edit project settings, and ruling 164 already
     established that an option whose title promises what its resolution does not do is worse
     than no option.
+    The completion that RAISES the packet does not then hand the task to the operator, and
+    that clause is load-bearing. Ruling 195 records that "a packet opened mid-work does NOT
+    stop the machine triggers", and the react at the end of an agent completion is one
+    (`agent-reply`, deliberately outside `PACKET_REFUSED_TRIGGERS`). Live on SHOP-24 the
+    first firing proved it: the `task.review.deadlock` audit row landed at 13:52:53.488Z and
+    an operator run started at 13:52:53.585Z, 97 milliseconds later, while the card told a
+    person the task was theirs. That turn happened to be benign — it posted evidence for the
+    human — but nothing constrained it, and the move it is free to make is the re-dispatch
+    this packet exists to interrupt. The other machine triggers keep ruling 195's carve-out;
+    a packet is not a lock, and the card's copy now states what HAPPENED ("Nothing was
+    dispatched on this objection: the task is on you") instead of promising a future the
+    mechanism does not guarantee.
     Writing the packet directly rather than through `operatorOpenPacket` means carrying that
     door's guards too, and an adversarial pass over this ruling's own code found one missing:
     ruling 177 refuses a packet on a CLOSED task, and a reviewer run that finishes after its
