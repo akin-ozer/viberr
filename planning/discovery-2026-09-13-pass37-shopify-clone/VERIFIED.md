@@ -987,3 +987,52 @@ external, irreversible publish — a workspace merge pushed to origin — so a p
 verdict flipped during the await must refuse BEFORE the push, not after it.
 
 Promise made at Verify, kept at acceptance, on the one path that merges. No finding.
+
+## The coordination test: what actually collided, and what caught it
+
+The goal called a monorepo of many services "a coordination test too — let the controller
+sequence that, and watch what collides." Here is what collided on the night of the 13th–14th,
+with five service branches open at once.
+
+### Collision 1 — the shared lockfile, which cannot be made additive
+
+`pnpm-lock.yaml` is generated from the whole workspace at once, so every new service touches it
+and no discipline about owned paths can prevent that. Twelve of the twenty tasks reference it.
+Five branches took a request-changes for the same root cause: a new service importer against a
+peer-qualified eslint snapshot, so `--frozen-lockfile` failed cold. Live at 03:41, SHOP-2's
+Integration Verifier failed `make up` with `ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY` on the exact
+revision its Code Reviewer had approved twenty minutes earlier.
+
+**The controller had already diagnosed it.** I put the sequencing question to it as a fresh
+observation, and found its own creation note for SHOP-20 in the agent log, dated the 13th:
+
+> *`pnpm-lock.yaml` is the hardest shared surface in this repository — every service task must
+> change it, its content is generated from the whole workspace at once, and it therefore cannot
+> be made additive the way the route table, the stack manifests and the CI matrix were… One
+> cause, five rework rounds, and a guaranteed conflict on every merge after the first. **This
+> task stops that recurring for the services that have not been built yet.***
+
+Which explains the dependency direction I had gone to question it about. SHOP-20 is blocked by
+the five in-flight services deliberately: it can only declare every workspace once those have
+settled their own `package.json`, and its purpose is the services still to come, not the five
+already paying. The sequencing is reasoned, and it is right.
+
+### Collision 2 — a shared placeholder each service got wrong separately
+
+`stack/gateway.json` on `main` sends a gateway secret; each service branch adds its own
+`stack/<service>.json` that must match it. SHOP-2 and SHOP-3 independently wrote
+`replace-with-local-secret` against the gateway's `replace-with-a-local-gateway-secret`. Neither
+could see the other's branch.
+
+**Both were caught by a required reviewer before merge**, within an hour of each other, each with
+the file and line named. That is the mechanism working as designed: parallel branches cannot see
+each other, so the thing that catches cross-branch drift is the review gate, and it did — twice,
+independently, on two different services.
+
+### What this says
+
+Two collisions, two different answers, neither of them a defect. The one that could be
+engineered away (manifests, route table, CI matrix) was made additive by design. The one that
+cannot be (a lockfile generated from the whole workspace) was given its own serialized task, with
+its dependency direction chosen on purpose. The rest is caught at review. That is what a working
+coordination model looks like under five concurrent branches.
