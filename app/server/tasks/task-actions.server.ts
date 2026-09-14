@@ -10243,7 +10243,10 @@ async function recordUnpushedHeadRefusal(
   refusal: string,
 ): Promise<void> {
   try {
-    const text = `**Acceptance refused:** ${refusal}`;
+    // The TITLE already says "Acceptance refused"; the renderer prints both, so
+    // a prefix here reads as "Acceptance refused: ... Acceptance refused: ...".
+    // Seen on the live Activity feed the first time this row rendered.
+    const text = refusal;
     const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const newest = existing?.parsed.timeline.find(
       (e) => e.type === "github" && e.title === UNPUSHED_HEAD_TITLE,

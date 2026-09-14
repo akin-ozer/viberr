@@ -358,6 +358,13 @@ const auditDetailsSchema = z.object({
   rules: z
     .array(z.object({ stageName: z.string().catch("?"), agentName: z.string().catch("?") }))
     .catch([]),
+  // Ruling 235: the two SHAs and the pull request a refused acceptance named.
+  // Without these the row falls back to the humanised action id, which is the
+  // one line on the audit panel that reads like a machine label instead of a
+  // sentence a person can act on.
+  prNumber: z.number().optional().catch(undefined),
+  revisionHeadSha: detailText,
+  liveHeadSha: detailText,
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -506,6 +513,15 @@ function auditText(
     // force-accept" is advice for a decision nobody still has to make. The
     // reason/remediation halves are split by a sentence boundary; rows recorded
     // before the copy was de-dashed used an em dash, so both are handled.
+    case "task.acceptance.head_unpushed": {
+      // Ruling 235. Deliberately not "<actor> did X": the actor on this row is
+      // the policy engine, and what a reader needs is WHICH revision was
+      // reviewed against WHICH head, in the same shape the refusal itself used.
+      const pr = d.prNumber ? `**PR #${d.prNumber}**` : "the review PR";
+      const reviewed = d.revisionHeadSha ? `\`${d.revisionHeadSha.slice(0, 7)}\`` : "the reviewed revision";
+      const live = d.liveHeadSha ? ` (head \`${d.liveHeadSha.slice(0, 7)}\`)` : "";
+      return `Acceptance refused: ${reviewed} is not on ${pr}${live}, so the merge would not have carried the reviewed work, on`;
+    }
     case "task.acceptance.forced": {
       const bypassed = d.bypassed;
       if (!bypassed || bypassed.startsWith("no gate")) {
