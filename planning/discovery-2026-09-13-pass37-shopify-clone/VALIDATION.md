@@ -1664,3 +1664,33 @@ merge landed the reviewed code.
 Nine canaries across this session, each red on only its own tests. For ruling 235 specifically:
 dropping `liveHeadSha` from the definite branch (the original defect) fails both tests; skipping
 the recorder fails both; dropping the idempotence guard fails only the twice-pressed one.
+
+### The contrast that shows ruling 235 was the odd one out
+
+Immediately after SHOP-2 merged, accepting SHOP-12 hit a DIFFERENT gate: SHOP-2's merge had moved
+`main`, so PR #14 now conflicted. That path already did everything the head gate did not:
+
+```
+toast            "SHOP-12's review PR #14 conflicts with the base branch. GitHub can't merge
+                  it, so it can't be accepted. Rebase the branch and re-review, or archive."
+timeline event   "The acceptance-time refresh found `shop-12` in CONFLICT with `main` in
+                  pnpm-lock.yaml, scripts/stack.test.mjs. The merge was aborted, the branch is
+                  untouched..."                          <- names the conflicting FILES
+audit            github.branch_update.acceptance
+review queue     the row's status line IS the conflict sentence
+"Waiting on your acceptance"   1 of 6 - SHOP-12 excluded from the acceptable set
+```
+
+So the conflict refusal is durable, file-level specific, and visible on the surface a human scans,
+while the head refusal reached only a toast. Same ceremony, same button, two gates, opposite
+treatment - which is what made F37-55 a defect rather than a design choice.
+
+It also started **no** operator run, and that is correct rather than a second gap: viberr's own
+operator persona says *"A CONFLICT is not yours to settle"* and *"never propose forcing the
+branch"*. A conflict is a human's to resolve; an unpushed branch is the operator's to push. Ruling
+235 hands off only the second.
+
+**And ruling 235 stayed silent on the clean path.** SHOP-12's delivered revision `f2d481aab5ab`
+matched PR #14's head exactly, so the head gate passed and wrote nothing: zero `Acceptance
+refused` notes, zero `task.acceptance.head_unpushed` rows. The new recorder fires on the mismatch
+it was written for and adds no noise to a healthy acceptance.
