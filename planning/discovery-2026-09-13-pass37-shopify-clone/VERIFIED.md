@@ -1777,3 +1777,44 @@ Three of the goal's named surfaces fall out of this one check:
 
 And the arithmetic closes against the files: 21 task files carry a real `pr.number`, the other 5
 (SHOP-8, 13, 14, 20, 26) carry `branch: null` and no PR and are all still in triage. 21 + 5 = 26.
+
+## The whole dependency graph, traced for a deadlock — ACYCLIC, and rooted where the work is (2026-09-14 19:1x UTC)
+
+Seven chained goals, three completed, four active. Each active goal carries exactly ONE active link
+with a real task and the rest `pending`, which is ruling 131(c)'s sequential chain doing its job:
+
+```
+goal-3 link 2 → SHOP-26     goal-5 link 1 → SHOP-5
+goal-6 link 1 → SHOP-12     goal-7 link 1 → SHOP-13
+```
+
+Every held task's list, resolved:
+
+```
+SHOP-11 → SHOP-14, SHOP-21(done), SHOP-5
+SHOP-13 → goal-2 link 2 (goal COMPLETED), SHOP-20
+SHOP-14 → goal-1 link 5 (goal COMPLETED), SHOP-2(done), goal-6 link 1 (= SHOP-12)
+SHOP-20 → SHOP-3(done), SHOP-2(done), SHOP-12, SHOP-11
+SHOP-26 → SHOP-11
+```
+
+Collapsed, that is a DAG with two roots — **SHOP-12 and SHOP-5** — and both were being actively
+worked at the moment of the trace (SHOP-12's Platform Architect resolving its conflict, SHOP-5's
+Infrastructure Engineer on rework). No cycle, nothing waiting on a task that waits on it, and
+nothing waiting on work that will never start. The board is correctly sequenced and its critical
+path is exactly where the agents are.
+
+`waiting: none` on all five held tasks is the documented state, not a stall: `setTaskDependencies`
+writes it when a task has a non-empty `blockedBy` and nothing else pending, because a held task
+waits on OTHER WORK rather than on a person or an agent.
+
+### NEAR-MISS #12 — "SHOP-8 waits on nothing and nobody is driving it"
+
+SHOP-8 appeared in my hand-typed trace list with an empty `blockedBy`, in triage, belonging to no
+goal — which reads as an orphan. It is the day-one **archive probe**, `archived: true` in the file,
+`archived: 1` in the projection, and its newest timeline event is "Archived: SHOP-8 was archived".
+All three agree; archived tasks leave the board by design.
+
+I had carried it over from a board count taken twenty minutes earlier. The authoritative scan
+(non-done AND non-archived) returns 9, which is exactly what Insights claims. Caught in one command,
+and the twelfth time this pass that measuring beat asserting.
