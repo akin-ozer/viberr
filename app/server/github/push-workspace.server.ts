@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { leaseConflictFor, leaseRefusal } from "~/shared/file-leases";
+import { activeFileLeases } from "~/server/tasks/file-leases.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
@@ -929,8 +930,10 @@ export async function pushWorkspaceBranch(
       // defeat the gate, so an unmeasurable diff refuses nothing and says so in
       // the log exactly as ruling 144(c) does.
       {
-        const leases = readProjectFile({ projectSlug, dataRoot })?.parsed.frontmatter
-          .fileLeases ?? [];
+        // Ruling 245(b): the RESOLVED list. A lease whose holder has merged or
+        // been archived binds nobody, and reading the raw frontmatter here let
+        // a completed task fence off a file forever.
+        const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
         if (leases.length > 0) {
           const changed = await changedFilesForPush(
             exec,

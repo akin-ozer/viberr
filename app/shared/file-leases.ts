@@ -26,7 +26,10 @@
 export interface FileLease {
   /** Globs this lease covers. `*` matches within one segment, `**` spans them. */
   paths: string[];
-  /** The ONE task that holds them. Released when it reaches a terminal stage. */
+  /** The ONE task that holds them. A lease whose holder has reached a terminal
+   *  stage or been archived binds nobody — resolved at READ time by
+   *  `activeFileLeases` (ruling 245(b)), never by a sweep that a completion
+   *  path could miss. */
   taskKey: string;
   /** Why it is held, in the holder's own words. Rendered wherever it refuses. */
   reason: string;

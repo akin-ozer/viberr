@@ -5464,6 +5464,27 @@ by rewriting those paragraphs:*
     did. Revisit if a controller is ever seen improvising around the silence.
     (`store-files.server.ts`, `controller-ops-mcp.server.ts`, `controller-toolkit.server.ts`.)
 
+247. **Ruling 245(b): a lease whose HOLDER is finished holds nothing (2026-09-15, pass 37;
+    F37-76).** Ruling 245 shipped with `FileLease.taskKey` documented as "released when it
+    reaches a terminal stage" and NOTHING implementing it. The controller read that contract,
+    believed it, and wrote it into the first real lease's own reason — "Lease releases when
+    SHOP-11 merges". SHOP-11 then merged, and the lease stood: `pnpm-lock.yaml` owned by a
+    completed task, refusing SHOP-5's delivery in the name of work that had already landed,
+    with two records promising the opposite. A comment claiming a mechanism nobody built is
+    the defect this pass has found more often than any other, and ruling 245's own finding
+    note had called a stale lease "its own stale-record problem" in the same breath.
+    Resolved at READ time (`activeFileLeases`), not swept on completion, for ruling 131(e)'s
+    reason: a sweep is a hook some completion path eventually misses, while a resolution
+    converges however the holder finished — accepted, force-accepted, archived, or edited on
+    disk. A holder that no longer EXISTS is spent too: it can neither deliver the file nor
+    release the lease, so binding on it would fence the path off forever in the name of a task
+    nobody can open. Every gate reads through the resolver: the push, and the canonical
+    anchor that tells a run what it may not touch.
+    The stored row stays until someone clears it, which is honest — the declaration was made
+    and is now spent — and `staleFileLeases` names exactly those so a surface can offer to
+    tidy them rather than leaving a person to notice.
+    (`file-leases.server.ts`, `push-workspace.server.ts`, `specialist-run.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

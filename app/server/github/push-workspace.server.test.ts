@@ -1132,11 +1132,39 @@ describe("ruling 245: a leased file refuses the push", () => {
   const REMOTE = "c".repeat(40);
   const range = `${REMOTE}..HEAD`;
   const leaseTo = async (taskKey: string, paths: string[]) => {
+    // Ruling 245(b): the holder must be a LIVE task. A lease naming a task that
+    // is done, archived or absent binds nobody, so a fixture that skipped
+    // seeding it would prove the gate works while actually proving it is
+    // skipped — which is how this test first passed against a phantom holder.
+    if (taskKey !== "VIB-1") {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(taskKey, { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
     const { updateProjectFile } = await import("~/server/files/project-writer.server");
     await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
       parsed.frontmatter.fileLeases = [{ paths, taskKey, reason: "splitting it into fragments" }];
     });
   };
+
+  it("ruling 245(b): a lease whose HOLDER has merged binds nobody", async () => {
+    await leaseTo("VIB-9", ["Makefile"]);
+    // The live shape: SHOP-11 merged and its lease went on refusing SHOP-5.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "done" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await push(fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      changedFilesByRange: { [range]: ["Makefile"] },
+    }));
+    // CANARY: read the raw frontmatter in the gate and this is `lease_held` —
+    // a completed task fencing off a file forever.
+    expect(res.status).toBe("pushed");
+  });
   const push = (git: ReturnType<typeof fakeGit>) => {
     bindPat();
     return pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });

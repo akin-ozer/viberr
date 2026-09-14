@@ -1,4 +1,5 @@
 import { withProjectRulings } from "~/server/files/project-rulings.server";
+import { activeFileLeases } from "./file-leases.server";
 import { type ReviewSubject, reviewSubjectSha } from "~/shared/revision-drift";
 import { execFile } from "node:child_process";
 import { closureRefusal, taskClosure } from "./task-closure.server";
@@ -495,9 +496,9 @@ async function freshRunAnchor(
       stageName: stageDisplayName(ctx, projectSlug, parsed.frontmatter.stage),
       // Ruling 245: read at anchor time, so a lease set mid-flight binds the
       // very next run rather than the one after a restart.
-      fileLeases:
-        readProjectFile(ctx.dataRoot ? { projectSlug, dataRoot: ctx.dataRoot } : { projectSlug })
-          ?.parsed.frontmatter.fileLeases ?? [],
+      // Ruling 245(b): resolved, so a run is never warned off a file whose
+      // holder has already landed.
+      fileLeases: activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
     });
   } catch (error) {
     logger.warn("canonical anchor could not be built for a fresh run", {

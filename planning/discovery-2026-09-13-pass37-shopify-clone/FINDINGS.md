@@ -4073,3 +4073,46 @@ the silence instead of reporting it.
 outcome, and refused to reach for it: *"That defeats the gate rather than passing it — and per that
 same packet it would not even work, since validation derives from the task's engagements, not the
 project rule."*
+
+## F37-76 · Ruling 245 claimed a release nobody built, and the controller believed it — HIGH (self-inflicted)
+
+**My own defect, found hours after shipping it, and live-blocking when found.**
+
+Ruling 245's `FileLease` interface documented `taskKey` as *"The ONE task that holds them. Released
+when it reaches a terminal stage."* Nothing implemented that. There was no sweep, no resolver, no
+hook — the gate read `project.md`'s raw list.
+
+**The controller read the contract and propagated it.** Given the new tool, it set one lease and
+wrote the claim into the lease's own stored reason:
+
+> `pnpm-lock.yaml` → SHOP-11 — "SHOP-11 (PR #15) is green at the acceptance boundary and merges
+> first … **Lease releases when SHOP-11 merges.**"
+
+I then accepted SHOP-11 and merged PR #15. The lease stood. `pnpm-lock.yaml` was now owned by a
+**completed** task, and SHOP-5 — the one branch that must merge `main` and regenerate that lockfile
+— would have been refused at the push, in the name of work that had already landed, with both the
+interface comment and the lease's own text promising otherwise.
+
+This is the defect this pass has found more often than any other: a comment asserting a mechanism.
+I wrote ruling 245's finding note calling a stale lease "its own stale-record problem" in the same
+breath as shipping one.
+
+**Fix (ruling 247 / 245(b)).** `activeFileLeases` resolves at READ time, not on a completion hook —
+ruling 131(e)'s reasoning: a sweep is a hook some path eventually misses, a resolution converges
+however the holder finished. Spent means terminal stage, archived, **or absent**: a holder nobody
+can open can neither deliver the file nor release the lease, so binding on it fences the path off
+forever. Both gates read through it — the push, and the canonical anchor. `staleFileLeases` names
+the spent rows so a surface can offer to clear them instead of leaving a person to notice.
+
+**Test.** Five cases with three canaries: returning the raw list (the shipped state) reddens three,
+ignoring archived holders reddens one, treating a missing holder as live reddens one.
+
+**And the fixture caught its own phantom.** The original push-gate test leased to "VIB-9", a task
+that never existed in that suite. Under the new rule it correctly stopped binding — so the test had
+been proving the gate fires while actually resting on a holder that was never there. It now seeds a
+live holder, and carries a case pinning that a MERGED holder's lease binds nobody.
+
+*Worth recording: the controller reasoned about a trap in this mechanism that I had not. Asked to
+lease `.data/**` to the cleanup task, it declined — "SHOP-5's cleanup push must itself change those
+paths to delete them, and a lease refuses pushes that change leased paths — it could block the very
+fix."*
