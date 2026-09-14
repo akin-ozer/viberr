@@ -1319,3 +1319,58 @@ That makes three this pass:
 
 None was found by reading the test. All three were found by breaking the source and watching the
 test stay green — which is the whole reason the rule is "prove it red", not "write a test".
+
+### Rulings 224 and 225, both proved live on a second quota exhaustion
+
+At **04:37 UTC** the Codex window went again — reopening 07:28 — and six tasks stalled inside a
+minute: SHOP-2, SHOP-3, SHOP-12, SHOP-18, SHOP-21, SHOP-22. This time both rulings were deployed,
+so the whole path ran on real data with nobody steering it.
+
+**Ruling 224, unprompted.** Every packet came up with `wait_for_window` RECOMMENDED, carrying the
+provider's own instant:
+
+```yaml
+- kind: wait_for_window
+  t: Wait for the window and pick @integration-verifier back up automatically (Sep 14, 2026 · 07:28 UTC)
+  rec: true
+  dueAt: 2026-09-14T07:28:00.000Z
+- kind: retry_other_backend
+  t: Retry @integration-verifier on Claude now
+  rec: false
+- kind: request_edit
+  t: "The window has reset …, or the Codex account changed: send @integration-verifier back"
+  rec: false
+```
+
+The option that permanently moves the task off its model policy, and the one that asks a human to
+assert a reset three hours early, are both demoted. Taking the recommendation on each wrote a
+`run-operator` schedule for 07:29.
+
+**Ruling 225, on the board.** Before: *"21 tasks · **5 waiting on a human** in this project."*
+After resolving them: *"21 tasks · **1 waiting on a human**"* — and the cards say when instead of
+who:
+
+> SHOP-18 · Browse, collections and product detail · #16 · validation failing · 🕐 **resumes 12:29**
+
+The task page agrees, in the rail that used to say "a human":
+
+> **Waiting on** — a schedule · Sep 14 · 07:29
+
+### And the live board found what reading had not
+
+The one card still reading "waiting on a human" was **SHOP-21** — no packet, no recommendations,
+not blocked, not archived, a schedule pending for 07:29, and the board's own "Waiting on me"
+tally reading **zero**. So the card named a person while the product agreed nobody was needed.
+The F37-45 lie, surviving the ruling written to remove it.
+
+The cause is exact: `acceptanceRefusal === null` is not "a human could accept this". The STAGE
+gate is the one acceptance refusal `acceptanceBlockReason` deliberately omits, because it turns
+on the workflow graph rather than the task file. SHOP-21 was at Build with nothing delivered —
+no refusal to report, and nothing acceptable either, because the only thing refusing it was never
+asked. Fixed by asking `isAtAcceptanceBoundary` as well, which is what the board already asks for
+`atAcceptanceBoundary`, from the same graph.
+
+**Three amendments to ruling 225 now, and they arrived in increasing order of usefulness**: two
+from re-reading the predicate, one from reading the mechanism's own refusals, and this one from
+looking at the board it was written for. Six hours after shipping, the surface still had the
+answer that the source did not.
