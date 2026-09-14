@@ -3721,3 +3721,61 @@ drain-after-operator, and drain-without-clearing all go red.
 
 *Fifth live firing of ruling 237 the same hour, on SHOP-25, exercised the unheld path end to end:
 `question_reviewer` started `run_dX5hzn` with the right directive to the right reviewer.*
+
+## F37-69 · Ruling 237 forbids a verdict in a prompt, and the reviewer returned one anyway — MEDIUM
+
+**What it is.** Ruling 237's escalation question says, in the constant a person is promised:
+
+> Do NOT review again and do NOT return a verdict: nothing has changed since your last one.
+
+Its own doc comment says why: *"a verdict here would bind to the same revision and count as another
+objection, which is the loop."*
+
+That is enforced by a sentence in a prompt with nothing that notices when the model does something
+else — **the construction ruling 186 refused**, cited by name in ruling 237's own header as the
+reason ruling 237 exists. I wrote it that way.
+
+**Live on SHOP-25, an hour after shipping it.** The Code Reviewer answered the question exactly as
+asked:
+
+> 1. Yes. The complete remaining set is: [two specific file-and-line blockers]. No other blocker
+> remains for this revision, including anything previously hidden behind the earlier blocker or
+> anything I would raise on re-review.
+> 2. Nothing I would block on is outside `apps/storefront/**`. No absent runner tool is involved,
+> and no unmade human decision is required.
+> 3. Live-stack execution … belong to goal-5 link 4 and the Integration Verifier at Verify; they are
+> not additional blockers.
+
+That is the loop-ending answer, with the environment/scope separation the question asks for. It is
+ruling 237 doing exactly what it was built to do.
+
+**And 8 milliseconds later the same run recorded a `request_changes`** on `rev_HzViP4JzPI5d` — the
+revision it had already objected to, untouched since. The record:
+
+```
+rev_uLQDOD3YBw6V  request_changes  rounds: 1   16:51:53
+rev_HzViP4JzPI5d  request_changes  rounds: 2   18:01:28   ← the question run
+```
+
+`consecutiveRequestChanges` sums `rounds`, so the count went 2 → 3 and ruling 237 raised a fresh
+"requested changes 3 times running" packet on top of the answer the person had just paid for. Every
+later round would have read one too high.
+
+**Fix (ruling 242, owner's call).** `rounds` increments only when a round was actually fought: the
+task's DELIVERING profile has a run row created since the reviewer's previous verdict. Ruling 204's
+own case still counts, because on SHOP-9 the deliverer ran and reported it had nothing in scope to
+change. A question run counts for nothing, because nobody reworked.
+
+Chosen over marking the run, and that choice is load-bearing: the run that verdicted was **not** the
+packet's own dispatch. Mine was interrupted by a server restart; the operator re-sent the question
+as a comment, twice. A mark on the run would have died with it. The counter reads run history, so
+it survives restarts and re-dispatch alike.
+
+**Test.** The existing ruling-204 test, rewritten to pin both halves: a repeat objection with no
+deliverer run keeps `rounds: 1`; the same objection after a deliverer run takes it to 2. Canaries
+both ways — dropping the `reworked` term reddens the first, making the deliverer's run never count
+reddens the second. Ruling 237's whole fixture had to start modelling a real deadlock (a rework
+before each objection), which is what SHOP-5, SHOP-6 and SHOP-10 all actually were.
+
+**Not fixed, deliberately, and on the owner's call:** a `request_changes` arriving while the count
+already stands at two still raises a fresh packet. The number it names is now true.

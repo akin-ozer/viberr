@@ -516,3 +516,41 @@ export function insertRunLine(
     new Date().toISOString(),
   );
 }
+
+/**
+ * Ruling 242 (pass 37, F37-69): did `profileId` RUN on this task since `since`?
+ *
+ * The signal ruling 204's round counter was reaching for. That ruling made a
+ * reviewer's repeat objection on the same revision count as a fresh round,
+ * because in a real deadlock the deliverer commits nothing and no new revision
+ * is ever minted — SHOP-9, where the count would otherwise have sat at 1 while
+ * the loop ran. What it could not distinguish is a repeat objection with NO
+ * rework behind it at all, which is what ruling 237's own escalation question
+ * provokes: the reviewer is asked to answer, answers, and verdicts again on an
+ * untouched revision.
+ *
+ * A DELIVERER RUN is the thing that separates them. In SHOP-9 the deliverer ran
+ * and reported it had nothing in scope to change; on SHOP-25's question run
+ * nobody reworked anything.
+ *
+ * Counts every run row whatever its state: a deliverer that was dispatched and
+ * crashed still means a round was fought, and reading `finished` only would let
+ * a failing rework loop climb forever without the counter noticing.
+ */
+export function profileRanSince(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  profileId: string,
+  since: string,
+): boolean {
+  // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM agent_runs
+        WHERE project_slug = ? AND task_key = ? AND agent_profile_id = ?
+          AND created_at > ?`,
+    )
+    .get(projectSlug, taskKey, profileId, since) as { n: number };
+  return row.n > 0;
+}

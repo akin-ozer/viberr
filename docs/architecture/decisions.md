@@ -5325,6 +5325,41 @@ by rewriting those paragraphs:*
     (`task-file.schema.ts`, `review-deadlock.server.ts`, `task-actions.server.ts`,
     `dependencies.server.ts`, `task-side-panels.tsx`.)
 
+242. **A review ROUND is counted by the deliverer having run, not by the reviewer having
+    spoken (owner, 2026-09-14, pass 37; F37-69). Amends ruling 204.** Ruling 204 made a
+    reviewer's repeat objection on the SAME revision count as a fresh round, because a real
+    deadlock mints no new revision: live on SHOP-9 the deliverer ran, reported it had
+    nothing in scope it was allowed to change, committed nothing, and the old
+    distinct-revision count sat at 1 while the loop ran. That reasoning is right and stands.
+    What it could not distinguish is a repeat objection with NO rework behind it at all —
+    and ruling 237's own escalation question provokes exactly that. Its directive says "Do
+    NOT review again and do NOT return a verdict: nothing has changed since your last one",
+    and its rationale says why: "a verdict here would bind to the same revision and count as
+    another objection, which is the loop". That enforcement was a sentence in a prompt with
+    nothing that notices when the model does otherwise — the construction ruling 186 refused,
+    which ruling 237's own comment cites as the reason ruling 237 exists.
+    Live on SHOP-25 the Code Reviewer answered the question exactly as asked (a complete,
+    bounded list, with the out-of-scope items separated) and attached a `request_changes` to
+    the same untouched revision 8 milliseconds later. That took `rounds` on
+    `rev_HzViP4JzPI5d` to 2 and the deadlock count from 2 to 3, so the person who had just
+    paid for the answer was handed a fresh "requested changes 3 times running" card, and
+    every later round would read one too high.
+    A DELIVERER RUN is the signal that separates the two. `rounds` now increments only when
+    the task's delivering profile has a run row created since the reviewer's previous verdict
+    (`profileRanSince`). SHOP-9 still counts: the deliverer ran. A question run counts for
+    nothing: nobody reworked. Any run row does, whatever its state, because a rework
+    dispatched that crashed is still a round fought; and a task with no deliverer engaged
+    counts as before, since there is nothing to read.
+    The owner's alternatives were a task-level record of which reviewer owes an answer, and
+    leaving the verdict alone while stopping the packet re-raising. The owner took the
+    counter, which needs no new state and survives what neither would: the run that verdicted
+    on SHOP-25 was not the packet's own dispatch — that one was interrupted by a server
+    restart — but an operator re-dispatch by comment, so any mark on the run would have died
+    with it.
+    NOT fixed by this, deliberately and recorded: a `request_changes` arriving while the
+    count already stands at two still raises a fresh packet. The count it names is now true.
+    (`run-store.server.ts`, `task-actions.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

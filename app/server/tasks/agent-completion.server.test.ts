@@ -977,8 +977,29 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * to change and committed nothing, and the verifier blocked the same revision
    * again: two objections, one row, and ruling 193's escalation counter read 1.
    */
-  it("ruling 204: a second request_changes on the SAME revision is a second round, not a replacement", async () => {
+  it("rulings 204 + 242: a second request_changes on the SAME revision counts a round only when the DELIVERER ran", async () => {
     writeReviewTask();
+    /** Ruling 242: the deliverer took a turn. A run row is the whole signal —
+     *  its state is irrelevant, because a rework that was dispatched and
+     *  crashed still means a round was fought. */
+    let delivererRuns = 0;
+    const delivererRan = (): void => {
+      delivererRuns += 1;
+      upsertRun(store.db, {
+        id: `run_dev_${delivererRuns}`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `dev-${delivererRuns}`,
+        role: "Developer",
+        kind: "primary",
+        backend: "claude",
+        model: "sonnet",
+        sdk: "claude",
+        agentName: "dev",
+        agentProfileId: "dev",
+        state: "finished",
+      });
+    };
     const reviewerInput = {
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -1003,10 +1024,22 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(1);
     expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
 
-    // Nothing changed in between: no new revision, no new head. The reviewer
-    // simply looked again and said the same thing.
-    // CANARY: write `rounds: 1` unconditionally (the pre-204 upsert) and this
-    // reads 1 — the deadlock signal ruling 193 escalates on stays flat forever.
+    // Ruling 242 (F37-69): a repeat objection with NOBODY having reworked is not
+    // a second round. Live on SHOP-25 the reviewer was asked ruling 237's
+    // escalation question, answered it completely, and attached a
+    // `request_changes` to the same untouched revision 8 milliseconds later —
+    // which took the deadlock count from 2 to 3 and re-raised the packet on top
+    // of the answer a person had just paid for.
+    // CANARY: drop the `reworked` term and this reads 2.
+    await review("Verdict: request_changes\n\n@operator here is the complete list.");
+    expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
+
+    // Ruling 204's own case, which still counts: no new revision is minted,
+    // because the DELIVERER ran and reported it had nothing in scope it was
+    // allowed to change. That is a round fought, and the signal is the run.
+    // CANARY: read `finished` runs only, or key on the revision again, and the
+    // deadlock ruling 237 escalates on goes back to sitting flat forever.
+    delivererRan();
     await review("Verdict: request_changes\n\n@operator the stack still cannot start.");
     const blocked = taskFile().parsed.frontmatter.verdicts;
     expect(blocked).toHaveLength(1);
@@ -1104,11 +1137,38 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       workdir: null,
       agentHandle: profileId,
     });
+    /**
+     * Ruling 242: a round is a round only if the DELIVERER RAN. A real deadlock
+     * has the deliverer going back in between objections and coming out with
+     * nothing it is allowed to change — SHOP-5, SHOP-6 and SHOP-10 all did — so
+     * each review here is preceded by the rework it is objecting to. Without
+     * this the fixture models the one case ruling 242 says is NOT a deadlock: a
+     * reviewer repeating itself with nobody having touched the work.
+     */
+    let delivererRuns = 0;
+    const rework = (): void => {
+      delivererRuns += 1;
+      upsertRun(store.db, {
+        id: `run_rework_${delivererRuns}`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `rework-${delivererRuns}`,
+        role: "Developer",
+        kind: "primary",
+        backend: "claude",
+        model: "sonnet",
+        sdk: "claude",
+        agentName: "dev",
+        agentProfileId: "dev",
+        state: "finished",
+      });
+    };
     const review = async (
       reply: string,
       profileId = "reviewer",
       extra: { dispatchedByName?: string } = {},
     ) => {
+      rework();
       const runId = await finishedRunWith(reply);
       await applyAgentCompletionEffects(
         store.db,

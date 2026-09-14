@@ -170,6 +170,7 @@ import {
   getRun,
   listRunsForTaskRows,
   patchRun,
+  profileRanSince,
 } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
@@ -3345,7 +3346,29 @@ export async function recordAgentCompletion(
           const prior = parsed.frontmatter.verdicts.find(
             (v) => v.profileId === reviewerProfileId && v.revisionId === rev.id,
           );
-          const rounds = prior?.result === verdict ? prior.rounds + 1 : 1;
+          // Ruling 242 (F37-69): a repeat verdict counts as a new ROUND only if
+          // a round was actually fought — the DELIVERER RAN between the two.
+          //
+          // Ruling 204 is right that a deadlock mints no new revision, so the
+          // count cannot key on revisions. It is the deliverer's RUN, not its
+          // commit, that says a round happened: on SHOP-9 the deliverer ran and
+          // reported it had nothing in scope to change, which is a round. What
+          // ruling 204 could not see is a repeat objection with no rework behind
+          // it at all — and ruling 237's own escalation question provokes
+          // exactly that. Live on SHOP-25 the reviewer was asked to name
+          // everything it would still block on, answered completely, and
+          // attached a `request_changes` to the same untouched revision 8ms
+          // later. That took the count from 2 to 3 with nobody having reworked
+          // anything, and re-raised the packet on top of the answer a person had
+          // just paid for. Ruling 237 forbids that verdict in its prompt, which
+          // is the construction ruling 186 refused; this is the part that
+          // notices when the model does something else.
+          const deliverer = deliveringEngagement(parsed.frontmatter);
+          const reworked =
+            !prior ||
+            !deliverer ||
+            profileRanSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
+          const rounds = prior?.result === verdict && reworked ? prior.rounds + 1 : 1;
           parsed.frontmatter.verdicts = [
             ...parsed.frontmatter.verdicts.filter(
               (v) =>
