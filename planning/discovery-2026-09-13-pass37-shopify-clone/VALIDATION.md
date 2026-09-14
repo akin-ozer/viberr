@@ -1727,3 +1727,46 @@ asserts the tooltip does NOT contain "both change". Restoring the old wording fa
 Fourteen canaries across the session, four of them for this ruling: ignore the head pin and the
 skip test fails; report a failed files call as an empty list and the absent-key test fails; drop
 `partial` and the floor test fails; compute the intersection one-way and the symmetry test fails.
+
+---
+
+## Ruling 236 used for a real decision, on its first day
+
+Three packets were answered and SHOP-22 came back approved on a clean host, which put it at the
+acceptance boundary with both required reviewers on the current revision and PR #17 mergeable.
+Eight rows were in the queue. The chips said:
+
+```
+SHOP-22   (no chip)
+SHOP-3    collides with SHOP-11, SHOP-12 and 1 more   pnpm-lock.yaml, scripts/stack.test.mjs
+SHOP-11   collides with SHOP-3, SHOP-12               pnpm-lock.yaml
+SHOP-12   collides with SHOP-3, SHOP-11 and 1 more    pnpm-lock.yaml, scripts/stack.test.mjs
+SHOP-21   collides with SHOP-3, SHOP-12               scripts/stack.test.mjs
+SHOP-5    (no chip)      SHOP-18   (no chip)      SHOP-23   (no chip)
+```
+
+So the queue answered the question a person actually has at that moment - *which of these is safe
+to merge right now* - without being asked, and without ordering anything. SHOP-22 was the safe one.
+It merged at 11:18:45Z; **eleven merged PRs**.
+
+The acceptance also exercised the base refresh honestly: *"Accepting the completion brought
+`shop-22` up to date with `main` (12 commits merged in, merge commit `2d07f0c`; the push published
+it, so origin now carries the workspace head)"*, then the merge, then the branch delete. Three
+separate github events, each naming what it did.
+
+### The three packets, and what answering them proved
+
+- **SHOP-22** asked me to clear stray SHOP-12 processes and re-run the verifier. I checked the
+  container first: ports already free, the strays had died with a restart. Answered with that
+  fact rather than the assumption, and said that if the failure reproduced on a clean host it
+  would be a real defect rather than contention. It did not reproduce - the Integration Verifier
+  approved with *"the clean cold start and real HTTP health journey passed without nudging"*. The
+  contention reading was right, and the packet's own recommended option was right.
+- **SHOP-21** asked who resolves its conflict with `main`. Answered: the Infrastructure Engineer,
+  because SHOP-21 owns `scripts/stack.test.mjs` by charter and the conflict is on that file plus
+  the lockfile. It has since committed the merge: *"Retained the existing 512-line
+  manifest-derived implementation and resolved `origin/main`..."*.
+- **SHOP-23** asked whether to widen its owned paths so the auth wiring can exist at all. Answered
+  yes, minimally, naming the two surfaces. Viberr recorded the decision and put the packet into
+  `awaiting: goal_edit` with *"Waiting for the edited goal; the packet clears as soon as it
+  lands"* - ruling 138 doing exactly what it says.
