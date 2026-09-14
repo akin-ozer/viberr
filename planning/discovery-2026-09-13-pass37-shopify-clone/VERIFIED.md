@@ -890,3 +890,30 @@ strongest non-member there is — re-probed at 03:10 UTC:
 The `.data` route a real client actually fetches answers the same way — a `SingleFetchRedirect`
 to `/login`, carrying nothing about the task in the body. No door leaks the existence of
 anything to an unauthenticated caller beyond the path the caller already typed.
+
+## Every open PR's head, checked against GitHub — 5 of 5 MATCH
+
+F37-43 was a task whose record said one revision and whose merge carried another, and ruling 226
+now refuses a merge whose head cannot be checked. That makes the standing question worth asking
+directly rather than trusting the new gate: **does what viberr records about each PR match what
+GitHub actually holds?**
+
+Asked of every open PR at 03:14 UTC, comparing three independently-written facts — the `pr.headSha`
+viberr cached from its last reconcile, the head GitHub reports live, and the `workRevision.headSha`
+the delivering agent reported:
+
+| task | PR | recorded | live (GitHub) | delivered revision | |
+|---|---|---|---|---|---|
+| SHOP-2 | #13 | `b7651c5` | `b7651c5` | `b7651c5` | match |
+| SHOP-3 | #11 | `605f6f6` | `605f6f6` | `605f6f6` | match |
+| SHOP-11 | #15 | `291c43d` | `291c43d` | `291c43d` | match |
+| SHOP-12 | #14 | `ac62466` | `ac62466` | `ac62466` | match |
+| SHOP-18 | #16 | `8ef0a2e` | `8ef0a2e` | `8ef0a2e` | match |
+
+All three agree on all five, including SHOP-2 — the branch that was deliberately allowed to
+diverge, conflicted with `main`, and was then rebased and re-delivered through viberr's own
+recovery path within the hour.
+
+This is the check F37-43 would have failed: SHOP-17's reviewers were pinned to `1f99f68`, which
+was never on the remote at all, while PR #12's head was `9104562`. Three columns, and the first
+would not have matched the second.
