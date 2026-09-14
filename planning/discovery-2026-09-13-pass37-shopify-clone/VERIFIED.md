@@ -320,6 +320,33 @@ Recorded honestly rather than claimed:
   confirm the door is admin-only (maintainer → 403 "Your project role (maintainer) cannot
   force-accept past the review gate", admin → reaches the acceptance ceremony).
 
+### CORRECTION, 2026-09-14 08:00 UTC — three of those four are now exercised
+
+The list above was true when written and is no longer. Left in place rather than edited, because
+what was believed at the time is part of the record, but a fresh-context reader must not act on
+it. Re-measured today:
+
+- **Browser capability — USED.** The storefront exists now (SHOP-4 merged, SHOP-18 delivered), so
+  there is something to drive. Across the run logs: **543 lines carrying `browser_`**, 84 carrying
+  `viberr_browser`, 284 carrying `playwright`. The tool names in those lines are real MCP calls
+  (`viberr_browser`, `browser_tabs`), not prose. Heaviest users: SHOP-4's Frontend Engineer (30
+  lines in one run), SHOP-18's Frontend Engineer, SHOP-4's Code Reviewer and Platform Architect,
+  and the controller itself. "Zero browser calls" is dead.
+- **`compression-threshold` — FIRED, on six tasks.** Ruling 206 made the folding
+  non-adjacency-based, and the live board now carries markers naming what they replaced:
+
+  ```
+  SHOP-2   2 markers    SHOP-3   3    SHOP-10  1
+  SHOP-11  3 markers    SHOP-12  2    SHOP-18  1
+  ```
+
+  SHOP-6 (134 events) and SHOP-7 (200) carry none, and that is correct rather than a gap: both are
+  merged and done, compaction only runs on a write, and nothing re-anchors on a closed task's file.
+- **Force-accept — EXERCISED**, both the door and the act. See "Force-accept — the ACT, end to end"
+  further down this file; the RBAC matrix covers the door.
+- **`meaningful-comment`** remains the one guardrail with zero firings, and that is still a fact
+  about this workload rather than evidence about the rule.
+
 ## Environment fact for the next pass — pnpm is not on an agent workspace's PATH
 
 > **CORRECTED LATER THE SAME DAY — I got this call wrong.** I wrote "not a finding" below and
