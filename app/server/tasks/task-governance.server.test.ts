@@ -3490,6 +3490,10 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     // not open at 02:27:00.
     expect(Date.parse(sched.dueAt)).toBeGreaterThan(Date.parse(due));
     expect(sched.prompt).toContain("has reopened");
+    // (That this resolution must start NO run is asserted in
+    // `delivery-requeue.server.test.ts`, where `runOperator` is mocked — this
+    // store deploys no operator, so a run-count assertion here would pass
+    // against code with no NO_REQUEUE entry at all.)
   });
 
   it("wait_for_window: a schedule that cannot be written says so and leaves the decision resolved (ruling 224)", async () => {

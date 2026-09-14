@@ -956,3 +956,32 @@ Each step's tests were honest about what they covered and each step was still in
 production. What closed it was deploying and provoking the real failure again — three times.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6605 tests passed**, `build` green.
+
+### …and a fourth pass, because answering the decision re-created it
+
+Deploying the third fix finally produced the option on the live packet, worded as intended:
+
+> **Wait for the window and pick the task back up automatically (Sep 14, 2026 · 02:27 UTC)**
+> *(recommended)* — Closes this decision and schedules an operator run for just after
+> Sep 14, 2026 · 02:27 UTC, on the same account and the same model. Nothing runs until then and
+> the board says so. No account, model or project policy changes.
+
+Taking it wrote the schedule correctly — `run-operator`, `dueAt: 2026-09-14T02:28:00.000Z`, one
+minute past the provider's instant — and then, **seven seconds later**, opened a brand new packet
+asking the same question. Resolving a packet re-queues the operator by default; that re-queue was
+refused by the quota the decision exists to wait out, and its failure opened a fresh packet. The
+decision re-created itself.
+
+`wait_for_window` now joins `NO_REQUEUE`. The canary for it took two attempts, and the first one
+is worth recording as a near-miss: asserting "no run row was created" in a store that deploys no
+operator passes against code with no NO_REQUEUE entry at all, and asserting "not called" after
+the harness's 5 ms `flush()` passes for the same reason. The test now settles a full second —
+long enough that the sibling `block_on_policy` test on the same harness sees its own call — so
+the absence is real:
+
+```
+# wait_for_window removed from NO_REQUEUE
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+```
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6606 tests passed**, `build` green.

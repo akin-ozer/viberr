@@ -321,6 +321,60 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     });
   });
 
+  /**
+   * Ruling 224 (F37-44). The decision IS that nothing runs until the window
+   * reopens; the schedule the resolution writes is what brings the operator
+   * back. Live on SHOP-18 the re-invoke fired seven seconds after the decision
+   * was recorded, was refused by the very quota the human had just chosen to
+   * wait out, and opened a NEW packet asking the same question — so answering
+   * the decision re-created it, in a loop.
+   */
+  it("wait_for_window does NOT re-queue: the schedule is what comes back (ruling 224)", async () => {
+    deployOperator("supervised");
+    seedTask(
+      { stage: "impl", waiting: "agent", readiness: "blocked" },
+      {
+        ...FAILURE_PACKET,
+        options: [
+          {
+            kind: "wait_for_window",
+            t: "Wait for the window and pick the task back up automatically",
+            d: "",
+            rec: true,
+            dueAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot, deps: DEPS },
+    );
+    await flush();
+    // The wait really was recorded, so "no run" cannot pass because nothing
+    // happened at all.
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.schedules).toHaveLength(1);
+
+    // Settled far longer than a re-queue needs: the sibling test above resolves
+    // `block_on_policy` on this same harness and sees its call, so a call here
+    // would be observable — "not called" is a real absence, not a race won by
+    // being too fast.
+    await new Promise((r) => setTimeout(r, 1_000));
+    // CANARY: remove `wait_for_window` from NO_REQUEUE and this fires — a run
+    // against the very quota the decision exists to wait out, which live on
+    // SHOP-18 was refused and opened a NEW packet asking the same question.
+    expect(runOp).not.toHaveBeenCalled();
+  });
+
   it("hold_runtime_debug does NOT re-queue (the human asked for no run)", async () => {
     deployOperator("supervised");
     seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);

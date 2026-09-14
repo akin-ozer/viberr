@@ -2471,3 +2471,13 @@ of inventing a second source of truth.
 That is the pass-24 trap — *"several pass-23 silent-drop fixes were INERT (wired to seams that
 can't fire)"* — caught this time only because the fix was deployed and re-triggered against the
 live stall rather than declared done when its tests went green.
+
+**And a fourth half: answering the decision re-created it.** With the option finally on the
+packet, taking it wrote the schedule correctly and then, seven seconds later, opened a brand new
+packet asking the same question. Resolving a packet re-queues the operator by default — and that
+re-queue was refused by the very quota the decision exists to wait out, whose failure opened a
+fresh packet. `wait_for_window` now sits in `NO_REQUEUE` beside `hold_runtime_debug`, for the
+same reason: the human asked for no run.
+
+Four passes, green tests after every one of them, and each was still wrong in production. The
+only thing that found any of it was deploying and provoking the real failure again.

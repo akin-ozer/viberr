@@ -8790,6 +8790,13 @@ export async function resolvePacket(
     // turn on the stage the first one is already reading.
     "force_accept",
     "move_stage",
+    // Ruling 224 (F37-44): the decision IS that nothing runs until the window
+    // reopens, and the schedule written above is what brings the operator
+    // back. Re-invoking it here spends a run against the very quota the human
+    // just chose to wait out, gets refused, and opens a NEW packet asking the
+    // same question — so answering the packet re-created it, in a loop. Live
+    // on SHOP-18 at 00:05:50, seven seconds after the decision was recorded.
+    "wait_for_window",
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {

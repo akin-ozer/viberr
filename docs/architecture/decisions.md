@@ -4754,6 +4754,10 @@ by rewriting those paragraphs:*
     time sends none - so on exactly the failure that stalls a board the facts are silent while
     the store holds the date parsed out of the provider's own sentence. Without that read the
     whole ruling is inert on the case it was written for, which the first deploy proved live.
+    Finally, the kind joins NO_REQUEUE: the decision IS that nothing runs, so re-invoking the
+    operator on resolution spends a run against the very quota the human chose to wait out,
+    gets refused, and opens a NEW packet asking the same question - answering the decision
+    re-created it. Live on SHOP-18, seven seconds after the decision was recorded.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 
