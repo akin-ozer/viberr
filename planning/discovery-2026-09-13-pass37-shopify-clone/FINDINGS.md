@@ -2815,6 +2815,12 @@ The refusal narration then re-added the identical sentence, with no suppression,
 headline. One deliberate de-duplication, undone three lines later by a second writer that did not
 know about it.
 
+**134(c)'s own half works.** Checked rather than assumed, across all 22 tasks and every `github`
+event on them: **zero consecutive identical texts.** The repetitions that look like duplicates in
+a truncated listing are different sentences — the remote SHA moved between them. So the
+suppression does what it claims; what defeated it was the second writer, which is the only thing
+this ruling changes.
+
 **Fixed as ruling 229** — `already_current` returns `done`. It is the tool's success condition,
 not a state conflict. The Claude operator reads `[done] … is already up to date`, the Codex plan
 executor files nothing, and the `github` event stays the single record, which is what 134(c)
