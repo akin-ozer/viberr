@@ -3275,3 +3275,70 @@ ruling 186's hold gate, with the refusal naming the reviewer question that clear
 GATE on the operator's own judgement in a case with a legitimate exception (the reviewer may
 genuinely have hit something new), and ruling 186's carve-out question went to the owner. This one
 should too.
+
+## F37-58 · A reviewer blocked on a defect in the BASE can never see it fixed — HIGH
+
+**What it is.** Three mechanisms that are each correct on their own compose into a task that
+cannot be un-blocked by fixing the thing the reviewer asked to have fixed. The only exits are an
+admin force-accept and archiving.
+
+1. A verdict binds to a work revision (F10-15). A `request_changes` stands until the same
+   reviewer records something else **on that revision**.
+2. Bringing the base branch in does not mint a new revision. `classifyRevisionDrift`
+   (`app/shared/revision-drift.ts:148`) counts Viberr's own recorded merge plus the base commits
+   it carried as `baseRefresh`, `authored: 0`, and `describeRevisionDrift` reports that kind with
+   `unreviewed: false` — the deliverable is unchanged, so the review still stands. Right, and I
+   verified it is right on the live case: `git rev-parse b7c4c90:apps/storefront` and
+   `aaf5e38:apps/storefront` are the same tree, `c41a09e6`.
+3. A re-review is pinned. `pinSupportCheckout` (`specialist-run.server.ts:3799`) detaches the
+   supporting checkout at the revision under review, unconditionally, so the reviewer re-reads the
+   tree it judged — **including the base it judged**.
+
+Put together: when the reviewer's blockers are in the base rather than in the deliverable, (2)
+says the review survives the fix and (3) guarantees a re-review cannot see the fix. Every further
+round replays the same objection.
+
+**Live, and it cost a governance override.** SHOP-18's Integration Verifier returned
+`request_changes` on `b7c4c907eff3` naming two defects, both outside this task's owned paths
+(`apps/storefront/**`) and both on `main`. Arda routed them to SHOP-21, SHOP-21 landed on `main`,
+and Viberr's own `update_branch` merged `main` into `shop-18` — recorded as
+`1 merge, 20 base commits, 0 authored commits since review`. I checked the fix myself at both
+shas:
+
+```
+b7c4c90:scripts/stack.test.mjs   readExpectedServices  0 occurrences   ← the defect, as reviewed
+aaf5e38:scripts/stack.test.mjs   readExpectedServices  3 occurrences   ← fixed, at the PR head
+b7c4c90:apps/storefront          tree c41a09e6…        ← identical, so the review still stands
+aaf5e38:apps/storefront          tree c41a09e6…
+```
+
+The verifier then blocked the SAME revision a second time (ruling 204's counter reads 2), and its
+own report asked for "a re-run on the merged revision". The operator raised a packet saying plainly
+that no tool of its own could make that happen — and it was right: `run_agent` re-pins the
+reviewer at `b7c4c90`. Its three options were force-accept, "restore the GitHub fetch credential
+and re-gate", and "re-run as-is", the last of which it flagged as certain to repeat because the
+previous run had already carried a directive naming `aaf5e38` and still landed on the pin.
+
+I force-accepted it as admin at 12:50:33Z, with the verification above recorded on the decision.
+PR #16 merged. The bypassed-gate disclosure is honest and the audit row is written — but a
+force-accept is the door for a wedged gate, and the gate wedged because a task did exactly what it
+was asked to do.
+
+**Why this is not "the reviewer should have been less strict".** The verifier's charter is a cold
+`make up` / `make test` on the whole stack, which is the project's own required-reviewer rule
+(ruling 178). A reviewer whose surface includes the repository root will find base defects, by
+design. The same trap catches any required reviewer whose checks read files the task does not own,
+which is most integration and stack reviewers.
+
+**Fix shape.** The pin is the piece that is wrong here, not the revision model. A base refresh that
+Viberr itself recorded is a fact Viberr can name: the reviewer could be pinned to a tree that is
+the reviewed revision's own paths **at** the refreshed head — or, more simply, re-pinned at the
+refreshed head with the disclosure saying which commits are base and which are authored, since
+`revisionDrift` already carries exactly that split and already asserts `authored: 0`. A re-review
+after a `base_refresh`-only drift is judging the same deliverable on a newer base, which is what
+"the review still stands" already claims. Where a re-review lands on a head with authored drift,
+the pin must stay: that is unreviewed work and ruling 179's whole point.
+
+This one is a behaviour change to a shipped ruling (179) and it interacts with ruling 226's head
+gate, so it wants the owner's call on whether the re-pin is automatic or an option on the packet
+ruling 237 now raises.
