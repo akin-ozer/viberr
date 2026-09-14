@@ -1251,7 +1251,20 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () 
   // S5-G3: the POSTED directive discloses an ambiguous tag; the RUN's directive
   // stays the operator's own words (the note addresses the humans reading the
   // timeline, not the agent about to work).
-  it("discloses an ambiguous @tag on the posted directive without notifying anyone", async () => {
+  /**
+   * S5-G3 asserted the OPPOSITE of this: the posted directive carried the
+   * ambiguity disclosure so the humans reading the timeline would learn the tag
+   * reached nobody. Ruling 232 removed that note's premise. A directive now
+   * notifies nobody by declared audience, so the disclosure's remedy - "mention
+   * the full name ('@First Last') or the email handle" - names a cause that is
+   * not the reason and sends a reader to fix the spelling of something that
+   * would not have notified either way. Found by reviewing ruling 232 against
+   * the disclosure it had not touched.
+   *
+   * The tag itself still stands in the posted text: the ruling changes who
+   * hears about the hand-off, not what the operator wrote.
+   */
+  it("posts an ambiguous @tag with NO disclosure, because a directive notifies nobody (ruling 232)", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
@@ -1284,7 +1297,9 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () 
       dataRoot: store.dataRoot,
     })!.parsed.timeline.find((e) => e.actor.kind === "operator" && e.type === "comment")!;
     expect(posted.text).toContain("coordinate with");
-    expect(posted.text).toContain("nobody was notified");
+    // The note is GONE: its remedy could not achieve what it promised here.
+    expect(posted.text).not.toContain("nobody was notified");
+    expect(posted.text).not.toContain("mention the full name");
     expect(
       countRow(store.db, `SELECT COUNT(*) c FROM notifications`),
     ).toMatchObject({ c: 0 });

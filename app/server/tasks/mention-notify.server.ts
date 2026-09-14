@@ -394,7 +394,18 @@ export function withAmbiguityDisclosure(
   db: DatabaseSync,
   text: string,
   projectSlug?: string,
+  /**
+   * Ruling 232 amendment: a comment whose declared audience is the agent
+   * notifies nobody, so BOTH disclosures below become misleading on it. Each
+   * one names a remedy — "mention the full name", "add them to the project
+   * first" — that assumes a correctly-spelled tag would have notified. On a
+   * directive it would not, however it is spelled and whoever is a member, so
+   * the note would send a reader to fix something that is not the reason.
+   * Found by reviewing ruling 232 against the disclosure it did not touch.
+   */
+  audience?: "agent" | "open",
 ): string {
+  if (audience === "agent") return text;
   const { ambiguous, nonMembers } = resolveIn(db, text, projectSlug);
   const note = [ambiguousMentionNote(ambiguous), nonMemberMentionNote(nonMembers)]
     .filter((line) => line.length > 0)

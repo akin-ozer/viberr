@@ -5039,7 +5039,10 @@ export async function operatorPromptAgent(
   // The POSTED form carries the ambiguity disclosure; the run's directive stays
   // exactly what the operator wrote (S5-G3 — the note addresses the humans
   // reading the timeline, not the agent about to work).
-  const commentText = withAmbiguityDisclosure(db, directive);
+  // Ruling 232 amendment: no disclosure on a directive. It notifies nobody by
+  // declared audience, so a note whose remedy is "spell the tag differently"
+  // points at the wrong cause.
+  const commentText = withAmbiguityDisclosure(db, directive, undefined, "agent");
   const comment: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
