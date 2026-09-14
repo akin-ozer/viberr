@@ -9,13 +9,13 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | sixty-eight findings — two withdrawn, each with its measurements kept |
+| [`FINDINGS.md`](FINDINGS.md) | seventy-one findings — two withdrawn, each with its measurements kept |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–241** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–242** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
 
 ## Day six, in one paragraph
@@ -39,6 +39,21 @@ refused to carry it out: the task was held, and ruling 186 refuses every agent d
 task. The person's chosen option bought nothing and there was no packet left to choose again from.
 `force_accept`'s own arm, in the same file, had already written the rule it broke. The owner chose
 to QUEUE rather than refuse (ruling 241), so the hold stays absolute and the intent survives it.
+
+Three more came out of that one. **F37-70**, found by adversarially reviewing ruling 241 an hour
+after shipping it: the drain lived only in `announceRelease`, and the operator's own
+`set_dependencies` clear — the door ruling 240 names as the remedy for a wrong hold — announces
+nothing, so the queued question would have sat forever under a wait panel promising it would be put
+when the wait cleared. F37-68's shape inside F37-68's fix. **F37-69**: ruling 237 forbids a verdict
+on its escalation question *in a prompt*, which is the construction ruling 186 refused; live on
+SHOP-25 the reviewer answered the question perfectly and verdicted anyway, 8ms later, on an
+untouched revision, taking the deadlock count from 2 to 3 (ruling 242 now counts a round by the
+deliverer having run). And **F37-71**: the notifications inbox demanded an acceptance the server
+refuses, because UX19-3's gate was wired into one of two sibling queries in the same function.
+
+The day also verified more than it fixed: the clone RUNS from a clean clone in one command, five
+services healthy, and its own `/ready` names exactly the three services the board says are still in
+open PRs.
 
 ## Day five, in one paragraph
 
