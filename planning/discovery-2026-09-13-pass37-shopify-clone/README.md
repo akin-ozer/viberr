@@ -9,14 +9,42 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | fifty-one findings — two withdrawn, each with its measurements kept |
+| [`FINDINGS.md`](FINDINGS.md) | fifty-six findings — two withdrawn, each with its measurements kept |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–228** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–236** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
+
+## Day four, in one paragraph
+
+The fourth session's findings came from the same habit as the third, aimed at surfaces nobody
+reads until they need them. The org audit browse existed specifically to show sign-ins, PAT
+changes and user administration in the app, and **could not show any of them**: a poller heartbeat
+written unconditionally once per delivered task per tick filled 61% of its 150-row window, so
+"Org-scoped" returned two `projection.rescan` rows against 96 such events on file, including the
+instance's only `github.pat.created` (**F37-52**). A mention notification quoted the first 240
+characters of the comment, which in 39 of 49 cases excluded the very handle it was sent for
+(**F37-53**). Pressing Accept on a task whose reviewers had approved a revision the pull request
+never carried refused correctly and told **one browser's toast and nothing else** — no audit row,
+no timeline event — so the operator, the only actor allowed to push, re-filed the same acceptance
+recommendation it had just been refused (**F37-55**). Insights counted a task sitting exactly ON
+the compression threshold as one the fold was managing, when the fold's own rule is `<=`
+(**F37-54**). And the record had been quietly inventing the owner's gender, two incompatible ways
+in one project (**F37-56**). The owner also took a design call on merge collisions, which became
+ruling 236: merging one task had put four of six open pull requests into CONFLICT inside a minute,
+all on two shared files, with the queue listing them as six independent rows throughout.
+
+**Five near-misses, caught before filing, all the same shape**: assume a mechanism, measure
+against the assumption, get a signal. The mention "lie" was a 240-char clip my regex had searched
+instead of the comment. The "missing packet" was a `## Packet` section my `awk` never reached. The
+"process leak" was transient teardown that a second reading showed gone. "Accept does nothing" was
+a refusal toast that had already dismissed before I sampled the DOM — caught only because the
+network log still held the 409, and that one led directly to F37-55. The "broken evidence chain"
+was a link viberr never made: an `EvidenceRow` is documented as *"A REFERENCE, never a dump"* and
+its backing is the run log, which still held the claim.
 
 ## Day three, in one paragraph
 

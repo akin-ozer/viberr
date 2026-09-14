@@ -211,3 +211,57 @@ each affected task — five, five and seven times respectively. Those were free.
 are not, which is why the image carrying rulings 227, 225's archived guard and 230 is built and
 waiting for a lull rather than going out immediately behind four Verify-stage runs that are
 bringing stacks up cold.
+
+---
+
+## Session four — two decisions
+
+### Mentions inside a directive (→ ruling 232)
+
+**Background put to the owner.** Viberr notifies a human whenever an operator's agent-directive
+comment contains their @handle. Measured: 19 of the 49 mentions sent to the owner were the operator
+*specifying a deliverable* to an agent ("end with an explicit @Arda question naming Stripe, Adyen,
+and Mock-only"), not addressing them — and SHOP-7 reworked twelve times, re-issuing that directive
+each round. But the fan-out exists on purpose: P14-GV-06 added it because "coordinate with @Arda"
+buried in a directive was a real ping going nowhere. Viberr cannot tell the two apart by parsing.
+
+**Four options offered.** (a) Keep delivering every tag but quote the window AROUND the mention and
+dedupe repeats. (b) Only a trailing `cc:` line pings. (c) A comment whose declared audience is
+`agent` never notifies a person. (d) Fix only the quote, leave routing alone.
+
+**The owner took (c).** A directive handed to a specialist is addressed to that specialist; a
+person named inside one is being described TO the agent, not addressed.
+
+**What I did with it, and the one boundary I drew.** Implemented at the fan-out seam so every
+future declared-agent writer inherits it. But `appendComment` DERIVES its `toAgent` from the mere
+presence of an agent handle, so a blanket reading would have silently dropped the human half of
+"@dev implement the endpoint, @Bora look at the schema first" — and a human has one comment box,
+not a second human-directed channel to fall back on. The gate is therefore for writers that DECLARE
+the audience themselves; today that is `operatorPromptAgent` alone. Stated in the ruling rather than
+left as an omission.
+
+Two halves the owner did not ask for but the decision implied: the quote defect was fixed anyway as
+ruling 233 (it is a defect on every comment that still notifies), and the operator persona was
+corrected, because the owner's own words were that the operator "should use" its human-directed
+path — which it cannot do while its persona says "the mention is what notifies them" without
+qualification.
+
+### Merge collisions in the review queue (→ ruling 236)
+
+**Background put to the owner.** Merging SHOP-2 put four of the six open pull requests into
+CONFLICTING within a minute, every one on the same two shared files. The pass carries 71
+`github.branch_update.operator` events; the operator reasons about merge order in prose on task
+timelines and reversed its own ordering once. The queue listed all six as independent rows, and a
+person discovered each collision by pressing Accept. Viberr reconciles mergeability already but
+stored `changed_files` as a COUNT, so it could see that a PR conflicts, only after the fact, and
+never that two were about to.
+
+**Four options offered.** (a) Warn on overlap in the queue, read-only. (b) Leave it; the operator
+handles it. (c) Serialize merges behind a per-project lease. (d) Treat it as the clone's problem.
+
+**The owner took (a)** — add information, order nothing, block nothing, leave every decision with
+the person.
+
+**Proven on its first day.** Eight rows, four chips. SHOP-22 was the one with no chip, and it was
+the one safe to merge; after it merged, every PR the chip called clean was still MERGEABLE and zero
+were newly conflicted. The queue answered "which of these is safe right now" without being asked.
