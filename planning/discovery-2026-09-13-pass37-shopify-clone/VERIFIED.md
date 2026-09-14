@@ -1348,3 +1348,39 @@ And it is covered by tests, including the negative case: *"R15-3 does not widen 
 contributor who does NOT own the task still cannot apply"*, alongside *"the contributor OWNER may
 apply an accept_completion recommendation"* and the dismissal equivalent. The exception was itself
 found as a live defect once (F15-12: a contributor-owner was shown Apply and then refused).
+
+## The evidence chain, and where its backing actually lives — CORRECT (2026-09-14)
+
+Agents attach evidence rows that viberr renders as fact ("Storefront Vitest suite · 32 passed ·
+0 failed"), so the obvious question is whether the claim survives contact with the log.
+
+**Spot check, exact.** SHOP-18's row claimed `32 passed · 0 failed`; its attachment
+`SHOP-18-storefront-test.txt` ends `Test Files 7 passed (7) / Tests 32 passed (32)`. The
+typecheck/lint row claimed `2 passed · 0 failed`; both attachments show the commands running clean.
+An adjacent row on the same event reads `Root stack-test diagnostic · 5 passed · 1 root failure` -
+the agent recording its own failure inside its own evidence rather than rounding it away.
+
+**Then a systematic sweep that produced a false alarm, worth recording.** Checking all 14 numeric
+evidence rows against their task's attachments left 5 "uncorroborated", including SHOP-18 claiming
+`28 passed` when the attachment now says 32. The obvious reading was that a later run had
+overwritten the older run's proof - viberr hands agents a WRITABLE attachments directory
+(`attachmentsWritableDir`) and does not mediate filenames, so same-name overwrites are real.
+
+That reading was wrong, and the schema says so outright. An `EvidenceRow` is
+`{ label, add, del }` - three strings - documented as **"A REFERENCE, never a dump"**, and the
+`evidence-separation` guardrail it complements "trims raw fenced output out of the prose and
+**points at the run logs**". Viberr never made an attachment link, so no link broke. The backing
+store is `run_log_lines`, kept 30 days, and it still holds the claim:
+
+```
+SHOP-18 runs whose retained log contains "28 passed":  5
+total run-log lines retained for SHOP-18:              2613
+```
+
+So the older claim is as substantiated today as when it was written. The attachment set is a
+convenience drop the agent curates, not the citation's backing - and conflating the two is what
+made this look like a defect.
+
+**Fifth near-miss of the pass, same shape as the other four**: assume a mechanism, measure against
+the assumption, get a signal. The check that settled it was reading the schema's own sentence about
+what the row IS.
