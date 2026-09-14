@@ -1484,3 +1484,54 @@ as a freshness fact rather than a browsable event, surfaced as "last checked" on
 and nowhere else. The org audit browse was the single place that selected everything and hoped the
 window would sort it out. Ruling 234 does not introduce a policy; it brings the last surface in
 line with one the app had already settled.
+
+---
+
+## The 07:29Z window, and what it actually proved
+
+All six `run-operator` schedules fired at **07:29:38Z**. Six operator runs, then six specialist
+dispatches, inside ninety seconds.
+
+**Ruling 225 — the complete lifecycle, live.** The board went from six `resumes 12:29` clock tags
+to **zero**, each replaced by an `agent working` pill, with the header still reading "0 waiting on
+a human" throughout. So the derived `waiting: schedule` held for the whole nine-hour hold, cleared
+the moment the schedule fired, and handed straight to `agent` without ever inventing a human
+demand. That is human to schedule to agent across a real stall, not a fixture.
+
+**Ruling 231 — partial, and the missing half is named.** Every one of the six operator runs
+started on `claude` / `opus[1m]`:
+
+```
+07:29:30  SHOP-2   operator  claude  opus[1m]     running
+07:29:30  SHOP-3   operator  claude  opus[1m]     running
+07:29:31  SHOP-12  operator  claude  opus[1m]     running
+07:29:31  SHOP-18  operator  claude  opus[1m]     running
+07:29:32  SHOP-21  operator  claude  opus[1m]     running
+07:29:32  SHOP-22  operator  claude  opus[1m]     running
+```
+
+This is worth recording but it is **not** ruling 231's proof: these are SCHEDULED runs, and R22
+already made a schedule resolve the live deployment at fire time. Ruling 231 is about the REACT
+chain, where the backend used to be carried forward as an override. The proof needs an operator
+run triggered by an agent REPLY, which is still pending: the six specialists dispatched at
+07:30-07:33 are on Codex and have not reported yet. Watching for it.
+
+**Ruling 232 — no live proof yet, and the zero is vacuous.** Zero new mention notifications since
+the 06:55 baseline (still 49, newest 03:55:48Z), and the operators wrote six fresh directives in
+that window. But the two I read carry bare "Arda", not "@Arda":
+
+```
+SHOP-3   "...the shared-surface check for Arda's 2026-09-13 decision on this task..."
+SHOP-22  "...the canonical value Arda decided on 2026-09-14 ("Adopt SHOP-2/3 value")..."
+```
+
+`findMentionSpans` requires a literal `@`, so neither would have notified under the OLD code
+either. A zero produced by input that could never have fired is not evidence, and counting it as
+such would be the fourth vacuous canary of this pass. Ruling 232 stands on its unit canaries
+(remove the gate, two tests fail by name; drop the `audience` at the call site, the
+`operatorPromptAgent` test fails alone) until a directive carrying a real `@handle` appears.
+
+**The model policy is holding on both sides.** Operators on `claude`/`opus[1m]` at high effort;
+every specialist dispatched in this window (Integration Verifier x3, Code Reviewer, Infrastructure
+Engineer, Frontend Engineer) started on Codex. Controller opus high, operator opus high after the
+owner's change, everything else luna max, exactly as set.
