@@ -931,3 +931,28 @@ The doc-sync test caught the count in `file-formats.md` on the same commit, whic
 mechanism working: a new packet-option kind cannot land without the reference enumerating it.
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6602 tests passed**, `build` green.
+
+### Ruling 224 took three passes to stop being inert, and only deploying it showed that
+
+Worth recording as a method note, because the tests were green after each one.
+
+1. **The specialist builder.** Tests passed, canaries red. Deployed, re-triggered the stall — and
+   the regenerated packet was the OPERATOR's, built by a different function the change never
+   touched, still recommending "the window has reset" three hours early.
+2. **The operator builder.** Tests passed, canary red. Deployed, re-triggered — and the packet
+   still carried no wait at all, and no date in its title either.
+3. **The instant itself.** `RunFailureFacts.resetsAt` comes from a machine `rate_limit_event`
+   sent *during* a run. Codex refuses at spawn time and sends none, so on the one failure that
+   stalls a board the facts are empty — while `/resources/health` was rendering
+   `exhausted.resetsAt: 1789352820`, parsed by the quota store out of the provider's sentence.
+   The option now reads that store when the facts are silent.
+
+```
+# the store read removed
+AssertionError: expected { kind: 'request_edit', …(5) } to match object { kind: 'wait_for_window', …(1) }
+```
+
+Each step's tests were honest about what they covered and each step was still inert in
+production. What closed it was deploying and provoking the real failure again — three times.
+
+Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6605 tests passed**, `build` green.

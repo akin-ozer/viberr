@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { findUserById } from "~/server/auth/user-store.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { substituteRunModel } from "~/server/runtimes/model-catalog.server";
+import { latestBackendRateLimits } from "~/server/runtimes/backend-quota.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
@@ -96,6 +97,31 @@ function windowWord(window: string | null | undefined): string {
   }
 }
 
+/**
+ * Ruling 224: the reset instant viberr actually knows, when the run's own
+ * failure facts do not carry one.
+ *
+ * `RunFailureFacts.resetsAt` is set only from a machine `rate_limit_event` the
+ * provider sent during the run. A Codex refusal at spawn time sends no such
+ * event — but its SENTENCE names the date, the quota store parses it
+ * (`parseQuotaResetAt`) and keeps it on the backend's exhaustion record. That
+ * record is the same one Insights and the Profile page render, so reading it
+ * here makes the packet agree with every other surface rather than inventing a
+ * second source of truth. An expired record is already dropped by the reader.
+ */
+function storedQuotaResetIso(db: DatabaseSync, backend: RealBackend): string | null {
+  try {
+    const row = latestBackendRateLimits(db).find((r) => r.backend === backend);
+    const seconds = row?.exhausted?.resetsAt ?? null;
+    if (seconds === null || !Number.isFinite(seconds)) return null;
+    return new Date(seconds * 1000).toISOString();
+  } catch {
+    // A reading that cannot be taken is not a reason to fail a failure
+    // description — the packet simply loses the wait option.
+    return null;
+  }
+}
+
 export function describeRunFailure(
   db: DatabaseSync,
   input: DescribeRunFailureInput,
@@ -106,7 +132,17 @@ export function describeRunFailure(
   const other: RealBackend = input.backend === "codex" ? "claude" : "codex";
   const kind = input.failure?.kind ?? "unknown";
   const facts = input.failure?.facts;
-  const resetLabel = formatResetLabel(facts?.resetsAt);
+  // Ruling 224 (F37-44), second correction: the FACTS carry a reset instant
+  // only when the provider sent a machine `rate_limit_event` this run —
+  // Codex's spawn-time refusal sends none, so `facts.resetsAt` is null on
+  // exactly the failure that stalls a board. Viberr does know the instant: the
+  // quota store parsed it out of the provider's own sentence ("try again at
+  // Sep 14th, 2026 2:27 AM") and holds it as `exhausted.resetsAt`. Read the
+  // store when the facts are silent, or the wait this ruling added never
+  // appears on the packet it was written for — which is what the first deploy
+  // proved, live, on a board with four stalled tasks.
+  const resetsAt = facts?.resetsAt ?? storedQuotaResetIso(db, input.backend);
+  const resetLabel = formatResetLabel(resetsAt);
   const ownerRecord = input.ownerUserId ? findUserById(db, input.ownerUserId) : null;
   const owner = ownerRecord ? { userId: ownerRecord.id, name: ownerRecord.name } : null;
   const ownerHasOther =
@@ -219,7 +255,7 @@ export function describeRunFailure(
   }
 
   const options = input.role === "operator"
-    ? operatorOptions(kind, backend, input.backend, resetLabel, facts?.resetsAt ?? null)
+    ? operatorOptions(kind, backend, input.backend, resetLabel, resetsAt)
     : specialistOptions(
         kind,
         backend,
@@ -231,7 +267,7 @@ export function describeRunFailure(
         input.profileId,
         input.profileModel,
         facts?.origin === "local",
-        facts?.resetsAt ?? null,
+        resetsAt,
       );
 
   return { reason, remedy, resetLabel, owner, options };

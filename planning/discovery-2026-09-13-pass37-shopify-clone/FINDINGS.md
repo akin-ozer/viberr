@@ -2458,3 +2458,16 @@ the provider had dated 02:27. It now carries the same wait, and the assert-it-re
 its place but loses the recommendation. Worth recording as its own lesson: the live re-trigger is
 what found the second half, because the first fix's tests only ever exercised the builder it
 changed.
+
+**And a third half, from re-triggering again.** With both builders fixed, the regenerated packet
+STILL carried no wait — because `RunFailureFacts.resetsAt` is populated from a machine
+`rate_limit_event` the provider sends *during* a run, and a Codex refusal at spawn time sends
+none. On exactly the failure that stalls a board, the facts are silent. Viberr did know the
+instant: the quota store had parsed it out of the provider's own sentence and `/resources/health`
+was rendering it as `exhausted.resetsAt: 1789352820`. The option now reads that store when the
+facts carry nothing, which is also what makes the packet agree with Insights and Profile instead
+of inventing a second source of truth.
+
+That is the pass-24 trap — *"several pass-23 silent-drop fixes were INERT (wired to seams that
+can't fire)"* — caught this time only because the fix was deployed and re-triggered against the
+live stall rather than declared done when its tests went green.

@@ -410,6 +410,37 @@ describe("describeRunFailure", () => {
       expect(d.options.filter((o) => o.recommended)).toHaveLength(1);
     });
 
+    it("reads the instant off the quota STORE when the run's facts carry none (ruling 224)", async () => {
+      const store = setupTestStore(ctx);
+      // The shape that actually stalls a board: Codex refuses at spawn time, so
+      // no machine rate_limit_event reaches the run and `facts.resetsAt` is
+      // null — while the provider's SENTENCE named the date and the quota store
+      // parsed it. Before this, the wait never appeared on the one packet it
+      // was written for, which the first deploy proved live.
+      const { recordBackendQuotaExhaustion } = await import(
+        "~/server/runtimes/backend-quota.server"
+      );
+      recordBackendQuotaExhaustion(store.db, "claude", {
+        credentialUserId: null,
+        credentialLabel: null,
+        resetsAt: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
+        resetsAtPrecision: "prose",
+        providerText: "You've hit your usage limit… try again at 2:27 AM.",
+        runId: "run_x",
+        observedAt: new Date().toISOString(),
+      });
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        // No resetsAt on the facts at all.
+        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+      });
+      // CANARY: drop `storedQuotaResetIso` and this is false — the fix is inert
+      // on the only failure that produces it.
+      expect(d.options[0]).toMatchObject({ kind: "wait_for_window", recommended: true });
+      expect(d.reason).toContain("reopens at");
+    });
+
     it("leaves the operator packet alone when the window has no dated reopening", () => {
       const store = setupTestStore(ctx);
       const d = describe_(store, {

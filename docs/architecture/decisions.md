@@ -4748,7 +4748,12 @@ by rewriting those paragraphs:*
     fallback, and never un-resolves the decision the human made. The OPERATOR's own quota
     packet is a second builder with the same defect and gets the same arm: its recommended
     option asked a human to assert the window had reset, which is the one statement on that
-    packet that is false at the moment it is offered.
+    packet that is false at the moment it is offered. And the instant is read from the QUOTA
+    STORE, not only from the run's own failure facts: `RunFailureFacts.resetsAt` is set from a
+    machine `rate_limit_event` the provider sends DURING a run, and a Codex refusal at spawn
+    time sends none - so on exactly the failure that stalls a board the facts are silent while
+    the store holds the date parsed out of the provider's own sentence. Without that read the
+    whole ruling is inert on the case it was written for, which the first deploy proved live.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 
