@@ -1421,3 +1421,28 @@ passed off as new scope.
 correctly every time, but the churn is real - SHOP-5's Infrastructure Engineer was cut off twice in
 a row - and the right response was to stop deploying while the board is busy rather than to keep
 proving the recovery works.
+
+## Ruling 131(e)'s all-or-nothing release, on three real dependents (2026-09-14)
+
+SHOP-21 merged at 11:53:28Z (PR #18, twelve merged). Three tasks listed it in `blockedBy`, and the
+engine treated them differently and correctly:
+
+| task | blockedBy before | after | why |
+|---|---|---|---|
+| SHOP-18 | `[SHOP-21]` | `[]` **released** | every entry done |
+| SHOP-11 | `[SHOP-14, SHOP-21, SHOP-5]` | unchanged | SHOP-14 and SHOP-5 are not done |
+| SHOP-19 | `[SHOP-3, SHOP-21, SHOP-22]` | unchanged | SHOP-22 IS done, SHOP-3 is not |
+
+SHOP-19 is the interesting row: two of its three entries are now complete and the list is still
+intact, because `releaseTask` clears the WHOLE list or none of it. A partial clear would have left
+a task looking half-held with no way to say which half, so the all-or-nothing rule is what makes
+the board's "waits on" readable at all.
+
+The release announced itself in the same breath as the reason the work cannot simply resume:
+
+> Released: everything this task waited on is done (SHOP-21). The task can move again; the base
+> branch has changed since the hold, so the work re-reads it before continuing.
+
+And it did: the operator brought `shop-18` up to date with `main` (20 commits, merge commit
+`aaf5e38`) before moving it to Review. Held for hours, released the instant its blocker landed,
+rebased, and advanced, with no human touching it beyond the acceptance that unblocked it.
