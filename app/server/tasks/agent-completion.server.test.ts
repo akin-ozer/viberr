@@ -1227,6 +1227,31 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.frontmatter.waiting).toBe("human");
     });
 
+    it("the note sits ABOVE the verdict that caused it, newest-first", async () => {
+      // The timeline is newest-first in the file, and viberr runs a
+      // `timeline.out_of_order` diagnostic over it. The reply comment carries
+      // the timestamp it was PREPARED with, which predates anything stamped
+      // during this write — so unshifting the escalation note inside the
+      // verdict block put a note 5ms newer than the reviewer's comment BELOW
+      // it. Live on SHOP-24 within the hour of shipping, and the diagnostic
+      // found it, not me.
+      // CANARY: move the unshift back into the verdict block.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+
+      const timeline = taskFile().parsed.timeline;
+      const noteAt = timeline.findIndex((e) => e.text.startsWith("**Decision packet:**"));
+      const verdictAt = timeline.findIndex((e) => e.type === "quality");
+      expect(noteAt).toBeGreaterThanOrEqual(0);
+      expect(verdictAt).toBeGreaterThan(noteAt);
+      // And the file is strictly newest-first, which is what the diagnostic reads.
+      const inversions = timeline.filter(
+        (e, i) => i > 0 && e.occurredAt > timeline[i - 1]!.occurredAt,
+      );
+      expect(inversions).toEqual([]);
+    });
+
     it("ruling 177: no packet on a task that CLOSED while the reviewer was running", async () => {
       // A reviewer run that finishes after its task was accepted still records
       // its verdict — evidence is evidence, and ruling 177 says so — but no

@@ -3400,15 +3400,14 @@ export async function recordAgentCompletion(
               // withdrawn" line into the decision log for one disappearance.
               deadlockEscalation.packet = parsed.packet;
               deadlockEscalation.deadlock = deadlock;
-              parsed.timeline.unshift({
-                occurredAt: new Date().toISOString(),
-                type: "comment",
-                actor: { kind: "system", systemId: "policy-engine" },
-                title: parsed.packet.title,
-                text: `**Decision packet:** ${parsed.packet.title}. Awaiting a human decision.`,
-                toAgent: false,
-                evidence: null,
-              });
+              // The NOTE is unshifted further down, after the verdict event,
+              // not here. The timeline is newest-first and this note is the
+              // consequence of that verdict, so it has to sit above it — but
+              // the reply comment carries the timestamp it was PREPARED with,
+              // which is older than anything stamped in this write. Unshifting
+              // here put a note 5ms newer than the reviewer's comment BELOW it,
+              // and viberr's own `timeline.out_of_order` diagnostic caught it
+              // on SHOP-24 within the hour.
             }
           }
         }
@@ -3511,6 +3510,20 @@ export async function recordAgentCompletion(
         };
         if (attachments) verdictEvent.attachments = attachments;
         parsed.timeline.unshift(verdictEvent);
+        // Ruling 237: the escalation note goes ABOVE the verdict that caused
+        // it, which means last, and with a stamp that cannot be older than what
+        // it sits on.
+        if (deadlockEscalation.packet) {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "comment",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: deadlockEscalation.packet.title,
+            text: `**Decision packet:** ${deadlockEscalation.packet.title}. Awaiting a human decision.`,
+            toAgent: false,
+            evidence: null,
+          });
+        }
       }
       // Ask-human question from the outcome envelope (Codex transport; the
       // Claude toolkit opens its packet live mid-run). One packet slot per

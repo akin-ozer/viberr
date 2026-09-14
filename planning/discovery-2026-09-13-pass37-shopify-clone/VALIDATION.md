@@ -1916,3 +1916,31 @@ The canary is worth its own note. The first version of that test asserted the op
 and passed with the guard removed — because the fixture deploys no operator, so the react returned
 early and the assertion was vacuous. A test that passes when you break the code is not evidence,
 and the only way to find out was to try to break it.
+
+### Viberr's own diagnostic caught the third defect in ruling 237, within the hour
+
+The task page's Diagnostics panel showed one finding on SHOP-24 after the packet landed:
+
+```
+HEADS-UP  timeline.out_of_order · Timeline entries are not strictly newest-first
+```
+
+Checked against the file rather than the panel, exactly one inversion, and it was mine:
+
+```
+index 5  13:52:53.471Z  comment   Code Reviewer: "Request changes. 1. pnpm-lock.yaml …"
+index 6  13:52:53.476Z  comment   "Decision packet: Code Reviewer has requested changes 2 times running"
+```
+
+The note is 5ms newer and sat below. The cause is that the reply comment carries the timestamp it
+was PREPARED with, which predates anything stamped during the write, and I unshifted the
+escalation note inside the verdict block — so the reply and verdict events went in afterwards and
+landed above it. The note now goes in last, after the verdict event, which is where it belongs
+anyway: it is that verdict's consequence, and the timeline is newest-first.
+
+Canaried by moving the unshift back: `expected 0 to be greater than 2`. The test also asserts the
+whole timeline has zero inversions, which is what the diagnostic itself reads.
+
+Worth recording for what it says about the surface rather than about my bug: the diagnostic is a
+panel nobody looks at until something is wrong, it was right, it was specific, and it found a
+same-day regression in code that had passed 6,674 tests.
