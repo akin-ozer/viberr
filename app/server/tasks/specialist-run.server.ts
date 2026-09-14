@@ -3218,7 +3218,9 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       (from
         ? `A human (${from}) asked you: "${input.directive.trim()}"\n` +
           `Answer THEM, and start your reply by tagging them — "@${from}" — so they ` +
-          `are notified. `
+          `are notified. Call them "they" unless they have told you otherwise: you were ` +
+          `given a name, not a pronoun, and what you write lands in a permanent record ` +
+          `that person reads. `
         : `You were asked: "${input.directive.trim()}"\n`) +
       `This is what to focus on — it may be an operator hand-off, a reviewer summon, ` +
       `or a teammate's @mention question. Do what it asks, then give a concise reply. ` +

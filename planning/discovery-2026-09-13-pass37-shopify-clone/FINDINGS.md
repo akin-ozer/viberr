@@ -3177,3 +3177,41 @@ should (a) land on the timeline, so the record is true and the operator re-ancho
 (b) queue the operator with a nudge naming the delivery, the way ruling 228's stranded nudge does
 — guarded so a refused acceptance cannot fan out repeat runs. The human keeps the toast they
 already get.
+
+---
+
+## F37-56 · Agents invent the owner's gender, and the record disagrees with itself — LOW
+
+**Found by reading one operator comment.** At 11:01 the SHOP-21 operator wrote:
+
+> "@Infrastructure Engineer — Arda resolved the blocking packet and assigned the conflict
+> resolution to you. **Her** words, which are now part of this task's contract: …"
+
+Nobody told it. Counting every gendered pronoun across the project's task files:
+
+```
+him  7      he  5      his  2      her  1
+```
+
+All fifteen refer to the project owner, and they contradict each other: SHOP-7's timeline says
+*"when Arda has what **he** needs to decide"*, *"recording **his** resolved Mock-only decision"*,
+*"asking **him** to choose"* (repeatedly, across four separate directives), while SHOP-21 says
+*"**Her** words"*. The same person, both ways, in the canonical record.
+
+**Why this is viberr's rather than the model's.** Viberr already uses the agent personas to
+enforce exactly this class of convention: NEW-4 makes every agent tag the human it answers,
+ruling 232 now tells the operator which comment reaches a person, and
+`specialist-run.server.ts` hands each specialist the asker's name specifically so the reply can
+address them. The one thing it never says is what to call them. An agent given a name and told to
+answer that person will guess, and a guess about a real person's identity is not a detail the
+record should be inventing — `task.md` is the thing viberr calls truth, it is permanent, and it is
+read by the person being described.
+
+**Small, and filed as LOW.** It costs nobody any work and blocks nothing. It is here because the
+bar is "viberr lying", the record does assert something viberr never knew, and it asserts it two
+incompatible ways within one project.
+
+**Fix:** one sentence where each side is already told how to address the human — the operator
+persona (shipped asset plus the fallback definition) and the specialist directive block that
+introduces `directiveFrom`. Use "they" unless the person has stated otherwise; a name is not
+evidence.

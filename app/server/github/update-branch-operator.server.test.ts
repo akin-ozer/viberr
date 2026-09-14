@@ -477,6 +477,20 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/tag them by name with an @mention \(e\.g\. "@Arda"\) in a comment/);
   });
 
+  /**
+   * F37-56: agents were given the human's NAME and told to answer them, and
+   * never told what to call them - so they guessed, and the record disagreed
+   * with itself. Counted across this pass's project: 7 "him", 5 "he", 2 "his"
+   * and 1 "her", all the same owner. `task.md` is what viberr calls truth, it
+   * is permanent, and the person it describes reads it.
+   *
+   * Canary: delete the pronoun sentence from the seed asset.
+   */
+  it("F37-56: tells the operator to say 'they' rather than guess a pronoun", () => {
+    expect(seed).toMatch(/Refer to a person as "they" unless they have told you otherwise/);
+    expect(seed).toMatch(/you are given names, not pronouns/);
+  });
+
   it("keeps the live store's copy in step when one is present (both copies or neither)", () => {
     if (live === null) return;
     expect(live).toBe(seed);
