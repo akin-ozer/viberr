@@ -201,6 +201,10 @@ readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
                                   # ready | input_required |
                                   # inconsistency_risk_detected | blocked
 waiting: human                    # human | agent | none (secondary signal)
+                                  # ruling 225: the PROJECTION also derives a
+                                  # fourth value, `schedule`, for a task resting
+                                  # on a pending occurrence with nothing pending
+                                  # on a person. Never written to a task file.
 ownerUserId: u_abc123             # ONE human owner; null when unowned
 engagements:                      # ONE uniform list of engaged agents (G1),
   - profileId: developer          # written by the DISPATCH since ruling 98 —
