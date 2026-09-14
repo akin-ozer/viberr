@@ -2832,3 +2832,54 @@ as a failure teaches people to skim it — R16-2's rule about filters, applied t
 
 **Live while being fixed:** SHOP-18 produced the 52nd instance at 04:02, between writing the fix
 and committing it.
+
+---
+
+## F37-50 · "Hold this until those land" has no packet option that performs it — MEDIUM
+
+**Found because the owner asked what a clone decision was doing in a viberr pass.** It was a fair
+challenge, and answering it properly turned up the viberr half I had walked past.
+
+SHOP-11's Integration Verifier request-changed twice, mostly on work outside SHOP-11's scope
+(gateway cart routing → SHOP-14, tracing → SHOP-5, the shared stack test → SHOP-21). The operator
+raised a packet whose recommended option read:
+
+> **Fund the missing baseline separately** — *Hold SHOP-11 while gateway routing, tracing, and
+> stack-test work lands under separate owned paths, then rerun Verify.*
+
+Its kind is `block_on_policy`. That kind's resolution is R20-1's "I fixed the credential, carry
+on": it sets `readiness: ready`, `waiting: agent`, and re-queues the operator. Measured
+immediately after resolving it — `readiness: ready`, `waiting: agent`, packet gone. **The option
+promised a hold and performed an unblock.**
+
+The operator is not being careless. Looking at all fifteen `PACKET_OPTION_KINDS`, **none of them
+sets dependencies.** `hold_runtime_debug` pauses coordination but is about inspecting a session
+and writes no `blockedBy`. The one decision a human most naturally makes about a task blocked by
+other tasks — *hold it until those land* — is the one decision no option kind can carry out, so
+the operator reached for the closest-sounding kind and its resolution did the opposite.
+
+**This is ruling 224's shape exactly.** There, a spent usage window had a real remedy — wait, and
+resume when the window reopens — that no option kind could express, so every option offered was
+wrong at the moment it was offered. Here, a task waiting on other work has a real remedy that
+viberr already implements *everywhere else*: ruling 131's `blockedBy`, which the board renders,
+the schedule runner refuses on, and the dependency release re-triggers automatically. The
+mechanism exists and is good. It just is not reachable from the one surface where the decision
+gets made.
+
+I worked around it by instructing the operator to call `set_dependencies` itself, which it can.
+That is a workaround requiring a human who knows viberr's internals well enough to know the
+packet is about to do the wrong thing.
+
+### The wider observation underneath it
+
+`ownedPaths` appears **zero times** in viberr's source. Task scope is not a viberr concept at
+all — the controller invented "Owned paths:" as prose in task goals, and it works only because
+agents read goals and reviewers honour them. Viberr's own machinery knows nothing about it, so a
+required reviewer's verdict is unscoped: it can block a task indefinitely on work that task is
+forbidden to touch, and the only exits viberr offers are force-accept (an audited admin override
+whose record would misrepresent what happened — the verdict was correct) or editing the project's
+required-reviewer policy. Neither says "out of scope for this task".
+
+That second half is a design question rather than a defect, and it belongs to the owner. The
+first half — a decision with no option kind to carry it — is the same defect ruling 224 fixed
+once already.
