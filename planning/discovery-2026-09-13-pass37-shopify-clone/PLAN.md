@@ -384,3 +384,79 @@ with the condition stubbed out. Source assertions pin a call SITE; they do not t
 - **Attachments are overwritable by filename.** Real, but no evidence row references one: an
   `EvidenceRow` is `{label, add, del}`, documented as "A REFERENCE, never a dump", and its backing is
   the run log, which still holds the older claims. Left alone.
+
+---
+
+# D10 — Day six: what a surface PROMISES against what the mechanism can keep
+
+Every item below is shipped, canaried and gated. Listed so a fresh-context reader can find the
+seam each one lives on, in the order they were found.
+
+## D10-1 — The resume and delivery doors take the gates the dispatch door has · F37-61, F37-62 · ruling 240
+
+`performDelivery` had no `blockedBy` check while the operator's turn instruction told it, on every
+held task, that `deliver_for_review` was refused by the server. Ruling 186's gate covered
+`run_agent` only. `assertResumeEligible` likewise admitted a resume onto a closed or held task.
+Both now refuse with `holdRefusal`/`closureRefusal`'s own sentences, written to the timeline rather
+than only returned. *Seam: `task-actions.server.ts` `performDelivery`; `specialist-run.server.ts`
+`assertResumeEligible`.*
+
+## D10-2 — A wait on a cancelled goal is a DEAD wait · F37-63
+
+`DependencyState` gained `"cancelled"`. A link with no task on a goal that reached a terminal status
+resolves to it and `deadDependencies` includes it, so ruling 131(e)'s note, notification and
+`waiting: human` fire unchanged. Deliberately NOT folded into `failed`, which surfaces render as
+"archived" — a different cause and a false one. *Seam: `app/shared/dependencies.ts`,
+`projections/dependencies.server.ts`.*
+
+## D10-3 — Both question doors name their asker · F37-64
+
+Ruling 222 was applied to the Claude `ask_human` tool only. The Codex outcome envelope copies its
+title format and never set `from`, so `notifyTaskWatchers` stamped the Operator over an agent's own
+question. *Seam: `recordAgentCompletion`'s `askNotice`.*
+
+## D10-4 — The acceptance grant decides who accepts, not the autonomy · F37-65
+
+`operatorAcceptsDirectly` is `operatorAcceptCompletion`'s recommend-branch condition negated
+character for character, answered by the runtime's own `gate()`. Threaded to the Execution caption;
+`applyAutonomyCeiling` now mirrors both halves of the gate (it mirrored only the downgrade).
+*Seam: `operator-actions.server.ts`, `execution-profile.tsx`, `agents-query.server.ts`.*
+
+## D10-5 — Two records that described what did not happen · F37-66, F37-67
+
+Ruling 211(b)'s withdrawal note moved beside the attempt it reports on, above every early return.
+The lost-completion note branches on `completionReplayWillRun`, which models every condition the
+boot sweep ACTS on — the SELECT and both in-loop skips, because a run selected and then skipped is
+not replayed. `replyNeverLandedSql` is the one clause both readers take. *Seam:
+`applyAgentCompletionEffects`, `run-service.server.ts`, `run-recovery.server.ts`.*
+
+## D10-6 — A decision a hold refuses is QUEUED · F37-68, F37-70 · ruling 241 (owner)
+
+`queuedQuestions` on the task file carries the profile, the directive TEXT and who decided. The
+packet says it before the choice (built with `blockedBy` inside the same locked write that raises
+it); the resolution queues instead of dispatching; the drain runs wherever the HOLD GOES AWAY —
+`announceRelease` AND the operator's own `set_dependencies` clear, which computes `releasing` as
+`!ctx.operatorAuthorized` and therefore announces nothing. Drain before `autoInvokeOperator`, and
+empty the list before any run starts. *Seam: `task-file.schema.ts` (+ the TOLERANT parser),
+`review-deadlock.server.ts`, `resolvePacket`, `dependencies.server.ts`, `task-side-panels.tsx`.*
+
+## D10-7 — A review ROUND is counted by the deliverer having run · F37-69 · ruling 242 (owner, amends 204)
+
+`rounds` increments only when the delivering profile has a run row created since that reviewer's
+previous verdict (`profileRanSince`). Ruling 204's SHOP-9 case still counts; a run started only to
+ANSWER ruling 237's question counts for nothing. Any run row counts whatever its state. *Seam:
+`run-store.server.ts`, the verdict upsert in `applyAgentCompletionEffects`.*
+
+## D10-8 — The inbox stops demanding an acceptance the server refuses · F37-71
+
+`decisionsRequiring`'s recommendation query reads the same `validation_block_reason` its acceptance
+sibling already reads, gated on the pending kinds being EXACTLY acceptance. Needed a new projected
+column, `recommendation_kinds` (distinct, sorted, comma-joined), registered in `BASELINE_COLUMNS`
+because the rebuilder names it on every task write. *Seam: `decisions.server.ts`,
+`rebuilder.server.ts`, `0001_baseline.sql`, `sqlite.server.ts`.*
+
+## Validation for every D10 item
+
+Same bar as the rest of this plan: each fix has a test proven red by breaking the SOURCE, not by
+deleting an assertion. The canaries are named in FINDINGS.md per item and re-run before each commit.
+Gates on every commit: `npx oxlint && npx tsc --noEmit && npm test && npm run build`.
