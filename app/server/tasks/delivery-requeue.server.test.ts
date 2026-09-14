@@ -287,6 +287,74 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
  * dedicated `packet-resolved` trigger, EXCEPT for the documented NO_REQUEUE set
  * (`hold_runtime_debug` asked for no run). Reuses the same `runOperator` mock.
  */
+/**
+ * Ruling 240 (F37-61, owner): a HELD task refuses delivery, the same way ruling
+ * 186 made every dispatch door refuse it.
+ *
+ * Ruling 186's own live case is the argument: SHOP-2 was marked "Held until
+ * every entry is done" and a run "pushed a branch cut from a base that predated
+ * the foundation it waited on". Publishing that branch to a review PR is
+ * `performDelivery`, which had no `blockedBy` check at all — while the
+ * operator's turn instruction told it the server refused this door.
+ */
+describe("ruling 240 — a held task refuses delivery", () => {
+  it("refuses before anything is pushed, in the same words the dispatch gate uses", async () => {
+    deployOperator("full");
+    seedTask({ blockedBy: ["VIB-2", "VIB-3"] });
+    const pushesBefore = pushMock.mock.calls.length;
+
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+
+    // CANARY: delete the hold block at the top of `performDelivery` and this
+    // reads "delivered" — the branch is pushed and the PR opened on a base that
+    // predates the work the task is waiting for.
+    expect(outcome.status).toBe("failed");
+    // Narrowed before reading `message`: only the failed variant carries one.
+    const failed = outcome.status === "failed" ? outcome : null;
+    expect(failed?.message).toContain("VIB-1 waits on VIB-2 and VIB-3");
+    expect(failed?.message).toContain("delivering it for review is refused");
+
+    // Nothing reached the remote. Counted from a baseline rather than asserted
+    // as "never called": `pushMock` is NOT cleared in this file's beforeEach
+    // (only `runOp` and `openTaskPrMock` are), so a bare not.toHaveBeenCalled()
+    // passes alone and fails after any sibling test — and its failure output
+    // formats the recorded `db` handle, which is closed by then, so the real
+    // assertion is buried under "database is not open".
+    expect(pushMock.mock.calls.length).toBe(pushesBefore);
+    expect(openTaskPrMock).not.toHaveBeenCalled();
+    // And the refusal is on the record, not just in the return value.
+    const events = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!
+      .parsed.timeline.map((e) => e.text)
+      .join("\n");
+    expect(events).toContain("delivering it for review is refused");
+  });
+
+  it("delivers normally the moment nothing is held", async () => {
+    // The gate keys on the list being non-empty, so an empty one must not cost
+    // a delivery. CANARY: gate on the key's presence rather than its length.
+    deployOperator("full");
+    seedTask({ blockedBy: [] });
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+    expect(outcome.status).toBe("delivered");
+  });
+});
+
 describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   const FAILURE_PACKET: TaskPacket = {
     type: "blocked",

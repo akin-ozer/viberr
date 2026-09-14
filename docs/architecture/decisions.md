@@ -5268,6 +5268,30 @@ by rewriting those paragraphs:*
     `controller-toolkit.server.ts`, `specialist-run.server.ts`, `operator-actions.server.ts`,
     `controller-run.server.ts`, `project.agents.tsx`, `agents-page.tsx`.)
 
+240. **A held task refuses DELIVERY, not just dispatch (owner, 2026-09-14, pass 37; F37-61).**
+    Ruling 186 made the hold a gate at the dispatch chokepoint and its comment says "Every
+    dispatch door lands here, so every one of them refuses". The operator's turn instruction
+    then told it, on every held task, that "`run_agent` and `deliver_for_review` are REFUSED
+    by the server while the task is held". Only the first was. `performDelivery` had no
+    `blockedBy` check anywhere in it, for a pass and a half, while the prompt asserted one.
+    That is ruling 186's own defect inverted: there a prompt ASKED where a gate was needed,
+    here a prompt CLAIMED a gate nobody built.
+    It matters because of the live case ruling 186 was written on. SHOP-2 was marked "Held
+    until every entry is done" and a run "pushed a branch cut from a base that predated the
+    foundation it waited on" — and publishing that branch to a review pull request is
+    `deliver_for_review`, not `run_agent`. The gated door was not the one the harm went
+    through.
+    The gate now sits at the top of `performDelivery`, before the branch bootstrap, the push
+    and the PR open, and refuses with `holdRefusal`'s own sentence so a person meets one
+    wording wherever a hold stops them. The refusal is written to the timeline, not only
+    returned.
+    The owner's alternatives were to leave it as doctrine with honest copy, and to gate it
+    with a packet-based override for the case where a task's own work is finished while it
+    waits on something unrelated. The owner took the plain gate: the same shape as ruling
+    186, and a task that genuinely should deliver can have its `blockedBy` corrected with
+    `set_dependencies`, which is the door ruling 131 already provides.
+    (`task-actions.server.ts`, `operator-run.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

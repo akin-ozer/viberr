@@ -1,3 +1,4 @@
+import { holdRefusal } from "~/shared/dependencies";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
@@ -6373,6 +6374,27 @@ export async function performDelivery(
 ): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
   try {
+    // Ruling 240 (F37-61): a HELD task refuses delivery, for ruling 186's own
+    // reason and against its own live case. Ruling 186 gated every DISPATCH
+    // door after SHOP-2 "pushed a branch cut from a base that predated the
+    // foundation it waited on" — and publishing that branch to a review PR is
+    // this function, which had no `blockedBy` check at all. The operator's
+    // turn instruction asserted the gate existed for a pass and a half before
+    // anyone read the delivery path.
+    //
+    // Before anything else in the delivery, so a held task never reaches the
+    // push, the PR open, or the branch bootstrap: the same shape as the
+    // closure and hold gates in `startAgentRun`, and the same refusal sentence,
+    // so a person sees one wording wherever a hold stops them.
+    {
+      const heldFile = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+      const held = heldFile?.parsed.frontmatter.blockedBy ?? [];
+      if (held.length > 0) {
+        const message = holdRefusal(taskKey, held, "delivering it for review");
+        await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
+        return { status: "failed", message };
+      }
+    }
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
     // 0. Ruling 128 (F34-4): the base branch must exist BEFORE the push, or a

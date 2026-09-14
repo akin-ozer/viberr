@@ -4198,8 +4198,14 @@ function heldDoctrine(snapshot: OperatorTaskSnapshot): string {
     // Ruling 186 (pass 37): dispatch is no longer something to ask for — it is
     // REFUSED at the chokepoint. Saying so stops a turn being spent discovering
     // it, and stops the prompt claiming a responsibility the server has taken.
-    "`run_agent` is REFUSED by the server while the task is held, so do not attempt it; there is no phrasing that gets past it. " +
-    "`deliver_for_review` is NOT gated (F37-61) and this sentence used to claim it was: do not use it on a held task anyway, because publishing a branch cut from a base that predates the work it waits on is the exact harm ruling 186 names, and here that is doctrine rather than a gate. " +
+    //
+    // Ruling 240 (F37-61): this sentence named BOTH doors for a pass and a half
+    // while only `run_agent` was gated — `performDelivery` had no `blockedBy`
+    // check at all, which is the door ruling 186's own live case went through
+    // ("pushed a branch cut from a base that predated the foundation it waited
+    // on" is a PUSH, not a dispatch). The delivery gate exists now, so the
+    // sentence is true as written.
+    "`run_agent` and `deliver_for_review` are BOTH REFUSED by the server while the task is held, so do not attempt either; there is no phrasing that gets past it. " +
     "The wait is a fact on the task, changed only with `set_dependencies` (the full list; `[]` clears it): use it if an entry is wrong, already satisfied by other means, or can never complete (an archived entry needs a person's or your edit). " +
     "If a person asked you something, answer it in ONE concise comment and tag them. Otherwise state in ONE concise comment that the task is held and what it waits on, and stop. Ending this turn with nothing else done is correct here."
   );

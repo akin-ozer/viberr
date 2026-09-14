@@ -4564,19 +4564,20 @@ describe("R19-1 — the operator's read-only repository view", () => {
  * about, inverted: there it was a prompt ASKING where a gate was needed; here it
  * is a prompt CLAIMING a gate that was never built.
  */
-describe("F37-61: the held-task doctrine names only the gate that exists", () => {
-  it("says run_agent is refused, and does not claim delivery is", async () => {
+describe("F37-61 / ruling 240: the held-task doctrine names two gates, and both exist", () => {
+  it("names both doors, and both are really gated", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("app/server/runtimes/operator-run.server.ts", "utf8");
-    // CANARY: restore "`run_agent` and `deliver_for_review` are REFUSED".
-    expect(src).not.toMatch(/`run_agent` and `deliver_for_review` are REFUSED/);
-    expect(src).toContain("`run_agent` is REFUSED by the server while the task is held");
-    expect(src).toContain("`deliver_for_review` is NOT gated");
+    // The sentence names both doors, and BOTH gates now exist — ruling 240 built
+    // the second after the owner's call. The point of this test is that the
+    // claim is checked against the code rather than restated.
+    expect(src).toContain("`run_agent` and `deliver_for_review` are BOTH REFUSED");
 
-    // And the claim is checked against the code rather than restated: the hold
-    // gate is in the dispatch chokepoint, and the delivery path has no
-    // blockedBy check. CANARY: add one to performDelivery and update the copy.
     const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
     expect(specialist).toContain('holdRefusal(input.taskKey, held, "running an agent on it")');
+    // CANARY: delete the hold gate from `performDelivery` and this fails — the
+    // prompt would be back to asserting a gate that was never built.
+    const actions = readFileSync("app/server/tasks/task-actions.server.ts", "utf8");
+    expect(actions).toContain('holdRefusal(taskKey, held, "delivering it for review")');
   });
 });
