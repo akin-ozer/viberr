@@ -991,6 +991,142 @@ describe("listGoals parses stored links instead of asserting their shape", () =>
  * stored BY INDEX, and `remove_pending_link` renumbers every later link — so a
  * removal used to silently re-point or orphan every reference to them.
  */
+/**
+ * Ruling 243 (pass 37, F37-72): a pending link can ADOPT a task that already
+ * exists.
+ *
+ * A chain normally makes its own task when it advances, and nothing could point
+ * a link at work created ahead of it. Live this pass a person asked the
+ * controller to build out the tasks for three pending links; it created them,
+ * and the links still read `taskKey: null`, so the chain would have created its
+ * own duplicates on the next advance. The only escape was
+ * `remove_pending_link`, which destroys the link's authored text — those three
+ * carried the orders service's port, its whole migration schema and a
+ * crash-resumption assertion, and every line had to be hand-copied into the new
+ * tasks before the links could go.
+ */
+describe("ruling 243: a pending link adopts an existing task", () => {
+  async function chainAndTask() {
+    const { createGoal } = await import("./goal-actions.server");
+    const { createTask } = await import("./task-actions.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const goal = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain with work made ahead of it",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const made = await createTask(
+      app.db,
+      { projectSlug: SLUG, title: "Built before the chain got there" },
+      actor,
+      ctx,
+    );
+    return { goal, made, actor, ctx };
+  }
+
+  it("binds both records: the link carries the task and the task names the link", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { readGoalFile } = await import("~/server/files/goal-writer.server");
+    const { goal, made, actor, ctx } = await chainAndTask();
+
+    // CANARY: delete the `adopt_task` arm and this throws on an unknown op.
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+      actor,
+      ctx,
+    );
+
+    const link = readGoalFile({ projectSlug: SLUG, goalId: goal.goalId, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.links.find((l) => l.index === 2)!;
+    expect(link.taskKey).toBe(made.key);
+    expect(link.status).toBe("active");
+    // CANARY: drop the `forward.adopted` write-back and the link claims the task
+    // while the task denies it — the worse of the two half-states.
+    const fm = readTaskFile({ projectSlug: SLUG, taskKey: made.key, dataRoot: app.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.goalRef).toEqual({ goalId: goal.goalId, linkIndex: 2 });
+  });
+
+  it("refuses a task another chain already carries, naming that chain", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const { goal, made, actor, ctx } = await chainAndTask();
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+      actor,
+      ctx,
+    );
+    // A second chain reaching for the same task. CANARY: drop the `goalRef`
+    // guard and two chains each advance on one task's completion, while the
+    // task's own `goalRef` can name only one of them.
+    const { createGoal } = await import("./goal-actions.server");
+    const other = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Second chain",
+        // Two links: createGoal starts link 1 at once, so the PENDING link 2 is
+        // the one that can reach for an already-carried task.
+        links: [
+          { title: "Another link", goal: "Another. Done when merged." },
+          { title: "Reaches for a carried task", goal: "Reach. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    await expect(
+      updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: other.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(new RegExp(`already carried by ${goal.goalId} link 2`));
+  });
+
+  it("refuses a link that already has a task, and an archived one", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const { setTaskArchived } = await import("./task-actions.server");
+    const { goal, made, actor, ctx } = await chainAndTask();
+    // Link 1 is ACTIVE with its own chain-made task.
+    await expect(
+      updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 1, taskKey: made.key } },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(/Only a pending link with no task can adopt one/);
+
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: made.key, archived: true },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      ctx,
+    );
+    await expect(
+      updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(/archived/);
+  });
+});
+
 describe("remove_pending_link refuses to renumber under a live reference", () => {
   it("refuses while a TASK waits on a link at or after it, and names the task", async () => {
     // Canary: drop the `referencesToLinksFrom` guard — the removal lands, the

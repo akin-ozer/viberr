@@ -5360,6 +5360,31 @@ by rewriting those paragraphs:*
     count already stands at two still raises a fresh packet. The count it names is now true.
     (`run-store.server.ts`, `task-actions.server.ts`.)
 
+243. **A pending goal link can ADOPT a task that already exists (2026-09-15, pass 37;
+    F37-72).** A chain makes its link's task when it advances, and nothing could point a
+    link at work created ahead of it. `create_task` takes no link, `edit_link` takes title,
+    goal and `blockedBy`, and the server's own op list had no binding op either — so a
+    person who asked the controller to build out the work for three pending links got three
+    real tasks the chain did not know about, and the chain would have created its own
+    duplicates on the next advance.
+    The only escape was `remove_pending_link`, which destroys the link's authored text. Live
+    those three links carried the orders service's port, its whole `orders` /
+    `order_lines` / `addresses` / `order_saga_steps` / `outbox` schema, a SIGKILL
+    crash-resumption assertion, the cart/checkout token-scoping rules and a diff assertion
+    naming an exact line count — and every line had to be hand-copied into the new tasks
+    before the links could go. Copying a specification between two records because nothing
+    binds them is the absurd thing this removes.
+    `adopt_task` binds an existing task to a PENDING link: the link takes the task, goes
+    `active`, and the task gains the `goalRef` back-reference, written AFTER the link
+    commits because a task claiming a link that does not claim it back is the worse
+    half-state. Ruling 155 runs the other way here than on an advance — the task already
+    exists and OWNS its wait, so the link mirrors the task's `blockedBy` rather than
+    overwriting it.
+    Refused: a link that already has a task, an archived task, and a task another chain
+    already carries (named, because a task belongs to one chain and its own `goalRef` can
+    name only one).
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

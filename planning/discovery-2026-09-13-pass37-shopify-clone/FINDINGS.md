@@ -3872,3 +3872,61 @@ this case: the conflict was noted at 08:13, the card was filed at 12:58, and the
 until 18:52 — the inbox demanded an impossible acceptance for roughly six hours, and would have kept
 demanding it indefinitely had nobody poked the task. The fix closes the window; ruling 137 only ever
 closed it by coincidence.
+
+## F37-72 · Work built ahead of a goal chain cannot be given to it — MEDIUM (controller usage gap)
+
+**Found by using the controller as an end user would**, and found by the controller itself.
+
+I asked it to create the tasks for goal-3's three pending links (orders service, payments adapter,
+gateway routes). It created SHOP-27, SHOP-28 and SHOP-29 — and then told me what I had not noticed:
+
+> `create_task` cannot attach a task to a goal link. goal-3 links 3, 4 and 5 still read
+> `taskKey: null`, `status: pending` — I just re-read the chain to confirm. So the chain will create
+> its **own** task for link 3 when SHOP-26 completes, duplicating SHOP-27.
+
+**Verified in the code, not taken on trust.** `create_task` takes projectSlug, title, goal, priority,
+labels, owner, dueDate, blockedBy — no link. `edit_link` takes index, title, goal, blockedBy — no
+`taskKey`. And the server's own op union is rename / pause / resume / cancel / skip_link /
+retry_link / edit_link / add_link / remove_pending_link: **nothing binds a task to a link.** A link
+gets its `taskKey` only when the chain itself advances (`mode === "advance"` requires
+`link.taskKey === null`).
+
+**What the only workaround costs.** `remove_pending_link` deletes the link and its authored text.
+Those three carried real specification the new tasks did not: port **4005**, the whole
+`orders`/`order_lines`/`addresses`/`order_saga_steps`/`outbox` schema with column lists, integer
+minor units, a **SIGKILL crash-resumption** test asserting `order_saga_steps` resolved after a real
+process kill, the cart/checkout/inventory token-scoping rules, Idempotency-Key pass-through, an
+aggregated `GET /docs` across five services, and a diff assertion naming an exact registration-line
+count. All of it had to be hand-copied into the tasks across three controller turns before the links
+could be removed. Copying a specification between two records because nothing binds them is the
+absurd thing here.
+
+**Two things viberr got right on the way**, recorded because they nearly hid the defect:
+`remove_pending_link` REFUSED the first attempt — *"removing it renumbers the links after it, and
+goal-5 link 4 waits on a link at or after 5"* — which caught two cross-chain references the
+controller had missed and would have silently broken. And `blockedBy` accepts task keys as well as
+link references, so those two waits could be re-pointed at SHOP-29 and SHOP-28 and survive.
+
+**Fix (ruling 243).** `adopt_task` binds an existing task to a pending link: the link takes it and
+goes active, the task gains its `goalRef` back-reference written after the link commits, and the
+link mirrors the TASK's `blockedBy` rather than overwriting it (ruling 155 runs the other way on an
+adoption than on an advance, because the task already owns its wait). Refused: a link that already
+has a task, an archived task, and a task another chain already carries — named, because a task
+belongs to one chain and its `goalRef` can name only one.
+
+**Test.** Three cases, each canaried by breaking the source: dropping the one-chain-per-task guard,
+allowing an archived adoptee, and dropping the task-side write-back all go red.
+
+### Recorded as a design question, not a defect: the dock occludes the page it points at
+
+Measured, because it looked like a bug: with the controller dock open, the task page's right-column
+controls are covered and the dock intercepts the click. At 1024 wide the dock spans x 604–1004 while
+`main` stays 232–1024; at 1600 it spans 1180–1580 while `main` stays 232–1600. `main` never reserves
+space, so "Archive task" hit-tests to the dock at both widths. The dock also follows navigation and
+re-scopes to the task you open, and the controller's most common handoff is "this is yours on the
+task page" — so it sends you to the controls it is covering.
+
+Not filed as a defect: the dock is `position: fixed` at both breakpoints by deliberate design (a
+bottom sheet on mobile), the user opened it, can see it, and Escape closes it. No lie, no lost work,
+no dead end. It is a product question about whether a surface meant for heavy use should reserve its
+space instead of overlaying — raised rather than decided.

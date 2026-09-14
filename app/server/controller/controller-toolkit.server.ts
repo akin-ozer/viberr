@@ -2503,8 +2503,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           "edit_link",
           "add_link",
           "remove_pending_link",
+          "adopt_task",
         ]),
         index: z.number().int().min(1).optional().describe("The link the op targets."),
+        taskKey: z
+          .string()
+          .optional()
+          .describe(
+            "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain.",
+          ),
         title: z.string().optional(),
         goal: z.string().optional(),
         description: z
@@ -2530,8 +2537,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             | "retry_link"
             | "edit_link"
             | "add_link"
-            | "remove_pending_link";
+            | "remove_pending_link"
+            | "adopt_task";
           index?: number;
+          /** adopt_task: the existing task the pending link should carry. */
+          taskKey?: string;
           title?: string;
           goal?: string;
           description?: string;
@@ -2540,7 +2550,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "redirect this project's goals");
-          const needIndex = ["skip_link", "retry_link", "edit_link", "remove_pending_link"];
+          const needIndex = ["skip_link", "retry_link", "edit_link", "remove_pending_link", "adopt_task"];
           if (needIndex.includes(args.op) && !args.index) {
             throw AppError.validation(`${args.op} needs the link index.`);
           }
@@ -2597,6 +2607,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               };
               if (args.blockedBy !== undefined) added.blockedBy = args.blockedBy;
               action = added;
+              break;
+            }
+            case "adopt_task": {
+              // Ruling 243: bind an EXISTING task to a pending link, so work
+              // created ahead of the chain is carried by it instead of
+              // duplicated when the chain advances.
+              if (!args.taskKey) {
+                return "[refused] adopt_task needs `taskKey`: the existing task the pending link should carry.";
+              }
+              action = { op: "adopt_task", index: args.index!, taskKey: args.taskKey };
               break;
             }
             case "remove_pending_link":

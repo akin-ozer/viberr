@@ -23,7 +23,7 @@ import {
   updateGoalFile,
   withGoalsLock,
 } from "~/server/files/goal-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
@@ -32,6 +32,7 @@ import { rolesForAction } from "~/shared/rbac";
 import {
   createTask,
   loadProjectContext,
+  reprojectTask,
   requireAction,
   requireProjectMutable,
   type ProjectContext,
@@ -317,7 +318,9 @@ export type UpdateGoalOp =
    *  task, which mirrors it back onto the link (ruling 155). */
   | { op: "edit_link"; index: number; title?: string; goal?: string; blockedBy?: string[] }
   | { op: "add_link"; title: string; goal: string; blockedBy?: string[] }
-  | { op: "remove_pending_link"; index: number };
+  | { op: "remove_pending_link"; index: number }
+  /** Ruling 243 (F37-72): bind an EXISTING task to a pending link. */
+  | { op: "adopt_task"; index: number; taskKey: string };
 
 export interface UpdateGoalInput {
   projectSlug: string;
@@ -334,6 +337,9 @@ interface ForwardedLinkWait {
 }
 interface LinkWaitForward {
   wait: ForwardedLinkWait | null;
+  /** Ruling 243: the task an `adopt_task` bound, written back after the goal
+   *  file commits so the two records point at each other or neither does. */
+  adopted: { taskKey: string; goalId: string; linkIndex: number } | null;
 }
 
 /** Creator-or-steering-tier gate for redirecting a chain. */
@@ -432,7 +438,7 @@ export async function updateGoal(
   // Ruling 155: an active link's wait lives on its task. The goal-file lock
   // below is not re-entrant, and the task writer mirrors the list back onto
   // this very file, so the forward runs AFTER the lock is released.
-  const forward: LinkWaitForward = { wait: null };
+  const forward: LinkWaitForward = { wait: null, adopted: null };
 
   const parsed = await updateGoalFile(
     goalRef(ctx, input.projectSlug, input.goalId),
@@ -630,6 +636,64 @@ export async function updateGoal(
           message = `Link ${fm.links.length} added.`;
           return `Link ${fm.links.length} (${title}) added by ${by}.`;
         }
+        case "adopt_task": {
+          // Ruling 243 (F37-72): a chain normally MAKES its link's task when it
+          // advances, and nothing could point a link at a task that already
+          // exists. So a person who asked the controller to build out the work
+          // for pending links got real tasks the chain did not know about, and
+          // the chain would later create its own duplicates. The only escape was
+          // `remove_pending_link`, which destroys the link's authored text —
+          // live on this pass those texts carried the orders service's port, its
+          // whole migration schema and a crash-resumption assertion, and they
+          // had to be hand-copied into the new tasks before the links could go.
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const link = fm.links.find((l) => l.index === op.index);
+          if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status !== "pending" || link.taskKey) {
+            throw AppError.conflict(
+              `Link ${op.index} already has a task (${link.taskKey ?? link.status}). ` +
+                "Only a pending link with no task can adopt one.",
+            );
+          }
+          const adoptee = readTaskFile({
+            projectSlug: input.projectSlug,
+            taskKey: op.taskKey,
+            dataRoot: ctx.dataRoot,
+          });
+          if (!adoptee) {
+            throw AppError.validation(`${op.taskKey} is not a task in this project.`);
+          }
+          if (adoptee.parsed.frontmatter.archived) {
+            throw AppError.conflict(
+              `${op.taskKey} is archived; restore it before a chain can carry it.`,
+            );
+          }
+          // A task carries at most ONE link. Two chains pointing at one task
+          // would each advance on its completion and each claim it as theirs,
+          // and the task's own `goalRef` can only name one of them.
+          const held = adoptee.parsed.frontmatter.goalRef;
+          if (held) {
+            throw AppError.conflict(
+              `${op.taskKey} is already carried by ${held.goalId} link ${held.linkIndex}. ` +
+                "A task belongs to one chain.",
+            );
+          }
+          link.taskKey = op.taskKey;
+          link.status = "active";
+          link.note = null;
+          link.redeclared = false;
+          // Ruling 155 runs the other way here than on an advance: the task
+          // already exists and OWNS its wait, so the link mirrors what the task
+          // says rather than overwriting it with the link's declared list.
+          link.blockedBy = [...adoptee.parsed.frontmatter.blockedBy];
+          forward.adopted = {
+            taskKey: op.taskKey,
+            goalId: fm.id,
+            linkIndex: op.index,
+          };
+          message = `Link ${op.index} is now carried by ${op.taskKey}.`;
+          return `Link ${op.index} (${link.title}) adopted existing task ${op.taskKey}, by ${by}.`;
+        }
         case "remove_pending_link": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           const link = fm.links.find((l) => l.index === op.index);
@@ -674,6 +738,30 @@ export async function updateGoal(
     );
     const list = wait.blockedBy.length > 0 ? wait.blockedBy.join(", ") : "nothing";
     message = `Link ${forward.wait.linkIndex} waits on ${list}, through ${forward.wait.taskKey}${wait.changed ? "" : " (unchanged)"}.`;
+  }
+  if (forward.adopted) {
+    // The task's own back-reference, written AFTER the link commits: the link
+    // is the record a person reads on the chain, and a task claiming a link
+    // that does not claim it back is the worse of the two half-states.
+    const adopted = forward.adopted;
+    await updateTaskFile(
+      { projectSlug: input.projectSlug, taskKey: adopted.taskKey, dataRoot: ctx.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.goalRef = { goalId: adopted.goalId, linkIndex: adopted.linkIndex };
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Adopted into a goal chain",
+          text:
+            `This task now carries **${adopted.goalId} link ${adopted.linkIndex}**. The chain ` +
+            "advances when it completes, and no separate task is created for that link.",
+          toAgent: false,
+          evidence: null,
+        });
+      },
+    );
+    reprojectTask(db, ctx, input.projectSlug, adopted.taskKey);
   }
   rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
   recordAudit(db, {
