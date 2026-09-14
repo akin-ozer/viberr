@@ -1384,3 +1384,40 @@ made this look like a defect.
 **Fifth near-miss of the pass, same shape as the other four**: assume a mechanism, measure against
 the assumption, get a signal. The check that settled it was reading the schema's own sentence about
 what the row IS.
+
+## Run recovery under 63 real interruptions — CORRECT (2026-09-14)
+
+Not a fixture: this session deployed repeatedly while the board was busy, killing live agent and
+reviewer runs mid-flight without warning, plus the host-level crash recorded earlier in this file.
+That produced the best dataset in the pass for the one failure mode the bug bar calls losing work.
+
+```
+run states across the pass     651 finished   63 interrupted   28 error   2 running
+interrupted runs                63
+  followed by a later run       63
+  never followed (lost work)     0
+run.recovery.reinvoked rows     63          <- exactly one per interruption
+```
+
+**And the sharper test, which "a later run exists" does not answer**: is any task CLAIMING an agent
+that is not there? That is the ghost signature - the board reads "agent working", the human waits,
+and nothing is running.
+
+```
+tasks whose board state says an agent is working:  2
+  with a live run:                                 2
+  with no live run:                                0
+```
+
+Zero. Every recovery also announced itself on the task rather than healing quietly: *"the run
+`run_mLuoQlsR09Fy` (agent) was still running when the server stopped; it is recorded as interrupted
+by the restart, and the operator is re-invoked"*, and the re-dispatch says what it is - *"SECOND
+RESEND of the SHOP-5 rework directive. Your last two runs were both interrupted mid-flight"*, and
+for a reviewer, *"your previous review run was interrupted by a server restart before it produced a
+verdict, so no verdict was recorded. Please review again"*. A resend is labelled a resend and not
+passed off as new scope.
+
+**Method note on the cost I was imposing.** These interruptions were mine. Viberr absorbed them
+correctly every time, but the churn is real - SHOP-5's Infrastructure Engineer was cut off twice in
+a row - and the right response was to stop deploying while the board is busy rather than to keep
+proving the recovery works.
