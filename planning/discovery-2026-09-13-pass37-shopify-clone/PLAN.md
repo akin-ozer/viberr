@@ -331,6 +331,49 @@ write "they" unless a person has stated otherwise, because the record had been i
 gender two incompatible ways in one project.
 *Canaries:* restore `>=`; delete the pronoun sentence.
 
+## D7 — The second objection reaches a person  ·  ruling 237 (owner: escalate, not gate)  ·  F37-57
+
+`reviewDeadlockOf` reads ruling 204's per-reviewer count inside the verdict's own locked write, and
+`buildReviewDeadlockPacket` is a PURE builder so the objection and the escalation land together or
+not at all. Written by the POLICY ENGINE (`from: policy-engine`), not through `operatorOpenPacket`,
+for ruling 226's reason — that door checks the OPERATOR's `generate-packets` grant and this is not
+the operator's judgement — which means carrying that door's guards by hand: ruling 177's closure
+check is the one that was missed first time. `question_reviewer` is the 17th packet kind and its
+resolution STARTS the named reviewer; authoring refuses one naming no reviewer or naming the
+deliverer. The completion that raises the packet does NOT then run its own operator react, because
+`agent-reply` is a machine trigger and ruling 195 exempts those from the open-packet refusal.
+*Canaries:* drop the threshold; count every verdict instead of one reviewer's; drop the packet-slot
+guard; drop `profileId` from the dispatch (it starts the DELIVERER); stub either authoring refusal;
+stub the closure clause (a packet on a Done task); delete the react-suppression arm (a second
+operator run appears); move the timeline unshift back inside the verdict block (an inversion the
+`timeline.out_of_order` diagnostic reads).
+*Do NOT re-add:* `withdrawAcceptanceOffers` in the escalation. It withdraws nothing — a
+`request_changes` always derives `validation: "failing"` and the verdict block's own filter already
+drops every `accept_completion` card. Its canary would not go red, which is the proof.
+
+## D8 — A re-review follows a base refresh  ·  ruling 238 (owner)  ·  F37-58
+
+`reviewSubjectSha` moves the review subject to the PR head when the drift is base-refresh ONLY, and
+`pinSupportCheckout` takes a `ReviewSubject` so the disclosure names BOTH shas and the refresh
+between them. One authored commit anywhere in the drift keeps ruling 179's pin; so does a drift
+measured against a different head, because such a measurement classifies none of the commits on
+this one. The verdict still binds to the reviewed revision: the revision is the deliverable's
+identity, which the refresh did not change.
+*Canaries:* drop `authored !== 0`; drop the `drift.headSha !== prHeadSha` guard. The checkout test
+is real git and asserts the refresh-brought file is present in the tree, which is the whole ruling.
+
+## D9 — One rulings KB per project  ·  ruling 239 (owner)
+
+`project.md` carries `rulingsKb`; `withProjectRulings` appends it (never prepends — the injection
+budget is spent in order) and dedupes it into all three KB lists: specialists, the operator's
+resolved authority, and the controller while its conversation is scoped to the project. The
+controller sets it with `set_project_rulings_kb`, refusing a directory no KB occupies.
+*Canaries:* prepend instead of append; drop the dedup; drop the store check; drop the parser field
+(it writes and reads back `undefined`); stub the controller condition to `false` (scoped prompt
+loses it) and remove it entirely (an instance-scoped prompt gains another project's rules).
+*Test lesson worth keeping:* the first controller test asserted three source substrings and passed
+with the condition stubbed out. Source assertions pin a call SITE; they do not test behaviour.
+
 ## Not items, recorded so they are not re-opened
 
 - **The clarity metric** (`waiting !== none || owner != null`) looks vacuous because every task here
