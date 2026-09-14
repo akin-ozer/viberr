@@ -15,10 +15,13 @@ Read in this order:
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–238** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–239** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
 
 ## Day five, in one paragraph
+
+By the end of the fifth session the board stood at **25 tasks, 14 done, 14 merged pull requests**
+on `akin-ozer/shopify-clone`.
 
 The fifth session found the two halves of one story, and the second half cost a governance
 override to escape. **F37-57**: ruling 210 held that a second consecutive `request_changes` from

@@ -1508,6 +1508,23 @@ resources:
 And its live run agrees: `2 knowledge bases`, which is exactly its grant. `kb-conventions` the MCP
 is `up=1, tools=14`. The reviewer had the document, in two channels, and objected anyway.
 
+**Second correction, same day, same regex.** The first reading was wrong about ONE profile; it was
+wrong about all nine. Parsed with the file's real indentation (`resources:` sits at six spaces, not
+four), every deployed profile on this project grants both knowledge bases:
+
+```
+operator, platform-architect, backend-engineer, frontend-engineer, infrastructure-engineer,
+code-reviewer, integration-verifier   ->  shopify-clone-architecture, shopify-clone-conventions
+developer, reviewer (seed profiles, not deployed here)  ->  none
+```
+
+That matters for ruling 239's own live proof and is recorded rather than glossed: on THIS project
+the rulings injection dedupes to a no-op for every specialist, because the controller had already
+granted the KB everywhere. What ruling 239 changes here is the CONTROLLER's own conversation, whose
+`config.kb` is empty and which had no project knowledge at all. The ruling's value for the
+specialists is prospective, not retrospective: a profile added tomorrow cannot miss it, and neither
+can the two seed profiles if they are ever engaged.
+
 The run line also says `1 grant did NOT reach this run`, which was the second thing worth chasing.
 It is `kb-architecture` — the MCP, `up=0, tools_count=null`, last checked 11:05 while its two
 siblings are up. Redundant belt-and-braces: that KB's *content* reached the run through the KB

@@ -1944,3 +1944,43 @@ whole timeline has zero inversions, which is what the diagnostic itself reads.
 Worth recording for what it says about the surface rather than about my bug: the diagnostic is a
 panel nobody looks at until something is wrong, it was right, it was specific, and it found a
 same-day regression in code that had passed 6,674 tests.
+
+## Ruling 239 — the project rulings KB · RED-PROVEN AND LIVE
+
+Seven tests. The two that matter are the controller's, and the first version of that one was
+worthless: it asserted three source substrings and passed with the condition stubbed to `false`.
+Rewritten to build the prompt for a project-scoped and an instance-scoped conversation and assert
+the KB text in one and not the other, it canaries both ways:
+
+| canary | test that went red |
+|---|---|
+| `input.conversation.projectSlug` condition → `false` | scoped prompt loses the rulings text |
+| condition removed, always inject | instance-scoped prompt GAINS another project's rules |
+| `withProjectRulings` prepends instead of appending | rulings displace the profile's own grants in the shared budget |
+| the `includes` dedup dropped | a profile that also grants it is charged twice against one budget |
+| `listKnowledgeBases` check dropped from the writer | a directory no KB occupies is accepted |
+| the parser's `rulingsKb` field dropped | the value writes and reads back `undefined` |
+
+The rewritten controller test earned itself twice over: it also caught that a canary loop's
+`git checkout` had silently reverted the controller edit entirely, so the feature was absent from
+the file while every other test still passed.
+
+**Live, through the controller's own tool.** I told the project controller the capability existed
+and asked it to designate `shopify-clone-conventions`. It called `set_project_rulings_kb`, and
+`project.md` carried `rulingsKb: shopify-clone-conventions` twenty seconds later. On the next turn
+of that same conversation I asked it, tools forbidden, what the rulings say a branch behind the
+merge queue must do with `pnpm-lock.yaml`. It quoted the section verbatim and named its own new
+capability:
+
+> From the rulings KB now injected here — `shopify-clone-conventions`, `conventions.md`, section
+> **"The lockfile"** … The KB is in my context as an attached resource this turn — that is the
+> rulings injection working, and it is the first turn where I could answer this without a tool
+> call.
+
+**What it does NOT prove, recorded honestly.** On this project the specialist injection is a no-op,
+because every one of the nine deployed profiles already grants both knowledge bases — I had that
+map wrong twice before parsing `project.md` at its real indentation. The dedup path is what runs
+for them, not the injection. The controller's conversation is the one place the behaviour is new
+here; for the specialists the ruling is prospective, and its value is that a profile added tomorrow
+cannot miss the rule, which is exactly the failure mode the KB's own "For reviewers" section was
+written about.
