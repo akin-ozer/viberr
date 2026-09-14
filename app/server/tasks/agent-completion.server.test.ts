@@ -1252,6 +1252,69 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(inversions).toEqual([]);
     });
 
+    it("the card's copy matches the mechanisms it names: authority, the goal, and the real door", async () => {
+      // Four claims in this packet were wrong when it shipped, all of the same
+      // kind: copy that named a mechanism without checking it. An adversarial
+      // sweep found them hours later.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet!;
+      const opt = (kind: string) => packet.options.find((o) => o.kind === kind)!;
+
+      // 1. force-accept-completion is roles: [A] in app/shared/rbac.ts. The RBAC
+      // probe this pass measured it live: maintainer gets 403 "Your project role
+      // (maintainer) cannot force-accept past the review gate".
+      // CANARY: put "maintainer" back into the force_accept detail.
+      // Read from the RBAC table itself, so the copy cannot drift from the
+      // grant it describes without this failing.
+      const { rolesForAction } = await import("~/shared/rbac");
+      const forceRoles = rolesForAction("force-accept-completion");
+      expect(forceRoles).toEqual(["admin"]);
+      expect(opt("force_accept").d).toContain("Admin only");
+      expect(opt("force_accept").d).not.toMatch(/Admin or maintainer/);
+
+      // 2. `custom` is NOT in PROCESS_ONLY_OPTION_KINDS, so a typed note is
+      // appended to the task's goal as binding contract (ruling 189). The
+      // option used to promise "nothing changed".
+      // CANARY: restore "with nothing changed".
+      expect(opt("custom").d).not.toMatch(/nothing changed/);
+      expect(opt("custom").d).toContain("recorded on the task's contract");
+
+      // 3. `deriveValidation` derives from the task's verdict-capable
+      // ENGAGEMENTS, not from the project's required-reviewer rules — so the
+      // body used to send a stuck human to a settings page that cannot unblock
+      // the task it is on. CANARY: restore "in project settings".
+      expect(packet.body).toContain("not in project settings");
+      expect(packet.body).toContain("Remove the engagement here");
+    });
+
+    it("the inbox says the POLICY ENGINE raised it, not the Operator", async () => {
+      // `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any notice that
+      // names nobody, so shipping without a `from` told every watcher the
+      // Operator raised this — while the card beside it reads
+      // `from: policy-engine` and the whole ruling rests on it not being the
+      // operator's judgement.
+      // CANARY: drop the `from` from the notifyTaskWatchers call.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      // SAFETY: `actor_json` is TEXT on `notifications`; the packet rows were
+      // just written by the escalation above.
+      const rows = store.db
+        .prepare(
+          `SELECT actor_json FROM notifications WHERE kind = 'packet' AND task_key = 'VIB-1'`,
+        )
+        .all() as { actor_json: string }[];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        // SAFETY: `actor_json` is written by `createNotification` from an
+        // `ActorRender`, every variant of which carries `kind` and `name`.
+        const from = JSON.parse(r.actor_json) as { kind: string; name: string };
+        expect(from).toEqual({ kind: "system", name: "Policy engine" });
+      }
+    });
+
     it("ruling 177: no packet on a task that CLOSED while the reviewer was running", async () => {
       // A reviewer run that finishes after its task was accepted still records
       // its verdict — evidence is evidence, and ruling 177 says so — but no

@@ -195,8 +195,10 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       "Two rounds is where another rework stops being the obvious move: either the reviewer is " +
       "paying out its findings one at a time, or it is asking for something this deliverable " +
       "cannot give it. Nothing was dispatched on this objection: the task is on you.\n\n" +
-      "If this reviewer can never pass the work, the door is the project's required reviewers " +
-      "in project settings; change them there, then resolve this.",
+      "If this reviewer can never pass the work at all, the door is on THIS task, not in project " +
+      "settings: `validation` is derived from the verdict-capable ENGAGEMENTS the task carries " +
+      "(`deriveValidation`), so dropping the project's required-reviewer rule would leave this " +
+      "task exactly as blocked. Remove the engagement here, or force-accept.",
     observations,
     options: [
       {
@@ -214,8 +216,9 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         kind: "custom",
         t: "Let the rework continue",
         d:
-          "Each round has found something real and the work is converging on it. Resolving this " +
-          "hands the task straight back to the operator with nothing changed.",
+          "Each round has found something real and the work is converging on it. Hands the task " +
+          "back to the operator to carry on. Anything you type below is recorded on the task's " +
+          "contract and every later run reads it (ruling 189), so say why rather than just yes.",
         rec: false,
       },
       {
@@ -223,7 +226,9 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         t: `Accept the work past ${input.reviewerName}`,
         d:
           "Completes the task without a passing verdict from this reviewer, recorded as the " +
-          "bypass it is. Admin or maintainer only.",
+          "bypass it is. Admin only: `force-accept-completion` is the one action in the RBAC " +
+          "table granted to admins alone, so a maintainer reading this is looking at a door " +
+          "that will refuse them.",
         rec: false,
       },
     ],

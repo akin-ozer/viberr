@@ -3600,6 +3600,12 @@ export async function recordAgentCompletion(
           ptype: "input",
           title: `Decision needed: ${deadlockEscalation.packet.title}`,
           text: deadlockEscalation.packet.body,
+          // Ruling 237: `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any
+          // notice that names nobody, so leaving this off told the inbox the
+          // Operator raised it — contradicting the card, which says
+          // `from: policy-engine`, and contradicting the ruling, whose whole
+          // point is that this is not the operator's judgement.
+          from: { kind: "system", name: "Policy engine" },
         },
         ctx,
       );
