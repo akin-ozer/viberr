@@ -3389,3 +3389,59 @@ plainly that the diagnostic does not repair anything.
 
 *Found by an adversarial multi-agent sweep of the surfaces this pass had not re-read, and verified
 independently before filing.*
+
+## F37-60 · Two recovery choices write themselves into the task's contract — MEDIUM
+
+**What it is.** Ruling 189 appends a resolved decision to the task's goal, because a person's answer
+binds future work. It deliberately EXCLUDES recovery choices, in its own words: a choice that
+"decides what happens NEXT, not what the work IS", because appending those "accumulates process
+noise in the text every future run re-anchors on". The ruling names the live case it was written
+for, on SHOP-7: the goal collected the provider decision (contract) and *"Work stalled: pick a
+recovery path → Redirect with sharper guidance"* (not).
+
+`PROCESS_ONLY_OPTION_KINDS` lists nine kinds. `wait_for_window` (ruling 224) and
+`block_on_dependencies` (ruling 230) are not among them, because **both postdate ruling 189** and
+neither was added when it shipped. Both are pure recovery: ruling 224's own text is "the decision IS
+the wait", ruling 230's is "hold this until those land".
+
+**Live, three times on one task.** SHOP-18's goal carries five `Decision —` blocks:
+
+```
+2026-09-13  "Publish the catalog facet contract"                     ← contract, belongs
+2026-09-14  "Operator run failed: pick a recovery path"              ← wait_for_window
+2026-09-14  "Operator run failed: pick a recovery path"              ← wait_for_window
+2026-09-14  "Work stalled: pick a recovery path"                     ← wait_for_window
+2026-09-14  "SHOP-18 storefront is done and approved; …"             ← contract, belongs
+```
+
+Three of five are the exact sentence ruling 189 quotes as the thing that must not be in a contract,
+and every run on that task re-anchored on all of them.
+
+**Fix.** Both kinds join the list. A person who TYPES a directive still binds it, whatever option
+they typed it on — that carve-out is deliberate and untouched.
+
+## F37-61 · The held-task doctrine claims a server gate on delivery that does not exist — MEDIUM
+
+**What it is.** Every operator turn on a held task receives:
+
+> `run_agent` and `deliver_for_review` are REFUSED by the server while the task is held, so do not
+> attempt either; there is no phrasing that gets past it.
+
+Half of that is true. Ruling 186's gate is in `startAgentRun` — "Every dispatch door lands here, so
+every one of them refuses: the operator's `run_agent`, the controller's `run_agent`, and the task
+page's Run-an-agent control". `deliver_for_review` is `performDelivery`, a different path, and
+there is no `blockedBy` check anywhere in it.
+
+**Why it matters more than a wrong sentence.** Ruling 186 exists because SHOP-2 "was marked 'Held
+until every entry is done' and a Codex run started 1.9 seconds later, designed and committed the
+whole identity service, and **pushed a branch cut from a base that predated the foundation it waited
+on**." Publishing that branch to a review PR is precisely `deliver_for_review`. The doctrine
+reassures the operator that the server would stop it; the server would not.
+
+This is ruling 186's own defect inverted. There, a prompt ASKED where a gate was needed. Here, a
+prompt CLAIMS a gate that was never built.
+
+**Fixed for honesty; the gate itself is an owner call.** The sentence now names only the gate that
+exists, and states plainly that not delivering a held task is doctrine rather than enforcement.
+Whether `performDelivery` should refuse a held task the way `startAgentRun` does is a behaviour
+change with ruling 186's precedent behind it, and ruling 186's scope was the owner's decision.

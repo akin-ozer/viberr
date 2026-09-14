@@ -4552,3 +4552,31 @@ describe("R19-1 — the operator's read-only repository view", () => {
     });
   });
 });
+
+/**
+ * F37-61: the held-task doctrine told the operator that BOTH `run_agent` and
+ * `deliver_for_review` are "REFUSED by the server". Only the first is. Ruling
+ * 186's gate lives in `startAgentRun` ("every dispatch door lands here"), and
+ * delivery is `performDelivery`, a different path with no `blockedBy` check
+ * anywhere in it.
+ *
+ * Asserting a gate that does not exist is the same defect ruling 186 was written
+ * about, inverted: there it was a prompt ASKING where a gate was needed; here it
+ * is a prompt CLAIMING a gate that was never built.
+ */
+describe("F37-61: the held-task doctrine names only the gate that exists", () => {
+  it("says run_agent is refused, and does not claim delivery is", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("app/server/runtimes/operator-run.server.ts", "utf8");
+    // CANARY: restore "`run_agent` and `deliver_for_review` are REFUSED".
+    expect(src).not.toMatch(/`run_agent` and `deliver_for_review` are REFUSED/);
+    expect(src).toContain("`run_agent` is REFUSED by the server while the task is held");
+    expect(src).toContain("`deliver_for_review` is NOT gated");
+
+    // And the claim is checked against the code rather than restated: the hold
+    // gate is in the dispatch chokepoint, and the delivery path has no
+    // blockedBy check. CANARY: add one to performDelivery and update the copy.
+    const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
+    expect(specialist).toContain('holdRefusal(input.taskKey, held, "running an agent on it")');
+  });
+});

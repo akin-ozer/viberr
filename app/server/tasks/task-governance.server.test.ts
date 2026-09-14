@@ -3828,6 +3828,47 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(goalOf(store)).toBe(before);
   });
 
+  it("F37-60: does NOT amend on wait_for_window or block_on_dependencies either", async () => {
+    // Both kinds POSTDATE ruling 189, so neither was added to its exclusion
+    // list, and the defect the ruling exists to stop came back through them.
+    // Live on SHOP-18: its goal carried five decision blocks, THREE of them
+    // "pick a recovery path → Wait for the window and pick the task back up
+    // automatically" — the same sentence ruling 189 quotes from SHOP-7 as the
+    // thing that must not be in a contract.
+    // CANARY: drop either kind from PROCESS_ONLY_OPTION_KINDS.
+    for (const option of [
+      {
+        kind: "wait_for_window" as const,
+        t: "Wait for the window and pick the task back up automatically",
+        d: "",
+        rec: true,
+        dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+      {
+        kind: "block_on_dependencies" as const,
+        t: "Hold this until those land",
+        d: "",
+        rec: true,
+        blockedBy: ["VIB-2"],
+      },
+    ]) {
+      const store = prepared();
+      withTask(
+        store,
+        { stage: "impl", ownerUserId: store.users.arda.id },
+        { ...QUESTION, title: "Work stalled: pick a recovery path", options: [option] },
+      );
+      const before = goalOf(store);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(goalOf(store)).toBe(before);
+    }
+  });
+
   it("DOES amend when a person types a directive, whatever packet they typed it on", async () => {
     const store = prepared();
     // A typed directive is content a person wrote; it binds the work even when

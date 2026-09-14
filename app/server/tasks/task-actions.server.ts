@@ -8971,6 +8971,16 @@ export async function resolvePacket(
     // `hold_runtime_debug` are here, and it was missed when the list was first
     // written.
     "block_on_policy",
+    // F37-60: both of these POSTDATE ruling 189, so neither was ever added, and
+    // the defect the ruling exists to stop came straight back through them.
+    // Ruling 224's own words are "the decision IS the wait" and ruling 230's are
+    // "hold this until those land" — pure recovery, deciding what happens NEXT
+    // rather than what the work IS. Live on SHOP-18: its goal carried FIVE
+    // decision blocks, three of them "pick a recovery path → Wait for the window
+    // and pick the task back up automatically", which is the same sentence
+    // ruling 189 quotes from SHOP-7 as the thing that must not be there.
+    "wait_for_window",
+    "block_on_dependencies",
     // Ruling 237: "ask the reviewer what else it would block on" decides who
     // runs next, and the answer that comes back is the reviewer's, not the
     // person's. Nothing about the deliverable changed.
