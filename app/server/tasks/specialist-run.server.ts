@@ -160,6 +160,7 @@ import {
   cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
+  type CloneCredential,
   githubRemoteSanitizationArgs,
   type CloneFailureLogDetails,
 } from "./git-clone-auth.server";
@@ -1954,7 +1955,7 @@ async function dispatchAgentRun(
   if (cloneFailure) {
     const promptFailure: PromptCloneFailure = {
       sentence: cloneFailure.sentence,
-      hadCredential: cloneFailure.hadCredential,
+      credential: cloneFailure.credential,
     };
     // F19-6: the agent is told to quote the reason verbatim, so this is the line
     // that carries git's real complaint into its report — and from there into
@@ -2385,6 +2386,9 @@ async function dispatchAgentRun(
     // F-P11 (pass 25): a plain Codex developer (no envelope schema) must not have
     // its prose reply re-parsed as an outcome envelope.
     envelopeRequested: useEnvelopeSchema,
+    // Ruling 248 (F37-77): the server could not provision this run's checkout,
+    // so it ran with no working tree. A run that read nothing judges nothing.
+    noCheckout: !!cloneFailure,
   };
   // Dispatch-completion contract (2026-08-29): the mechanical half — the
   // completion pipeline appends the missing @tags to the report and ALWAYS
@@ -3031,7 +3035,7 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
  *  {@link CloneFailure}. */
 export interface PromptCloneFailure {
   sentence: string;
-  hadCredential: boolean;
+  credential: CloneCredential;
   /** F19-6: git's own redacted output — the agent must quote it. */
   stderrExcerpt?: string;
 }
@@ -3136,9 +3140,13 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
             `${input.cloneFailure.sentence}\n` +
             `- Do NOT try to clone, fetch, or authenticate to \`${input.repo}\` yourself, and do NOT ask anyone to ` +
             `provision credentials or place a checkout` +
-            (input.cloneFailure.hadCredential
-              ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead` :
-                ``) +
+            // Ruling 249: both of these are false leads a human would chase,
+            // so name whichever one applies rather than only the first.
+            (input.cloneFailure.credential === "supplied"
+              ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead`
+              : input.cloneFailure.credential === "not_involved"
+                ? ` — this step never reached GitHub, so no credential is involved in it and asking for one sends a human down a false lead`
+                : ``) +
             `. Report that the checkout could not be provisioned, quote the reason above verbatim, and stop. ` +
             `Do not speculate about the cause beyond what that sentence says.\n` +
             // F19-6: without this the reason a human can act on ("GH006:
@@ -3778,8 +3786,9 @@ function agentGitIdentityEnv(profileId: string) {
 
 /** Why a workspace checkout is missing — carried to the prompt and the human. */
 export interface CloneFailure extends CloneFailureLogDetails {
-  /** Whether a real token reached the clone (decides the credential story). */
-  hadCredential: boolean;
+  /** Ruling 249: what part a credential played — supplied, absent, or not
+   *  involved at all (the local arm never reaches GitHub). */
+  credential: CloneCredential;
   /** One plain sentence, safe to show a human and to put in a prompt. */
   sentence: string;
   /**
@@ -3901,7 +3910,10 @@ async function cloneRepo(
     taskBranch?: string | null;
   },
 ): Promise<CloneOutcome> {
-  let hadCredential = false;
+  // Ruling 249: `absent` until an arm proves otherwise — the local arm sets
+  // `not_involved` because it never reaches GitHub, the network arm sets
+  // `supplied` when a token was actually handed to git.
+  let credential: CloneCredential = "absent";
   // F19-6: hoisted out of the try so the catch can scrub it BY VALUE. The token
   // never reaches argv or the remote URL (askpass env only), so this literal
   // scrub plus the userinfo patterns is the whole redaction surface.
@@ -3938,6 +3950,10 @@ async function cloneRepo(
       const deliveringDir = supportCheckoutDir(workspaceRoot, name);
       rmSync(dir, { recursive: true, force: true });
       if (existsSync(path.join(deliveringDir, ".git"))) {
+        // Ruling 249: everything below this line is local. A failure here is
+        // never about a credential, and saying it was sent a human (and an
+        // operator, live on SHOP-5) to re-provision one that already worked.
+        credential = "not_involved";
         mkdirSync(path.dirname(dir), { recursive: true });
         try {
           await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
@@ -4022,7 +4038,7 @@ async function cloneRepo(
 
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
-    hadCredential = !!token;
+    credential = token ? "supplied" : "absent";
     try {
       // R21-4: through the project's mirror cache — the FIRST task in a project
       // pays the network clone, the rest are hardlinked from it in seconds. Any
@@ -4075,7 +4091,7 @@ async function cloneRepo(
     const warnFields = {
       taskKey: input.taskKey,
       repo: input.repo,
-      hadCredential,
+      credential,
       timeoutMs: cloneTimeoutMs(),
       ...details,
     };
@@ -4087,9 +4103,9 @@ async function cloneRepo(
     // render the excerpt only when the key is there.
     const failure: CloneFailure = {
       ...details,
-      hadCredential,
+      credential,
       sentence: cloneFailureSentence(details, {
-        hadCredential,
+        credential,
         timeoutMs: cloneTimeoutMs(),
       }),
     };

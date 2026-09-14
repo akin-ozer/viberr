@@ -23,6 +23,7 @@ import {
   cloneTimeoutMs,
   cloneFailureLogDetails,
   cloneFailureSentence,
+  type CloneCredential,
 } from "~/server/tasks/git-clone-auth.server";
 import {
   cloneProgressStep,
@@ -1445,12 +1446,15 @@ export async function ensureOperatorRepoCheckout(
   }
 
   let token: string | null = null;
-  let hadCredential = false;
+  // Ruling 249: the operator's checkout is always a network clone, and the
+  // credential is resolved before it — so this arm only ever says supplied or
+  // absent, and both are true when it says them.
+  let credential: CloneCredential = "absent";
   try {
     mkdirSync(path.dirname(dir), { recursive: true });
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
-    hadCredential = !!token;
+    credential = token ? "supplied" : "absent";
     try {
       // R21-4: through the project's mirror cache, exactly as the specialist
       // path clones — so the operator drive that runs FIRST on a project pays
@@ -1487,7 +1491,7 @@ export async function ensureOperatorRepoCheckout(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       repo,
-      hadCredential,
+      credential,
       ...details,
     };
     logger.warn(
@@ -1499,7 +1503,7 @@ export async function ensureOperatorRepoCheckout(
       kind: "unavailable",
       repo,
       sentence:
-        cloneFailureSentence(details, { hadCredential, timeoutMs: cloneTimeoutMs() }) +
+        cloneFailureSentence(details, { credential, timeoutMs: cloneTimeoutMs() }) +
         (stderrExcerpt ? ` The checkout reported: ${stderrExcerpt}` : ""),
     };
   }

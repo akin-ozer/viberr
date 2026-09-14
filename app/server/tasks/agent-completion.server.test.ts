@@ -27,7 +27,7 @@ import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
-import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
+import { insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
@@ -35,8 +35,10 @@ import {
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
+import { stageOutcome } from "./agent-outcome.server";
 import {
   applyAgentCompletionEffects,
+  classifyReviewerVerdict,
   markWaitingAgent,
 } from "./task-actions.server";
 import {
@@ -499,6 +501,122 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
     expect(fm.recommendations.map((r) => r.id)).toEqual(["rec_run"]);
+  });
+
+  /**
+   * Ruling 248 (pass 37, F37-77): a run that could not read the work judges
+   * nothing.
+   *
+   * LIVE, on SHOP-5. The Code Reviewer's checkout failed to provision, so
+   * viberr told it in the prompt: "The workspace has NO checkout, and this is a
+   * server-side FAILURE, not something you can fix … quote the reason above
+   * verbatim". It did exactly that, returned envelope `verdict: null` and wrote
+   * "No content verdict recorded" in its summary — and viberr recorded
+   * `request_changes` against the revision, because the prose fallback matched
+   * the word "failure" inside viberr's OWN sentence. That fabricated objection
+   * was the second in a row from that reviewer, so the policy engine raised a
+   * review-deadlock packet asking a person to choose between interrogating a
+   * reviewer that never judged and forcing acceptance past a verdict that did
+   * not exist.
+   *
+   * The text below is the sentence viberr itself composes, verbatim.
+   */
+  const VIBERR_OWN_NO_CHECKOUT_REPORT =
+    "The checkout could not be provisioned, so I cannot review revision `81ae03e` or run its suite. " +
+    "Per the workspace contract: \u201cThe workspace has NO checkout, and this is a server-side failure, " +
+    "not something you can fix.\u201d No content verdict recorded.";
+
+  it("ruling 248: a reviewer run with NO checkout records no verdict, however its prose reads", async () => {
+    writeReviewTask();
+    const runId = await finishedRunWith(VIBERR_OWN_NO_CHECKOUT_REPORT);
+    // The durable fact the clone path stamps on the row.
+    patchRun(store.db, runId, { noCheckout: 1 });
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+
+    const fm = taskFile().parsed.frontmatter;
+    // CANARY: drop `&& !readNothing` from the verdict line and this is
+    // `failing` with a `request_changes` row bound to the revision — the live
+    // shape, fabricated out of viberr's own word.
+    expect(fm.verdicts).toEqual([]);
+    expect(fm.validation).toBe("changed");
+    // And the record says what happened, rather than leaving a completed review
+    // run on the page with nothing to explain the silence.
+    const note = taskFile().parsed.timeline.find(
+      (e) => e.type === "note" && e.text.includes("no checkout of the repository"),
+    );
+    expect(note).toBeTruthy();
+    expect(note!.text).toContain("recorded no verdict");
+    // "Re-run the review" is bad advice for a condition a re-run reproduces.
+    expect(note!.text).not.toContain("Re-run the review or record a verdict manually");
+  });
+
+  it("ruling 248: the trap is real — that same prose classifies as request_changes", () => {
+    // Not a hypothetical. The ONE word carrying the verdict is "failure", and
+    // it is in the sentence VIBERR wrote and ordered the agent to quote.
+    // CANARY: this is the pre-fix behaviour, pinned so nobody removes the gate
+    // above believing the classifier is harmless here.
+    expect(classifyReviewerVerdict(VIBERR_OWN_NO_CHECKOUT_REPORT)).toBe("request_changes");
+    expect(
+      classifyReviewerVerdict(
+        VIBERR_OWN_NO_CHECKOUT_REPORT.replace("server-side failure", "server-side condition"),
+      ),
+    ).toBeNull();
+  });
+
+  it("ruling 248: an envelope that ASKED instead of judging is not re-read as a verdict", async () => {
+    writeReviewTask();
+    const runId = await finishedRunWith(
+      "I need the pinned revision before I can judge this. The suite currently fails to run at all.",
+    );
+    // The agent filled the envelope, left `verdict` empty and asked a question:
+    // it said which of the two it was doing.
+    stageOutcome(store.db, `oc-${runId}`, {
+      summary: "I need the pinned revision before I can judge this.",
+      question: {
+        title: "Provision checkout",
+        body: "Provision a usable checkout for the pinned revision, then I can review.",
+      },
+    });
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        outcomeKey: `oc-${runId}`,
+      },
+      { id: runId, state: "finished" },
+    );
+
+    const fm = taskFile().parsed.frontmatter;
+    // CANARY: drop `&& !outcome?.question` and the word "fails" in the prose
+    // becomes a blocking review verdict on a revision nobody judged. The
+    // no-verdict NOTE already treats a question as a legitimate no-verdict
+    // outcome (pass 24, C-4); the classifier is its sibling.
+    expect(fm.verdicts).toEqual([]);
+    expect(fm.validation).toBe("changed");
   });
 
   it("records a reviewer verdict from the FULL reply even when the verdict sits past the 1200-char comment cut (X9)", async () => {

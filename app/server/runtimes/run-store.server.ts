@@ -78,6 +78,11 @@ export type AgentRunRow = {
    *  runs carry the task owner, controller turns the asker. Null only on a run
    *  refused before any credential was looked up (an unowned task). */
   credential_user_id: string | null;
+  /** Ruling 248 (pass 37, F37-77): 1 when the workspace checkout could not be
+   *  provisioned, so this run executed with NO working tree. A run that could
+   *  not read the work judges nothing — the completion pipeline closes the
+   *  verdict path (envelope and prose fallback alike) for these rows. */
+  no_checkout: number;
 };
 
 export interface InsertRunInput {
@@ -211,6 +216,10 @@ export interface RunPatch {
    *  start path stamps it onto the row a reservation already inserted, without
    *  re-writing every other column of a run that is already live. */
   credentialUserId?: string | null;
+  /** Ruling 248: this run executed with no working tree (see
+   *  `AgentRunRow.no_checkout`). Patched at completion registration, like
+   *  `outcomeKey`, so boot recovery re-reads it from the row after a restart. */
+  noCheckout?: 0 | 1;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -238,6 +247,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     dispatchedByName: ["dispatched_by_name", patch.dispatchedByName],
     dispatchedByUserId: ["dispatched_by_user_id", patch.dispatchedByUserId],
     credentialUserId: ["credential_user_id", patch.credentialUserId],
+    noCheckout: ["no_checkout", patch.noCheckout],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

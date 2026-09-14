@@ -228,6 +228,19 @@ export interface CloneFailureLogDetails {
 }
 
 /**
+ * What part a GitHub credential played in the attempt that failed.
+ *
+ * Ruling 249 (pass 37, F37-78): two values were not enough. The specialist
+ * checkout has an arm that never touches the network (a supporting run is
+ * cloned from the delivering checkout ON DISK), and the token is fetched only
+ * in the arm after it, so a failure there reported `false` and viberr said "No
+ * GitHub credential is attached to this project" about a project holding a
+ * working one. That sentence exists to stop a failure being re-narrated as
+ * something it was not; saying it did exactly what it was written to prevent.
+ */
+export type CloneCredential = "supplied" | "absent" | "not_involved";
+
+/**
  * One plain sentence naming what actually went wrong, for the agent's prompt and
  * the task timeline.
  *
@@ -239,11 +252,14 @@ export interface CloneFailureLogDetails {
  */
 export function cloneFailureSentence(
   details: CloneFailureLogDetails,
-  opts: { hadCredential: boolean; timeoutMs?: number },
+  opts: { credential: CloneCredential; timeoutMs?: number },
 ): string {
-  const cred = opts.hadCredential
-    ? "The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem."
-    : "No GitHub credential is attached to this project, so the clone ran anonymously.";
+  const cred =
+    opts.credential === "supplied"
+      ? "The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem."
+      : opts.credential === "not_involved"
+        ? "This step never reached GitHub at all: the checkout is copied from a clone already on this server, so no credential was involved either way."
+        : "No GitHub credential is attached to this project, so the clone ran anonymously.";
   switch (details.reason) {
     case "git_unavailable":
       return `git is not installed on the Viberr server, so the workspace checkout could not be created. ${cred}`;

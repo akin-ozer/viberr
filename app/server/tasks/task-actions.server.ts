@@ -3986,6 +3986,12 @@ export async function registerAgentCompletion(
     dispatchedByUserId?: string;
     /** Present when started inside an operator react loop (continue the chain). */
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    /** Ruling 248 (F37-77): the workspace checkout could not be provisioned, so
+     *  this run executed with NO working tree. PERSISTED on the run row for the
+     *  same reason as `outcomeKey` — the closure that would otherwise carry it
+     *  dies with the process, and a recovered reviewer would have its report
+     *  re-classified into a verdict it never gave. */
+    noCheckout?: boolean;
   },
 ): Promise<void> {
   // Persist on the run row what boot recovery must re-find after a restart —
@@ -3994,6 +4000,7 @@ export async function registerAgentCompletion(
   // (AO-1) and the dispatcher of the dispatch-completion contract (C02-R11).
   const persisted: Parameters<typeof patchRun>[2] = {};
   if (input.outcomeKey) persisted.outcomeKey = input.outcomeKey;
+  if (input.noCheckout) persisted.noCheckout = 1;
   if (input.dispatchedByName) {
     persisted.dispatchedByName = input.dispatchedByName;
     if (input.dispatchedByUserId) persisted.dispatchedByUserId = input.dispatchedByUserId;
@@ -4361,10 +4368,22 @@ export async function applyAgentCompletionEffects(
   }
   const runAttachments = attachmentsPrune.kept;
   if (finished.state === "finished") {
+    // Ruling 248 (pass 37, F37-77): a run whose workspace could not be
+    // provisioned READ NOTHING, so it judged nothing. Live on SHOP-5 the Code
+    // Reviewer reported exactly that — envelope `verdict: null`, summary "No
+    // content verdict recorded" — and viberr wrote `request_changes` onto the
+    // task anyway, because the prose fallback matched the word "failure" inside
+    // VIBERR'S OWN sentence, the one the prompt tells the agent to quote
+    // verbatim. That fabricated objection was the second in a row, so the
+    // policy engine raised a review-deadlock packet asking a person to choose
+    // between interrogating a reviewer that never judged and forcing acceptance
+    // past a verdict that did not exist. The operator caught it, said so on the
+    // task, and could not withdraw a packet the policy engine had raised.
+    const readNothing = thisRunRow?.no_checkout === 1;
     // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
     // back to the prose classifier (G4). The regex NEVER runs without authority
     // (R1 — a developer's "tests pass" can't flip validation).
-    let verdict = verdictAuthorized ? (outcome?.verdict ?? null) : null;
+    let verdict = verdictAuthorized && !readNothing ? (outcome?.verdict ?? null) : null;
     if (!verdictAuthorized && outcome?.verdict) {
       // B-5 (pass 24): a Codex agent CAN fill the `verdict` field of its outcome
       // envelope even without the `report-validation-verdict` grant — the JSON
@@ -4379,7 +4398,25 @@ export async function applyAgentCompletionEffects(
         verdict: outcome.verdict,
       });
     }
-    if (!verdict && verdictAuthorized) {
+    if (readNothing && verdictAuthorized) {
+      // Loud, because the review did NOT happen: validation is untouched, and
+      // the note below tells the humans on the task so nobody reads a completed
+      // review run as a judgement.
+      logger.warn("verdict-capable run had NO checkout — no verdict recorded from it", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        profileId: input.profileId,
+        envelopeVerdict: outcome?.verdict ?? null,
+      });
+    }
+    // The fallback is for SILENCE, not for overruling an answer. An agent that
+    // filled the envelope and ASKED A QUESTION with the verdict field empty has
+    // said which of the two it was doing; running a regex over its prose then
+    // converts "here is what I need before I can judge" into a judgement. The
+    // no-verdict NOTE below already reads a question as "a legitimate no-verdict
+    // outcome" (pass 24, C-4) — the classifier is its sibling and never learned
+    // it, which is this pass's most-found defect shape.
+    if (!verdict && verdictAuthorized && !readNothing && !outcome?.question) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {
         logger.info("agent verdict resolved by prose fallback (no envelope)", {
@@ -4467,10 +4504,18 @@ export async function applyAgentCompletionEffects(
       !!completionFm &&
       !!reviewStageId &&
       completionFm.stage === reviewStageId;
+    // Ruling 248: when the run had no working tree the note says THAT, because
+    // "re-run the review" is bad advice for a condition a re-run reproduces.
+    // It fires even for a run that asked a question: the question reaches a
+    // person as a packet, and the task's own record should still say plainly
+    // that the review did not happen and why.
+    const noteText = readNothing
+      ? "This review run had no checkout of the repository, so it read nothing and recorded no verdict. Validation is unchanged and acceptance stays gated. The workspace failure is on the server, not on the agent: fix that first, then run the review again."
+      : "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.";
     if (
       verdictAuthorized &&
       !verdict &&
-      !question &&
+      (!question || readNothing) &&
       atReviewStage &&
       !input.fromHumanDirective
     ) {
@@ -4483,7 +4528,7 @@ export async function applyAgentCompletionEffects(
               type: "note",
               actor: { kind: "system", systemId: "policy-engine" },
               title: null,
-              text: "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.",
+              text: noteText,
               toAgent: false,
               evidence: null,
             });

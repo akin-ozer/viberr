@@ -595,6 +595,14 @@ CREATE TABLE "agent_runs" (
   -- always re-invokes the operator. NULL on runs nobody dispatched by hand.
   dispatched_by_name TEXT,
   dispatched_by_user_id TEXT,
+  -- Ruling 248 (pass 37, F37-77): 1 when this run's workspace checkout could
+  -- NOT be provisioned, so the run executed with no working tree. A run that
+  -- could not read the work judges nothing: the verdict path (envelope AND the
+  -- prose fallback) is closed for these rows. Persisted rather than held in the
+  -- completion closure so a run recovered after a restart keeps the fact --
+  -- the closure dies with the process, and a recovered no-checkout reviewer
+  -- would otherwise have its report re-classified into a verdict.
+  no_checkout INTEGER NOT NULL DEFAULT 0,
   -- Ruling 127: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
   -- run billed. Task runs (operator, specialist, resume, scheduled, boot recovery,
   -- retry) carry the task owner; controller turns carry the asker. NULL only on a

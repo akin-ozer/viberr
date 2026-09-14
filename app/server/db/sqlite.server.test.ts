@@ -58,10 +58,12 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "interrupted_reason",
         // F35-1: the sink patches it on every persisted line.
         "usage_final",
+        // Ruling 248: `patchRun` names it on every completion registration.
+        "no_checkout",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(7);
+      expect(columns()).toHaveLength(8);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
 
       // F37-71: a task projection from before the recommendation-kinds column.

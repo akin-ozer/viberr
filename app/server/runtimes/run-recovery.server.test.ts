@@ -75,6 +75,27 @@ describe("outcome_key lives in the run store (C1, pass 31)", () => {
     expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_2");
   });
 
+  /**
+   * Ruling 248 (pass 37, F37-77): the run executed with NO working tree, so the
+   * completion pipeline closes its verdict path. Persisted on the ROW rather
+   * than held in the completion closure for the reason `outcome_key` is: the
+   * closure dies with the process, and a no-checkout reviewer recovered after a
+   * restart would have its report re-classified into a verdict it never gave.
+   */
+  it("patchRun writes no_checkout and getRun reads it back (ruling 248)", () => {
+    seedRun("run_nc");
+    // A row written before viberr recorded the fact reads 0, which is the
+    // honest value: nothing here says this run was checkout-less.
+    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(0);
+    patchRun(store.db, "run_nc", { noCheckout: 1 });
+    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(1);
+    // CANARY: leave `noCheckout` out of `patchRun`'s assignable map and the
+    // exhaustiveness `satisfies` catches it at compile time; leave it out of
+    // the baseline healer and an existing data root fails every completion.
+    patchRun(store.db, "run_nc", { phase: "working" });
+    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(1);
+  });
+
   it("patchRun writes interrupted_reason and getRun reads it back (pass 35 U35-7)", () => {
     seedRun("run_ir");
     expect(getRun(store.db, "run_ir")!.interrupted_reason).toBeNull();

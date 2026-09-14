@@ -409,6 +409,12 @@ const BASELINE_COLUMNS: readonly {
         ddl: "usage_final INTEGER NOT NULL DEFAULT 0",
         backfill: "UPDATE agent_runs SET usage_final = 1 WHERE state = 'finished'",
       },
+      // Ruling 248 (F37-77): the run executed with no working tree. Named by
+      // `patchRun` on every completion registration, so a root that predates it
+      // would fail every run's completion. No backfill: the default is the
+      // honest value for a row written before viberr recorded the fact — 0 says
+      // "nothing here says this run was checkout-less", which is exactly true.
+      { name: "no_checkout", ddl: "no_checkout INTEGER NOT NULL DEFAULT 0" },
     ],
   },
   {

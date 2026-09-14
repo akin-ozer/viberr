@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -2309,7 +2310,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       cloneFailure: {
         sentence:
           "The workspace checkout was cancelled after 900s — the clone ran past its time limit rather than failing. The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem.",
-        hadCredential: true,
+        credential: "supplied",
       },
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
     });
@@ -2323,6 +2324,28 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("Do NOT try to clone");
     expect(prompt).toContain("provision credentials");
     expect(prompt).toContain("wastes a human's time on a false lead");
+  });
+
+  it("ruling 249: the prompt forbids the credential guess for a LOCAL checkout failure too", () => {
+    // F37-78: the supporting checkout is cloned from the delivering one on
+    // disk, so a failure there is never about a credential. The prompt used to
+    // append its "do not ask for credentials" clause only when a token HAD been
+    // supplied, so on this arm the agent was left free to report the one cause
+    // it could see. CANARY: drop the `not_involved` arm and the last assertion
+    // fails while the agent is sent to ask for a credential nobody needs.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      cloned: false,
+      cloneFailure: {
+        sentence:
+          "The workspace checkout failed (git exit 128). This step never reached GitHub at all: the checkout is copied from a clone already on this server, so no credential was involved either way.",
+        credential: "not_involved",
+      },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).toContain("Do NOT try to clone");
+    expect(prompt).toContain("never reached GitHub, so no credential is involved in it");
+    expect(prompt).toContain("false lead");
   });
 
   it("F19-6: git's own (redacted) words reach the prompt, with an order to quote them", () => {
@@ -2339,7 +2362,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       cloned: false,
       cloneFailure: {
         sentence: "The workspace checkout failed (git exit 128).",
-        hadCredential: true,
+        credential: "supplied",
         stderrExcerpt: "remote: Repository not found.\nfatal: repository not found",
       },
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
@@ -2353,7 +2376,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
         cloned: false,
         cloneFailure: {
           sentence: "The workspace checkout failed (git exit 128).",
-          hadCredential: true,
+          credential: "supplied",
         },
         delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
       }),
@@ -4207,6 +4230,73 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // delivering tree, so delivery's `git add -A` can never sweep it into the PR.
       writeFileSync(path.join(criticWs, "reviewer-scratch.txt"), "leaked?");
       expect(existsSync(path.join(ws, "reviewer-scratch.txt"))).toBe(false);
+    });
+
+    /**
+     * Rulings 248 + 249 (pass 37, F37-77 / F37-78), both live on SHOP-5 in one
+     * evening.
+     *
+     * The supporting checkout is cloned from the delivering one ON DISK, and
+     * the project token is fetched only in the arm after it — so when that
+     * local clone failed, viberr told the reviewer and the operator "No GitHub
+     * credential is attached to this project, so the clone ran anonymously"
+     * about a project holding a working credential. The operator believed it
+     * and wrote it onto the task.
+     *
+     * And the run was marked as having no working tree, which is what closes
+     * its verdict path: without that fact on the row, the reviewer's honest
+     * report ("No content verdict recorded") was re-classified into a blocking
+     * `request_changes` by the prose fallback.
+     */
+    it("rulings 248/249: a failed LOCAL support clone marks the run checkout-less and blames no credential", async () => {
+      const ws = await workspaceCheckout();
+      // The delivering checkout is THERE (so the local arm is the one taken)
+      // and unusable, so `git clone --local` fails the way it did live.
+      rmSync(path.join(ws, ".git"), { recursive: true, force: true });
+      writeFileSync(path.join(ws, ".git"), "not a git directory\n");
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actor(store.users.arda));
+
+      const prompt = lastRunSpec()?.prompt ?? "";
+      // The run really did lose its checkout.
+      expect(prompt).toContain("The workspace has NO checkout");
+      // Ruling 249 CANARY: move `credential = "not_involved"` out of the local
+      // arm and this reads "No GitHub credential is attached to this project",
+      // which is what sent the operator to re-provision a working one.
+      expect(prompt).not.toContain("No GitHub credential is attached");
+      expect(prompt).not.toContain("ran anonymously");
+      expect(prompt).toContain("never reached GitHub");
+
+      // Ruling 248 CANARY: drop `noCheckout: !!cloneFailure` from the
+      // completion contract and this is 0 — the verdict path stays open for a
+      // run that read nothing.
+      const { getRun } = await import("~/server/runtimes/run-store.server");
+      expect(getRun(store.db, run.runId)!.no_checkout).toBe(1);
     });
 
     it("refuses a second run of the SAME supporting engagement while one is in flight (its isolated dir is re-cloned fresh)", async () => {

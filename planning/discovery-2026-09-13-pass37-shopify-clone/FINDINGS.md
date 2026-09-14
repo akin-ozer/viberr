@@ -4116,3 +4116,98 @@ live holder, and carries a case pinning that a MERGED holder's lease binds nobod
 lease `.data/**` to the cleanup task, it declined — "SHOP-5's cleanup push must itself change those
 paths to delete them, and a lease refuses pushes that change leased paths — it could block the very
 fix."*
+
+## F37-77 · Viberr read its own word as the reviewer's verdict, and raised a decision on it — HIGH
+
+**The clearest "viberr lying" of the pass, found by reading a verdict row and disbelieving it.**
+
+SHOP-5's verdict list ends with this:
+
+```yaml
+- profileId: code-reviewer
+  revisionId: rev_cmpNBlEL0_kz
+  headSha: 81ae03ed9c85a27d593cd121f8605d9da8b207eb
+  result: request_changes
+  reason: "The checkout could not be provisioned, so I cannot review revision `81ae03e…`
+    … this is a server-side failure, not something you can fix … No content verdict recorded."
+```
+
+The reviewer said **"No content verdict recorded"** and viberr recorded a verdict. Its own
+structured envelope, in `runtimes/codex/run_1EeySeqev-r0.jsonl`, is unambiguous:
+
+```json
+{"evidence":null,"summary":"The checkout could not be provisioned…","verdict":null,
+ "question":{"title":"Provision checkout","body":"Please provision a usable checkout…"}}
+```
+
+**How.** `applyAgentCompletionEffects` falls back to `classifyReviewerVerdict(replyText)` when
+a verdict-granted agent produced no envelope verdict. The classifier's step 3 counts an
+un-negated `failure`. The word came from viberr:
+
+> `- **The workspace has NO checkout, and this is a server-side failure, not something you can
+> fix.** … Report that the checkout could not be provisioned, quote the reason above verbatim.`
+
+Measured, on the exact live text: `classifyReviewerVerdict(…)` → `"request_changes"`. Replace
+`server-side failure` with `server-side condition` and it returns `null`. **One word viberr
+wrote, and told the agent to repeat, was the whole verdict.**
+
+**What it cost.** `validation: failing`. Then ruling 237's counter saw a second consecutive
+`request_changes` from that reviewer and raised `pkt_50zoVyxekoN7`, putting three options to a
+human: interrogate a reviewer that never judged, force-accept past a verdict that did not
+exist, or another rework round. The operator caught it — "the open packet rests on a premise
+the evidence contradicts … there is no reviewer judgement here to interrogate, defer to, or
+override" — **tried to withdraw it and could not**, because the policy engine raised it.
+
+**Two causes, two gates (ruling 248).**
+1. A run whose workspace could not be provisioned records no verdict at all. The fact is
+   stamped on the run row (`no_checkout`), not held in the completion closure — a recovered
+   run would otherwise be re-classified after a restart, which is `outcome_key`'s own lesson.
+2. The prose fallback is a fallback for **silence**, not an override of an answer. An agent
+   that filled the envelope, left the verdict empty and asked a question has said which of the
+   two it was doing. The no-verdict NOTE already treats a question as "a legitimate no-verdict
+   outcome" (pass 24, C-4). The classifier is its sibling and never learned it — the shape this
+   pass has found more than any other (F37-70, F37-71, F37-73).
+
+**Tests.** Four, all canaried: removing the no-checkout gate reddens one, removing the question
+narrowing reddens another, faking the note text reddens a third, and dropping
+`noCheckout: !!cloneFailure` from the completion contract reddens the integration case. A fifth
+pins the trap itself — that this prose still classifies as `request_changes` — so nobody
+removes the gate believing the classifier is harmless here.
+
+**Residue on the live board:** SHOP-5 still carries the fabricated verdict row and the packet it
+raised. Recorded, not hand-edited.
+
+## F37-78 · The checkout failure blamed a credential that was present and working — HIGH
+
+Found in the same incident, one layer down, because the operator's conclusion did not match the
+database.
+
+The operator wrote onto SHOP-5: *"an earlier attempt logged a workspace-checkout failure
+(… already exists and is not an empty directory), **anonymous clone, no GitHub credential
+attached to this project**"*. Measured against the store:
+
+```
+project_github_credentials → pat_esbY7-6IenWI
+project_github_health      → {"status":"connected","repo":"akin-ozer/shopify-clone","private":true}
+```
+
+The credential is there and working. The operator was not guessing — viberr told it so.
+`cloneFailureSentence` had two states, and `hadCredential` is set only in `cloneRepo`'s network
+arm. A SUPPORTING run is cloned from the delivering checkout **already on disk**, and that arm
+runs BEFORE the token is fetched, so every failure there reported `false` and the sentence said
+"No GitHub credential is attached to this project, so the clone ran anonymously."
+
+That sentence's own doc comment states its purpose: to stop a failure "being re-narrated
+downstream as something it was not… by asking for a credential that already exists." It
+produced exactly that outcome, and the prompt's counter-clause ("the credential is present and
+working; repeating that request wastes a human's time") was gated on the same wrong boolean, so
+the one arm that most needed it never got it.
+
+**Fix (ruling 249).** A third state, `not_involved`: this step never reached GitHub, so no
+credential was involved either way. Set at the top of the local arm; the prompt's do-not-ask
+clause fires for it too. Three tests, all canaried — including an integration case that fails a
+real local clone and asserts the prompt makes no credential claim.
+
+**Still open:** *why* that local clone failed with "already exists and is not an empty
+directory" when the arm `rmSync`s the destination first. Not reproduced; recorded rather than
+guessed at.

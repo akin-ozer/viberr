@@ -5485,6 +5485,48 @@ by rewriting those paragraphs:*
     tidy them rather than leaving a person to notice.
     (`file-leases.server.ts`, `push-workspace.server.ts`, `specialist-run.server.ts`.)
 
+248. **A run that could not read the work judges nothing (2026-09-15, pass 37; F37-77).**
+    Live on SHOP-5 the Code Reviewer's checkout failed to provision. Viberr told it so in
+    the prompt, in viberr's own words, and ordered it to quote them verbatim: *"The workspace
+    has NO checkout, and this is a server-side FAILURE, not something you can fix."* It did
+    exactly that, returned an envelope with `verdict: null` and wrote "No content verdict
+    recorded" in its summary. Viberr recorded `request_changes` against the revision, because
+    the prose fallback matched the word "failure" inside the sentence viberr itself composed.
+    Delete that one word and the classifier returns null; it was the entire verdict. The
+    fabricated objection was the second in a row from that reviewer, so ruling 237's counter
+    raised a review-deadlock packet asking a person to choose between interrogating a reviewer
+    that never judged, forcing acceptance past a verdict that did not exist, and another round
+    of rework. The operator read the reviewer's own report, said so on the task, and could not
+    withdraw a packet the policy engine had raised.
+    Two gates, because the incident had two causes. A run whose workspace could not be
+    provisioned records NO verdict at all, envelope or prose: the fact is stamped on the run
+    row (`no_checkout`) rather than kept in the completion closure, for `outcome_key`'s reason
+    — the closure dies with the process, and a recovered run would be re-classified. And the
+    prose fallback is a fallback for SILENCE, not an override of an answer: an agent that
+    filled the envelope, left the verdict empty and asked a QUESTION has said which of the two
+    it was doing. The no-verdict note already read a question as "a legitimate no-verdict
+    outcome" (pass 24, C-4); the classifier is its sibling and never learned it, which is this
+    pass's most-found shape. The note itself now names the real condition, because "re-run the
+    review" is bad advice for something a re-run reproduces.
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `run-store.server.ts`,
+    `sqlite.server.ts`, `0001_baseline.sql`.)
+
+249. **A checkout failure names the cause it knows, not one it guessed (2026-09-15, pass 37;
+    F37-78).** `cloneFailureSentence` had two credential states, and the specialist checkout
+    has three cases. A SUPPORTING run is cloned from the delivering checkout ALREADY ON DISK,
+    and the project token is fetched only in the arm after it — so a failure in the local arm
+    reported `hadCredential: false`, and viberr announced *"No GitHub credential is attached
+    to this project, so the clone ran anonymously"* about a project holding a working one
+    (`pat_esbY7-6IenWI`, health `connected`). The operator believed it and wrote "anonymous
+    clone, no GitHub credential attached to this project" onto SHOP-5.
+    That sentence exists, in its own doc comment, "to stop the failure being re-narrated
+    downstream as something it was not… by asking for a credential that already exists". It
+    did the exact thing it was written to prevent. The third state, `not_involved`, says the
+    true thing: this step never reached GitHub, so no credential was involved either way —
+    and the prompt's "do not ask for credentials" clause now fires for it too, because that
+    guess is a false lead in both directions.
+    (`git-clone-auth.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is
