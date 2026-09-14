@@ -1795,3 +1795,12 @@ Set against the merge that produced the finding: accepting SHOP-2 flipped four o
 CONFLICTING within a minute, with nothing on any surface having said it would. The difference
 between those two merges is the whole point of the ruling - not that one was lucky, but that the
 queue could tell them apart beforehand and did.
+
+**Second merge, second correct prediction.** SHOP-21's chip named SHOP-3 and SHOP-12 as its
+collisions. After PR #18 merged, both were still CONFLICTING (they already were, so the merge
+worsened nothing), SHOP-11 unchanged, and SHOP-5, SHOP-23 and SHOP-18 all MERGEABLE - SHOP-18
+having just rebased across 20 commits of `main`. Again **zero newly-conflicted pull requests**, and
+again the chip had named exactly the PRs sharing paths with the one being merged.
+
+Two merges since the ruling shipped, both anticipated correctly: the one with no chip broke
+nothing, and the one whose chip named two already-conflicting PRs added no new damage.
