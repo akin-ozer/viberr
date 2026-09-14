@@ -114,6 +114,7 @@ describe("reclaimTerminalTaskWorkspaces", () => {
       credentialPolicy: null,
       guardrails: [],
       requiredReviewers: [],
+    fileLeases: [],
     });
     task(store, "VIB-1", "shipped");
     task(store, "VIB-2", "impl");

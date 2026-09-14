@@ -87,6 +87,7 @@ import {
   removeStage,
   renameStage,
   reorderStages,
+  setProjectFileLeases,
   setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
@@ -1094,7 +1095,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named. Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1121,6 +1122,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // not any profile grants it. Null means the project has named none,
           // and a settled rule has nowhere to live but each task's goal.
           rulingsKb: fm.rulingsKb ?? null,
+          // Ruling 245: who owns which shared paths until they merge. Read here
+          // rather than inferred from prose, which is what every agent was doing.
+          fileLeases: fm.fileLeases ?? [],
           stages: project.stages.map((s) => ({
             id: s.id,
             name: s.name,
@@ -1985,6 +1989,42 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "set_project_rulings_kb",
+  );
+
+  add(
+    tool(
+      "set_file_leases",
+      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY — another task whose push changes a leased path is refused by name, before anything reaches GitHub. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass. A lease naming a task this project does not have is refused, and two leases may not cover the same glob.",
+      {
+        projectSlug: z.string().optional(),
+        leases: z
+          .array(
+            z.object({
+              paths: z.array(z.string()).describe("Globs, e.g. [\"pnpm-lock.yaml\"] or [\"make/**\"]."),
+              taskKey: z.string().describe("The one task that owns them until it merges."),
+              reason: z.string().describe("Why, in one line. It is quoted in every refusal."),
+            }),
+          )
+          .describe("The COMPLETE lease list; [] clears every lease."),
+      },
+      runWith(
+        async (args: {
+          projectSlug?: string;
+          leases: { paths: string[]; taskKey: string; reason: string }[];
+        }) => {
+          const slug = slugOf(args.projectSlug);
+          requireVisible(slug, "change this project's policy");
+          const result = await setProjectFileLeases(
+            db,
+            { projectSlug: slug, leases: args.leases },
+            actor,
+            { dataRoot },
+          );
+          return `[done] ${result.toast}.`;
+        },
+      ),
+    ),
+    "set_file_leases",
   );
 
   add(

@@ -1,4 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import type { FileLeaseRow } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, ROLE_LABEL } from "~/shared/rbac";
 import {
   isReservedTaskPrefix,
@@ -525,6 +527,89 @@ export async function setProjectRulingsKb(
       ? `Rulings knowledge base set to ${wanted}. Every agent on this project reads it, and so does the controller while it works here`
       : "Rulings knowledge base cleared",
     dir: wanted,
+    changed: true,
+  };
+}
+
+const FILE_LEASES_AUDIT_ACTION = "project.file_leases.updated";
+
+/**
+ * Ruling 245 (pass 37, F37-74): set the project's per-file LEASES, or clear
+ * them with an empty list.
+ *
+ * Same authority as every other project policy (`edit-policy`), and validated
+ * against the board the same way a rulings KB is validated against the store: a
+ * lease naming a task that does not exist would refuse deliveries in the name of
+ * nobody, and a person meeting that refusal could not act on it.
+ *
+ * Two leases may not cover the same glob. Which of them owns a file would then
+ * depend on list order, and "who owns this file" is the one question a lease
+ * exists to answer.
+ */
+export async function setProjectFileLeases(
+  db: DatabaseSync,
+  input: { projectSlug: string; leases: { paths: string[]; taskKey: string; reason: string }[] },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; leases: FileLeaseRow[]; changed: boolean }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
+  const cleaned: FileLeaseRow[] = [];
+  const claimed = new Map<string, string>();
+  for (const raw of input.leases) {
+    const paths = [...new Set(raw.paths.map((p) => p.trim()).filter(Boolean))];
+    if (paths.length === 0) {
+      throw AppError.validation("A lease needs at least one path. Drop the row, or give it a path.");
+    }
+    const taskKey = raw.taskKey.trim();
+    const task = readTaskFile(
+      ctx.dataRoot
+        ? { projectSlug: input.projectSlug, taskKey, dataRoot: ctx.dataRoot }
+        : { projectSlug: input.projectSlug, taskKey },
+    );
+    if (!task) {
+      throw AppError.validation(
+        `${taskKey} is not a task in this project, so it cannot hold a lease. ` +
+          "A lease refuses other tasks' deliveries in its holder's name, and a holder nobody " +
+          "can open is a refusal nobody can act on.",
+      );
+    }
+    for (const glob of paths) {
+      const already = claimed.get(glob);
+      if (already && already !== taskKey) {
+        throw AppError.validation(
+          `Two leases both cover \`${glob}\` (${already} and ${taskKey}). ` +
+            "Which one owns it would depend on list order, and that is the one question a lease answers.",
+        );
+      }
+      claimed.set(glob, taskKey);
+    }
+    cleaned.push({ paths, taskKey, reason: raw.reason.trim() });
+  }
+  let changed = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const before = JSON.stringify(parsed.frontmatter.fileLeases ?? []);
+    changed = before !== JSON.stringify(cleaned);
+    if (!changed) return;
+    parsed.frontmatter.fileLeases = cleaned;
+  });
+  if (!changed) {
+    return { toast: "File leases unchanged", leases: cleaned, changed: false };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: FILE_LEASES_AUDIT_ACTION,
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { leases: cleaned.map((l) => `${l.taskKey}: ${l.paths.join(", ")}`).join(" | ") },
+  });
+  return {
+    toast:
+      cleaned.length === 0
+        ? "File leases cleared"
+        : `File leases saved: ${cleaned.map((l) => `${l.paths.join(", ")} to ${l.taskKey}`).join("; ")}`,
+    leases: cleaned,
     changed: true,
   };
 }

@@ -79,6 +79,7 @@ function storeWithTwoProjects(): TestStore {
     credentialPolicy: null,
     guardrails: [],
     requiredReviewers: [],
+  fileLeases: [],
   });
   writeTask(store.dataRoot, SLUG, {
     frontmatter: baseTaskFrontmatter("VIB-101"),

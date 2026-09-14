@@ -148,6 +148,19 @@ requiredReviewers:                # ruling 178: reviewers the project REQUIRES p
                                   # controller's set_required_reviewers; read on Policy.
   - stageId: review
     profileId: reviewer
+fileLeases:                       # ruling 245: which TASK owns which shared paths
+                                  # until it merges — the ordering statement
+                                  # `blockedBy` cannot make (`blockedBy` says "do not
+                                  # START until done"). Enforced at DELIVERY: another
+                                  # task whose push changes a leased path is refused
+                                  # before anything reaches GitHub, and every run's
+                                  # canonical anchor names what it may not touch.
+                                  # Globs: `*` within one segment, `**` spans segments
+                                  # and covers the directory itself. `[]` is the default.
+                                  # Set by set_file_leases (edit-policy).
+  - paths: ["pnpm-lock.yaml"]
+    taskKey: SHOP-11
+    reason: regenerating it for the cart importer
 ---
 
 Project description prose (markdown body).

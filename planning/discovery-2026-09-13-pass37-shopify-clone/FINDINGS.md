@@ -3983,3 +3983,49 @@ state), and refusing on the option kind alone kills ruling 122's real case, wher
 **Not a dead end, checked.** SHOP-11 re-read `readiness: ready`, `waiting: agent` with an operator
 and a deliverer running — the machinery recovered on its own. The cost was the wasted decision and
 the false consent, not a stranded task.
+
+## F37-74 · Merge order is a rule with no object — HIGH (controller usage gap)
+
+**The controller found this one.** I asked it, in the dock, what single thing it most lacks a tool
+for. Its answer, verified against the project's own conventions KB and viberr's schema:
+
+> Your conventions encode at least four rules that all require knowing **which open branch lands
+> next** … Viberr has nowhere to put that. `blockedBy` is the only ordering primitive, and it means
+> "do not start until done" — far too strong. The real statement — "SHOP-11 and SHOP-5 may both
+> proceed, SHOP-11 merges first, SHOP-5 absorbs it on rebase" — is unsayable in the product. So it
+> lives in prose inside task texts and operator comments, and every agent re-derives it, every run.
+
+**The bill it named, all of it checkable.** SHOP-11 was made to WAIT on SHOP-14 and SHOP-5 when
+sequence was meant: twelve commits of drift, a conflict, a refused push, a decision packet, and a
+human decision that could not take effect (F37-73). SHOP-19 merged the Makefile fragment layout
+while SHOP-5 still held the pre-refactor monolith — predictable, nobody holding it, another packet.
+At the moment it answered, SHOP-5 and SHOP-11 were both conflicting and behind `main` at once and
+nothing in viberr said which went first.
+
+**Fix (ruling 245, owner's call: leases over a queue).** A lease is path globs, the one task holding
+them, and why. The owner chose it over an ordered merge queue because it answers the sharper
+question — not "who is next" but "who owns this file right now" — and that one is checkable at
+delivery.
+
+Read in three places, enforced in one:
+- `get_project` carries `fileLeases`, so the controller reads it instead of inferring.
+- Every run's **canonical anchor** names what the run may NOT touch, high in the block — a run that
+  learns this after editing has already done the thing the lease exists to stop.
+- The **push** refuses, at ruling 144's own seam: the moment the change would become published
+  history and the last at which refusing is free. Nothing reaches GitHub, no PR opens, the branch is
+  exactly as it was.
+
+An unmeasurable diff refuses nothing and logs it, keeping ruling 144's distinction that `null` means
+"history could not answer", never "nothing changed" — a lease gate that read a degraded null as an
+empty list would wave through the delivery it exists to stop.
+
+Refused at authoring: a lease naming a task the project does not have (a refusal nobody could act
+on), and two leases over one glob (list order would decide the owner, which is the one question a
+lease answers).
+
+**Test.** The matcher carries its own suite — exact paths, `*` confined to one segment, `**` across
+segments and covering the bare directory, the `cart` vs `cart-api` neighbour trap, regex
+metacharacters that must not escape, and an empty glob that must match nothing. Canaries, all run:
+rendering `*` as `.*`, dropping the bare-directory arm, dropping the holder skip, dropping the
+empty-glob guard, dropping the push gate, treating an unmeasurable diff as empty, dropping the
+anchor section, and telling the holder about its own lease.

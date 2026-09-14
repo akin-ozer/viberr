@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { leaseConflictFor, leaseRefusal } from "~/shared/file-leases";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
@@ -76,6 +77,20 @@ export type PushWorkspaceResult =
        *  `null` when history could not answer — an unmeasured push, which is
        *  not the same claim as a measured empty list. */
       workflowFiles: string[] | null;
+    }
+  /**
+   * Ruling 245: refused because this push changes a file another task LEASES.
+   * Nothing was pushed and no PR was opened — the same posture every other
+   * pre-push refusal takes, so the branch is exactly as it was.
+   */
+  | {
+      status: "lease_held";
+      branch: string;
+      /** The refusal sentence, from the shared `leaseRefusal` builder. */
+      reason: string;
+      /** The leased path this push changes, and who holds it. */
+      path: string;
+      holder: string;
     }
   /**
    * Ruling 144: a push of `.github/workflows/*` refused for the `workflow`
@@ -299,12 +314,29 @@ async function changedWorkflowFiles(
   remoteHead: string | null,
   defaultBranch: string,
 ): Promise<string[] | null> {
+  return changedFilesForPush(exec, repoDir, remoteHead, defaultBranch, ".github/workflows/");
+}
+
+/**
+ * Ruling 245: every file this push would change, measured the same way ruling
+ * 144 measures the workflow subset — origin's head for the branch, the base
+ * only on a first push. `pathspec` narrows it; omitted, it is the whole diff.
+ *
+ * `null` keeps ruling 144's meaning exactly: "history could not answer", which
+ * is NOT "nothing changed". A lease gate reading a degraded null as an empty
+ * list would wave through the very delivery it exists to stop.
+ */
+async function changedFilesForPush(
+  exec: Exec,
+  repoDir: string,
+  remoteHead: string | null,
+  defaultBranch: string,
+  pathspec?: string,
+): Promise<string[] | null> {
   const listFrom = async (range: string): Promise<string[] | null> => {
-    const res = await exec(
-      "git",
-      ["-C", repoDir, "log", "--format=", "--name-only", range, "--", ".github/workflows/"],
-      { cwd: repoDir, timeoutMs: 10_000 },
-    );
+    const args = ["-C", repoDir, "log", "--format=", "--name-only", range];
+    if (pathspec !== undefined) args.push("--", pathspec);
+    const res = await exec("git", args, { cwd: repoDir, timeoutMs: 10_000 });
     if (!res.ok) return null;
     return [...new Set(res.stdout.split("\n").map((l) => l.trim()).filter(Boolean))];
   };
@@ -888,6 +920,49 @@ export async function pushWorkspaceBranch(
           taskKey,
           branch,
         });
+      }
+      // Ruling 245 (F37-74): a file another task LEASES is refused here, for
+      // ruling 144's own reason and at its own seam — this is the moment the
+      // change would become published history, and the last one at which
+      // refusing costs nothing. Measured, never assumed: a `null` read means
+      // history could not answer, and waving the push through on that would
+      // defeat the gate, so an unmeasurable diff refuses nothing and says so in
+      // the log exactly as ruling 144(c) does.
+      {
+        const leases = readProjectFile({ projectSlug, dataRoot })?.parsed.frontmatter
+          .fileLeases ?? [];
+        if (leases.length > 0) {
+          const changed = await changedFilesForPush(
+            exec,
+            repoDir,
+            pushedRemoteBefore,
+            defaultBranch,
+          );
+          if (changed === null) {
+            logger.info("could not measure the files this push changes; no lease gate", {
+              taskKey,
+              branch,
+            });
+          } else {
+            const conflict = leaseConflictFor(changed, leases, taskKey);
+            if (conflict) {
+              const reason = leaseRefusal(taskKey, conflict, "delivering it for review");
+              logger.info("workspace branch push refused before GitHub: file lease", {
+                taskKey,
+                branch,
+                path: conflict.path,
+                holder: conflict.lease.taskKey,
+              });
+              return {
+                status: "lease_held",
+                branch,
+                reason,
+                path: conflict.path,
+                holder: conflict.lease.taskKey,
+              };
+            }
+          }
+        }
       }
       const validation = credential?.validation ?? null;
       if (

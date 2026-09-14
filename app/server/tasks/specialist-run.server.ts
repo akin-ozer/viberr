@@ -493,6 +493,11 @@ async function freshRunAnchor(
     return canonicalTaskAnchor({
       parsed,
       stageName: stageDisplayName(ctx, projectSlug, parsed.frontmatter.stage),
+      // Ruling 245: read at anchor time, so a lease set mid-flight binds the
+      // very next run rather than the one after a restart.
+      fileLeases:
+        readProjectFile(ctx.dataRoot ? { projectSlug, dataRoot: ctx.dataRoot } : { projectSlug })
+          ?.parsed.frontmatter.fileLeases ?? [],
     });
   } catch (error) {
     logger.warn("canonical anchor could not be built for a fresh run", {

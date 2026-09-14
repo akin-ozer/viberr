@@ -5407,6 +5407,38 @@ by rewriting those paragraphs:*
     with `deleteBranch`.
     (`operator-actions.server.ts`.)
 
+245. **Per-file LEASES: which task owns a shared path until it merges (owner, 2026-09-15,
+    pass 37; F37-74).** The project's conventions encode at least four rules that all need
+    to name a file's current owner — only the branch at the head of the merge queue
+    regenerates the lockfile freely, an authorized shared-file edit names its order, the
+    approved branch merges first, SERIALISE's "the authorization names the merge order".
+    Viberr had nowhere to put that fact. `blockedBy` was the only ordering primitive and it
+    means "do not START until done", which is far too strong: the statement actually wanted
+    is "both may proceed, this one owns `pnpm-lock.yaml` until it lands". So it lived in
+    prose inside task texts, and every agent re-derived it every run.
+    The absence cost two decision packets in one evening. SHOP-19 merged the Makefile
+    fragment layout while SHOP-5 still carried the pre-refactor monolith — entirely
+    predictable, nobody holding it. And SHOP-11 was made to WAIT on two tasks when sequence
+    was meant, drifting twelve commits behind, conflicting, refusing a push, and spending a
+    human decision that could not take effect.
+    The owner's alternatives were an ordered merge queue and doing nothing. The owner took
+    LEASES, which answer the sharper question: not "who is next" but "who owns this file
+    right now", and that one is checkable at delivery.
+    A lease is some path globs, the one task holding them, and why. Two wildcards only —
+    `*` within a segment, `**` across them and covering the directory itself — because a
+    surprising match on a shared file is worse than a missing feature. Read in three places
+    and enforced in one: `get_project` carries them, every run's canonical anchor names what
+    the run may NOT touch (high in the block, because a run that learns this after editing
+    has already done the thing the lease exists to stop), and the PUSH refuses — ruling 144's
+    own seam, the moment the change would become published history and the last at which
+    refusing is free. An unmeasurable diff refuses nothing and says so, keeping ruling 144's
+    distinction that `null` is "history could not answer", never "nothing changed".
+    Refused at authoring: a lease naming a task the project does not have (a refusal nobody
+    could act on), and two leases over one glob (list order would decide the owner, which is
+    the one question a lease answers).
+    (`file-leases.ts`, `project-file.schema.ts`, `settings-actions.server.ts`,
+    `push-workspace.server.ts`, `task-actions.server.ts`, `controller-toolkit.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

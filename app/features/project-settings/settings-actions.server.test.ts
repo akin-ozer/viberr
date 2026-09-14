@@ -1104,6 +1104,111 @@ describe("setRequiredReviewers (ruling 178)", () => {
  * Ruling 239 (pass 37): the project's rulings knowledge base — the one KB every
  * run on the project reads, whether or not a profile grants it.
  */
+/**
+ * Ruling 245 (pass 37, F37-74): a lease says which task owns a shared path
+ * until it merges — the statement `blockedBy` cannot make, because `blockedBy`
+ * means "do not START until done" and what is wanted is "both may proceed, this
+ * one owns the lockfile until it lands".
+ */
+describe("setProjectFileLeases (ruling 245)", () => {
+  let store: TestStore;
+  let holderA = "";
+  let holderB = "";
+  const leases = () =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter
+      .fileLeases;
+  beforeEach(async () => {
+    store = setupTestStore(ctx);
+    const { createTask } = await import("~/server/tasks/task-actions.server");
+    // The real keys, not assumed ones: the project's own prefix and counter
+    // decide them, and a lease is validated against the board.
+    holderA = (
+      await createTask(store.db, { projectSlug: store.slug, title: "Holder one" }, admin(store), {
+        dataRoot: store.dataRoot,
+      })
+    ).key;
+    holderB = (
+      await createTask(store.db, { projectSlug: store.slug, title: "Holder two" }, admin(store), {
+        dataRoot: store.dataRoot,
+      })
+    ).key;
+  });
+
+  it("writes the list, and reads it back off the project file", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    const saved = await setProjectFileLeases(
+      store.db,
+      {
+        projectSlug: store.slug,
+        leases: [{ paths: ["pnpm-lock.yaml", " make/** "], taskKey: holderA, reason: " the fragments " }],
+      },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(saved.changed).toBe(true);
+    // Trimmed and deduped on the way in: a lease is matched by string, so a
+    // stray space is a lease that silently covers nothing.
+    expect(leases()).toEqual([
+      { paths: ["pnpm-lock.yaml", "make/**"], taskKey: holderA, reason: "the fragments" },
+    ]);
+    expect(saved.toast).toContain(holderA);
+  });
+
+  it("refuses a holder this project does not have, and writes nothing", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    await expect(
+      setProjectFileLeases(
+        store.db,
+        { projectSlug: store.slug, leases: [{ paths: ["Makefile"], taskKey: "VIB-999", reason: "x" }] },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/VIB-999 is not a task in this project/);
+    // CANARY: drop the holder check and a refusal names a task nobody can open.
+    expect(leases()).toEqual([]);
+  });
+
+  it("refuses two leases over the same glob, because order would decide the owner", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    await expect(
+      setProjectFileLeases(
+        store.db,
+        {
+          projectSlug: store.slug,
+          leases: [
+            { paths: ["pnpm-lock.yaml"], taskKey: holderA, reason: "a" },
+            { paths: ["pnpm-lock.yaml"], taskKey: holderB, reason: "b" },
+          ],
+        },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Two leases both cover/);
+    expect(leases()).toEqual([]);
+  });
+
+  it("clears with an empty list, and reports an unchanged write as unchanged", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    const args = {
+      projectSlug: store.slug,
+      leases: [{ paths: ["Makefile"], taskKey: holderA, reason: "splitting it" }],
+    };
+    await setProjectFileLeases(store.db, args, admin(store), { dataRoot: store.dataRoot });
+    const again = await setProjectFileLeases(store.db, args, admin(store), {
+      dataRoot: store.dataRoot,
+    });
+    expect(again.changed).toBe(false);
+    const cleared = await setProjectFileLeases(
+      store.db,
+      { projectSlug: store.slug, leases: [] },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(cleared.changed).toBe(true);
+    expect(leases()).toEqual([]);
+  });
+});
+
 describe("setProjectRulingsKb (ruling 239)", () => {
   let store: TestStore;
   const projectFm = () =>

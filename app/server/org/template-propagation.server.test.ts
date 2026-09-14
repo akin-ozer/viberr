@@ -131,6 +131,7 @@ describe("listTemplateResourceDrift", () => {
       credentialPolicy: null,
       guardrails: [],
       requiredReviewers: [],
+      fileLeases: [],
       archived: true,
     });
     // A seeded-shape deployment: profileId + capabilities, no definition, so
@@ -149,6 +150,7 @@ describe("listTemplateResourceDrift", () => {
       credentialPolicy: null,
       guardrails: [],
       requiredReviewers: [],
+    fileLeases: [],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await grantOnTemplate(store, ["github"]);

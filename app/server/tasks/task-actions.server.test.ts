@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
@@ -5611,5 +5611,57 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
       by: null,
       answered: { at: expect.any(String), byUserId: store.users.arda.id },
     });
+  });
+});
+
+
+/**
+ * Ruling 245 (pass 37, F37-74): the anchor tells a run what another task owns,
+ * BEFORE it edits anything.
+ *
+ * The delivery gate refuses a push that touches a leased file, but a refusal
+ * that arrives after the work is done is a wasted turn, not a guard. The anchor
+ * is the "read this before you act" block, so the lease belongs in it.
+ */
+describe("ruling 245: the canonical anchor names the files another task owns", () => {
+  let canonicalTaskAnchorFn: typeof import("./task-actions.server").canonicalTaskAnchor;
+  beforeEach(async () => {
+    canonicalTaskAnchorFn = (await import("./task-actions.server")).canonicalTaskAnchor;
+  });
+  const anchorFor = (key: string, leases: { paths: string[]; taskKey: string; reason: string }[]) =>
+    canonicalTaskAnchorFn({
+      parsed: {
+        frontmatter: baseTaskFrontmatter(key, { title: "Probe" }),
+        goal: "Do the thing.",
+        timeline: [],
+        packet: null,
+        unknownFrontmatter: {},
+        extraSections: [],
+      },
+      stageName: "Build",
+      fileLeases: leases,
+    });
+
+  it("renders another task's lease, with its holder and its reason", () => {
+    const anchor = anchorFor("VIB-1", [
+      { paths: ["Makefile", "make/**"], taskKey: "VIB-9", reason: "splitting it into fragments" },
+    ]);
+    // CANARY: drop the section and a run learns about the lease only when its
+    // delivery is refused, after it has already edited the file.
+    expect(anchor).toContain("Files another task owns right now");
+    expect(anchor).toContain("`Makefile`");
+    expect(anchor).toContain("`make/**`");
+    expect(anchor).toContain("VIB-9");
+    expect(anchor).toContain("splitting it into fragments");
+    expect(anchor).toContain("refused before it reaches GitHub");
+  });
+
+  it("says nothing to the HOLDER about its own lease, and nothing when there are none", () => {
+    // CANARY: drop the `l.taskKey !== fm.key` filter and the one task given the
+    // file to own is told not to touch it.
+    expect(anchorFor("VIB-9", [
+      { paths: ["Makefile"], taskKey: "VIB-9", reason: "splitting it" },
+    ])).not.toContain("Files another task owns");
+    expect(anchorFor("VIB-1", [])).not.toContain("Files another task owns");
   });
 });

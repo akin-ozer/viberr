@@ -1,4 +1,5 @@
 import { holdRefusal } from "~/shared/dependencies";
+import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
@@ -1457,6 +1458,12 @@ function anchorClamp(text: string, max: number): string {
  * Pure + exported for the directive-content test.
  */
 export function canonicalTaskAnchor(input: {
+  /** Ruling 245: the project's file leases, so a run learns what it may not
+   *  touch from STATE rather than re-deriving it from convention prose every
+   *  turn. Only leases held by OTHER tasks are rendered — a holder needs no
+   *  warning about the file it was given to own. Absent on a hand-built
+   *  anchor; the real producers always pass the project's list. */
+  fileLeases?: readonly FileLease[];
   parsed: ParsedTaskFile;
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
@@ -1484,6 +1491,23 @@ export function canonicalTaskAnchor(input: {
   lines.push(`${fm.key} — "${fm.title}"`);
   lines.push(refs.join(" · "));
   lines.push("");
+  // Ruling 245: what another task owns right now. High in the anchor, because a
+  // run that learns this after it has edited the file has already done the
+  // thing the lease exists to stop, and the delivery refusal is then a wasted
+  // turn rather than a guard.
+  const foreign = (input.fileLeases ?? []).filter((l) => l.taskKey !== fm.key);
+  if (foreign.length > 0) {
+    lines.push("### Files another task owns right now (ruling 245)");
+    lines.push(
+      "Do NOT change these. They are leased until their holder merges, and a delivery " +
+        "that touches one is refused before it reaches GitHub.",
+    );
+    for (const lease of foreign) {
+      const why = lease.reason ? ` — ${lease.reason}` : "";
+      lines.push(`- ${lease.paths.map((p) => `\`${p}\``).join(", ")} → **${lease.taskKey}**${why}`);
+    }
+    lines.push("");
+  }
   lines.push("### Goal (canonical)");
   lines.push(goal.trim() ? anchorClamp(goal, ANCHOR_GOAL_MAX_CHARS) : "_No goal recorded._");
   if (packet) {
@@ -6513,6 +6537,23 @@ export async function performDelivery(
         taskKey,
         status: push.status,
       });
+    }
+
+    // Ruling 245 (F37-74): a file another task LEASES. Surfaced and returned
+    // here, before anything reads the push further: nothing was pushed, no PR
+    // was opened, and the branch is exactly as it was — so this is a refusal a
+    // person acts on, not a failure to diagnose. The sentence is the shared
+    // `leaseRefusal` one, so a lease reads the same wherever it stops someone.
+    if (push.status === "lease_held") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery refused: a file is leased",
+        push.reason,
+      );
+      return { status: "failed", message: push.reason };
     }
 
     // P11-12: a capability-policy refusal is NOT an empty delivery — surface it

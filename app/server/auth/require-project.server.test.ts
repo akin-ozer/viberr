@@ -131,6 +131,7 @@ function writeProbeProject(
     credentialPolicy: null,
     guardrails: [],
     requiredReviewers: [],
+    fileLeases: [],
     ...patch,
   });
 }
