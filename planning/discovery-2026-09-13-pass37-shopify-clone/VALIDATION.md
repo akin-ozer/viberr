@@ -1084,3 +1084,53 @@ IS the re-check** — the body says so, and a successful acceptance withdraws th
 Two options remain and both do exactly what they say.
 
 Each fix has its own canary, each proven red by reverting the guard it tests.
+
+### Rulings 225–228 deployed, 03:32 UTC — and the schema change the store needed
+
+I had been holding the deploy because five Codex runs were in flight and a restart kills them.
+Then the container restarted **on its own** at 03:30 (clean exit 0, Docker's restart policy), and
+the cost I had been avoiding became a measurement instead of a guess:
+
+```
+finalized non-terminal runs at boot: total 5
+```
+
+Five runs interrupted, five operators re-invoked, every reviewer re-dispatched within seconds,
+and each task carrying the honest note — *"the run … was still running when the server stopped;
+it is recorded as interrupted by the restart, and the operator is re-invoked to decide what to
+do next."* The board absorbed it in about ten seconds. So the deploy went ahead immediately
+afterwards, and cost the same again.
+
+**The schema change.** Ruling 225's `waiting: "schedule"` needs the store's CHECK to admit it,
+and migrations are squashed and forward-only — editing the baseline changes what a FRESH
+`projection.sqlite` gets and nothing else, which is F21-1's whole point. The live root was
+rebuilt in place with the app stopped (one writer per data root, ever), preserving `audit_events`,
+which is not derived from markdown and could not be recreated by a rescan:
+
+```
+rows 20 -> 20
+indexes recreated: 1
+CHECK widened
+integrity: {"integrity_check":"ok"}
+```
+
+**The boot then checked my own work.** Ruling 225 added `task_projections.waiting` to
+`projectionCheckGaps` — the probe that reads the DDL SQLite itself stored and names any value the
+code declares that the live root refuses. The boot integrity line came back with no gaps, which
+is the widening confirmed by the mechanism the same ruling extended.
+
+```
+projection rescan complete   projects=1 tasks=20 changed=0 unchanged=28 removed=0 errors=0
+finalized non-terminal runs at boot: total 5
+boot integrity check … dataRootDirsOk=true migrationsApplied=1 projections={projects:1,tasks:20}
+viberr server booted
+```
+
+All four rulings verified present in the running image by grepping the built server for a
+sentence each one introduced.
+
+**One casualty, handled honestly.** SHOP-18's operator was mid-run and its Codex process died
+with `SIGBUS`. Viberr raised a decision packet quoting the provider verbatim — *"Codex Exec
+exited with signal SIGBUS:"* — with three options and "Re-run the operator now" recommended.
+Taking it restarted coordination, and within seconds all five tasks were working again. The
+product's account of what my deploy did to it was accurate in every particular.
