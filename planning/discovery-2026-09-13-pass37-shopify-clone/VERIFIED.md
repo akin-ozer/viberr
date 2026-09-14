@@ -1818,3 +1818,45 @@ All three agree; archived tasks leave the board by design.
 I had carried it over from a board count taken twenty minutes earlier. The authoritative scan
 (non-done AND non-archived) returns 9, which is exactly what Insights claims. Caught in one command,
 and the twelfth time this pass that measuring beat asserting.
+
+## Viberr's own diagnostic, audited against an independent scan — COMPLETE AND ACCURATE (2026-09-15)
+
+Viberr writes diagnostics about its own records. Across the whole board it reports exactly one:
+
+```
+SHOP-24 · timeline.out_of_order · info · hard_stop 0
+"Timeline entries are not strictly newest-first. The page renders file order, so an entry may sit
+ out of place until the file is rewritten."
+```
+
+**Audited by scanning every task file myself**, parsing each `### <iso> · <type> · <actor>` heading
+and checking strict descending order:
+
+```
+scanned 26 task files; 1 with inversions
+SHOP-24   56 events, 2 inversion(s)
+          2026-09-14T14:18:52.271Z comment system:policy-engine   (10ms)
+          2026-09-14T13:52:53.476Z comment system:policy-engine   (5ms)
+```
+
+Same task, same count. The diagnostic found everything an independent parse finds and claimed
+nothing extra — and it graded itself `info` with `hard_stop: 0`, which is right: the entries are
+present and readable, only mis-sorted.
+
+### And it doubles as the proof that the ruling-237 ordering fix works
+
+Both inversions are the policy-engine's own packet comment landing beside the verdict that raised
+it — 13:52:53 is SHOP-24's first ruling-237 firing, the one whose 5ms inversion this same diagnostic
+surfaced earlier in the pass, and which was fixed by unshifting the note AFTER the verdict event.
+
+The residue is historical by design: a task file is not rewritten to re-sort old entries. What
+matters is what has been written since.
+
+```
+timeline events on the board:                                  1997
+written after the last inversion (2026-09-14T14:18:52.271Z):    266
+inversions among those:                                           0
+```
+
+266 events across 26 files since the fix, every one strictly ordered. That is a stronger statement
+than the fix's unit test makes, and it came from viberr's own instrument rather than from mine.
