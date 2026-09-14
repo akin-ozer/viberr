@@ -1153,3 +1153,22 @@ exactly offset to hide here.
 The `stopped` column is the stronger evidence in one way — all 55 are restart casualties, and
 every restart in this session wrote its own note on every affected task, which I watched happen
 three times (03:30 unplanned, 03:32 and 04:03 deploys; 5, 5 and 7 runs respectively).
+
+## Ruling 206 works on the running board (checked 2026-09-14, pass 37)
+
+Ruling 206 made routine-comment folding non-adjacency-based after finding that "a guardrail that
+is on, configured, and counted by Insights had never removed a single event". Checked against the
+live files, counting markers by their exact `title: Compacted`:
+
+```
+SHOP-2   96 events   2 markers      SHOP-11   91 events   3 markers
+SHOP-3  122 events   3 markers      SHOP-12  104 events   2 markers
+SHOP-10 148 events   1 marker       SHOP-18   88 events   1 marker
+```
+
+Every task that has been written to since the ruling deployed now carries markers, each naming
+how many it replaced ("5 earlier routine comments compacted to keep the task readable").
+
+SHOP-6 (134 events) and SHOP-7 (200 events) carry none, and that is correct rather than a gap:
+both are merged and done, compaction only runs on a write, and nothing re-anchors on a closed
+task's file. Folding them would be churn with no reader.

@@ -3087,3 +3087,32 @@ This is not obviously viberr's mistake to fix by itself: `P14-GV-06` deliberatel
 fan-out because *"a human @tagged inside an operator directive ('…coordinate with @Arda') was never
 notified"*, and that is a real ping worth delivering. Viberr cannot tell the two apart by parsing.
 Raised with the owner with this background rather than guessed at.
+
+---
+
+## F37-54 · Insights counts a task as compacting when it is exactly one event short — LOW
+
+**Found by checking the one number on the Insights card that names a mechanism.** "Long timelines
+— 14 tasks past their project's compression threshold." Counting the timelines by hand gave 13.
+
+The missing one is SHOP-1, which sits at exactly 40 events against a threshold of 40.
+
+```ts
+// insights-query.server.ts
+return threshold != null && t.event_count >= threshold;
+
+// timeline-compaction.server.ts — the only rule that decides
+if (events.length <= options.threshold) return events;
+```
+
+A task AT the threshold is never folded, so counting it as "past" the threshold names a task the
+machinery is not managing. The insights test enshrined it (`eventCount: 40` commented "at
+threshold → long"), so the two halves had been allowed to disagree on purpose.
+
+Small, and it costs nobody any work. Recorded because the card's whole job is to describe the
+machinery, and its own test file says the metric exists so a task is not wrongly called "one the
+readability machinery is actively managing".
+
+**Fixed** by taking the boundary from the machinery rather than restating it, and the test now
+asserts `compactTimelineEvents` itself on both lengths (40 untouched, 41 folded) so the two
+cannot drift apart again.

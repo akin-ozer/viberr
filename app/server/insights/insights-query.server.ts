@@ -504,9 +504,15 @@ function oversightSummary(
       avgMs: avg(reviewDurations),
       medianMs: median(reviewDurations),
     },
+    // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
+    // opens with `if (events.length <= options.threshold) return events`, so a
+    // task sitting exactly ON the threshold is not compacted and is not one the
+    // readability machinery is managing. Counting it as "past their project's
+    // compression threshold" put a task in the card that the fold never touches
+    // — off by one against the only rule that decides.
     longTimelines: tasks.filter((t) => {
       const threshold = compressionAt.get(t.project_slug);
-      return threshold != null && t.event_count >= threshold;
+      return threshold != null && t.event_count > threshold;
     }).length,
     coordination,
   };

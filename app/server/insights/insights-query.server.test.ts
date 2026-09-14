@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Guardrail } from "~/schemas/project-file.schema";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { compactTimelineEvents } from "~/server/tasks/timeline-compaction.server";
 import { getInsightsSummary } from "./insights-query.server";
 
 const ctx = createTestDbContext();
@@ -741,13 +742,36 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.timeToReview.medianMs).toBe(2 * 60 * 60 * 1000);
   });
 
-  it("counts long timelines at the compression threshold and scopes everything by project", () => {
+  /**
+   * The boundary belongs to `compactTimelineEvents`, which opens with
+   * `if (events.length <= options.threshold) return events`. A task sitting
+   * exactly ON the threshold is therefore never folded, so counting it as one
+   * "past their project's compression threshold" names a task the machinery is
+   * not managing. Asserted against the real rule rather than restated, so the
+   * two cannot drift apart again.
+   */
+  it("counts long timelines PAST the threshold, on the same boundary compaction uses", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     insertProject(db, "other");
-    insertTask(db, { key: "VIB-1", eventCount: 40 }); // at threshold → long
-    insertTask(db, { key: "VIB-2", eventCount: 39 });
+    insertTask(db, { key: "VIB-1", eventCount: 40 }); // AT threshold → not folded
+    insertTask(db, { key: "VIB-2", eventCount: 41 }); // past it → folded
     insertTask(db, { project: "other", key: "OT-1", eventCount: 99, waiting: "agent" });
+
+    // The rule itself, on the same two lengths.
+    const ev = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        occurredAt: `2026-08-22T10:00:${String(i).padStart(2, "0")}.000Z`,
+        type: "comment" as const,
+        actor: { kind: "operator" as const },
+        title: null,
+        text: `routine ${i}`,
+        toAgent: false,
+        evidence: null,
+      }));
+    const opts = { threshold: 40, keepRecent: 4 };
+    expect(compactTimelineEvents(ev(40), opts)).toHaveLength(40); // untouched
+    expect(compactTimelineEvents(ev(41), opts).length).toBeLessThan(41);
 
     const all = getInsightsSummary(db, NOW).oversight;
     expect(all.longTimelines).toBe(2);
@@ -771,7 +795,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertProject(db, "off", [
       { id: "compression-threshold", desc: "", on: false, value: 40, unit: "events" },
     ]);
-    // Actively compacted in `tight` (25 >= 10) — invisible against a flat 40.
+    // Actively compacted in `tight` (25 > 10) — invisible against a flat 40.
     insertTask(db, { project: "tight", key: "TI-1", eventCount: 25 });
     // Nothing compacts these: the project has the guardrail off.
     insertTask(db, { project: "off", key: "OF-1", eventCount: 45 });
