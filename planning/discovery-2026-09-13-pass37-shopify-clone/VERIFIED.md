@@ -1291,3 +1291,30 @@ refused with a 409 and this toast:
 
 Exact, names both shas, and states the remedy. A reviewer approving a revision the PR does not
 carry is precisely the drift this gate exists for, and it caught it on real work.
+
+## Files are truth, tested on the DERIVED columns while the board churned (2026-09-14 08:10 UTC)
+
+The earlier files-are-truth passes compared copied fields. This one targets the columns the
+rebuilder DERIVES, which is where the stale-row bug of this pass actually lived (ruling 225 shipped
+three times while the content-hash short-circuit kept the old rows, until
+`PROJECTION_DERIVATION_VERSION` was bumped). Run against all 23 tasks with five specialists mid-run:
+
+```
+tasks compared:     23
+field families:     stage, readiness, validation, branch, archived, event_count
+real mismatches:    0
+```
+
+`event_count` matched the literal `### <iso>` entry count on every task, which is the field most
+likely to drift silently.
+
+Six tasks reported a `readiness` difference and every one is the derivation working as ruled:
+SHOP-11, 13, 14, 18, 19 and 20 all carry a non-empty `blockedBy`, and ruling 131's dependency
+floor pins them to `blocked` while the file keeps whatever it last stored. That is deliberate and
+documented in `readiness-policy.server.ts` ("THE readiness derivation - the only place readiness is
+derived"), the floor can only WORSEN a stored value, and the projection keeps `stored_readiness`
+beside `readiness` so both are recoverable.
+
+The question that follows - whether an agent re-anchoring on the task sees `ready` on a blocked
+task - has the right answer too: `get_task` builds from the projection, not from the raw
+frontmatter, so the agent is handed the derived `blocked`. The stored value never reaches it.
