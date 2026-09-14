@@ -65,9 +65,12 @@ function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
   const partial = overlaps.some((o) => o.partial);
   const files = [...new Set(overlaps.flatMap((o) => o.paths))];
   const listed = files.slice(0, 6).join(", ");
+  // "both" is only true of a single collision; the union below covers however
+  // many there are, so the sentence names the shared files as a list instead of
+  // asserting a pairing that stopped being a pair at the second overlap.
   const title =
-    `Merging this pull request will put ${keys.join(", ")} into conflict: ` +
-    `both change ${listed}${files.length > 6 ? `, and ${files.length - 6} more` : ""}.` +
+    `Merging this pull request will put ${keys.join(", ")} into conflict. ` +
+    `Shared files: ${listed}${files.length > 6 ? `, and ${files.length - 6} more` : ""}.` +
     (partial
       ? " One of the file lists was capped, so the real overlap may be larger."
       : "");

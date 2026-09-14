@@ -1694,3 +1694,36 @@ branch"*. A conflict is a human's to resolve; an unpushed branch is the operator
 matched PR #14's head exactly, so the head gate passed and wrote nothing: zero `Acceptance
 refused` notes, zero `task.acceptance.head_unpushed` rows. The new recorder fires on the mismatch
 it was written for and adds no noise to a healthy acceptance.
+
+---
+
+## Ruling 236, live on the board that produced it
+
+Deployed, then one reconcile tick fetched every open PR's changed paths. The queue now renders
+four collision chips, and they are symmetric and correct against the real diffs:
+
+```
+SHOP-3   collides with SHOP-11, SHOP-12 and 1 more   (SHOP-21)
+         Shared files: pnpm-lock.yaml, scripts/stack.test.mjs
+SHOP-11  collides with SHOP-3, SHOP-12               Shared files: pnpm-lock.yaml
+SHOP-12  collides with SHOP-3, SHOP-11 and 1 more    Shared files: pnpm-lock.yaml,
+                                                     scripts/stack.test.mjs
+SHOP-21  collides with SHOP-3, SHOP-12               Shared files: scripts/stack.test.mjs
+```
+
+Checked against the fetched lists: SHOP-3's PR #11 really does change `pnpm-lock.yaml` and
+`scripts/stack.test.mjs` alongside its 15 owned `services/inventory/**` files. Every chip names
+only tasks whose diffs genuinely intersect, and every intersection is reported from both sides.
+
+This is precisely the information that did not exist when I merged SHOP-2 and put four PRs into
+conflict in one minute.
+
+**A copy defect caught on the live render and fixed.** The first deployment's tooltip read *"put
+SHOP-11, SHOP-12, SHOP-21 into conflict: both change pnpm-lock.yaml…"* - "both" is true of one
+collision and false of every board that actually needs the chip. It now reads *"…into conflict.
+Shared files: …"*, which is correct at any count, and the test pins it: the three-collision case
+asserts the tooltip does NOT contain "both change". Restoring the old wording fails two tests.
+
+Fourteen canaries across the session, four of them for this ruling: ignore the head pin and the
+skip test fails; report a failed files call as an empty list and the absent-key test fails; drop
+`partial` and the floor test fails; compute the intersection one-way and the symmetry test fails.

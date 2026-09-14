@@ -508,7 +508,7 @@ describe("ruling 236: the collision chip", () => {
       (e.getAttribute("title") ?? "").includes("into conflict"),
     );
     expect(chip?.getAttribute("title")).toContain("VIB-9");
-    expect(chip?.getAttribute("title")).toContain("pnpm-lock.yaml");
+    expect(chip?.getAttribute("title")).toContain("Shared files: pnpm-lock.yaml");
   });
 
   it("summarises past two, still by name", () => {
@@ -523,6 +523,14 @@ describe("ruling 236: the collision chip", () => {
       [],
     );
     expect(container.textContent).toContain("collides with VIB-9, VIB-10 and 1 more");
+    // The tooltip must not claim a PAIRING once there is more than one
+    // collision: "both change" was true of the first overlap and false of every
+    // board that actually needs this chip.
+    const chip = [...container.querySelectorAll("[title]")].find((e) =>
+      (e.getAttribute("title") ?? "").includes("into conflict"),
+    );
+    expect(chip?.getAttribute("title")).toContain("VIB-9, VIB-10, VIB-11 into conflict");
+    expect(chip?.getAttribute("title")).not.toContain("both change");
   });
 
   it("says so when a capped list makes the overlap a floor", () => {
