@@ -1666,3 +1666,44 @@ the board and why the recovery path has had 83 chances to be wrong.
   there would have been arithmetic on a denominator that does not exist.
 - *Coordination tokens* says "tokens, not dollars" and names how many runs report no provider total
   (110 of 879), so the 5% is read with its own error bar attached.
+
+## The evidence chain, cross-referenced across files — HOLDS (2026-09-14 18:5x UTC)
+
+An earlier entry checked where the evidence chain's backing lives. This checks whether the backing
+is INTERNALLY CONSISTENT, which is the thing a fabricated log gets wrong.
+
+SHOP-23's Integration Verifier approved `52a3b3b7d2be` with a verdict claiming, among much else:
+
+> Cold `make up` and `make status` passed … Stopping identity produced typed `503
+> DEPENDENCY_UNAVAILABLE`; restoration succeeded.
+
+Ten attachments back it. Three tests on them:
+
+**1. The claim's content is really there.** `shop23-final-make-up.log` ends with a service table —
+`fixture-ready 4101`, `fixture-dependent 4102`, `gateway 8080`, `identity 4001`, `inventory 4003`,
+all healthy, "all 5 services healthy; pids written to .data/stack.pid".
+
+**2. `status` was a SEPARATE run, not a paste of the same output.** The two files carry different
+PIDs for the same services (make-up: 24376/24385/24393/24405/24417; status: 29208/29217/29225/
+29250/29276). A copied block would have matched.
+
+**3. The failure injection was performed against the stack the first log recorded.**
+`shop23-failure-injection-down.log` reads:
+
+```json
+{"action":"stopped-identity","pid":24405,"healthPortDown":true}
+{"action":"gateway-call-while-identity-stopped","status":503,
+ "body":{"error":{"code":"DEPENDENCY_UNAVAILABLE"}},"expectedCode":"DEPENDENCY_UNAVAILABLE"}
+```
+
+`24405` is identity's PID in `shop23-final-make-up.log`, exactly. The cross-file reference is the
+strongest signal available short of re-running it: the verifier stopped the process that log says it
+started, and recorded the typed envelope the gateway returned.
+
+And `shop23-failure-recovery-call.log` returns `403 FORBIDDEN` with `expectedCode: FORBIDDEN` — which
+is what "restoration succeeded" should look like: the dependency is back, so the call is refused on
+AUTHORIZATION rather than on availability. A log that merely said "recovered" would have proved less.
+
+**What this does not prove:** that the numbers were produced by the commands named, rather than by a
+model writing plausible JSON. Nothing short of re-running can settle that, which is why the
+independent run was attempted separately.
