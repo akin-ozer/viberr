@@ -920,6 +920,56 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     expect(getByText("writer-skill").closest(".res-chip")!.className).not.toContain("missing");
   });
 
+  it("ruling 239: says the rulings KB reaches this profile, EVEN when the profile grants it too", () => {
+    // The first version of this note only rendered when the profile did NOT
+    // grant the KB, which is backwards for the case that actually exists on a
+    // live board: every profile granted it, so the note never appeared and the
+    // chip was left implying that removing the grant would stop the agent
+    // reading it. It would not. CANARY: restore the
+    // `!a.resources.kb.includes(rulingsKb)` condition and this fails.
+    const granted: AgentProfileView = {
+      ...mkProfile({}),
+      resources: { skills: [], mcps: [], kb: ["team-rulings"] },
+    };
+    const { getByText } = render(
+      <ProfileDetail
+        a={granted}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        rulingsKb="team-rulings"
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(
+      getByText(/Removing the grant here would not stop this profile reading it/),
+    ).toBeTruthy();
+  });
+
+  it("says nothing about rulings when the project names no rulings KB", () => {
+    // The overwhelming majority of projects. CANARY: render the note
+    // unconditionally and every project grows a paragraph about a KB it has not
+    // got, naming an empty store directory.
+    const { queryByText } = render(
+      <ProfileDetail
+        a={withGrants()}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(queryByText(/the project's rulings/)).toBeNull();
+  });
+
   it("marks nothing when the catalog is unknown — never invents a missing state", () => {
     const { container } = render(
       <ProfileDetail

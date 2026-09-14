@@ -1059,10 +1059,11 @@ export function ProfileDetail({
               ? { drift: { missing: a.templateDrift.missing.kb, extra: a.templateDrift.extra.kb } }
               : {})}
           />
-          {rulingsKb && !a.resources.kb.includes(rulingsKb) && (
+          {rulingsKb && (
             <p className="muted">
-              Every run on this project also reads <code className="mono">{rulingsKb}</code>, the
-              project's rulings. Nobody grants it and nobody can remove it here.
+              Every run on this project reads <code className="mono">{rulingsKb}</code>, the
+              project's rulings, whether or not it is granted above (ruling 239). Removing the
+              grant here would not stop this profile reading it.
             </p>
           )}
         </div>
