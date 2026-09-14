@@ -3477,3 +3477,44 @@ rather than inventing a closure from silence.
 
 *Found by the adversarial sweep (which reported the closure half); the hold half I found while
 verifying it.*
+
+## F37-63 · A wait on a cancelled goal's pending link is held forever, and the sweep's own comment says it is not — HIGH
+
+**What it is.** Five mechanisms line up to miss one case:
+
+1. `case "cancel"` (`goal-actions.server.ts:506`) sets `fm.status = "cancelled"` and leaves every
+   link exactly as it was.
+2. The resolver read `link.status` alone and mapped `pending` to `open`
+   (`projections/dependencies.server.ts:141`), never consulting the goal's status. A cancelled
+   chain was indistinguishable from a live one.
+3. `deadDependencies` filtered `failed` and `missing` only, so the entry was never dead.
+4. `reconcileGoal` early-returns on a terminal chain, so the link can never acquire a task.
+5. Every goal-side remedy — `skip_link`, `edit_link`, `retry_link`, `remove_pending_link` — opens
+   with `if (terminal) throw AppError.conflict("Goal X is cancelled.")`, so the natural fix is
+   refused.
+
+The dependent sits `readiness: blocked`, dispatch refused by ruling 186, the coordinating operator
+triggers refused by ruling 131(d), the entry rendered with no annotation at all — identical to a
+live wait — and the minute-tick sweep re-confirms it forever.
+
+**And the code says otherwise, in the function written for it.** `releaseDependents`:
+
+> the sweep also notices a wait that can NEVER complete, whatever killed it. The archive hook was
+> the only caller that ever looked, so **a cancelled goal**, a removed link or a lost task left its
+> dependent held and silent.
+
+It names this exact case as one it fixed. It did not fix it. Ruling 131(e) makes the same promise —
+"noted once on the dependent's timeline, the owner is notified, the task is left `waiting: human`
+because a person owes the list an edit" — and this class got none of the three.
+
+**Fix.** `cancelled` becomes its own `DependencyState`: a link with no task on a goal that has
+reached a terminal status resolves to it, and `deadDependencies` includes it. Ruling 131(e)'s whole
+machinery — the note, the notification, `waiting: human` — then fires unchanged, and the entry
+carries its own cause, which is what the note points the reader at ("What KILLED the entry is on
+the entry itself, rendered as its state").
+
+Deliberately NOT folded into `failed`: surfaces render that one as "archived", which is a different
+cause and a false one.
+
+*Reported by the adversarial sweep with the full five-step trace; every step re-verified here
+against the code before the fix.*

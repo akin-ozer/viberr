@@ -568,6 +568,73 @@ describe("the sweep notices a dead wait whatever killed it", () => {
 });
 
 
+/**
+ * F37-63: a pending link on a CANCELLED goal is dead and nothing noticed.
+ *
+ * Every mechanism lined up to miss it. `case "cancel"` sets only
+ * `fm.status = "cancelled"` and leaves the links exactly as they were; the
+ * resolver read `link.status` alone and mapped `pending` to `open`;
+ * `deadDependencies` filtered `failed`/`missing`; and every goal-side remedy
+ * that could rescue it (`skip_link`, `edit_link`, `retry_link`,
+ * `remove_pending_link`) refuses with "Goal X is cancelled". Meanwhile
+ * `releaseDependents`' own comment claimed the sweep "notices a wait that can
+ * NEVER complete, whatever killed it … a cancelled goal, a removed link or a
+ * lost task". It did not notice this one.
+ */
+describe("F37-63: a pending link on a cancelled goal is a dead wait", () => {
+  it("is noted, notified and left on a human, like every other dead wait", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    // goal-1 link 2 has no task yet. Cancel the chain it belongs to.
+    const { updateGoal } = await import("./goal-actions.server");
+    await updateGoal(
+      store.db,
+      { projectSlug: store.slug, goalId: "goal-1", action: { op: "cancel" } },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-13", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        blockedBy: ["goal-1 link 2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runOperator = runOperatorStub();
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
+
+    // CANARY: drop the `goalTerminal` arm from the resolver and this task is
+    // held forever in silence — the sweep sees `open`, writes nothing, and the
+    // minute tick re-confirms it for as long as the instance runs.
+    expect(await releaseDependents(store.db, ctxWith, store.slug)).not.toContain("VIB-13");
+    const parsed = file(store, "VIB-13");
+    const dead = parsed.timeline.filter((e) => e.title === "Waiting on work that cannot complete");
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.text).toContain("can never complete");
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // The entry keeps its own cause, which is what the note points the reader
+    // at ("What KILLED the entry is on the entry itself, rendered as its
+    // state"). CANARY: fold `cancelled` into `failed` and the surface says
+    // "archived", which is a different cause and a false one.
+    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
+    const entries = resolveDependencies(store.db, store.slug, ["goal-1 link 2"]);
+    expect(entries[0]!.state).toBe("cancelled");
+  });
+
+  it("a live chain's pending link is still just open", async () => {
+    // The gate keys on the GOAL's status, so an ordinary wait must not become
+    // dead. CANARY: treat every taskless pending link as cancelled.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
+    expect(resolveDependencies(store.db, store.slug, ["goal-1 link 2"])[0]!.state).toBe("open");
+  });
+});
+
 describe("the archive hook and the convergent sweep state the same fact once", () => {
   it("two archived dependencies produce two notes, not a third from the sweep", async () => {
     // `dead` was FILTERED by the archived key, so the per-key hook spelled

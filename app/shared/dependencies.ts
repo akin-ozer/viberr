@@ -23,7 +23,17 @@ export type DependencyRef =
 /** The state a reference resolves to at read time. `failed` covers an
  *  archived task and a failed goal link — a wait that can never complete;
  *  `missing` is a reference nothing in the project answers to. */
-export type DependencyState = "open" | "done" | "failed" | "missing";
+/**
+ * F37-63: `cancelled` is its own state, not folded into `failed`.
+ *
+ * A link on a CANCELLED goal that never acquired a task can never acquire one
+ * (`reconcileGoal` early-returns on a terminal chain) and cannot be skipped
+ * (every goal-side remedy refuses with "Goal X is cancelled"), so the wait is
+ * dead. It resolved as `open` before, which is why nothing noticed it. It is
+ * not `failed`, because the surfaces render that as "archived" and a cancelled
+ * chain is a different cause a person needs to read correctly.
+ */
+export type DependencyState = "open" | "done" | "failed" | "missing" | "cancelled";
 
 /** One entry as a surface renders it. */
 export interface DependencyRender {

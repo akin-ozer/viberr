@@ -117,10 +117,13 @@ function resolveWithStages(
       });
       continue;
     }
-    // SAFETY: `links_json` is TEXT NOT NULL DEFAULT '[]' on `goal_projections`.
+    // SAFETY: `links_json` is TEXT NOT NULL DEFAULT '[]' and `status` TEXT NOT
+    // NULL on `goal_projections`.
     const goal = db
-      .prepare(`SELECT links_json FROM goal_projections WHERE project_slug = ? AND goal_id = ?`)
-      .get(slug, ref.goal) as { links_json: string } | undefined;
+      .prepare(
+        `SELECT links_json, status FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+      )
+      .get(slug, ref.goal) as { links_json: string; status: string } | undefined;
     const links = goal
       ? z.array(goalLinkRowSchema).catch([]).parse(JSON.parse(goal.links_json))
       : null;
@@ -139,12 +142,24 @@ function resolveWithStages(
       });
       continue;
     }
+    // F37-63: a link with no task, on a goal that has reached a terminal status,
+    // can NEVER acquire one — `reconcileGoal` early-returns on a terminal chain,
+    // and every goal-side remedy (`skip_link`, `edit_link`, `retry_link`,
+    // `remove_pending_link`) refuses with "Goal X is cancelled". Before this it
+    // resolved to `open`, indistinguishable from a live wait, so
+    // `deadDependencies` never saw it and ruling 131(e)'s note and notification
+    // never fired — while `releaseDependents`' own comment claimed the sweep
+    // "notices a wait that can NEVER complete, whatever killed it … a cancelled
+    // goal, a removed link or a lost task". It did not notice this one.
+    const goalTerminal = goal?.status === "cancelled" || goal?.status === "completed";
     const state: DependencyState =
       link.status === "done" || link.status === "skipped"
         ? "done"
         : link.status === "failed"
           ? "failed"
-          : "open";
+          : goalTerminal
+            ? "cancelled"
+            : "open";
     out.push({ ref: canonical, label: canonical, state, taskKey: null, goalId: ref.goal });
   }
   return out;
@@ -158,7 +173,9 @@ export function dependenciesSatisfied(entries: readonly DependencyRender[]): boo
 
 /** The entries that can never complete on their own. */
 export function deadDependencies(entries: readonly DependencyRender[]): DependencyRender[] {
-  return entries.filter((e) => e.state === "failed" || e.state === "missing");
+  return entries.filter(
+    (e) => e.state === "failed" || e.state === "missing" || e.state === "cancelled",
+  );
 }
 
 /** Every task in `slug` whose stored list is non-empty, with the raw list. */
