@@ -1475,3 +1475,12 @@ top of the org-scoped list, which is untidy. It is not a heartbeat: it fires on 
 explicit Re-scan, so its volume here is an artifact of this session restarting the container all
 day, not of how the product runs. Hiding it would be tuning the audit log to my own workflow, and
 a restart is a fact an admin may legitimately want. The hidden list stays one action long.
+
+**And the other feed was already right, which is the argument for ruling 234's shape.** The
+project Activity page reads audit rows through an ALLOW-list (`AUDIT_ACTION_KINDS`, then
+`action IN (...)`), and `github.reconcile.task` appears in it zero times — only the project-wide
+`github.reconcile.project` does. So the rest of the product already treated the per-task heartbeat
+as a freshness fact rather than a browsable event, surfaced as "last checked" on the GitHub panel
+and nowhere else. The org audit browse was the single place that selected everything and hoped the
+window would sort it out. Ruling 234 does not introduce a policy; it brings the last surface in
+line with one the app had already settled.

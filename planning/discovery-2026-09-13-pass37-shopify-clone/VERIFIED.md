@@ -1172,3 +1172,50 @@ how many it replaced ("5 earlier routine comments compacted to keep the task rea
 SHOP-6 (134 events) and SHOP-7 (200 events) carry none, and that is correct rather than a gap:
 both are merged and done, compaction only runs on a write, and nothing re-anchors on a closed
 task's file. Folding them would be churn with no reader.
+
+## Three surfaces read against the files, and all three held (2026-09-14, pass 37)
+
+Checked during the quota stall, when nothing could move underneath the reading.
+
+**Attachments (R19-19).** The panel says "90 files" for SHOP-15 and the directory holds exactly
+90, each row naming its author, time and size. The raw-bytes route refuses everything it should:
+
+```
+SHOP-15-final-down.txt            200   the file
+does-not-exist.txt                404   "Not found"
+..%2F..%2F..%2Fproject.md         404   "Not found"
+..%2f..%2ftask.md                 404   "Not found"
+%2e%2e%2f%2e%2e%2fproject.md      404   "Not found"
+....//....//project.md            404   router 404
+SHOP-15-final-down.txt%00.png     404   "Not found"
+```
+
+No bytes leaked by any encoding of a traversal, and a missing file is a plain 404 rather than a
+stack trace.
+
+**The review queue's count and its stage claims.** "6 in review" against six tasks carrying an
+open PR, while only two sit in the Review STAGE — and every row discloses where it actually is
+rather than implying the stage: SHOP-18's reads "Review in progress at **Build**". The trailing
+"Review" on each row looked at first like a stage label contradicting that; it is
+`<span class="rq-go" aria-hidden="true">` — the go affordance with its chevron, hidden from
+assistive tech so it is not read as a second stage.
+
+**Revision-bound verdicts, and drift (the goal's named surface).** The queue tells three tasks
+"Waiting on 1 required reviewer approval of the current revision." Against the files:
+
+| task | current revision | verdicts ON it | required at stage | missing |
+|---|---|---|---|---|
+| SHOP-22 | `rev_N45Gv…` / `ec5c6aa1` | code-reviewer approve | integration-verifier | yes |
+| SHOP-2 | `rev_k4CCK…` / `ea5f2ffd` | code-reviewer approve | integration-verifier | yes |
+| SHOP-3 | `rev_t_209…` / `6a635c46` | code-reviewer approve | integration-verifier | yes |
+
+The subtle half is the one that matters. SHOP-2's `integration-verifier` DID speak — a
+`request_changes` on `rev_uFvlCQ75CU2F`, and SHOP-3's on `rev_8I3noZbnIf1L`. Both are previous
+revisions, and neither is credited in either direction: the rejection does not block the new
+revision and the absence is reported as "waiting", not as "changes requested". That is exactly
+what a revision-bound verdict is for, working on real drift rather than a fixture.
+
+**SHOP-11's page, on a task with `waiting: none` at a non-terminal stage.** Header reads Review /
+blocked / validation failing, names all three blockers as chips, and the page carries the copy
+that says the hold ends by itself ("Held until…", "Viberr releases it…"). The "Blocked decision"
+pill that looked like current state sits inside `.timeline` — history, correctly placed.
