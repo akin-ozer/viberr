@@ -846,3 +846,47 @@ The honest reading is that the controller sequences well and generalises well **
 is named**, and that naming the pattern took a human watching five identical packets go by. What
 it could not do was see the hot spot before it had a victim — which is exactly what the goal
 asked to find out.
+
+---
+
+## Files are truth — re-tested after the night's churn, 2026-09-14 03:12 UTC
+
+The claim is only worth something if it survives activity, so it was re-tested at the busiest
+point of the pass: five concurrent agent runs, four tasks that had just resumed from a
+three-hour quota wait, two branches refreshed from `main`, three review verdicts recorded, and
+one deliberately conflicted branch rebased and re-delivered — all since the last check.
+
+Viberr's own **Re-scan** ("Reconcile the board with the file-native store"):
+
+```
+project projection rescan complete
+  slug=shopify-clone-platform projects=1 tasks=20
+  changed=0 unchanged=28 removed=0 errors=0 durationMs=12
+```
+
+**28 files, 0 changed, 0 errors.** Every projected row already matched the markdown it was built
+from; the rescan had nothing to correct. That is the testable form of "the markdown IS the
+record" — not an assertion in a doc, a number the product produces about itself on demand.
+
+Worth noting what makes the number meaningful: `changed=0` is only interesting because the same
+command DID report changes after the projection store was corrupted earlier in this pass, and
+reported `errors=1` while a rebuild was failing (F37-37). It distinguishes states, so a zero is
+evidence rather than a default.
+
+## The outer RBAC boundary, re-probed the same night
+
+The four-role matrix and the non-member (zoe) are recorded above. The anonymous case — the
+strongest non-member there is — re-probed at 03:10 UTC:
+
+| door | no session |
+|---|---|
+| `/` | 302 → `/login` |
+| `/projects/shopify-clone-platform/board` | 302 → `/login?returnTo=…` |
+| `/projects/shopify-clone-platform/tasks/SHOP-2` | 302 → `/login?returnTo=…` |
+| `/org/settings` | 302 → `/login` |
+| `/insights` | 302 → `/login` |
+| `/resources/controller` | 302 → `/login` |
+
+The `.data` route a real client actually fetches answers the same way — a `SingleFetchRedirect`
+to `/login`, carrying nothing about the task in the body. No door leaks the existence of
+anything to an unauthenticated caller beyond the path the caller already typed.
