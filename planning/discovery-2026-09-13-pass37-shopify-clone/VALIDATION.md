@@ -1235,3 +1235,34 @@ wrote, 150ms before the note above:
 Option says hold; record says unblocked; frontmatter agreed (`readiness: ready`,
 `waiting: agent`). No inference needed — the product wrote both halves itself, one after the
 other, on one timeline.
+
+### Ruling 229, live — the count that could have falsified it did not move
+
+Baseline taken before the deploy, at 04:02:34 UTC: **58** "plan was not carried out in full"
+notes, **52** of them `update_branch_from_base` "already up to date", growing at roughly one
+every two minutes with seven tasks running.
+
+Ten minutes after the deploy, at 04:13:59, with five to seven tasks running throughout:
+
+```
+total = 58      already-up-to-date = 52      (baseline 58 / 52)
+```
+
+Unchanged. Not because the condition stopped occurring — there are 106 `github`
+"already up to date" events on this board and SHOP-22 produced a fresh one at 04:13:41, which is
+the single-instance proof:
+
+```
+04:13:48 · transition · operator     (Design → Build)
+04:13:48 · github     · operator     (Opened PR #17 for review)
+04:13:41 · github     · operator     `shop-22` is already up to date with `main`. Origin's copy…
+04:12:11 · comment    · agent:codex/infrastructure-engineer
+```
+
+The `github` event is there, doing its job. The note that used to follow every one of them is
+not. The operator made the speculative call viberr's own tool description asks for, the branch
+was current, and the record now says so once instead of twice — the second time under a headline
+announcing a failure.
+
+Had the number climbed, the diagnosis was wrong and the monitor would have said so in those
+words. It did not climb.
