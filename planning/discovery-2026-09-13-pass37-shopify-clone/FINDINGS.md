@@ -2623,3 +2623,64 @@ that means something, which is R16-2's failure applied to a timeline.
 **Confirmed by the sequel.** Once the packet was resolved, the identical comment on the identical
 task triggered an operator run within seconds — and the operator replied to it by name. The
 mechanism works. It just had no voice for the case where it declines.
+
+---
+
+## F37-47 · The run the board waited three hours for did nothing, and nothing noticed — MEDIUM
+
+**Found by watching the thing ruling 224 had just fixed.** At `02:28:19` SHOP-3's schedule fired
+and the operator ran — the first run after a three-hour quota wait. It produced exactly one
+event:
+
+```
+02:28:54 · policy · operator
+  The operator's plan was not carried out in full. This step was refused by its
+  capability policy:
+  - `update_branch_from_base` — SHOP-3 is at Verify, the acceptance boundary: the
+    branch is brought up to date once, at acceptance time, and merged in the same
+    ceremony. Do not refresh it here; recommend or accept the completion instead.
+  What it intended:
+  > The delivered PR is clean but 3 commits behind main; update the task branch
+  > before engaging the required Verify reviewer.
+```
+
+Then nothing, until I posted a comment at `02:53:21`. **25 minutes parked**, immediately after
+three hours of waiting, and the task page showed "awaiting verdict" with no hint that its run had
+achieved nothing.
+
+**The refusal is correct and well written.** It names the step, the reason, and the remedy. The
+remedy is addressed to the operator — and the operator's turn had ended before the sentence was
+written. Nobody was ever going to read it.
+
+**The backstop that should have caught it asks the wrong question.** `operatorLeftTaskStranded`
+ends with:
+
+```ts
+return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
+```
+
+That is the right question for a drive that CHOSE to stop — at an auto-advance stage, something
+should have happened. It is the wrong question for a drive that was STOPPED. SHOP-3 was at
+Verify, whose outbound boundary is `human`, so the drive that did nothing at all looked exactly
+like a drive correctly waiting for a person.
+
+**Fixed as ruling 228**: a plan refused *in full* is stranded whatever the boundary, and takes
+F31-11's single nudge with its own instruction — the idle-stage sentence would be false twice
+over (the stage need not be auto-advance, and the run did not end idle by choice). The nudge is
+told the refusals are on the timeline with their remedies in them, and forbidden from re-planning
+the same refused action. A nudged drive refused in full again records the durable hold and stops,
+exactly as F31-11 requires.
+
+**Two things the test fixture taught me**, both of which sharpened the ruling:
+
+1. An **empty or unparseable** plan is already handled — viberr opens a packet titled "Operator
+   turn produced no actionable plan". My first fixture tripped that path instead, which is how I
+   learned the gap is *specifically* the plan that named real work and was refused every bit of
+   it. The ruling says so explicitly now.
+2. "In full" has to be exact. `refused` holds one entry per step that did not run, so equality
+   with the plan length IS "nothing happened" — and a step that THREW breaks the loop early,
+   leaving the counts unequal. That is correct: an abort is narrated on its own terms and must
+   not also be nudged.
+
+**Cost of the gap, measured:** ruling 224 bought back three hours of board time at 02:28, and
+SHOP-3 handed 25 minutes of it straight back fourteen seconds later.

@@ -1736,6 +1736,87 @@ describe("stranded auto-stage resume", () => {
     });
 
     /**
+     * Ruling 228 (F37-47, live on SHOP-3). The backstop above asks "is the
+     * outbound boundary `auto`?", which is the right question for a drive that
+     * CHOSE to stop and the wrong one for a drive that was STOPPED. SHOP-3 sat
+     * at Verify (boundary `human`) after a plan whose only step — an
+     * `update_branch_from_base` — was refused by the capability policy. The
+     * refusal even told the operator what to do instead ("recommend or accept
+     * the completion instead"), and no operator read it: the turn had ended.
+     * 25 minutes parked, on the very run the Codex window had just been waited
+     * three hours for.
+     *
+     * A malformed step is the cheapest whole-plan refusal there is, and it
+     * exercises the same `refused.length === plan.actions.length` arithmetic a
+     * policy denial does.
+     */
+    it("ruling 228: a plan refused IN FULL is nudged once, even at a human boundary", async () => {
+      // A stage whose outbound boundary is `human`, not `auto` — the shape the
+      // backstop could not see.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          title: "list files in the project",
+          stage: "review",
+          readiness: "ready",
+          waiting: "human",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "A goal with scope.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "manual",
+        dataRoot: store2.dataRoot,
+      });
+      // Drive 1 plans exactly one action and it does not run.
+      // Every field present-but-nullable, the shape OpenAI strict output
+      // produces (B-6) — a missing key would fail the plan schema instead,
+      // which is the escalation path, not this one.
+      // A REAL action the policy refuses: review → done is the locked human
+      // boundary, so the operator may not make this move. An empty or
+      // unparseable plan is a different case viberr already catches
+      // ("produced no actionable plan") — the gap is a plan that named real
+      // work and was not allowed to do it.
+      const refusedPlan = JSON.stringify({
+        reasoning: "Move it along.",
+        actions: [transitionAction({ toStageId: "done" })],
+      });
+      adapter2.finish(store2, refusedPlan, "finished");
+
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      // And it is told WHY it is back — not the idle-stage sentence, which
+      // would be false twice over here (the stage is not auto-advance, and the
+      // run did not end idle by choice).
+      const prompt = adapter2.pending!.spec.prompt;
+      expect(prompt).toContain("EVERY action your previous run planned was refused");
+      expect(prompt).toContain("Do NOT plan the same refused action again");
+      expect(prompt).not.toContain("auto-advance stage idle");
+
+      // Drive 2 is refused in full as well: one nudge, then the hold, exactly
+      // as F31-11 requires — a refused plan must not loop either.
+      adapter2.finish(store2, refusedPlan, "finished");
+      await eventually(() => {
+        const parsed = readTaskFile({
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          dataRoot: store2.dataRoot,
+        })!.parsed;
+        expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
+        expect(parsed.frontmatter.waiting).toBe("human");
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(operatorRuns()).toHaveLength(2);
+    });
+
+    /**
      * Ruling 202 (F37-22, live on SHOP-10). A nudged drive whose single action
      * was `deliver_for_review` — it pushed the branch and opened PR #8 — was
      * recorded by this backstop as having "held it twice in a row without

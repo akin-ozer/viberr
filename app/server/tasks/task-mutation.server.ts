@@ -89,6 +89,13 @@ export interface TaskMutationContext {
      *  did: a drive whose single action was `deliver_for_review` was called a
      *  deliberate hold 111ms before its own PR event reached the timeline. */
     delivered?: boolean;
+    /**
+     * Ruling 228 (F37-47): EVERY action this drive planned was refused, so the
+     * drive did nothing at all. Not the same as an operator that decided to
+     * wait — it decided to act and was stopped — and the difference is what
+     * the settle-time backstop needs to tell them apart.
+     */
+    planWhollyRefused?: boolean;
   };
 }
 

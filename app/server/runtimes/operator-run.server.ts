@@ -227,6 +227,10 @@ export interface RunOperatorInput {
    *  fourteen drives on a no-op task). The turn instruction also reads it, so
    *  the nudged drive is told to either advance or RECORD the hold. */
   strandedResume?: boolean;
+  /** Ruling 228 (F37-47): this nudge exists because the previous drive's plan
+   *  was refused in full, not because it left an auto stage idle. The two read
+   *  differently to the operator and the turn instruction says which. */
+  planRefusedNudge?: boolean;
   /** transition trigger — what just moved (display names) and who moved it.
    *  `transitionByHuman` null = the operator's own move (continue the flow);
    *  a name = a human decided it, and the turn instruction tells the operator
@@ -891,6 +895,15 @@ export function operatorLeftTaskStranded(
   workflow: readonly { from: string; to: string; boundary: string }[],
   /** The finished drive's OWN last transition landed the task on this stage. */
   ownMoveLandedHere = false,
+  /**
+   * Ruling 228 (F37-47): every step the drive planned was refused, so it did
+   * nothing. Stranded regardless of the outbound boundary — the boundary test
+   * below asks "is something expected to happen here without a human?", which
+   * is the right question for a drive that CHOSE to stop and the wrong one for
+   * a drive that was stopped. SHOP-3 sat at Verify (boundary `human`) after a
+   * wholly refused plan and this backstop could not see it.
+   */
+  planWhollyRefused = false,
 ): boolean {
   if (task.archived) return false;
   if (task.packet) return false; // a decision IS pending — the human's move
@@ -899,6 +912,7 @@ export function operatorLeftTaskStranded(
   // paid nudge would only rediscover the wait (JC-9: five runs, no dispatch).
   if (task.blockedBy.length > 0) return false;
   if (ownMoveLandedHere) return true;
+  if (planWhollyRefused) return true;
   return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
 }
 
@@ -1002,6 +1016,8 @@ export async function maybeResumeStrandedOperator(
     // on its own move any more, whatever the new stage's outbound boundary is.
     ref.ownRun?.movedToStageId !== undefined &&
       ref.ownRun.movedToStageId === file.parsed.frontmatter.stage,
+    // Ruling 228: or it planned only steps it was not allowed to take.
+    ref.ownRun?.planWhollyRefused === true,
   );
   if (!stranded) return false;
 
@@ -1141,19 +1157,21 @@ export async function maybeResumeStrandedOperator(
     return false;
   }
 
-  logger.info("operator ended leaving an auto stage idle — resuming the chain", {
+  logger.info("operator ended without acting — resuming the chain", {
     taskKey: ref.taskKey,
     stage: file.parsed.frontmatter.stage,
     depth,
   });
-  void runOperator(db, {
+  const nudge: RunOperatorInput = {
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
     trigger: "transition",
     transitionDepth: depth,
     strandedResume: true,
     dataRoot: ref.dataRoot,
-  }).catch((error) => {
+  };
+  if (ref.ownRun?.planWhollyRefused === true) nudge.planRefusedNudge = true;
+  void runOperator(db, nudge).catch((error) => {
     logger.error("stranded-operator resume failed", {
       taskKey: ref.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
@@ -2335,7 +2353,7 @@ async function startCodexOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
-    input.strandedResume,
+    input.planRefusedNudge ? "plan-refused" : input.strandedResume,
     input.dependencyRelease,
   );
   const orgMcpServers = mcp.servers;
@@ -2831,6 +2849,21 @@ async function executeCodexPlan(
     }
   }
   await narrateRefusedActions(db, ctx, input, refused, plan.reasoning);
+  // Ruling 228 (F37-47): stamp the case where the drive did NOTHING because
+  // every step it planned was refused. The refusal messages are written to be
+  // acted on ("Do not refresh it here; recommend or accept the completion
+  // instead") and they arrive after the turn has ended, so without this nobody
+  // reads them until a human notices the task has stopped. Live on SHOP-3, on
+  // the very run the Codex window had just been waited three hours for: one
+  // refused step, nothing else, and 25 minutes parked at Verify.
+  //
+  // `refused` holds one entry per non-running step (including malformed ones),
+  // so equality with the plan length IS "nothing ran" — and a step that THREW
+  // breaks the loop early, leaving the counts unequal, which is right: an abort
+  // is narrated on its own terms and is not this.
+  if (ctx.operatorRun && plan.actions.length > 0 && refused.length === plan.actions.length) {
+    ctx.operatorRun.planWhollyRefused = true;
+  }
 }
 
 /** A plan step that did not run, and WHY it did not (see OperatorActionResult):
@@ -3017,7 +3050,7 @@ async function startRealOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
-    input.strandedResume,
+    input.planRefusedNudge ? "plan-refused" : input.strandedResume,
     input.dependencyRelease,
   );
 
@@ -3687,6 +3720,17 @@ function goalIsUnspecified(goal: string): boolean {
 
 type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
 
+/**
+ * Ruling 228 (F37-47): WHICH stranded case a nudged drive is answering, because
+ * the two read completely differently to the operator. `idle-stage` is F31-11's
+ * original: the drive chose to do nothing at an auto-advance stage.
+ * `plan-refused` is the opposite: it chose actions and every one was refused,
+ * so telling it "your previous run ended with this auto-advance stage idle"
+ * would be false twice over — the stage need not be auto-advance, and the run
+ * did not end idle by choice. `false` for an ordinary drive.
+ */
+type StrandedNudge = boolean | "idle-stage" | "plan-refused";
+
 /** What a transition trigger carries (owner ruling 2026-07-26). */
 export interface TransitionContext {
   fromName: string;
@@ -3836,7 +3880,7 @@ function operatorTurnDoctrine(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: ResolvedPacketOption,
-  strandedResume?: boolean,
+  strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
 ): string {
   if (humanComment?.trim()) {
@@ -3997,10 +4041,16 @@ function operatorTurnDoctrine(
   // automatic one — say so, and give the deliberate-hold case a recordable
   // exit (a packet flips the stranded predicate durably, so the settle stops
   // re-judging the stage as abandoned).
-  const resumeContext = strandedResume
-    ? "You are re-invoked ONCE because your previous run ended with this auto-advance stage idle: nothing pending, nothing dispatched, no packet. This is the only automatic nudge — nothing re-invokes you again for the same idle stage. " +
-      "Either take the advancing action now (transition, dispatch, or deliver per the stage rule below), or, if the goal or a human directive tells you to HOLD this stage, record the hold so it is a decision instead of a stall: `open_decision_packet` asking the human to confirm the hold (offer options to resume, adjust the goal, or keep holding). Do not end this turn with the stage idle and nothing recorded. "
-    : "";
+  const resumeContext = !strandedResume
+    ? ""
+    : strandedResume === "plan-refused"
+      ? // Ruling 228: this drive did not decide to wait — it was stopped. The
+        // refusals are already on the timeline with their remedies in them, so
+        // the one thing to forbid is planning the same refused step again.
+        "You are re-invoked ONCE because EVERY action your previous run planned was refused, so nothing happened at all. The refusals are on the timeline, and each one names what to do instead — read them and follow them. " +
+        "Do NOT plan the same refused action again; it will be refused again and this is the only automatic nudge. Take an action you are actually permitted to take, or, if there genuinely is none, `open_decision_packet` telling the human what you wanted to do, why you cannot, and what you need from them. Do not end this turn with nothing recorded. "
+      : "You are re-invoked ONCE because your previous run ended with this auto-advance stage idle: nothing pending, nothing dispatched, no packet. This is the only automatic nudge — nothing re-invokes you again for the same idle stage. " +
+        "Either take the advancing action now (transition, dispatch, or deliver per the stage rule below), or, if the goal or a human directive tells you to HOLD this stage, record the hold so it is a decision instead of a stall: `open_decision_packet` asking the human to confirm the hold (offer options to resume, adjust the goal, or keep holding). Do not end this turn with the stage idle and nothing recorded. ";
   return (
     resumeContext +
     scheduleContext +
@@ -4164,7 +4214,7 @@ export function buildCodexOperatorPrompt(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: ResolvedPacketOption,
-  strandedResume?: boolean,
+  strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
 ): string {
   return (
@@ -4201,7 +4251,7 @@ export function buildOperatorTurnPrompt(
   transition?: TransitionContext,
   scheduleNote?: string,
   resolvedOption?: ResolvedPacketOption,
-  strandedResume?: boolean,
+  strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
 ): string {
   return (

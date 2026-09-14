@@ -4848,6 +4848,30 @@ by rewriting those paragraphs:*
     what caught the duplicate. And the machine triggers (`create`, `transition`, `delivered`,
     `agent-reply`) stay silent because they fire constantly and refuse routinely — noting each
     would bury the one that means something, which is R16-2's failure applied to a timeline.
+
+228. **A plan refused in full is a drive that was STOPPED, not one that decided to wait (owner,
+    2026-09-14, pass 37; F37-47).** The settle-time stranded backstop (F31-11, ruling 152(a),
+    ruling 202) asks whether the stage's outbound boundary is `auto`. That is the right question
+    for a drive that CHOSE to do nothing and the wrong one for a drive that chose actions and was
+    not allowed to take any of them. SHOP-3 sat at Verify - boundary `human`, so invisible to the
+    backstop - after a plan whose only step, an `update_branch_from_base`, was refused by the
+    capability policy. The refusal even named the remedy ("Do not refresh it here; recommend or
+    accept the completion instead") and no operator ever read it, because the turn had already
+    ended. 25 minutes parked, on the very run the Codex window had just been waited three hours
+    for.
+    So a drive whose plan was refused IN FULL is stranded whatever the boundary, and takes the
+    same single nudge. Its turn instruction is its own, because the idle-stage sentence would be
+    false twice over here - the stage need not be auto-advance and the run did not end idle by
+    choice: it says every action was refused, that the refusals are on the timeline with their
+    remedies in them, and that re-planning the same refused action is forbidden. Everything else
+    is F31-11's machinery unchanged: one nudge, and a nudged drive that is refused in full again
+    records the durable `heldAtStage` hold and settles to a human instead of looping.
+    "In full" is exact and load-bearing: `refused` holds one entry per step that did not run, so
+    equality with the plan length IS "nothing happened". A step that THREW breaks the loop and
+    leaves the counts unequal, which is correct - an abort is narrated on its own terms. An empty
+    or unparseable plan never reaches this at all; viberr already opens a packet for that
+    ("Operator turn produced no actionable plan"), and the gap was only ever the plan that named
+    real work and was refused every bit of it.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 
