@@ -27,6 +27,7 @@ const FULL: ParsedTaskFile = {
     operator: { assignedAtStageId: "triage" },
     recommendations: [],
     schedules: [],
+    queuedQuestions: [],
     urgent: true,
     priority: "urgent",
     labels: [],

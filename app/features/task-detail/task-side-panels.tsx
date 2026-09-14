@@ -511,11 +511,15 @@ export function TaskDetailsPanel({
   task,
   canEdit,
   labelSuggestions = [],
+  queuedQuestions = [],
 }: {
   task: TaskDetail;
   canEdit: boolean;
   /** Labels already used in this project, offered as label autocomplete. */
   labelSuggestions?: string[];
+  /** Ruling 241: reviewer questions the hold refused, put when it lifts. They
+   *  belong under the wait because they ARE what happens when it ends. */
+  queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
 }) {
   const csrf = useCsrfToken();
   const fetcher = useFetcher<ActionResult>();
@@ -670,6 +674,32 @@ export function TaskDetailsPanel({
                 )}
               </span>
             </div>
+            {queuedQuestions.length > 0 && (
+              // Ruling 241: without this the only trace of a queued question is
+              // one timeline note, and a promise a person cannot see is the
+              // defect this pass kept finding.
+              <div className="kv-row" data-queued-questions={queuedQuestions.length}>
+                <span className="k">When it clears</span>
+                <span className="v sub">
+                  {queuedQuestions.length === 1
+                    ? `Viberr puts ${queuedQuestions[0]!.decidedByLabel}'s question to `
+                    : `Viberr puts ${queuedQuestions.length} queued questions to `}
+                  {queuedQuestions
+                    .map((q) => {
+                      // Ruling 232: a handle is a NAME. The reviewer's live
+                      // profile name, falling back to its role and then to the
+                      // profile id, so an undeployed profile still reads as
+                      // something a person can act on.
+                      const live = [task.specialist, ...task.reviewers].find(
+                        (a) => a?.profileId === q.profileId,
+                      );
+                      return live?.profileName || live?.role || q.profileId;
+                    })
+                    .join(", ")}
+                  {" before the operator gets the task back."}
+                </span>
+              </div>
+            )}
           </div>
           {depOpen && (
             <depFetcher.Form method="post" className="meta-edit-panel" data-dependency-form>

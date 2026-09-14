@@ -1259,6 +1259,65 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
     });
 
+    /**
+     * Ruling 241 (F37-68). Live on SHOP-5 this exact resolution ran on a HELD
+     * task: ruling 186 refuses every agent dispatch while a task waits, and
+     * this arm found that out only after writing the decision onto the task
+     * contract and clearing the packet. The person's chosen option did nothing,
+     * and there was no packet left to choose again from.
+     *
+     * The owner's call was to queue rather than refuse.
+     */
+    it("ruling 241: on a HELD task the question is queued, not lost and not dispatched", async () => {
+      writeReviewTask({ blockedBy: ["VIB-9"] });
+      await review(blocks(1));
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet!;
+      expect(packet.options[0]?.kind).toBe("question_reviewer");
+      // Said BEFORE the choice. CANARY: drop `heldBy` from the packet build and
+      // the card promises a question it cannot put.
+      expect(packet.options[0]?.d).toContain("VIB-1 waits on VIB-9");
+      expect(packet.options[0]?.d).toContain("put the moment the wait clears");
+
+      // SAFETY: COUNT(*) over a table this store owns is always an integer.
+      const runCount = () =>
+        (
+          store.db
+            .prepare(`SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ?`)
+            .get(store.slug) as { n: number }
+        ).n;
+      const before = runCount();
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+      const fm = taskFile().parsed.frontmatter;
+      // CANARY: delete the queue write and the person's decision buys nothing —
+      // which is the state this shipped in.
+      expect(fm.queuedQuestions).toHaveLength(1);
+      expect(fm.queuedQuestions[0]).toMatchObject({
+        profileId: "reviewer",
+        decidedByLabel: store.users.arda.email,
+        heldBy: ["VIB-9"],
+      });
+      expect(fm.queuedQuestions[0]!.directive).toContain(
+        "name EVERYTHING you would still block on",
+      );
+      // Nothing was dispatched: ruling 186 would have refused it, and a run
+      // that never started must not be claimed. CANARY: drop the queued check
+      // from the dispatch guard and this fires the refused run.
+      expect(runCount()).toBe(before);
+      expect(fm.waiting).toBe("human");
+      expect(taskFile().parsed.packet).toBeNull();
+      const decision = taskFile().parsed.timeline.find((e) => e.type === "transition")!;
+      expect(decision.text).toContain("queued with the task");
+      expect(decision.text).toContain("VIB-9");
+    });
+
     it("does NOT hand the task back to the operator on the completion that raised it", async () => {
       // The packet says "Coordination is paused until you say which", and the
       // react at the end of this very completion is an `agent-reply` trigger —

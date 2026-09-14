@@ -5292,6 +5292,39 @@ by rewriting those paragraphs:*
     `set_dependencies`, which is the door ruling 131 already provides.
     (`task-actions.server.ts`, `operator-run.server.ts`.)
 
+241. **A decision a hold refuses is QUEUED, not consumed for nothing (owner, 2026-09-14,
+    pass 37; F37-68).** Ruling 237's escalation recommends asking the reviewer to name
+    everything it would still block on. Ruling 186 refuses every agent dispatch on a held
+    task. Ruling 237 added a dispatch door and checked neither, so live on SHOP-5 a person
+    chose the recommended option, the decision was written onto the task contract, the
+    packet was cleared, and only THEN did the refusal surface: nothing was asked, the
+    packet was gone, and the contract said "no rework until the reviewer has answered"
+    about a reviewer nobody would ever ask.
+    `force_accept`'s own arm had already written the rule this broke: "Both refusals the
+    force path can still make are run HERE, before the resolution write: that write clears
+    the packet, and a refusal discovered after it would leave the decision recorded with no
+    acceptance behind it."
+    The owner's alternatives were to let a question through the hold (it forbids reviewing
+    and forbids a verdict, so it builds nothing on a stale base), and to refuse up front on
+    the card. The owner took QUEUE: the hold stays absolute and the person's intent
+    survives it. The question rides the task as `queuedQuestions` — the profile, the
+    directive TEXT (a person was promised those words, and the wait can outlive the
+    constant) and who decided — and `announceRelease`, the single release chokepoint, puts
+    it BEFORE it re-invokes the operator. That ordering is ruling 203's: an operator
+    re-invoked first could dispatch the very rework the decision exists to stop, in the
+    window between the release and the question.
+    The list is emptied before any run starts, whatever the run then does: a question left
+    queued through a failed start would be asked again on the next release, and a reviewer
+    asked the same question twice is the loop ruling 237 breaks. A failed start says so on
+    the timeline instead.
+    Said BEFORE the choice, not discovered after it: the packet is built with the task's
+    `blockedBy` in the same locked write that raises it, and the option reads "X waits on Y,
+    and Viberr refuses every agent run while it does, so the question is held with the task
+    and put the moment the wait clears." The wait panel names it too, because a promise a
+    person made and cannot see is the same defect in another place.
+    (`task-file.schema.ts`, `review-deadlock.server.ts`, `task-actions.server.ts`,
+    `dependencies.server.ts`, `task-side-panels.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

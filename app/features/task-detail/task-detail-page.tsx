@@ -127,6 +127,7 @@ export function TaskDetailPage({
   mentionables,
   recommendations,
   schedules,
+  queuedQuestions = [],
   archived = false,
   acceptance,
   githubHost,
@@ -191,6 +192,10 @@ export function TaskDetailPage({
   /** Pending scheduled runs (O-3 generalized, loader — from the task file).
    *  Rendered inside the execution profile's run controls. */
   schedules: TaskSchedule[];
+  /** Ruling 241: reviewer questions a dependency hold refused. Optional with
+   *  an empty default, like `labelSuggestions`: all but a handful of tasks have
+   *  none, and a render built by hand should not have to say so. */
+  queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
   /** R14-3: the task's archive disposition (loader — from the task file, which
    *  is where it lives; the projection has no column for it). */
   archived?: boolean;
@@ -790,6 +795,7 @@ export function TaskDetailPage({
           dispositionBusy={archiveBusy}
         />
         <TaskDetailsPanel
+          queuedQuestions={queuedQuestions}
           task={task}
           canEdit={canEditMeta}
           labelSuggestions={labelSuggestions}

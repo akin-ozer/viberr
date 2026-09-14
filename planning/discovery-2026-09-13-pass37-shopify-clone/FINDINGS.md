@@ -3670,3 +3670,54 @@ ways: pinning `willReplay = true` reddens two, `false` reddens the third — so 
 passed by deleting the promise either.
 
 *Both reported by the adversarial sweep; both re-derived from the code and reproduced before fixing.*
+
+## F37-68 · The recommended option on a decision packet was refused, after consuming the decision — HIGH
+
+**Found by using it**, not by reading it. Ruling 237's escalation fired a fourth time, on SHOP-5.
+I opened the card, picked the recommended option ("Ask Integration Verifier what else it would
+block on"), and watched what viberr did with it:
+
+```
+17:35:15.159Z transition  **Decision:** Ask Integration Verifier what else it would block on.
+                          No rework until the reviewer has answered.
+17:35:15.327Z log   warn  question_reviewer start failed
+17:35:15.344Z blocked     The question could not be put to the reviewer: SHOP-5 waits on
+                          SHOP-23 and Viberr is holding it, so running an agent on it is
+                          refused. Nothing was asked and nothing is running.
+```
+
+SHOP-5 was `blockedBy: [SHOP-23]` before the packet was ever raised, by my own earlier decision on
+that task. Ruling 186 refuses every agent dispatch while a task waits, and says so in its own
+comment: *"Every dispatch door lands here, so every one of them refuses."* Ruling 237 added a
+dispatch door and checked nothing.
+
+**What it cost.** The decision was written onto the task's contract (ruling 189 binds it: every
+later run reads it). The packet was cleared, so there was nothing left to choose again from. The
+contract now said "no rework until the reviewer has answered" about a reviewer that would never be
+asked. Two of the card's three options dead-end this way on a held task; only force-accept works.
+
+**The codebase had already ruled on this.** `force_accept`'s own arm, a hundred lines above mine:
+
+> Both refusals the force path can still make are run HERE, **before the resolution write**: that
+> write clears the packet, and a refusal discovered after it would leave the decision recorded with
+> no acceptance behind it.
+
+**Fix (ruling 241, owner's call: queue, not refuse).** The hold is read before the resolution write.
+On a held task the question is queued onto the task (`queuedQuestions`: the profile, the directive
+text, who decided, what it waited on) instead of dispatched, and `announceRelease` — the single
+release chokepoint both the manual clear and the engine's auto-release pass through — puts it when
+the wait lifts, BEFORE re-invoking the operator. That ordering is load-bearing: an operator woken
+first can dispatch the rework the decision exists to stop, in the window between the two.
+
+The packet says it before the choice now (built with `blockedBy` inside the same locked write that
+raises it), and the wait panel names the queued question, because a promise a person made and
+cannot see is F37-66 and F37-67 in a third place.
+
+**Test.** The resolution half asserts the queue write, the absent dispatch, and the card's copy;
+the drain half asserts the stored directive reaches the runtime, that the list is emptied BEFORE
+the run so no reviewer is asked twice, that a failed start says so, and the question-before-operator
+ordering. Canaries: `queueing = false` (the shipped defect), `held = ""` (card ignores the hold),
+drain-after-operator, and drain-without-clearing all go red.
+
+*Fifth live firing of ruling 237 the same hour, on SHOP-25, exercised the unheld path end to end:
+`question_reviewer` started `run_dX5hzn` with the right directive to the right reviewer.*

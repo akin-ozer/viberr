@@ -154,6 +154,13 @@ export interface ReviewDeadlockPacketInput {
   reviewerName: string;
   /** The deliverer's display name, when one is engaged. */
   delivererName: string | null;
+  /**
+   * Ruling 241: what the task waits on (`blockedBy`), because a hold changes
+   * what the recommended option DOES. Ruling 186 refuses every agent dispatch
+   * on a held task, so on SHOP-5 the card promised a question it could not put
+   * — the option's own description has to say what will really happen.
+   */
+  heldBy: readonly string[];
 }
 
 /**
@@ -163,6 +170,7 @@ export interface ReviewDeadlockPacketInput {
  */
 export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): TaskPacket {
   const handle = `@${input.reviewerName}`;
+  const held = input.heldBy.length > 0 ? input.heldBy.join(", ") : "";
   const observations: TaskPacket["observations"] = [
     { k: "Reviewer", v: handle, code: false },
     {
@@ -205,10 +213,15 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         kind: "question_reviewer",
         t: `Ask ${input.reviewerName} what else it would block on`,
         d:
-          `Starts ${input.reviewerName} with one question and no rework behind it: name everything ` +
-          "you would still block on across your own surface, on the revision as it stands. " +
-          "A verdict is supposed to be the complete set, so the answer either ends the loop or " +
-          "shows it cannot be ended by reworking.",
+          `${held ? "Queues" : "Starts"} ${input.reviewerName} with one question and no rework ` +
+          "behind it: name everything you would still block on across your own surface, on the " +
+          "revision as it stands. A verdict is supposed to be the complete set, so the answer " +
+          "either ends the loop or shows it cannot be ended by reworking." +
+          // Ruling 241: said BEFORE the choice, not discovered after it.
+          (held
+            ? ` ${input.taskKey} waits on ${held}, and Viberr refuses every agent run while it ` +
+              "does, so the question is held with the task and put the moment the wait clears."
+            : ""),
         rec: true,
         profileId: input.deadlock.profileId,
       },

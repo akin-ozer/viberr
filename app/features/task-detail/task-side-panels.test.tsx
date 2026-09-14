@@ -237,14 +237,22 @@ describe("gap-10: Current state shows when anything last happened", () => {
   });
 });
 
-function renderDetails(patch: Partial<TaskDetail>, canEdit: boolean) {
+function renderDetails(
+  patch: Partial<TaskDetail>,
+  canEdit: boolean,
+  queuedQuestions: { id: string; profileId: string; decidedByLabel: string }[] = [],
+) {
   const task = detail(patch);
   const Stub = createRoutesStub([
     {
       path: "/",
       Component: () => (
         <ToastProvider>
-          <TaskDetailsPanel task={task} canEdit={canEdit} />
+          <TaskDetailsPanel
+            task={task}
+            canEdit={canEdit}
+            queuedQuestions={queuedQuestions}
+          />
         </ToastProvider>
       ),
       action: async () => ({ ok: true }),
@@ -350,6 +358,44 @@ describe("TaskDetailsPanel", () => {
     expect(kv(container, "Labels")).toContain("codex");
     // "due <Mon> <day>", never the "overdue · …" a past date would render.
     expect(kv(container, "Due date")).toMatch(/^due /);
+  });
+
+  /**
+   * Ruling 241 (F37-68): a question the hold refused is put when the hold
+   * lifts, and the wait has to say so. Without this the only trace is one
+   * timeline note, and a promise a person made and cannot see is the defect
+   * this pass kept finding.
+   */
+  it("names the queued question under the wait, by the reviewer's NAME", () => {
+    const { container } = renderDetails(
+      {
+        blockedBy: [{ ref: "VIB-9", label: "VIB-9", state: "open", taskKey: "VIB-9", goalId: null }],
+        reviewers: [
+          {
+            kind: "agent",
+            profileId: "rev",
+            backend: "codex",
+            name: "Codex",
+            role: "Code review",
+            profileName: "Integration Verifier",
+          },
+        ],
+      },
+      false,
+      [{ id: "qq_1", profileId: "rev", decidedByLabel: "Arda" }],
+    );
+    // Ruling 232: a handle is a NAME. CANARY: fall back to `q.profileId` first
+    // and this reads "rev", which names nobody a person can search for.
+    expect(kv(container, "When it clears")).toContain("Integration Verifier");
+    expect(kv(container, "When it clears")).toContain("Arda");
+    expect(kv(container, "When it clears")).toContain("before the operator gets the task back");
+  });
+
+  it("says nothing about queued questions when there are none", () => {
+    // CANARY: render the row unconditionally and every task grows a "When it
+    // clears" line about a question nobody asked for.
+    const { container } = renderDetails({}, false);
+    expect(container.querySelector("[data-queued-questions]")).toBeNull();
   });
 
   it("shows 'Normal / None / None' for a bare task", () => {

@@ -293,6 +293,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const schedules = (taskFile?.parsed.frontmatter.schedules ?? []).filter(
     (s) => s.status === "pending",
   );
+  // Ruling 241: reviewer questions a dependency hold refused, waiting for the
+  // release. Read from the FILE beside the recommendations and for the same
+  // reason (no projection column). Surfaced because a promise a person made and
+  // cannot see is the defect this pass kept finding: the card said the question
+  // would be put when the wait clears, and until then the only trace was one
+  // timeline note that scrolls.
+  const queuedQuestions = (taskFile?.parsed.frontmatter.queuedQuestions ?? []).map((q) => ({
+    id: q.id,
+    profileId: q.profileId,
+    decidedByLabel: q.decidedByLabel,
+  }));
 
   // R15-1: the accept confirm names exactly what merges — the delivered
   // revision (task file) and the merge target (project default branch).
@@ -340,6 +351,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       : {},
     recommendations,
     schedules,
+    queuedQuestions,
     archived,
     // P14-LV-06: the review queue counted this viewer under "Waiting on your
     // acceptance" while the page rendered acceptance ONLY as an operator

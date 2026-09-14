@@ -20,9 +20,11 @@ import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import { setTaskArchived, transitionStage } from "./task-actions.server";
 import { goalRunnerTick } from "./goal-actions.server";
+import type { StartAgentRunInput, StartAgentRunResult } from "./specialist-run.server";
 import {
   announceRelease,
   clearDependencies,
+  drainQueuedQuestions,
   noteDeadDependency,
   releaseDependents,
   releaseDueDependents,
@@ -795,5 +797,150 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: [] }, actor(store, "arda"), { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } });
     expect(goal2().raw).toBe(before);
     expect(goal2().parsed.frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
+  });
+});
+
+/**
+ * Ruling 241 (pass 37, F37-68): the question a hold refused is put when the
+ * hold lifts, and before the operator gets the task back.
+ *
+ * Live on SHOP-5 ruling 237's escalation recommended asking the reviewer what
+ * else it would block on. The task was held (`blockedBy: [SHOP-23]`), ruling 186
+ * refuses every agent dispatch while it is, and the resolution discovered that
+ * only AFTER writing the decision onto the task contract and clearing the
+ * packet. Nothing was asked, the packet was gone, and the contract said "no
+ * rework until the reviewer has answered" about a reviewer nobody would ask.
+ */
+/** What the drain sends the dispatch: the contract under test, taken from the
+ *  dispatch's own input type so the recorder cannot assert a shape the real
+ *  function would not accept. */
+type QuestionDispatch = StartAgentRunInput;
+
+const QUESTION_RUN: StartAgentRunResult = {
+  runId: "run_q",
+  backend: "claude",
+  role: "Code review",
+  name: "rev",
+};
+
+const recordDispatch =
+  (into: QuestionDispatch[]) =>
+  (_db: DatabaseSync, input: QuestionDispatch): Promise<StartAgentRunResult> => {
+    into.push(input);
+    return Promise.resolve(QUESTION_RUN);
+  };
+
+describe("F37-68 / ruling 241: a reviewer question the hold refused survives the wait", () => {
+  function seedQueued(store: TestStore, held: string[]): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        blockedBy: held,
+        engagements: [
+          { profileId: "rev", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+        ],
+        queuedQuestions: [
+          {
+            id: "qq_1",
+            profileId: "rev",
+            directive: "Name everything you would still block on.",
+            decidedBy: store.users.arda.id,
+            decidedByLabel: "Arda",
+            decidedAt: "2026-09-14T17:35:15.159Z",
+            heldBy: [...held],
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("the drain starts the reviewer with the stored question, and empties the queue first", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, []);
+    const started: QuestionDispatch[] = [];
+    const drained = await drainQueuedQuestions(
+      store.db,
+      { dataRoot: store.dataRoot, deps: { startAgentRun: recordDispatch(started) } },
+      store.slug,
+      "VIB-11",
+    );
+    {
+      expect(drained).toBe(1);
+      expect(started).toHaveLength(1);
+      // The STORED text, not a constant rebuilt at drain time: a person was
+      // promised this question and the wait can outlive the constant.
+      expect(started[0]!.directive).toBe("Name everything you would still block on.");
+      expect(started[0]!.profileId).toBe("rev");
+      expect(started[0]!.directiveFrom).toBe("Arda");
+      // CANARY: drain without clearing and the next release asks the same
+      // reviewer the same question again, which is the loop ruling 237 breaks.
+      expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
+    }
+  });
+
+  it("a start that fails after the release says so, and does not leave the question queued", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, []);
+    await drainQueuedQuestions(
+      store.db,
+      {
+        dataRoot: store.dataRoot,
+        deps: {
+          startAgentRun: () => Promise.reject(new Error("The reviewer is no longer deployed.")),
+        },
+      },
+      store.slug,
+      "VIB-11",
+    );
+    {
+      const parsed = file(store, "VIB-11");
+      expect(parsed.frontmatter.queuedQuestions).toEqual([]);
+      // F37-33: `waiting` must never claim an agent nobody started.
+      expect(parsed.frontmatter.waiting).toBe("human");
+      const note = parsed.timeline.find((e) => e.title === "Queued question not put")!;
+      expect(note.text).toContain("The reviewer is no longer deployed.");
+      expect(note.text).toContain("Nothing was asked and nothing is running.");
+    }
+  });
+
+  it("the release drains the question BEFORE it hands the task back to the operator", async () => {
+    // Ordering is the whole point: the decision says the reviewer answers
+    // before anyone reworks anything, and an operator re-invoked first can
+    // dispatch that rework in the window between the two.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, ["VIB-2"]);
+    const order: string[] = [];
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => {
+      order.push("operator");
+      return Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const });
+    });
+    {
+      await announceRelease(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          deps: {
+            runOperator,
+            startAgentRun: (): Promise<StartAgentRunResult> => {
+              order.push("question");
+              return Promise.resolve(QUESTION_RUN);
+            },
+          },
+        },
+        store.slug,
+        "VIB-11",
+        { entries: ["VIB-2"] },
+      );
+      await eventually(() => expect(order).toContain("operator"));
+      // CANARY: move the drain below the `autoInvokeOperator` call and this
+      // reads ["operator", "question"].
+      expect(order).toEqual(["question", "operator"]);
+    }
   });
 });

@@ -327,6 +327,7 @@ function fm(input: {
     operator: input.operator,
     recommendations: input.recommendations ?? [],
     schedules: [],
+    queuedQuestions: [],
     urgent: input.urgent,
     priority: input.priority ?? (input.urgent ? "urgent" : "normal"),
     labels: input.labels ?? [],

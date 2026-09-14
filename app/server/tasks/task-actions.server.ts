@@ -181,6 +181,7 @@ import type {
   RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { startAgentRun } from "./specialist-run.server";
 import type {
   openTaskPr,
   OpenTaskPrContext,
@@ -297,6 +298,11 @@ export interface TaskActionDeps {
    *  merge the operator's `update_branch_from_base` performs), injectable so a
    *  test can assert the ceremony's call sequence: one refresh, one merge. */
   updateBranchFromBase?: typeof updateWorkspaceBranchFromBase;
+  /** Ruling 241: the dispatch the dependency release drains a queued reviewer
+   *  question through. Injected for the same reason `runOperator` is — the
+   *  drain's contract is WHAT it sends and in what order, and both are
+   *  unobservable through a real run. */
+  startAgentRun?: typeof startAgentRun;
 }
 
 /** The mutation ctx plus the test seams: the impls above, and the mock
@@ -690,6 +696,7 @@ export async function createTask(
     engagements: [],
     recommendations: [],
     schedules: [],
+    queuedQuestions: [],
     // R19-14: creation is gated to the entry stage above, and a task in triage
     // has no operator until it advances (contracts §1.1) — always null at birth.
     operator: null,
@@ -3389,6 +3396,10 @@ export async function recordAgentCompletion(
                 // nothing a person can search for.
                 reviewerName: names.get(reviewerProfileId) ?? roleDisplay,
                 delivererName: delivererNameOf(parsed.frontmatter, names),
+                // Ruling 241: read inside the same locked write that raises the
+                // packet, so the card's promise is built from the hold the
+                // resolution will meet — not one read a moment earlier.
+                heldBy: parsed.frontmatter.blockedBy,
               });
               parsed.frontmatter.waiting = "human";
               // Ruling 137 says a packet withdraws the standing acceptance
@@ -8554,6 +8565,20 @@ export async function resolvePacket(
       // honest about who the task is on, and the stage does not move — the
       // reviewer is being asked a question about the revision where it stands,
       // not sent to judge a new one.
+      //
+      // Ruling 241 (F37-68): unless a dependency hold refuses it. Ruling 186
+      // refuses every agent dispatch on a held task, and live on SHOP-5 this
+      // arm wrote the decision, cleared the packet and then discovered the
+      // refusal — leaving the contract saying "no rework until the reviewer has
+      // answered" about a reviewer nobody would ever ask. The hold is read
+      // HERE, before the resolution write, for the reason `force_accept`'s own
+      // arm states: "a refusal discovered after it would leave the decision
+      // recorded with no acceptance behind it."
+      //
+      // The owner's call was to queue rather than refuse, so the decision still
+      // stands and the question rides on the task until the wait clears.
+      const heldFor = existing.parsed.frontmatter.blockedBy;
+      const queueing = heldFor.length > 0 && !!option.profileId;
       event = {
         occurredAt: now,
         type: "transition",
@@ -8561,13 +8586,30 @@ export async function resolvePacket(
         title: null,
         text:
           option.ev ??
-          `**Decision:** ${option.t}. No rework until the reviewer has answered.`,
+          (queueing
+            ? `**Decision:** ${option.t}. ${holdRefusal(input.taskKey, heldFor, "asking it now")} ` +
+              "The question is queued with the task and put the moment the wait clears. " +
+              "No rework until the reviewer has answered."
+            : `**Decision:** ${option.t}. No rework until the reviewer has answered.`),
         toAgent: false,
         evidence: null,
       };
       mutate = (fm) => {
-        fm.waiting = "agent";
+        // A queued question is not an agent working: `waiting` stays with the
+        // hold's own answer rather than claiming a run nobody started (F37-33).
+        fm.waiting = queueing ? "human" : "agent";
         fm.readiness = "ready";
+        if (queueing && option.profileId) {
+          fm.queuedQuestions.push({
+            id: newId("qq"),
+            profileId: option.profileId,
+            directive: REVIEW_DEADLOCK_QUESTION,
+            decidedBy: actor.userId,
+            decidedByLabel: actor.label,
+            decidedAt: now,
+            heldBy: [...heldFor],
+          });
+        }
       };
       clearPacket = true;
       break;
@@ -9945,7 +9987,16 @@ export async function resolvePacket(
   // decision, the dispatch is coordination machinery — with one difference that
   // matters: the directive is the WHOLE point of the option, so a start failure
   // means the promise on the card was not kept and has to say so.
-  if (option.kind === "question_reviewer" && option.profileId) {
+  if (
+    option.kind === "question_reviewer" &&
+    option.profileId &&
+    // Ruling 241: a question the hold queued is not dispatched now — the
+    // release drains it (`announceRelease`). Read from the file the resolution
+    // just wrote, so this cannot disagree with what was recorded.
+    !readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter.queuedQuestions.some(
+      (q) => q.profileId === option.profileId,
+    )
+  ) {
     const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
     try {
       const { startAgentRun } = await import("./specialist-run.server");

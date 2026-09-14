@@ -426,6 +426,43 @@ export const SCHEDULE_STATUS_VALUES = [
   "cancelled",
 ] as const;
 
+/**
+ * Ruling 241 (pass 37, F37-68): a question put to a reviewer that a DEPENDENCY
+ * HOLD refuses right now, kept until the hold lifts.
+ *
+ * Ruling 237's escalation recommends asking the reviewer to name everything it
+ * would still block on. Ruling 186 refuses every agent dispatch on a held task
+ * ("Every dispatch door lands here, so every one of them refuses"), and ruling
+ * 237 added a dispatch door without checking. Live on SHOP-5 the person chose
+ * the recommended option, the decision was written onto the task contract, the
+ * packet was cleared, and the reviewer was never asked: the one option that
+ * could end the loop consumed the decision and did nothing.
+ *
+ * The owner's call was QUEUE, not refuse: the question survives the wait and is
+ * put the moment the task can run again. `announceRelease` is the one release
+ * chokepoint, so the drain has exactly one home.
+ */
+export const queuedQuestionSchema = z
+  .object({
+    id: z.string().min(1),
+    /** The reviewer the question is for. Resolved against the LIVE engagement
+     *  at drain time, the same R22 rule the schedule's `profileId` follows. */
+    profileId: z.string().min(1),
+    /** The question itself, stored rather than rebuilt: a person was promised
+     *  this text (ruling 237 wrote it down for that reason), and the wait can
+     *  outlive the constant. */
+    directive: z.string().min(1),
+    /** Who decided, for the run's `directiveFrom` and for the record. */
+    decidedBy: z.string().min(1),
+    decidedByLabel: z.string().min(1),
+    decidedAt: z.string().min(1),
+    /** What the task waited on when the question was queued, so the drain note
+     *  can say what it was waiting for. */
+    heldBy: z.array(z.string()).default([]),
+  })
+  .loose();
+export type QueuedQuestion = z.infer<typeof queuedQuestionSchema>;
+
 export const scheduleSchema = z
   .object({
     id: z.string().min(1),
@@ -1059,6 +1096,9 @@ const taskFrontmatterFields = {
   recommendations: z.array(recommendationSchema),
   /** Pending/fired scheduled actions (O-3) — a server-side runner fires them. */
   schedules: z.array(scheduleSchema),
+  /** Ruling 241: reviewer questions a dependency hold refused, put when the
+   *  hold lifts. Empty on every task that never had one. */
+  queuedQuestions: z.array(queuedQuestionSchema).default([]),
   urgent: z.boolean(),
   /** Task priority (pass-25). A graded triage scale; "urgent" is the top rung and
    *  keeps the board's existing urgent highlight (`urgent` is derived from it at
@@ -1464,6 +1504,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "operator",
   "recommendations",
   "schedules",
+  "queuedQuestions",
   "urgent",
   "priority",
   "labels",
@@ -1851,6 +1892,19 @@ export function parseTaskFrontmatter(
       data,
       "schedules",
       taskFrontmatterFields.schedules.element,
+    ),
+    // Ruling 241: absent on every task that never had a question queued →
+    // empty, silently. Per-ROW, so one malformed entry never drops a question
+    // a person was promised. (`queuedQuestions` carries a `.default([])`
+    // wrapper, so its element is named directly — `.element` is only exposed by
+    // a bare `z.array`, and the same trap dropped `rulingsKb` on the project
+    // parser earlier in this pass: this builder reads field by field, so a
+    // field missing HERE writes fine and reads back undefined.)
+    queuedQuestions: tolerantRows(
+      diagnostics,
+      data,
+      "queuedQuestions",
+      queuedQuestionSchema,
     ),
     // urgent is an optional boolean by contract — absent means false, silently.
     urgent: tolerant(

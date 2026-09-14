@@ -226,6 +226,14 @@ recommendations: []               # pending operator recommendation cards; an
 schedules: []                     # pending/fired scheduled runs (O-3, ruling 98:
                                   # run-operator | run-agent; the agent arm pins
                                   # profileId + prompt, nothing else)
+queuedQuestions: []               # ruling 241: reviewer questions a dependency
+                                  # hold refused (ruling 186 refuses every agent
+                                  # dispatch while `blockedBy` is non-empty).
+                                  # Each entry pins profileId + the directive
+                                  # text + who decided; `announceRelease` drains
+                                  # the list before it re-invokes the operator,
+                                  # emptying it first so no reviewer is asked
+                                  # the same question twice.
 urgent: true                      # optional; absent ≡ false
 validation: changed               # healthy | changed | failing | none | bypassed
                                   # (`bypassed` = a human force-accepted past the
