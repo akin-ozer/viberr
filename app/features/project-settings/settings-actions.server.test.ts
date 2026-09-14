@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -33,6 +33,7 @@ import {
   repairProjectRepo,
   repoFootprintTasks,
   setBranchCleanup,
+  setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
   NEW_STAGE_COLORS,
@@ -1096,5 +1097,74 @@ describe("setRequiredReviewers (ruling 178)", () => {
       ).rejects.toMatchObject({ status: 403 });
     }
     expect(rulesOf(store)).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 239 (pass 37): the project's rulings knowledge base — the one KB every
+ * run on the project reads, whether or not a profile grants it.
+ */
+describe("setProjectRulingsKb (ruling 239)", () => {
+  let store: TestStore;
+  const projectFm = () =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+  async function seedKb(name: string): Promise<string> {
+    const { saveKnowledgeBase } = await import("~/server/org/resources.server");
+    const saved = await saveKnowledgeBase(
+      store.db,
+      { name, refresh: "on change" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    return saved.kb.dir;
+  }
+  beforeEach(() => {
+    store = setupTestStore(ctx);
+  });
+
+  it("refuses a directory no knowledge base occupies, and writes nothing", async () => {
+    // A rulings KB that resolves to nothing injects silently-empty context into
+    // every run and reads on every surface as though the project had settled
+    // rules it has not. CANARY: drop the `listKnowledgeBases` check.
+    await expect(
+      setProjectRulingsKb(
+        store.db,
+        { projectSlug: store.slug, dir: "no-such-kb" },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/No knowledge base lives at "no-such-kb"/);
+    expect(projectFm().rulingsKb ?? null).toBeNull();
+  });
+
+  it("names a real one, reports it, and clears back to null", async () => {
+    const dir = await seedKb("team-rulings");
+    const set = await setProjectRulingsKb(
+      store.db,
+      { projectSlug: store.slug, dir },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(set.changed).toBe(true);
+    expect(set.dir).toBe(dir);
+    expect(projectFm().rulingsKb).toBe(dir);
+
+    // Idempotent: the same value is not a change and writes no audit row.
+    const again = await setProjectRulingsKb(
+      store.db,
+      { projectSlug: store.slug, dir },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(again.changed).toBe(false);
+
+    const cleared = await setProjectRulingsKb(
+      store.db,
+      { projectSlug: store.slug, dir: null },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(cleared.changed).toBe(true);
+    expect(projectFm().rulingsKb ?? null).toBeNull();
   });
 });

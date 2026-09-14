@@ -87,6 +87,7 @@ import {
   removeStage,
   renameStage,
   reorderStages,
+  setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
@@ -1093,7 +1094,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary. Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named. Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1116,6 +1117,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // resolved to the names the acceptance gate prints; set with
           // set_required_reviewers.
           requiredReviewers: resolveRequiredReviewers(fm, dataRoot),
+          // Ruling 239: the one KB every run on this project reads, whether or
+          // not any profile grants it. Null means the project has named none,
+          // and a settled rule has nowhere to live but each task's goal.
+          rulingsKb: fm.rulingsKb ?? null,
           stages: project.stages.map((s) => ({
             id: s.id,
             name: s.name,
@@ -1954,6 +1959,32 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "set_required_reviewers",
+  );
+
+  add(
+    tool(
+      "set_project_rulings_kb",
+      "Name the project's RULINGS knowledge base by store DIRECTORY (ruling 239), or pass dir: null to clear it. Project admin (edit-policy). Unlike a per-profile `kbs` grant, this one KB is injected into EVERY run the project makes — each specialist, the operator, and your own conversation while it is scoped to this project — so nobody can forget it on the one profile that needed it. Use it for rules the project has SETTLED and should not re-litigate: a convention a review established, a shared-surface protocol, an environment fact reviewers keep re-deriving. `list_knowledge_bases` gives the grantKey to pass here; a directory no knowledge base occupies is refused by name with nothing written. Promoting an existing KB into this role is the expected move, and a profile that also grants it explicitly is not charged for it twice.",
+      {
+        projectSlug: z.string().optional(),
+        dir: z
+          .string()
+          .nullable()
+          .describe("The KB store directory (list_knowledge_bases `grantKey`), or null to clear."),
+      },
+      runWith(async (args: { projectSlug?: string; dir: string | null }) => {
+        const slug = slugOf(args.projectSlug);
+        requireVisible(slug, "change this project's policy");
+        const result = await setProjectRulingsKb(
+          db,
+          { projectSlug: slug, dir: args.dir },
+          actor,
+          { dataRoot },
+        );
+        return `[done] ${result.toast}.`;
+      }),
+    ),
+    "set_project_rulings_kb",
   );
 
   add(

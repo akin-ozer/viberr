@@ -460,6 +460,75 @@ export async function setRequiredReviewers(
   };
 }
 
+const RULINGS_KB_AUDIT_ACTION = "project.rulings_kb.updated";
+
+/**
+ * Ruling 239 (pass 37): name the project's RULINGS knowledge base, or clear it
+ * with `dir: null`.
+ *
+ * Same authority as every other project policy (`edit-policy`), and validated
+ * against the store the same way a required reviewer is validated against the
+ * deployed agents: a directory no knowledge base occupies is refused by name
+ * with nothing written, because a rulings KB that resolves to nothing would
+ * inject silently-empty context into every run on the project and read, on
+ * every surface, as though the project had settled rules it has not.
+ */
+export async function setProjectRulingsKb(
+  db: DatabaseSync,
+  input: { projectSlug: string; dir: string | null },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; dir: string | null; changed: boolean }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
+  const wanted = input.dir?.trim() ? input.dir.trim() : null;
+  if (wanted !== null) {
+    const { listKnowledgeBases } = await import("~/server/org/resources.server");
+    const known = listKnowledgeBases(db, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});
+    const match = known.find((kb) => kb.dir === wanted);
+    if (!match) {
+      throw AppError.validation(
+        `No knowledge base lives at "${wanted}". ` +
+          (known.length
+            ? `The store has: ${known.map((kb) => kb.dir).join(", ")}.`
+            : "The store has none yet, so create one first.") +
+          " Name the store DIRECTORY, not the knowledge base's display name or id.",
+      );
+    }
+  }
+  let changed = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const before = parsed.frontmatter.rulingsKb ?? null;
+    changed = before !== wanted;
+    if (!changed) return;
+    parsed.frontmatter.rulingsKb = wanted;
+  });
+  if (!changed) {
+    return {
+      toast: wanted
+        ? `Rulings knowledge base unchanged: ${wanted}`
+        : "This project already has no rulings knowledge base",
+      dir: wanted,
+      changed: false,
+    };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: RULINGS_KB_AUDIT_ACTION,
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { dir: wanted },
+  });
+  return {
+    toast: wanted
+      ? `Rulings knowledge base set to ${wanted}. Every agent on this project reads it, and so does the controller while it works here`
+      : "Rulings knowledge base cleared",
+    dir: wanted,
+    changed: true,
+  };
+}
+
 // -------------------------------------------------------------- repo repair
 
 /** `owner/name` from free input — tolerates a pasted GitHub URL and a

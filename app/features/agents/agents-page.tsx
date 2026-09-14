@@ -729,6 +729,7 @@ export function ProfileDetail({
   stages,
   workflow,
   resourceCatalog,
+  rulingsKb = null,
   backendHealth,
   insts,
   projectName,
@@ -749,6 +750,10 @@ export function ProfileDetail({
   /** P14-KM-11: the live store catalog, so a grant naming a resource the store
    *  no longer holds renders as missing rather than healthy. */
   resourceCatalog?: readonly ResCatalogGroup[];
+  /** Ruling 239: the project's rulings knowledge base, which every profile
+   *  reads whether or not it grants one. Without saying so here, this card's
+   *  own `kb` list is WRONG about what the profile actually gets. */
+  rulingsKb?: string | null;
   insts: AgentDeploymentView[];
   projectName: string;
   canManage: boolean;
@@ -1054,6 +1059,12 @@ export function ProfileDetail({
               ? { drift: { missing: a.templateDrift.missing.kb, extra: a.templateDrift.extra.kb } }
               : {})}
           />
+          {rulingsKb && !a.resources.kb.includes(rulingsKb) && (
+            <p className="muted">
+              Every run on this project also reads <code className="mono">{rulingsKb}</code>, the
+              project's rulings. Nobody grants it and nobody can remove it here.
+            </p>
+          )}
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
@@ -1435,6 +1446,7 @@ export function AgentsPage({
   viewerIsOrgAdmin = false,
   resourceCatalog,
   backendHealth,
+  rulingsKb = null,
 }: {
   profiles: AgentProfileView[];
   /** Org templates not yet deployed here — the "Add from library" options. */
@@ -1457,6 +1469,9 @@ export function AgentsPage({
    *  page, including the editor's note (there is no second, quietly divergent
    *  `backendAvailable` pair any more). */
   backendHealth?: BackendHealthMap | undefined;
+  /** Ruling 239: the project's rulings knowledge base, injected into every run
+   *  the project makes. Null when the project names none. */
+  rulingsKb?: string | null;
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -1817,6 +1832,7 @@ export function AgentsPage({
               workflow={workflow}
               {...(resourceCatalog ? { resourceCatalog } : {})}
               {...(backendHealth ? { backendHealth } : {})}
+              {...(rulingsKb ? { rulingsKb } : {})}
               insts={deployments.filter((d) => d.profileId === current.id)}
               projectName={projectName}
               canManage={canManage}

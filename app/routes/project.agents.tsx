@@ -1,3 +1,4 @@
+import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
 import { pageTitle } from "~/shared/page-title";
@@ -121,6 +122,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // unconditionally — a toggle for it would be one an admin could flip with no
     // effect. No profile grants it either, as of B7 (pass 16).
     resourceCatalog: buildResourceCatalog(db),
+    // Ruling 239: the project's rulings KB is granted by nobody and reaches
+    // every profile on this page. Without it here the page would show a
+    // profile's `kb` list and be WRONG about what that profile reads — which
+    // is the same mistake the capability matrix made about repo-write in
+    // pass 27, and the reason that matrix exists.
+    // Read from the project FILE rather than the projection: this is one
+    // display field, and a projection column for it would mean a baseline
+    // change and a rebuild for something the file answers directly.
+    rulingsKb: projectRulingsKb(params.slug),
     // Ruling 127: ONE backend answer for this page. The roster line reads the
     // count, and the create/edit modal reads `viewerConnected` for its advisory
     // note. It is deliberately not a second `backendAvailable` pair: authoring a
@@ -306,6 +316,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       viewerIsOrgAdmin={loaderData.viewerIsOrgAdmin}
       resourceCatalog={loaderData.resourceCatalog}
       backendHealth={loaderData.backendHealth}
+      rulingsKb={loaderData.rulingsKb}
     />
   );
 }

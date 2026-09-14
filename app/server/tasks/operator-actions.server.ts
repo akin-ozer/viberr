@@ -1,3 +1,4 @@
+import { withProjectRulings } from "~/server/files/project-rulings.server";
 import {
   describeRevisionDrift,
   type RevisionDrift,
@@ -488,7 +489,11 @@ export function resolveOperatorAuthority(
     effort: backend === declaredBackend ? view.effort || "" : "",
     name: view.name || "Operator",
     skills: view.resources.skills,
-    kb: view.resources.kb ?? [],
+    // Ruling 239: the operator reads the project's rulings the same as every
+    // agent it coordinates. It writes the packets and scoping notes those
+    // agents work from, so an operator that had not read the project's settled
+    // rules would re-open questions the project had closed.
+    kb: withProjectRulings(view.resources.kb ?? [], projectSlug, ctx),
     mcps: view.resources.mcps ?? [],
     persona: definition?.persona?.trim() || null,
     deployed: true,

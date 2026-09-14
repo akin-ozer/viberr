@@ -275,6 +275,20 @@ export const projectFrontmatterSchema = z.object({
   credentialPolicy: projectCredentialPolicySchema,
   guardrails: guardrailsSchema,
   requiredReviewers: requiredReviewersSchema,
+  /**
+   * Ruling 239 (pass 37): the project's RULINGS knowledge base, by store
+   * directory, or null when the project has not named one.
+   *
+   * Unlike `agents[].resources.kb`, which is a per-profile grant a controller
+   * can forget on the one profile that needed it, this KB reaches EVERY agent
+   * on the project — deliverer, reviewer and operator alike — and the
+   * controller itself while it is scoped to the project. It is the channel for
+   * a rule the project has settled, so the next task does not re-litigate it.
+   *
+   * `nullish().catch(null)` for the same reason every other late field uses it:
+   * a project.md written before this existed parses unchanged.
+   */
+  rulingsKb: z.string().nullish().catch(null),
 });
 export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 
@@ -293,6 +307,7 @@ export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "credentialPolicy",
   "guardrails",
   "requiredReviewers",
+  "rulingsKb",
 ];
 
 /** Widened to `string` so the raw-key scan below can test membership without
@@ -513,6 +528,11 @@ export function parseProjectFrontmatter(
       "requiredReviewers",
       requiredReviewersSchema,
     ),
+    // Ruling 239: the project's rulings KB. `tolerant` with a null fallback,
+    // like `credentialPolicy` — a garbled value must read as "no rulings KB"
+    // rather than failing the whole project parse, and a project.md written
+    // before this field existed has none.
+    rulingsKb: tolerant(diagnostics, data, "rulingsKb", z.string().nullish(), null) ?? null,
   };
 
   if (frontmatter.stages.length === 0) {

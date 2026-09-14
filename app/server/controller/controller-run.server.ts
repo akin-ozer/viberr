@@ -1,3 +1,4 @@
+import { withProjectRulings } from "~/server/files/project-rulings.server";
 import path from "node:path";
 import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
@@ -864,7 +865,19 @@ export function buildControllerSystemPrompt(
   for (const part of skillSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (skill)\n\n${part.body}`);
   }
-  const kbSet = readKbBodies(input.config.kb, input.dataRoot, KB_INJECTION_BUDGET);
+  // Ruling 239: a controller conversation SCOPED to a project reads that
+  // project's rulings, like every agent the project runs. The controller is
+  // where a project's stages, profiles, grants and knowledge bases are set up,
+  // so it is the one actor that must not be planning against rules the project
+  // has already settled without it.
+  const controllerKb = input.conversation.projectSlug
+    ? withProjectRulings(
+        input.config.kb,
+        input.conversation.projectSlug,
+        input.dataRoot ? { dataRoot: input.dataRoot } : {},
+      )
+    : input.config.kb;
+  const kbSet = readKbBodies(controllerKb, input.dataRoot, KB_INJECTION_BUDGET);
   if (kbSet.parts.length > 0) resourceParts.push(KB_PRECEDENCE_NOTE);
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);

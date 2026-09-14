@@ -1,3 +1,4 @@
+import { withProjectRulings } from "~/server/files/project-rulings.server";
 import { type ReviewSubject, reviewSubjectSha } from "~/shared/revision-drift";
 import { execFile } from "node:child_process";
 import { closureRefusal, taskClosure } from "./task-closure.server";
@@ -1573,6 +1574,13 @@ async function dispatchAgentRun(
       ),
     );
   }
+  // Ruling 239: the project's rulings KB reaches EVERY agent on the project,
+  // after the profile's own grants and R18-1's inherited ones so it never
+  // displaces them in the shared injection budget. Placed here rather than in
+  // the per-profile grant so nobody can forget it on the one profile that
+  // needed it — which is exactly how a conventions KB written "For reviewers"
+  // came to be re-derived from first principles, four rework rounds at a time.
+  kb = withProjectRulings(kb, input.projectSlug, ctx);
 
   // Ruling 127: WHOSE account this run bills, resolved BEFORE anything is
   // spent. A task with no owner, an owner whose account is gone, or an owner

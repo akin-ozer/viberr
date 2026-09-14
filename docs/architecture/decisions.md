@@ -5233,6 +5233,41 @@ by rewriting those paragraphs:*
     re-review round.
     (`revision-drift.ts`, `specialist-run.server.ts`, `operator-toolkit.server.ts`.)
 
+239. **A project names ONE knowledge base as its rulings, and every run it makes reads it
+    (owner, 2026-09-14, pass 37).** A knowledge base is granted per profile, which makes it
+    a thing you attach to eight profiles and forget on the ninth, and the ninth is the one
+    that needed it. Live, the conventions KB carried a section headed "For reviewers"
+    stating that a missing lockfile importer "is a KNOWN systemic condition on this
+    repository with a stated rule above, not a novel defect to be re-derived from first
+    principles on each task", and recording its own past cost: four reviewers each
+    re-deriving it, four rework rounds. SHOP-24's Code Reviewer then blocked on exactly that
+    rule twice, which raised ruling 237's packet and cost a human a goal amendment.
+    That reviewer HAD the KB. Checked twice, because the obvious hypothesis was that it did
+    not: the grants were right, its run mounted both knowledge bases, and `kb-conventions`
+    was healthy. What was missing is a channel that cannot be got wrong.
+    So `project.md` carries `rulingsKb`, and `withProjectRulings` puts it into every KB list
+    the project builds: each specialist (after its own grants and R18-1's inherited ones, so
+    it never displaces them in the shared injection budget), the operator, and the
+    controller while its conversation is scoped to that project. Appended and deduped, so a
+    profile that also grants it explicitly is not charged twice against one budget, which is
+    the expected shape when an existing KB is promoted into the role. A project that names
+    none behaves exactly as before.
+    The owner's framing, which this implements verbatim: "per project kb with rulings …
+    this kb must be used by every agent in the project, when the controller session also
+    using a project it should read the project kb as well. If we already have a kb for this
+    we can transform it to this."
+    The controller sets it with `set_project_rulings_kb` under the same `edit-policy`
+    authority as every other project policy, and a directory no knowledge base occupies is
+    refused by name with nothing written: a rulings KB that resolved to nothing would inject
+    silently-empty context into every run and read, on every surface, as though the project
+    had settled rules it has not. The Agents page says so under each profile's knowledge
+    bases, because a card that lists a profile's grants while the runtime injects one more
+    is wrong about what that profile reads, which is the pass-27 capability-matrix defect in
+    another costume.
+    (`project-file.schema.ts`, `project-rulings.server.ts`, `settings-actions.server.ts`,
+    `controller-toolkit.server.ts`, `specialist-run.server.ts`, `operator-actions.server.ts`,
+    `controller-run.server.ts`, `project.agents.tsx`, `agents-page.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
