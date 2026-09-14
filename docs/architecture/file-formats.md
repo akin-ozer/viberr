@@ -508,9 +508,13 @@ Notes:
 ### Timeline entry grammar (append contract for agents)
 
 - Entries are NEWEST FIRST. To append an event, prepend a block directly
-  under `## Timeline` (writers do this; external appenders that append at
-  the bottom are tolerated — display sorts by timestamp and an
-  `timeline.out_of_order` info diagnostic is recorded).
+  under `## Timeline`. Appending at the BOTTOM is parsed without error, but
+  nothing repairs it: every reader is file order (`listTaskEvents` is
+  `ORDER BY position ASC`, and the task page slices the first N off the
+  front), so a bottom-appended entry renders as the OLDEST thing on the task
+  and falls outside the initial slice. A `timeline.out_of_order` info
+  diagnostic is recorded when it happens; that diagnostic reports the damage,
+  it does not undo it.
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
   `<space>·<space>` (U+00B7). `type` is one of the 11 contract types
   (`comment completion github policy note quality transition blocked agent

@@ -3342,3 +3342,50 @@ the pin must stay: that is unreviewed work and ruling 179's whole point.
 This one is a behaviour change to a shipped ruling (179) and it interacts with ruling 226's head
 gate, so it wants the owner's call on whether the re-pin is automatic or an option on the packet
 ruling 237 now raises.
+
+## F37-59 · The record's own heads-up says the page fixed an inversion; no page sorts — MEDIUM
+
+**What it is.** When a task file's timeline is not strictly newest-first, the parser records an
+info diagnostic and the task page prints it verbatim in its Diagnostics panel:
+
+> `timeline.out_of_order` · Timeline entries are not strictly newest-first — display sorts by
+> timestamp.
+
+Nothing sorts. Verified on every leg of the read path:
+
+```
+app/server/projections/rebuilder.server.ts   parsed.timeline.forEach((event, position) => …)   ← position IS the file index
+app/server/projections/task-query.server.ts  ORDER BY position ASC
+app/features/task-detail/timeline-slice.ts   events.slice(0, shown)                            ← off the FRONT of that array
+app/features/task-detail/timeline.tsx        .filter() only; no .sort, no .reverse
+```
+
+So a task whose file carries an inversion renders the inversion, and the one panel whose job is to
+tell a reader the truth about the record tells them the page already compensated.
+
+**The worse half is the append contract.** `docs/architecture/file-formats.md` is what agents are
+pointed at to write a task file, and it said:
+
+> external appenders that append at the bottom are tolerated — display sorts by timestamp and an
+> `timeline.out_of_order` info diagnostic is recorded
+
+That is an instruction inviting the defect on a false promise. An agent that appends at the bottom
+produces an entry that renders as the OLDEST thing on the task and falls outside the initial
+30-event slice — the newest event on a 118-event task takes three "Show older events" clicks to
+reach, and the review queue's subline still names the old one (`WHERE position = 0`, commented
+"position 0 = newest, file order").
+
+**Found on the live board, by the diagnostic firing on my own defect.** SHOP-24 carries the store's
+only `timeline.out_of_order` row, because ruling 237's escalation note was written 5ms newer than
+the comment it sat below. **I read that sentence that day and took reassurance from it.** The
+inversion was real and the page was showing it.
+
+**Fix shape — and why it is NOT "make the display sort".** Sorting on render would mask a real
+record defect, and file order is load-bearing elsewhere: ruling 63's bounded newest-first slice
+assumes it, and the review queue reads `position = 0` as "newest". The codebase's own instinct is
+right: ruling 237's inversion was fixed in the WRITE. So the diagnostic now reports the damage
+instead of claiming to have undone it, and the append contract tells appenders to prepend and says
+plainly that the diagnostic does not repair anything.
+
+*Found by an adversarial multi-agent sweep of the surfaces this pass had not re-read, and verified
+independently before filing.*

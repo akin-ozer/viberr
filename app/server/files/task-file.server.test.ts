@@ -694,3 +694,59 @@ describe("task.md structure injection through metadata the escaper skipped", () 
     expect(serializeTaskFile(parsed)).toBe(first);
   });
 });
+
+/**
+ * F37-59: the `timeline.out_of_order` heads-up used to end "display sorts by
+ * timestamp". Nothing sorts. `listTaskEvents` is `ORDER BY position ASC` over
+ * the verbatim file index the rebuilder writes, `sliceTimeline` takes the first
+ * N off the front of that array, and the task timeline component only filters
+ * it. The panel whose job is to tell a reader the truth about the record was
+ * telling them the page had already compensated.
+ *
+ * Found on the live board: SHOP-24 carried this diagnostic because ruling 237's
+ * escalation note was written 5ms newer than the comment it sat below, and I
+ * read this very sentence that day and took reassurance from it.
+ */
+describe("timeline.out_of_order says what actually happens (F37-59)", () => {
+  const withInversion = [
+    "---",
+    "key: VIB-1",
+    "title: T",
+    "stage: impl",
+    "---",
+    "",
+    "## Goal",
+    "",
+    "g",
+    "",
+    "## Timeline",
+    "",
+    "### 2026-09-14T10:00:00.000Z · comment · operator",
+    "",
+    "older, but written first",
+    "",
+    "### 2026-09-14T11:00:00.000Z · comment · operator",
+    "",
+    "newer, appended at the BOTTOM",
+    "",
+  ].join("\n");
+
+  it("records the diagnostic, and promises no sort that does not happen", () => {
+    const { diagnostics } = parseTaskFileContent(withInversion, { fallbackKey: "VIB-1" });
+    const d = diagnostics.find((x) => x.code === "timeline.out_of_order");
+    expect(d).toBeTruthy();
+    // CANARY: restore "display sorts by timestamp" and this fails. The claim is
+    // false on every task-page reader, and the append contract in
+    // docs/architecture/file-formats.md repeated it to AGENTS as a reason that
+    // appending at the bottom is safe.
+    expect(d!.message).not.toMatch(/sorts by timestamp/i);
+    expect(d!.message).toContain("renders file order");
+  });
+
+  it("the append contract no longer tells agents a bottom append is repaired", async () => {
+    const { readFileSync } = await import("node:fs");
+    const doc = readFileSync("docs/architecture/file-formats.md", "utf8");
+    expect(doc).not.toMatch(/display sorts by timestamp/);
+    expect(doc).toContain("it does not undo it");
+  });
+});
