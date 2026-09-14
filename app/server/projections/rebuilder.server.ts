@@ -557,10 +557,23 @@ export function rebuildTaskFile(
   // authors `waiting: schedule`, so a file that somehow carries one projects as
   // whatever it has actually earned here.
   const restsOnSchedule =
-    fm.waiting !== "agent" &&
+    // Only the state that actually says the false sentence. `waiting: "none"`
+    // renders NO wait tag at all, so it tells nobody anything and needs no
+    // correcting; `"agent"` is a run in flight. Narrowing this to the one
+    // stored value the ruling is about is what keeps the derivation from
+    // inventing a claim where there was none.
+    fm.waiting === "human" &&
     !parsed.packet &&
     fm.recommendations.length === 0 &&
     acceptanceRefusal !== null &&
+    // Ruling 131(d): a task that waits on other work is HELD, and the schedule
+    // runner refuses its occurrence on exactly those grounds — "waits on other
+    // work (…) — no operator run was started; Viberr releases the task when
+    // every entry is done." A card reading "resumes Sep 14 · 02:28" over an
+    // occurrence the runner will refuse is the very lie this ruling removes,
+    // reintroduced by it. What holds such a task is the dependency, and the
+    // board already says so.
+    fm.blockedBy.length === 0 &&
     fm.schedules.some((occurrence) => occurrence.status === "pending");
 
   const projectedWaiting: Waiting = isTerminalStage(

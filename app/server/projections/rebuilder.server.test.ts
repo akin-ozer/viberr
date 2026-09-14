@@ -1546,6 +1546,56 @@ describe("ruling 225: a task resting on a clock", () => {
     }
   });
 
+  it("never promises a resume the schedule runner will refuse", () => {
+    // Caught by re-reading my own predicate, not by any of the 41 tests that
+    // were already green. A task that waits on other work is HELD (ruling
+    // 131(d)), and the schedule runner refuses its occurrence on exactly those
+    // grounds: "waits on other work (…) — no operator run was started; Viberr
+    // releases the task when every entry is done." A card reading "resumes Sep
+    // 14 · 02:28" over an occurrence that will be refused is the same lie this
+    // ruling removes, reintroduced by it.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          blockedBy: ["VIB-2"],
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).not.toBe("schedule");
+      expect(task.resumesAt ?? null).toBeNull();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("invents no claim on a task that was making none", () => {
+    // `waiting: "none"` renders NO wait tag at all, so it tells nobody
+    // anything and there is nothing to correct. The ruling is about the one
+    // stored value that says the false sentence.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          waiting: "none",
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("none");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it("never lets a hand-authored `schedule` claim a rest it has not earned", () => {
     const ctx = createTestDbContext();
     try {

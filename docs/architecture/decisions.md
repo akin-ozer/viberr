@@ -4790,6 +4790,15 @@ by rewriting those paragraphs:*
     recording: the refusal arrives as "projection rebuild failed" and a stale row, the exact
     silent-staleness failure `boot.server.ts` probes this column for and ruling 217 built the
     health latch for. The canary caught it before the deploy did.
+    Amended the same day, from re-reading the predicate rather than from a failing test: it must
+    also require `waiting: "human"` exactly, and an EMPTY `blockedBy`. A task that waits on other
+    work is held (ruling 131(d)) and the schedule runner refuses its occurrence on precisely
+    those grounds - "waits on other work (...) - no operator run was started; Viberr releases the
+    task when every entry is done" - so a card reading "resumes Sep 14 · 02:28" over it would be
+    this ruling's own lie, reintroduced by this ruling. And `waiting: "none"` renders no wait tag
+    at all, so it claims nothing and has nothing to correct; deriving over it would invent a
+    promise where the board had made none. Forty-one green tests covered neither case, which is
+    the point: a predicate is not verified by the tests that happen to pass.
 
 226. **A head GitHub will not compare is refused, not disclosed (owner, 2026-09-14, pass 37;
     F37-43).** Ruling 135 built the guard for a PR head that is not the reviewed revision and
