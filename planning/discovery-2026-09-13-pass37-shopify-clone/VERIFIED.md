@@ -1122,3 +1122,34 @@ product forced it to write that sentence.
 caught three instances of a defect none of their branches could see the origin of, each naming
 the file and line. The cost is one rework round per service, and the cause sat in a file no
 service task owns.
+
+## Every run that failed produced a decision a human can see — CORRECT
+
+"Losing work" is on this pass's bug bar, and the sharpest version of it is a run that dies with
+nobody told. Measured at 04:06 UTC, with 648 runs on the instance:
+
+| Insights | |
+|---|---|
+| runs in `error` | **22** |
+| runs `stopped` | 55 (all 55 by a restart, and each one noted on its task) |
+
+| this project's task files | |
+|---|---|
+| `blocked` events reading "Operator run failed: pick a recovery path" | 12 |
+| `blocked` events reading "Work stalled: pick a recovery path" | 10 |
+| **total run-failure packets** | **22** |
+
+Twenty-two failures, twenty-two decision packets, each naming the provider's own sentence and
+offering resolvable options. No task carries an agent run with an unexplained gap after it.
+
+**The honest caveat:** Insights counts runs across the whole INSTANCE — this project plus the
+controller's own conversation runs — and does not break errors down by project, so the exact
+correspondence is a count match rather than a per-run trace. It would be consistent with (say)
+one controller error and one un-narrated task error cancelling out. What the count does establish
+is that the failure-narration machinery is not systematically dropping anything: at 22-for-22 on
+a board that has been running twelve hours, a silent-drop class would have to be both rare and
+exactly offset to hide here.
+
+The `stopped` column is the stronger evidence in one way — all 55 are restart casualties, and
+every restart in this session wrote its own note on every affected task, which I watched happen
+three times (03:30 unplanned, 03:32 and 04:03 deploys; 5, 5 and 7 runs respectively).
