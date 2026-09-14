@@ -1589,3 +1589,50 @@ The draft itself is worth a line: it widened the owned paths file by file (gatew
 `packages/http/src/index.ts`, `stack/gateway.json`), explicitly did NOT take `pnpm-lock.yaml` or
 `scripts/stack.test.mjs`, and states that `packages/contracts` stays untouched — matching the
 decision note I typed, including the part about not colliding with the SHOP-3/11/12 merge queue.
+
+## The collision map and the drift arithmetic, measured against GitHub and git (2026-09-14 18:2x UTC)
+
+Two claims the review queue makes about five live PRs, both checkable against ground truth rather
+than against another viberr surface.
+
+### The "collides with" pills — 5 of 5 EXACT, and symmetric
+
+The queue renders a collision pill per task. Measured by pulling each open PR's own file list from
+GitHub and intersecting them pairwise:
+
+| pair | shared file |
+|---|---|
+| SHOP-5 ↔ SHOP-19 | `Makefile` |
+| SHOP-11 ↔ SHOP-12 | `pnpm-lock.yaml` |
+| SHOP-12 ↔ SHOP-19 | `scripts/stack.test.mjs` |
+
+What the page shows: SHOP-5 → SHOP-19. SHOP-11 → SHOP-12. SHOP-12 → SHOP-11, SHOP-19. SHOP-19 →
+SHOP-5, SHOP-12. SHOP-25 → no pill.
+
+Every pair appears on BOTH its tasks and no pair appears that the file lists do not support. SHOP-25
+touches nothing the other four touch and is correctly silent, which is the half that would be easy
+to get wrong by rendering an empty pill.
+
+### SHOP-19's drift sentence — every number exact
+
+The card reads *"base refreshed · 1 merge commit · 7 base commits · 0 authored commits since
+review."* The task file records `revisionDrift: { headSha: aa0a680c, authored: 0, baseRefresh: {
+merges: 1, commits: 7 } }` and `baseRefreshes: [{ mergeSha: aa0a680c, baseSha: 5ede2693, commits: 7 }]`.
+
+Against the repository:
+
+```
+aa0a680c's parents   50750c45 (the reviewed sha)   5ede2693     → baseSha matches
+rev-list p1..p2      7                                          → commits: 7 matches
+merges created       1 (aa0a680c itself)                        → merges: 1 matches
+non-merge commits on the branch, --not origin/main   (none)     → authored: 0 matches
+```
+
+**A wrong reading I caught before filing it.** `git log --oneline 50750c45..aa0a680c` returns 8
+commits, 4 of them merges and 4 authored by `backend-engineer`/`platform-architect` — which looks
+like "4 merges, 4 authored" against viberr's "1 merge, 0 authored". That range counts everything
+reachable through the merge, including main's own history; it is the wrong denominator for a claim
+about what the REFRESH brought in. Viberr's counting is the correct one, and the second measurement
+is the one that settles it.
+
+This is ruling 238's disclosure machinery checked against git rather than against itself.
