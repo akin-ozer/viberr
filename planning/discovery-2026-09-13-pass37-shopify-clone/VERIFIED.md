@@ -1754,3 +1754,26 @@ routing runs first and answers 404, which is the honest answer for a route that 
 
 One file read refuted it. Recorded because the hypothesis was reasonable and wrong, which is the
 eleventh time this pass.
+
+## "21 linked to tasks" against GitHub's own 23 — CORRECT, and it closes three goal surfaces at once (2026-09-14 19:0x UTC)
+
+The GitHub page claims **21 pull requests linked to tasks**. GitHub's numbering runs 1..23. The two
+it does not claim are the interesting part:
+
+| PR | state | branch | why viberr does not list it |
+|---|---|---|---|
+| #2 | CLOSED | `shop-7` | the PR I closed BY HAND, unmerged, to reject SHOP-7 deliberately. SHOP-7's current PR is **#5**, which the page lists as merged, and `SHOP-7/task.md` carries `pr.number: 5`. Viberr tracks the task's CURRENT pull request, not every one it ever had. |
+| #4 | CLOSED | `shop-6` | titled "Scratch work on shop-6 (not viberr's)" — a pull request viberr never opened. It does not claim it. |
+
+Three of the goal's named surfaces fall out of this one check:
+
+- **Rejection and recovery.** The deliberate hand-rejection of #2 did not leave SHOP-7 stranded or
+  double-counted: it re-delivered to #5 and merged, and the old PR is neither claimed nor forgotten.
+- **Branch collision (ruling 122).** `shop-6` was taken by that scratch PR, so SHOP-6's execution
+  branch is **`shop-6-efd4`** — the unique-suffix allocation, still visible on the page as
+  `shop-6-efd4 → main · SHOP-6`.
+- **PR adoption.** A pull request on a task-shaped branch that viberr did not create is not adopted
+  by accident.
+
+And the arithmetic closes against the files: 21 task files carry a real `pr.number`, the other 5
+(SHOP-8, 13, 14, 20, 26) carry `branch: null` and no PR and are all still in triage. 21 + 5 = 26.
