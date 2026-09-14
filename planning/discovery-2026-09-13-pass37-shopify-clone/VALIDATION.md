@@ -1129,6 +1129,23 @@ viberr server booted
 All four rulings verified present in the running image by grepping the built server for a
 sentence each one introduced.
 
+**Exactly what is and is not live, checked rather than assumed.** The image was finalized at
+`03:30:19Z`, and two refinements were committed after it. Rather than reason from timestamps I
+grepped the running build for strings unique to each:
+
+| change | committed | in the running image |
+|---|---|---|
+| rulings 225–228, core | before the build | **yes** (four sentences, one per ruling) |
+| 225 amended — `waiting: human` exactly, `blockedBy` empty | 08:25 local | **yes** |
+| 226 amended — two options, not three | 08:28 local | **yes** (`"Press Accept again to re-run the check"` present; `"Try the check again"` gone) |
+| 227 — door refusal attributed to the policy engine | 08:31 local | no |
+| 225 amended again — archived guard | 08:36 local | no |
+
+Neither missing piece is reachable by anything on the board right now: no archived task holds a
+pending occurrence, and the attribution one only changes which system name a door-refusal note
+carries. Both go out with the next deploy. Saying "all four rulings are deployed" was true; it
+would have been sloppy to leave it at that while two refinements sat behind the image.
+
 **One casualty, handled honestly.** SHOP-18's operator was mid-run and its Codex process died
 with `SIGBUS`. Viberr raised a decision packet quoting the provider verbatim — *"Codex Exec
 exited with signal SIGBUS:"* — with three options and "Re-run the operator now" recommended.
