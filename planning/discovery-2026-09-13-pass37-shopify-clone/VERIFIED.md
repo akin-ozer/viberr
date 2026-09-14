@@ -1481,3 +1481,47 @@ So the surface reports the RUNTIME's authority, not the file's wishlist, and say
 only by persuasion. **Seventh near-miss of the pass**, and the most instructive: the product's own
 comments turned out to be a better oracle than my counting, and they had already written down the
 exact numbers that made me suspicious.
+
+## Knowledge-base grants, chased as a suspected bug and found CORRECT (2026-09-14)
+
+SHOP-24's Code Reviewer blocked twice on `pnpm-lock.yaml` being outside the task's owned paths.
+The project's own conventions KB has a section headed **"For reviewers"** that says exactly this is
+not a defect to re-derive:
+
+> A missing lockfile importer, or a frozen install that fails against a peer-qualified snapshot, is
+> a KNOWN systemic condition on this repository with a stated rule above — not a novel defect to be
+> re-derived from first principles on each task. … Four separate reviewers each discovering this
+> independently cost four rework rounds for one cause.
+
+So the obvious hypothesis was that the KB never reached the reviewer, and a first pass at
+`project.md` with a regex appeared to confirm it: `shopify-clone-conventions` looked granted to
+`integration-verifier` alone. **That reading was wrong** — the regex mis-sliced across profile
+blocks. Read directly, the Code Reviewer's own resources are:
+
+```yaml
+resources:
+  skills: [delivery-review]
+  mcps:   [kb-architecture, kb-conventions]
+  kb:     [shopify-clone-architecture, shopify-clone-conventions]
+```
+
+And its live run agrees: `2 knowledge bases`, which is exactly its grant. `kb-conventions` the MCP
+is `up=1, tools=14`. The reviewer had the document, in two channels, and objected anyway.
+
+The run line also says `1 grant did NOT reach this run`, which was the second thing worth chasing.
+It is `kb-architecture` — the MCP, `up=0, tools_count=null`, last checked 11:05 while its two
+siblings are up. Redundant belt-and-braces: that KB's *content* reached the run through the KB
+injection path regardless, which is why the count still reads 2. The disclosure is honest in both
+directions — the AGENT is told which resource is missing and why, by name, and instructed not to
+claim knowledge from it; the human's console line carries only the count.
+
+**So the mechanism is correct and the gap is a product-design one**, recorded here rather than as a
+finding because nothing lied, lost work, or blocked a path: ruling 189 makes a person's packet
+answer BINDING by appending it to the task's goal, while a convention in a KB is advisory context
+an agent may weigh or not. The rule this project re-litigates most lives in the advisory channel.
+Measured cost of that so far, by the KB's own account plus this pass: four rework rounds on SHOP-4's
+generation, then two more rounds, a decision packet and a human goal amendment on SHOP-24.
+
+Near-miss count for the pass is now eight, and this one had the same shape as the other seven:
+assume a mechanism, measure against the assumption, get a signal. Reading the file the mechanism
+actually reads is what separated it.
