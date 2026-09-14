@@ -375,6 +375,128 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(runOp).not.toHaveBeenCalled();
   });
 
+  /**
+   * Ruling 230 (F37-50). The decision IS the wait, so the same rule as
+   * `wait_for_window`: re-invoking the operator would pay a drive to rediscover
+   * the hold it was just told about (JC-9's five runs), and ruling 131(d)
+   * refuses the held triggers at the door anyway.
+   *
+   * What makes this worth its own test rather than a line in a list: the hold
+   * has to be REAL. Before this ruling the nearest option was
+   * `block_on_policy`, whose resolution sets `readiness: ready` and
+   * `waiting: agent` — so an option titled "Hold SHOP-11 while…" produced the
+   * record "SHOP-11 is unblocked", measured live at 04:12 UTC.
+   */
+  it("block_on_dependencies records a REAL hold and does NOT re-queue (ruling 230)", async () => {
+    deployOperator("supervised");
+    seedTask(
+      { stage: "impl", waiting: "agent", readiness: "blocked" },
+      {
+        ...FAILURE_PACKET,
+        options: [
+          {
+            kind: "block_on_dependencies",
+            t: "Hold until the gateway work lands",
+            d: "",
+            rec: true,
+            blockedBy: ["VIB-2"],
+          },
+        ],
+      },
+    );
+    // The hold's target has to EXIST: `setTaskDependencies` validates the refs,
+    // and a hold on a task that is not there would be a hold nothing can ever
+    // release. Discovered by this test failing exactly that way first.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "The gateway work this one waits on",
+      }),
+      goal: "Stand in for the blocking task.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot, deps: DEPS },
+    );
+    await flush();
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.packet).toBeNull();
+    // The hold is on the file, written through the same door every other
+    // dependency edit uses — not a sentence in an event.
+    expect(parsed.frontmatter.blockedBy).toEqual(["VIB-2"]);
+    // And the record says wait, not "unblocked".
+    const decision = parsed.timeline.find((e) => e.type === "transition")!;
+    expect(decision.text).toContain("waits on VIB-2");
+    expect(decision.text).not.toContain("unblocked");
+
+    await new Promise((r) => setTimeout(r, 1_000));
+    // CANARY: remove `block_on_dependencies` from NO_REQUEUE.
+    expect(runOp).not.toHaveBeenCalled();
+  });
+
+  it("ruling 230: a hold that cannot be written says so and never un-resolves the decision", async () => {
+    // Found by accident — the test above failed this way first, because its
+    // target did not exist. `setTaskDependencies` validates the refs, which is
+    // right: a hold on a task that is not there releases on nothing. What must
+    // not happen is the decision being thrown away because its side effect
+    // failed, which is why the write is best-effort and narrated.
+    //
+    // Canary: make the post-write effect throw instead of narrating.
+    deployOperator("supervised");
+    seedTask(
+      { stage: "impl", waiting: "agent", readiness: "blocked" },
+      {
+        ...FAILURE_PACKET,
+        options: [
+          {
+            kind: "block_on_dependencies",
+            t: "Hold until the missing task lands",
+            d: "",
+            rec: true,
+            blockedBy: ["VIB-404"],
+          },
+        ],
+      },
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot, deps: DEPS },
+    );
+    await flush();
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // The human's decision stands.
+    expect(parsed.packet).toBeNull();
+    // The hold did not land, and the record says so in words a person can act
+    // on rather than leaving them to infer it from an empty list.
+    expect(parsed.frontmatter.blockedBy).toEqual([]);
+    const note = parsed.timeline.find((e) => /was \*\*not\*\* recorded as waiting on/.test(e.text));
+    expect(note).toBeTruthy();
+    expect(note!.text).toContain("set what it waits on from the task page");
+    // And still no run: the decision was "do not run", and a failed side effect
+    // does not turn that into a dispatch.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(runOp).not.toHaveBeenCalled();
+  });
+
   it("hold_runtime_debug does NOT re-queue (the human asked for no run)", async () => {
     deployOperator("supervised");
     seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);

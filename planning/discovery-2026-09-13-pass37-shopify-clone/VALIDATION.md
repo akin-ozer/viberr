@@ -1266,3 +1266,35 @@ announcing a failure.
 
 Had the number climbed, the diagnosis was wrong and the monitor would have said so in those
 words. It did not climb.
+
+### Ruling 230 — red-proved in both halves, and a third path found by the canary
+
+The fix has two independent halves, each proved by reverting only itself:
+
+| reverted | test that went red |
+|---|---|
+| `block_on_dependencies` removed from `NO_REQUEUE` | the no-requeue assertion (a run fired) |
+| the post-write `setTaskDependencies` effect removed | the `blockedBy` assertion (the hold was never written) |
+
+Two authoring refusals have their own canary: an option naming nothing to wait on, and a
+`blockedBy` on any other kind. Both refuse by name and write no packet.
+
+**The third path was found by the canary hitting it first.** My first version of the main test
+used `VIB-2` as the dependency without seeding it, and the run came back with the hold unwritten
+and this in the log:
+
+```
+block_on_dependencies resolution could not record the hold
+  err: AppError: VIB-2 is not a task in this project.
+       at validateDependencyRefs (dependencies.server.ts:185)
+```
+
+Which is correct on both counts, and I had not planned for either. `setTaskDependencies`
+validates the refs — a hold on a task that does not exist releases on nothing — and the
+best-effort narration I had written fired and kept the human's decision standing. That path now
+has a test of its own: the packet still clears, `blockedBy` stays empty, the timeline says
+"was **not** recorded as waiting on … set what it waits on from the task page", and no run starts,
+because a failed side effect must not turn "do not run" into a dispatch.
+
+Writing the failure path before knowing it was reachable was luck. The canary is what turned it
+into something known to work.

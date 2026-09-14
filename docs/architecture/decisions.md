@@ -4923,6 +4923,32 @@ by rewriting those paragraphs:*
     board that a human should actually read are no longer the twelfth of it. A record that
     reports encouraged, designed behaviour as a failure teaches people to skim it, which is
     R16-2's rule about filters applied to a timeline.
+
+230. **"Hold this until those land" becomes an option that performs it (owner, 2026-09-14, pass
+    37; F37-50).** Ruling 131 built the whole dependency mechanism - the board renders `blockedBy`,
+    the schedule runner refuses a held occurrence, the dependency release re-triggers the operator
+    when the last entry finishes - and none of it was reachable from a decision packet. So an
+    operator that wanted a hold reached for the nearest-sounding kind, `block_on_policy`, whose
+    resolution is R20-1's "I fixed the credential, carry on": it sets `readiness: ready`,
+    `waiting: agent` and re-queues. Live on SHOP-11 at 04:12, an option titled "**Hold** SHOP-11
+    while gateway routing, tracing and stack-test work lands" produced the record "SHOP-11 is
+    **unblocked** and the operator re-runs to re-check", and the frontmatter agreed. The option
+    promised a hold and performed an unblock, and none of the fifteen kinds could have done
+    otherwise, because not one of them writes a dependency.
+    `block_on_dependencies` takes a `blockedBy` payload and writes it through `setTaskDependencies`
+    - the same door the operator's own tool and the task page use, so the canonicalisation, the
+    goal-link mirror and the "Dependencies updated" note are the ones every other caller gets
+    (ruling 164: an option performs the real action through the real door). It joins `NO_REQUEUE`
+    for ruling 224's reason: the decision IS that nothing runs, and re-invoking the operator would
+    pay a drive to rediscover the hold it was just told about, which is JC-9's five runs and the
+    same thing ruling 131(d) refuses at the door.
+    Two refusals at authoring time, by name like every other payload-bearing kind: a
+    `block_on_dependencies` naming nothing to wait on is refused (it would resolve into a hold
+    that releases on nothing), and a `blockedBy` on any other kind is refused. And the write is
+    best-effort with its failure narrated rather than thrown: `setTaskDependencies` validates the
+    refs, so a hold on a task that does not exist is correctly refused, and when that happens the
+    human's decision must still stand while the record says plainly that nothing releases this
+    task and where to set it by hand. That path was found by the canary hitting it first.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 

@@ -1006,6 +1006,10 @@ export interface OperatorPacketOptionInput {
   /** wait_for_window only — ruling 224: the provider's own reset instant, ISO.
    *  The resolution schedules the agent's re-dispatch just after it. */
   dueAt?: string;
+  /** block_on_dependencies only — ruling 230: the tasks or goal links this one
+   *  waits on. The resolution writes them through `setTaskDependencies`, so
+   *  Viberr releases the task when the last entry finishes. */
+  blockedBy?: string[];
 }
 
 export interface OperatorOpenPacketInput {
@@ -1368,6 +1372,35 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 230: a hold that names nothing to wait on resolves into a hold that
+  // releases on nothing — the task would sit with no dependencies, no run and
+  // no owner. Refused by name like every other option whose payload its kind
+  // requires.
+  const strayHold = rawOptions.find(
+    (o) =>
+      o.kind === "block_on_dependencies" &&
+      (o.blockedBy ?? []).filter((e) => e.trim() !== "").length === 0,
+  );
+  if (strayHold) {
+    return {
+      outcome: "noop",
+      message:
+        `A block_on_dependencies option needs the work it waits on — "${strayHold.title}" names none. ` +
+        "Pass blockedBy as task keys or goal links, or offer a different hold.",
+    };
+  }
+  const strayBlockedBy = rawOptions.find(
+    (o) => o.kind !== "block_on_dependencies" && (o.blockedBy ?? []).length > 0,
+  );
+  if (strayBlockedBy) {
+    return {
+      outcome: "noop",
+      message:
+        `blockedBy only fits a block_on_dependencies option — "${strayBlockedBy.title}" is ${strayBlockedBy.kind}. ` +
+        "Drop it, or offer the hold as its own option.",
+    };
+  }
+
   // Ruling 226: the head-check override is the policy engine's to offer and
   // nobody else's. It is granted against a triple the gate read live at the
   // moment it refused, so an operator authoring it from a stale board would be
@@ -1426,6 +1459,9 @@ export async function operatorOpenPacket(
     // useless without one — an option promising to resume "when the window
     // reopens" with no instant would resolve into a schedule with no due time.
     if (o.kind === "wait_for_window" && o.dueAt) option.dueAt = o.dueAt;
+    if (o.kind === "block_on_dependencies" && o.blockedBy?.length) {
+      option.blockedBy = [...o.blockedBy];
+    }
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();

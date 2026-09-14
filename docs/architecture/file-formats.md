@@ -395,14 +395,15 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 15 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 16 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
                                   #   edit_goal | archive_task | discard_branch |
                                   #   resolve_remote_collision | force_accept |
                                   #   move_stage | wait_for_window |
-                                  #   accept_unverified_head | custom
+                                  #   accept_unverified_head |
+                                  #   block_on_dependencies | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in

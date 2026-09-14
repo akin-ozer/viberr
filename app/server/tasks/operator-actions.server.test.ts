@@ -4686,6 +4686,51 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 
+  it("refuses a hold that names nothing to wait on, and blockedBy on any other kind", async () => {
+    // Ruling 230: a block_on_dependencies with no entries resolves into a hold
+    // that releases on nothing — no dependencies, no run, no owner. Canary:
+    // remove either stray refusal.
+    packetsRoster();
+    seedTask("impl");
+    const empty = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Wait or push on?",
+        options: [
+          { kind: "block_on_dependencies", title: "Hold until the gateway lands", recommended: true },
+          { kind: "request_edit", title: "Send it back" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(empty.outcome).toBe("noop");
+    expect(empty.message).toContain("A block_on_dependencies option needs the work it waits on");
+    expect(task().packet).toBeNull();
+
+    const stray = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Wait or push on?",
+        options: [
+          { kind: "redirect", title: "Have the developer redo it", recommended: true, blockedBy: ["VIB-2"] },
+          { kind: "request_edit", title: "Send it back" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(stray.outcome).toBe("noop");
+    expect(stray.message).toContain("blockedBy only fits a block_on_dependencies option");
+    expect(task().packet).toBeNull();
+  });
+
   it("refuses to let the operator offer the head-check override at all", async () => {
     // Ruling 226: the waiver is granted against a (PR, revision, live head)
     // triple the ACCEPTANCE GATE read at the moment it refused. An operator

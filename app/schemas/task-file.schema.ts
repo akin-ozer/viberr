@@ -206,6 +206,16 @@ export const PACKET_OPTION_KINDS = [
   // only while all three still match, so it cannot be spent on a head that
   // moved afterwards.
   "accept_unverified_head",
+  // Ruling 230 (pass 37, F37-50): "hold this until those land". Payload:
+  // `blockedBy`, the tasks or goal links this one waits on. Resolution writes
+  // ruling 131's dependency list, which the board renders, the schedule runner
+  // refuses on, and the dependency release re-triggers automatically when the
+  // last entry finishes. The mechanism was already there and good; the only
+  // thing missing was a way to reach it from the surface where the decision is
+  // actually made, so an operator wanting a hold reached for `block_on_policy`
+  // — whose resolution UNBLOCKS — and the record said "SHOP-11 is unblocked"
+  // under an option titled "Hold SHOP-11 while…".
+  "block_on_dependencies",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -719,6 +729,26 @@ export const packetObservationSchema = z
   .loose();
 export type PacketObservation = z.infer<typeof packetObservationSchema>;
 
+/**
+ * Ruling 131: one `blockedBy` entry as stored — a spelling
+ * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (a task
+ * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
+ * carries exactly what the surfaces print and the resolver looks up.
+ */
+export const dependencyRefTextSchema = z
+  .string()
+  .transform((value, ctx) => {
+    const canonical = canonicalDependencyRef(value);
+    if (canonical === null) {
+      ctx.addIssue({
+        code: "custom",
+        message: `not a task key or a goal link (\`${value}\`)`,
+      });
+      return z.NEVER;
+    }
+    return canonical;
+  });
+
 export const packetOptionSchema = z
   .object({
     kind: z.enum(PACKET_OPTION_KINDS),
@@ -752,6 +782,9 @@ export const packetOptionSchema = z
      *  re-dispatch just after it. Required on the kind, refused on every
      *  other. */
     dueAt: z.string().optional(),
+    /** Ruling 230: `block_on_dependencies` — what this task waits on, in the
+     *  same spellings `blockedBy` stores (a task key, or a goal link). */
+    blockedBy: z.array(dependencyRefTextSchema).optional(),
     /** redirect — ruling 163 (pass 35, F35-13): the resolution RETURNS the
      *  task to the review stage when it stands at or past it, so the reworked
      *  revision gets its verdict where the reviewers are eligible. Written by
@@ -901,26 +934,6 @@ export const reviewVerdictSchema = z
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
 // -------------------------------------------------------- frontmatter
-
-/**
- * Ruling 131: one `blockedBy` entry as stored — a spelling
- * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (a task
- * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
- * carries exactly what the surfaces print and the resolver looks up.
- */
-export const dependencyRefTextSchema = z
-  .string()
-  .transform((value, ctx) => {
-    const canonical = canonicalDependencyRef(value);
-    if (canonical === null) {
-      ctx.addIssue({
-        code: "custom",
-        message: `not a task key or a goal link (\`${value}\`)`,
-      });
-      return z.NEVER;
-    }
-    return canonical;
-  });
 
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
 export const baseRefreshSchema = z

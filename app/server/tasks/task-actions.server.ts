@@ -8483,6 +8483,49 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "block_on_dependencies": {
+      // Ruling 230 (F37-50): the decision IS the wait. `blockedBy` is ruling
+      // 131's mechanism and it is already good — the board renders it, the
+      // schedule runner refuses on it, and the dependency release re-triggers
+      // the operator when the last entry finishes. It simply could not be
+      // reached from a packet, so an operator wanting a hold picked
+      // `block_on_policy`, whose resolution UNBLOCKS, and the record read
+      // "SHOP-11 is unblocked" under an option titled "Hold SHOP-11 while…".
+      //
+      // The list is written AFTER this write, through `setTaskDependencies` —
+      // the same door the operator's own tool and the task page use, so the
+      // canonicalisation, the goal-link mirror and the "Dependencies updated"
+      // note are the ones every other caller gets (ruling 164: an option
+      // performs the real action through the real door).
+      const entries = (option.blockedBy ?? []).filter((e) => e.trim() !== "");
+      if (entries.length === 0) {
+        throw AppError.conflict(
+          `"${option.t}" names nothing to wait on, so there is no hold to record. ` +
+            `Ask the operator to offer the option again with the tasks this one waits on.`,
+        );
+      }
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. ${key} waits on ${entries.join(", ")} — nothing runs on it ` +
+            `until every entry is done, and Viberr releases it then.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        // Deliberately `human`, not `none`: the dependency write below is what
+        // earns `none` (it settles the flag itself once nothing is pending). If
+        // it fails, the task is left visibly on a person rather than silently
+        // idle with no hold and no owner.
+        fm.waiting = "human";
+      };
+      clearPacket = true;
+      break;
+    }
     case "wait_for_window": {
       // Ruling 224 (F37-44): the decision IS the wait. The packet closes and
       // the task settles on a human, because nothing is running and nothing
@@ -8881,6 +8924,11 @@ export async function resolvePacket(
     "archive_task", // the task left the board
     "edit_goal", // the packet is still open, awaiting the goal
     "hold_runtime_debug", // the human explicitly asked for no run (§1.2)
+    // Ruling 230: the decision is that nothing runs until the dependencies
+    // clear. Re-invoking the operator would only pay a drive to rediscover the
+    // wait it was just told about — JC-9's five runs, and the same reason
+    // ruling 131(d) refuses the held triggers at the door.
+    "block_on_dependencies",
     "retry_other_backend", // starts a specialist run above; its completion re-invokes
     "discard_branch", // cleanup only, no coordination change
     "resolve_remote_collision", // the re-delivery's own machinery owns the follow-up
@@ -9442,6 +9490,48 @@ export async function resolvePacket(
     };
     if ("ack" in input) forced.ack = input.ack ?? null;
     await forceAcceptCompletion(db, forced, actor, ctx);
+  }
+
+  // block_on_dependencies (ruling 230, pass 37, F37-50): write the hold the
+  // decision promised, through the same door every other dependency edit uses.
+  // Best-effort like its siblings: a refused write never un-resolves a decision
+  // a human already made, and its outcome lands on the timeline in plain words.
+  if (option.kind === "block_on_dependencies") {
+    const entries = (option.blockedBy ?? []).filter((e) => e.trim() !== "");
+    try {
+      const { setTaskDependencies } = await import("./dependencies.server");
+      await setTaskDependencies(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          blockedBy: entries,
+        },
+        actor,
+        ctx,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("block_on_dependencies resolution could not record the hold", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
+            `The decision stands and nothing was started, but nothing releases this task either — ` +
+            `set what it waits on from the task page.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
   }
 
   // wait_for_window (ruling 224, pass 37, F37-44): write the schedule the
