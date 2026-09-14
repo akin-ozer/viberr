@@ -985,3 +985,23 @@ AssertionError: expected "vi.fn()" to not be called at all, but actually been ca
 ```
 
 Gates: `oxlint` clean, `tsc --noEmit` clean, **363 files / 6606 tests passed**, `build` green.
+
+### Ruling 224, live, on the stall that produced it
+
+All four tasks the Codex window stopped are now waiting on a schedule instead of on a human
+being awake:
+
+| task | packet | waiting | scheduled |
+|---|---|---|---|
+| SHOP-3 | cleared | human | `run-operator` · 2026-09-14T02:28:00Z |
+| SHOP-11 | cleared | human | `run-operator` · 2026-09-14T02:28:00Z |
+| SHOP-12 | cleared | human | `run-operator` · 2026-09-14T02:28:00Z |
+| SHOP-18 | cleared | human | `run-operator` · 2026-09-14T02:28:00Z |
+
+Each timeline records the decision in viberr's own words — *"wait for the Codex window to reopen
+(Sep 14, 2026 · 02:27 UTC). An operator run is scheduled to pick the task back up on the same
+account. No account or project policy was changed."* — followed by the schedule note. The board
+says `waiting: human`, which is true: nothing is running and nothing is pretending to.
+
+Before the ruling the same four tasks had three exits: change the deployment's model policy,
+assert a window had reset three hours early, or come back at 02:27 and press four buttons.
