@@ -4799,6 +4799,16 @@ by rewriting those paragraphs:*
     at all, so it claims nothing and has nothing to correct; deriving over it would invent a
     promise where the board had made none. Forty-one green tests covered neither case, which is
     the point: a predicate is not verified by the tests that happen to pass.
+    Amended twice more, from the same question asked properly the second time: **what states does
+    the schedule runner refuse?** It refuses a held task, an archived one, and a closed one, each
+    with its own outcome (`skipped-held`, `skipped-archived`, `skipped-done`). A card that names
+    a resume time for an occurrence the runner will refuse is a promise nothing intends to keep,
+    so the derivation excludes every one of them: the terminal case via LV-20's `none` above,
+    and `blockedBy` and `archived` by name. R14-3 archiving removes a task from every view except
+    the Archived filter, and that filter still draws the card, so "a consumer filters it out"
+    does not hold here. The general rule this ruling ended up standing for: a derived promise is
+    bounded by what the mechanism behind it will actually do, and the way to find its edges is to
+    read that mechanism's refusals rather than to imagine the cases.
 
 226. **A head GitHub will not compare is refused, not disclosed (owner, 2026-09-14, pass 37;
     F37-43).** Ruling 135 built the guard for a PR head that is not the reviewed revision and

@@ -1574,6 +1574,32 @@ describe("ruling 225: a task resting on a clock", () => {
     }
   });
 
+  it("never promises a resume on an archived task either", () => {
+    // Third instance of the same hole, found the same way: by asking which
+    // tasks the schedule runner refuses. It has a dedicated `skipped-archived`
+    // outcome, so a resume time on an archived card is a run that will not
+    // happen. Archiving leaves every view but the Archived filter — which
+    // still draws the card, and the card still draws this tag.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          archived: true,
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug, { includeArchived: true })[0]!;
+      expect(task.archived).toBe(true);
+      expect(task.waiting).not.toBe("schedule");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it("invents no claim on a task that was making none", () => {
     // `waiting: "none"` renders NO wait tag at all, so it tells nobody
     // anything and there is nothing to correct. The ruling is about the one

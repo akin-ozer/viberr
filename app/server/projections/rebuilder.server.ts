@@ -574,6 +574,15 @@ export function rebuildTaskFile(
     // reintroduced by it. What holds such a task is the dependency, and the
     // board already says so.
     fm.blockedBy.length === 0 &&
+    // And the same again for an archived task. The schedule runner refuses its
+    // occurrence with its own outcome (`skipped-archived`, kept distinct from
+    // `skipped-done` so the note does not tell an archived task it was
+    // "already Done"), so a resume time on that card promises a run that will
+    // not happen. The terminal-stage case is already handled above, by LV-20's
+    // `none`. R14-3 archiving removes a task from every view but the Archived
+    // filter — and that filter still draws the card, and the card still draws
+    // this tag, so "a consumer filters it out" is not true here.
+    !fm.archived &&
     fm.schedules.some((occurrence) => occurrence.status === "pending");
 
   const projectedWaiting: Waiting = isTerminalStage(
