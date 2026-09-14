@@ -1627,3 +1627,40 @@ before asking, named the convention in play (shared surface #5, which it noted "
 stopped four tasks with the same question"), said why it was asking rather than acting (path
 ownership, no missing capability), and offered a third option whose own description admits it
 "does NOT unblock SHOP-18 on its own". That is a decision packet written for someone deciding.
+
+---
+
+## Ruling 235, proven on the task that produced the finding
+
+Deployed at 08:02Z and tested against SHOP-2's real unpushed head, which was still sitting there.
+One minute, start to finish:
+
+```
+08:03:34  Accept pressed        409 refused: "SHOP-2's delivered revision `ea5f2ff` is not on
+                                GitHub: PR #13's head is `913ce9d`..."   <- toast, as before
+08:03:34  github event          "Acceptance refused: the reviewed revision is not on the
+                                pull request"                            <- NEW: the record
+08:03:34  audit                 task.acceptance.head_unpushed            <- NEW
+08:03:34  runtime.run.started   operator, trigger head-unpushed          <- NEW: the hand-off
+08:03:46  github.workspace.branch_reconciled
+08:03:57  operator comment      "@Arda The refused acceptance is unblocked. PR #13's head was
+                                `913ce9d`, one commit behind the revision the reviewers judged;
+                                I pushed the delivered revision..."
+08:03:59  github event          "Pushed `ea5f2ff` to **PR #13** for review (was `913ce9d`)."
+08:04:33  Accept pressed        MERGED at ea5f2ff; SHOP-2 -> Done
+```
+
+Twenty-five seconds from the refusal to the delivery that fixes it. The same sequence an hour
+earlier produced: refusal, nothing recorded, operator re-runs, operator files the SAME acceptance
+recommendation, human presses Accept again, refused again.
+
+**The part that matters most is what merged.** PR #13 merged at `ea5f2ff` - the revision both
+required reviewers were pinned to - not at `913ce9d`, the head the PR had been carrying. That is
+the exact failure this gate exists to prevent, and the one that happened for real on SHOP-17
+(ruling 223: two reviewers approved `1f99f68`, it was never pushed, and PR #12 merged at
+`9104562`). Here the gate refused, the refusal became durable, the operator acted on it, and the
+merge landed the reviewed code.
+
+Nine canaries across this session, each red on only its own tests. For ruling 235 specifically:
+dropping `liveHeadSha` from the definite branch (the original defect) fails both tests; skipping
+the recorder fails both; dropping the idempotence guard fails only the twice-pressed one.

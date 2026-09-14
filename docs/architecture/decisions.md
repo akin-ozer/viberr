@@ -5064,6 +5064,39 @@ by rewriting those paragraphs:*
     listed by name and never pattern-matched.
     (`audit-browse.server.ts`, `org.settings.tsx`, `org-settings-page.tsx`.)
 
+235. **A refused acceptance is recorded, and the delivery is handed to the operator (pass 37;
+    F37-55).** SHOP-2 reached the acceptance boundary with both required reviewers approving
+    revision `ea5f2ffd7493` and the operator recommending "Accept completion and move SHOP-2 to
+    Done. The review is clean." Pressing Accept refused, correctly: PR #13's head was `913ce9d`,
+    and the reviewed revision had never been pushed. The Integration Verifier had said so inside
+    its own approval - it reviewed `ea5f2ffd7493` "with `913ce9d` as its ancestor".
+    The refusal went to one browser's toast and nowhere else. No audit row, no timeline event,
+    the string "not on GitHub" absent from `task.md`. Two things followed. The RECORD did not
+    contain the most consequential human action on the task, which is files-are-truth failing at
+    the one place it is least affordable. And the OPERATOR could not learn it: it re-anchors on
+    `task.md` every turn, so when the human pressed "Run operator" to get the branch pushed, it
+    ran, saw nothing about any refusal, and filed the SAME acceptance recommendation again. It
+    holds `deliver-review-pr: direct` and could have pushed in that turn. Accept, refuse, run
+    operator, be re-recommended the same accept - and the refusal's own remedy ("Deliver the
+    branch to push it") names an action ruling 134 reserves for the operator, so the human cannot
+    perform it and no button offers it.
+    The mechanism was one missing field. Every refusal funnels through `refuseUnverifiedHead`,
+    whose recorder is guarded on `check.liveHeadSha` - and the KNOWN-mismatch branch of
+    `evaluateAcceptancePrHead` returned `{refusal, verification}` and no `liveHeadSha`, so the
+    guard skipped and nothing was written. The refusal sentence quotes both SHAs; the value was
+    in hand and simply not carried.
+    Ruling 226 had already fixed this shape one branch away, for the case where GitHub answers the
+    pull and refuses the compare: it writes a packet BEFORE it throws, because a refusal that
+    leaves no record strands the task. The certain case gets the same durability and a different
+    instrument. Not a packet: a known mismatch is not a decision, the reviewed revision must be
+    pushed, and only the operator may push it - so there is nothing to ask. It gets a `github`
+    timeline event, a `task.acceptance.head_unpushed` audit row (on the Activity feed beside
+    `task.acceptance.forced`, for the same reason), and a `head-unpushed` operator hand-off whose
+    turn instruction names the delivery and says explicitly NOT to file another acceptance
+    recommendation. Idempotent by note text, like `noteDeadDependency`: a button pressed five
+    times is one record and one hand-off, never five paid runs. The human keeps the toast.
+    (`task-actions.server.ts`, `operator-run.server.ts`, `activity-feed.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

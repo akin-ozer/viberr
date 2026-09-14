@@ -1130,7 +1130,10 @@ export async function autoInvokeOperator(
     | "pr-diverged"
     | "delivered"
     | "packet-resolved"
-    | "dependencies-released",
+    | "dependencies-released"
+    // Ruling 235: a refused acceptance whose cause is an unpushed reviewed
+    // revision. Only the operator may push it, so the refusal is handed here.
+    | "head-unpushed",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
@@ -10212,6 +10215,86 @@ export interface AcceptancePrHeadCheck {
  * task), and never re-writes itself while its own packet is standing — a human
  * pressing Accept twice gets one question, not two.
  */
+/** The timeline title ruling 235's record carries, and the idempotence key. */
+const UNPUSHED_HEAD_TITLE = "Acceptance refused: the reviewed revision is not on the pull request";
+
+/**
+ * Ruling 235 (F37-55) — record a refused acceptance whose cause is a KNOWN head
+ * mismatch, and hand the delivery to the operator.
+ *
+ * Measured live: SHOP-2's two required reviewers approved `ea5f2ffd7493`, PR #13's
+ * head was `913ce9d`, and pressing Accept refused with an exact sentence naming
+ * both. That sentence went to one browser's toast and nowhere else — no audit
+ * row, no timeline event, nothing in `task.md`. The person then pressed "Run
+ * operator" to get the branch pushed; the operator re-anchored on a file that
+ * said nothing about any refusal and filed the SAME acceptance recommendation
+ * again. Accept, refuse, run operator, be re-recommended the same accept.
+ *
+ * Idempotent by note text, like `noteDeadDependency`: pressing Accept five times
+ * writes one note and hands off once, because the second press finds its own
+ * sentence already newest and does neither again.
+ */
+async function recordUnpushedHeadRefusal(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  check: AcceptancePrHeadCheck,
+  refusal: string,
+): Promise<void> {
+  try {
+    const text = `**Acceptance refused:** ${refusal}`;
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const newest = existing?.parsed.timeline.find(
+      (e) => e.type === "github" && e.title === UNPUSHED_HEAD_TITLE,
+    );
+    // Already on the record for this exact pair: say nothing and, crucially,
+    // do not start another paid operator run for a button pressed twice.
+    if (newest?.text === text) return;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: UNPUSHED_HEAD_TITLE,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.acceptance.head_unpushed",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: {
+        prNumber: check.prNumber,
+        revisionHeadSha: check.revisionHeadSha,
+        liveHeadSha: check.liveHeadSha,
+      },
+    });
+    // Fire-and-forget, like every other operator hand-off in this module: the
+    // refusal is the caller's answer and must not wait on a paid run, nor be
+    // turned into a 500 by one that fails.
+    void autoInvokeOperator(db, ctx, projectSlug, taskKey, "head-unpushed").catch((error) => {
+      logger.error("head-unpushed operator handoff failed", {
+        taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  } catch (error) {
+    // The refusal is the point; failing to record it must not turn a refused
+    // acceptance into a thrown-away one.
+    logger.warn("could not record the unpushed-head acceptance refusal", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 async function refuseUnverifiedHead(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -10220,6 +10303,21 @@ async function refuseUnverifiedHead(
   check: AcceptancePrHeadCheck,
 ): Promise<never> {
   const refusal = check.refusal ?? "";
+  // Ruling 235 (F37-55): a KNOWN mismatch is not a decision. The reviewed
+  // revision simply is not on the pull request, the only remedy is to push it,
+  // and ruling 134 reserves pushing for the operator — so there is nothing to
+  // ask a person. It gets a record and a hand-off instead of a packet; only the
+  // UNVERIFIABLE case (ruling 226), where a maintainer really must choose
+  // between re-delivering and merging unchecked, opens one.
+  if (
+    check.verification !== "unverifiable" &&
+    check.liveHeadSha &&
+    check.prNumber !== null &&
+    check.revisionHeadSha
+  ) {
+    await recordUnpushedHeadRefusal(db, ctx, projectSlug, taskKey, check, refusal);
+    throw AppError.conflict(refusal);
+  }
   if (check.liveHeadSha && check.prNumber !== null && check.revisionHeadSha) {
     try {
       await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
@@ -10445,6 +10543,13 @@ async function evaluateAcceptancePrHead(
               `PR #${pr.number}'s head is \`${headSha.slice(0, 7)}\`. Deliver the branch to push it; ` +
               `it cannot be accepted until the PR carries the reviewed revision.`,
             verification: "verified",
+            // Ruling 235 (F37-55): the live head travels with the refusal so the
+            // recorder below can write what was refused and why. Without it
+            // `refuseUnverifiedHead`'s guard saw a null and recorded NOTHING —
+            // the refusal reached one browser's toast and never the task file,
+            // so the operator (the only actor allowed to push) could not learn
+            // it and re-filed the same acceptance recommendation.
+            liveHeadSha: headSha,
           };
         }
       }

@@ -1437,6 +1437,105 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
    * naming the check that did not run rather than the consequence. Live, that
    * merged SHOP-17 at the revision its Code Reviewer had rejected.
    */
+  describe("ruling 235: a KNOWN unpushed head is recorded and handed to the operator", () => {
+    const head = "f".repeat(40);
+    const delivered = "a".repeat(40);
+    /** The never-pushed shape: the compare 404s and GitHub's real 422 commit
+     *  read confirms the delivered revision does not exist on the remote. */
+    const neverPushed = () =>
+      fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${head}`]: {
+          status: 404,
+          body: { message: "Not Found" },
+        },
+        [`GET /repos/akin-ozer/viberr/commits/${delivered}`]: {
+          status: 422,
+          body: { message: `No commit found for SHA: ${delivered}` },
+        },
+      });
+    const withCredential = () => {
+      const patActor = actor(store.users.arda);
+      const pat = createPat(
+        store.db,
+        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0235" },
+        patActor,
+      );
+      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    };
+    const accept = () =>
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+    const notes = () =>
+      fm().timeline.filter(
+        (e) =>
+          e.type === "github" &&
+          e.title === "Acceptance refused: the reviewed revision is not on the pull request",
+      );
+
+    /**
+     * F37-55, measured live: SHOP-2's two required reviewers approved
+     * `ea5f2ffd7493`, PR #13's head was `913ce9d`, and pressing Accept refused
+     * with an exact sentence naming both. That sentence reached ONE browser's
+     * toast and nothing else - no audit row, no timeline event, nothing in
+     * `task.md`. The person then pressed "Run operator" to get the branch
+     * pushed; the operator re-anchored on a file that said nothing about a
+     * refusal and filed the SAME acceptance recommendation again.
+     */
+    it("writes the refusal to the timeline and the audit log, and opens NO packet", async () => {
+      healthySeed();
+      withCredential();
+      github = neverPushed();
+
+      await expect(accept()).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringContaining("is not on GitHub"),
+      });
+      expect(mergeMock).not.toHaveBeenCalled();
+      expect(fm().frontmatter.stage).toBe("review");
+
+      // The record now contains what the browser was told.
+      const [note] = notes();
+      expect(note).toBeTruthy();
+      expect(note!.text).toContain("is not on GitHub");
+      expect(note!.text).toContain(delivered.slice(0, 7));
+      expect(note!.text).toContain(head.slice(0, 7));
+
+      // And NOT a packet: a known mismatch is not a decision. The reviewed
+      // revision must be pushed, ruling 134 reserves pushing for the operator,
+      // so there is nothing for a person to choose. Only the UNVERIFIABLE case
+      // (ruling 226) asks.
+      // `packet` is the signal, not `waiting`: a task sitting at the acceptance
+      // boundary already waits on a human before anything here runs, so a
+      // waiting-state assertion would pass whatever this code did.
+      expect(fm().packet).toBeNull();
+
+      expect(
+        listAuditEvents(store.db, { action: "task.acceptance.head_unpushed" }),
+      ).toHaveLength(1);
+    });
+
+    it("presses Accept twice without a second note or a second operator run", async () => {
+      healthySeed();
+      withCredential();
+      github = neverPushed();
+
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+
+      // Idempotent by note text: the button pressed twice is one record and one
+      // hand-off, not two paid operator runs.
+      expect(notes()).toHaveLength(1);
+      expect(
+        listAuditEvents(store.db, { action: "task.acceptance.head_unpushed" }),
+      ).toHaveLength(1);
+    });
+  });
+
   describe("ruling 226: a head GitHub would not compare is refused, not disclosed", () => {
     const head = "f".repeat(40);
     const delivered = "a".repeat(40);

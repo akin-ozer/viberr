@@ -3116,3 +3116,64 @@ readability machinery is actively managing".
 **Fixed** by taking the boundary from the machinery rather than restating it, and the test now
 asserts `compactTimelineEvents` itself on both lengths (40 untouched, 41 folded) so the two
 cannot drift apart again.
+
+---
+
+## F37-55 · A refused acceptance is told to one browser and to nobody else — MEDIUM
+
+**Found by accepting a task the operator had just recommended.** SHOP-2 reached the acceptance
+boundary at 07:45 with both required reviewers approving revision `ea5f2ffd7493`, and the operator
+filed its recommendation: *"Accept completion and move SHOP-2 to Done. The review is clean and the
+work meets the goal."* I clicked Accept. It refused, correctly:
+
+> SHOP-2's delivered revision `ea5f2ff` is not on GitHub: PR #13's head is `913ce9d`. Deliver the
+> branch to push it; it cannot be accepted until the PR carries the reviewed revision.
+
+The refusal is right, exact, names both shas and states the remedy. The Integration Verifier had
+even said as much inside its own approval ("Reviewed HEAD `ea5f2ffd7493` with `913ce9d` as its
+ancestor") — it reviewed a revision that was never pushed. This is the drift the gate exists for.
+
+**What is wrong is where the refusal goes: one toast, in one browser, and nowhere else.**
+
+```
+audit rows for SHOP-2 after the refused accept:   runtime.run.started
+                                                  github.reconcile.task
+                                                  task.operator.recommended
+                                                  task.operator.recommended_completion
+timeline events mentioning the refusal:           none
+the string "not on GitHub" in task.md:            absent
+```
+
+So the consequences compose:
+
+1. **The record does not contain it.** A human accepted, viberr refused, and `task.md` — the thing
+   that is supposed to be true — shows no trace. Files-are-truth fails for the single most
+   consequential human action in the product.
+2. **The operator cannot learn it.** It re-anchors on `task.md` every turn. I clicked "Run
+   operator" precisely to get the branch pushed; it ran at 07:50:32 and filed
+   `task.operator.recommended_completion` **again** at 07:50:58 — the identical recommendation for
+   the identical action that had just been refused. It holds `deliver-review-pr: direct` and could
+   have pushed in that same turn. It had no way to know it needed to.
+3. **The remedy has no control.** The refusal says "Deliver the branch to push it". The task page
+   offers Edit, Verify, Accept completion, Archive, Edit details, Edit what it waits on, Apply,
+   Dismiss, Run operator. There is no deliver or push button, by design — ruling 134 says
+   "Pushing is never a person's job and never an agent's". So the sentence names a remedy the
+   human is structurally unable to perform, and the actor who can perform it is not told.
+
+The loop is therefore closed and silent: accept, refuse, run operator, be re-recommended the same
+accept. The card keeps asserting "The review is clean and the work meets the goal" while viberr
+itself refuses to act on it.
+
+**Viberr has already ruled on exactly this shape, one branch of the same function away.** Ruling
+226 (this pass) covers the case where GitHub answers the pull but refuses the compare: it writes a
+two-option decision packet, reprojects, and only then throws — because a refusal that leaves no
+record strands the task. The DEFINITE mismatch, ten lines away in the same
+`evaluateAcceptancePrHead`, returns a bare `refusal` string that the caller throws as a 409 with
+no packet, no note and no audit row. The uncertain case was made durable; the certain one was not.
+
+**The fix is not another packet.** A packet asks a human to choose, and here there is nothing to
+choose: the reviewed revision must be pushed, and only the operator may push it. So the refusal
+should (a) land on the timeline, so the record is true and the operator re-anchors on it, and
+(b) queue the operator with a nudge naming the delivery, the way ruling 228's stranded nudge does
+— guarded so a refused acceptance cannot fan out repeat runs. The human keeps the toast they
+already get.

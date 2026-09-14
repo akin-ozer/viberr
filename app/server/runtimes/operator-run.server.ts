@@ -191,6 +191,7 @@ export interface RunOperatorInput {
     | "delivered"
     | "packet-resolved"
     | "dependencies-released"
+    | "head-unpushed"
     | "scheduled"
     | "manual";
   /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
@@ -3946,6 +3947,26 @@ function operatorTurnDoctrine(
       "Rework on a task whose PR is already open is delivered the same way: `deliver_for_review` pushes the new revision to that PR. " +
       "If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
+    );
+  }
+  if (trigger === "head-unpushed") {
+    // Ruling 235 (F37-55): a human pressed Accept and the gate refused because
+    // the reviewed revision is not on the PR. Only this operator can push it
+    // (ruling 134: "pushing is never a person's job and never an agent's"), so
+    // the refusal is handed here rather than left as a toast in one browser.
+    // Live shape: SHOP-2's reviewers approved `ea5f2ff`, PR #13's head was
+    // `913ce9d`, and the operator - re-run by the human for exactly this -
+    // filed the SAME acceptance recommendation again, because nothing on the
+    // task said the acceptance had been refused.
+    const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
+    return (
+      `A person pressed Accept on this task and Viberr refused it: the delivered revision your ` +
+      `reviewers were pinned to is not the head of ${prNo}. Call \`deliver_for_review\` to push ` +
+      `the delivered revision to that pull request, then say in ONE concise comment that the ` +
+      `branch now carries the reviewed revision and the acceptance can be tried again. ` +
+      `Do NOT file another acceptance recommendation: one is already on the task and the block ` +
+      `is the unpushed branch, not the decision. If the push cannot be made, say why in that ` +
+      `same comment so the person is not left pressing a button that keeps refusing.`
     );
   }
   if (trigger === "pr-diverged") {
