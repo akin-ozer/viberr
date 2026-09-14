@@ -2060,3 +2060,39 @@ release on this board. The drain's contract is proven by injection at the seam
 (`ctx.deps.startAgentRun`), the same seam `runOperator` already uses, and the release ordering by a
 real `announceRelease` call. A live drain needs a task that is BOTH held and in review deadlock at
 the same moment, which has happened exactly once in six days.
+
+---
+
+## F37-65, validated LIVE on the running instance (2026-09-15)
+
+Not by assertion — by reading the two surfaces the fix touches, on the deployed build, against the
+behaviour the whole pass produced.
+
+**The capability matrix.** The Operator profile on `/projects/shopify-clone-platform/agents`:
+
+```
+ACTS DIRECTLY          Select & run agents
+                       Generate decision & blocking packets
+                       Append typed important events
+                       Stage transitions                      ← promoted
+                       Deliver the branch & open the review PR ← promoted
+                       Bring the task branch up to date
+                       Search & fetch from the web
+RECOMMENDS ONLY        Accept completion into Done            ← NOT promoted
+```
+
+`stage-transitions` and `deliver-review-pr` are stored `recommend` and show as DIRECT, because full
+autonomy promotes them. `completion-for-acceptance` is stored `recommend` and stays RECOMMENDS ONLY,
+because owner ruling Q1 exempts it. Before the fix `applyAutonomyCeiling` mirrored only the
+downgrade half, so the first two sat under RECOMMENDS ONLY while the runtime let the operator do
+them unattended — which is what it did all pass.
+
+**The Execution caption**, on SHOP-19:
+
+> Full autonomy: this run can move the task. Accepting completion still needs a person, because the
+> operator's acceptance grant is not direct.
+
+**And the behaviour both now describe**, across six days: every stage transition and every
+`deliver_for_review` on this board was the operator acting alone; every acceptance (SHOP-3, SHOP-18,
+SHOP-23, SHOP-24, SHOP-25) was a person pressing the button while the operator filed a card. The two
+surfaces and the six-day record now say the same thing.
