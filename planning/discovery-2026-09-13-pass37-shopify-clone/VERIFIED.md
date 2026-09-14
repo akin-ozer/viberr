@@ -917,3 +917,38 @@ recovery path within the hour.
 This is the check F37-43 would have failed: SHOP-17's reviewers were pinned to `1f99f68`, which
 was never on the remote at all, while PR #12's head was `9104562`. Three columns, and the first
 would not have matched the second.
+
+## The controller declined a grant it could not make safe — CORRECT
+
+The owner added a credential-free filesystem MCP server (`kb-files`, `npx -y
+@modelcontextprotocol/server-filesystem /data/kb`, 14 tools, 4 marked as write) and asked the
+controller which profiles to grant it to. It granted it to none, and the reasoning is the
+behaviour worth recording:
+
+1. **It probed before deciding** — `kb-files healthy: 14 tools · 1212ms, stdio, no credential` —
+   rather than reasoning about a server it had not touched.
+2. **It found the grant redundant.** `shopify-clone-architecture` and `shopify-clone-conventions`
+   are native KB grants already held by every profile named. Viberr's per-KB mechanism is the
+   specialized path, and it was already in place; the MCP server was a second, broader route to
+   the same two files.
+3. **It refused to assert an enforcement it could not verify**: *"if Viberr enforces that
+   marking, it does so somewhere I cannot read, and I won't assert that it does."* The
+   enforcement does exist (ruling 176), and viberr does surface it to the controller as
+   `writeToolsNote`. Declining to claim it anyway is the right posture, not a gap.
+4. **It named the real risk in one sentence**: `/data/kb` is the root of the KB store, which
+   holds `controller-handbook` as well — content injected as trusted configuration into the
+   other agents, the operator and the controller itself. *"A reviewer that rewrites the
+   conventions KB changes the standard the next reviewer is judged against."*
+5. **It corrected the owner's premise from the files**, not from memory: this project's deployed
+   `code-reviewer` holds `execute-code-or-write-repo: direct` (verified in `project.md`), so it
+   is the generic `reviewer` profile, not the deployed one, that ruling 176's withholding would
+   have covered.
+
+The residual design limit — an MCP grant has no read-only mode, so a broad mount is grant-all or
+grant-none — is real but narrow, and it is reachable only by mounting a server over content the
+product already serves a narrower way. The system's answer in that situation was to notice and
+stop, which is the answer you want.
+
+I briefly filed this as a finding (F37-48) and withdrew it the same hour: the owner asked why
+anything wanted the whole KB server, and the answer — nothing did — was already in the
+controller's first paragraph.

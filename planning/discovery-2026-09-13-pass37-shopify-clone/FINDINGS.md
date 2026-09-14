@@ -2684,3 +2684,93 @@ exactly as F31-11 requires.
 
 **Cost of the gap, measured:** ruling 224 bought back three hours of board time at 02:28, and
 SHOP-3 handed 25 minutes of it straight back fourteen seconds later.
+
+---
+
+## F37-48 · WITHDRAWN — the specialized path already existed, and everything behaved
+
+> **Withdrawn the same hour it was written, after the owner asked the obvious question I had
+> not: "why does it want the whole kb MCP — there were specialized ones, maybe."** Nothing
+> wanted it. The answer was in the controller's own first paragraph, which I had read and not
+> weighed:
+>
+> > *The read benefit is zero. `shopify-clone-architecture` and `shopify-clone-conventions` are
+> > already native KB grants on exactly the profiles you named… They read that content today.
+> > `kb-files` would hand them a second path to the same two files.*
+>
+> Viberr's specialized mechanism for "let this profile read this knowledge base" is the native
+> KB grant, it is per-KB, and it was already granted to every profile in question. `kb-files`
+> was a second, broader path to the same content, mounted at the store ROOT, and the controller
+> declined it for that reason before it ever reached the write-tool argument.
+>
+> I also checked the copy I accused of overstating its protection. `writeToolPosture`
+> (resource-rows.tsx, ruling 220 — mine, from earlier in this pass) renders
+> `· N write tools withheld from read-only runs`. **"Read-only runs" is exactly the binding
+> condition**, stated in viberr's own vocabulary. It does not overclaim.
+>
+> What is left is a design limit, not a defect: an MCP grant has no read-only mode. That limit
+> only bites when an admin mounts a broad filesystem server over content the product already
+> serves a narrower way — and when that happened, the controller caught it, refused to assert
+> an enforcement it could not read, and said so. Recorded in VERIFIED.md instead, where it
+> belongs.
+>
+> The measurements below are kept because they are correct and worth having.
+
+### Original writeup, kept for its measurements
+
+## An MCP server can only be granted whole, and its one safety mark misses the profiles that matter
+
+**Found by the controller, in the course of doing its job, and verified against the files.** The
+owner added a credential-free filesystem MCP server (`kb-files`, mounted at `/data/kb`, 14 tools,
+4 marked as write tools) and asked the controller to grant it to the profiles that would benefit.
+The controller probed it, found it healthy, and **declined to grant it to anyone** — then
+explained why, in terms that turn out to be exactly right:
+
+> I cannot withhold the write tools. There is no per-tool filter anywhere in my surface:
+> `save_global_agent` takes `mcps` as a flat list of grant keys… Granting `kb-files` grants all
+> 14 tools, including the 4 write ones. Nothing about the marking in Org settings propagates
+> into the agent's runtime through any control I hold — **if Viberr enforces that marking, it
+> does so somewhere I cannot read, and I won't assert that it does.**
+>
+> The repo-write gate does not cover this. `execute-code-or-write-repo` gates the task repo;
+> these tools write to `/data/kb`. And `/data/kb` is the root of the whole KB store… So a
+> granted agent gets read access to every KB in the org regardless of its own grants, and write
+> access to the files that are injected as trusted configuration into the other agents, the
+> operator, and me. **A reviewer that rewrites the conventions KB changes the standard the next
+> reviewer is judged against.**
+
+**Both halves check out.**
+
+*The enforcement it could not see exists* — ruling 176, in `specialist-mcp.server.ts`:
+
+```ts
+const denied = options.withholdWriteTools ? row.writeTools : [];
+```
+
+and viberr does put it on the controller's own surface, as `writeToolsNote`: *"N write tools are
+withheld from every run without `execute-code-or-write-repo`, and from every operator run."* The
+controller's refusal to assert it was appropriate caution, not ignorance — but the note was there
+to read.
+
+*And that note is the finding.* `withholdWriteTools` is driven by whether the run withholds
+**repo-write**, and repo-write is about the **task repository**. `/data/kb` is not the task
+repository — it is viberr's own configuration store. Verified against this project's
+`project.md`:
+
+| profile | `execute-code-or-write-repo` | would `kb-files` write tools mount? |
+|---|---|---|
+| `code-reviewer` (the deployed reviewer) | **direct** | **yes** |
+| `reviewer` (the generic library profile) | off | no |
+
+So the protection binds on the profile nobody was going to grant it to, and misses the deployed
+Code Reviewer — the exact profile the owner named. The Org-settings row reads "N write tools
+withheld from read-only…", which is true of a narrower set of runs than a reader would take it
+to mean.
+
+**There is no way to express the thing that was actually wanted.** "Grant this server read-only"
+has no representation: a grant is a server key, and the only modifier is a marking whose binding
+condition is a capability about a different filesystem. The controller's choice was grant-all or
+grant-none, and it correctly chose none — which means the feature the owner set up is
+unreachable as configured.
+
+**Not ruled on** — and then withdrawn, see the note at the top of this entry.
