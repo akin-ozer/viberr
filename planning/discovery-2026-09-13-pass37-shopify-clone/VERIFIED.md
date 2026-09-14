@@ -1542,3 +1542,50 @@ generation, then two more rounds, a decision packet and a human goal amendment o
 Near-miss count for the pass is now eight, and this one had the same shape as the other seven:
 assume a mechanism, measure against the assumption, get a signal. Reading the file the mechanism
 actually reads is what separated it.
+
+## Ruling 238 fired live on SHOP-5, and the disclosure named both shas (2026-09-14)
+
+The condition the ruling was written for, arriving on its own: the operator brought `shop-5` up to
+date with `main` (13 commits, merge `ec9103b`), moved the task to Verify, and engaged the
+Integration Verifier. The Code Reviewer's `approve` was recorded on `cbc3937`, the pre-refresh
+revision.
+
+```
+workRevision.headSha  cbc39375de9a…     ← what the verdict binds to
+pr.headSha            ec9103be5bff…     ← where the branch now stands
+pr.revisionDrift      { authored: 0, baseRefresh: { merges: 1, commits: 13 } }
+```
+
+Base-refresh only, so `reviewSubjectSha` moved the subject. The verifier's own run-inputs line:
+
+> workspace checked out at the reviewed revision `cbc3937` **on its refreshed base**, at `ec9103b`
+> (1 merge commit, 13 base commits, and no authored work since the review — ruling 238)
+
+Before today that run would have been detached at `cbc3937` and judged the pre-refresh base, which
+is precisely how SHOP-18 wedged. Both shas are named, and the sentence says which one the verdict
+still binds to.
+
+## Ruling 138's goal-edit packet, exercised end to end (2026-09-14)
+
+SHOP-23's packet offered three scope options; I confirmed "Authorize the minimal wiring surfaces"
+(an `edit_goal`) at 11:01 UTC and then did not save the edited goal for five hours. Viberr's
+handling of that gap is the thing worth recording, because it is the state ruling 138 (F34-13) was
+written for:
+
+- the status pill read **goal edit pending** and Current state read **Waiting on: a goal edit**;
+- the packet rendered as DECIDED on reload — the chosen option highlighted and locked, the other
+  two shown but inert, under the line "Decision made · save the edited goal to clear this packet";
+- one **Edit the goal** control reopened the editor **with the draft rebuilt**, not with the old
+  goal, and the draft was the one the option carried;
+- the instance home page counted it in "3 decisions waiting on you", which I checked against the
+  record: two open packets plus one standing recommendation. Exactly three.
+
+Saving it wrote `**Packet resolved:** the requested goal edit landed` and the packet cleared in the
+same breath. Nothing had to be re-decided, and nothing was lost across five hours and a page
+reload.
+
+The draft itself is worth a line: it widened the owned paths file by file (gateway `app.ts`,
+`env.ts`, `outbound.ts`, `types.ts`, additive route modules, both test trees,
+`packages/http/src/index.ts`, `stack/gateway.json`), explicitly did NOT take `pnpm-lock.yaml` or
+`scripts/stack.test.mjs`, and states that `packages/contracts` stays untouched — matching the
+decision note I typed, including the part about not colliding with the SHOP-3/11/12 merge queue.
