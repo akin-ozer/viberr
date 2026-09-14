@@ -223,10 +223,15 @@ describe("a failed rebuild is retried (ruling 218)", () => {
         comment("2026-08-26T10:01:00.000Z", "second"),
       ],
     });
+    // The LATCH wait needs the longer budget too, not just the heal below.
+    // The first version of this fix raised only the heal, and the test failed
+    // again under full-suite load at 12,087ms — the shared 12s default, spent
+    // here. Whatever is slow under load is slow for both waits.
     await waitFor(
       () => projectionFaultCount() > 0,
       "the failing rebuild to be latched",
       () => pokeDir(taskDir(store.slug, "VIB-1", store.dataRoot)),
+      26_000,
     );
 
     // The store recovers. NOTHING touches the file again — that is the whole
