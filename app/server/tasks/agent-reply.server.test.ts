@@ -14,7 +14,7 @@ import {
   deliveringEngagement,
   supportingEngagements,
 } from "~/schemas/task-file.schema";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -2423,4 +2423,96 @@ describe("comment routing: agent handles engage agents, teammate handles never d
       timeline.some((e) => e.text.includes("has been answered by a human")),
     ).toBe(false);
   }, 20_000);
+});
+
+/**
+ * F37-66 (pass 37): ruling 211(b)'s withdrawal note is written AFTER three
+ * early returns, and two of them are the very reasons it exists.
+ *
+ * Ruling 211(b): `commentToAgent`'s single-flight refusal writes "Viberr starts
+ * it on this comment as soon as that run finishes" onto the canonical record,
+ * and when the completion hop cannot keep that promise the person is owed the
+ * correction in the same place they were given it. Its own doc names the causes:
+ * "the task closed underneath it, the stage stopped admitting the profile, a
+ * credential went away."
+ *
+ * Ruling 211(b) moved the delivery ATTEMPT above the error branch's return and
+ * the closed-task branch's return, for exactly this reason. The withdrawal was
+ * left below all of them — so on a task that closed underneath the run, the
+ * attempt runs, fails, reports `owed`, and the function returns before anything
+ * writes it down. The person's promise stands uncontradicted on the timeline
+ * they are reading.
+ */
+describe("F37-66 — the undelivered-mention withdrawal survives the early returns", () => {
+  it("a task that CLOSED under the run still withdraws the promise it cannot keep", async () => {
+    queueFakeRun({ lines: [], keepRunning: true });
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await waitFor(() =>
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+        (r) => r.agent_profile_id === "dev" && r.state === "running",
+      ),
+    );
+    const live = listRunsForTaskRows(store.db, store.slug, "VIB-1").find(
+      (r) => r.agent_profile_id === "dev" && r.state === "running",
+    )!;
+
+    // The person's instruction meets the single-flight guard and is promised.
+    const refused = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev also drop the dead flag" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(refused.triggered).toBeNull();
+    expect(refused.runNotStarted).toContain("as soon as that run finishes");
+
+    // …and the task is archived while the run is still going: the ordinary way
+    // a board closes work out from under a live agent.
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.archived = true;
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: live.id, dataRoot: store.dataRoot },
+      actor(store.users.arda),
+    );
+
+    const timeline = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.timeline;
+    // Ruling 177's note proves we really took the closed-task branch — the
+    // early return under test. Without this the test could pass on a task that
+    // never closed at all.
+    const closedNoted = await waitFor(() =>
+      timeline().some((e) => e.title === "Completed after the task closed"),
+    );
+    expect(closedNoted).toBe(true);
+    // No run was started for the mention, so the promise was not kept.
+    expect(
+      listRunsForTaskRows(store.db, store.slug, "VIB-1").filter(
+        (r) => r.agent_profile_id === "dev",
+      ).length,
+    ).toBe(1);
+
+    // CANARY: put `appendUndeliveredMentionNote` back below the closed-task
+    // return and this is the state that ships — a promise on the record with
+    // nothing anywhere contradicting it.
+    const withdrawn = await waitFor(() =>
+      timeline().some((e) => e.title === "Mention still not delivered"),
+    );
+    expect(withdrawn).toBe(true);
+    const note = timeline().find((e) => e.title === "Mention still not delivered")!;
+    expect(note.text).toContain("a comment");
+    expect(note.text).toContain("@dev");
+  }, 30_000);
 });

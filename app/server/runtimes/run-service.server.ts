@@ -1403,6 +1403,33 @@ export async function noteCompletionEffectsLost(
     taskKey: run.task_key,
     details: { runId: run.id, kind: run.kind },
   });
+  // F37-67: what this note may promise depends on what the boot sweep will
+  // actually do with this run, so it asks the sweep's own rule rather than
+  // asserting one. The only shape that produces this note is
+  // `applyAgentCompletionEffects` REJECTING, and that function records the
+  // reply (with any verdict, atomically) in its step 1 before the delivery
+  // reconcile and the operator react that can fail after it. When step 1 did
+  // land, "none of them landed" is false about the one effect a person can see,
+  // and `recoverUnreactedAgentRuns` excludes the run forever on the very audit
+  // row step 1 wrote — so the replay sentence named a mechanism that had
+  // already decided not to run. Both sentences now follow the fact.
+  const { completionReplayWillRun } = await import("./run-recovery.server");
+  let willReplay = false;
+  try {
+    willReplay = await completionReplayWillRun(db, run);
+  } catch (error) {
+    // A predicate that cannot be read must not cost the note itself. Staying
+    // false is the safe side: it promises nothing and points at the one action
+    // a person can always take.
+    logger.warn("completion-replay predicate failed", {
+      runId: run.id,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  const agent = run.agent_name ?? run.role;
+  const text = willReplay
+    ? `The ${agent} run finished, but applying its completion effects (its reply, any verdict, the delivery reconcile, and re-engaging the operator) failed, so none of them landed. This task is not being worked right now. Run recovery replays the effects on the next restart; you can also re-run the agent. The run log it already produced is unchanged.`
+    : `The ${agent} run finished, but applying its completion effects failed partway. Anything already written above stands; what did not run is the delivery reconcile and re-engaging the operator. This task is not being worked right now, and boot recovery will not pick this run up, so nothing changes on its own: re-run the agent to carry on. The run log it already produced is unchanged.`;
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.frontmatter.waiting = "human";
@@ -1411,7 +1438,7 @@ export async function noteCompletionEffectsLost(
         type: "continuity",
         actor: { kind: "system", systemId: "runtime-continuity" },
         title: null,
-        text: `The ${run.agent_name ?? run.role} run finished, but applying its completion effects (its reply, any verdict, the delivery reconcile, and re-engaging the operator) failed, so none of them landed. This task is not being worked right now. Run recovery replays the effects on the next restart; you can also re-run the agent. The run log it already produced is unchanged.`,
+        text,
         toAgent: false,
         evidence: null,
       });

@@ -3593,3 +3593,80 @@ withheld rows; `return gate(...) === "direct"` reddens the supervised row. Both 
 
 *Reported by the adversarial sweep; the live grant map and every acceptance on the board were
 re-checked against `project.md` before fixing.*
+
+## F37-66 · Ruling 211(b)'s withdrawal sits below the returns it was written for — MEDIUM
+
+**What it is.** `commentToAgent`'s single-flight refusal writes a promise onto the canonical record:
+
+> This agent already has a run in progress on this task — Viberr starts it on this comment as soon
+> as that run finishes. The comment stays on the record.
+
+Ruling 211(b) exists because that promise can fail, and names its causes: *"the task closed
+underneath it, the stage no longer admits the profile, a credential is gone."* Its remedy is a
+"Mention still not delivered" note, *"withdrawn where it was made."*
+
+Ruling 211(b) also moved the delivery ATTEMPT above the error branch's return and the closed-task
+branch's return, writing that the call *"used to sit after the `error` branch's return and after
+the closed-task branch's return, so a run that ended in error (or a task that closed underneath it)
+dropped the person's instruction silently, under a note promising the opposite."*
+
+The withdrawal was left below all of them — and below ruling 237's new return as well. So on the
+first two causes ruling 211(b) itself names, the attempt runs, fails, reports the count, and the
+function returns before anything writes it down. Same defect, same two branches, one layer in.
+
+**Reproduced end to end**, not argued: a live run, a person's `@dev` comment refused by the
+single-flight guard, the task archived while the run is going, the run interrupted. Ruling 177's
+"Completed after the task closed" note lands (so the closed branch really was taken) and no
+withdrawal follows. The person is left with the promise and nothing contradicting it.
+
+**Fix.** The withdrawal moves beside the attempt it reports on, above every early return.
+
+A throw still writes no note, and that is deliberate now rather than accidental: a throw means the
+owed count is unknown, and every cause ruling 211(b) names is a REFUSAL, which returns `triggered:
+null` with a real count. The catch says so.
+
+## F37-67 · A continuity note makes two claims, and both are false in the case that produces it — MEDIUM
+
+**What it is.** When completion effects are lost, viberr writes:
+
+> The dev run finished, but applying its completion effects (its reply, any verdict, the delivery
+> reconcile, and re-engaging the operator) failed, **so none of them landed**. This task is not being
+> worked right now. **Run recovery replays the effects on the next restart**; you can also re-run the
+> agent.
+
+The only shape that produces this note is `applyAgentCompletionEffects` REJECTING — the C4 pass-24
+comment says so in as many words: the synchronous guard in `fireIfAlreadyTerminal` *"can never catch
+an async rejection here."* That function posts the reply, and any verdict written atomically with
+it, in step 1 — then reconciles delivery in step 2 and reacts in step 4.
+
+So a rejection in step 2 or step 4 has already landed step 1. **"None of them landed" is false about
+the one effect a person can see on the timeline they are reading it on.**
+
+And step 1's write is what makes the second claim false. It records `task.agent.replied`, and
+`recoverUnreactedAgentRuns` selects `NOT EXISTS` that row. The run is excluded from the sweep
+permanently. The note tells a person to wait for a restart that has already decided not to help.
+
+**A third way, found by running the sweep instead of reading it.** The first draft of the test
+asserted the promise was kept for a run whose reply never landed — and it failed. The sweep SELECTED
+the run (its own log line said `count: 1`) and then `continue`d inside the loop on
+`if (!replyText) continue`, before recording any attempt. A run with no readable reply is counted as
+recovered-in-progress and silently dropped. The crash-loop cap is a fourth.
+
+**Fix.** One rule, in one place, read by both. `replyNeverLandedSql(expr)` is the sweep's own clause,
+used by the sweep and by `completionReplayWillRun`, which models every condition the sweep ACTS on —
+the SELECT and both in-loop skips, because a run that is selected and then skipped is not replayed
+whatever the query said. The note branches on it:
+
+- replay really will run: the old sentence, unchanged.
+- it will not: *"applying its completion effects failed partway. Anything already written above
+  stands; what did not run is the delivery reconcile and re-engaging the operator. This task is not
+  being worked right now, and boot recovery will not pick this run up, so nothing changes on its own:
+  re-run the agent to carry on."*
+
+**Test.** Three shapes, each checked against the sweep RUN FOR REAL rather than asserted: reply
+already landed (no replay row), reply never landed with readable text (replay row present, promise
+kept), reply never landed with no text (selected then dropped, promise withheld). Canaries both
+ways: pinning `willReplay = true` reddens two, `false` reddens the third — so the fix cannot be
+passed by deleting the promise either.
+
+*Both reported by the adversarial sweep; both re-derived from the code and reproduced before fixing.*

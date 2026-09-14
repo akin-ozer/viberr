@@ -4480,11 +4480,32 @@ export async function applyAgentCompletionEffects(
     deferredOwed = outcome.pending;
   } catch (error) {
     // A delivery that cannot start must never swallow the completion pipeline.
+    // `deferredOwed` stays 0 here, so no withdrawal note follows — deliberate:
+    // a THROW means the count is unknown, and every cause ruling 211(b) names
+    // (closure, stage, credential) is a refusal, which returns `triggered:
+    // null` with a real count instead of throwing. A throw here is a broken
+    // disk or database, and this log line is the honest record of it.
     logger.warn("deferred @mention delivery failed", {
       taskKey: input.taskKey,
       profileId: input.profileId,
       err: error instanceof Error ? error : new Error(String(error)),
     });
+  }
+  // F37-66: ruling 211(b)'s withdrawal, written HERE — beside the attempt it
+  // reports on, and above every early return below it.
+  //
+  // The refusal wrote "Viberr starts it on this comment as soon as that run
+  // finishes" onto the canonical record. When that cannot happen — the causes
+  // ruling 211(b) itself names: the task closed underneath it, the stage no
+  // longer admits the profile, a credential is gone — the promise has to be
+  // withdrawn where it was made. It used to sit below the error branch's
+  // return, the closed-task branch's return and ruling 237's, which is the same
+  // placement bug ruling 211(b) had already fixed for the ATTEMPT and for the
+  // same two branches: a task archived under a live run took the closed branch,
+  // returned, and left the person's promise standing with nothing anywhere
+  // contradicting it.
+  if (deferredOwed > 0 && !deferredStarted) {
+    await appendUndeliveredMentionNote(db, ctx, input, deferredOwed);
   }
 
   if (finished.state === "error") {
@@ -4872,15 +4893,6 @@ export async function applyAgentCompletionEffects(
   // question exists nowhere else, and coordination can wait one hop. The
   // operator is re-invoked by THAT run's completion, so nothing is skipped,
   // only ordered.
-  if (deferredOwed > 0 && !deferredStarted) {
-    // Ruling 211(b): the refusal wrote "Viberr starts it on this comment as
-    // soon as that run finishes" onto the canonical record. When that cannot
-    // happen — the task closed underneath it, the stage no longer admits the
-    // profile, a credential is gone — the promise has to be withdrawn where it
-    // was made. Silence here is the same defect ruling 203 was written to stop,
-    // one layer further in.
-    await appendUndeliveredMentionNote(db, ctx, input, deferredOwed);
-  }
   if (deferredStarted) return;
 
   // Dispatch-completion contract (2026-08-29): a manually/schedule-dispatched

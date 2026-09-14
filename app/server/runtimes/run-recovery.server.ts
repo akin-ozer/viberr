@@ -5,7 +5,7 @@ import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
-import { patchRun } from "./run-store.server";
+import { patchRun, type AgentRunRow } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
 import {
   codexRunHomeDir,
@@ -546,6 +546,82 @@ export async function settleAbandonedWaits(
   return rows.length;
 }
 
+/**
+ * The sweep's own "this run's reply never landed" clause, as ONE rule.
+ *
+ * F37-67: `noteCompletionEffectsLost` writes a note promising "Run recovery
+ * replays the effects on the next restart" while this clause was excluding the
+ * run permanently — `applyAgentCompletionEffects` records `task.agent.replied`
+ * in its step 1 and can still reject in step 2 or step 4, which is the ONLY
+ * shape that produces that note. Both readers take the clause from here now, so
+ * the promise cannot say one thing while the query does another.
+ *
+ * `runIdExpr` is the SQL expression naming the run: a column in the sweep
+ * (`r.id`), a bound `?` for one run.
+ */
+export function replyNeverLandedSql(runIdExpr: string): string {
+  return (
+    `NOT EXISTS (
+            SELECT 1 FROM audit_events a
+             WHERE a.action = 'task.agent.replied'
+               AND a.details_json LIKE '%"runId":"' || ${runIdExpr} || '"%'
+          )`
+  );
+}
+
+/**
+ * Will the boot sweep replay this run's lost completion effects?
+ *
+ * Every condition `recoverUnreactedAgentRuns` acts on, for one run — the SELECT
+ * above AND the two skips inside its loop, because a run that is selected and
+ * then skipped is not replayed, whatever the query said.
+ *
+ * The `waiting = 'agent' OR effects_lost` arm is the one condition not modelled:
+ * the only caller records its own `run.completion.effects_lost` row before
+ * asking, which satisfies that arm by construction.
+ */
+export async function completionReplayWillRun(
+  db: DatabaseSync,
+  run: Pick<AgentRunRow, "id" | "kind" | "state" | "agent_profile_id" | "task_key">,
+): Promise<boolean> {
+  if (run.kind !== "primary" && run.kind !== "reviewer") return false;
+  if (run.state !== "finished") return false;
+  if (!run.agent_profile_id) return false;
+  // SAFETY: a bare `SELECT <expr>` with no FROM returns exactly one row, and
+  // SQLite renders a NOT EXISTS predicate as the integer 1 or 0.
+  const stillOwed = db
+    .prepare(`SELECT ${replyNeverLandedSql("?")} AS owed`)
+    .get(run.id) as { owed: number } | undefined;
+  if (stillOwed?.owed !== 1) return false;
+  // The loop's first skip: no readable reply means nothing to replay, and it
+  // `continue`s BEFORE recording its attempt — so the run is counted in the
+  // "recovering dropped agent-reply reactions" log line and then quietly
+  // dropped. A note promising a replay here would be wrong in a way nothing
+  // downstream ever corrects.
+  const { replyTextForRun } = await import("~/server/tasks/agent-reply.server");
+  if (!replyTextForRun(db, run.id)) return false;
+  // The crash-loop backstop: at the cap, further boots skip this run entirely.
+  // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
+  const priorReplays = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM audit_events
+          WHERE action = ?
+            AND task_key = ?
+            AND details_json LIKE '%"runId":"' || ? || '"%'
+            AND occurred_at >= ?`,
+      )
+      .get(
+        RECOVERY_REPLAY_ACTION,
+        run.task_key,
+        run.id,
+        new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString(),
+      ) as { n: number }
+  ).n;
+  return priorReplays < RECOVERY_REINVOKE_CAP;
+}
+
 export async function recoverUnreactedAgentRuns(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
@@ -573,11 +649,7 @@ export async function recoverUnreactedAgentRuns(
                  AND e.details_json LIKE '%"runId":"' || r.id || '"%'
             )
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM audit_events a
-             WHERE a.action = 'task.agent.replied'
-               AND a.details_json LIKE '%"runId":"' || r.id || '"%'
-          )`,
+          AND ${replyNeverLandedSql("r.id")}`,
     )
     .all() as {
     id: string;
