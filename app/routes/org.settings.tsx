@@ -133,6 +133,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     // to READ org/instance-scoped events (sign-ins, PAT changes, user admin) in
     // the app; the project Activity page is project-scoped and the export is a file.
     auditEvents: listRecentAuditEvents(getDb()),
+    // Ruling 234: the org-scoped view is its OWN window, fetched here so the
+    // toggle stays instant (no round trip, and the text filter keeps working
+    // over whichever list is showing). Filtering the list above client-side is
+    // what made the toggle unable to reach the very class it exists for: a
+    // poller heartbeat filled the unscoped window and the sign-ins fell out.
+    auditEventsOrgScoped: listRecentAuditEvents(getDb(), { orgOnly: true }),
     // Ruling 99: the controller configuration the admin tab edits.
     controllerConfig: resolveControllerConfig(),
     // Ruling 108: which of its sections this DEPLOYMENT allows editing.
@@ -792,6 +798,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       runSpendCapUsd={loaderData.runSpendCapUsd}
       s3Audit={loaderData.s3Audit}
       auditEvents={loaderData.auditEvents}
+      auditEventsOrgScoped={loaderData.auditEventsOrgScoped}
       controllerConfig={loaderData.controllerConfig}
       controllerLocks={loaderData.controllerLocks}
     />

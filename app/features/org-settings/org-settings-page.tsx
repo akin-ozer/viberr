@@ -77,6 +77,7 @@ export function OrgSettingsPage({
   runSpendCapUsd,
   s3Audit,
   auditEvents,
+  auditEventsOrgScoped,
   controllerConfig,
   controllerLocks,
 }: {
@@ -91,6 +92,7 @@ export function OrgSettingsPage({
   s3Audit: S3AuditConfigView | null;
   /** PG26-A: recent audit events for the in-app browse panel. */
   auditEvents: AuditBrowseRow[];
+  auditEventsOrgScoped: AuditBrowseRow[];
   /** Ruling 99: the live controller configuration this admin surface edits. */
   controllerConfig: ControllerConfigView;
   /** Ruling 108: per-section deployment locks the panel renders read-only. */
@@ -241,6 +243,7 @@ export function OrgSettingsPage({
         key={s3Audit ? `${s3Audit.bucket}|${s3Audit.region}|${s3Audit.prefix}|${s3Audit.endpoint}|${s3Audit.accessKeyId}` : "none"}
         s3Audit={s3Audit}
         events={auditEvents}
+        orgScopedEvents={auditEventsOrgScoped}
       />
         <StorageLine storage={view.storage} />
         </div>
@@ -259,22 +262,34 @@ export function OrgSettingsPage({
  * PG26-A — the in-app audit browse. Recent events, newest first, with a text
  * filter and an "Org-scoped" toggle that isolates the class this feature exists
  * for: `project_slug`-less events (sign-ins, PAT changes, user admin) that the
- * project Activity page can't show. Filtering is client-side over the ~150 rows
- * the loader already fetched — the export is the path to the full record.
+ * project Activity page can't show.
+ *
+ * Ruling 234: the toggle SWAPS between two server-fetched windows rather than
+ * filtering one. It used to narrow whatever the unscoped query returned, so a
+ * poller heartbeat that filled that window pushed every sign-in out of reach —
+ * measured at 2 org-scoped rows visible against 96 on file. Two lists keep the
+ * toggle instant (no round trip) and keep the text filter working over whichever
+ * one is showing. The export is still the path to the full record.
  */
-function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
+function AuditBrowse({
+  events,
+  orgScopedEvents,
+}: {
+  events: AuditBrowseRow[];
+  orgScopedEvents: AuditBrowseRow[];
+}) {
   const [q, setQ] = useState("");
   const [orgOnly, setOrgOnly] = useState(false);
+  const shown = orgOnly ? orgScopedEvents : events;
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return events.filter((e) => {
-      if (orgOnly && e.projectSlug) return false;
-      if (!needle) return true;
-      return [e.action, e.actorLabel, e.subjectId ?? "", e.projectSlug ?? ""].some(
-        (v) => v.toLowerCase().includes(needle),
-      );
-    });
-  }, [events, q, orgOnly]);
+    if (!needle) return shown;
+    return shown.filter((e) =>
+      [e.action, e.actorLabel, e.subjectId ?? "", e.projectSlug ?? ""].some((v) =>
+        v.toLowerCase().includes(needle),
+      ),
+    );
+  }, [shown, q]);
   return (
     <div className="audit-browse">
       <div className="audit-browse-bar">
@@ -300,8 +315,10 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
       </div>
       {filtered.length === 0 ? (
         <p className="fine">
-          {events.length === 0
-            ? "No audit events recorded yet."
+          {shown.length === 0
+            ? orgOnly
+              ? "No instance-scoped events recorded yet."
+              : "No audit events recorded yet."
             : "No events match this filter."}
         </p>
       ) : (
@@ -325,7 +342,7 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
               <span className="audit-actor" title={e.actorLabel}>{e.actorLabel}</span>
               <span className="audit-action" title={e.action}>{e.action}</span>
               <span className="audit-scope">
-                <span className="audit-scope-tag">
+                <span className="audit-scope-tag" title={e.projectSlug ?? "org"}>
                   {e.projectSlug ?? "org"}
                 </span>
                 {e.subjectId ? (
@@ -339,8 +356,9 @@ function AuditBrowse({ events }: { events: AuditBrowseRow[] }) {
         </ul>
       )}
       <p className="fine audit-browse-foot">
-        Showing {filtered.length} of {events.length} most-recent events. Download or
-        push to S3 for the full log.
+        Showing {filtered.length} of {shown.length} most-recent
+        {orgOnly ? " instance-scoped " : " "}events. Download or push to S3 for the
+        full log.
       </p>
     </div>
   );
@@ -545,9 +563,11 @@ function S3TargetModal({
 function AuditExportCard({
   s3Audit,
   events,
+  orgScopedEvents,
 }: {
   s3Audit: S3AuditConfigView | null;
   events: AuditBrowseRow[];
+  orgScopedEvents: AuditBrowseRow[];
 }) {
   const { submit, busy } = useOrgAction();
   const configured = s3Audit !== null;
@@ -583,7 +603,7 @@ function AuditExportCard({
       {/* PG26-A: browse the recent log in-app. Org/instance-scoped events
           (sign-ins, PAT changes, user admin) have no other in-app view — the
           project Activity page is project-scoped. */}
-      <AuditBrowse events={events} />
+      <AuditBrowse events={events} orgScopedEvents={orgScopedEvents} />
       <div className="audit-dl">
         {/* A real file response (Content-Disposition) — the browser saves it. */}
         <a className="btn sm" href="/org/settings/audit-export?format=csv">

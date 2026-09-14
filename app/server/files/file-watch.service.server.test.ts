@@ -65,8 +65,16 @@ function pokeDir(dir: string): void {
   writeFileSync(path.join(dir, "poke-marker"), String(Date.now()));
 }
 
-async function startWatcherReady(store: ReturnType<typeof setupTestStore>) {
-  const watcher = startFileWatcher({ dataRoot: store.dataRoot, db: store.db });
+async function startWatcherReady(
+  store: ReturnType<typeof setupTestStore>,
+  retryBackoffMs?: readonly number[],
+) {
+  const options: Parameters<typeof startFileWatcher>[0] = {
+    dataRoot: store.dataRoot,
+    db: store.db,
+  };
+  if (retryBackoffMs) options.retryBackoffMs = retryBackoffMs;
+  const watcher = startFileWatcher(options);
   // Chokidar arms asynchronously — `ready` marks the initial scan complete.
   // The listener attaches in the same synchronous frame as the start, so the
   // event cannot have fired before it.
@@ -210,7 +218,15 @@ describe("a failed rebuild is retried (ruling 218)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(events()).toBe(1);
 
-    await startWatcherReady(store);
+    // Ruling 218's real ladder is 2s / 5s / 15s. This test has to WAIT for a
+    // retry, so with the production numbers a repair landing just after the
+    // second attempt waits fifteen more seconds for the third — and the budget
+    // then has to beat full-suite scheduling noise on top. It was raised to 12s
+    // and failed at 12,087ms; raised to 26s and failed at 26,052ms. The ladder
+    // is the variable, not the budget, so the canary drives a fast one: the
+    // BEHAVIOUR under test is "a failed rebuild is retried at all", which the
+    // interval does not change.
+    await startWatcherReady(store, [60, 60, 60, 60, 60]);
 
     // The store cannot take the events rewrite for the whole first attempt —
     // the shape a transient `disk I/O error` has. `content_hash` is written
@@ -223,15 +239,11 @@ describe("a failed rebuild is retried (ruling 218)", () => {
         comment("2026-08-26T10:01:00.000Z", "second"),
       ],
     });
-    // The LATCH wait needs the longer budget too, not just the heal below.
-    // The first version of this fix raised only the heal, and the test failed
-    // again under full-suite load at 12,087ms — the shared 12s default, spent
-    // here. Whatever is slow under load is slow for both waits.
     await waitFor(
       () => projectionFaultCount() > 0,
       "the failing rebuild to be latched",
       () => pokeDir(taskDir(store.slug, "VIB-1", store.dataRoot)),
-      26_000,
+      12_000,
     );
 
     // The store recovers. NOTHING touches the file again — that is the whole
@@ -240,19 +252,14 @@ describe("a failed rebuild is retried (ruling 218)", () => {
     // CANARY: delete `scheduleRetry` from `rebuildFile` and this never
     // converges — the timeline stays one comment behind its own file, which is
     // exactly what SHOP-4 did until a human pressed Re-scan.
-    // The budget has to clear the BACKOFF, not just "feel long enough". Ruling
-    // 218's ladder is 2s / 5s / 15s, so a repair that lands just after the
-    // second retry waits until 22s for the third — and the shared 12s budget
-    // made this test fail under full-suite load while passing alone. A flaky
-    // canary is a canary nobody trusts, which is worse than none.
     await waitFor(
       () => events() === 2,
       "the retry to heal the stale projection",
       undefined,
-      26_000,
+      12_000,
     );
     expect(projectionFaultCount()).toBe(0);
-  }, 35_000);
+  }, 30_000);
 });
 
 describe("watcher liveness (E8)", () => {

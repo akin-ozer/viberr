@@ -1430,3 +1430,48 @@ state", nine hours earlier.
 `waiting: "human"` exactly, archived, the stage gate — plus a derivation stamp. Three of the five
 came from looking at the running board rather than at the code, and the fifth came from a file
 whose opening paragraph is a description of the mistake.
+
+---
+
+## Ruling 234 — the audit browse, measured on the same table that produced F37-52
+
+Deployed 06:40Z. The instance was idle (the Codex window had stalled every task until
+07:28Z), so nothing but the fix changed between the two readings.
+
+**The default view.**
+
+| | before | after |
+|---|---|---|
+| `github.reconcile.task` rows | 91 of 150 (61%) | **0** |
+| window the 150 rows span | 09:18 to 10:11 — **53 min** | 09:04 to 11:40 — **2h 36m** |
+
+What fills the window now is the record: 7 `task.operator.packet_opened`, 7
+`task.packet.resolved`, 9 `task.transition`, 13 `task.agent.replied`, 6 `task.schedule.created`.
+Before, those were the rows the heartbeat was pushing out.
+
+**The "Org-scoped" toggle.**
+
+| | before | after |
+|---|---|---|
+| rows | 2 | **100** |
+| reach | 09:45 to 09:46 | back to **yesterday 11:04** |
+| sign-ins visible | 0 | **11** |
+| user administration | 0 | 6 `org.user.created`, 5 forced password resets |
+| credential changes | 0 | 1 `github.pat.created`, 1 `org.connection.created`, 2 `profile.backend.connected` |
+| policy changes | 0 | 1 `org.mcp.tool_policy.changed`, 3 `org.mcp.added` |
+
+**The single check worth keeping.** Filtering the org-scoped view for `pat` used to answer
+"No events match this filter." It now answers:
+
+```
+Yesterday · 11:07   arda@viberr.dev   github.pat.created   org   pat_esbY7-6IenWI
+```
+
+Who created the instance's GitHub credential, when, and which one. That row has existed on file
+since yesterday and had never been readable in the app.
+
+**What was deliberately NOT hidden.** `projection.rescan` is 34 of those 100 rows and sits at the
+top of the org-scoped list, which is untidy. It is not a heartbeat: it fires on boot and on an
+explicit Re-scan, so its volume here is an artifact of this session restarting the container all
+day, not of how the product runs. Hiding it would be tuning the audit log to my own workflow, and
+a restart is a fact an admin may legitimately want. The hidden list stays one action long.

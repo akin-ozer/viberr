@@ -138,6 +138,88 @@ describe("notifyMentionedUsers", () => {
     expect(row!.text).toContain("mentioned you");
     expect(row!.text).toContain("…");
   });
+
+  /**
+   * Ruling 233 — the quote must contain the mention it was sent for.
+   *
+   * The head clip is the right window only when the handle is near the top. An
+   * operator directive opens by naming the AGENT it is dispatching and reaches
+   * the person hundreds of characters later; measured on pass 37's live
+   * instance, 19 of 49 mention notifications quoted a window that excluded the
+   * handle they were sent for, so the row read "mentioned you" above a sentence
+   * addressed to somebody else.
+   */
+  it("quotes the window around the mention when the handle sits past the cap (ruling 233)", () => {
+    const store = setupTestStore(ctx);
+    const head = "@Platform Architect, revise the deliverable on the task branch.";
+    const directive =
+      `${head} ${"Keep the diff inside the owned path. ".repeat(8)}` +
+      "Ensure the document ends with an explicit @arda question naming every option.";
+    // The premise: the handle is genuinely outside the head window.
+    expect(directive.indexOf("@arda")).toBeGreaterThan(240);
+
+    notifyMentionedUsers(store.db, {
+      text: directive,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+
+    const [row] = notificationRows(store);
+    const text = String(row!.text);
+    expect(text).toContain("@arda question naming every option");
+    // …and it is still a quote, not the whole comment.
+    expect(text.length).toBeLessThan(300);
+    expect(text).toContain("…");
+    // The head the old clip showed is text addressed to somebody else.
+    expect(text).not.toContain(head);
+  });
+
+  it("keeps the head window when the mention is already inside it (ruling 233)", () => {
+    const store = setupTestStore(ctx);
+    const report = `@arda done. ${"evidence ".repeat(80)}`;
+    notifyMentionedUsers(store.db, {
+      text: report,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    const [row] = notificationRows(store);
+    // Unchanged by ruling 233: no leading ellipsis, opens on the comment.
+    expect(String(row!.text)).toContain("mentioned you — “@arda done.");
+  });
+
+  /**
+   * Ruling 232 (owner, 2026-09-14) — a comment whose DECLARED audience is the
+   * agent notifies no person. Asserted at the seam, so every writer that
+   * declares it inherits the rule; `operatorPromptAgent` proves it end to end
+   * in the writer-enumeration block below.
+   */
+  it("a declared agent audience notifies nobody (ruling 232)", () => {
+    const store = setupTestStore(ctx);
+    const directive =
+      "@dev implement the cart endpoint, and leave the schema question for @arda.";
+
+    const open = notifyMentionedUsers(store.db, {
+      text: directive,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(open).toEqual([store.users.arda.id]);
+    expect(notificationRows(store)).toHaveLength(1);
+
+    const toAgent = notifyMentionedUsers(store.db, {
+      text: directive,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+      audience: "agent",
+    });
+    expect(toAgent).toEqual([]);
+    // The same text, the same resolvable handle, and no second row.
+    expect(notificationRows(store)).toHaveLength(1);
+  });
 });
 
 /**
@@ -245,11 +327,18 @@ describe("mention disambiguation (B-FD2)", () => {
     ];
     expect(resolveMentionTargets(users, "@selin @arda-kaya ship it")).toEqual({
       userIds: ["u1", "u2"],
+      // Ruling 233: which handle won which user, so a caller can quote the
+      // span that actually names the recipient.
+      matchedBy: new Map([
+        ["selin", "u2"],
+        ["arda-kaya", "u1"],
+      ]),
       ambiguous: [],
       nonMembers: [],
     });
     expect(resolveMentionTargets(users, "@arda ship it")).toEqual({
       userIds: [],
+      matchedBy: new Map(),
       ambiguous: ["arda"],
       nonMembers: [],
     });
@@ -643,27 +732,6 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       },
     },
     {
-      name: "operatorPromptAgent (the operator's directive comment)",
-      roster: false,
-      write: async (store, tag) => {
-        // No specialist is deployed, so the RUN cannot start (the auto-engage
-        // refuses an undeployed profileId) — but the directive COMMENT is
-        // written (and fanned out) before the run is triggered, which is the
-        // writer under test. This is the P14-GV-06 shape verbatim.
-        await operatorPromptAgent(
-          store.db,
-          {
-            projectSlug: store.slug,
-            taskKey: "VIB-1",
-            directive: `Implement the fix and coordinate with ${tag} on the copy.`,
-            profileId: "developer",
-            handle: "dev",
-          },
-          { dataRoot: store.dataRoot },
-        ).catch(() => {});
-      },
-    },
-    {
       name: "operatorPostComment (operator narration)",
       roster: true,
       write: async (store, tag) => {
@@ -743,6 +811,55 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       expect(mentions[0]!.actor_json).toBeTruthy();
     });
   }
+
+  /**
+   * Ruling 232 (owner, 2026-09-14) — the ONE writer that must NOT fan out to a
+   * person, and the reason it is carved out of the table above rather than
+   * missing from it.
+   *
+   * `operatorPromptAgent` writes the operator's directive to a specialist, so
+   * its declared audience is the agent. P14-GV-06 had added the fan-out here
+   * because "…coordinate with @Arda" inside a directive was a real ping going
+   * nowhere. Pass 37 measured what those tags actually are on a live instance:
+   * 19 of 49 mention notifications came from directives where the handle was the
+   * operator specifying a deliverable ("end with an explicit @Arda question"),
+   * re-sent on every rework round. Viberr cannot tell the two apart by parsing,
+   * and the owner ruled that a declared-agent audience notifies nobody.
+   *
+   * The directive below is P14-GV-06's own shape verbatim, so this test fails
+   * the moment the audience stops being declared at that call site.
+   */
+  it("operatorPromptAgent notifies nobody: its audience is the agent (ruling 232)", async () => {
+    const store = setupTestStore(ctx);
+    seed(store, false);
+    const tag = `@${store.users.arda.email.split("@")[0]}`;
+    // No specialist is deployed, so the RUN cannot start (the auto-engage
+    // refuses an undeployed profileId) — but the directive COMMENT is written
+    // before the run is triggered, which is the writer under test.
+    await operatorPromptAgent(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        directive: `Implement the fix and coordinate with ${tag} on the copy.`,
+        profileId: "developer",
+        handle: "dev",
+      },
+      { dataRoot: store.dataRoot },
+    ).catch(() => {});
+
+    expect(notificationRows(store).filter((r) => r.kind === "mention")).toEqual([]);
+    // The comment itself still lands, tagged to-agent: the ruling changes who
+    // hears about it, not whether the hand-off is on the record.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const directive = file.parsed.timeline.find((e) => e.type === "comment");
+    expect(directive?.toAgent).toBe(true);
+    expect(directive?.text).toContain(tag);
+  });
 
   /**
    * The completeness half. The table above is hand-written, so it can only fail

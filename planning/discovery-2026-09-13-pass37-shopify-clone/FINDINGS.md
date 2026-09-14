@@ -2936,3 +2936,154 @@ since lowered), and the backend is resolved live. Safe because the operator re-a
 `input.operatorRun`; my first test set it on `ctx`. Reverting the fix changed nothing, which is
 the only reason I looked. That is the third vacuous canary this pass — the discipline of proving
 red before believing green is what caught all three.
+
+---
+
+## F37-52 · The in-app audit browse cannot show the event class it was built for — MEDIUM
+
+**Found by reading the org audit panel on an idle board and noticing every visible row was the
+same event.** The board had not moved for two and a half hours, yet the panel was a wall of
+`github.reconcile.task`.
+
+`audit-browse.server.ts` states the feature's whole reason for existing:
+
+> nothing let an admin READ org/instance-scoped events (`auth.login.*`, `org.user.*`,
+> `org.connection.*`, `github.pat.*`) inside the app: they only existed in a downloaded CSV/JSON.
+> This is the lean read behind the org-settings Audit panel
+
+and the "Org-scoped" toggle's own tooltip repeats the promise: *"Show only org / instance-scoped
+events (sign-ins, PAT changes, user administration). These are the events the project Activity
+page cannot show."*
+
+**Measured on the running instance, 10:11 local.** Of the 150 rows the panel had fetched:
+
+```
+ 91  github.reconcile.task     ← 61%, all of it idle polling
+  9  runtime.run.started
+  9  task.agent.replied
+  6  task.operator.packet_opened
+  6  task.packet.resolved
+  6  task.schedule.created
+  …
+  2  projection.rescan
+```
+
+The window those 150 rows span is **04:18Z → 05:11Z — 53 minutes.** Clicking "Org-scoped" leaves
+**2 rows**, and both are `projection.rescan`. Not one sign-in. Not one PAT change. Not one
+user-administration event.
+
+What is on file, and therefore what the toggle is failing to reach:
+
+```
+ 11  auth.sign_in                           newest 2026-09-13T06:36:55Z
+  6  org.user.created                       newest 2026-09-13T06:30:49Z
+  5  auth.password.forced_reset_completed   newest 2026-09-13T06:38:45Z
+  3  org.mcp.added                          newest 2026-09-13T07:15:16Z
+  2  profile.backend.connected              newest 2026-09-13T06:08:41Z
+  1  github.pat.created                     newest 2026-09-13T06:07:11Z
+  1  org.mcp.tool_policy.changed            newest 2026-09-13T07:07:41Z
+```
+
+Ninety-six org-scoped events, every one of them outside the window. The instance's only recorded
+PAT creation — the single most security-relevant row in the table — is unreachable in-app and
+always will be.
+
+**The mechanism.** `listRecentAuditEvents` is one unfiltered query:
+
+```sql
+SELECT … FROM audit_events ORDER BY occurred_at DESC, rowid DESC LIMIT ?   -- 150
+```
+
+and the toggle is a `useMemo` over the rows that query already returned. So the toggle can only
+ever narrow a window it does not control. Meanwhile `github.reconcile.task` is written
+**unconditionally, once per delivered task per poller tick** — deliberately, and correctly, per
+F19-22: it is the honest answer to "when did we last look", and it must be written whether or not
+anything changed. Seven delivered tasks on a five-minute tick is 2,016 rows a day that arrive
+whether or not a human does anything. After 23 hours this project's table is 4,033 rows of which
+1,151 (28.5%) are that one action — already the largest by a factor of three.
+
+The two facts compose badly: a heartbeat that must be unconditional, read through a window that
+is a fixed row count. The heartbeat wins, and it wins harder the longer the instance lives. On any
+instance with an active project, the panel silently degrades to under an hour of history, and the
+security-review class it was built for falls out first because those events are rare by nature.
+
+**Not a lie, but the footer is the only thing keeping it honest.** "Showing 2 of 150 most-recent
+events" is literally true, and "Download or push to S3 for the full log" is a real escape. That is
+what keeps this MEDIUM rather than HIGH. But the escape is: to find out who signed in, an org
+admin downloads a hundred-thousand-row export and greps it. The panel exists precisely so they
+would not have to.
+
+**The fix has two halves, and both are small.**
+
+1. The Org-scoped toggle must be a **server-side** list, not a client-side filter. The loader can
+   fetch both lists — recent-overall and recent-org-scoped — so the toggle stays instant and the
+   text filter keeps working over whichever is active. No paging UI, no round trip.
+2. The default browse should **exclude the unconditional per-tick reconcile heartbeat**. It is a
+   freshness fact, consumed by `latestTaskReconcileCheckAt` and rendered as "last checked" on the
+   GitHub panel — it is not an event a human browses. Excluding it from the browse query alone
+   changes nothing about the table, the retention sweep, the export, or F19-22's guarantee.
+
+Half 1 is what makes the promise true. Half 2 is what makes the default view worth reading.
+
+---
+
+## F37-53 · A mention notification quotes the part of the comment that is not about you — MEDIUM
+
+**Found by reading my own bell and not recognising a single thing in it.** Four unread rows said
+"mentioned you" and every one of them opened with an instruction to an agent.
+
+The inbox renders a mention as `Operator · mentioned you — "<first 240 characters>"`. The quote is
+`clip()` in `mention-notify.server.ts`, a head truncation:
+
+```ts
+const NOTIFY_QUOTE_MAX = 240;
+function clip(text: string) {
+  const t = text.trim();
+  return t.length <= NOTIFY_QUOTE_MAX ? t : `${t.slice(0, NOTIFY_QUOTE_MAX - 1).trimEnd()}…`;
+}
+```
+
+**Measured over every mention notification this instance has sent me.** For each one I found the
+comment it quotes in the task file and located the `@Arda` the resolver matched:
+
+```
+mention notifications examined:                    49
+  resolving @handle sits PAST the 240-char quote:  19   (39%)
+```
+
+Where the handle actually sat, and what surrounded it:
+
+```
+07:21:56  SHOP-7  char 935  …end with an explicit question to @Arda naming all three options…
+07:36:48  SHOP-7  char 274  …and ends with the explicit decision request to @Arda…
+08:05:18  SHOP-7  char 316  …Ensure the document ends with an explicit @Arda question naming…
+08:48:50  SHOP-7  char 414  …and satisfies the explicit question for @Arda. Inspect the full diff…
+```
+
+So in two of every five mention notifications, the one sentence that concerns the recipient is the
+one sentence the notification does not show. What it shows instead is the opening of a directive
+addressed to somebody else — `"@Platform Architect, revise the existing task-branch deliverable…"`
+— under a header that says **mentioned you**. The header is true. The evidence under it is not the
+evidence for it.
+
+There is no way to tell from the inbox which of the two it is, so the only reliable move is to
+open every one and search the comment for your own name. That is the work the notification exists
+to save.
+
+**The fix is small and the machinery already exists.** `findMentionSpans` already returns the
+`start`/`end` of every span, and `resolveMentionTargets` already knows which span resolved to which
+user. Clip a window *around* the first span that resolved to this recipient instead of around
+character zero, with a leading ellipsis when the window does not start at the beginning. Same
+budget, same row height, and the quote becomes the reason the row exists.
+
+**Separately, and for the owner — a design question, not a defect.** Look at what those `@Arda`s
+are. Not one of them is addressed to me. Every one is the operator telling an agent what the
+deliverable must contain: *"end with an explicit @Arda question"*, *"satisfies the explicit
+question for @Arda"*. The tag is a content specification being handed to a writer, and viberr reads
+it as a ping. SHOP-7 reworked twelve times and re-issued that directive each round, so the same
+non-event reached my inbox again and again.
+
+This is not obviously viberr's mistake to fix by itself: `P14-GV-06` deliberately added this
+fan-out because *"a human @tagged inside an operator directive ('…coordinate with @Arda') was never
+notified"*, and that is a real ping worth delivering. Viberr cannot tell the two apart by parsing.
+Raised with the owner with this background rather than guessed at.

@@ -5,7 +5,7 @@ import {
   createNotification,
 } from "~/server/projections/notifications.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
-import { extractMentions } from "~/ui/mention-spans";
+import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
 
 /**
  * @mention → `mention`-notification fan-out, shared by EVERY comment writer
@@ -65,10 +65,65 @@ export const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude",
 /** Cap the quoted comment inside the notification text — an agent reply can be
  *  a full report; the inbox row needs the gist, the timeline has the rest. */
 const NOTIFY_QUOTE_MAX = 240;
+/** Run-up kept before the mention when the window has to move off the head, so
+ *  the quote opens on the sentence the handle sits in rather than on the handle. */
+const QUOTE_LEAD = 80;
+/** How far the window start may slide forward to land after a space instead of
+ *  inside a word. Past this it is cheaper to begin mid-word than to lose text. */
+const QUOTE_SNAP = 24;
 
 function clip(text: string): string {
   const t = text.trim();
   return t.length <= NOTIFY_QUOTE_MAX ? t : `${t.slice(0, NOTIFY_QUOTE_MAX - 1).trimEnd()}…`;
+}
+
+/**
+ * Ruling 233 — the quote a mention notification carries must contain the
+ * mention that caused it.
+ *
+ * `clip` takes the head of the comment, which is the right window only when the
+ * handle is near the top. It often is not: an operator directive opens by naming
+ * the agent it is dispatching and reaches the person hundreds of characters
+ * later, and an agent's report reaches them later still. Measured on pass 37's
+ * live instance, 19 of 49 mention notifications (39%) quoted a window that
+ * excluded the handle they were sent for, so the row read "mentioned you"
+ * above a sentence addressed to somebody else and the recipient had to open the
+ * task and search it for their own name — the work the notification exists to
+ * save.
+ *
+ * `at` is an index into `text` (a span start from `findMentionSpans`). The head
+ * window is kept whenever it already covers the mention, so the common case is
+ * byte-for-byte what it was; only a mention past the cap moves the window.
+ */
+function quoteAround(text: string, at: number): string {
+  const t = text.trim();
+  if (t.length <= NOTIFY_QUOTE_MAX) return t;
+  // `at` indexes the untrimmed text; every offset below is on the trimmed one.
+  const mark = Math.max(0, at - (text.length - text.trimStart().length));
+  if (mark < NOTIFY_QUOTE_MAX) return clip(text);
+  let start = Math.max(0, mark - QUOTE_LEAD);
+  const space = t.indexOf(" ", start);
+  if (space !== -1 && space - start < QUOTE_SNAP) start = space + 1;
+  const end = Math.min(t.length, start + NOTIFY_QUOTE_MAX - 2);
+  return `${start > 0 ? "…" : ""}${t.slice(start, end).trim()}${end < t.length ? "…" : ""}`;
+}
+
+/**
+ * The quote for ONE recipient: windowed on the first handle in the text that
+ * resolved to them, or the head when none did (a caller that notified them for
+ * another reason). `matchedBy` is the resolver's handle-to-user map, so "which
+ * span is theirs" is answered by the same ladder that decided to notify them.
+ */
+function quoteForUser(
+  text: string,
+  userId: string,
+  matchedBy: ReadonlyMap<string, string>,
+  knownNames: readonly string[],
+): string {
+  for (const span of findMentionSpans(text, [...knownNames])) {
+    if (matchedBy.get(span.handle) === userId) return quoteAround(text, span.start);
+  }
+  return clip(text);
 }
 
 export interface MentionableUser {
@@ -80,6 +135,9 @@ export interface MentionableUser {
 export interface MentionResolution {
   /** Users to notify, in the input (users-table) order, deduplicated. */
   userIds: string[];
+  /** Which handle won which user, for a caller that needs to point at the
+   *  mention itself rather than just know that one happened (ruling 233). */
+  matchedBy: Map<string, string>;
   /** Handles that matched more than one person and so notified NOBODY. */
   ambiguous: string[];
   /** Handles that matched exactly one real, enabled user who is NOT a member of
@@ -124,7 +182,10 @@ export function resolveMentionTargets(
       users.map((u) => u.name),
     ).filter((h) => !RESERVED_HANDLES.has(h)),
   );
-  if (handles.size === 0) return { userIds: [], ambiguous: [], nonMembers: [] };
+  const matchedBy = new Map<string, string>();
+  if (handles.size === 0) {
+    return { userIds: [], matchedBy, ambiguous: [], nonMembers: [] };
+  }
 
   const matched = new Set<string>();
   const ambiguous: string[] = [];
@@ -151,10 +212,12 @@ export function resolveMentionTargets(
       continue;
     }
     matched.add(target.id);
+    matchedBy.set(handle, target.id);
   }
 
   return {
     userIds: users.filter((u) => matched.has(u.id)).map((u) => u.id),
+    matchedBy,
     ambiguous,
     nonMembers,
   };
@@ -361,6 +424,21 @@ export interface NotifyMentionsInput {
    *  dispatch-completion cc line, ruling 98) pings only the added handles,
    *  never re-notifying anyone the earlier comment already reached. */
   skipUserIds?: ReadonlySet<string>;
+  /**
+   * Ruling 232 (owner, 2026-09-14) — the comment's DECLARED audience.
+   *
+   * `"agent"` is a machine-authored directive handed to a specialist: its
+   * handles address that agent, and a person named inside it is being described
+   * TO the agent, not addressed. Such a comment notifies no person. Default
+   * `"open"` keeps every other writer exactly as it was.
+   *
+   * Declared, not inferred: `appendComment` DERIVES its `toAgent` from the
+   * presence of an agent handle, so a human writing "@dev do X, @Bora look at
+   * the schema first" would lose Bora's ping under a blanket rule — and a human
+   * has one comment box, not a second human-directed channel to fall back on.
+   * The gate is therefore for writers that set the audience themselves.
+   */
+  audience?: "agent" | "open";
 }
 
 export interface MentionFanout {
@@ -389,11 +467,16 @@ export function fanOutMentions(
   db: DatabaseSync,
   input: NotifyMentionsInput,
 ): MentionFanout {
-  const { userIds, ambiguous, nonMembers } = resolveIn(
+  const { userIds, matchedBy, ambiguous, nonMembers } = resolveIn(
     db,
     input.text,
     input.projectSlug,
   );
+  // Ruling 232: a directive addressed to an agent notifies no person. The
+  // handles that reached nobody are still reported, because they are facts
+  // about the text and the author's disclosure is written from them.
+  if (input.audience === "agent") return { mentioned: [], ambiguous, nonMembers };
+  const knownNames = enabledUsers(db).map((u) => u.name);
   const mentioned: string[] = [];
   for (const userId of userIds) {
     if (input.excludeUserId && userId === input.excludeUserId) continue;
@@ -402,7 +485,7 @@ export function fanOutMentions(
     const notification: CreateNotificationInput = {
       userId,
       kind: "mention",
-      text: `mentioned you — “${clip(input.text)}”`,
+      text: `mentioned you — “${quoteForUser(input.text, userId, matchedBy, knownNames)}”`,
       from: input.from,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

@@ -4985,6 +4985,71 @@ by rewriting those paragraphs:*
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 
+232. **A comment whose DECLARED audience is the agent notifies no person (owner, 2026-09-14,
+    pass 37; F37-53).** P14-GV-06 added the mention fan-out to `operatorPromptAgent` because a
+    human tagged inside an operator directive ("...coordinate with @Arda on the copy") was never
+    notified - the tag was decoration. Pass 37 measured what those tags actually are on a live
+    instance: of 49 mention notifications sent to the owner, 19 came from directives where the
+    handle was the operator SPECIFYING a deliverable to a specialist - "Ensure the document ends
+    with an explicit @Arda question naming Stripe, Adyen, and Mock-only" - re-issued verbatim on
+    every rework round, and SHOP-7 reworked twelve times. Viberr cannot tell "coordinate with
+    @Arda" from "write an @Arda question" by parsing, so the owner ruled on the audience instead:
+    a directive handed to an agent is addressed to that agent, and a person named inside it is
+    being described TO the agent, not addressed.
+    DECLARED, not inferred, and the distinction is load-bearing. `appendComment` DERIVES its
+    `toAgent` from the presence of an agent handle, so a blanket rule would silently drop the
+    human half of "@dev implement the endpoint, @Bora look at the schema first" - and a human has
+    one comment box, not a second human-directed channel to fall back on. The gate is therefore
+    for writers that set the audience themselves; today that is `operatorPromptAgent` alone.
+    The rule lives at the fan-out seam (`audience: "agent"` on `NotifyMentionsInput`), not at the
+    call site, so a future declared-agent writer inherits it. The handles that reached nobody are
+    still reported, because they are facts about the text that the author's disclosure is written
+    from, and the directive comment itself still lands on the timeline tagged to-agent: the ruling
+    changes who hears about the hand-off, not whether it is on the record.
+    (`mention-notify.server.ts`, `task-actions.server.ts`.)
+
+233. **A mention notification quotes the mention, not the opening of the comment (pass 37;
+    F37-53).** The inbox row reads `mentioned you - "<first 240 characters>"`, and the head is the
+    right window only when the handle is near the top. It often is not: an operator directive
+    opens by naming the AGENT it is dispatching and reaches the person hundreds of characters
+    later, and an agent's report reaches them later still. Measured over every mention
+    notification this instance had sent the owner, 19 of 49 (39%) quoted a window that EXCLUDED
+    the handle they were sent for - the handles sat at characters 274, 316, 414 and 935. The
+    header said "mentioned you" above a sentence addressed to somebody else, and the only
+    reliable way to find out what was said to you was to open the task and search it for your own
+    name, which is the work the notification exists to save.
+    The quote is now windowed on the first span that resolved to THIS recipient, which is why
+    `resolveMentionTargets` returns the handle-to-user map it always computed and threw away. The
+    head window is kept whenever it already covers the mention, so the common case is unchanged
+    byte for byte; only a mention past the cap moves the window, and it then carries a leading
+    ellipsis. One recipient's quote is theirs alone - two people tagged in different paragraphs
+    of the same comment each see their own.
+    (`mention-notify.server.ts`, `mention-spans.ts`.)
+
+234. **The in-app audit browse reaches the class it exists for (pass 37; F37-52).** The panel
+    shipped as ONE `ORDER BY occurred_at DESC LIMIT 150` with the "Org-scoped" toggle filtering
+    those rows client-side, so the toggle could only narrow a window it did not control. Two
+    facts then composed badly. `github.reconcile.task` is written UNCONDITIONALLY, once per
+    delivered task per poller tick - deliberately and correctly, per F19-22: it is the honest
+    answer to "when did we last look" and must exist whether or not the pass changed anything.
+    Seven delivered tasks on a five-minute tick is 2,016 rows a day that arrive while nobody
+    touches the instance. A heartbeat that must be unconditional, read through a window that is a
+    fixed row count: the heartbeat wins, and it wins harder the longer the instance lives.
+    Measured live on a board that had not moved in two and a half hours: 91 of the 150 rows (61%)
+    were that one action, the window spanned 53 minutes, and clicking "Org-scoped" left TWO rows,
+    both `projection.rescan`. Not one sign-in, not one PAT change, not one user-administration
+    event - while 96 such events sat on file, including the instance's only `github.pat.created`,
+    the most security-relevant row in the table. The feature's own module doc says it exists
+    because "nothing let an admin READ org/instance-scoped events inside the app"; it still did
+    not.
+    So the heartbeat is excluded from the BROWSE and nowhere else - the table, the retention
+    sweep, the export and `latestTaskReconcileCheckAt` all still see every row, so F19-22's
+    guarantee is intact - and the org-scoped list is its own SQL query. The loader fetches both
+    windows so the toggle stays instant and the text filter keeps working over whichever one is
+    showing. Excluding a row from an audit browse is a deliberate act, so the hidden actions are
+    listed by name and never pattern-matched.
+    (`audit-browse.server.ts`, `org.settings.tsx`, `org-settings-page.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

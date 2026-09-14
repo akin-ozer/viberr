@@ -5050,16 +5050,22 @@ export async function operatorPromptAgent(
     parsed.timeline.unshift(comment);
   });
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
-  // P14-GV-06 (NEW-4 gap): this was the ONE comment writer that wrote the
-  // timeline directly and skipped the mention fan-out, so a human @tagged inside
-  // an operator directive ("…coordinate with @Arda") was never notified. The
-  // agent's own @handle is a reserved handle and routes without notifying.
+  // P14-GV-06 added this fan-out so a human @tagged inside an operator directive
+  // ("…coordinate with @Arda") was not silently dropped. Ruling 232 (owner,
+  // 2026-09-14) reverses that for THIS writer: the comment's declared audience is
+  // the agent, and pass 37 measured what the tags in it actually are — 19 of 49
+  // mention notifications on the live instance came from directives whose @handle
+  // was the operator SPECIFYING a deliverable ("end with an explicit @Arda
+  // question naming Stripe, Adyen, and Mock-only"), re-issued on every rework
+  // round. The call stays, carrying the audience, so the rule lives at the one
+  // fan-out seam and the non-delivery report is still computed for the timeline.
   notifyMentionedUsers(db, {
     text: commentText,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     from: OPERATOR_NOTIFY_FROM,
     occurredAt: comment.occurredAt,
+    audience: "agent",
   });
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.

@@ -1188,8 +1188,21 @@ describe("appendComment", () => {
   });
 });
 
-describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
-  it("notifies a human @tagged inside the operator's directive comment", async () => {
+describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () => {
+  /**
+   * P14-GV-06 asserted the OPPOSITE of this: it added the fan-out here because a
+   * human tagged inside an operator directive was never notified. Ruling 232
+   * (owner, 2026-09-14) reverses it for this writer after pass 37 measured what
+   * those tags are in practice — 19 of 49 mention notifications on the live
+   * instance came from directives whose handle was the operator specifying a
+   * deliverable ("end with an explicit @Arda question"), re-sent on every rework
+   * round. The comment's declared audience is the agent, so it pings nobody.
+   *
+   * The directive below is P14-GV-06's own text verbatim, so the two contracts
+   * are compared on identical input rather than on a case chosen to suit the new
+   * rule.
+   */
+  it("does not notify a human @tagged inside the operator's directive (ruling 232)", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
@@ -1197,8 +1210,7 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const firstName = store.users.arda.name.split(" ")[0];
     // The run itself can't start here (no deployed profile) — the directive
-    // COMMENT is written first, and that comment was the one writer in the app
-    // that never fanned its mentions out (NEW-4 gap).
+    // COMMENT is written first, which is the writer under test.
     await expect(
       operatorPromptAgent(
         store.db,
@@ -1223,13 +1235,17 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
         text: z.string(),
       }),
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ user_id: store.users.arda.id, kind: "mention" });
-    // Attributed to the operator, like its narration comments.
-    expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({
-      kind: "agent",
-      name: "Operator",
-    });
+    expect(rows).toEqual([]);
+    // The hand-off is still on the record: the ruling changes who hears about
+    // the directive, not whether it was written.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const directive = file.parsed.timeline.find((e) => e.type === "comment");
+    expect(directive?.toAgent).toBe(true);
+    expect(directive?.text).toContain(`@${firstName}`);
   });
 
   // S5-G3: the POSTED directive discloses an ambiguous tag; the RUN's directive

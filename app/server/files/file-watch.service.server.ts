@@ -133,8 +133,29 @@ function cancelAll(timers: Map<string, ReturnType<typeof setTimeout>>): void {
 }
 
 /** Starts (or returns the already-running) projects-tree watcher. */
+/**
+ * Ruling 218's retry ladder, per file, reset on the first success. Exported so
+ * the seam below can be documented against the real numbers; overridden only by
+ * a test that would otherwise have to out-wait it (see `retryBackoffMs`).
+ */
+export const RETRY_BACKOFF_MS = [2_000, 5_000, 15_000, 45_000, 120_000] as const;
+
 export function startFileWatcher(
-  options: { dataRoot?: string; db?: DatabaseSync } = {},
+  options: {
+    dataRoot?: string;
+    db?: DatabaseSync;
+    /**
+     * Override ruling 218's backoff ladder. A TEST seam, and it exists because
+     * the alternative failed twice: the ruling-218 canary has to wait for a
+     * retry to fire, and with the real 2s/5s/15s ladder a repair that lands just
+     * after the second retry waits 15s more for the third. That is not a budget
+     * you can pick, it is a race with production timing — the test was raised to
+     * 12s, failed under full-suite load at 12,087ms, was raised to 26s, and
+     * failed again at 26,052ms. A canary nobody trusts is worse than none, so
+     * the ladder became injectable instead of the budget becoming bigger.
+     */
+    retryBackoffMs?: readonly number[];
+  } = {},
 ): FSWatcher {
   const cache = watcherHost();
   const root = getDataRoot(options.dataRoot);
@@ -175,7 +196,7 @@ export function startFileWatcher(
    */
   const retries = new Map<string, ReturnType<typeof setTimeout>>();
   const attempts = new Map<string, number>();
-  const RETRY_BACKOFF_MS = [2_000, 5_000, 15_000, 45_000, 120_000];
+  const backoff = options.retryBackoffMs ?? RETRY_BACKOFF_MS;
   const rebuildFile = (absPath: string) => {
     const failed = (err: Error) => {
       logger.error("watcher rebuild failed", { path: absPath, err });
@@ -209,7 +230,7 @@ export function startFileWatcher(
   };
   function scheduleRetry(absPath: string): void {
     const attempt = attempts.get(absPath) ?? 0;
-    const delay = RETRY_BACKOFF_MS[attempt];
+    const delay = backoff[attempt];
     if (delay === undefined) {
       logger.warn("giving up on a projection rebuild — health reports it instead", {
         path: absPath,

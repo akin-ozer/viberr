@@ -5100,13 +5100,31 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .audit-action { font-family: var(--font-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* `min-width: 0`: the cell's `auto` track would otherwise floor at the tag plus
    a 14rem subject and starve the action; the subject truncates instead. */
-.audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); min-width: 0; }
+/* `max-width: 100%` is what actually holds the cell. `justify-self: end` sizes
+   this item to its content, NOT to its track, so a scope wider than the track
+   overflows LEFTWARDS out of its own grid area and paints over the event name —
+   and `overflow: hidden` cannot help, because the box it clips against is the
+   oversized one. The percentage resolves against the grid area, so the item can
+   never leave it and its children truncate inside it instead. */
+.audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); min-width: 0;
+  max-width: 100%; overflow: hidden; }
 /* Design pass 2026-09-08: the scope tag is in the quiet tier. `.audit-scope-tag.org`
    is gone — "org" on every row was a blue fill on every row of the log, and the
    word already says which scope an event has. */
+/* Ruling 234 follow-up: the tag TRUNCATES. Its cell is `fit-content(7rem)` at
+   phone width, and a long project slug ("shopify-clone-platform") is far wider
+   than that — with no truncation it overflowed its own grid area and, being
+   `justify-self: end`, painted leftwards straight over the event name beside it.
+   Two unreadable strings on top of each other, only visible once the browse
+   stopped being a wall of same-shaped reconcile rows. Full value in `title`. */
 .audit-scope-tag { font-family: var(--font-mono); font-size: .69rem; padding: .125rem .375rem; border-radius: var(--radius-small);
-  background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); color: var(--muted); white-space: nowrap; }
-.audit-subject { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+  background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 8; }
+/* The slug repeats on every row of a single-project instance; the task key is
+   the one specific thing in the cell. So when the two must share a phone-width
+   track the SLUG gives way first (`flex-shrink: 8` above against this 1). */
+.audit-subject { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem;
+  min-width: 0; flex-shrink: 1; }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
 .audit-dl .btn { text-decoration: none; }
