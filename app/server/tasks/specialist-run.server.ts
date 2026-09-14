@@ -3486,7 +3486,13 @@ export async function resolveResumeConfinement(
     const resumeTask = readTaskFile(
       taskRef(ctx, input.projectSlug, input.taskKey),
     );
-    const kb =
+    // Ruling 239: and the project's rulings, for the same reason R18-1 keeps the
+    // deliverer's KBs here — a resumed thread that silently drops a knowledge
+    // base mid-conversation is worse than one that never had it, because the
+    // agent's earlier turns were reasoning with it. This is the SECOND place
+    // that builds a run's KB list; the fresh-run site is the one ruling 239
+    // shipped with, and this one was missed.
+    const kb = withProjectRulings(
       !input.delivers && resumeTask
         ? withDeliveringGrants(resolved.kb, () =>
             deliveringContextGrants(
@@ -3496,7 +3502,10 @@ export async function resolveResumeConfinement(
                 resolveDeployedSpecialist(ctx, input.projectSlug, profileId).kb,
             ),
           )
-        : resolved.kb;
+        : resolved.kb,
+      input.projectSlug,
+      ctx,
+    );
     // Re-mount beside the workspace this task's runs share (ruling 180: one
     // plugin per run, so a RESUMED supporting agent can no longer wipe the
     // delivering run's skills — the F19-15 race the in-checkout mount had).

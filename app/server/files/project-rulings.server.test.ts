@@ -83,9 +83,14 @@ describe("the runtimes that build a run's knowledge call it", () => {
     // a real run; the controller's is covered behaviourally below, which is
     // stronger and is what caught this test being too weak the first time.
     const { readFileSync } = await import("node:fs");
-    expect(readFileSync("app/server/tasks/specialist-run.server.ts", "utf8")).toContain(
-      "kb = withProjectRulings(kb, input.projectSlug, ctx)",
-    );
+    const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
+    expect(specialist).toContain("kb = withProjectRulings(kb, input.projectSlug, ctx)");
+    // TWO sites in this file, not one. The fresh-run site is the one ruling 239
+    // shipped with; the RESUMED (@mention) run builds its own list for R18-1
+    // parity and was missed, so a reviewer resumed mid-thread silently lost the
+    // project's rulings between turns. An adversarial sweep found it the same
+    // day. CANARY: unwrap either call and the count drops.
+    expect(specialist.split("withProjectRulings(").length - 1).toBe(2);
     // The operator reads it through its resolved authority, so every consumer
     // of `authority.kb` gets it and not just the prompt builder.
     expect(readFileSync("app/server/tasks/operator-actions.server.ts", "utf8")).toContain(
