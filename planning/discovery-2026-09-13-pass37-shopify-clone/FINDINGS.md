@@ -2398,6 +2398,33 @@ functional (it is the revision that passed everything except a lockfile repair a
 stack-test generalisation) but is NOT the reviewed revision. SHOP-19, which the controller
 created to own that generalisation, waits on SHOP-17 and SHOP-3 and can absorb it.
 
+### The surviving half, closed 2026-09-14 (ruling 226, owner's call)
+
+Ruling 223 made the 422 probe reachable, which closed the exact live failure. What it did not
+close was the design underneath it — A9's deliberate trade, where a head that could not be
+VERIFIED still merged and the note named the check that did not run rather than what that
+meant. I put it to the owner with the background and they chose **refuse and ask**.
+
+The load-bearing distinction turned out to be one A9 had stated and then not enforced. Its own
+words are *"the merge's own honesty covers unreachability"* — true when GitHub is unreachable,
+because then the merge fails too. False in exactly one case, which is the dangerous one: GitHub
+**answers** the pull request and refuses only the comparison. Then the repo is reachable, the
+merge will land, and the only missing thing is the knowledge of what lands. That case now
+refuses; the rest still pass with A9's disclosure.
+
+And a refusal needs an exit, or it is the next finding. The gate records the question on the
+task — both shas in it, three real answers — and the override is pinned to one
+(PR, revision, live head) triple with the deciding person's name on it. Not force-accept, which
+bypasses the verdict gate and has never been able to touch this one.
+
+**Two canaries paid for themselves before the deploy.** The waiver had no line in the frontmatter
+key order, so it never reached disk: the gate re-reading it would have refused forever, and the
+override would have been a button that did nothing. And A9's own test *described* "GitHub
+unreachable" while its fixture answered the pull and failed the compare — this ruling's case,
+not A9's. The fixture, not the ruling, was what made the old behaviour look intended. That is
+the second time in two days a fixture has been the thing standing between viberr and a real
+answer (ruling 223's invented 404 was the first).
+
 ---
 
 ## F37-44 · When the Codex window went, every option on the packet was wrong — HIGH

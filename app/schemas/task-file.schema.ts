@@ -198,6 +198,14 @@ export const PACKET_OPTION_KINDS = [
   // declares, and the alternative asked the human to ASSERT a window had reset
   // when the provider had just said it would not for another three hours.
   "wait_for_window",
+  // Ruling 226 (pass 37, F37-43): the deliberate way past a head GitHub would
+  // not compare. NOT `force_accept`, which cannot bypass the head gate and must
+  // not start: this waives ONE check, for ONE (PR, delivered revision, live
+  // head) triple, with the person's name on it and the consequence stated. The
+  // resolution records that triple as `headCheckWaiver`; the gate honours it
+  // only while all three still match, so it cannot be spent on a head that
+  // moved afterwards.
+  "accept_unverified_head",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -1043,6 +1051,29 @@ const taskFrontmatterFields = {
   // its card. This is the SERVER half only: the durable fact + its projection +
   // TaskSummary. The "accepted · gate bypassed" display arm is C-VOCAB's.
   acceptance: z.enum(["forced"]).nullable().optional(),
+  /**
+   * Ruling 226 (F37-43): a maintainer took a merge whose containment check
+   * GitHub refused to run, deliberately and on the record.
+   *
+   * Pinned to all three shas/numbers it was granted against, because the whole
+   * danger it admits is that the PR head is unknown: a waiver that outlived the
+   * head it was granted for would be a standing permission to merge anything
+   * that branch later carried. The gate re-reads the live head and honours this
+   * only while the triple still matches.
+   */
+  headCheckWaiver: z
+    .object({
+      prNumber: z.number().int(),
+      /** The delivered revision the reviewers were pinned to. */
+      revisionHeadSha: z.string().min(1),
+      /** The live PR head GitHub reported at the moment of the waiver. */
+      liveHeadSha: z.string().min(1),
+      at: z.string().min(1),
+      byUserId: z.string().min(1),
+      byLabel: z.string().default(""),
+    })
+    .nullable()
+    .optional(),
   github: githubCacheSchema.nullable(),
   /** Chained-goal back-reference (ruling 99): this task is one LINK of a goal
    *  chain. The chain itself is canonical in
@@ -1369,6 +1400,10 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "pr",
   "noChanges",
   "acceptance",
+  // Ruling 226: without this line the waiver never reaches the file, so the
+  // gate that re-reads it would refuse forever and the override would be a
+  // button that does nothing. The canary found exactly that.
+  "headCheckWaiver",
   "github",
   "goalRef",
   "createdAt",
@@ -1830,6 +1865,14 @@ export function parseTaskFrontmatter(
       data,
       "acceptance",
       taskFrontmatterFields.acceptance,
+      undefined,
+    ),
+    // Ruling 226: absent means "no override was granted" — never a diagnostic.
+    headCheckWaiver: tolerant(
+      diagnostics,
+      data,
+      "headCheckWaiver",
+      taskFrontmatterFields.headCheckWaiver,
       undefined,
     ),
     github: tolerant(

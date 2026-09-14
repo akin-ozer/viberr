@@ -1368,6 +1368,22 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 226: the head-check override is the policy engine's to offer and
+  // nobody else's. It is granted against a triple the gate read live at the
+  // moment it refused, so an operator authoring it from a stale board would be
+  // offering a waiver over facts it never checked — and the thing being waived
+  // is the last guard between a review and the base branch.
+  const strayWaiver = rawOptions.find((o) => o.kind === "accept_unverified_head");
+  if (strayWaiver) {
+    return {
+      outcome: "noop",
+      message:
+        `accept_unverified_head is not an option you can offer — "${strayWaiver.title}". ` +
+        "The acceptance gate writes it itself when GitHub refuses the head comparison, " +
+        "pinned to the shas it read at that moment.",
+    };
+  }
+
   // Exactly one recommended option (the parser expects this): honour the first
   // one the operator marked, else default to the first option.
   let recSeen = false;

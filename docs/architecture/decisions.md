@@ -4790,6 +4790,42 @@ by rewriting those paragraphs:*
     recording: the refusal arrives as "projection rebuild failed" and a stale row, the exact
     silent-staleness failure `boot.server.ts` probes this column for and ruling 217 built the
     health latch for. The canary caught it before the deploy did.
+
+226. **A head GitHub will not compare is refused, not disclosed (owner, 2026-09-14, pass 37;
+    F37-43).** Ruling 135 built the guard for a PR head that is not the reviewed revision and
+    ruling 223 made it reachable against GitHub's real 422. What survived was A9's trade: a head
+    that could not be VERIFIED still merged, with a note naming the check that did not run. Live
+    that merged SHOP-17 at `9104562` - the revision its Code Reviewer had REJECTED - while both
+    reviewers' approvals pointed at `1f99f68`, which was never pushed, and the completion note
+    said only that the head "could not be verified."
+    A9's reasoning was that "the merge's own honesty covers unreachability", and for an
+    unreachable GitHub that is true: the merge fails too. It is false in exactly one case, and
+    that case is the dangerous one - GitHub ANSWERS the pull request and refuses only the
+    comparison. Then the repository is reachable, the merge will succeed, and the only thing
+    missing is the knowledge of what is being merged. That case now REFUSES, and the sentence
+    names the consequence rather than the procedure: "code no reviewer approved could reach the
+    base branch." Every other unverifiable head still passes with A9's disclosure, which is the
+    case A9 described.
+    A refusal with no exit is its own defect, and this one could strand a task permanently,
+    since no amount of re-delivering makes GitHub answer. So the gate does not only throw a
+    sentence at the browser: it records the question on the task, with both shas in it, and the
+    three real answers - try the check again (recommended, because a refused comparison is
+    usually a bad minute), send it back to be re-delivered, or take the merge deliberately. That
+    third option is NOT force-accept and must not borrow its door: force-accept bypasses the
+    VERDICT gate and has never been able to touch this one. It waives ONE containment check, for
+    ONE (PR, delivered revision, live head) triple, re-read live at the moment of the decision,
+    with the deciding person's name on it. Pinned, because the whole danger it admits is that
+    the head is unknown: a waiver that outlived the head it was granted for would be a standing
+    permission to merge whatever that branch later carried. The operator cannot offer the option
+    at all - it would be waiving a check over facts it never read - and when the re-read
+    succeeds the resolution grants nothing and says so, because a waiver written on a check that
+    would now pass is a permission nobody needed.
+    Two canaries paid for themselves before the deploy. The first: the waiver had no line in the
+    frontmatter key order, so it never reached disk, and the gate that re-reads it would have
+    refused forever - an override button that did nothing. The second: A9's own test described
+    "GitHub unreachable" while its fixture answered the pull and failed the compare, which is
+    this ruling's case, not A9's. The fixture, not the ruling, was what made the old behaviour
+    look intended.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 

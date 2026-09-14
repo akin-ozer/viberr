@@ -1252,20 +1252,28 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(fm().frontmatter.stage).toBe("review");
     expect(mergeMock).not.toHaveBeenCalled();
 
-    // The commit exists on GitHub: the 404 compare is unexplained, so the head
-    // stays unverifiable and the acceptance proceeds with its disclosure.
+    // The commit exists on GitHub: the 404 compare is unexplained. Ruling 226
+    // (owner, 2026-09-14): that no longer merges. GitHub answered the pull and
+    // refused only the comparison, so the repository is reachable, the merge
+    // would land, and what would land is unknown.
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
       [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${head}`]: { status: 404, body: { message: "Not Found" } },
       [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: { body: { sha: "a".repeat(40) } },
     });
-    await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
-      dataCtx(),
-    );
-    expect(fm().frontmatter.stage).toBe("done");
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("could not be checked against the delivered revision"),
+    });
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(mergeMock).not.toHaveBeenCalled();
   });
 
   it("a head that CONTAINS the delivered revision (delivery + auto-commit) is accepted", async () => {
@@ -1383,11 +1391,15 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
   });
 
   it("A9: an UNVERIFIABLE head that still merges records the caveat in the completion event", async () => {
-    // The head reads (a different sha), but the CONTAINMENT compare 404s — the
-    // check could not run. Acceptance still proceeds (an unverifiable head is
-    // allowed, unlike a KNOWN mismatch), the merge lands, and the record must
-    // say the containment check did not run. Canary: drop the A9 branch in
+    // A9's own case, narrowed by ruling 226 to what it always described:
+    // GitHub is UNREACHABLE, so the containment check cannot run — and the
+    // merge attempt is subject to the same unreachability, which is what made
+    // "the merge's own honesty covers it" true here. Acceptance proceeds and
+    // the record must say the check did not run. Canary: drop the A9 branch in
     // applyAcceptanceWrite and the completion event reads like a verified accept.
+    //
+    // The case where GitHub ANSWERS the pull and refuses only the comparison is
+    // ruling 226's, and is tested as a refusal above.
     healthySeed();
     const patActor = actor(store.users.arda);
     const pat = createPat(
@@ -1396,12 +1408,8 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       patActor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    // The PR-head read answers; the compare fails in a way that is NOT the
-    // never-pushed evidence (ruling 135 reads a 404 compare confirmed by a 404
-    // commit read as a refusal), so the head stays unverifiable.
     github = fakeGithubFetch({
-      "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: "f".repeat(40) } } },
-      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${"f".repeat(40)}`]: { status: 500, body: { message: "boom" } },
+      "GET /repos/akin-ozer/viberr/pulls/114": { status: 500, body: { message: "boom" } },
     });
     mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
 
@@ -1418,6 +1426,168 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     const completion = parsed.timeline.find((e) => e.type === "completion");
     expect(completion!.text).toContain("could not be verified against the");
     expect(completion!.text).toContain("without that containment check");
+  });
+
+  /**
+   * Ruling 226 (owner, 2026-09-14) — the surviving half of F37-43.
+   *
+   * Ruling 135 built the guard for a PR head that is not the reviewed revision,
+   * and ruling 223 made it reachable against GitHub's real 422. What stayed was
+   * A9's trade: a head that could not be VERIFIED still merged, with a note
+   * naming the check that did not run rather than the consequence. Live, that
+   * merged SHOP-17 at the revision its Code Reviewer had rejected.
+   */
+  describe("ruling 226: a head GitHub would not compare is refused, not disclosed", () => {
+    const head = "f".repeat(40);
+    const delivered = "a".repeat(40);
+    /** GitHub answers the pull and refuses the comparison: reachable, mergeable,
+     *  unknown. Not the never-pushed case (the commit read confirms it exists). */
+    const answersPullRefusesCompare = () =>
+      fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${head}`]: {
+          status: 500,
+          body: { message: "boom" },
+        },
+      });
+    const withCredential = () => {
+      const patActor = actor(store.users.arda);
+      const pat = createPat(
+        store.db,
+        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0226" },
+        patActor,
+      );
+      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    };
+    const accept = () =>
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+
+    it("refuses the merge and opens a decision naming both shas", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      expect(mergeMock).not.toHaveBeenCalled();
+      expect(fm().frontmatter.stage).toBe("review");
+
+      // A refusal with no way forward is its own defect, so the gate records
+      // the question rather than only throwing a sentence at the browser.
+      const packet = fm().packet!;
+      expect(packet.title).toContain("could not be checked before merging");
+      expect(packet.body).toContain(head.slice(0, 7));
+      expect(packet.body).toContain(delivered.slice(0, 7));
+      expect(packet.options.map((o) => o.kind)).toEqual([
+        "custom",
+        "request_edit",
+        "accept_unverified_head",
+      ]);
+      // The recommendation is the cheap, safe one — not the override.
+      expect(packet.options.findIndex((o) => o.rec)).toBe(0);
+      expect(fm().frontmatter.waiting).toBe("human");
+    });
+
+    it("presses Accept twice without stacking a second question", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      const first = fm().packet!.id;
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      expect(fm().packet!.id).toBe(first);
+    });
+
+    it("grants NO override when the re-read succeeds", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+
+      // GitHub answers the comparison this time. A waiver written now would be
+      // a permission nobody needed.
+      github = fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${head}`]: {
+          body: { status: "ahead" },
+        },
+      });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+
+      const after = fm();
+      expect(after.packet).toBeNull();
+      expect(after.frontmatter.headCheckWaiver ?? null).toBeNull();
+      expect(
+        after.timeline.find((e) => e.type === "transition")!.text,
+      ).toContain("answered the comparison this time");
+    });
+
+    it("pins the override to the head it was granted for, and says what it admits", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+      const waiver = fm().frontmatter.headCheckWaiver!;
+      expect(waiver).toMatchObject({
+        prNumber: 114,
+        revisionHeadSha: delivered,
+        liveHeadSha: head,
+        byUserId: store.users.arda.id,
+      });
+
+      // The merge now goes through, and the record names the consequence and
+      // the person — not the procedure that was skipped.
+      mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
+      await accept();
+      const completion = fm().timeline.find((e) => e.type === "completion")!;
+      expect(completion.text).toContain("Code no reviewer approved may be on the base branch");
+      expect(completion.text).not.toContain("GitHub could not be reached");
+    });
+
+    it("refuses again once the branch moves under the override", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+      expect(fm().frontmatter.headCheckWaiver).toBeTruthy();
+
+      // Someone pushes. The waiver names a head that is no longer there, and a
+      // waiver that outlived its head would be a standing permission to merge
+      // whatever the branch later carried.
+      const moved = "e".repeat(40);
+      github = fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: moved } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${moved}`]: {
+          status: 500,
+          body: { message: "boom" },
+        },
+      });
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      expect(mergeMock).not.toHaveBeenCalled();
+    });
   });
 
   it("A9: a VERIFIED head adds NO caveat (a clean accept never reads as unverified)", async () => {

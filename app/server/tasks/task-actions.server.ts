@@ -8023,7 +8023,9 @@ export async function resolvePacket(
         input.projectSlug,
         input.taskKey,
       );
-      if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+      if (headCheck.refusal) {
+        await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+      }
       // R19-8: the packet path is a writer to Done like the other two, so the
       // no-change basis is re-proved live HERE as well — otherwise the
       // operator's own acceptance packet becomes the one door a stale
@@ -8501,6 +8503,104 @@ export async function resolvePacket(
       mutate = (fm) => {
         // Not `waiting: agent`: no agent is coming for the next few hours, and
         // a board that claims one is the F37-33 lie by another road.
+        fm.waiting = "human";
+        if (fm.readiness === "blocked") fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
+    case "accept_unverified_head": {
+      // Ruling 226 (F37-43): the deliberate way past a head GitHub would not
+      // compare. It is NOT force-accept and must not borrow its door — that one
+      // bypasses the VERDICT gate and cannot touch this one. This waives a
+      // single containment check, for a single (PR, delivered revision, live
+      // head) triple, and the authority it asks for is the acceptance it is
+      // about to make possible.
+      requireAction(
+        db,
+        project,
+        actor,
+        "accept-completion",
+        "accept a completion whose PR head could not be checked",
+      );
+      // Re-read live before granting anything. The refusal this packet answers
+      // is a transient-shaped failure, and the honest outcome when it has
+      // cleared is to grant NO waiver and say the check ran — a waiver written
+      // on a check that would now pass is a permission nobody needed.
+      const recheck = await acceptancePrHeadCheck(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+      );
+      if (!recheck.refusal) {
+        event = {
+          occurredAt: now,
+          type: "transition",
+          actor: human,
+          title: null,
+          text:
+            `**Decision:** ${option.t}. On re-reading, GitHub answered the comparison this ` +
+            `time, so no override was recorded and ${key} can be accepted normally.`,
+          toAgent: false,
+          evidence: null,
+        };
+        mutate = (fm) => {
+          fm.waiting = "human";
+          if (fm.readiness === "blocked") fm.readiness = "ready";
+        };
+        clearPacket = true;
+        break;
+      }
+      // Still refusing, but without the three facts there is nothing to pin a
+      // waiver to, and an unpinned one would be a standing permission to merge
+      // whatever that branch later carries.
+      if (
+        !recheck.liveHeadSha ||
+        recheck.prNumber === null ||
+        !recheck.revisionHeadSha
+      ) {
+        throw AppError.conflict(
+          `${key}'s pull request or delivered revision is no longer readable, so there is ` +
+            `nothing to record this override against. Refresh the task and try again.`,
+        );
+      }
+      const waivedHead = recheck.liveHeadSha;
+      const waivedRevision = recheck.revisionHeadSha;
+      const waivedPr = recheck.prNumber;
+      const waiverUserId = actor.userId ?? null;
+      if (!waiverUserId) {
+        throw AppError.conflict(
+          `Only a signed-in person can accept ${key} without the containment check.`,
+        );
+      }
+      const waiverLabel = userName(db, waiverUserId) ?? "";
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        // The record states the CONSEQUENCE, not the check. A9's note named
+        // the check that did not run, which reads as a formality; what this
+        // decision actually admits is that unreviewed code may land.
+        text:
+          `**Decision:** ${option.t}. PR #${waivedPr} may be merged at head ` +
+          `\`${waivedHead.slice(0, 7)}\` without confirming it contains the reviewed ` +
+          `revision \`${waivedRevision.slice(0, 7)}\`. Code no reviewer approved may reach ` +
+          `the base branch. The override applies to this head only: if the branch moves, ` +
+          `the check is required again.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.headCheckWaiver = {
+          prNumber: waivedPr,
+          revisionHeadSha: waivedRevision,
+          liveHeadSha: waivedHead,
+          at: now,
+          byUserId: waiverUserId,
+          byLabel: waiverLabel,
+        };
         fm.waiting = "human";
         if (fm.readiness === "blocked") fm.readiness = "ready";
       };
@@ -9939,21 +10039,34 @@ function forceIrreducibleRefusal(
  * during the await refuses instead of riding a stale verification through.
  */
 export interface AcceptancePrHeadCheck {
-  /** The refusal sentence, or null when the head is verified or unverifiable. */
+  /** The refusal sentence, or null when the head is verified or unverifiable
+   *  in a way that cannot reach the base branch (see `verification`). */
   refusal: string | null;
   /**
    * A9 (pass 23): WHY `refusal` is null — the two cases used to be
    * indistinguishable. `verified` = a live read confirmed the PR head contains
    * the delivered revision. `unverifiable` = the check could not run (GitHub
-   * unreachable, the PR read or compare failed) — acceptance is still ALLOWED
-   * (the merge's own honesty covers unreachability), but the record must SAY the
-   * containment check did not run or a verified accept and an unverified one read
-   * identically. `not-applicable` = nothing to verify (no PR, no revision, or the
-   * PR is already merged).
+   * unreachable, the PR read or compare failed). `not-applicable` = nothing to
+   * verify (no PR, no revision, or the PR is already merged).
+   *
+   * Ruling 226 amends what `unverifiable` permits. A9 allowed it through on the
+   * reasoning that "the merge's own honesty covers unreachability" — true when
+   * GitHub is unreachable, because then the merge fails too. It is false in the
+   * one case where GitHub answered the pull request and refused only the
+   * comparison: the repository is reachable, the merge will succeed, and the
+   * containment check simply did not run. That case now carries a `refusal` and
+   * a `liveHeadSha`; the rest still pass with the A9 disclosure on the record.
    */
   verification: "verified" | "unverifiable" | "not-applicable";
   prNumber: number | null;
   revisionHeadSha: string | null;
+  /**
+   * Ruling 226: the head GitHub reported for the PR, when it reported one.
+   * Present only on the refusing `unverifiable` case — the packet that offers
+   * the way out names both SHAs, and the waiver that takes it is pinned to this
+   * exact head so it cannot be spent on a different one.
+   */
+  liveHeadSha: string | null;
 }
 
 /**
@@ -9969,6 +10082,103 @@ export interface AcceptancePrHeadCheck {
  * so a full-autonomy operator accept followed by a human "Complete merge"
  * merged a stale-head PR through the two doors that skipped it.
  */
+/**
+ * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
+ *
+ * A refusal with no exit is its own defect, and this one could otherwise strand
+ * a task permanently — the cause is GitHub declining a comparison, which no
+ * amount of re-delivering necessarily fixes. So the gate does not just throw a
+ * sentence into a toast: it records the question on the task, with both shas in
+ * it, and the three real answers.
+ *
+ * Written from the ONE gate all four Done writers share, so the packet appears
+ * whichever door was tried. Never clobbers an open decision (one packet slot per
+ * task), and never re-writes itself while its own packet is standing — a human
+ * pressing Accept twice gets one question, not two.
+ */
+async function refuseUnverifiedHead(
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  check: AcceptancePrHeadCheck,
+): Promise<never> {
+  const refusal = check.refusal ?? "";
+  if (check.liveHeadSha && check.prNumber !== null && check.revisionHeadSha) {
+    try {
+      await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+        if (parsed.packet) return;
+        const head = check.liveHeadSha!.slice(0, 7);
+        const delivered = check.revisionHeadSha!.slice(0, 7);
+        parsed.packet = {
+          id: newId("pkt"),
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "policy-engine",
+          title: `PR #${check.prNumber}'s head could not be checked before merging`,
+          body:
+            `GitHub answered the pull request and then refused to compare its head ` +
+            `\`${head}\` against the delivered revision \`${delivered}\` that your reviewers ` +
+            `were pinned to.\n\nThe repository is reachable, so the merge itself would ` +
+            `succeed. What is unknown is WHAT would be merged: if the PR carries something ` +
+            `other than the reviewed revision, accepting puts code no reviewer approved on ` +
+            `the base branch. That is not hypothetical — it is how SHOP-17 merged a revision ` +
+            `its Code Reviewer had rejected.`,
+          observations: [],
+          options: [
+            {
+              kind: "custom",
+              t: "Try the check again",
+              d:
+                "Closes this decision and changes nothing else. A refused comparison is " +
+                "usually transient (rate limit, a bad minute at GitHub); accept again and " +
+                "the check runs fresh.",
+              rec: true,
+            },
+            {
+              kind: "request_edit",
+              t: "Send it back to be re-delivered",
+              d:
+                "Returns the task for rework so the branch is pushed again from the " +
+                "workspace. Use this when you suspect the remote branch is not what was " +
+                "reviewed.",
+              rec: false,
+            },
+            {
+              kind: "accept_unverified_head",
+              t: "Merge it anyway, without the check",
+              d:
+                `Records, with your name on it, that PR #${check.prNumber} may be merged at ` +
+                `head \`${head}\` without confirming it contains \`${delivered}\`. Then press ` +
+                `Accept again: the merge stays your act, not a side effect of answering this. ` +
+                `It applies to this head only, so if the branch moves the check is required ` +
+                `again. Code no reviewer approved may reach the base branch.`,
+              rec: false,
+            },
+          ],
+        };
+        parsed.frontmatter.waiting = "human";
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: `PR #${check.prNumber}'s head could not be checked before merging`,
+          text: `**Acceptance refused:** ${refusal}`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+    } catch (error) {
+      // The refusal is the point; failing to RECORD it must not turn a refused
+      // merge into a thrown-away one. Log and refuse anyway.
+      logger.warn("could not record the unverified-head decision packet", {
+        taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  throw AppError.conflict(refusal);
+}
+
 export async function acceptancePrHeadCheck(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -9983,6 +10193,7 @@ export async function acceptancePrHeadCheck(
     verification: verdict.verification,
     prNumber: fm?.pr?.number ?? null,
     revisionHeadSha: activeWorkRevision(fm?.workRevision)?.headSha ?? null,
+    liveHeadSha: verdict.liveHeadSha ?? null,
   };
 }
 
@@ -10047,6 +10258,8 @@ async function evaluateAcceptancePrHead(
 ): Promise<{
   refusal: string | null;
   verification: "verified" | "unverifiable" | "not-applicable";
+  /** Ruling 226: the live PR head, when GitHub reported one. */
+  liveHeadSha?: string | null;
 }> {
   try {
     const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -10109,8 +10322,44 @@ async function evaluateAcceptancePrHead(
           };
         }
       }
-      // Could not compare — unknown, not a refusal, but NOT a verification either.
-      return { refusal: null, verification: "unverifiable" };
+      // Ruling 226 (F37-43's surviving half): GitHub ANSWERED the pull request
+      // and then would not answer the comparison. Both SHAs are in hand, the
+      // repository is reachable, and the merge that follows this check would
+      // therefore succeed — so "unknown" here is not the offline case A9's
+      // disclosure was written for. It is the case where viberr is about to
+      // merge a head it cannot tell apart from one its reviewers rejected,
+      // which is what it did to SHOP-17 live: two reviewers approved
+      // `1f99f68`, that revision was never pushed, and PR #12 merged at
+      // `9104562` with a note saying only that the head "could not be
+      // verified".
+      //
+      // So it refuses, and the sentence names the consequence rather than the
+      // check. The way out is the packet the refused acceptance opens
+      // (`unverified_head`), where a maintainer can re-check, send the branch
+      // back, or take the merge deliberately with their name on it.
+      // The waiver a maintainer granted for exactly this triple (ruling 226).
+      // Re-read live, never trusted from the moment it was written: the head
+      // below is what GitHub reports NOW, so a branch that moved after the
+      // waiver no longer matches and the refusal returns.
+      const waiver = fm?.headCheckWaiver ?? null;
+      if (
+        waiver &&
+        waiver.prNumber === pr.number &&
+        waiver.revisionHeadSha === rev.headSha &&
+        waiver.liveHeadSha === headSha
+      ) {
+        return { refusal: null, verification: "unverifiable", liveHeadSha: headSha };
+      }
+      return {
+        refusal:
+          `PR #${pr.number}'s head (${headSha.slice(0, 7)}) could not be checked against the ` +
+          `delivered revision ${rev.headSha.slice(0, 7)}: GitHub answered the pull request and ` +
+          `then refused the comparison. Accepting now would merge without knowing whether the ` +
+          `PR carries the revision your reviewers approved, so code no reviewer approved could ` +
+          `reach the base branch. Re-check it, or re-deliver the branch.`,
+        verification: "unverifiable",
+        liveHeadSha: headSha,
+      };
     }
     if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
       return { refusal: null, verification: "verified" };
@@ -10535,7 +10784,9 @@ export async function applyAcceptanceWrite(
   const headCheck =
     input.headCheck ??
     (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
-  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  if (headCheck.refusal) {
+    await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+  }
   // R19-8: the SECOND layer of the no-change gate. Every writer to Done funnels
   // through here, so a caller that forgets the check still cannot close a task
   // on a stale `noChanges` flag (F19-21).
@@ -10676,10 +10927,27 @@ export async function applyAcceptanceWrite(
       headCheck.prNumber !== null &&
       parsed.frontmatter.pr?.state === "merged"
     ) {
-      input.event.text +=
-        `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
-        `delivered revision before the merge (GitHub could not be reached for the check). ` +
-        `It was accepted without that containment check.`;
+      // Ruling 226: two different things reach this line now, and they are not
+      // the same admission. A9's original case is GitHub being unreachable, and
+      // its sentence is right for that. The other is a maintainer who was shown
+      // the refusal and took the merge anyway — there the record must name what
+      // was risked, not the procedure that was skipped, and it must name who
+      // decided. "The check did not run" reads as a formality; "code no
+      // reviewer approved may be on the base branch" is what it means.
+      const waiver = parsed.frontmatter.headCheckWaiver ?? null;
+      const waived =
+        waiver !== null &&
+        waiver.prNumber === headCheck.prNumber &&
+        waiver.liveHeadSha === headCheck.liveHeadSha;
+      input.event.text += waived
+        ? `\n\nNote: PR #${headCheck.prNumber} was merged at head ` +
+          `\`${(headCheck.liveHeadSha ?? "").slice(0, 7)}\` without confirming it contains the ` +
+          `reviewed revision \`${(headCheck.revisionHeadSha ?? "").slice(0, 7)}\` — GitHub ` +
+          `refused the comparison and ${waiver.byLabel || waiver.byUserId} accepted it anyway. ` +
+          `Code no reviewer approved may be on the base branch.`
+        : `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
+          `delivered revision before the merge (GitHub could not be reached for the check). ` +
+          `It was accepted without that containment check.`;
     }
     parsed.timeline.unshift(input.event);
     accepted = true;
@@ -10907,7 +11175,9 @@ async function acceptCompletion(
     input.projectSlug,
     input.taskKey,
   );
-  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  if (headCheck.refusal) {
+    await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+  }
 
   // R19-8: a `noChanges` task closes WITHOUT a merge, so its basis is re-proved
   // LIVE — a flag set at some past delivery attempt must never close a task whose
@@ -11347,7 +11617,9 @@ export async function completeTaskMerge(
     input.projectSlug,
     input.taskKey,
   );
-  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  if (headCheck.refusal) {
+    await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+  }
 
   const mergeTaskPr =
     ctx.deps?.mergeTaskPr ??

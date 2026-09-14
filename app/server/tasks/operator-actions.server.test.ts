@@ -4685,6 +4685,34 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
     expect(task().packet).toBeNull();
   });
+
+  it("refuses to let the operator offer the head-check override at all", async () => {
+    // Ruling 226: the waiver is granted against a (PR, revision, live head)
+    // triple the ACCEPTANCE GATE read at the moment it refused. An operator
+    // offering it from a board snapshot would be waiving a check over facts it
+    // never read — and the thing waived is the last guard between a review and
+    // the base branch. Canary: remove the stray-waiver refusal.
+    packetsRoster();
+    seedTask("impl");
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Pick a path",
+        options: [
+          { kind: "accept_unverified_head", title: "Just merge it", recommended: true },
+          { kind: "request_edit", title: "Send it back" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("accept_unverified_head is not an option you can offer");
+    expect(task().packet).toBeNull();
+  });
 });
 
 /**
