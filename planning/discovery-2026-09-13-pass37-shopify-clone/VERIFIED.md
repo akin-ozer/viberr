@@ -1318,3 +1318,33 @@ beside `readiness` so both are recoverable.
 The question that follows - whether an agent re-anchoring on the task sees `ready` on a blocked
 task - has the right answer too: `get_task` builds from the projection, not from the raw
 frontmatter, so the agent is handed the derived `blocked`. The stored value never reaches it.
+
+## The Policy page's exception to its own table — CORRECT (2026-09-14)
+
+The RBAC matrix probe earlier in this pass tested the TABLE. The Policy page also prints an
+exception to it, in prose under "Rules that reach beyond project roles":
+
+> Contributors and above may take or release their own task ownership (viewers are read + comment
+> only). The owner is the task's human reviewer and acceptance authority, scoped to that task: a
+> contributor who owns a task **may accept its completion, and may resolve the non-acceptance
+> options on a decision packet** the operator raises on that task, **even though the table reserves
+> those columns for maintainers**.
+
+A page that contradicts its own table in prose is exactly the shape a lie takes, so it is worth
+checking rather than reading. It holds, and the implementation is careful about the edges the
+prose implies:
+
+- `ownerException` requires a live match AND `roleCan(role, "own-task")`, whose role set is
+  `[admin, maintainer, contributor]` - so a demoted VIEWER who still holds a stale `ownerUserId`
+  is excluded, which the code comments call out by name.
+- `requireAcceptCompletion` puts `requireProjectMutable` FIRST, before the exception, with the
+  reason stated: *"Owning a task on an archived board is not a licence to close it: acceptance
+  attempts a real merge on a project the product calls read-only."* The exception short-circuits
+  `requireAction`, which is the one chokepoint enforcing R6-3, so the ordering is load-bearing.
+- Packet resolution carries the same exception but routes `accept_completion` past it deliberately,
+  so a contributor-owner is not blocked by the maintainer gate before the owner check runs.
+
+And it is covered by tests, including the negative case: *"R15-3 does not widen the outer gate: a
+contributor who does NOT own the task still cannot apply"*, alongside *"the contributor OWNER may
+apply an accept_completion recommendation"* and the dismissal equivalent. The exception was itself
+found as a live defect once (F15-12: a contributor-owner was shown Apply and then refused).
