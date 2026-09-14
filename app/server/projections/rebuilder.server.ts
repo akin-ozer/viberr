@@ -4,6 +4,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
+import { isAtAcceptanceBoundary } from "~/shared/mapping/task.server";
 import {
   acceptanceBlockedReason,
   activeWorkRevision,
@@ -157,6 +158,9 @@ interface ProjectContextRow {
   slug: string;
   repo: string | null;
   stages_json: string;
+  /** Ruling 225 (amended): the stage graph, for the acceptance-boundary test —
+   *  the one acceptance gate `acceptanceBlockReason` deliberately leaves out. */
+  workflow_json: string;
   required_reviewers_json: string;
 }
 
@@ -477,12 +481,14 @@ export function rebuildTaskFile(
 
   // Project context (already-projected row): stages for reference checks,
   // default repo, member ids for guest flags.
-  // SAFETY: the SELECT names exactly ProjectContextRow's four members;
-  // 0001_baseline declares `slug`, `stages_json` and `required_reviewers_json`
-  // NOT NULL and `repo` nullable, which is how the row types them.
+  // SAFETY: the SELECT names exactly ProjectContextRow's five members;
+  // 0001_baseline declares `slug`, `stages_json`, `workflow_json` and
+  // `required_reviewers_json` NOT NULL and `repo` nullable, which is how the
+  // row types them.
   const project = db
     .prepare(
-      `SELECT slug, repo, stages_json, required_reviewers_json FROM projects WHERE slug = ?`,
+      `SELECT slug, repo, stages_json, workflow_json, required_reviewers_json
+         FROM projects WHERE slug = ?`,
     )
     .get(slug) as ProjectContextRow | undefined;
   // SAFETY: `stages_json` has ONE writer — rebuildProjectFile above stores
@@ -490,6 +496,12 @@ export function rebuildTaskFile(
   // carries an `id`. Only the ids are read here.
   const stageIds: string[] = project
     ? (JSON.parse(project.stages_json) as { id: string }[]).map((s) => s.id)
+    : [];
+  // SAFETY: same single writer as `stages_json` — `rebuildProjectFile` stores
+  // `JSON.stringify(fm.workflow)`, whose entries the project-file schema
+  // guarantees carry `from`/`to`. Only those two are read here.
+  const projectWorkflow: { from: string; to: string }[] = project
+    ? (JSON.parse(project.workflow_json) as { from: string; to: string }[])
     : [];
   // SAFETY: same single writer — `JSON.stringify(resolveRequiredReviewers(fm))`.
   const requiredReviewers: RequiredReviewerView[] = project
@@ -556,6 +568,32 @@ export function rebuildTaskFile(
   // `validation: "bypassed"`, the canonical file keeps saying `human`. Nothing
   // authors `waiting: schedule`, so a file that somehow carries one projects as
   // whatever it has actually earned here.
+  /**
+   * Ruling 225, amended again — and this one was caught on the live board, not
+   * by reading.
+   *
+   * `acceptanceRefusal === null` is NOT "a human could accept this". The stage
+   * gate is the ONE acceptance refusal `acceptanceBlockReason` deliberately
+   * leaves out, because it turns on the project's workflow graph rather than on
+   * anything in the task file (see that function's own note). So a task sitting
+   * at an early stage with nothing delivered has no refusal to report — not
+   * because it is acceptable, but because the only thing refusing it was not
+   * consulted.
+   *
+   * Live: SHOP-21 at Build, no revision, no PR, a `run-operator` schedule
+   * pending for 07:29, and its card and rail still read "waiting on a human"
+   * after this ruling shipped. Nobody can accept a task at Build, and the
+   * decisions inbox was not counting it either — the board's own "Waiting on
+   * me" tally read zero while the card named a person.
+   */
+  const couldBeAcceptedNow =
+    acceptanceRefusal === null &&
+    isAtAcceptanceBoundary(
+      fm.stage,
+      stageIds.map((id) => ({ id })),
+      projectWorkflow,
+    );
+
   const restsOnSchedule =
     // Only the state that actually says the false sentence. `waiting: "none"`
     // renders NO wait tag at all, so it tells nobody anything and needs no
@@ -565,7 +603,9 @@ export function rebuildTaskFile(
     fm.waiting === "human" &&
     !parsed.packet &&
     fm.recommendations.length === 0 &&
-    acceptanceRefusal !== null &&
+    // Ruling 225 (amended): "nothing a human could accept right now" — the
+    // stage gate included, which `acceptanceRefusal` alone omits.
+    !couldBeAcceptedNow &&
     // Ruling 131(d): a task that waits on other work is HELD, and the schedule
     // runner refuses its occurrence on exactly those grounds — "waits on other
     // work (…) — no operator run was started; Viberr releases the task when
@@ -744,6 +784,8 @@ export function rebuildTaskFile(
     "",
     nowIso(),
   );
+
+
 
   db.prepare(
     `DELETE FROM task_events WHERE project_slug = ? AND task_key = ?`,

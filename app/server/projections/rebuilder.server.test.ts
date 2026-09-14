@@ -1546,6 +1546,43 @@ describe("ruling 225: a task resting on a clock", () => {
     }
   });
 
+  it("rests on the clock at a stage nobody can accept from", () => {
+    // Caught on the live board, not by reading. SHOP-21 sat at Build with no
+    // revision, no PR and a `run-operator` schedule pending for 07:29, and its
+    // card and rail both still read "waiting on a human" after this ruling
+    // shipped — while the board's own "Waiting on me" tally read zero.
+    //
+    // The cause: `acceptanceRefusal === null` is NOT "a human could accept".
+    // The STAGE gate is the one acceptance refusal `acceptanceBlockReason`
+    // deliberately omits (it turns on the workflow graph, not the task file),
+    // so an early-stage task with nothing delivered has no refusal to report —
+    // not because it is acceptable, but because the only thing refusing it was
+    // never consulted.
+    //
+    // Canary: drop `isAtAcceptanceBoundary` from `couldBeAcceptedNow`.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          // `impl` is neither the review stage nor a stage with an edge to the
+          // terminal one, so nothing can be accepted from here.
+          stage: "impl",
+          readiness: "ready",
+          waiting: "human",
+          schedules: [pending("2026-09-14T07:29:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).toBe("schedule");
+      expect(task.resumesAt).toBe("2026-09-14T07:29:00.000Z");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it("never promises a resume the schedule runner will refuse", () => {
     // Caught by re-reading my own predicate, not by any of the 41 tests that
     // were already green. A task that waits on other work is HELD (ruling
