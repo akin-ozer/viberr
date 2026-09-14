@@ -1374,3 +1374,49 @@ asked. Fixed by asking `isAtAcceptanceBoundary` as well, which is what the board
 from re-reading the predicate, one from reading the mechanism's own refusals, and this one from
 looking at the board it was written for. Six hours after shipping, the surface still had the
 answer that the source did not.
+
+### The last mile of ruling 225 — and a guard I failed to use that describes my own failure
+
+After the stage-gate amendment deployed, SHOP-21's rail **still** read "a human". The boot rescan
+explained why in one number:
+
+```
+projection rescan complete   projects=1 tasks=22 changed=0 unchanged=30 errors=0
+```
+
+`changed=0`. No task file had changed, so the content-hash short-circuit skipped every rebuild —
+and the rows kept the answers the OLD derivation had written. The ruling was live in the code and
+absent from the board.
+
+Viberr has a mechanism for exactly this, and its doc describes my mistake before I made it:
+
+> The boot rescan is a content-hash short-circuit: an unchanged `task.md` is never re-projected,
+> which is exactly right for offline drift and **exactly wrong for a derivation change** — the
+> rows written under the old rule keep the old shape forever, on every existing instance, with no
+> migration to say so… This stamp makes a derivation change self-applying.
+
+`PROJECTION_DERIVATION_VERSION`. Ruling 225 derives a fourth `waiting` value from unchanged file
+content, which is the textbook case, and I shipped it three times — the ruling and two
+amendments — without bumping the stamp. Bumped to 4, and the boot did the rest:
+
+```
+boot rebuilt every projection for a derivation change   from=3 to=4
+  projects=1 tasks=22 changed=30 unchanged=0 errors=0
+```
+
+**The board, finally:**
+
+| moment | header | SHOP-21's card |
+|---|---|---|
+| quota stall, before any decision | 5 waiting on a human | waiting on a human |
+| after resolving six `wait_for_window` packets | 1 waiting on a human | waiting on a human |
+| after the stage-gate amendment + the stamp | **0 waiting on a human** | **🕐 resumes 12:29** |
+
+Six tasks holding on a clock, every card naming the clock, and a count that means only work a
+person can actually do — which is what the owner asked for when they chose "its own resting
+state", nine hours earlier.
+
+**What this cost to learn:** ruling 225 needed four corrections after shipping — `blockedBy`,
+`waiting: "human"` exactly, archived, the stage gate — plus a derivation stamp. Three of the five
+came from looking at the running board rather than at the code, and the fifth came from a file
+whose opening paragraph is a description of the mistake.
