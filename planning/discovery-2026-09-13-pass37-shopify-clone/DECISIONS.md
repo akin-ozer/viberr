@@ -172,3 +172,42 @@ Decisions 1 and 2 each turned into a ruling the same night, and each ruling then
 amending two or three times from re-reading rather than from failing tests — recorded in
 VALIDATION.md, because the ratio (five self-inflicted bugs, zero caught by a green suite of
 6,632) is the more useful number.
+
+## 2026-09-14 04:19 UTC — the owner moves the OPERATOR to opus high
+
+> "Change operator to opus high"
+
+This overrides the pass's opening model policy, which put the controller on opus high and
+**every other agent, operator included, on luna max**. Applied through the Agents page: the
+operator profile's backend switched Codex → Claude, which repopulated the model list, then
+`opus[1m]` with effort `high`. Confirmed in `project.md`:
+
+```yaml
+kind: operator
+name: Operator
+backends:
+  - claude
+model: opus[1m]
+effort: high
+```
+
+**Two consequences worth having on the record.**
+
+*Cost.* The operator is by far the most-run agent on this instance — 355 of 648 runs at the time
+of the change, against 100 primary, 88 reviewer and 10 controller. The controller's ten
+`opus[1m]` runs had cost $19.23; every other run on the board reported no cost, being Codex. So
+this moves the dominant run kind from a subscription backend onto a metered one, and the
+instance's daily cost with it. The owner was told before the next cycle rather than after the
+next invoice.
+
+*Enforcement gets stronger.* Ruling 185 removed the OS sandbox from Codex runs, which made
+repo-write withholding **advisory** there — the prompt omits the delivery steps and the
+server-owned gate is the real boundary. On Claude the tool layer binds it outright. So the
+operator's withheld capabilities stop being advisory the moment this took effect, and the Agents
+page drops the "· advisory on Codex" note from that row.
+
+*And it raises the price of a restart.* Every deploy in this session re-invoked the operator on
+each affected task — five, five and seven times respectively. Those were free. From 04:19 they
+are not, which is why the image carrying rulings 227, 225's archived guard and 230 is built and
+waiting for a lull rather than going out immediately behind four Verify-stage runs that are
+bringing stacks up cold.
