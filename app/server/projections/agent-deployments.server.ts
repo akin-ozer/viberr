@@ -98,6 +98,10 @@ function engagementStatus(
     return engagement === "operator" ? "coordinating" : "working";
   }
   if (live === "queued") return "queued";
+  // Ruling 225: a clock rest reaches this line as `schedule` and lands on "on
+  // call", which is the honest word for it — the agent is not running and will
+  // be invoked without anybody asking. The one thing it must not say is
+  // "waiting on human", which is the branch below.
   if (waiting !== "human") return "on call";
   return engagement === "operator" && hasPacket ? "packet open" : "waiting on human";
 }

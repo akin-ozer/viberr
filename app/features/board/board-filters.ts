@@ -84,7 +84,14 @@ export function matchesBoardFilter(
       // card that shows no stuck signal. Those tasks are the "Agent working"
       // chip's members. The moment a packet flips `waiting` to "human" the
       // task is holding again and re-enters this filter.
-      (task.readiness === "input_required" && task.waiting !== "agent") ||
+      // Ruling 225: and the same is true of a task resting on a CLOCK. It is
+      // not stuck either — it picks itself back up at a named instant, its card
+      // says so, and this filter selects work that cannot proceed. Matching it
+      // would be R16-2's bug mirrored a second time: the filter selecting a
+      // card that shows no stuck signal.
+      (task.readiness === "input_required" &&
+        task.waiting !== "agent" &&
+        task.waiting !== "schedule") ||
       task.validation === "failing" ||
       task.urgent ||
       // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue

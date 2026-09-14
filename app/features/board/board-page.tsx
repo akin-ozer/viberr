@@ -762,7 +762,12 @@ function TaskCard({
 function readinessYields(task: TaskSummary): boolean {
   const r = task.displayReadiness;
   if (r === "agent_working") return true;
-  if (task.waiting !== "human") return false;
+  // Ruling 225 extends ruling 168(a)'s yield to a clock rest, and it matters
+  // more here than for a human wait: "input required" above "resumes Sep 14 ·
+  // 02:28" is not one demand said twice, it is two statements that contradict
+  // each other — a pill claiming a person is needed right now over a tag saying
+  // the task comes back on its own.
+  if (task.waiting !== "human" && task.waiting !== "schedule") return false;
   return r === "ready" || r === "input_required" || r === "blocked" || r === "goal_edit_pending";
 }
 

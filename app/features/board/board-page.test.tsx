@@ -222,6 +222,28 @@ describe("ruling 225: the board says a clock rest is a clock rest", () => {
     ).toBe("resumes on its own");
   });
 
+  it("never draws a demand pill over a tag that says nobody is needed", () => {
+    // Ruling 168(a) made a "blocked" pill above "waiting on you" yield, as one
+    // demand said twice. Over a clock rest the two are not a repetition, they
+    // contradict: "input required" says a person is needed right now, the tag
+    // says the task comes back on its own.
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        waiting: "schedule",
+        resumesAt: "2026-09-14T02:28:00.000Z",
+        readiness: "input_required",
+        displayReadiness: "input_required",
+      }),
+    ]);
+    expect(container.querySelector(".card-top .pill")).toBeNull();
+    expect(container.textContent).not.toContain("input required");
+    expect(
+      container.querySelector(".card .wait-tag")!.textContent!.trim(),
+    ).toMatch(/^resumes \S/);
+  });
+
   it("leaves the subtitle's human count to the humans", () => {
     const { container } = renderBoard([
       task({
