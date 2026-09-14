@@ -952,3 +952,38 @@ stop, which is the answer you want.
 I briefly filed this as a finding (F37-48) and withdrew it the same hour: the owner asked why
 anything wanted the whole KB server, and the answer — nothing did — was already in the
 controller's first paragraph.
+
+## A guardrail's promise, checked against the mechanism — KEPT
+
+Most of this pass's findings came from one move: read a sentence viberr shows a human, then test
+whether the mechanism can keep it. It is only honest to record the times it can.
+
+SHOP-3's operator planned an `update_branch_from_base` at Verify and was refused:
+
+> `update_branch_from_base` — SHOP-3 is at Verify, the acceptance boundary: **the branch is
+> brought up to date once, at acceptance time, and merged in the same ceremony.** Do not refresh
+> it here; recommend or accept the completion instead.
+
+That sentence makes a promise about a different code path than the one refusing. If acceptance
+did not in fact refresh, every task would merge stale and the refusal would be talking about
+something that does not happen — the pass-24 shape, "wired to a seam that cannot fire".
+
+It does happen. `refreshBranchForAcceptance` (task-actions.server.ts) reads the task's PR and
+branch, refuses to act without an open PR in `review`/`accepted`, and calls
+`updateWorkspaceBranchFromBase` — and it is called from inside `attemptAcceptanceMerge`,
+immediately before `mergeTaskPr`, with the caller's identity re-check running on BOTH sides of
+it:
+
+```
+beforeMerge?.();
+const refresh = await refreshBranchForAcceptance(db, ctx, projectSlug, taskKey, actor);
+if (refresh) return refresh;
+beforeMerge?.();
+const result = await mergeTaskPr(…)
+```
+
+The double re-check is itself deliberate (P14-GV-05 applied to the refresh): the refresh is an
+external, irreversible publish — a workspace merge pushed to origin — so a packet replaced or a
+verdict flipped during the await must refuse BEFORE the push, not after it.
+
+Promise made at Verify, kept at acceptance, on the one path that merges. No finding.
