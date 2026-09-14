@@ -1446,3 +1446,38 @@ The release announced itself in the same breath as the reason the work cannot si
 And it did: the operator brought `shop-18` up to date with `main` (20 commits, merge commit
 `aaf5e38`) before moving it to Review. Held for hours, released the instant its blocker landed,
 rebased, and advanced, with no human touching it beyond the acceptance that unblocked it.
+
+## The capability matrix, re-probed on a surface with a history of lying — CORRECT (2026-09-14)
+
+Pass 27's headline was that this matrix *lied about repo-write*, so it is worth re-probing rather
+than trusting. Counting stored `direct` grants in `project.md` against what the Policy page prints:
+
+```
+profile                   stored direct    page says
+operator                        7             7
+developer                      11             9
+reviewer                       11             5
+platform-architect             16             9
+frontend-engineer              17            10
+code-reviewer                  14             7
+```
+
+Every non-operator row is lower, which looks exactly like under-reporting. It is not, and the code
+anticipates the confusion by name:
+
+> D-2 (pass 24): the policy count must sum only GOVERNED caps. The buckets also carry group-null
+> advisory persona lines the runtime never reads, which the profile-detail page (one click away)
+> relegates to "Advisory only · N lines". Counting them here made "N direct" disagree with the
+> detail's "acts directly" column (**e.g. Reviewer 11 vs 5**).
+
+`Reviewer 11 vs 5` is the precise pair I had just measured. The reviewer's extra six are
+profile-specific persona lines (`read-repo-diff`, `run-validation-suites`, `author-test-cases`,
+`post-quality-flags`, `approve-review`, `request-changes`) that no tool layer enforces, so counting
+them as "acts directly" would be the matrix overclaiming - the pass-27 defect in the other
+direction. The `advisory on Codex` tag beside each row is F-P2 from pass 25, flagging grants that
+bind only advisorily on that backend.
+
+So the surface reports the RUNTIME's authority, not the file's wishlist, and says which parts bind
+only by persuasion. **Seventh near-miss of the pass**, and the most instructive: the product's own
+comments turned out to be a better oracle than my counting, and they had already written down the
+exact numbers that made me suspicious.
