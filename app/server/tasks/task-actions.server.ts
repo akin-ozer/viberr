@@ -8246,6 +8246,12 @@ export async function resolvePacket(
    *  `accept_completion` arm — the shared write below re-reads the stage under
    *  the lock and skips itself when the task is already there. */
   let acceptsInto: string | null = null;
+  /** Ruling 241: THIS resolution queued the reviewer's question instead of
+   *  dispatching it, because the task is held. A flag rather than a read of the
+   *  written file: "did I queue" and "does a queue entry exist" are different
+   *  questions, and the second one answers yes for an entry somebody else left
+   *  behind — which would silently skip the dispatch this decision promised. */
+  let queuedTheQuestion = false;
   /** OBS-11: the empty branch this resolution closes over. Decided by the
    *  `accept_completion` arm from the PRE-acceptance frontmatter, but acted on
    *  only after the write lands, so the decision has to outlive that arm's
@@ -8602,6 +8608,7 @@ export async function resolvePacket(
       // stands and the question rides on the task until the wait clears.
       const heldFor = existing.parsed.frontmatter.blockedBy;
       const queueing = heldFor.length > 0 && !!option.profileId;
+      queuedTheQuestion = queueing;
       event = {
         occurredAt: now,
         type: "transition",
@@ -10013,12 +10020,9 @@ export async function resolvePacket(
   if (
     option.kind === "question_reviewer" &&
     option.profileId &&
-    // Ruling 241: a question the hold queued is not dispatched now — the
-    // release drains it (`announceRelease`). Read from the file the resolution
-    // just wrote, so this cannot disagree with what was recorded.
-    !readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter.queuedQuestions.some(
-      (q) => q.profileId === option.profileId,
-    )
+    // Ruling 241: a question THIS resolution queued is not dispatched now — the
+    // moment the hold goes away puts it instead.
+    !queuedTheQuestion
   ) {
     const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
     try {

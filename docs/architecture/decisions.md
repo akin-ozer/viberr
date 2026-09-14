@@ -5360,6 +5360,19 @@ by rewriting those paragraphs:*
     count already stands at two still raises a fresh packet. The count it names is now true.
     (`run-store.server.ts`, `task-actions.server.ts`.)
 
+    *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
+    lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
+    `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is
+    excluded on purpose — `announceRelease` re-invokes the operator and a write from inside
+    its own turn would loop — so the operator correcting a wait with `set_dependencies`, which
+    is the door ruling 240 names as the remedy for a wrong hold, cleared the hold without
+    draining. The question would have sat on the task forever under a wait panel still
+    promising it would be put when the wait cleared, on a task with nothing left to clear:
+    F37-68's own shape inside F37-68's own fix. The drain now runs wherever the hold GOES
+    AWAY, not only where a release is ANNOUNCED. The dispatch guard was corrected in the same
+    pass: it asked whether a queue entry EXISTS, which answers yes for one somebody else left
+    behind, and now carries the flag saying whether THIS resolution queued.)*
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

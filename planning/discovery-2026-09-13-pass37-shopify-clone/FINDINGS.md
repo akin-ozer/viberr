@@ -3779,3 +3779,40 @@ before each objection), which is what SHOP-5, SHOP-6 and SHOP-10 all actually we
 
 **Not fixed, deliberately, and on the owner's call:** a `request_changes` arriving while the count
 already stands at two still raises a fresh packet. The number it names is now true.
+
+## F37-70 · Ruling 241's drain missed the door ruling 240 names as the remedy — MEDIUM (self-review)
+
+**Found by adversarially reviewing my own fix an hour after shipping it** — the habit that found
+three of ruling 237's defects the same way.
+
+Ruling 241 puts a queued reviewer question at the release, and `announceRelease` is the one release
+chokepoint. But `setTaskDependencies` computes:
+
+```ts
+const releasing = next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized;
+```
+
+The operator is excluded **on purpose**: `announceRelease` calls `autoInvokeOperator`, and doing
+that from inside the operator's own turn would loop. So when the OPERATOR clears a wait, the hold
+goes away and no release is announced — viberr writes "No longer waits on other work" instead.
+
+The drain lived only in `announceRelease`. So the operator correcting a wrong wait with
+`set_dependencies` — **the door ruling 240 names by name as the remedy** ("a task that genuinely
+should deliver can have its `blockedBy` corrected with `set_dependencies`, which is the door ruling
+131 already provides") — would strand the question permanently, under a wait panel still reading
+*"When it clears: Viberr puts Arda's question to Integration Verifier before the operator gets the
+task back"*, on a task with nothing left to clear.
+
+A promise displayed forever about an event that can no longer happen. That is F37-66, F37-67 and
+F37-68's shape, reintroduced inside F37-68's own fix.
+
+**Fix.** The drain runs wherever the hold GOES AWAY, not only where a release is ANNOUNCED.
+
+**Second defect, same review.** The post-resolution dispatch guard asked whether a queue entry
+EXISTS for that reviewer, which is a different question from whether THIS resolution queued one —
+and answers yes for an entry somebody else left behind, silently skipping the dispatch the decision
+promised. It now carries the flag.
+
+**Test.** The operator clears the wait with `operatorAuthorized: true`; the question is dispatched
+and the queue emptied. Canary: restore the drain to `announceRelease` alone and it goes red with
+`expected [] to have a length of 1`.

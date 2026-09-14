@@ -908,6 +908,38 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
     }
   });
 
+  it("the OPERATOR clearing the wait puts the question too, though no release is announced", async () => {
+    // Self-review of ruling 241, an hour after shipping it. `setTaskDependencies`
+    // computes `releasing` as `next.length === 0 && previous.length > 0 &&
+    // !ctx.operatorAuthorized` — the operator is excluded deliberately, because
+    // `announceRelease` re-invokes the operator and a write from inside its own
+    // turn would loop. But the drain lived ONLY in `announceRelease`, so the
+    // operator correcting a wait with `set_dependencies` (the door ruling 240
+    // names by name) left the question stranded on the task forever, under a
+    // wait panel still promising it would be put when the wait clears — on a
+    // task with nothing left to clear. F37-68's own shape, in my own fix.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, ["VIB-2"]);
+    const started: QuestionDispatch[] = [];
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-11", blockedBy: [] },
+      actor(store, "arda"),
+      {
+        dataRoot: store.dataRoot,
+        operatorAuthorized: true,
+        deps: { startAgentRun: recordDispatch(started), runOperator: runOperatorStub() },
+      },
+    );
+    expect(file(store, "VIB-11").frontmatter.blockedBy).toEqual([]);
+    // CANARY: drain only inside `announceRelease` and this is 0 — the promise
+    // on the wait panel outlives the wait and nothing ever puts the question.
+    expect(started).toHaveLength(1);
+    expect(started[0]!.profileId).toBe("rev");
+    expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
+  });
+
   it("the release drains the question BEFORE it hands the task back to the operator", async () => {
     // Ordering is the whole point: the decision says the reviewer answers
     // before anyone reworks anything, and an operator re-invoked first can

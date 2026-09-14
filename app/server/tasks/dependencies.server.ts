@@ -344,6 +344,17 @@ export async function setTaskDependencies(
       entries: previous,
       clearedBy: actor.label,
     });
+  } else if (previous.length > 0 && next.length === 0) {
+    // Ruling 241, corrected by self-review: the drain belongs wherever the HOLD
+    // GOES AWAY, not only where a release is ANNOUNCED. `releasing` excludes
+    // `ctx.operatorAuthorized` on purpose — `announceRelease` re-invokes the
+    // operator, and doing that from inside the operator's own turn would loop —
+    // so an operator correcting a wait with `set_dependencies` (the door ruling
+    // 240 names as the remedy for a wrong hold) took the last branch and left
+    // the question stranded forever, under a wait panel still promising it
+    // would be put when the wait cleared, on a task with nothing left to clear.
+    // That is F37-68's own shape inside F37-68's own fix.
+    await drainQueuedQuestions(db, ctx, input.projectSlug, input.taskKey);
   }
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true, blockedBy: next, added, removed };
 }
