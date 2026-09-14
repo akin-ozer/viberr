@@ -5019,6 +5019,16 @@ by rewriting those paragraphs:*
     (`a48b34db` to `b5f35eef`, matching the shipped bytes exactly) through the
     `PRIOR_SHIPPED_HASHES` / `shipped-assets.json` path, which is what that machinery is for and
     is the first time this pass exercised it. No instance file was edited by hand.
+    **Amendment, found by reviewing this ruling against what it did not touch.** The dispatch site
+    also wraps the directive in `withAmbiguityDisclosure`, which appends "@x matches more than one
+    person here, so nobody was notified - mention the full name" or, for a non-member, "add them to
+    the project first". Both notes name a REMEDY, and under this ruling neither can work: the
+    comment notifies nobody however the handle is spelled and whoever is a member, so the note
+    sends a reader to fix something that was not the reason. S5-G3 added the disclosure to tell the
+    humans reading the timeline that a tag reached nobody; that is now true of EVERY tag in a
+    directive, which makes a per-ambiguity note both noise and misleading. It is therefore skipped
+    on a declared-agent comment. The tag itself still stands in the posted text: the ruling changes
+    who hears about the hand-off, not what the operator wrote.
     (`mention-notify.server.ts`, `task-actions.server.ts`, `operator.definition.md`,
     `operator-run.server.ts`, `default-assets.server.ts`.)
 
