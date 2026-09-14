@@ -1636,3 +1636,33 @@ about what the REFRESH brought in. Viberr's counting is the correct one, and the
 is the one that settles it.
 
 This is ruling 238's disclosure machinery checked against git rather than against itself.
+
+## Insights, four claims checked against the files and the run table — ALL CORRECT (2026-09-14 18:33 UTC)
+
+The page was probed earlier in the pass and carried one honest caveat (it counts runs across the
+whole INSTANCE). Re-probed now that there is an order of magnitude more data behind it — 879 runs.
+
+| the page says | measured | verdict |
+|---|---|---|
+| "9 of 9 active tasks have a definite next actor" | 9 tasks are non-done and non-archived | CORRECT |
+| "21 of 21 delivered tasks carry branch + PR" | 21 task files carry a real `pr.number`, and all 21 carry a branch; the other 5 carry `branch: null` and no PR, and are all still in triage | CORRECT |
+| "83 stopped (83 by a restart)" | `SELECT interrupted_by, interrupted_reason … WHERE state='interrupted'` returns exactly one group: `{interrupted_by: null, interrupted_reason: "restart", n: 83}` | CORRECT |
+| "743 of 879 runs reported no cost … (738 on Codex and 5 on Claude)" | `by backend` on the same page reads codex 738 + claude 141 = 879 | CORRECT, and the split is named rather than rounded away |
+
+**The claim I expected to fail, and why it did not.** "9 of 9" looked wrong against a board scan I
+had run twenty minutes earlier showing ten non-done tasks. The board had moved underneath it —
+SHOP-25 went Review → Verify in between. Measuring at the same instant as the claim is the whole
+method; measuring against a stale scan is how the four wrong findings earlier in this pass were
+nearly filed.
+
+**What the 83 also settles:** no run on this board has ever been stopped by a person. Every
+interruption in six days came from a process restart, which is why `interrupted_by` is null across
+the board and why the recovery path has had 83 chances to be wrong.
+
+**Two refusals worth naming as correct behaviour**, both on the same page:
+
+- *Coordination overhead* reads `n/a`, not `0%` or a fabricated ratio: "operator and controller runs
+  reported $78.89; no delivery run reported a cost … so there is no share to take." A percentage
+  there would have been arithmetic on a denominator that does not exist.
+- *Coordination tokens* says "tokens, not dollars" and names how many runs report no provider total
+  (110 of 879), so the 5% is read with its own error bar attached.
