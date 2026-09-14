@@ -789,7 +789,14 @@ async function noteQueuedTriggerRefused(
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "note",
-        actor: { kind: "system", systemId: "operator-lease" },
+        // Ruling 227: a door refusal never touched the lease queue, so
+        // attributing it to the lease would be a small lie in the one column
+        // a reader uses to tell viberr's mechanisms apart. `policy-engine` is
+        // the actor viberr's own rules already write under.
+        actor: {
+          kind: "system",
+          systemId: arrival === "door" ? "policy-engine" : "operator-lease",
+        },
         title: null,
         text,
         toAgent: false,
