@@ -407,7 +407,15 @@ async function reconcileTaskUnlocked(
     compareResult.status === "ok" ? compareResult.compare : null;
 
   // 2. PR lookup (state/draft/merged + checks + change stats).
-  let prResult = await findPrForBranch(gh.client, gh.repo, branch);
+  // Ruling 236: hand the linker the head our cached path list was read at, so
+  // the changed-files call is skipped on every tick where the head has not
+  // moved — which is almost all of them.
+  let prResult = await findPrForBranch(
+    gh.client,
+    gh.repo,
+    branch,
+    fm.pr?.paths?.headSha ?? null,
+  );
   // Ruling 160 (pass 35, F35-11): the branch listing answers `none` for a
   // closed PR whose branch has since advanced (F26), which is exactly what a
   // push landing after a person's close looks like. The task's OWN cached
@@ -624,6 +632,17 @@ async function reconcileTaskUnlocked(
     if (checks) owned.checks = checks;
     if (review) owned.review = review;
     if (mergeable) owned.mergeable = mergeable;
+    // Ruling 236: measured this pass wins; otherwise the SAME PR's cached list
+    // is carried, because a skipped read means "unchanged", not "unknown". A
+    // list read for a DIFFERENT head than the one now live is dropped rather
+    // than shown stale - `paths.headSha` is what makes that decidable.
+    const measuredPaths = pr.paths ?? null;
+    const carriedPaths =
+      measuredPaths ??
+      (cachedPr?.number === pr.number && cachedPr.paths?.headSha === pr.headSha
+        ? (cachedPr.paths ?? null)
+        : null);
+    if (carriedPaths) owned.paths = carriedPaths;
     // A measured drift wins; on a settled PR (nothing measured this pass) the
     // last measurement is carried forward for the SAME PR — see `driftMeasurable`.
     const carriedDrift =

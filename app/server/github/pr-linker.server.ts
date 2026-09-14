@@ -1,3 +1,4 @@
+import { PR_PATHS_MAX } from "~/schemas/task-file.schema";
 import { z } from "zod";
 import type {
   PrChecks,
@@ -89,6 +90,12 @@ export interface PrFacts {
   /** P14-LV-07: can GitHub merge this PR? ABSENT when the detail fetch failed
    * (unknown → callers keep the cached value) or the PR is terminal. */
   mergeable?: PrMergeable;
+  /** Ruling 236: the paths this PR changes, pinned to the head they were read
+   *  at. ABSENT under the same rule as everything above — not read this pass,
+   *  so the caller keeps its cached list. Deliberately NOT fetched when the
+   *  known head already matches: a file list cannot change without the head
+   *  moving, so the common tick costs no extra call. */
+  paths?: { headSha: string; changed: string[]; truncated: boolean };
 }
 
 export type PrLinkResult =
@@ -370,10 +377,64 @@ export function deriveMergeable(pr: {
  * Finds the newest PR whose head is `branch` (any state), then fetches the
  * PR detail (merged flag + change stats) and a check-runs summary.
  */
+/** Ruling 236: the one field the changed-files read uses. A row without a
+ *  usable `filename` is dropped rather than failing the page, and a page that
+ *  does not parse at all leaves the key absent (= not read). */
+const ghPullFileSchema = z.object({ filename: z.string().min(1) }).loose();
+
+/**
+ * Ruling 236 — the repository paths a pull request changes.
+ *
+ * Called only when the head MOVED (see `knownPathsHeadSha`), because a file
+ * list cannot change without it: on a board where most ticks find nothing new,
+ * this adds no API traffic at all. Capped at `PR_PATHS_MAX` with `truncated`
+ * set, and the cap is honest rather than silent — an overlap computed from a
+ * clipped list can only miss a collision, never invent one.
+ *
+ * Returns undefined when the read failed, which is the caller's "not read this
+ * pass" and makes it keep whatever it had.
+ */
+async function readPrPaths(
+  client: GithubClient,
+  repo: string,
+  number: number,
+  headSha: string,
+): Promise<PrFacts["paths"] | undefined> {
+  const perPage = 100;
+  const changed: string[] = [];
+  let truncated = false;
+  for (let page = 1; changed.length < PR_PATHS_MAX; page++) {
+    const answer = await client.request(
+      "GET",
+      `/repos/${repo}/pulls/${number}/files`,
+      z.array(ghPullFileSchema),
+      { searchParams: { per_page: perPage, page } },
+    );
+    if (!answer.ok) return undefined; // not read: the caller keeps its cache
+    for (const row of answer.data) {
+      if (changed.length >= PR_PATHS_MAX) {
+        truncated = true;
+        break;
+      }
+      changed.push(row.filename);
+    }
+    if (answer.data.length < perPage) break;
+    if (changed.length >= PR_PATHS_MAX) {
+      truncated = true;
+      break;
+    }
+  }
+  return { headSha, changed, truncated };
+}
+
 export async function findPrForBranch(
   client: GithubClient,
   repo: string,
   branch: string,
+  /** Ruling 236: the head the caller's cached `pr.paths` was read at. When the
+   *  live head still equals it the changed-file read is SKIPPED and the key is
+   *  left absent, so the caller keeps the list it already has. */
+  knownPathsHeadSha?: string | null,
 ): Promise<PrLinkResult> {
   const owner = repo.split("/")[0] ?? repo;
   const list = await client.request(
@@ -534,6 +595,12 @@ export async function findPrForBranch(
   const mergeable =
     detail.ok && state === "review" ? deriveMergeable(pr) : "unknown";
   if (mergeable !== "unknown") facts.mergeable = mergeable;
+  // Ruling 236: only an OPEN pull request's file list is worth anything to the
+  // overlap read, and only a head that MOVED can have changed it.
+  if (state === "review" && headSha && headSha !== knownPathsHeadSha) {
+    const paths = await readPrPaths(client, repo, pr.number, headSha);
+    if (paths) facts.paths = paths;
+  }
   return { status: "found", pr: facts };
 }
 

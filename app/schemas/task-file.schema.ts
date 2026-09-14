@@ -467,6 +467,13 @@ export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
  * indistinguishable from a credential outage. ABSENT/null means "never read",
  * exactly like `checks`/`review`.
  */
+/** Ruling 236: the cap on `pr.paths.changed`. A PR touching more files than
+ *  this records the first `PR_PATHS_MAX` and sets `truncated`, which the
+ *  overlap read treats as "this list may be short" rather than as the whole
+ *  diff. Chosen to cover any review-sized change while bounding what a
+ *  hand-edited file can put in memory. */
+export const PR_PATHS_MAX = 300;
+
 export const PR_MERGEABLE_VALUES = ["clean", "conflicting", "unknown"] as const;
 export type PrMergeable = (typeof PR_MERGEABLE_VALUES)[number];
 
@@ -502,6 +509,23 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
+    // Ruling 236 (owner, 2026-09-14): the repository paths this PR changes, so
+    // the review queue can say which OTHER open PRs a merge would put into
+    // conflict before a person finds out by pressing Accept. Pinned to the head
+    // it was read at, because a file list cannot change without the head moving
+    // — that pin is what lets the fetch be skipped on every tick where it did
+    // not. `truncated` is honest about the cap rather than silently short: an
+    // overlap computed from a clipped list can only MISS a collision, never
+    // invent one, and a surface that shows it must say which it is.
+    // Same optional-key convention as everything above: absent = never read.
+    paths: z
+      .object({
+        headSha: z.string().min(1),
+        changed: z.array(z.string().min(1)).max(PR_PATHS_MAX),
+        truncated: z.boolean(),
+      })
+      .nullish()
+      .catch(null),
     // Ruling 135 (pass 34, F34-11): the PR's head sha as GitHub last reported
     // it. Absent = never read (the same optional-key convention as the facts
     // above); carried forward by the reconciler and by a PR reuse; never

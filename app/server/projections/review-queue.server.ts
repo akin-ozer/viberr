@@ -74,6 +74,19 @@ import { getProject, listProjectTasks } from "./board-query.server";
  * Rows are read-only projections; the queue performs zero mutations.
  */
 
+/** Ruling 236: one other open PR this row's diff collides with. */
+export interface PrOverlap {
+  taskKey: string;
+  prNumber: number;
+  /** The shared paths, in this row's order. Capped for display by the surface;
+   *  the full set is what the count reflects. */
+  paths: string[];
+  /** Either side's path list hit `PR_PATHS_MAX`, so the real overlap may be
+   *  LARGER than this. Never smaller: a clipped list can only miss a collision.
+   *  A surface that shows the count must say so. */
+  partial: boolean;
+}
+
 export interface ReviewQueueRow {
   key: string;
   title: string;
@@ -135,6 +148,16 @@ export interface ReviewQueueRow {
      *  revision, so the subline can trust it). Absent = on the PR, or unread. */
     headSha?: string;
     unpushedRevision?: UnpushedRevision;
+    /** Ruling 236 (owner, 2026-09-14): the other OPEN review PRs in this project
+     *  whose changed paths intersect this one's, so the queue can say which
+     *  merges will conflict which before a person finds out by pressing Accept.
+     *  Measured live: merging SHOP-2 put four of six open PRs into CONFLICTING
+     *  inside a minute, all on the same two shared files, and the queue listed
+     *  them as six independent rows throughout.
+     *
+     *  Read-only: it orders nothing and blocks nothing. Absent when no path
+     *  list has been read for this PR; empty when nothing overlaps. */
+    overlaps?: PrOverlap[];
   } | null;
   validation: Validation;
   /** F10-11/F10-15: null = the current revision is acceptance-ready (all
@@ -367,6 +390,38 @@ export function getReviewQueue(
   // (`acceptanceStageBlockedReason`, task-actions.server.ts, whose predicate
   // this is); review work before the boundary is listed, never offered for
   // acceptance.
+  // Ruling 236: pairwise path intersection across the OPEN review PRs. Done
+  // here, over rows already loaded, rather than in the UI: it is a question
+  // about the project's pull requests, not about one card, and a surface that
+  // recomputed it per row would need every other row anyway.
+  const diffs = new Map<string, { changed: string[]; truncated: boolean }>();
+  for (const t of inReview) {
+    const paths = t.pr?.paths;
+    if (t.pr?.state === "review" && paths && paths.changed.length > 0) {
+      diffs.set(t.key, { changed: paths.changed, truncated: paths.truncated });
+    }
+  }
+  for (const row of rows) {
+    const mineDiff = diffs.get(row.key);
+    if (!row.pr || !mineDiff) continue;
+    const mine = new Set(mineDiff.changed);
+    const found: PrOverlap[] = [];
+    for (const other of rows) {
+      if (other.key === row.key || !other.pr) continue;
+      const theirs = diffs.get(other.key);
+      if (!theirs) continue;
+      const shared = theirs.changed.filter((path) => mine.has(path));
+      if (shared.length === 0) continue;
+      found.push({
+        taskKey: other.key,
+        prNumber: other.pr.number,
+        paths: shared,
+        partial: mineDiff.truncated || theirs.truncated,
+      });
+    }
+    row.pr.overlaps = found;
+  }
+
   const isReady = (r: ReviewQueueRow): boolean =>
     r.atAcceptanceBoundary &&
     r.waiting === "human" &&

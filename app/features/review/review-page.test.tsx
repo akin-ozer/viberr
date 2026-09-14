@@ -482,3 +482,66 @@ describe("U35-5: the header counts review work, not a stage", () => {
     expect(getByText("0 of 8")).toBeTruthy();
   });
 });
+
+/**
+ * Ruling 236 (owner, 2026-09-14) — the collision chip. Names the tasks, not the
+ * count: "two others" says there is a problem and nothing about which merge to
+ * do first, which is the whole question a person is at this queue to answer.
+ */
+describe("ruling 236: the collision chip", () => {
+  const colliding = (overlaps: NonNullable<ReviewRowView["pr"]>["overlaps"]) => ({
+    ...rowHuman,
+    pr: { ...rowHuman.pr!, overlaps },
+  });
+
+  it("names the colliding tasks and puts the shared files in the tooltip", () => {
+    const { container } = renderQueue(
+      [
+        colliding([
+          { taskKey: "VIB-9", prNumber: 9, paths: ["pnpm-lock.yaml"], partial: false },
+        ]),
+      ],
+      [],
+    );
+    expect(container.textContent).toContain("collides with VIB-9");
+    const chip = [...container.querySelectorAll("[title]")].find((e) =>
+      (e.getAttribute("title") ?? "").includes("into conflict"),
+    );
+    expect(chip?.getAttribute("title")).toContain("VIB-9");
+    expect(chip?.getAttribute("title")).toContain("pnpm-lock.yaml");
+  });
+
+  it("summarises past two, still by name", () => {
+    const { container } = renderQueue(
+      [
+        colliding([
+          { taskKey: "VIB-9", prNumber: 9, paths: ["a.ts"], partial: false },
+          { taskKey: "VIB-10", prNumber: 10, paths: ["a.ts"], partial: false },
+          { taskKey: "VIB-11", prNumber: 11, paths: ["a.ts"], partial: false },
+        ]),
+      ],
+      [],
+    );
+    expect(container.textContent).toContain("collides with VIB-9, VIB-10 and 1 more");
+  });
+
+  it("says so when a capped list makes the overlap a floor", () => {
+    const { container } = renderQueue(
+      [
+        colliding([
+          { taskKey: "VIB-9", prNumber: 9, paths: ["a.ts"], partial: true },
+        ]),
+      ],
+      [],
+    );
+    const chip = [...container.querySelectorAll("[title]")].find((e) =>
+      (e.getAttribute("title") ?? "").includes("into conflict"),
+    );
+    expect(chip?.getAttribute("title")).toContain("may be larger");
+  });
+
+  it("renders nothing when no pull request collides", () => {
+    const { container } = renderQueue([colliding([])], []);
+    expect(container.textContent).not.toContain("collides with");
+  });
+});

@@ -11,6 +11,8 @@ import type {
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
 
+import type { PrOverlap } from "~/server/projections/review-queue.server";
+
 export interface ReviewRowView {
   key: string;
   title: string;
@@ -56,6 +58,10 @@ export interface ReviewRowView {
     /** Ruling 135: the CURRENT unpushed record, filtered by the row builder. */
     headSha?: string;
     unpushedRevision?: UnpushedRevision;
+    /** Ruling 236: the other open PRs whose diffs collide with this one, as the
+     *  projection computed them. Absent when no file list has been read; empty
+     *  when nothing overlaps. */
+    overlaps?: PrOverlap[];
   } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).

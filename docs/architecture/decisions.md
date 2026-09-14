@@ -5097,6 +5097,37 @@ by rewriting those paragraphs:*
     times is one record and one hand-off, never five paid runs. The human keeps the toast.
     (`task-actions.server.ts`, `operator-run.server.ts`, `activity-feed.server.ts`.)
 
+236. **The review queue names which other pull requests a merge will conflict (owner,
+    2026-09-14, pass 37).** Accepting SHOP-2 put FOUR of the six open pull requests into
+    `CONFLICTING` inside one minute, every one of them on the same two shared files
+    (`pnpm-lock.yaml`, `scripts/stack.test.mjs`), and the review queue listed all six as
+    independent rows throughout. A person discovered each collision by pressing Accept and
+    reading a refusal. The pass carries 71 `github.branch_update.operator` events and 12
+    acceptance-time refreshes; the operator does reason about merge order, but in prose on
+    individual task timelines, and it reversed its own ordering once.
+    Viberr reconciles each pull request's mergeability already and did NOT know what any of them
+    changed: `changed_files` was stored as a COUNT. So the queue could see that a PR conflicts,
+    only ever after the fact, and never that two PRs are about to.
+    `pr.paths` now records the changed paths, pinned to the head they were read at. The pin is
+    what makes it nearly free: a file list cannot change without the head moving, so the fetch is
+    skipped on every tick where it has not, which on a quiet board is all of them. A failed read
+    leaves the key ABSENT, the same "not read this pass" convention as `checks`, `review` and
+    `mergeable`, so a GitHub hiccup keeps the cached list instead of erasing every collision chip
+    on the board. Capped at `PR_PATHS_MAX` with `truncated` carried through to the surface,
+    because a clipped list can only MISS a collision and never invent one: the count shown is a
+    floor, and the tooltip says so rather than printing a number that quietly means "at least".
+    The intersection is computed server-side over the rows the queue already loaded, and it is
+    SYMMETRIC - both rows name each other, or only whoever merged second would ever be warned.
+    The chip names the tasks rather than counting them ("collides with SHOP-3, SHOP-11"), because
+    a count says there is a problem and nothing about which merge to do first, which is the
+    question the queue exists to answer.
+    Read-only by the owner's choice: it orders nothing, blocks nothing, and starts nothing. The
+    alternatives on the table were a merge lease that serializes acceptances and a decision to
+    treat the collisions as the clone's problem; the owner took the one that adds information and
+    leaves every decision with the person.
+    (`task-file.schema.ts`, `pr-linker.server.ts`, `github-reconciler.server.ts`,
+    `review-queue.server.ts`, `review-helpers.ts`, `review-page.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

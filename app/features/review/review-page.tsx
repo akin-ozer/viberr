@@ -6,6 +6,7 @@ import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
+import type { PrOverlap } from "~/server/projections/review-queue.server";
 
 /**
  * Review queue — the human acceptance boundary as a read-only triage list.
@@ -45,6 +46,40 @@ import { reviewRowSub, type ReviewRowView } from "./review-helpers";
 const ACCEPTANCE_CAP_LABEL =
   capabilityById("completion-for-acceptance")?.label ??
   "Accept completion into Done";
+
+/**
+ * Ruling 236 — the collision chip. Names the tasks, not the count alone: "two
+ * others" tells a person there is a problem and nothing about which merge to
+ * do first, which is the whole question.
+ *
+ * `partial` rides into the tooltip rather than the label. A path list clipped
+ * at `PR_PATHS_MAX` can only MISS a collision, never invent one, so the count
+ * shown is a floor and the reader is told so instead of being given a number
+ * that quietly means "at least".
+ */
+function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
+  if (overlaps.length === 0) return null;
+  const keys = overlaps.map((o) => o.taskKey);
+  const shown = keys.slice(0, 2).join(", ");
+  const label = keys.length > 2 ? `${shown} and ${keys.length - 2} more` : shown;
+  const partial = overlaps.some((o) => o.partial);
+  const files = [...new Set(overlaps.flatMap((o) => o.paths))];
+  const listed = files.slice(0, 6).join(", ");
+  const title =
+    `Merging this pull request will put ${keys.join(", ")} into conflict: ` +
+    `both change ${listed}${files.length > 6 ? `, and ${files.length - 6} more` : ""}.` +
+    (partial
+      ? " One of the file lists was capped, so the real overlap may be larger."
+      : "");
+  return (
+    <span title={title}>
+      <Pill kind="neutral" sm>
+        <Icon name="branch" />
+        collides with {label}
+      </Pill>
+    </span>
+  );
+}
 
 function RQRow({
   t,
@@ -106,6 +141,13 @@ function RQRow({
               : ` · ${prStatePill(t.pr.state).label}`}
           </Pill>
         )}
+        {/* Ruling 236 (owner, 2026-09-14): which OTHER open PRs this one's diff
+            collides with. Read-only and quiet by design: it orders nothing and
+            blocks nothing, it only stops the queue presenting collisions as
+            independent rows. Live cause: merging SHOP-2 put four of six open
+            PRs into CONFLICTING inside a minute, all on the same two shared
+            files, and a person discovered each one by pressing Accept. */}
+        <OverlapChip overlaps={t.pr?.overlaps ?? []} />
         <ValidationPill value={t.validation} sm />
         {/* F26-14: the same triage metadata the board card shows — priority,
             labels and due date — so the acceptance boundary is not blind to an
