@@ -1045,3 +1045,42 @@ The whole arc is on one timeline, in order, with no gaps:
 
 Files are truth, and the record is testable: every line above is in `task.md`, and the two
 `fired`/`firedAt` stamps in the frontmatter agree with the container log to the millisecond.
+
+### Rulings 225 and 226, re-reviewed against themselves before they ever deployed
+
+Four defects in tonight's own work, none of which any test caught. Every one came from reading
+the code back and asking what it would do on a case I had not imagined while writing it. They
+are recorded because the ratio matters: **six hours of writing, four self-inflicted bugs, zero
+found by a green suite.**
+
+**1. Ruling 225 promised a resume the schedule runner refuses.** The predicate required no
+packet, no recommendation and no acceptable completion — and said nothing about `blockedBy`. A
+task that waits on other work is held (ruling 131(d)), and the runner refuses its occurrence in
+those exact words: *"waits on other work (…) — no operator run was started; Viberr releases the
+task when every entry is done."* So a held task with a pending occurrence would have had a card
+reading "resumes Sep 14 · 02:28" over a schedule that was never going to fire. **This ruling's
+own lie, reintroduced by this ruling.** All 41 canaries were green over that hole.
+
+**2. Ruling 225 would have invented a claim on a task making none.** It keyed on
+`waiting !== "agent"`, which includes `"none"` — and `"none"` renders no wait tag at all. There
+was nothing to correct there, so deriving over it would have added a promise where the board had
+been silent. Narrowed to `waiting === "human"`, the one stored value that says the false
+sentence.
+
+**3. Ruling 226's packet did not reach the board.** `updateTaskFile` writes the file and nothing
+else; every other writer in that module reprojects after it. Without that call the decision the
+person was being told about in the same breath would not appear until the file watcher happened
+to notice it.
+
+**4. Ruling 226's recommended option re-created the packet it answered.** "Try the check again"
+had to be a `custom`, and a `custom` resolution sends the task back to the agent side and
+re-queues the operator — which re-runs the head gate, refuses again, and opens the same packet
+again. That is ruling 224's fourth half, which cost four deploys to find in September, reappearing
+in a packet written the same night by the person who wrote the ruling about it.
+
+The fix was to delete the option rather than add machinery: the packet never sets
+`readiness: blocked`, so it does not refuse the acceptance, which means **pressing Accept again
+IS the re-check** — the body says so, and a successful acceptance withdraws the packet by itself.
+Two options remain and both do exactly what they say.
+
+Each fix has its own canary, each proven red by reverting the guard it tests.
