@@ -113,6 +113,7 @@ export function TaskDetailPage({
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
+  operatorAcceptsDirectly = false,
   runPrincipal,
   liveAgentRuns,
   runsVisible = true,
@@ -162,6 +163,9 @@ export function TaskDetailPage({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
+  /** F37-65: whether the operator's `completion-for-acceptance` grant actually
+   *  resolves to `direct` at this autonomy. Autonomy alone does not say. */
+  operatorAcceptsDirectly?: boolean;
   /** Ruling 127: whose accounts this task's agent runs bill (the OWNER's) and
    *  what those accounts can run. `null` = unowned, so nothing runs here.
    *  P11-41's "would fail fast" gate, answered per person. */
@@ -847,6 +851,7 @@ export function TaskDetailPage({
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
           operatorAutonomy={operatorAutonomy}
+          operatorAcceptsDirectly={operatorAcceptsDirectly}
           runPrincipal={runPrincipal}
           canRunAgents={canRunAgents}
           liveAgentRuns={liveAgentRuns}

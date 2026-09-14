@@ -397,6 +397,7 @@ function OperatorRunControl({
   holdNote,
   defaultBackend,
   configuredAutonomy,
+  acceptsDirectly = false,
   runRefusal,
   schedules,
   scheduleBusy,
@@ -421,6 +422,10 @@ function OperatorRunControl({
   /** R19-A: the project's configured operator autonomy — what this run WILL
    *  use. Full announces itself below; supervised is the quiet default. */
   configuredAutonomy: "supervised" | "full";
+  /** F37-65: whether `completion-for-acceptance` really resolves to `direct`.
+   *  `gate()` holds it at `recommend` whatever the autonomy unless the grant
+   *  says direct (owner ruling Q1), so autonomy alone cannot answer it. */
+  acceptsDirectly?: boolean;
   /** P11-41, now per-person (ruling 127): why a run on the operator's backend
    *  would refuse, or null when it would start. An operator drive bills the
    *  task OWNER, so this sentence names them; it disables Run and renders,
@@ -500,11 +505,19 @@ function OperatorRunControl({
       )}
       {configuredAutonomy === "full" && !disabled && (
         // F20-9's mirror, kept: full autonomy is the state that lets this run
-        // transition stages and accept completion itself — it must be visible
-        // on the surface that launches it. Supervised needs no caption.
+        // transition stages — it must be visible on the surface that launches
+        // it. Supervised needs no caption.
+        //
+        // F37-65: but it does NOT by itself let the run accept completion.
+        // `gate()` holds `completion-for-acceptance` at `recommend` whatever
+        // the autonomy unless the grant is explicitly `direct` (owner ruling
+        // Q1). This caption claimed otherwise on every task of a board whose
+        // operator is `full` + `recommend`, while every acceptance on it was a
+        // person pressing the button.
         <span className="sub xs dim">
-          Full autonomy: this run can move the task and accept completion
-          itself.
+          {acceptsDirectly
+            ? "Full autonomy: this run can move the task and accept completion itself."
+            : "Full autonomy: this run can move the task. Accepting completion still needs a person, because the operator's acceptance grant is not direct."}
         </span>
       )}
       {/* P14 ruling: a `title` is unreachable on a DISABLED control, so the
@@ -955,6 +968,7 @@ export function ExecutionProfile({
   workflow,
   operatorBackend,
   operatorAutonomy,
+  acceptsDirectly = false,
   runPrincipal,
   canRunAgents,
   liveAgentRuns,
@@ -983,6 +997,9 @@ export function ExecutionProfile({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
+  /** F37-65: threaded down to the caption, which must not infer acceptance
+   *  authority from autonomy alone. */
+  acceptsDirectly?: boolean;
   /** Ruling 127: whose accounts this task's runs bill, and what those accounts
    *  can run. `null` = no owner (or a seat pointing at a disabled/deleted
    *  account), so nothing can run here at all. P11-41's fail-fast honesty, now
@@ -1091,6 +1108,7 @@ export function ExecutionProfile({
                   : {})}
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}
+                acceptsDirectly={acceptsDirectly}
                 runRefusal={backendRunRefusal(
                   runPrincipal,
                   operatorBackend,

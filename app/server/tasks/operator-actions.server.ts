@@ -379,6 +379,44 @@ export function operatorBackendFor(
 }
 
 /**
+ * F37-65: can the deployed operator ACCEPT COMPLETION itself, or does it only
+ * file a card a person applies?
+ *
+ * Autonomy alone does not answer this and the task page's Execution caption
+ * read it as though it did: "Full autonomy: this run can move the task and
+ * accept completion itself." `gate()` keeps `completion-for-acceptance` at
+ * `recommend` whatever the autonomy unless the grant is EXPLICITLY `direct`
+ * (owner ruling Q1, 2026-07-11 — "an admin who configured `recommend`
+ * expecting a human gate must never get a silent agent-close just because the
+ * run was launched at full autonomy"). Live on shopify-clone-platform the
+ * operator is `autonomy: full` with `completion-for-acceptance: recommend`, so
+ * every task page on that board promised something the operator could not do,
+ * and every acceptance in the pass was a person pressing the button.
+ *
+ * The predicate is `operatorAcceptCompletion`'s own recommend-branch condition
+ * negated, character for character, so the caption cannot drift from the
+ * behaviour it describes. No `deployed` check of its own: `gate` already answers
+ * `deny` for an undeployed operator, and its comment asks to be the ONE place
+ * both gates answer from — a second copy here is the drift this finding is
+ * about. Falls back to `false` for an unreadable project, which is the honest
+ * caption (a page that cannot resolve an operator cannot promise one acts).
+ */
+export function operatorAcceptsDirectly(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): boolean {
+  try {
+    const authority = resolveOperatorAuthority(ctx, projectSlug);
+    return (
+      authority.autonomy === "full" &&
+      gate(authority, "completion-for-acceptance") === "direct"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * R19-A — the operator deployment's CONFIGURED autonomy for a project: the
  * ceiling every run is clamped to. The exact sibling of `operatorBackendFor`
  * (P11-76) and for the same reason — the run picker must offer the options that

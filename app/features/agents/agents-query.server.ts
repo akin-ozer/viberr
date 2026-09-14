@@ -102,12 +102,35 @@ function applyAutonomyCeiling(
   grants: readonly CapabilityGrantView[],
   autonomy: "supervised" | "full" | undefined,
 ): CapabilityGrantView[] {
-  if (autonomy === "full") return grants.map((g) => ({ ...g }));
-  return grants.map((g) =>
-    g.capabilityId === ACCEPT_COMPLETION_CAP_ID && g.mode === "direct"
-      ? { ...g, mode: "recommend" }
-      : { ...g },
-  );
+  return grants.map((g) => {
+    // The DOWNGRADE (F20-9 / R20-7, unchanged): acceptance acts directly only
+    // at full autonomy, so a `direct` grant on a supervised operator renders as
+    // "Recommends only".
+    if (
+      g.capabilityId === ACCEPT_COMPLETION_CAP_ID &&
+      g.mode === "direct" &&
+      autonomy !== "full"
+    ) {
+      return { ...g, mode: "recommend" };
+    }
+    // F37-65: the PROMOTION, which this twin never mirrored. `gate()` reads
+    // `authority.autonomy === "full" ? "direct" : "recommend"` for every
+    // `recommend` grant EXCEPT acceptance, so a full-autonomy operator acts
+    // directly on grants this display was calling "Recommends only" — the
+    // label whose legend says it proposes a card a human applies. Ruling 82's
+    // claim is that the display MIRRORS the runtime gate; it mirrored one half.
+    //
+    // `autonomy` is undefined for a specialist, so this stays a no-op there,
+    // which is correct: this is the OPERATOR's gate.
+    if (
+      g.mode === "recommend" &&
+      autonomy === "full" &&
+      g.capabilityId !== ACCEPT_COMPLETION_CAP_ID
+    ) {
+      return { ...g, mode: "direct" };
+    }
+    return { ...g };
+  });
 }
 
 /** Id-based capability policy → the mock's display-label buckets.

@@ -1286,11 +1286,33 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     const { container } = renderExec(execTask({ operator: attachedOperator }), {
       operatorBackend: "claude",
       operatorAutonomy: "full" as const,
+      // F37-65: the acceptance half of this caption is now conditional on the
+      // GRANT resolving to direct, which is what the runtime gate asks.
+      acceptsDirectly: true,
       runPrincipal: connectedPrincipal(),
     });
     expect(container.textContent).toContain(
       "Full autonomy: this run can move the task and accept completion",
     );
+  });
+
+  it("F37-65: full autonomy WITHOUT a direct acceptance grant does not promise acceptance", () => {
+    // `gate()` holds `completion-for-acceptance` at `recommend` whatever the
+    // autonomy unless the grant says direct (owner ruling Q1). This caption read
+    // autonomy alone, so on shopify-clone-platform — `autonomy: full`,
+    // `completion-for-acceptance: recommend` — every task page promised an
+    // acceptance the operator could not perform, while every acceptance in the
+    // pass was a person pressing the button.
+    // CANARY: render the old single sentence unconditionally.
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "claude",
+      operatorAutonomy: "full" as const,
+      acceptsDirectly: false,
+      runPrincipal: connectedPrincipal(),
+    });
+    expect(container.textContent).toContain("Full autonomy: this run can move the task.");
+    expect(container.textContent).toContain("Accepting completion still needs a person");
+    expect(container.textContent).not.toContain("accept completion itself");
   });
 
   it("states the operator's dispatch mandate on the cell", () => {

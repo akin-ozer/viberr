@@ -75,6 +75,7 @@ import { userBackendHealth } from "~/server/runtimes/backend-credentials.server"
 import { findUserById } from "~/server/auth/user-store.server";
 import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import {
+  operatorAcceptsDirectly,
   operatorAutonomyFor,
   operatorBackendFor,
 } from "~/server/tasks/operator-actions.server";
@@ -361,6 +362,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     operatorBackend: operatorBackendFor({}, params.slug),
     // R19-A: the ceiling, so the run picker offers only what will actually run.
     operatorAutonomy: operatorAutonomyFor({}, params.slug),
+    // F37-65: autonomy alone does not say whether the operator can accept
+    // completion — `gate()` keeps that capability at `recommend` unless the
+    // grant is explicitly `direct`. The caption used to read autonomy only.
+    operatorAcceptsDirectly: operatorAcceptsDirectly({}, params.slug),
     // Ruling 127: every agent run on this task bills its OWNER's accounts, so
     // "which backends can run here" is a question about the owner — not about
     // this deployment and not about the viewer. `null` means the task has no
@@ -1213,6 +1218,7 @@ export default function TaskDetailRoute({
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
       operatorAutonomy={loaderData.operatorAutonomy}
+      operatorAcceptsDirectly={loaderData.operatorAcceptsDirectly}
       // Ruling 127: the run picker's "would fail fast" gate answers for the
       // task OWNER (whose accounts a run bills), and an unowned task can run
       // nothing at all. The panels render the refusal that names the person,

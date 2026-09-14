@@ -47,6 +47,7 @@ import {
   deliverGate,
   gate,
   operatorAcceptCompletion,
+  operatorAcceptsDirectly,
   operatorDeliverForReview,
   operatorDispatchAgent,
   operatorOpenPacket,
@@ -1961,6 +1962,77 @@ describe("auto-invoke on stage transition", () => {
     // Give any (unwanted) fire-and-forget invocation a chance to appear.
     await new Promise((r) => setTimeout(r, 60));
     expect(listRunsForTask(store.db, store.slug, "VIB-1").filter((r) => r.op)).toHaveLength(0);
+  });
+});
+
+/**
+ * F37-65 (pass 37): the Execution caption on every task page of a full-autonomy
+ * board said "this run can move the task and accept completion itself."
+ *
+ * It read `configuredAutonomy === "full"` alone. Live on shopify-clone-platform
+ * the operator is deployed `autonomy: full` with `completion-for-acceptance:
+ * recommend`, and owner ruling Q1 (2026-07-11) holds that grant at `recommend`
+ * whatever the autonomy — so the sentence was false on all 26 tasks, and every
+ * acceptance in the pass was a person pressing the button while the operator
+ * filed cards.
+ *
+ * These tests do not assert the helper's arithmetic; they assert it AGREES with
+ * `operatorAcceptCompletion`, which is the only thing worth promising a reader.
+ * CANARY: `return authority.autonomy === "full"` (the defect itself) reddens the
+ * `recommend` and withheld rows; `return gate(...) === "direct"` reddens the
+ * supervised row.
+ */
+describe("F37-65 — operatorAcceptsDirectly predicts what an acceptance really does", () => {
+  const DIRECT_ACCEPTANCE: { capabilityId: string; mode: CapabilityMode }[] = [
+    ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+    { capabilityId: "completion-for-acceptance", mode: "direct" },
+  ];
+  const WITHHELD: { capabilityId: string; mode: CapabilityMode }[] = DEFAULT_POLICY.filter(
+    (c) => c.capabilityId !== "completion-for-acceptance",
+  );
+
+  const rows: {
+    what: string;
+    policy: { capabilityId: string; mode: CapabilityMode }[];
+    autonomy: OperatorAutonomy;
+    accepts: boolean;
+  }[] = [
+    // The live board's exact shape, and the one the caption lied about.
+    { what: "full autonomy, acceptance `recommend`", policy: DEFAULT_POLICY, autonomy: "full", accepts: false },
+    { what: "full autonomy, acceptance `direct`", policy: DIRECT_ACCEPTANCE, autonomy: "full", accepts: true },
+    { what: "supervised, acceptance `direct`", policy: DIRECT_ACCEPTANCE, autonomy: "supervised", accepts: false },
+    { what: "full autonomy, acceptance withheld", policy: WITHHELD, autonomy: "full", accepts: false },
+  ];
+
+  for (const row of rows) {
+    it(`${row.what}: says ${row.accepts}, and the runtime does the same`, async () => {
+      deployRoster(row.policy, row.autonomy);
+      expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, store.slug)).toBe(row.accepts);
+      seedTask("review");
+      const r = await operatorAcceptCompletion(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        authority(row.autonomy),
+      );
+      // The claim under test is narrow and total: "accepts completion itself"
+      // means the task reaches the terminal stage on the operator's own move.
+      expect(r.outcome === "done").toBe(row.accepts);
+      expect(task().frontmatter.stage === "done").toBe(row.accepts);
+    });
+  }
+
+  it("is false when the project deploys no operator at all", () => {
+    // Not a redundant guard: the caption is rendered from a project file that
+    // may have had its operator removed since the page last loaded, and the
+    // helper must answer for that project rather than throw into the loader.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, agents: [] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, store.slug)).toBe(false);
+    // And for a project that is not there at all — `resolveOperatorAuthority`
+    // throws `notFound`, which must not become a 500 on the task page.
+    expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, "no-such-project")).toBe(false);
   });
 });
 

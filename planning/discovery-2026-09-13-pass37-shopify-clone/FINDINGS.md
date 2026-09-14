@@ -3546,3 +3546,50 @@ the chip and avatar — says Operator.
 Canary: drop it and the test reads `expected 'Operator' not to be 'Operator'`.
 
 *Reported by the adversarial sweep; confirmed against the live notification row before fixing.*
+
+## F37-65 · Two surfaces claim the operator can accept completion; the gate says otherwise — MEDIUM
+
+**What it is.** Owner ruling Q1 (2026-07-11) makes `completion-for-acceptance` the one capability
+full autonomy does NOT promote: `gate()` holds an explicit `recommend` at `recommend` whatever the
+run's autonomy, because *"an admin who configured `recommend` expecting a human gate must never get
+a silent agent-close just because the run was launched at full autonomy."* Two surfaces read
+autonomy alone and announced the opposite.
+
+**(a) The Execution caption, on every task page of the board.**
+`execution-profile.tsx` rendered, gated on `configuredAutonomy === "full"` and nothing else:
+
+> Full autonomy: this run can move the task and accept completion itself.
+
+`shopify-clone-platform` deploys its operator `autonomy: full` with `completion-for-acceptance:
+recommend`. So the sentence was false on all 26 tasks — and the whole pass is the counter-proof:
+SHOP-18, SHOP-24 and SHOP-3 were all accepted by a person pressing the button while the operator
+filed `accept_completion` cards. Not one acceptance on this board was the operator's own.
+
+**(b) `applyAutonomyCeiling` mirrored half of `gate()`.**
+Ruling 82 states the capability matrix *"MIRRORS the runtime gate"*. `applyAutonomyCeiling`
+(`agents-query.server.ts`) mirrored only the DOWNGRADE half — a `direct` grant shown as gated under
+supervised autonomy. It did not mirror the PROMOTION: under full autonomy `gate()` turns every
+`recommend` into `direct` *except* `completion-for-acceptance`. So a full-autonomy operator's
+matrix showed "Delivers the branch and opens the review" as a recommendation the human applies,
+when the runtime would have the operator do it directly and unattended.
+
+The two halves disagree in opposite directions, which is why one mirror missing looked deliberate.
+
+**Fix.** One predicate, `operatorAcceptsDirectly`, that calls the runtime's own `gate()` — it is
+`operatorAcceptCompletion`'s recommend-branch condition negated character for character. Threaded
+to the caption, which now says what is true in the `recommend` case: *"Full autonomy: this run can
+move the task. Accepting completion still needs a person, because the operator's acceptance grant
+is not direct."* `applyAutonomyCeiling` mirrors both halves.
+
+No `deployed` check of its own: `gate()` already answers `deny` for an undeployed operator and its
+comment asks to be the one place both gates answer from — a second copy is the same drift this
+finding is about.
+
+**Test.** The suite does not assert the predicate's arithmetic; it asserts the predicate AGREES
+with `operatorAcceptCompletion` across four rosters (full+recommend, full+direct, supervised+direct,
+full+withheld), comparing its answer against whether the task actually reaches the terminal stage.
+Canaries: `return authority.autonomy === "full"` — the defect itself — reddens the `recommend` and
+withheld rows; `return gate(...) === "direct"` reddens the supervised row. Both run.
+
+*Reported by the adversarial sweep; the live grant map and every acceptance on the board were
+re-checked against `project.md` before fixing.*
