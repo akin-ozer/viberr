@@ -3234,6 +3234,14 @@ export async function recordAgentCompletion(
    *  announcement block would type-check as dead code and quietly stop being
    *  checked. */
   const deadlockEscalation: ReviewDeadlockEscalation = { packet: null, deadlock: null };
+  /** The project's stages, read once and only when a verdict is being written:
+   *  `taskClosure` needs them, and every other verdict-less completion must not
+   *  pay a project read for a guard it never reaches. */
+  let deadlockStagesCache: ProjectContext["stages"] | null = null;
+  const deadlockStages = (): ProjectContext["stages"] => {
+    deadlockStagesCache ??= loadProjectContext(ctx, projectSlug).stages;
+    return deadlockStagesCache;
+  };
   let validation: TaskFrontmatter["validation"] = "healthy";
   // The title/summary are computed from the RESOLVED (derived) validation, not
   // the raw verdict, so the event can never read "Review passed / Validation:
@@ -3347,7 +3355,19 @@ export async function recordAgentCompletion(
           // than asking the operator to. Read inside the lock, from the array
           // just written, and acted on after it — a packet write cannot happen
           // inside another file lock.
-          if (verdict === "request_changes" && !parsed.packet) {
+          // Ruling 177 (F36-5): never a packet on a CLOSED task. A reviewer run
+          // that finishes after its task was accepted, force-accepted or
+          // archived still records its verdict — evidence is evidence — and
+          // ruling 177's own arm below says no coordination follows it. An
+          // escalation asking a person to decide something about a shipped task
+          // is exactly the packet that ruling refused, and `operatorOpenPacket`
+          // refuses it by name; writing the packet here rather than through
+          // that door means carrying its guard too.
+          if (
+            verdict === "request_changes" &&
+            !parsed.packet &&
+            !taskClosure(parsed.frontmatter, deadlockStages()).closed
+          ) {
             const deadlock = reviewDeadlockOf(
               parsed.frontmatter,
               reviewerProfileId,
@@ -3367,6 +3387,14 @@ export async function recordAgentCompletion(
                 delivererName: delivererNameOf(parsed.frontmatter, names),
               });
               parsed.frontmatter.waiting = "human";
+              // Ruling 137 says a packet withdraws the standing acceptance
+              // offers, and this packet needs no code for it: a
+              // `request_changes` always derives `validation: "failing"`, and
+              // the filter a few lines below already drops every
+              // `accept_completion` and, while failing, every `transition`
+              // card. Calling `withdrawAcceptanceOffers` here as its siblings
+              // do would withdraw nothing and write a second "the offer was
+              // withdrawn" line into the decision log for one disappearance.
               deadlockEscalation.packet = parsed.packet;
               deadlockEscalation.deadlock = deadlock;
               parsed.timeline.unshift({

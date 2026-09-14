@@ -1164,6 +1164,60 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
     });
 
+    it("ruling 177: no packet on a task that CLOSED while the reviewer was running", async () => {
+      // A reviewer run that finishes after its task was accepted still records
+      // its verdict — evidence is evidence, and ruling 177 says so — but no
+      // coordination follows it. An escalation asking a person to decide
+      // something about a shipped task is exactly the packet ruling 177
+      // refused, and `operatorOpenPacket` would have refused it by name.
+      // CANARY: drop the `taskClosure(...).closed` clause from the escalation
+      // guard and this opens a decision packet on a Done task.
+      writeReviewTask();
+      await review(blocks(1));
+      expect(taskFile().parsed.packet).toBeNull();
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.frontmatter.stage = "done";
+        },
+      );
+
+      await review(blocks(2));
+      expect(taskFile().parsed.packet).toBeNull();
+      // The verdict itself still lands: closing the task does not erase what a
+      // reviewer found.
+      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(2);
+    });
+
+    it("ruling 137: no acceptance offer survives beside the packet", async () => {
+      // A packet pauses coordination, so an offer to accept must not stand
+      // beside it — least of all one the verdict in the same write just made
+      // impossible. This packet needs no withdrawal code of its own: a
+      // `request_changes` always derives `validation: "failing"`, and the
+      // verdict block's own filter drops every `accept_completion` card. The
+      // test is here because that is a COUPLING, not an obvious property, and
+      // the day it changes this packet starts shipping beside a live Accept
+      // button. CANARY: drop `r.kind !== "accept_completion"` from the
+      // recommendation filter.
+      writeReviewTask({
+        recommendations: [
+          {
+            id: "rec_accept",
+            kind: "accept_completion",
+            label: "Accept the completion",
+            detail: "Recorded by Viberr when the delivery landed.",
+          },
+        ],
+      });
+
+      await review(blocks(1));
+      await review(blocks(2));
+      expect(taskFile().parsed.packet).not.toBeNull();
+      expect(
+        taskFile().parsed.frontmatter.recommendations.map((r) => r.id),
+      ).not.toContain("rec_accept");
+    });
+
     it("never clobbers a packet that is already open", async () => {
       writeReviewTask();
       await review(blocks(1));

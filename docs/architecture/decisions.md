@@ -5174,6 +5174,17 @@ by rewriting those paragraphs:*
     NOT an option: the resolution cannot edit project settings, and ruling 164 already
     established that an option whose title promises what its resolution does not do is worse
     than no option.
+    Writing the packet directly rather than through `operatorOpenPacket` means carrying that
+    door's guards too, and an adversarial pass over this ruling's own code found one missing:
+    ruling 177 refuses a packet on a CLOSED task, and a reviewer run that finishes after its
+    task was accepted or archived still records its verdict (ruling 177's own arm says so —
+    evidence is evidence, and no coordination follows). The escalation now checks closure in
+    the same locked read. The OTHER guard, ruling 137's acceptance-offer withdrawal, is
+    deliberately absent: a `request_changes` always derives `validation: "failing"`, and the
+    verdict block's own filter already drops every `accept_completion` card, so calling the
+    withdrawal would withdraw nothing and write a second line into the decision log for one
+    disappearance. A test pins that coupling, because it is a coupling and not an obvious
+    property.
     (`review-deadlock.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`, `operator-toolkit.server.ts`, `operator-run.server.ts`,
     `activity-feed.server.ts`.)

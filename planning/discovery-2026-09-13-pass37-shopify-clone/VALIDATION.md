@@ -1854,3 +1854,26 @@ Force-accepted as admin at 12:50:33Z with that verification recorded on the deci
 merged; SHOP-18 Done. The ceremony named both shas and the base-refresh split before I confirmed,
 which is what made the check possible at all — and is the reason the override is defensible rather
 than a guess.
+
+### Ruling 237, reviewed adversarially against itself
+
+Writing a packet directly rather than through `operatorOpenPacket` means carrying that door's
+guards by hand. Two were candidates; one was a real defect and one was not, and the difference was
+only visible by trying to break the test.
+
+- **Ruling 177's closure guard — MISSING, now fixed.** A reviewer run that finishes after its task
+  was accepted, force-accepted or archived still records its verdict (ruling 177's own arm says so
+  in as many words: "its report is on the record; no coordination follows"). The escalation would
+  have opened a decision packet on a shipped task — precisely the packet F36-5 found live and
+  `operatorOpenPacket` refuses by name. Canaried: stub the closure clause to `true` and the test
+  reads `expected { id: 'pkt_…' } to be null` on a Done task.
+- **Ruling 137's offer withdrawal — NOT needed, and the test proved it.** I wrote the withdrawal
+  first, and its canary would not go red. The reason is that a `request_changes` always derives
+  `validation: "failing"` and the verdict block's own filter three lines later already drops every
+  `accept_completion` card. The withdrawal was dead code writing a second "the offer was withdrawn"
+  line for one disappearance, so it came out. The test stayed, re-aimed at the coupling that
+  actually holds: canary `r.kind !== "accept_completion"` in the filter and it reads
+  `expected [ 'rec_accept' ] to not include 'rec_accept'`.
+
+The second is the more useful record. A test that cannot go red is not a weak test, it is a
+statement that the code under it does nothing.
