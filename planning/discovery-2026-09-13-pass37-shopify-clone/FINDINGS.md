@@ -3445,3 +3445,35 @@ prompt CLAIMS a gate that was never built.
 exists, and states plainly that not delivering a held task is doctrine rather than enforcement.
 Whether `performDelivery` should refuse a held task the way `startAgentRun` does is a behaviour
 change with ruling 186's precedent behind it, and ruling 186's scope was the owner's decision.
+
+## F37-62 · The @mention resume door enforces neither the closure gate nor the hold — HIGH
+
+**What it is.** `assertResumeEligible` — the gate on resuming an agent's provider session from an
+@mention — checks ruling 133's stage eligibility and nothing else. It does not go through
+`startAgentRun`, so it enforces neither of the two gates every other dispatch door does:
+
+| gate | ruling | `startAgentRun` | resume door |
+|---|---|---|---|
+| task is closed (Done / archived) | 177 | `taskClosure` at :1245 | **absent** |
+| task is held (`blockedBy`) | 186 | `holdRefusal` at :1266 | **absent** |
+
+Both rulings state the opposite in their own words. Ruling 177: *"a closed task refuses every
+coordination door"*. Ruling 186: *"Every dispatch door lands here, so every one of them refuses:
+the operator's `run_agent`, the controller's `run_agent`, and the task page's Run-an-agent
+control."* This door lands nowhere near it.
+
+**The absurdity is on one page.** On a Done task, the Run-an-agent control refuses by name — and
+typing `@dev one more thing` in the comment box directly below it resumes that agent's session and
+spends a paid run on a shipped task. Proved by canary: delete the closure block and the test reads
+`expected 'resumed' to be null`.
+
+**The hold half is the same hole ruling 240 closed an hour earlier**, one door along: ruling 186
+gated dispatch, ruling 240 gated delivery after the owner's call, and this third door was gated by
+neither.
+
+**Fix.** Both gates, at the top of `assertResumeEligible`, reusing each door's own refusal sentence
+so a person meets one wording per cause however they arrived. An unreadable board refuses nothing
+rather than inventing a closure from silence.
+
+*Found by the adversarial sweep (which reported the closure half); the hold half I found while
+verifying it.*

@@ -4312,6 +4312,35 @@ export function assertResumeEligible(
 ): void {
   const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!existing) throw AppError.notFound(`Task ${taskKey} not found.`);
+  // F37-62: the RESUME door is a dispatch door, and it used to enforce only
+  // ruling 133's stage gate. It does not go through `startAgentRun`, so it
+  // enforced NEITHER of the two gates every other door does:
+  //
+  //  - ruling 177: "a closed task refuses every coordination door". The Run-an-
+  //    agent control on the same page refuses a Done or archived task by name;
+  //    an @mention of the same agent resumed its session and spent a paid run.
+  //  - ruling 186: the hold. Its comment says "Every dispatch door lands here,
+  //    so every one of them refuses" — this one did not land there, which is
+  //    the same hole ruling 240 closed on the delivery path an hour ago.
+  //
+  // Both refusals reuse the sentences their own doors use, so a person meets
+  // one wording per cause however they reached it.
+  {
+    // A board that cannot be read refuses NOTHING here rather than guessing: an
+    // unreadable project is already a louder failure elsewhere, and inventing a
+    // closure from silence would refuse a resume on a healthy task.
+    const stages = projectBoard(ctx, projectSlug)?.stages ?? [];
+    const closure = taskClosure(existing.parsed.frontmatter, stages);
+    if (closure.closed) {
+      throw AppError.validation(
+        closureRefusal(taskKey, closure, stages, "resuming an agent on it"),
+      );
+    }
+    const held = existing.parsed.frontmatter.blockedBy;
+    if (held.length > 0) {
+      throw AppError.validation(holdRefusal(taskKey, held, "resuming an agent on it"));
+    }
+  }
   let resolved: ResolvedSpecialist | null = null;
   try {
     resolved = resolveDeployedSpecialist(ctx, projectSlug, profileId);

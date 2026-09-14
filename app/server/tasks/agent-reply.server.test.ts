@@ -1033,6 +1033,68 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
   });
 
+  it("F37-62: the RESUME door refuses a CLOSED task, like every other dispatch door", async () => {
+    // Ruling 177: "a closed task refuses every coordination door". The
+    // Run-an-agent control on the same page refuses a Done task by name because
+    // `startAgentRun` gates on `taskClosure` — but an @mention RESUMES an
+    // existing provider session without going through it, so the same person on
+    // the same page could spend a paid run on a shipped task.
+    // CANARY: delete the closure block from `assertResumeEligible`.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "done",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_dev_closed", "dev", "primary");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBeNull();
+    expect(result.runNotStarted).toMatch(/VIB-1 is closed/);
+    expect(result.runNotStarted).toMatch(/resuming an agent on it/);
+    // The comment still lands: refusing the RUN never discards what a person wrote.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
+  });
+
+  it("F37-62: the RESUME door refuses a HELD task, like every other dispatch door", async () => {
+    // Ruling 186's comment claims "Every dispatch door lands here, so every one
+    // of them refuses" — this door does not land in `startAgentRun` at all.
+    // Same hole ruling 240 closed on the delivery path.
+    // CANARY: delete the hold block from `assertResumeEligible`.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        blockedBy: ["VIB-2"],
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_dev_held", "dev", "primary");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev carry on" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBeNull();
+    expect(result.runNotStarted).toMatch(/waits on VIB-2/);
+    expect(result.runNotStarted).toMatch(/resuming an agent on it is refused/);
+  });
+
   it("an @mention of the DELIVERING agent resumes it at a stage its profile does not declare", async () => {
     // Canary: drop the `delivers` arm from `runEligibilityFor`.
     scopeBothToReview();
