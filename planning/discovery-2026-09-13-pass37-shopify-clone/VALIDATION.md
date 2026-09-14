@@ -1178,3 +1178,24 @@ the cases.**
 
 Held for the next deploy rather than restarting the board again for one guard that no live task
 currently reaches.
+
+### Ruling 229 — the baseline, captured before the fix went live
+
+The claim is that `already_current` returning `noop` is what produced the flood of "plan was not
+carried out in full" notes. That is falsifiable by counting, so the count was taken before the
+deploy rather than argued for after it.
+
+At **04:02:34 UTC**, across all 22 tasks:
+
+```
+"The operator's plan was not carried out in full"            58
+  …of which update_branch_from_base "already up to date"     52
+  …leaving refusals a human should actually read              6
+```
+
+It was 57/51 twenty minutes earlier, so the rate is roughly one new instance every two minutes
+with seven tasks running — SHOP-18 produced one at 04:02, between the fix being written and
+committed.
+
+If ruling 229 is right, the second number stops growing while the first keeps pace with the
+sixth. If it keeps climbing, the diagnosis was wrong and the note is coming from somewhere else.
