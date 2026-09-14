@@ -267,3 +267,77 @@ field to null.
 - Docs updated in the same change: `docs/architecture/decisions.md` (rulings 186-188),
   `docs/domain/task-lifecycle.md` (the hold gate), `docs/domain/github-delivery.md` (commit
   standing, the sync pill), `docs/domain/controller-and-goals.md` (the four tool changes).
+
+---
+
+# Session four — items D1-D6
+
+Found and fixed in sequence rather than planned up front, because each came out of driving the
+live board. Same discipline as C1-C7: a test proved red by breaking the source, then the live app
+re-driven through the UI. Red-proofs and live-proofs in `VALIDATION.md`.
+
+## D1 — A directive handed to an agent stops notifying people  ·  F37-53  ·  ruling 232 (owner)
+
+The gate lives at the ONE fan-out seam (`audience: "agent"` on `NotifyMentionsInput`), not at the
+call site, so a future declared-agent writer inherits it. Boundary drawn deliberately and stated in
+the ruling: `appendComment` DERIVES its `toAgent` from the presence of an agent handle, so the gate
+is for writers that DECLARE the audience — today `operatorPromptAgent` alone. A blanket reading
+would have dropped the human half of "@dev implement the endpoint, @Bora look at the schema first".
+Second half, implied by the owner's own words ("the operator should use its human-directed path"):
+the persona now says which path is which, in the shipped asset and the fallback.
+*Canaries:* remove the gate (two tests by name); drop the `audience` at the call site (the
+`operatorPromptAgent` test alone); delete the persona sentence (assertion + drift check).
+
+## D2 — A mention notification quotes the mention  ·  F37-53  ·  ruling 233
+
+`resolveMentionTargets` now returns the handle-to-user map it always computed and threw away, and
+the quote is windowed on the first span resolving to THAT recipient. The head window is kept when
+it already covers the mention, so the common case is unchanged byte for byte.
+*Canary:* force `quoteAround` to take the head.
+
+## D3 — The in-app audit browse reaches the class it exists for  ·  F37-52  ·  ruling 234
+
+Two halves. The unconditional per-tick reconcile heartbeat is excluded from the BROWSE only — table,
+retention sweep, export and `latestTaskReconcileCheckAt` untouched, so F19-22's guarantee holds. And
+"Org-scoped" became its own SQL query instead of a client-side filter over whatever the unscoped
+window returned. The loader fetches both windows so the toggle stays instant.
+*Canaries:* stop hiding the heartbeat; ignore `orgOnly` in SQL; filter one list in the UI again.
+
+## D4 — A refused acceptance is recorded and handed to the operator  ·  F37-55  ·  ruling 235
+
+The known-mismatch branch now carries `liveHeadSha`, which is the one missing field that had made
+`refuseUnverifiedHead`'s recorder skip silently. Not a packet — a known mismatch is not a decision —
+but a timeline event, a `task.acceptance.head_unpushed` audit row with its own `auditText` sentence,
+and a `head-unpushed` operator hand-off whose turn instruction names the delivery and forbids
+re-filing the recommendation. Idempotent by note text.
+*Canaries:* drop `liveHeadSha` (the original defect); skip the recorder; drop the idempotence guard;
+delete the `auditText` case.
+
+## D5 — The review queue names colliding pull requests  ·  ruling 236 (owner)
+
+`pr.paths` records the changed paths pinned to the head they were read at; the pin is what makes the
+fetch nearly free. A failed read leaves the key ABSENT (the same convention as `checks`/`review`/
+`mergeable`) so a GitHub hiccup keeps the cached list rather than erasing every chip. Capped with
+`truncated` carried to the surface, because a clipped list can only MISS a collision. The
+intersection is server-side and symmetric.
+*Canaries:* ignore the head pin; report a failed files call as an empty list; drop `partial`;
+compute the intersection one-way; render a count instead of names.
+
+## D6 — Two small honesty fixes  ·  F37-54, F37-56
+
+`longTimelines` takes its boundary from `compactTimelineEvents` itself (`>`, not `>=`), and the test
+asserts the real rule on both lengths rather than restating a number. And the agent personas say to
+write "they" unless a person has stated otherwise, because the record had been inventing the owner's
+gender two incompatible ways in one project.
+*Canaries:* restore `>=`; delete the pronoun sentence.
+
+## Not items, recorded so they are not re-opened
+
+- **The clarity metric** (`waiting !== none || owner != null`) looks vacuous because every task here
+  has an owner, but ownership CAN be released to null (`task.ownership.admin_released`), so it can
+  genuinely drop. Left alone.
+- **The `readiness` difference** between file and projection on six tasks is ruling 131's dependency
+  floor working, with `stored_readiness` preserved beside it. Left alone.
+- **Attachments are overwritable by filename.** Real, but no evidence row references one: an
+  `EvidenceRow` is `{label, add, del}`, documented as "A REFERENCE, never a dump", and its backing is
+  the run log, which still holds the older claims. Left alone.
