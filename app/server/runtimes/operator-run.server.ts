@@ -743,11 +743,16 @@ async function noteQueuedTriggerRefused(
   // to it.
   const owedAnyway = arrival === "door" && (queued.trigger ?? "manual") === "manual";
   if (refused === "blocked-by" && !queued.scheduleId && !owedAnyway) return;
-  logger.info("queued operator trigger refused at the front of the lease queue", {
-    key: `${queued.projectSlug}/${queued.taskKey}`,
-    trigger: queued.trigger ?? "manual",
-    refused,
-  });
+  logger.info(
+    arrival === "door"
+      ? "operator trigger refused at the door — noting it on the task"
+      : "queued operator trigger refused at the front of the lease queue",
+    {
+      key: `${queued.projectSlug}/${queued.taskKey}`,
+      trigger: queued.trigger ?? "manual",
+      refused,
+    },
+  );
   const ref = {
     projectSlug: queued.projectSlug,
     taskKey: queued.taskKey,

@@ -4835,6 +4835,15 @@ by rewriting those paragraphs:*
     "GitHub unreachable" while its fixture answered the pull and failed the compare, which is
     this ruling's case, not A9's. The fixture, not the ruling, was what made the old behaviour
     look intended.
+    Amended the same day by re-reading the packet I had just written: it offers TWO options, not
+    three. A "try the check again" option would have to be a `custom`, and a `custom` resolution
+    sends the task back to the agent side and re-queues the operator - which re-runs this very
+    gate, refuses again, and opens this very packet again. Answering the decision would re-create
+    it, which is ruling 224's fourth half repeating on a different packet. A re-check needs no
+    option at all: this packet does not set `readiness: blocked`, so it never refuses the
+    acceptance, and pressing Accept again IS the re-check - which the body now says, and which a
+    successful acceptance finishes by withdrawing the packet on its own. The remaining two
+    options both do exactly what they say.
 
 227. **A refusal a person is waiting on is written on the task, not only in the log (owner,
     2026-09-14, pass 37; F37-46).** Ruling 141 taught the operator's refusals to speak when a

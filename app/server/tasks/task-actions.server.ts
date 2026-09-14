@@ -8024,7 +8024,7 @@ export async function resolvePacket(
         input.taskKey,
       );
       if (headCheck.refusal) {
-        await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+        await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
       }
       // R19-8: the packet path is a writer to Done like the other two, so the
       // no-change basis is re-proved live HERE as well — otherwise the
@@ -10097,6 +10097,7 @@ export interface AcceptancePrHeadCheck {
  * pressing Accept twice gets one question, not two.
  */
 async function refuseUnverifiedHead(
+  db: DatabaseSync,
   ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
@@ -10116,6 +10117,7 @@ async function refuseUnverifiedHead(
           from: "policy-engine",
           title: `PR #${check.prNumber}'s head could not be checked before merging`,
           body:
+            `Press Accept again to re-run the check; this decision does not block it.\n\n` +
             `GitHub answered the pull request and then refused to compare its head ` +
             `\`${head}\` against the delivered revision \`${delivered}\` that your reviewers ` +
             `were pinned to.\n\nThe repository is reachable, so the merge itself would ` +
@@ -10124,24 +10126,26 @@ async function refuseUnverifiedHead(
             `the base branch. That is not hypothetical — it is how SHOP-17 merged a revision ` +
             `its Code Reviewer had rejected.`,
           observations: [],
+          // Two options, and deliberately NOT a third "try the check again".
+          // That one would have to be a `custom`, whose resolution sends the
+          // task back to the agent side and re-queues the operator — which
+          // would re-run this very gate, refuse again, and open this very
+          // packet again. Answering the decision would re-create it, which is
+          // ruling 224's fourth half repeating. Re-checking needs no option at
+          // all: this packet does not block acceptance, so pressing Accept is
+          // the re-check, and a successful acceptance withdraws the packet on
+          // its own.
           options: [
-            {
-              kind: "custom",
-              t: "Try the check again",
-              d:
-                "Closes this decision and changes nothing else. A refused comparison is " +
-                "usually transient (rate limit, a bad minute at GitHub); accept again and " +
-                "the check runs fresh.",
-              rec: true,
-            },
             {
               kind: "request_edit",
               t: "Send it back to be re-delivered",
               d:
                 "Returns the task for rework so the branch is pushed again from the " +
                 "workspace. Use this when you suspect the remote branch is not what was " +
-                "reviewed.",
-              rec: false,
+                "reviewed. To simply re-run the check instead, press Accept again: a " +
+                "refused comparison is usually transient, and this decision does not " +
+                "block the acceptance.",
+              rec: true,
             },
             {
               kind: "accept_unverified_head",
@@ -10167,6 +10171,12 @@ async function refuseUnverifiedHead(
           evidence: null,
         });
       });
+      // `updateTaskFile` writes the file and nothing else — every other writer
+      // in this module reprojects after it, and a packet that exists only in
+      // the markdown is one the board does not show until the watcher happens
+      // to notice. The person is being told, in the same breath, that a
+      // decision is waiting for them.
+      reprojectTask(db, ctx, projectSlug, taskKey);
     } catch (error) {
       // The refusal is the point; failing to RECORD it must not turn a refused
       // merge into a thrown-away one. Log and refuse anyway.
@@ -10785,7 +10795,7 @@ export async function applyAcceptanceWrite(
     input.headCheck ??
     (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
   if (headCheck.refusal) {
-    await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+    await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
   }
   // R19-8: the SECOND layer of the no-change gate. Every writer to Done funnels
   // through here, so a caller that forgets the check still cannot close a task
@@ -11176,7 +11186,7 @@ async function acceptCompletion(
     input.taskKey,
   );
   if (headCheck.refusal) {
-    await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+    await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
   }
 
   // R19-8: a `noChanges` task closes WITHOUT a merge, so its basis is re-proved
@@ -11618,7 +11628,7 @@ export async function completeTaskMerge(
     input.taskKey,
   );
   if (headCheck.refusal) {
-    await refuseUnverifiedHead(ctx, input.projectSlug, input.taskKey, headCheck);
+    await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
   }
 
   const mergeTaskPr =

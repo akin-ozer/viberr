@@ -1482,12 +1482,31 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       expect(packet.title).toContain("could not be checked before merging");
       expect(packet.body).toContain(head.slice(0, 7));
       expect(packet.body).toContain(delivered.slice(0, 7));
+      // TWO options, and the missing third is the point: a "try the check
+      // again" option would have to be a `custom`, whose resolution sends the
+      // task back to the agent side and re-queues the operator — re-running
+      // this gate, refusing again, and re-opening this packet. Answering the
+      // decision would re-create it, which is ruling 224's fourth half. A
+      // re-check needs no option at all: this packet does not block acceptance.
       expect(packet.options.map((o) => o.kind)).toEqual([
-        "custom",
         "request_edit",
         "accept_unverified_head",
       ]);
-      // The recommendation is the cheap, safe one — not the override.
+      expect(packet.body).toContain("Press Accept again to re-run the check");
+      // And it reaches the BOARD, not just the markdown. `updateTaskFile`
+      // writes the file and nothing else; without an explicit reproject the
+      // decision a person was just told about would not appear until the file
+      // watcher happened to notice.
+      // SAFETY: `packet_json` is the only selected column and 0001_baseline
+      // declares it nullable TEXT, so a matching row is exactly this shape —
+      // and the task was written by this test, so a row exists.
+      const projected = store.db
+        .prepare(
+          `SELECT packet_json FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+        )
+        .get(store.slug, "VIB-1") as { packet_json: string | null };
+      expect(projected.packet_json ?? "").toContain("could not be checked before merging");
+      // The recommendation is the safe one — never the override.
       expect(packet.options.findIndex((o) => o.rec)).toBe(0);
       expect(fm().frontmatter.waiting).toBe("human");
     });
@@ -1519,7 +1538,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       });
       await resolvePacket(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
         actor(store.users.arda),
         dataCtx(),
       );
@@ -1540,7 +1559,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
 
       await resolvePacket(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
         actor(store.users.arda),
         dataCtx(),
       );
@@ -1568,7 +1587,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       await expect(accept()).rejects.toMatchObject({ status: 409 });
       await resolvePacket(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
         actor(store.users.arda),
         dataCtx(),
       );
