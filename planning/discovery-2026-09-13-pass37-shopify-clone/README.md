@@ -9,19 +9,38 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | fifty-eight findings — two withdrawn, each with its measurements kept |
+| [`FINDINGS.md`](FINDINGS.md) | sixty-eight findings — two withdrawn, each with its measurements kept |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–239** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–241** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
 
-## Day five, in one paragraph
+## Day six, in one paragraph
 
-By the end of the fifth session the board stood at **25 tasks, 14 done, 14 merged pull requests**
+By the end of the sixth session the board stood at **26 tasks, 16 done, 16 merged pull requests**
 on `akin-ozer/shopify-clone`.
+
+The sixth session was one family of defect, found three ways, and the last one was found by
+pressing a button rather than reading code. **F37-65**: the Execution caption told every task on
+this board that a full-autonomy run "can move the task and accept completion itself", while owner
+ruling Q1 holds `completion-for-acceptance` at `recommend` whatever the autonomy — every acceptance
+in the whole pass was a person pressing the button. **F37-66** and **F37-67**: two records that
+described what did not happen — ruling 211(b)'s withdrawal note sat below the very early returns it
+was written for, and the lost-completion note promised a boot replay that its own sibling write had
+already excluded the run from. Running the recovery sweep instead of reading it found a third way
+the promise was false, and a fourth.
+
+Then **F37-68**, the one worth the session. Ruling 237's escalation fired on SHOP-5, I picked its
+recommended option, and viberr wrote the decision onto the task's contract, cleared the packet, and
+refused to carry it out: the task was held, and ruling 186 refuses every agent dispatch on a held
+task. The person's chosen option bought nothing and there was no packet left to choose again from.
+`force_accept`'s own arm, in the same file, had already written the rule it broke. The owner chose
+to QUEUE rather than refuse (ruling 241), so the hold stays absolute and the intent survives it.
+
+## Day five, in one paragraph
 
 The fifth session found the two halves of one story, and the second half cost a governance
 override to escape. **F37-57**: ruling 210 held that a second consecutive `request_changes` from

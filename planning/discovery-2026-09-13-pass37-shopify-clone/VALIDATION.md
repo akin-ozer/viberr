@@ -1984,3 +1984,79 @@ for them, not the injection. The controller's conversation is the one place the 
 here; for the specialists the ruling is prospective, and its value is that a profile added tomorrow
 cannot miss the rule, which is exactly the failure mode the KB's own "For reviewers" section was
 written about.
+
+---
+
+## F37-65 — the operator's acceptance grant decides who accepts
+
+**Red-proof.** The suite does not assert the predicate's arithmetic; it asserts it AGREES with
+`operatorAcceptCompletion` across four rosters, comparing its answer against whether the task
+actually reaches the terminal stage. Canaries run both ways:
+
+```
+return authority.autonomy === "full"          → × full autonomy, acceptance `recommend`
+                                                × full autonomy, acceptance withheld
+return gate(...) === "direct"                 → × supervised, acceptance `direct`
+```
+
+**Live-proof.** The whole pass is it. `shopify-clone-platform` deploys the operator `autonomy: full`
+with `completion-for-acceptance: recommend`, and every acceptance on the board — SHOP-18, SHOP-24,
+SHOP-3, and SHOP-23 after the fix — was a person pressing the button while the operator filed
+`accept_completion` recommendation cards. The caption told all 26 tasks otherwise.
+
+## F37-66 / F37-67 — two records that described what did not happen
+
+**Red-proof, F37-66.** Reproduced end to end rather than argued: a live run, a person's `@dev`
+comment refused by the single-flight guard, the task archived while the run is going, the run
+interrupted. Ruling 177's "Completed after the task closed" note lands — proving the closed branch
+was really taken — and the withdrawal never follows. The test reached that final assertion and
+failed on it.
+
+**Red-proof, F37-67.** Three shapes, each checked against `recoverUnreactedAgentRuns` RUN FOR REAL
+rather than asserted: reply already landed (no replay row), reply never landed with readable text
+(replay row present, promise kept), reply never landed with no text (selected then dropped, promise
+withheld). `willReplay = true` reddens two; `willReplay = false` reddens the third, so the fix
+cannot be passed by deleting the promise either.
+
+**What running the sweep found that reading it did not.** The first draft asserted the promise was
+kept for a run whose reply never landed, and it failed: the sweep SELECTED the run (`count: 1` in
+its own log line) and then `continue`d inside the loop on `if (!replyText) continue`, before
+recording any attempt. That is a third way the old sentence was false, and the crash-loop cap is a
+fourth. Both are modelled now.
+
+## F37-68 / ruling 241 — a decision a hold refuses is queued
+
+**Found live, by pressing the button.** Not a code read: ruling 237's escalation fired on SHOP-5, I
+opened the card and chose its recommended option, and watched the three events land 185 milliseconds
+apart — the decision onto the contract, `question_reviewer start failed` in the log, and the blocked
+note saying the question could not be put.
+
+**Red-proof.** The resolution half asserts the queue write, the ABSENT dispatch, and the card's copy
+naming the wait before the choice. The drain half asserts the stored directive reaches the runtime
+with the right profile and decider, that the list is emptied BEFORE the run so no reviewer is asked
+twice, that a failed start says so on the timeline with `waiting` back on a person, and the
+question-before-operator ordering. Canaries:
+
+```
+queueing = false            → × the queue write and the absent dispatch (the shipped defect)
+held = ""                   → × the card's copy (it promises a question it cannot put)
+drain after autoInvoke      → × order reads ["operator", "question"]
+drain without clearing      → × two tests: the queue survives and the failure path leaves it
+q.profileId over the name   → × the panel names nobody a person can search for
+render the row always       → × every task grows a line about a question nobody asked for
+```
+
+**Live-proof of the unheld path**, the same hour: ruling 237 fired a fifth time on SHOP-25, which
+carries no hold. Resolving with the recommended option started `run_dX5hzn` — the Code Reviewer,
+with ruling 237's directive, and no rework behind it.
+
+**Live-proof of the release path**, on the deployed fix: accepting SHOP-23 merged PR #19, deleted
+its branch, and released SHOP-5 — `announceRelease` ran and re-invoked the operator. SHOP-5 itself
+carried no queued question to drain, because its question was lost by the defect before the fix
+existed; that loss is recorded rather than repaired by hand.
+
+**What it does NOT prove, recorded honestly.** No queued question has yet been drained by a real
+release on this board. The drain's contract is proven by injection at the seam
+(`ctx.deps.startAgentRun`), the same seam `runOperator` already uses, and the release ordering by a
+real `announceRelease` call. A live drain needs a task that is BOTH held and in review deadlock at
+the same moment, which has happened exactly once in six days.
