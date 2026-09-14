@@ -2481,3 +2481,66 @@ same reason: the human asked for no run.
 
 Four passes, green tests after every one of them, and each was still wrong in production. The
 only thing that found any of it was deploying and provoking the real failure again.
+
+---
+
+## F37-45 · The board said "waiting on a human" about four tasks waiting on a clock — MEDIUM
+
+**Found by reading viberr's own promise back to it.** Ruling 224's packet copy, which I had
+written and shipped four hours earlier, ends:
+
+> Closes this decision and schedules an operator run for just after Sep 14, 2026 · 02:27 UTC…
+> **Nothing runs until then and the board says so.**
+
+The board did not say so. With all four schedules written and pending, the cards read:
+
+| task | card tag | what was actually true |
+|---|---|---|
+| SHOP-11 | waiting on a human | resumes 02:28, unattended |
+| SHOP-12 | waiting on a human | resumes 02:28, unattended |
+| SHOP-18 | waiting on a human | resumes 02:28, unattended |
+| SHOP-3 | waiting on a human | resumes 02:28, unattended |
+
+…under a header counting **"5 waiting on a human in this project"**, of which four were waiting
+on nobody. Nothing was asked of any person, and no surface anywhere named the time.
+
+**The cause is older than ruling 224.** `waiting: human` in a task file does not mean "a human
+owes something" — it is simply what `clearWaitingToHuman` writes when the last run ends, i.e.
+"no agent is working, a human is next". Every waiting-sensitive surface renders that as the
+sentence "waiting on a human", which was true for as long as a person really was the only way
+forward. Ruling 224 introduced the first state where a task moves on its own, and the sentence
+became false the moment it shipped.
+
+**Fixed as ruling 225** — `schedule` as a fourth DERIVED waiting value, on the LV-20 pattern:
+the canonical file keeps saying `human`, the projection decides once, and the card, the board
+subtitle and filters, the review row and its subline, the task page's "Waiting on" rail and the
+controller's own board summary all move together.
+
+**The half that took the thinking** is the limit, not the rule. `decisionsRequiring` reads this
+same column, so a careless derivation would not have softened a lie, it would have HIDDEN a
+decision — an open packet, a live recommendation, or a completion a human could accept right now
+all keep `human`, because a schedule takes none of that off anybody's hands. The predicate is
+pinned to the acceptance gate the inbox itself uses, so a clock rest is by construction never a
+row that inbox would have counted.
+
+The "no activity" cue needed the same care in the other direction. A clock rest must not light
+it — the gap is hours by design — but exempting the state outright would have hidden the one
+genuine stall it can have, a schedule that came DUE and never fired. Its idle clock restarts at
+the due instant instead: silent until then, quiet on the human threshold after.
+
+### The canary caught something the fix had not planned for
+
+The first green-to-red run failed on `CHECK constraint failed: waiting IN ('human','agent','none')`.
+The derivation was correct and the STORE refused it — which arrives as a swallowed "projection
+rebuild failed" and a stale row, the exact silent staleness `boot.server.ts` probes the column
+next door for (F21-1) and ruling 217 built the health latch for.
+
+Reading that probe is what turned one fix into three. `projectionCheckGaps` covered
+`task_projections.validation` and `notifications.kind` — a list of the columns someone had been
+bitten by, not of the columns at risk. `waiting` is a CHECK over a TS enum the projector derives
+into, exactly like `validation` beside it, and it was missing. So: the baseline CHECK is widened,
+`WAITING_VALUES` is pinned to it structurally (the sibling of the F21-1 pin, which needs no
+fixture for the next member), and the boot probe reads this column too.
+
+Had the canary not been written first, this would have deployed as four tasks that silently
+stopped projecting the moment they started resting on a clock.
