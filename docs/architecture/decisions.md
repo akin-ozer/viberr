@@ -4809,6 +4809,17 @@ by rewriting those paragraphs:*
     does not hold here. The general rule this ruling ended up standing for: a derived promise is
     bounded by what the mechanism behind it will actually do, and the way to find its edges is to
     read that mechanism's refusals rather than to imagine the cases.
+    Amended a third time, and this one was caught on the LIVE BOARD rather than by reading.
+    `acceptanceRefusal === null` is not "a human could accept this": the STAGE gate is the one
+    acceptance refusal `acceptanceBlockReason` deliberately omits, because it turns on the
+    project's workflow graph rather than on anything in the task file. So a task at an early
+    stage with nothing delivered reports no refusal - not because it is acceptable, but because
+    the only thing refusing it was never consulted. SHOP-21 sat at Build with no revision and no
+    PR, a `run-operator` schedule pending for 07:29, and its card and its rail both still read
+    "waiting on a human" after this ruling shipped, while the board's own "Waiting on me" tally
+    read zero. The predicate now asks `isAtAcceptanceBoundary` as well - the same question
+    `TaskSummary.atAcceptanceBoundary` answers for the board, from the same workflow graph, now
+    selected into the projector's project row for the purpose.
 
 226. **A head GitHub will not compare is refused, not disclosed (owner, 2026-09-14, pass 37;
     F37-43).** Ruling 135 built the guard for a PR head that is not the reviewed revision and
