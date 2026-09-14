@@ -64,6 +64,24 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       expect(columns()).toHaveLength(7);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
 
+      // F37-71: a task projection from before the recommendation-kinds column.
+      // The rebuilder names it on EVERY task write, so a root without it could
+      // not project a single task. CANARY: drop the `task_projections` entry
+      // from BASELINE_COLUMNS and this reads two columns, not three.
+      db.exec(
+        `CREATE TABLE task_projections (project_slug TEXT NOT NULL, task_key TEXT NOT NULL)`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: PRAGMA table_info rows always carry a TEXT `name`.
+      const taskColumns = (db.prepare(`PRAGMA table_info(task_projections)`).all() as {
+        name: string;
+      }[]).map((c) => c.name);
+      expect(taskColumns).toEqual([
+        "project_slug",
+        "task_key",
+        "recommendation_kinds",
+      ]);
+
       // Ruling 176: an org MCP registry from before the write-tool columns.
       // `listMcpServers` names both on every Settings render and run mount.
       db.exec(`CREATE TABLE org_mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL)`);

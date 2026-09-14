@@ -3816,3 +3816,50 @@ promised. It now carries the flag.
 **Test.** The operator clears the wait with `operatorAuthorized: true`; the question is dispatched
 and the queue emptied. Canary: restore the drain to `announceRelease` alone and it goes red with
 `expected [] to have a length of 1`.
+
+## F37-71 · UX19-3's rule was wired into one of two sibling queries in the same function — MEDIUM
+
+**Three surfaces, one moment, one task, and one of them disagreed.** SHOP-12, live:
+
+| surface | what it said |
+|---|---|
+| Task page | Accept button DISABLED, with "Not acceptable yet. SHOP-12's review PR #14 conflicts with the base branch. GitHub can't merge it, so it can't be accepted." |
+| Review queue | filed under "Still in review"; the acceptance panel read "0 of 5 · Nothing waits on you" |
+| Notifications | **"Waiting on you · 1 decision — Accept completion and move SHOP-12 to Done"** |
+
+Ground truth agreed with the first two: `gh pr view 14` returns `mergeable=CONFLICTING`, and the
+head it reports is byte-identical to the recommendation's own `forHeadSha`, so nothing was stale.
+`mergeReadinessRefusal` → `conflictingPrBlockedReason` refuses the acceptance.
+
+**Where it lives.** `decisionsRequiring` runs two queries. The second one carries UX19-3's own
+comment:
+
+> `validation_block_reason` used to carry only the reviewer/verdict half of the gate … Both
+> refusals now live in the projected column itself, **so the ONE predicate below is again the whole
+> gate and the two readers cannot drift.**
+
+The first query — the one that picks up a task carrying a pending RECOMMENDATION — sits ten lines
+above it and applies no acceptance gate at all. And an `accept_completion` recommendation **is** an
+acceptance. So the same conflicting-PR task UX19-3 correctly drops as `kind: "acceptance"` walks
+straight back in as `kind: "recommendation"` the moment the operator files a card for it. The rule
+was written, the data was projected, and the sibling query in the same function never read it:
+`task_projections` already held `validation_block_reason` = the exact refusal sentence for SHOP-12.
+
+**Fix.** The recommendation arm reads the same column. Gated on the pending kinds being EXACTLY
+acceptance, never on the block alone — a `transition` card is actionable whatever GitHub thinks of
+the merge, and hiding it would lose a real decision. `recommendation_count` cannot answer "is this
+only acceptances?", so the projection gained `recommendation_kinds` (distinct, sorted, comma-joined,
+so the test is a plain equality), registered in `BASELINE_COLUMNS` because the rebuilder names it on
+every task write and a root that predates the baseline edit would fail every projection.
+
+**Not withdrawn, deliberately.** The task page keeps the card and prints "Not acceptable now" under
+it, which is the right pattern: the reader still learns the work is reviewed and ready but for a
+rebase. What must not happen is an inbox demanding a decision nobody can make.
+
+**Test.** Both halves, plus the healer. Canaries: no gate (the shipped state) reddens the acceptance
+case; a blanket gate on any recommendation while blocked reddens the transition case; dropping the
+`task_projections` entry from `BASELINE_COLUMNS` reddens the upgrade test.
+
+*Found by reading the notifications page against the review queue, ten minutes after near-miss #9
+had taught me the review queue's silence was CORRECT. The rule I used to kill that finding is the
+one that exposed this.*

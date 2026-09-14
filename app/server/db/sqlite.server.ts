@@ -442,6 +442,22 @@ const BASELINE_COLUMNS: readonly {
       },
     ],
   },
+  {
+    table: "task_projections",
+    columns: [
+      // F37-71: the DISTINCT kinds of a task's pending recommendations. The
+      // rebuilder names it on EVERY task write, so a root that predates the
+      // baseline edit would fail every projection rather than degrade — the
+      // exact failure this healer exists for. No backfill: the very next
+      // rebuild of each task writes the real value, and the empty default
+      // means "no pending recommendations", which is what a row with
+      // `recommendation_count = 0` already says.
+      {
+        name: "recommendation_kinds",
+        ddl: "recommendation_kinds TEXT NOT NULL DEFAULT ''",
+      },
+    ],
+  },
 ];
 
 /**

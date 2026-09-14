@@ -683,12 +683,12 @@ export function rebuildTaskFile(
        (project_slug, task_key, title, stage, readiness, stored_readiness,
         waiting, urgent, priority, labels_json, due_date, blocked_by_json, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
-        work_revision_sha, goal, packet_json, recommendation_count,
+        work_revision_sha, goal, packet_json, recommendation_count, recommendation_kinds,
         schedules_json, event_count, comment_count,
         goal_id, goal_link_index,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -711,6 +711,7 @@ export function rebuildTaskFile(
        goal = excluded.goal,
        packet_json = excluded.packet_json,
        recommendation_count = excluded.recommendation_count,
+       recommendation_kinds = excluded.recommendation_kinds,
        schedules_json = excluded.schedules_json,
        event_count = excluded.event_count,
        comment_count = excluded.comment_count,
@@ -764,6 +765,10 @@ export function rebuildTaskFile(
     parsed.goal,
     parsed.packet ? JSON.stringify(parsed.packet) : null,
     fm.recommendations.length,
+    // Sorted + deduped so the SQL below can ask "is this ONLY acceptances?"
+    // with a plain equality test rather than a LIKE that would also match
+    // `accept_completion,transition`.
+    [...new Set(fm.recommendations.map((r) => r.kind))].sort().join(","),
     JSON.stringify(fm.schedules),
     parsed.timeline.length,
     commentCount,

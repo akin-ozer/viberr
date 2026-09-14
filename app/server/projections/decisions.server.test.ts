@@ -451,6 +451,88 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
       );
     });
 
+    /**
+     * F37-71 (pass 37, live on SHOP-12). UX19-3 put both missing refusals into
+     * `validation_block_reason` "so the ONE predicate below is again the whole
+     * gate and the two readers cannot drift" — and wired it into the ACCEPTANCE
+     * query only. The sibling query two lines above it, the one that picks up a
+     * task carrying a pending RECOMMENDATION, has no acceptance gate at all.
+     *
+     * An `accept_completion` recommendation IS an acceptance, so the same task
+     * that UX19-3 correctly drops as `kind: "acceptance"` comes straight back in
+     * as `kind: "recommendation"` the moment the operator files a card for it.
+     *
+     * Live: SHOP-12's PR #14 was `mergeable: conflicting` (GitHub agreed), the
+     * task page disabled its Accept button and printed the refusal, the review
+     * queue filed it under "Still in review" and said "Nothing waits on you" —
+     * and the notifications page said "Waiting on you · 1 decision · Accept
+     * completion and move SHOP-12 to Done".
+     */
+    it("F37-71: an accept_completion RECOMMENDATION is gated by the same conflict", () => {
+      const store = setupTestStore(ctx);
+      // The optional-key convention: an ABSENT `mergeable` is "GitHub has not
+      // said", which is not the same as passing undefined through a typed field.
+      const prFor = (mergeable?: "conflicting"): TaskFrontmatter["pr"] => {
+        const pr = { number: 300, state: "review" as const, title: "Task VIB-322" };
+        return mergeable ? { ...pr, mergeable } : pr;
+      };
+      const withOffer = (mergeable?: "conflicting") =>
+        seedAcceptanceReady(store, "VIB-322", {
+          pr: prFor(mergeable),
+          recommendations: [
+            {
+              id: "rec_1",
+              kind: "accept_completion",
+              toStageId: "done",
+              label: "Accept completion and move VIB-322 to Done",
+              detail: "The review is clean and the work meets the goal.",
+              forHeadSha: REVISION.headSha,
+            },
+          ],
+        });
+
+      // Baseline: a clean PR, so the offer is real and both surfaces say so.
+      withOffer();
+      expect(
+        decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
+      ).toEqual(["recommendation"]);
+      expect(queue(store).ready.map((r) => r.key)).toEqual(["VIB-322"]);
+
+      // The PR now conflicts. The acceptance the card offers is refused.
+      withOffer("conflicting");
+      expect(queue(store).ready).toHaveLength(0);
+      // CANARY: this is the shipped state — the card walks back in through the
+      // recommendation query and the inbox demands a decision nobody can make.
+      expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
+    });
+
+    it("F37-71: a recommendation that is NOT an acceptance still counts while the PR conflicts", () => {
+      // The other half, and the reason this cannot be a blanket filter on
+      // `validation_block_reason`: a stage-transition card is actionable whatever
+      // GitHub thinks of the merge, and hiding it would lose a real decision.
+      const store = setupTestStore(ctx);
+      seedAcceptanceReady(store, "VIB-323", {
+        pr: {
+          number: 300,
+          state: "review",
+          title: "Task VIB-323",
+          mergeable: "conflicting",
+        },
+        recommendations: [
+          {
+            id: "rec_2",
+            kind: "transition",
+            toStageId: "impl",
+            label: "Move VIB-323 back to Build",
+            detail: "The branch needs a rebase before review can finish.",
+          },
+        ],
+      });
+      expect(
+        decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
+      ).toEqual(["recommendation"]);
+    });
+
     it("an OPEN BLOCKED PACKET: the decision is the PACKET, never an acceptance", () => {
       const store = setupTestStore(ctx);
       seedAcceptanceReady(store, "VIB-321");

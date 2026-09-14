@@ -168,6 +168,14 @@ CREATE TABLE task_projections (
   -- as a count so read paths (notifications "Waiting on you", home decisions)
   -- can reconcile decision notifications against LIVE state without file I/O.
   recommendation_count INTEGER NOT NULL DEFAULT 0,
+  -- F37-71: the DISTINCT kinds of those pending recommendations, sorted and
+  -- comma-joined ('accept_completion', 'accept_completion,transition', …).
+  -- The count alone cannot say whether a task's only pending decision is an
+  -- ACCEPTANCE, and UX19-3's gate applies to acceptances: live on SHOP-12 a
+  -- conflicting PR was correctly dropped from the inbox as `kind: acceptance`
+  -- and walked straight back in as `kind: recommendation` the moment the
+  -- operator filed a card for the same acceptance.
+  recommendation_kinds TEXT NOT NULL DEFAULT '',
   -- Pending/fired scheduled actions (O-3), as a JSON array of the task file's
   -- `schedules`. The server-side schedule runner queries this to find due
   -- entries without reading every task file. '[]' when none.
