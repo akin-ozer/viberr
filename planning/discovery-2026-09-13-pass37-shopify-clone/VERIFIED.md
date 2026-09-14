@@ -1707,3 +1707,50 @@ AUTHORIZATION rather than on availability. A log that merely said "recovered" wo
 **What this does not prove:** that the numbers were produced by the commands named, rather than by a
 model writing plausible JSON. Nothing short of re-running can settle that, which is why the
 independent run was attempted separately.
+
+## The clone RUNS — independently, from a clean clone of main, in one command (2026-09-14 18:5x UTC)
+
+The goal asks for "something I can actually run … one command to bring it up". Tested rather than
+assumed, on the host rather than in an agent's workspace:
+
+```
+git clone akin-ozer/shopify-clone && corepack pnpm install --frozen-lockfile   → exit 0 (30.5s)
+make up                                                                        → exit 0
+  fixture-ready 4101 · fixture-dependent 4102 · gateway 8080 · identity 4001 · inventory 4003
+  [stack] all 5 services healthy; pids written to .data/stack.pid
+make status                                                                    → exit 0, 5 healthy
+make down                                                                      → all 5 stopped, 0 listeners left
+```
+
+Different PIDs from the agent's run, on a different machine, from a fresh clone — which retires the
+caveat on the evidence-chain entry above. The commands really do produce that output.
+
+### The running product corroborates the board, by itself
+
+`GET :8080/ready` answers with a typed envelope naming each dependency:
+
+```json
+{"error":{"code":"DEPENDENCY_UNAVAILABLE","message":"Gateway is not ready",
+ "details":{"dependencies":{"identity":true,"catalog":false,"inventory":true,"cart":false,"orders":false}},
+ "requestId":"eb181454-…"}}
+```
+
+`catalog`, `cart` and `orders` are false — and those are exactly SHOP-12, SHOP-11 and SHOP-25, the
+three tasks the board says are still in open PRs. The product's own readiness endpoint and viberr's
+record agree about what is built, from opposite directions. Every response carries a `requestId`,
+which is SHOP-5's observability work visible in the artifact.
+
+### NEAR-MISS #11 — "nobody can ever register through the gateway"
+
+`POST /identity/register` with no auth header returns **404**; the same path with a forged bearer
+returns **401**. Registration cannot carry a token by definition, so this looked like the storefront's
+entire entry path being unreachable.
+
+It is not. `services/gateway/src/routes/identity.ts` registers exactly ONE route — `PATCH
+/users/:userId/roles` — because SHOP-23 was scoped to "Roles, authorization and gateway auth".
+`/register` 404s because it is not forwarded yet, not because auth refuses it. The 401 comes from
+auth middleware running before routing whenever an `authorization` header is present; with no header
+routing runs first and answers 404, which is the honest answer for a route that does not exist.
+
+One file read refuted it. Recorded because the hypothesis was reasonable and wrong, which is the
+eleventh time this pass.
