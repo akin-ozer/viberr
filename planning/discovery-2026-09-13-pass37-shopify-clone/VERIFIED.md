@@ -1105,6 +1105,19 @@ Unlike the lockfile, this one **can** be fixed once and additively — it is a s
 single file, generated from nothing. Handed to the controller with the measurement rather than
 fixed by me: the clone is its to build.
 
+It created **SHOP-22** (unblocked, high) within minutes, carried the measurement into the goal
+with an instruction not to re-derive it, and — the part worth keeping — wrote the task's own
+limits into it:
+
+> **`services/_template` is copy-time. Be clear about what this task can and cannot do.** Fixing
+> the template does NOT reach identity, inventory, catalog or cart, which are already scaffolded
+> and have each already corrected their own manifest on their own branch. This task prevents the
+> next two occurrences and ends the drift at its source; **it does not retroactively repair
+> anything.**
+
+A task that states what it cannot do is worth more than one that overclaims, and nothing in the
+product forced it to write that sentence.
+
 **What the review gate is actually worth here.** Nothing escaped. Three independent reviewers
 caught three instances of a defect none of their branches could see the origin of, each naming
 the file and line. The cost is one rework round per service, and the cause sat in a file no
