@@ -9,13 +9,13 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | forty-eight findings — one withdrawn with its measurements |
+| [`FINDINGS.md`](FINDINGS.md) | forty-eight findings — two withdrawn, each with its measurements kept |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–220** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–228** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
 
 ## Day three, in one paragraph

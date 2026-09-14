@@ -146,3 +146,29 @@ is never told is not a rule:
 Cost accepted: reviews get slower and more expensive per round. The round count is the
 expensive thing, and a reviewer can still miss something honestly — which is what the escape
 hatch is for.
+
+## Night of 2026-09-14 — five owner decisions
+
+Taken with the background in front of the owner, in the order asked.
+
+| # | question | decision |
+|---|---|---|
+| 1 | A task resting on a clock still said "waiting on a human". What should it read? | **Its own resting state** — drops out of every "waiting on you / human" count so those counts mean only work a person can do now → ruling 225 |
+| 2 | When viberr cannot verify the PR head it is about to merge, should it still merge? | **Refuse and open a packet** naming both SHAs — "unreviewed code reached main" is the one outcome the review gate exists to prevent → ruling 226 |
+| 3 | SHOP-2 was the deliberate drift. Which recovery path? | **Rebase and re-review** through viberr's own path, not force-accept, not archive |
+| 4 | 20 tasks against a 25+ bar. Push for breadth? | **Let the chains run** — tasks the controller opened itself are better evidence than tasks I asked for |
+| 5 | The controller refused an MCP grant it could not make safe. How to fix the granularity? | **Question returned, not answered**: *"why does it want the whole kb MCP — there were specialized ones, maybe"*. It didn't. The finding was withdrawn. |
+
+Decision 5 is the one worth keeping in view. I had built a MEDIUM finding on an MCP grant
+model, and the owner's one-line question dismantled its premise: viberr's native per-KB grants
+are the specialized path, they were already held by every profile in question, and the
+controller had said so in the first paragraph of its own refusal — a paragraph I had read and
+not weighed. Two further claims in that finding also failed on inspection: the org-settings copy
+I accused of overclaiming says "withheld from read-only runs", which is exactly the binding
+condition, and the enforcement the controller declined to assert does exist and is on its
+surface. Withdrawn the same hour, and re-filed in VERIFIED.md as correct behaviour.
+
+Decisions 1 and 2 each turned into a ruling the same night, and each ruling then needed
+amending two or three times from re-reading rather than from failing tests — recorded in
+VALIDATION.md, because the ratio (five self-inflicted bugs, zero caught by a green suite of
+6,632) is the more useful number.
