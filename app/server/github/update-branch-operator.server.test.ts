@@ -348,10 +348,32 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
   });
 
-  it("says so honestly when the branch is already current", async () => {
+  it("ruling 229: an already-current branch is never narrated as a refused plan step", async () => {
+    // The end-to-end consequence, pinned where it is decidable: the plan
+    // executor files a step under "refused" purely on `outcome`, and
+    // `narrateRefusedActions` headlines any refused step "The operator's plan
+    // was not carried out in full." The sentence is ALSO already on the
+    // timeline as the `github` event ruling 134(c) writes — and 134(c) goes to
+    // the trouble of suppressing that event when it would duplicate, which the
+    // refusal narration then undid with no suppression and a worse headline.
+    //
+    // Canary: return `noop` from either already-current arm.
     const git = fakeGit({ behind: 0 });
     const res = await act(git.exec);
-    expect(res.outcome).toBe("noop");
+    expect(["denied", "noop"]).not.toContain(res.outcome);
+  });
+
+  it("says so honestly when the branch is already current — and calls it DONE", async () => {
+    // Ruling 229 (F37-49): `done`, not `noop`. This is the tool's success
+    // condition, and its own description tells the operator to call it
+    // speculatively for exactly this reason ("idempotent and cheap… call it
+    // when you are unsure rather than guessing"). Returned as `noop` it landed
+    // in the plan executor's `refused` list, and the timeline then carried
+    // "The operator's plan was not carried out in full" over a call the
+    // product had asked for — 51 of 57 such notes on the pass-37 board.
+    const git = fakeGit({ behind: 0 });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("done");
     expect(res.message).toContain("already up to date");
     const file = readTaskFile({
       projectSlug: store.slug,
@@ -454,7 +476,8 @@ describe("ruling 134(c): the remote report", () => {
   const REPO_PATH = "/repos/akin-ozer/viberr";
   it("names a lagging origin, points at deliver_for_review, and writes ONE timeline line across two calls", async () => {
     const first = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
-    expect(first.outcome).toBe("noop");
+    // Ruling 229: `done` — see the already-current test above.
+    expect(first.outcome).toBe("done");
     expect(first.message).toContain("already up to date with `main`");
     expect(first.message).toContain("Origin's copy of `vib-1` (`remote0`) is 2 commits behind the workspace head");
     expect(first.message).toContain("call `deliver_for_review` to push it");

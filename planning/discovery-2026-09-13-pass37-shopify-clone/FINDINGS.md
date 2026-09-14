@@ -2774,3 +2774,55 @@ grant-none, and it correctly chose none — which means the feature the owner se
 unreachable as configured.
 
 **Not ruled on** — and then withdrawn, see the note at the top of this entry.
+
+---
+
+## F37-49 · Viberr asks the operator to make a call, then records it as a failure — 51 times — MEDIUM
+
+**Found by noticing the same note going past over and over.** `update_branch_from_base`'s own
+tool description, which viberr writes and the operator reads:
+
+> It is **idempotent and cheap: an already-current branch changes nothing and says so, so call it
+> when you are unsure rather than guessing.** … `null` means nothing has compared them yet,
+> **which is not a reason to skip it.**
+
+The operator does as it is told. The already-current answer comes back as `outcome: "noop"`,
+the plan executor files any `noop` under REFUSED, and `narrateRefusedActions` headlines every
+refused step:
+
+> **The operator's plan was not carried out in full.** This step did not apply to the task's
+> current state:
+> - `update_branch_from_base` — `shop-18` is already up to date with `main`…
+
+Counted across the board at 04:00 UTC:
+
+| notes on this board | |
+|---|---|
+| "The operator's plan was not carried out in full" | **57** |
+| …of which `update_branch_from_base` "already up to date" | **51 (89%)** |
+| …leaving refusals a human should actually read | **6** |
+
+The product asks for a speculative call and then records it, eighty-nine times in a hundred, as
+an incomplete plan.
+
+### The half that makes it a defect rather than a nuisance
+
+The sentence is **already on the timeline**. Ruling 134(c) writes it as a `github` event — and
+goes to the trouble of suppressing that event when the newest one already says the same thing,
+reasoning that *"the tool is idempotent by contract, so the record is too."*
+
+The refusal narration then re-added the identical sentence, with no suppression, under a worse
+headline. One deliberate de-duplication, undone three lines later by a second writer that did not
+know about it.
+
+**Fixed as ruling 229** — `already_current` returns `done`. It is the tool's success condition,
+not a state conflict. The Claude operator reads `[done] … is already up to date`, the Codex plan
+executor files nothing, and the `github` event stays the single record, which is what 134(c)
+intended.
+
+What it leaves behind is the reason the note exists: the six refusals on that board a human
+should read are no longer one twelfth of it. A record that reports encouraged, designed behaviour
+as a failure teaches people to skim it — R16-2's rule about filters, applied to a timeline.
+
+**Live while being fixed:** SHOP-18 produced the 52nd instance at 04:02, between writing the fix
+and committing it.

@@ -4900,6 +4900,29 @@ by rewriting those paragraphs:*
     or unparseable plan never reaches this at all; viberr already opens a packet for that
     ("Operator turn produced no actionable plan"), and the gap was only ever the plan that named
     real work and was refused every bit of it.
+
+229. **The one call viberr tells the operator to make speculatively stops being reported as a
+    failure (owner, 2026-09-14, pass 37; F37-49).** `update_branch_from_base`'s own tool
+    description says: "It is idempotent and cheap: an already-current branch changes nothing and
+    says so, **so call it when you are unsure rather than guessing**", and of `baseBehindBy`:
+    "`null` means nothing has compared them yet, **which is not a reason to skip it**." The
+    operator complies. The already-current answer then came back as `outcome: "noop"`, which the
+    plan executor files under REFUSED, which `narrateRefusedActions` headlines "**The operator's
+    plan was not carried out in full.**" On the pass-37 board that note stood 57 times and **51
+    of them were this one line** - the product asking for a call and then recording it as an
+    incomplete plan.
+    The duplication is the sharper half. Ruling 134(c) already writes the same sentence as a
+    `github` event, and deliberately SUPPRESSES it when the newest such event says the same
+    thing, on the reasoning that "the tool is idempotent by contract, so the record is too". The
+    refusal narration then re-added that identical sentence with no suppression and a worse
+    headline. So `already_current` returns `done`: it is this tool's success condition, not a
+    state conflict. The Claude operator reads `[done] … is already up to date`, the plan executor
+    files nothing, and the `github` event remains the one record - which is what 134(c) intended
+    before the second writer undid it.
+    What this leaves behind is the point of the note in the first place: the six refusals on that
+    board that a human should actually read are no longer the twelfth of it. A record that
+    reports encouraged, designed behaviour as a failure teaches people to skim it, which is
+    R16-2's rule about filters applied to a timeline.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 
