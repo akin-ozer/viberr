@@ -1298,3 +1298,24 @@ because a failed side effect must not turn "do not run" into a dispatch.
 
 Writing the failure path before knowing it was reachable was luck. The canary is what turned it
 into something known to work.
+
+### The third vacuous canary of the pass, and what caught it
+
+Ruling 231's test passed the first time I wrote it — **with the bug restored.** Reverting the fix
+changed nothing, which is the only reason I looked at the test instead of believing it.
+
+The cause: the override the ruling is about lives on `input.operatorRun`, and the test had set it
+on `ctx`. So the react block's `if (input.operatorRun)` never fired, the chain took the
+undeployed branch, and the run came back on `claude` whether the fix was present or not. A test
+that cannot fail is not evidence of anything.
+
+That makes three this pass:
+
+| canary | how it was vacuous | how it was caught |
+|---|---|---|
+| `NO_REQUEUE` run-row assertion | asserted against a store with `agents: []`, so no run could ever start | red-proof |
+| `NO_REQUEUE` "not called" after `flush()` | 5ms settle, faster than the re-queue it was watching for | red-proof, plus a sibling test as the control |
+| ruling 231's react backend | the override set on the wrong object | red-proof |
+
+None was found by reading the test. All three were found by breaking the source and watching the
+test stay green — which is the whole reason the rule is "prove it red", not "write a test".
