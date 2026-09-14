@@ -9,14 +9,31 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | fifty-six findings — two withdrawn, each with its measurements kept |
+| [`FINDINGS.md`](FINDINGS.md) | fifty-eight findings — two withdrawn, each with its measurements kept |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–236** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–238** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
+
+## Day five, in one paragraph
+
+The fifth session found the two halves of one story, and the second half cost a governance
+override to escape. **F37-57**: ruling 210 held that a second consecutive `request_changes` from
+one reviewer is the point to stop reworking and ask — and wrote that as a paragraph in the
+operator's turn instruction. Ruling 204 gave it a counter that read the deadlock correctly. Live on
+SHOP-5 the counter read 3, the paragraph was in the prompt, and the operator moved Review to Build
+46 seconds after the third verdict and re-dispatched the deliverer 16 seconds later, having asked
+nobody anything. The same construction ruling 186 refused six sessions earlier. **F37-58** is why
+the deadlocks happen: a verdict binds to a work revision, a base refresh mints no new revision and
+is correctly reported as not-unreviewed, and `pinSupportCheckout` detaches every re-review at the
+reviewed revision — so a reviewer blocked on a defect in the BASE re-reads the base that still has
+it, forever. SHOP-18 hit exactly that, and the only way out was an admin force-accept, which I
+performed after checking at both shas that the fix was real and the deliverable untouched. The
+owner took escalate-not-gate for the first (ruling 237) and automatic re-pin on base-only drift for
+the second (ruling 238).
 
 ## Day four, in one paragraph
 

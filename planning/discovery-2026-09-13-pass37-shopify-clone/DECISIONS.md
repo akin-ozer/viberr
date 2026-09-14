@@ -265,3 +265,53 @@ the person.
 **Proven on its first day.** Eight rows, four chips. SHOP-22 was the one with no chip, and it was
 the one safe to merge; after it merged, every PR the chip called clean was still MERGEABLE and zero
 were newly conflicted. The queue answered "which of these is safe right now" without being asked.
+
+### The reviewer that keeps objecting (→ ruling 237)
+
+**Background put to the owner.** SHOP-5 took three `request_changes` from one reviewer on three
+revisions, each naming something real the last round had not. Every mechanism built for this
+worked: ruling 204's counter read 3, and ruling 210's doctrine was in the operator's turn
+instruction ending "Do not send the deliverer back into another round until the reviewer has
+answered." The operator moved Review to Build 46 seconds after the third verdict and re-dispatched
+the deliverer 16 seconds later, with no question put to the reviewer on any round. SHOP-6 took
+seven rounds, SHOP-10 five. Ruling 186 had already found this exact construction unacceptable — a
+request in a prompt, with nothing checking the model obeyed it — and the owner made that one a hard
+gate.
+
+**The complication, stated up front.** Unlike ruling 186's case, there is a legitimate exception
+here: the reviewer may genuinely have hit something new on round three, and a gate would refuse
+correct behaviour to stop the incorrect kind.
+
+**Four options offered.** (a) A hard gate cleared by the reviewer's answer. (b) A gate with a
+written-justification escape. (c) Escalate to a human, don't gate. (d) Leave it advisory and
+surface the round count. And separately: fire at two, at three, or at two from the same reviewer.
+
+**The owner took (c), at two from the same reviewer.** The operator keeps every move it had; the
+second consecutive objection reaches a person by itself. The "same reviewer" half needed no new
+counting — `consecutiveRequestChanges` already filters to one `profileId`, so another reviewer's
+objections never count toward this one and never keep it alive.
+
+Two halves the decision implied. The packet is written by the POLICY ENGINE rather than through
+`operatorOpenPacket`, because that door checks the OPERATOR's `generate-packets` grant and this is
+not the operator's judgement (ruling 226's reasoning). And `question_reviewer` became a real packet
+kind whose resolution STARTS the named reviewer, rather than a `custom` whose resolution re-runs
+the operator — the operator is the thing that ignored this instruction, so an option relying on it
+would have repeated the bug inside its own fix.
+
+### The reviewer that cannot see the fix (→ ruling 238)
+
+**Background put to the owner.** SHOP-18's Integration Verifier blocked on two defects in `main`,
+outside the task's owned paths. They were routed to SHOP-21, fixed, merged into the branch by
+Viberr's own `update_branch` — and the verifier objected to the same revision again, because
+`pinSupportCheckout` detaches a re-review at the reviewed revision, whose base still has them.
+Verified at both shas before raising it: `readExpectedServices` absent at `b7c4c90` and present at
+`aaf5e38`, `apps/storefront` the same tree at both. The task escaped by an admin force-accept,
+which I performed, with that verification recorded on the decision.
+
+**Four options offered.** (a) Re-pin automatically when the drift is base-refresh only. (b) Offer
+it as an option on ruling 237's packet. (c) Mint a revision for every base refresh. (d) Leave it;
+force-accept is the answer.
+
+**The owner took (a).** The pin stays wherever any authored commit is in the drift, which is the
+case ruling 179 exists for. (c) was named as the most disruptive in the question itself: it would
+stale passing approvals too, so a refresh on a task ready to accept would cost a full re-review.

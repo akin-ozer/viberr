@@ -1804,3 +1804,53 @@ again the chip had named exactly the PRs sharing paths with the one being merged
 
 Two merges since the ruling shipped, both anticipated correctly: the one with no chip broke
 nothing, and the one whose chip named two already-conflicting PRs added no new damage.
+
+## Ruling 237 — the deadlock packet · RED-PROVEN, LIVE PENDING
+
+Six tests, each broken at the source to confirm it fails for the reason it claims.
+
+| canary (source broken) | test that went red |
+|---|---|
+| `rounds < REVIEW_DEADLOCK_ROUNDS` → `rounds < 1` | packet opens on the FIRST objection; per-reviewer and reset tests also fail |
+| per-reviewer count → `verdicts.filter(request_changes).length` | two reviewers objecting once each raise a packet |
+| `&& !parsed.packet` removed from the escalation guard | the deadlock packet clobbers an unrelated open one |
+| `profileId: option.profileId` dropped from the dispatch | the resolution starts `dev` — the DELIVERER — with a prompt telling it not to review |
+| both authoring refusals stubbed to `find(() => false)` | a `question_reviewer` naming no reviewer, and one naming a stranger, both author successfully |
+
+The dispatch canary is the one worth naming: with the profile gone, the resolution started the
+delivering engineer, because `startAgentRun` falls back to the primary. A card that said "Ask
+integration-verifier what else it would block on" would have run the deliverer instead. That is
+what the authoring refusal exists for, and why the option is a real kind and not a `custom`.
+
+**Live proof is pending by design.** The escalation fires on a verdict WRITE, so the two tasks
+already sitting at two consecutive objections when it deployed (SHOP-11, SHOP-18) did not get a
+packet retroactively — correct, and it self-heals on the next objection. A watcher is running
+against `audit_events` for the first `task.review.deadlock` row.
+
+## Ruling 238 — a re-review follows a base refresh · RED-PROVEN, LIVE-EVIDENCED
+
+Six tests. The two guards, canaried:
+
+| canary | test that went red |
+|---|---|
+| `drift.authored !== 0` dropped from the condition | a drift with authored commits re-pins onto unreviewed work |
+| `drift.headSha !== prHeadSha` dropped | a drift measured against an older head re-pins onto commits nobody classified |
+
+The checkout test is real git, not a string: it builds a two-commit repo, pins the supporting
+checkout at the second commit with `rePinned` set, and asserts both that `HEAD` moved and that
+`B.md` — the file the refresh brought — is now present in the tree. That file's presence is the
+whole ruling: before it, the reviewer could not see the fix it had asked for.
+
+**The live case is the finding itself.** SHOP-18, verified at both shas before any override:
+
+```
+b7c4c90:scripts/stack.test.mjs   readExpectedServices  0   ← the defect, as reviewed
+aaf5e38:scripts/stack.test.mjs   readExpectedServices  3   ← fixed, at the PR head
+b7c4c90:apps/storefront          tree c41a09e6…            ← identical, so the review still stood
+aaf5e38:apps/storefront          tree c41a09e6…
+```
+
+Force-accepted as admin at 12:50:33Z with that verification recorded on the decision; PR #16
+merged; SHOP-18 Done. The ceremony named both shas and the base-refresh split before I confirmed,
+which is what made the check possible at all — and is the reason the override is defensible rather
+than a guess.
