@@ -4949,6 +4949,28 @@ by rewriting those paragraphs:*
     refs, so a hold on a task that does not exist is correctly refused, and when that happens the
     human's decision must still stand while the record says plainly that nothing releases this
     task and where to set it by hand. That path was found by the canary hitting it first.
+
+231. **A react chain follows the deployed operator, not the one it started on (owner, 2026-09-14,
+    pass 37; F37-51).** The reply/react re-invocation carried three things forward: the chain
+    depth, the autonomy, and the BACKEND of the drive that prompted the agent - and it passed that
+    backend as an OVERRIDE, which beats the live deployment inside
+    `resolveOperatorAuthority`. R22 removed exactly that pin from schedules, in exactly these
+    words: "A schedule fires unattended, so following the profile that is actually deployed then
+    matters MORE than freezing whatever was configured hours earlier." A react is the same shape
+    for the same reason - the agent it reacts to may have been running for an hour.
+    Measured live. The owner changed the operator from Codex to `opus[1m]` at 04:19:56 UTC; a
+    react chain started a CODEX operator run at 04:31:44 against a deployment that read `claude`,
+    twelve minutes after the policy changed and with only one operator deployment on the project.
+    A model policy that takes effect only once every in-flight chain drains is not the policy the
+    owner set.
+    Depth still travels, because it is the loop bound and nothing else can carry it. Autonomy
+    still travels, because the resolver clamps it to the deployment's configured ceiling (R19-A),
+    so a chain cannot hold an autonomy the project has since lowered. Only the backend is dropped,
+    and dropping it is safe because the operator re-anchors on `task.md` rather than on a provider
+    transcript: a chain whose backend changes between turns loses nothing it was relying on.
+    The canary for this passed while the bug was restored, the first time it was written - the
+    override lives on `input.operatorRun`, and the test had set it on `ctx`. It was only a test
+    of the fix once it could fail without it.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
     `task-file.schema.ts`.)
 

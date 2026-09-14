@@ -4556,19 +4556,39 @@ export async function applyAgentCompletionEffects(
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
   const { resolveOperatorAuthority } = await import("./operator-actions.server");
-  let reactBackend: RealBackend;
   let reactAutonomy: OperatorAutonomy;
   let currentDepth: number;
   if (input.operatorRun) {
-    reactBackend = input.operatorRun.backend;
     reactAutonomy = input.operatorRun.autonomy;
     currentDepth = input.operatorRun.reactDepth;
   } else {
-    const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
-    reactBackend = authority.backend;
-    reactAutonomy = authority.autonomy;
+    reactAutonomy = resolveOperatorAuthority(ctx, input.projectSlug, {}).autonomy;
     currentDepth = 0;
   }
+  // Ruling 231 (F37-51): the react chain carries its DEPTH and its autonomy,
+  // and no longer carries a BACKEND.
+  //
+  // It used to pin `input.operatorRun.backend` — the backend of the drive that
+  // prompted the agent — and pass it as an override, which beats the live
+  // deployment. R22 removed exactly that pin from schedules, on exactly this
+  // reasoning: "A schedule fires unattended, so following the profile that is
+  // actually deployed then matters MORE than freezing whatever was configured
+  // hours earlier." A react is the same shape. The agent it is reacting to may
+  // have been running for an hour, and live on pass 37 an owner moved the
+  // operator from Codex to `opus[1m]` at 04:19:56 and a react chain started a
+  // CODEX operator run at 04:31:44 — twelve minutes later, against a deployment
+  // that said `claude`.
+  //
+  // Safe to drop because the operator re-anchors on `task.md` rather than on a
+  // provider transcript (its continuity mode), so a chain that changes backend
+  // between turns loses nothing it was relying on. Autonomy stays carried: it
+  // is clamped by the deployment's configured ceiling inside the resolver
+  // (R19-A), so a chain cannot hold a ceiling the project has since lowered.
+  const reactBackend: RealBackend = resolveOperatorAuthority(
+    ctx,
+    input.projectSlug,
+    {},
+  ).backend;
   // No-progress detection compares the STORED comment forms (adversarial-
   // review #4): both sides must be the same form or a repeat never matches.
   // Comments now store the FULL reply, so compare `fullText` against

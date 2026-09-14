@@ -279,6 +279,80 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
 
   /**
+   * Ruling 231 (F37-51, live on pass 37). The react re-invocation used to pin
+   * `ctx.operatorRun.backend` — the backend of the drive that prompted the
+   * agent — and pass it as an OVERRIDE, which beats the live deployment. R22
+   * removed exactly that pin from schedules, on exactly this reasoning:
+   * following the profile that is ACTUALLY deployed matters more than freezing
+   * whatever was configured earlier.
+   *
+   * Measured: the owner moved the operator from Codex to `opus[1m]` at
+   * 04:19:56 UTC, and a react chain started a CODEX operator run at 04:31:44
+   * against a deployment that read `claude`.
+   *
+   * Canary: restore `reactBackend = input.operatorRun.backend`.
+   */
+  it("ruling 231: a react uses the DEPLOYED backend, not the one its chain started on", async () => {
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            // The live deployment the owner just set.
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    writeReviewTask({ stage: "impl", waiting: "agent" });
+    const runId = await finishedRunWith("Done with the slice. @operator");
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "developer",
+        role: "Implementation",
+        delivers: true,
+        workdir: null,
+        agentHandle: "developer",
+        // The chain that prompted this agent ran on the OLD backend. This is
+        // the field the react block reads — putting it on `ctx` instead made
+        // the first version of this canary pass with the bug restored.
+        operatorRun: { backend: "codex", autonomy: "supervised", reactDepth: 0 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+
+    // SAFETY: `backend` is a TEXT NOT NULL column on `agent_runs`
+    // (0001_baseline.sql); only operator rows are selected and this test
+    // creates exactly one.
+    const operatorRows = store.db
+      .prepare(`SELECT backend FROM agent_runs WHERE kind = 'operator'`)
+      .all() as { backend: string }[];
+    expect(operatorRows.length).toBeGreaterThan(0);
+    expect(operatorRows.map((r) => r.backend)).not.toContain("codex");
+    expect(operatorRows[0]!.backend).toBe("claude");
+  });
+
+  /**
    * Ruling 177 (pass 36, F36-5): a run that outlives its task's closure —
    * HLC-9 was force-accepted while its developer was still building; the run
    * finished three minutes later, the dispatch-completion contract re-invoked

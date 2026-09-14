@@ -2883,3 +2883,56 @@ required-reviewer policy. Neither says "out of scope for this task".
 That second half is a design question rather than a defect, and it belongs to the owner. The
 first half — a decision with no option kind to carry it — is the same defect ruling 224 fixed
 once already.
+
+---
+
+## F37-51 · A model-policy change does not reach a chain already running — MEDIUM
+
+**Found by changing a setting the owner asked for and then watching whether it took.** At
+04:19:56 UTC the operator profile moved Codex → Claude `opus[1m]`, effort high. `project.md`
+carried exactly one operator deployment and it read `claude`. Then:
+
+```
+04:23:44Z  SHOP-3   operator run started (codex structured output)
+04:23:57Z  SHOP-3   operator run started (real)              ← claude
+04:24:27Z  SHOP-22  operator run started (codex structured output)
+04:25:19Z  SHOP-22  operator run started (real)              ← claude
+04:31:44Z  SHOP-18  operator run started (codex structured output)
+```
+
+The last one is twelve minutes after the change. I armed a monitor rather than concluding from
+the first two, and it caught that one on its own.
+
+**The mechanism.** `applyAgentCompletionEffects` continues an operator chain by re-invoking the
+operator, and it carried the chain's `backend` forward:
+
+```ts
+if (input.operatorRun) {
+  reactBackend = input.operatorRun.backend;   // the drive that prompted the agent
+  …
+}
+…
+resolveOperatorAuthority(ctx, input.projectSlug, { backend: reactBackend, … })
+```
+
+That backend is passed as an **override**, and inside the resolver
+`overrides.backend ?? declaredBackend` means the override beats the live deployment. So every
+reply to an agent that a Codex operator had prompted came back on Codex, however long the agent
+had been running and whatever the project said by then.
+
+**Viberr had already ruled on this exact shape.** R22 removed the backend pin from schedules:
+
+> A scheduled re-run no longer pins a backend or autonomy. It resolves the LIVE deployed operator
+> profile at fire time… **A schedule fires unattended, so following the profile that is actually
+> deployed then matters MORE than freezing whatever was configured hours earlier.**
+
+A react is unattended in the same way and can be separated from its chain's start by an hour of
+agent work. **Fixed as ruling 231** — depth still travels (it is the loop bound), autonomy still
+travels (the resolver clamps it to the deployment's ceiling, so a chain cannot hold an autonomy
+since lowered), and the backend is resolved live. Safe because the operator re-anchors on
+`task.md` rather than a provider transcript.
+
+**Method note: the canary passed with the bug restored.** The override lives on
+`input.operatorRun`; my first test set it on `ctx`. Reverting the fix changed nothing, which is
+the only reason I looked. That is the third vacuous canary this pass — the discipline of proving
+red before believing green is what caught all three.
