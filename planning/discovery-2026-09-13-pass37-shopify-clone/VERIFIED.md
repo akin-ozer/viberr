@@ -1083,3 +1083,29 @@ verbatim and then states the consequence A9's wording leaves out: *what merged i
 verified*. The owner's decision to refuse that merge rather than disclose it was reached
 independently, from the same sentence, by viberr's own controller — hours later and without
 being asked.
+
+### Collision 3 — a template placeholder nobody could see was wrong
+
+Three services took a request-changes for the same gateway-secret mismatch within ninety minutes:
+SHOP-2 (`stack/identity.json:16`), SHOP-3 (`stack/inventory.json:16`), SHOP-12
+(`stack/catalog.json:16`). Three different services, three different reviewers, the same line
+number — which is what made it worth looking past coincidence.
+
+Measured on `main`:
+
+| file | line 16 |
+|---|---|
+| `services/_template/stack/template.json` | `"GATEWAY_SECRET": "replace-with-local-secret"` |
+| `stack/gateway.json` | `"GATEWAY_SECRET": "replace-with-a-local-gateway-secret"` |
+
+Every service scaffolded from SHOP-10's template inherits the wrong placeholder, fails the same
+check, and repairs it privately on its own branch. Three so far; orders and admin would make five.
+
+Unlike the lockfile, this one **can** be fixed once and additively — it is a single line in a
+single file, generated from nothing. Handed to the controller with the measurement rather than
+fixed by me: the clone is its to build.
+
+**What the review gate is actually worth here.** Nothing escaped. Three independent reviewers
+caught three instances of a defect none of their branches could see the origin of, each naming
+the file and line. The cost is one rework round per service, and the cause sat in a file no
+service task owns.
