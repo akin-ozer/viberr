@@ -1134,3 +1134,30 @@ with `SIGBUS`. Viberr raised a decision packet quoting the provider verbatim —
 exited with signal SIGBUS:"* — with three options and "Re-run the operator now" recommended.
 Taking it restarted coordination, and within seconds all five tasks were working again. The
 product's account of what my deploy did to it was accurate in every particular.
+
+### A fifth self-inflicted bug, and the question that would have found all three
+
+An hour after the first two, a third instance of the same hole in ruling 225: an **archived**
+task with a pending occurrence would also have shown "resumes Sep 14 · 02:28". The schedule
+runner refuses an archived task with its own dedicated outcome — `skipped-archived`, kept
+distinct from `skipped-done` precisely so the note does not tell an archived task it was
+"already Done" — so the card would have named a time for a run nothing intended to start.
+
+R14-3 archiving removes a task from every view except the Archived filter. That filter still
+draws the card, and the card still draws this tag, so the usual defence ("every consumer filters
+`archived = 0`") does not apply to this particular surface.
+
+**Three holes, one question.** I found the first two by re-reading my predicate and imagining
+cases. The right question was available the whole time and is not imaginative at all:
+
+> *What states does the schedule runner refuse?*
+
+It answers itself in its own vocabulary — `skipped-held`, `skipped-archived`, `skipped-done` —
+and each one is exactly a state where a resume time would be a lie. Asked that way the three
+exclusions fall out together instead of one per hour, which is now written into the ruling as
+the general rule: **a derived promise is bounded by what the mechanism behind it will actually
+do, and the way to find its edges is to read that mechanism's refusals rather than to imagine
+the cases.**
+
+Held for the next deploy rather than restarting the board again for one guard that no live task
+currently reaches.
