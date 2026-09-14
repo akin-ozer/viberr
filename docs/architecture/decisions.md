@@ -5439,6 +5439,31 @@ by rewriting those paragraphs:*
     (`file-leases.ts`, `project-file.schema.ts`, `settings-actions.server.ts`,
     `push-workspace.server.ts`, `task-actions.server.ts`, `controller-toolkit.server.ts`.)
 
+246. **A refusal names the real limit, and says whether the door it points at is open
+    (2026-09-15, pass 37; F37-75).** Found by asking the controller to ATTEMPT four things it
+    cannot do and report the refusals verbatim, rather than reason about them from its tool
+    list.
+    `readStoreDoc` judged TYPE before EXISTENCE, so a path the store had never held was
+    refused for its file extension. The controller asked for `make/stack.mk` — a file in the
+    git repository, which that reader has no view of — and was told Viberr "only opens text
+    documents". It dutifully retried the same path as `.md` and was told the file "no longer
+    exists", which claims it once did. Two refusals, two causes that were not the reason, and
+    the real limit stated by neither. Existence is judged first now, and the miss says what
+    the reader IS: the org knowledge-base and skill store, not a git repository, with GitHub
+    and an agent on a task with a checkout named as the ways to read a repo file. The
+    editor's own type guard is unchanged for a file that IS there.
+    `move_task` into the terminal stage pointed at the task page and stopped, so a person
+    sent there on a task still waiting for a reviewer followed a correct pointer to a control
+    that would refuse them. It now carries `acceptanceRefusalFor`'s own sentence when one
+    stands — the same gate the task page shows — so the reply names the door AND says whether
+    it is open.
+    Recorded and deliberately NOT fixed: a tool that does not exist emits no refusal at all,
+    so asking the controller to resolve a packet or force-accept produces silence rather than
+    a pointer. The controller proposed refusing stubs. Leaving it: a stub is a tool that
+    exists to deny, and the honest answer to "can you do X" is the model saying no, which it
+    did. Revisit if a controller is ever seen improvising around the silence.
+    (`store-files.server.ts`, `controller-ops-mcp.server.ts`, `controller-toolkit.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

@@ -808,6 +808,32 @@ describe("writeStoreDoc", () => {
     expect(readStoreDoc(target, ["nope.md"])).toBeNull();
   });
 
+  /**
+   * Ruling 246 (pass 37, F37-75): EXISTENCE is judged before TYPE.
+   *
+   * The other order answers a path this store has never held with a complaint
+   * about its file extension. Live, the controller asked for `make/stack.mk` —
+   * a file in the git repository, which this reader has no view of — and was
+   * told Viberr "only opens text documents". It retried as `.md` and was told
+   * the file "no longer exists", which implies it once did. Two refusals, two
+   * causes that were not the reason.
+   */
+  it("ruling 246: an ABSENT path reads as absent, whatever its extension", async () => {
+    const { db, target } = await setupKb();
+    writeStoreDoc(db, target, ["notes"], "a.md", "hello", ACTOR);
+    // CANARY: put the extension check back in front and this throws "only opens
+    // text documents" about a file that was never here.
+    expect(readStoreDoc(target, ["make", "stack.mk"])).toBeNull();
+    expect(readStoreDoc(target, ["nope.mk"])).toBeNull();
+    // A file that IS here and cannot be round-tripped is still refused by TYPE:
+    // the ordering change must not lose the editor's own guard.
+    const abs = path.join(target.rootAbs, "script.sh");
+    writeFileSync(abs, "echo hi");
+    expect(() => readStoreDoc(target, ["script.sh"])).toThrowError(
+      /only opens text documents/,
+    );
+  });
+
   it("P14-UI-59: refuses to clobber an existing doc unless told to replace it", async () => {
     const { db, ctx, kb, target } = await setupKb();
     writeStoreDoc(db, target, [], "facts.md", "ORIGINAL", ACTOR);

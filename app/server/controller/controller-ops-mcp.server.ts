@@ -423,7 +423,20 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         const target = resolveStoreTarget(db, args.kind, args.id, { dataRoot });
         if (!target) throw AppError.notFound("That resource no longer exists.");
         const doc = readStoreDoc(target, args.path);
-        if (!doc) throw AppError.notFound("That file no longer exists.");
+        if (!doc) {
+          // Ruling 246 (F37-75): say what this reader IS, not that the file
+          // "no longer exists" — which claims it once did, and sent the
+          // controller looking for a deletion that never happened. The store
+          // and the git repository are different places, and the caller most
+          // likely to hit this is one that confused them.
+          throw AppError.notFound(
+            `${target.kind === "kb" ? "Knowledge base" : "Skill"} "${target.name}" has no ` +
+              `\`${args.path.join("/")}\`. This reads the org KNOWLEDGE-BASE and SKILL store, ` +
+              "not a git repository — Viberr has no tool that returns repository file contents, " +
+              "so a path from the project's repo will never be found here. Open it on GitHub, or " +
+              "ask an agent on a task with a checkout.",
+          );
+        }
         auditRead("read_store_doc", `${target.kind}/${target.id}`, {
           path: args.path.join("/"),
           truncated: doc.truncated,

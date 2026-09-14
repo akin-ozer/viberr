@@ -784,12 +784,38 @@ describe("read_store_doc: org admins only, like the store browser", () => {
         path: ["ops-note.md"],
       }),
     ).toBe("[error] That resource no longer exists.");
-    expect(
-      await call(ids.orgAdmin, "read_store_doc", {
-        kind: "kb",
-        id: kbId,
-        path: ["gone.md"],
-      }),
-    ).toBe("[error] That file no longer exists.");
+    // Ruling 246 (F37-75): "no longer exists" claimed the file once did, and
+    // sent the controller looking for a deletion that never happened. The
+    // message now says what this reader IS. CANARY: restore the old sentence
+    // and the caller most likely to hit this — one that confused the store
+    // with the git repository — learns nothing about which place it asked.
+    const missing = await call(ids.orgAdmin, "read_store_doc", {
+      kind: "kb",
+      id: kbId,
+      path: ["gone.md"],
+    });
+    expect(missing).toContain("has no `gone.md`");
+    expect(missing).toContain("not a git repository");
+    expect(missing).not.toContain("no longer exists");
+  });
+
+  /**
+   * Ruling 246: the live shape. The controller asked for `make/stack.mk` — a
+   * path in the project's git repository — and was told Viberr "only opens text
+   * documents", so it retried as `.md` and was told the file "no longer exists".
+   * Two refusals, two causes that were not the reason, and the real limit
+   * stated by neither.
+   */
+  it("ruling 246: a repository path is answered by SCOPE, never by its extension", async () => {
+    const message = await call(ids.orgAdmin, "read_store_doc", {
+      kind: "kb",
+      id: kbId,
+      path: ["make", "stack.mk"],
+    });
+    // CANARY: put the extension check back in front of the existence check in
+    // `readStoreDoc` and this reads "only opens text documents".
+    expect(message).not.toContain("only opens text documents");
+    expect(message).toContain("not a git repository");
+    expect(message).toContain("Open it on GitHub");
   });
 });

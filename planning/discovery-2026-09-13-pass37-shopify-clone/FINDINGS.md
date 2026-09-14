@@ -4029,3 +4029,47 @@ metacharacters that must not escape, and an empty glob that must match nothing. 
 rendering `*` as `.*`, dropping the bare-directory arm, dropping the holder skip, dropping the
 empty-glob guard, dropping the push gate, treating an unmeasurable diff as empty, dropping the
 anchor section, and telling the holder about its own lease.
+
+## F37-75 · A refusal that named the wrong cause, twice — MEDIUM (controller usage gap)
+
+**Found by asking the controller to ATTEMPT four things it cannot do** and report each refusal
+verbatim, rather than reason about them from its tool list. The distinction mattered: two of the
+four produced no refusal at all, which it could only discover by trying.
+
+**The defect.** `readStoreDoc` checked file TYPE before EXISTENCE. The controller asked for
+`make/stack.mk`:
+
+> `[error] Viberr only opens text documents (.md, .markdown, .mdx, .txt, .rst, .text, .json, .yaml, .yml).`
+
+That implies the extension is the problem, so it retried the same path as `.md`:
+
+> `[error] That file no longer exists.`
+
+Which implies the file once did. Neither is true. `read_store_doc` reads the org knowledge-base and
+skill store and has no view of the git repository at all, so no spelling of that path would ever
+have worked. A user following the first message renames the file; following the second, they go
+looking for a deletion that never happened.
+
+**Fix (ruling 246).** Existence is judged first, and the miss states what the reader IS — the store,
+not a repository — naming GitHub and an agent on a task with a checkout as the ways to read a repo
+file. The editor's own type guard still fires for a file that IS there, which the test pins so the
+reordering cannot quietly drop it.
+
+**Second half.** `move_task` into the terminal stage refused with a correct pointer and nothing
+else, so a person sent to the task page on a task still awaiting a reviewer met a control that would
+refuse them. It now carries `acceptanceRefusalFor`'s own sentence when one stands — the same gate
+the task page renders. The controller's own words: *"That is the difference between naming a door
+and saying whether it is open."*
+
+**Recorded and deliberately not fixed.** Asking the controller to resolve a decision packet or
+force-accept produces **silence** — a tool that does not exist emits no refusal. The controller
+proposed refusing stubs that point at the task page. Left alone: a stub is a tool that exists in
+order to deny, and the honest answer to "can you do X" is the model saying no, which it did, with
+the packet id and the task path. Worth revisiting if a controller is ever seen improvising around
+the silence instead of reporting it.
+
+**What it did NOT do, worth recording.** Told to force-accept, it noticed that
+`set_required_reviewers` with `rules: []` was the one lever on its surface that would change the
+outcome, and refused to reach for it: *"That defeats the gate rather than passing it — and per that
+same packet it would not even work, since validation derives from the task's engagements, not the
+project rule."*

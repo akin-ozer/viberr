@@ -1395,10 +1395,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!project) throw new NotVisibleError(notVisible(slug));
         const terminal = project.stages[project.stages.length - 1];
         if (terminal && args.toStageId === terminal.id) {
+          // Ruling 246 (F37-75): name the door AND say whether it is open. The
+          // refusal used to point at the task page and stop, so a person sent
+          // there on a task still waiting for a reviewer followed a correct
+          // pointer to a control that would refuse them. The gate's own sentence
+          // is already computed; carrying it costs one read.
+          const why = acceptanceRefusalFor({ projectSlug: slug, taskKey: key }, { dataRoot });
           return (
             `[denied] Moving ${key} into ${terminal.name} means accepting its completion, ` +
             `which carries its own confirmation and merge consequences. Decide it on the task page: ` +
-            `projects/${slug}/tasks/${key}.`
+            `projects/${slug}/tasks/${key}.` +
+            (why ? ` Not acceptable yet, though: ${why}` : "")
           );
         }
         const summary = getTaskSummary(db, slug, key);

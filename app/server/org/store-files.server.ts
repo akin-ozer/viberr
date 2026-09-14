@@ -439,12 +439,20 @@ export function readStoreDoc(
   if (parts.length === 0) return null;
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
+  // Ruling 246 (F37-75): EXISTENCE before TYPE. The other order answers a path
+  // this store has never held with a complaint about its file extension, which
+  // names a cause that is not the reason and invites the caller to rename the
+  // thing and try again. Live, the controller asked for `make/stack.mk` — a
+  // file in the git repository, which this reader has no view of at all — and
+  // was told Viberr "only opens text documents"; it dutifully retried as `.md`
+  // and was then told the file "no longer exists", which implies it once did.
+  // Two refusals, two wrong causes, and the real limit stated by neither.
+  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
   if (!STORE_TEXT_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
     throw AppError.validation(
       `Viberr only opens text documents (${STORE_TEXT_EXTENSION_LIST.join(", ")}).`,
     );
   }
-  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
   const size = statSync(abs).size;
   const text = readFileSync(abs, "utf8").slice(0, maxBytes);
   return { text, truncated: size > maxBytes };
