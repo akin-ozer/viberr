@@ -460,3 +460,56 @@ because the rebuilder names it on every task write. *Seam: `decisions.server.ts`
 Same bar as the rest of this plan: each fix has a test proven red by breaking the SOURCE, not by
 deleting an assertion. The canaries are named in FINDINGS.md per item and re-run before each commit.
 Gates on every commit: `npx oxlint && npx tsc --noEmit && npm test && npm run build`.
+
+---
+
+# D11 — Day seven: the controller as the surface, not the subject
+
+This stretch drove the board THROUGH the controller rather than around it, and inspected the
+controller's own behaviour. Three of the four items below were found by using it as an end user
+would; one it found itself when asked.
+
+## D11-1 — A pending goal link can adopt an existing task · F37-72 · ruling 243
+
+`create_task` takes no link, `edit_link` takes no `taskKey`, and the server's op union had no
+binding op — so tasks built ahead of a chain were invisible to it and the chain would create
+duplicates. The only escape destroyed the link's authored text. `adopt_task` binds the two; the
+task's `goalRef` is written AFTER the link commits, and the link mirrors the TASK's `blockedBy`
+(ruling 155 runs the other way on an adoption than on an advance). *Seam:
+`goal-actions.server.ts` op union + `controller-toolkit.server.ts`.*
+
+## D11-2 — A packet option whose premise is false is refused where it is written · F37-73 · ruling 244
+
+`resolve_remote_collision` clears a FOREIGN remote. Offered on a task whose PR is its own, it
+consumed a human decision — through a destructive-action ceremony naming a branch deletion — and
+answered "no collision to clear". The `accept_completion` arm in the same function already refuses
+exactly this shape for exactly this reason. *Seam: `operatorOpenPacket`, gated on
+`github.unownedPr`.*
+
+## D11-3 — Per-file leases · F37-74 · ruling 245 (owner)
+
+The ordering statement `blockedBy` cannot make. A lease is globs + one holder + why; read by
+`get_project` and by every run's canonical anchor, enforced at the push (ruling 144's seam). An
+unmeasurable diff refuses nothing. *Seam: `shared/file-leases.ts`, `project-file.schema.ts`,
+`settings-actions.server.ts`, `push-workspace.server.ts`, `canonicalTaskAnchor`,
+`controller-toolkit.server.ts`.*
+
+## D11-4 — The inbox stops demanding an impossible acceptance · F37-71
+
+Shipped in the previous stretch, deployed in this one. *Seam: `decisions.server.ts` +
+`recommendation_kinds` on the projection, registered in `BASELINE_COLUMNS`.*
+
+## Recorded as design questions, not defects
+
+- **The dock occludes the page it points at.** Measured at 1024 and 1600: `main` never reserves the
+  dock's 400px, so the right-column controls hit-test to the dock. Not filed — `position: fixed` at
+  both breakpoints is deliberate, the user opened it, Escape closes it. Raised as a product
+  question about whether a surface meant for heavy use should reflow the page.
+- **Task keys in controller prose are not links.** Viberr linkifies structured fields (pills, goal
+  chips) and never prose, consistently, including agent comments on task pages. Friction, not an
+  inconsistency.
+
+## Validation for every D11 item
+
+Same bar: every fix has a test proven red by breaking the SOURCE. Ruling 245's matcher carries eight
+canaries of its own because a glob that matches one path too many silently fences off work.
