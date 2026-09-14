@@ -3863,3 +3863,12 @@ case; a blanket gate on any recommendation while blocked reddens the transition 
 *Found by reading the notifications page against the review queue, ten minutes after near-miss #9
 had taught me the review queue's silence was CORRECT. The rule I used to kill that finding is the
 one that exposed this.*
+
+**How long the window really is, measured after the fix.** Later the same evening the operator tried
+to bring `shop-12` up to date, git failed on the same two files, and it raised a blocked packet —
+which fired ruling 137's withdrawal: *"Withdrew the offer 'Accept completion and move SHOP-12 to
+Done': a decision packet opened."* So a packet IS one way the stale card leaves. That did not save
+this case: the conflict was noted at 08:13, the card was filed at 12:58, and the packet did not open
+until 18:52 — the inbox demanded an impossible acceptance for roughly six hours, and would have kept
+demanding it indefinitely had nobody poked the task. The fix closes the window; ruling 137 only ever
+closed it by coincidence.
