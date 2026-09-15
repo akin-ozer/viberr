@@ -6454,6 +6454,25 @@ by rewriting those paragraphs:*
     what happens at the boundary, and a goal exactly AT the limit is accepted whole.
     (`operator-actions.server.ts`.)
 
+289. **`read_board`'s excerpt says it is one (2026-09-15, pass 37; F37-124, completes 281).**
+    The board read handed back another task's goal as a bare `.slice(0,
+    BOARD_READ_GOAL_CHARS)`, so a long contract came back ending mid-word and read as the
+    whole of it. Found by the controller, which reported a goal arriving "cut off mid-word"
+    and — correctly — said it could not tell from where it sat whether the READ was
+    truncating or the stored text was damaged. The stored text was intact; the reader was
+    the one clipping, and it said nothing.
+    Worth recording plainly because of where it was: in the reader ruling 281 shipped
+    THIS MORNING, written by the same author who spent the afternoon closing exactly this
+    shape on a knowledge base (283), an agent report (285) and a goal draft (288). The
+    habit of capping a field and moving on is not a thing other people do.
+    The cap stays — this is the SHALLOW read of the tasks beside your own, and a second
+    task's whole contract competing with the reader's own prompt is what it prevents. What
+    it now says is how long the goal really is, that what was returned is its opening, and
+    where the whole of it lives: the task's own page. No "read the rest" tool is named,
+    because there deliberately is not one. A goal that FITS carries no marker at all — a
+    whole contract claiming to be an excerpt sends a reader looking for text that does not
+    exist. (`board-read.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
