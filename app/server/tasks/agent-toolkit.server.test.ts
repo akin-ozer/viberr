@@ -350,6 +350,65 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
   });
 
+  /**
+   * Ruling 281 (pass 37, F37-114): an agent could read its repository and not
+   * the board it works on. A task key it was TOLD about — in a document, a
+   * directive, another agent's report — could not be checked.
+   *
+   * The cost, measured: `services/cart/DESIGN.md:458` claimed "SHOP-39 was
+   * created for this gap". Two agents on SHOP-26 read it, correctly refused to
+   * trust a document's claim about the board ("a task named in a document is
+   * not a task until someone checks"), and had no way to check. The operator
+   * re-raised a decision already made, and its recommended option would have
+   * created a second task carrying SHOP-39's title word for word.
+   */
+  it("ruling 281: read_board answers a key, lists the board, and denies a key that is not there", async () => {
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_board");
+    const read = tools.read_board!;
+    // Ungranted: every fact here is already in the agent's own prompt for its
+    // OWN task, so the gap was never permission — it was the tasks beside it.
+    // CANARY: put it behind a `collab` flag and the profiles that hit this
+    // (a reviewer, a builder reading a DESIGN.md) are the ones without it.
+    expect(read).toBeTruthy();
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl" }),
+      goal: "Serve the published batch contract.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const call = async (args: { taskKey?: string }) => {
+      // SAFETY: every tool in this toolkit answers the text shape
+      // `{ content: [{ type: "text", text }] }`; a change fails the parse
+      // below rather than reading undefined.
+      const out = (await read.handler(
+        args as never,
+        {} as never,
+      )) as { content: { text: string }[] };
+      return out.content[0]!.text;
+    };
+
+    const one = await call({ taskKey: "VIB-9" });
+    expect(one).toContain('"key": "VIB-9"');
+    expect(one).toContain("Serve the published batch contract");
+    // CANARY: drop the `stage`/`waitsOn` fields and "is this live, and is it
+    // waiting on me" stops being answerable, which is the question.
+    expect(one).toContain('"stage"');
+    expect(one).toContain('"waitsOn"');
+
+    const all = await call({});
+    expect(all).toContain('"key": "VIB-3"');
+    expect(all).toContain('"key": "VIB-9"');
+
+    // The answer that prompted the whole tool: a key that is not on this board
+    // is a claim that was wrong, said plainly.
+    // CANARY: return an empty object for a miss and the agent cannot tell
+    // "not here" from "here with nothing in it".
+    const missing = await call({ taskKey: "VIB-404" });
+    expect(missing).toContain("[noop] No task VIB-404 in this project");
+    expect(missing).toContain("that claim is wrong");
+  });
+
   it("declares `evidence` only when the profile holds attach-evidence-references", () => {
     const granted = toolkitTools({ ...BASE, evidence: true }, "oc_a").report_outcome!;
     const withheld = toolkitTools({ ...BASE, evidence: false }, "oc_b").report_outcome!;

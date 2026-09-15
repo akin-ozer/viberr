@@ -89,6 +89,11 @@ interface AgentToolkitDeps {
 
 const prose = normalizeEscapedNewlines;
 
+/** Ruling 281: how much of ANOTHER task's goal `read_board` hands back. Enough
+ *  to answer "is this the work I was told about", not enough to make a second
+ *  task's whole contract compete with this run's own prompt. */
+const GOAL_READ_CHARS = 2_000;
+
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
 
@@ -590,6 +595,113 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               ? ` — GitHub rate limit remaining: ${remaining}`
               : "";
           return textResult(`[done] GET ${result.path}${rl}\n\n${body}`);
+        },
+      ),
+    );
+  }
+
+  // Ruling 281 (pass 37, F37-114): an agent can read its repository and not the
+  // board it works on. Its whole Viberr toolkit was post_comment, ask_human,
+  // report_outcome and (with a grant) github_read — so a task key it is TOLD
+  // about, in a document or a directive, could not be checked.
+  //
+  // The cost, measured: `services/cart/DESIGN.md:458` claimed "SHOP-39 was
+  // created for this gap". Two agents on SHOP-26 read it, correctly refused to
+  // trust a document's claim about the board — "a task named in a document is
+  // not a task until someone checks" — and had no way to check. The operator
+  // re-raised a decision that had already been made, and its recommended option
+  // would have created a SECOND task with SHOP-39's title word for word. The
+  // project's own conventions require a reported gap to end up owned by a live
+  // task; the agent could not verify one.
+  //
+  // Deliberately narrow (owner's call, 2026-09-15): this project only, read
+  // only, and no field a member could not already read on the task page. It is
+  // ungranted because every one of these facts is in the agent's own prompt for
+  // its OWN task already — the gap was only ever the other tasks beside it.
+  // Mounted only when this profile already has a Viberr server — a profile
+  // holding no collaboration grant at all still gets nothing, which is the
+  // gate U11 pinned and this must not widen.
+  if (tools.length > 0) {
+    tools.push(
+      tool(
+        "read_board",
+        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project as a list. THIS project only, and read-only — it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
+        {
+          taskKey: z
+            .string()
+            .optional()
+            .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
+        },
+        async (args) => {
+          try {
+            const { listProjectTasks } = await import(
+              "~/server/projections/board-query.server"
+            );
+            // Archived tasks are INCLUDED: "SHOP-8 was archived" is a real and
+            // useful answer to "does SHOP-8 exist", and an agent told about a key
+            // that has been retired must be able to learn that rather than read
+            // it as never having existed.
+            const listOpts: NonNullable<Parameters<typeof listProjectTasks>[2]> = {
+              includeArchived: true,
+            };
+            if (ctx.dataRoot !== undefined) listOpts.dataRoot = ctx.dataRoot;
+            const rows = listProjectTasks(db, projectSlug, listOpts);
+            const wanted = args.taskKey?.trim();
+            if (wanted) {
+              const row = rows.find((t) => t.key === wanted);
+              if (!row) {
+                // The honest answer to the question that prompted this tool: a
+                // key that does not exist here is a claim that was wrong, and
+                // saying so plainly is the whole point.
+                return textResult(
+                  `[noop] No task ${wanted} in this project. If a document or a report named it, ` +
+                    `that claim is wrong — say so rather than acting on it.`,
+                );
+              }
+              const file = readTaskFile({
+                projectSlug,
+                taskKey: row.key,
+                dataRoot: ctx.dataRoot,
+              });
+              return textResult(
+                JSON.stringify(
+                  {
+                    key: row.key,
+                    title: row.title,
+                    stage: row.stage,
+                    readiness: row.readiness,
+                    waiting: row.waiting,
+                    archived: row.archived,
+                    waitsOn: row.blockedBy.map((e) => `${e.label} (${e.state})`),
+                    goal: file ? file.parsed.goal.slice(0, GOAL_READ_CHARS) : null,
+                  },
+                  null,
+                  1,
+                ),
+              );
+            }
+            return textResult(
+              JSON.stringify(
+                rows.map((t) => ({
+                  key: t.key,
+                  title: t.title,
+                  stage: t.stage,
+                  readiness: t.readiness,
+                  waiting: t.waiting,
+                  archived: t.archived,
+                  waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
+                })),
+                null,
+                1,
+              ),
+            );
+          } catch (error) {
+            logger.warn("agent read_board failed", {
+              taskKey,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+            return textResult("[error] The board could not be read.");
+          }
         },
       ),
     );
