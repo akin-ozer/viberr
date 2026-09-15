@@ -381,7 +381,18 @@ function boardContext(
   const description = project.description.trim();
   return (
     `## Board ${project.name} (slug ${slug})${project.archived ? " · ARCHIVED (read-only)" : ""}\n` +
-    (description ? `${description.length > 600 ? `${description.slice(0, 600)}...` : description}\n` : "") +
+    // Ruling 292: the excerpt names its reader, exactly as the goal-chain line
+    // six lines above already does ("list_goals reads them"). `get_project`
+    // carries the description whole (line ~1342); without the pointer this
+    // ellipsis was a cut with nowhere to go, on the one text a board's owner
+    // writes to explain what the board IS.
+    (description
+      ? `${
+          description.length > 600
+            ? `${description.slice(0, 600)}... (excerpt; get_project has the whole description)`
+            : description
+        }\n`
+      : "") +
     `repo: ${project.repo ?? "none"} · members: ${members || "none"}\n` +
     `stages: ${stages}\n` +
     `boundaries: ${boundaries || "none declared"}\n` +
