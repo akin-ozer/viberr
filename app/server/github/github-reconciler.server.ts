@@ -1765,7 +1765,9 @@ export async function mergeTaskPr(
       return {
         status: "not_mergeable",
         prNumber,
-        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Rebase the branch, then merge.`,
+        // Ruling 291: merge the base IN. Viberr's own remedy is a merge, and a
+        // rebase rewrites commits the pull request already published.
+        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Merge \`${gh.defaultBranch}\` into the branch — never rebase it — then merge.`,
         mergeable,
       };
     }

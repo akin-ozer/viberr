@@ -309,7 +309,7 @@ const PACKET_REFUSED_TRIGGERS: ReadonlySet<string> = new Set(["manual", "schedul
  *
  * `manual` is a PERSON: a mention, or the Run operator button. A person who is
  * told nothing concludes their instruction was taken, and on SHOP-2 that is
- * what happened — "@operator rebase and re-review" landed on the timeline with
+ * what happened — a human's "@operator …and re-review" landed on the timeline with
  * the mention rendered as routed, the composer's own footer promising
  * "@mentions route to agents", and the refusal only in the server log.
  *
@@ -4253,7 +4253,9 @@ function dependenciesInstruction(
   const by = release?.clearedBy ? `${release.clearedBy} cleared the wait on ${entries}` : `${entries} is done`;
   return (
     `The work this task waited on has landed: ${by}. Viberr released the task (the list is empty, the hold is cleared) and re-invoked you. ` +
-    "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need a rebase. " +
+    // Ruling 291: the old wording told the OPERATOR to want the one
+    // operation its own `update_branch_from_base` text forbids it to ask for.
+    "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need the base merged into its branch — `update_branch_from_base`, never a rebase. " +
     (snapshot.openPacket
       ? "A decision packet is open on this task. If it is a hold packet you opened about this very wait, it is now MOOT: `resolve_decision_packet` it first and say why. "
       : "") +

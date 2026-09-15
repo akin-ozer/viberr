@@ -1301,7 +1301,11 @@ export function DecisionPacket({
               onChange={(e) => setCustomText(e.target.value)}
               aria-invalid={customInvalid || undefined}
               aria-describedby={customInvalid ? CUSTOM_ERR_ID : undefined}
-              placeholder="e.g. Hold the merge, rebase onto main first, and re-run the reviewer on the new head."
+              // Ruling 291: the placeholder is Viberr TEACHING what a good
+              // directive looks like, at the moment a person is writing one —
+              // so it must not model the operation the product forbids. It
+              // used to model the very operation the product forbids.
+              placeholder="e.g. Hold the merge, bring the branch up to date with main first, and re-run the reviewer on the new head."
               rows={2}
               data-autofocus=""
             />

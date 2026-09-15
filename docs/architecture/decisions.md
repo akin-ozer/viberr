@@ -4184,15 +4184,30 @@ by rewriting those paragraphs:*
     `operator-actions.server.ts` carries the note "Live on SHOP-11: a rebase diverged the
     branch from its own PR #15", and the shopify-clone board's own rulings open with "a
     branch with an open PR is published history — merge main in, never rebase".
-    The sentence now names the merge, and says why the alternative is wrong rather than
-    only that it is: rebasing rewrites commits the pull request already published. One
-    string, shared by `conflictingPrBlockedReason` and the acceptance ceremony's refusal,
-    so the two cannot drift.
+    Every sentence now names the merge, and says why the alternative is wrong rather than
+    only that it is: rebasing rewrites commits the pull request already published.
+    THE CORRECTION THIS RULING NEEDED ITSELF. Its first draft changed the two strings a
+    grep for one sentence found, and claimed "one string, shared by both call sites, so
+    they cannot drift". Within the hour the review queue was still reading "GitHub can't
+    merge it until the branch is rebased" on a live board. SIX more were standing at that
+    moment: that one, two short `cause` strings beside the long reason already fixed, the
+    GitHub tab's comment, a note handed to the OPERATOR ("delivered work … may need a
+    rebase"), the reconciler's own notification, and the decision packet's PLACEHOLDER —
+    which is Viberr modelling what a good directive looks like at the exact moment a
+    person is writing one, in the operation the product forbids.
+    So the rule is a SWEEP, not a string: `rebase-advice.test.ts` walks every source file
+    under `app/` and fails on any line recommending one, matching the recommendation
+    rather than the word (this ruling has to say it, and so does every comment explaining
+    why not). Writing it caught an eighth site the hand-grep had missed. A claim that N
+    places are fixed is worth exactly as much as the thing that counts them, which is the
+    lesson of the pass applied to the author of the pass.
     Nothing about the MECHANISM changed here. That is the point: the mechanism was right
-    and the instruction beside it told a person to do the opposite, which is the cheapest
+    and the instructions beside it told a person to do the opposite, which is the cheapest
     kind of defect to ship and among the more expensive to undo — a rewritten branch cannot
     be un-rewritten by the person who followed the advice.
-    (`task-file.schema.ts`, `task-actions.server.ts`.)
+    (`task-file.schema.ts`, `task-actions.server.ts`, `review-helpers.ts`,
+    `github-reconciler.server.ts`, `operator-run.server.ts`, `decision-packet.tsx`,
+    `github-view.tsx`, and the sweep that counts them.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on

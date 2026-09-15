@@ -379,8 +379,9 @@ export function BranchesPanel({
                           {reviewPill(row.pr.review).label}
                         </Pill>
                       )}
-                      {/* F17-L6: a conflict is actionable here too — the branch
-                          needs a rebase before its PR can merge. */}
+                      {/* F17-L6: a conflict is actionable here too — the base
+                          must be merged into the branch before its PR can merge
+                          (ruling 291: never a rebase). */}
                       {mergeablePill(row.pr.mergeable) && (
                         <Pill kind={mergeablePill(row.pr.mergeable)!.kind} sm>
                           {mergeablePill(row.pr.mergeable)!.label}

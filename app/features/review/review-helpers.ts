@@ -135,7 +135,11 @@ function actionablePrSub(pr: NonNullable<ReviewRowView["pr"]>): string | null {
       : `PR #${pr.number} does not carry the delivered revision ${rev}. Deliver the branch to push it.`;
   }
   if (pr.mergeable === "conflicting") {
-    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the branch is rebased.`;
+    // Ruling 291: merged IN, not rebased. Viberr's own remedy is a merge
+    // (`update_branch_from_base`), and a rebase rewrites commits the pull
+    // request already published — which is how SHOP-11's branch diverged from
+    // its own PR #15.
+    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the base is merged INTO the branch (not rebased).`;
   }
   // R17-1 (F17-L12) as amended by ruling 132 (pass 34, F34-14): the head moved
   // after the review — the ONE canonical sentence says what moved, and only

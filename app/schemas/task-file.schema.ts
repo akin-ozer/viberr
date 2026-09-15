@@ -1427,7 +1427,8 @@ export function closedPrBlockedReason(
  * task on a merge that did not happen — live-proven: VM-4 went to Done with
  * `pr.state: accepted` while PR #103 stayed open and conflicting, and the
  * timeline blamed unreachable GitHub / missing credentials. The conflict is a
- * REWORK signal (rebase the branch), not a merge-pending state.
+ * REWORK signal, not a merge-pending state — and the rework is a MERGE of the
+ * base into the branch, never a rebase (ruling 291).
  *
  * `unknown` (GitHub still computing) never blocks — the merge attempt itself is
  * the authority there. Shaped like the other acceptance gates (reason-or-null).
@@ -1439,7 +1440,7 @@ export function conflictingPrBlockedReason(
   const pr = fm.pr;
   if (!pr || pr.mergeable !== "conflicting") return null;
   if (pr.state === "merged" || pr.state === "closed") return null;
-  // Ruling 291 (F37-126): NOT "rebase the branch". Viberr's own remedy is a
+  // Ruling 291 (F37-126): this never names the rewrite. Viberr's own remedy is a
   // MERGE — `update_branch_from_base` "merge[s] the base into the branch and
   // push[es] it", and that same tool's text tells the operator to "never ask an
   // agent to rebase, merge or force-push". This sentence was the one place the
