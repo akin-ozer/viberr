@@ -66,6 +66,43 @@ describe("strictTool (ruling 296)", () => {
     expect(reached).toEqual([{ taskKey: "VIB-1" }]);
   });
 
+  /**
+   * Ruling 303 (pass 37, F37-138). Measured live: four operator tool calls came
+   * back to a run as the literal string `database is not open`, from `get_task`
+   * and `read_board`, in the six seconds before the old process finished
+   * shutting down. The leak is the finding, not the shutdown: every one of the
+   * operator's 17 tools handed the SDK a bare handler, while the controller's
+   * guards and the agent toolkit's per-tool catches both converted.
+   */
+  it("ruling 303: an unexpected throw answers in words, and names the tool", async () => {
+    const client = await connect([
+      strictTool("get_task", "probe", {}, async () => {
+        // Exactly what the live one threw.
+        throw new Error("database is not open");
+      }),
+    ]);
+    const answer = textOf(await client.callTool({ name: "get_task", arguments: {} }));
+    // CANARY: hand the SDK the bare handler and this IS "database is not open".
+    expect(answer).not.toContain("database is not open");
+    expect(answer).toContain("[error]");
+    expect(answer).toContain("get_task");
+    // The sentence that stops a relay: no answer is not an empty answer.
+    expect(answer).toContain("did not get a result");
+  });
+
+  it("ruling 303: an AppError keeps its own words, because those were written for the caller", async () => {
+    const { AppError } = await import("~/server/errors/app-error.server");
+    const client = await connect([
+      strictTool("move_task", "probe", {}, async () => {
+        throw AppError.validation("VIB-1 is already at Review.");
+      }),
+    ]);
+    const answer = textOf(await client.callTool({ name: "move_task", arguments: {} }));
+    // CANARY: fold AppError into the generic arm and every refusal Viberr
+    // carefully worded becomes "failed unexpectedly".
+    expect(answer).toBe("[error] VIB-1 is already at Review.");
+  });
+
   it("publishes additionalProperties:false so the model is TOLD, at every level", async () => {
     const client = await connect([
       strictTool(

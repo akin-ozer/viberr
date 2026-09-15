@@ -1,6 +1,8 @@
 import { tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { AppError } from "~/server/errors/app-error.server";
+import { logger } from "~/server/logging/logger.server";
 
 /** What every Viberr MCP tool answers with, at the SDK's own definition of
  *  it, so this file never restates a contract it does not own. */
@@ -67,5 +69,64 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
   fields: Fields,
   handler: (args: z.infer<z.ZodObject<Fields>>) => Promise<ToolText>,
 ): SdkMcpToolDefinition {
-  return wholeSchemaTool(name, description, z.strictObject(fields), handler);
+  return wholeSchemaTool(
+    name,
+    description,
+    z.strictObject(fields),
+    // Ruling 303: no tool hands the SDK a bare handler.
+    guarded(name, handler),
+  );
+}
+
+/**
+ * Ruling 303: an unexpected failure answers in words, on every surface.
+ *
+ * Measured, live: four operator tool calls came back to a run as the literal
+ * string `database is not open`, from `get_task` and `read_board`, in the six
+ * seconds before this instance's old process finished shutting down. The
+ * database had closed under a run that was still calling tools.
+ *
+ * The leak is the finding, not the shutdown. Every one of the operator's 17
+ * tools passed its handler to the SDK bare, so ANY throw inside became the
+ * model's answer verbatim -- a SQLite sentence, a stack's message, whatever it
+ * was. Its two siblings both convert: the controller's `run`/`runWith` guards
+ * turn an unknown error into "[error] That action failed unexpectedly", and
+ * the agent toolkit catches per tool ("[error] The board could not be read.").
+ * The operator, the actor that relays what it reads onto a human's timeline,
+ * was the one that did not.
+ *
+ * So the conversion lives here, where every Viberr tool on every surface
+ * already passes and a new one cannot opt out. An `AppError` keeps its own
+ * words, because those are written for the caller. Anything else is logged
+ * with the tool's name and answered with a sentence that says what is true:
+ * this call produced no answer, so do not report one.
+ */
+function guarded(
+  name: string,
+  handler: (args: never) => Promise<ToolText>,
+): (args: never) => Promise<ToolText> {
+  return async (args) => {
+    try {
+      return await handler(args);
+    } catch (error) {
+      if (error instanceof AppError) {
+        return { content: [{ type: "text", text: `[error] ${error.userMessage}` }] };
+      }
+      logger.error("mcp tool failed", {
+        tool: name,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `[error] \`${name}\` failed unexpectedly and returned no answer. The details are ` +
+              "in the server log. Do not report anything as a fact about this call: you did " +
+              "not get a result, which is different from getting an empty one.",
+          },
+        ],
+      };
+    }
+  };
 }

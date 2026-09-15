@@ -4570,6 +4570,28 @@ by rewriting those paragraphs:*
     prompt callers take the default, so `timelineTotal` and `timelineOlder` now reach the
     operator in its PROMPT as well as through the tool, which is where it needed them.
 
+303. **An unexpected failure answers in words, on every surface (owner, 2026-09-16,
+    pass 37; F37-138).** Found by reading what the product actually returned rather than by
+    asking anyone: a sweep of 1,265 tool results across the last sixty run logs turned up
+    22 errors, and four of them were the literal string `database is not open`, answered to
+    a live run by `get_task` and `read_board`. Timestamped 19:30:38 through 19:30:43, with
+    this container starting at 19:30:46 -- the six seconds in which the old process closed
+    its database while a run was still calling tools.
+    The shutdown ordering is not the finding. The LEAK is. Every one of the operator's 17
+    tools handed its handler to the SDK bare, so any throw inside became the model's answer
+    verbatim: a SQLite sentence here, a stack's message elsewhere, whatever it happened to
+    be. Both of its siblings convert. The controller's `run`/`runWith` guards answer
+    "[error] That action failed unexpectedly. The details are in the server log"; the agent
+    toolkit catches per tool and answers "[error] The board could not be read." The
+    operator -- the one actor whose job is to relay what it reads onto a human's timeline,
+    and which had no `catch` in any of its seventeen -- was the one that did not.
+    So the conversion lives in `strictTool`, where ruling 296 already put the rule that
+    every Viberr tool on every surface passes through and a new one cannot opt out. An
+    `AppError` keeps its own words, because those were written for the caller and are the
+    refusals this codebase spends its care on. Anything else is logged with the tool's name
+    and answered with the sentence that stops a relay: this call produced no answer, so do
+    not report one, because not getting a result is different from getting an empty one.
+
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
