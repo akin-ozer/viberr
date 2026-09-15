@@ -4456,3 +4456,45 @@ restored: both clock reads landed in the same millisecond, so the assertion coul
 slow machine. `CreateTaskInput.now` is now a test seam — the shape the reset-label clock already
 uses — and the canary fixes the creation instant, so the assertion is a fact about the code rather
 than about how fast the machine ran. A canary that can only go red under load is not a canary.
+
+## F37-85 · Ruling 247 reached both gates and not the read the controller uses — MEDIUM
+
+Found by an adversarial audit of the controller, and confirmed by re-reading a sentence the
+controller had already said to me:
+
+> "One honest gap: I replaced the lease list wholesale without reading the prior state, so **I
+> cannot tell you from a direct read whether SHOP-11's lease had already self-released when it
+> merged.** … I should have read `fileLeases` first; next time I will."
+
+It could not have. `get_project` returns `fm.fileLeases ?? []` — the raw stored list — while its own
+tool description promises "which task owns which shared paths **until it merges**". Ruling 247 made
+that promise true at the push gate and at the canonical anchor, and not here. So the controller's
+only direct read of the mechanism reports spent leases as binding, and its apology was for a
+failure that was not its own.
+
+**Fix (ruling 256a).** `get_project` resolves through `activeFileLeases`, and reports
+`spentFileLeases` beside it so a declaration that is now spent is named rather than dropped.
+Canaried: restoring the raw read makes both rows read as binding.
+
+## F37-86 · `list_decisions` answered "nothing is waiting" about a project it had not looked at — HIGH
+
+A defect in the tool ruling 251 added this morning, found by the audit the same day.
+
+```js
+const explicit = args.projectSlug ?? boundSlug ?? null;
+const onlyTask = args.taskKey ?? (explicit ? boundTask : null);   // <- the bug
+```
+
+A conversation anchored to a task carries `boundTask`. Asked about a **different** project, the
+tool kept that anchor and filtered the other project's decisions by a task key that project does
+not contain — then answered:
+
+> "Nothing is waiting on a person here."
+
+A false all-clear, from the one tool whose entire job is to say what is waiting. It is a worse
+failure than the silence ruling 251 was written to end: silence sends a person to look, and a
+confident "nothing" stops them looking.
+
+**Fix (ruling 256b).** The anchor applies only when the project asked about is the project it was
+anchored in. Canaried: restoring the old line makes the cross-project read come back empty while
+the packet sits there.

@@ -300,6 +300,99 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       call(ids.nonMember, "list_decisions", { projectSlug: SLUG }, null),
     ).resolves.toMatch(/\[denied\]/);
   });
+
+  /**
+   * Ruling 256 (pass 37, F37-86): the anchor belongs to the project it was
+   * anchored IN.
+   *
+   * A conversation anchored to a task, asked about a DIFFERENT project, filtered
+   * that project's decisions by a task key it does not contain and answered
+   * "Nothing is waiting on a person here" — a false all-clear, from the one tool
+   * whose entire job is to say what is waiting.
+   */
+  it("ruling 256: an anchored task never filters another project's decisions", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const { buildControllerToolkit } = await import("./controller-toolkit.server");
+      const { findUserById } = await import("~/server/auth/user-store.server");
+      const user = findUserById(app.db, ids.orgAdmin)!;
+      const read = async (
+        bound: { projectSlug: string | null; taskKey: string | null },
+        args: Record<string, JsonValue>,
+      ) => {
+        const toolkit = buildControllerToolkit({
+          db: app.db,
+          ctx: { dataRoot: app.dataRoot },
+          user: { id: user.id, email: user.email, name: user.name },
+          projectSlug: bound.projectSlug,
+          taskKey: bound.taskKey,
+        });
+        const tool = toolkit.tools.find((t) => t.name === "list_decisions")!;
+        // SAFETY: every toolkit handler returns the `textResult` shape.
+        const result = (await tool.handler(args, {})) as { content: { text: string }[] };
+        return JSON.parse(result.content[0]!.text);
+      };
+
+      // Anchored to VIB-1 in THIS project: the anchor applies, and VIB-142's
+      // packet is correctly filtered out.
+      const anchored = await read({ projectSlug: SLUG, taskKey: "VIB-1" }, {});
+      expect(anchored.forYou).toEqual([]);
+      expect(anchored.howToAnswer).toContain("Nothing is waiting");
+
+      // Same conversation, asked about a project it is NOT anchored in. The
+      // anchor belongs to the project it was anchored in, so it must not filter
+      // here — and VIB-142's packet is waiting.
+      //
+      // CANARY: drop the `explicit === boundSlug` guard and this reads
+      // "Nothing is waiting on a person here": a false all-clear from the one
+      // tool whose entire job is to say what is waiting.
+      const elsewhere = await read(
+        { projectSlug: "some-other-board", taskKey: "VIB-1" },
+        { projectSlug: SLUG },
+      );
+      expect(elsewhere.forYou.map((d: { task: string }) => d.task)).toContain(PACKET_TASK);
+      expect(elsewhere.howToAnswer).toContain("answerAt");
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  /**
+   * Ruling 256 (F37-85): `get_project` reads leases the way the GATES read them.
+   *
+   * Ruling 247 made a lease whose holder has finished bind nobody, and wired it
+   * into the push and the canonical anchor — not into the read the controller
+   * uses. Live, the controller said so itself: "I cannot tell you from a direct
+   * read whether SHOP-11's lease had already self-released when it merged."
+   */
+  it("ruling 256: get_project resolves leases and names the spent ones apart", async () => {
+    const { updateProjectFile, readProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const before = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.fileLeases;
+    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+      p.frontmatter.fileLeases = [
+        { paths: ["pnpm-lock.yaml"], taskKey: "VIB-142", reason: "still working" },
+        { paths: ["Makefile"], taskKey: "VIB-404", reason: "holder does not exist" },
+      ];
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const view = JSON.parse(await call(ids.orgAdmin, "get_project"));
+      // CANARY: return `fm.fileLeases` raw and BOTH rows appear as binding,
+      // which is what made the controller unable to tell live leases from spent
+      // ones.
+      expect(view.fileLeases.map((l: { taskKey: string }) => l.taskKey)).toEqual(["VIB-142"]);
+      expect(view.spentFileLeases.map((l: { taskKey: string }) => l.taskKey)).toEqual(["VIB-404"]);
+    } finally {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.fileLeases = before ?? [];
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
 });
 
 /**

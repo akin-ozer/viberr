@@ -5650,6 +5650,26 @@ by rewriting those paragraphs:*
     clock already uses.
     (`task-actions.server.ts`.)
 
+256. **The controller reads what the gates read, and an anchor belongs to the project it was
+    anchored in (2026-09-15, pass 37; F37-85, F37-86).** Two defects in tools this pass shipped
+    the same day, both found by an adversarial audit of the controller and both the shape the
+    pass keeps confirming.
+    (a) Ruling 247 made a lease whose holder has finished bind nobody, and wired that into the
+    push and the canonical anchor — not into `get_project`, the read the CONTROLLER uses, which
+    kept handing back `fm.fileLeases` raw while its own description promised "which task owns
+    which shared paths **until it merges**". The controller said the consequence out loud
+    before anyone looked for it: *"I cannot tell you from a direct read whether SHOP-11's lease
+    had already self-released when it merged. I should have read `fileLeases` first."* It had;
+    the read was lying. `get_project` now resolves them, and names the spent rows separately so
+    they can be cleared rather than silently dropped.
+    (b) `list_decisions` took the conversation's anchored task and applied it to whatever
+    project it was asked about. Anchored to a task in one project and asked about another, it
+    filtered that other project's decisions by a key it does not contain and answered "Nothing
+    is waiting on a person here" — a false all-clear from the one tool whose entire job is to
+    say what is waiting, and a worse failure than the silence ruling 251 was written to end.
+    The anchor now applies only when the project asked about IS the project it was anchored in.
+    (`controller-toolkit.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

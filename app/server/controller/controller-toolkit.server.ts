@@ -103,6 +103,10 @@ import {
   type DecisionRef,
 } from "~/server/projections/decisions.server";
 import {
+  activeFileLeases,
+  staleFileLeases,
+} from "~/server/tasks/file-leases.server";
+import {
   getTaskSummary,
   listTaskEvents,
 } from "~/server/projections/task-query.server";
@@ -1111,7 +1115,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1140,7 +1144,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           rulingsKb: fm.rulingsKb ?? null,
           // Ruling 245: who owns which shared paths until they merge. Read here
           // rather than inferred from prose, which is what every agent was doing.
-          fileLeases: fm.fileLeases ?? [],
+          //
+          // Ruling 256 (pass 37, F37-85): RESOLVED, like the gates read it.
+          // Ruling 247 made a lease whose holder has finished bind nobody, and
+          // applied that at the push and the canonical anchor — not here, the
+          // read the controller actually uses. So this reported spent leases as
+          // live, and the controller said so out loud: "I cannot tell you from a
+          // direct read whether SHOP-11's lease had already self-released when
+          // it merged." It could not, because this line handed it the raw list.
+          fileLeases: activeFileLeases(slug, dataRoot ? { dataRoot } : {}),
+          // Named, not dropped: the declaration was made and is now spent, and
+          // somebody may want to clear the row.
+          spentFileLeases: staleFileLeases(db, slug, dataRoot ? { dataRoot } : {}),
           stages: project.stages.map((s) => ({
             id: s.id,
             name: s.name,
@@ -2466,7 +2481,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // conversation's own anchor, then everything they can see.
         const explicit = args.projectSlug ?? boundSlug ?? null;
         if (explicit) requireVisible(explicit, "read this project's decisions");
-        const onlyTask = args.taskKey ?? (explicit ? boundTask : null);
+        // Ruling 256: the anchor belongs to the project it was anchored IN. A
+        // conversation anchored to VIB-1 in one project, asked about another,
+        // used to filter that other project's decisions by a task key it does
+        // not contain and answer "Nothing is waiting on a person here" — a
+        // false all-clear, on the tool whose whole job is to say what is
+        // waiting.
+        const onlyTask =
+          args.taskKey ?? (explicit !== null && explicit === boundSlug ? boundTask : null);
 
         // The SAME source the home page's "N decisions waiting on you" counts
         // (`decisionsRequiring`), so the controller and the page can never
