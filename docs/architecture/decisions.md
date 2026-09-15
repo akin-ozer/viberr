@@ -6473,6 +6473,25 @@ by rewriting those paragraphs:*
     whole contract claiming to be an excerpt sends a reader looking for text that does not
     exist. (`board-read.server.ts`.)
 
+290. **A card that counts exceptions names them (2026-09-15, pass 37; F37-125, ruling 253
+    for a dashboard).** Three cards on `/insights` report a count of EXCEPTIONS —
+    delivered work that cannot be traced, active work with no definite next actor, records
+    past their project's readability guardrail — and each named none of them. Live this
+    pass, on a real board: "98% · Branch & PR traceability · 41 of 42 delivered tasks carry
+    branch + PR". The whole point of that number is to find work nobody can trace, and it
+    would not say which task. The query already had the rows; it counted them and threw the
+    identities away.
+    Ruling 253 settled this exact shape for a knowledge base — "the NAMES, not just the
+    counts. An agent cannot ask for a rule it cannot name, and a human debugging 'why did
+    the run ignore the standing correction' had nothing to read." A dashboard is that rule
+    with a person reading it, and a metric a person cannot act on is a metric that only
+    grades them.
+    Each of the three now carries its exceptions by key, linked to the task page, capped at
+    {@link INSIGHTS_NAMED_EXCEPTIONS} so one card cannot become a wall on a drifted
+    instance — and past the cap the card says how many more, so a capped list never reads
+    as the whole set. A card that names everything it counts shows no remainder.
+    (`insights-query.server.ts`, `insights-page.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

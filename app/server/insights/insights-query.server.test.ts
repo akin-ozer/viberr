@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Guardrail } from "~/schemas/project-file.schema";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { compactTimelineEvents } from "~/server/tasks/timeline-compaction.server";
-import { getInsightsSummary } from "./insights-query.server";
+import { INSIGHTS_NAMED_EXCEPTIONS, getInsightsSummary } from "./insights-query.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -707,6 +707,49 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.traceability.deliveredTasks).toBe(2);
     expect(g.traceability.tracedTasks).toBe(1);
     expect(g.traceability.pct).toBeCloseTo(0.5, 5);
+    // Ruling 290: and it NAMES the one that cannot be traced. A traceability
+    // metric that reports "1 of 2" and will not say which is withholding the
+    // only fact a person reads it for. CANARY: return the count alone.
+    expect(g.traceability.untraced).toEqual(["gp/VIB-2"]);
+  });
+
+  /**
+   * Ruling 290 (pass 37, F37-125). Three cards on /insights counted EXCEPTIONS
+   * — untraceable work, work with no next actor, records past the readability
+   * guardrail — and named none of them. Live this pass the page read "41 of 42
+   * delivered tasks carry branch + PR" with no way to reach the 1. Ruling 253
+   * settled the same shape for a knowledge base ("an agent cannot ask for a
+   * rule it cannot name"); this is that rule with a person reading it.
+   */
+  it("ruling 290: the clarity and long-timeline cards name their exceptions too, and cap honestly", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // No owner and nothing waited on → no definite next actor.
+    insertTask(db, { key: "VIB-9", waiting: "none" });
+    // Owned, so it IS clear and must not be named.
+    insertTask(db, { key: "VIB-10", waiting: "none", owner: "u_1" });
+
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.clarity.unclear).toEqual(["gp/VIB-9"]);
+    expect(g.clarity.clearTasks).toBe(1);
+    // A card that names everything it counts reports no remainder.
+    expect(g.clarity.activeTasks - g.clarity.clearTasks - g.clarity.unclear.length).toBe(0);
+  });
+
+  it("ruling 290: past the cap the names stop and the count does not", () => {
+    // The cap is what stops one card becoming a wall on a drifted instance;
+    // the remainder is what stops the capped list reading as the whole set.
+    // CANARY: drop the `.slice` in `namedKeys` and the first assertion fails;
+    // drop the remainder arithmetic on the card and a reader sees 8 of 12.
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    for (let i = 0; i < INSIGHTS_NAMED_EXCEPTIONS + 4; i += 1) {
+      insertTask(db, { key: `VIB-${100 + i}`, waiting: "none" });
+    }
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.clarity.unclear).toHaveLength(INSIGHTS_NAMED_EXCEPTIONS);
+    expect(g.clarity.activeTasks).toBe(INSIGHTS_NAMED_EXCEPTIONS + 4);
+    expect(g.clarity.clearTasks).toBe(0);
   });
 
   it("pairs packet-opened with the task's next packet-resolved; unresolved packets count as open, not as zero", () => {

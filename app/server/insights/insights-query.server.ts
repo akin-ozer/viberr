@@ -71,7 +71,13 @@ export interface DailyPoint {
 export interface OversightSummary {
   /** Active (non-archived, non-terminal-stage) tasks with a definite next
    *  actor: `waiting` names human/agent, or a human owns the task. */
-  clarity: { activeTasks: number; clearTasks: number; pct: number | null };
+  clarity: {
+    activeTasks: number;
+    clearTasks: number;
+    pct: number | null;
+    /** Ruling 290: WHICH active tasks have no definite next actor. */
+    unclear: string[];
+  };
   /** Of DELIVERED tasks — a delivered work revision or a recorded PR — how
    *  many carry BOTH the task branch and a recorded PR, the key↔branch↔PR
    *  chain (ruling 143). An allocated branch alone is NOT a delivery: ruling
@@ -82,7 +88,13 @@ export interface OversightSummary {
    *  delivered revision with NO pull request stays in the denominator,
    *  because an unpushed delivery is exactly the untraceable one this number
    *  exists to find. */
-  traceability: { deliveredTasks: number; tracedTasks: number; pct: number | null };
+  traceability: {
+    deliveredTasks: number;
+    tracedTasks: number;
+    pct: number | null;
+    /** Ruling 290: WHICH delivered tasks are untraced, not just how many. */
+    untraced: string[];
+  };
   /** How long an operator-opened decision/blocked packet waits for the human,
    *  from the packet-opened audit row to its task's next packet-resolved row. */
   packetResolution: {
@@ -99,6 +111,8 @@ export interface OversightSummary {
    *  managing. A project with the guardrail off contributes none: nothing is
    *  compacting there. */
   longTimelines: number;
+  /** Ruling 290: WHICH of them, capped — the count alone names no task to open. */
+  longTimelineKeys: string[];
   /** F31-D6 — coordination overhead: the COORDINATION runs' share of all
    *  reported run spend in scope. Live pass 31 read 63% before anyone had a
    *  number for it. Coordination is `operator` + `controller` (RunKind): both
@@ -398,9 +412,18 @@ function oversightSummary(
     const terminal = roles.get(t.project_slug)?.terminalId ?? null;
     return terminal == null || t.stage !== terminal;
   });
-  const clearTasks = active.filter(
-    (t) => t.waiting !== "none" || t.owner_user_id != null,
-  ).length;
+  // Ruling 290 (F37-125): the NAMES, not just the counts. Every one of these
+  // three numbers is a count of EXCEPTIONS — work that is untraceable, work
+  // with no next actor, a record past the readability guardrail — and each one
+  // withheld the only fact a person needs to act on it. "41 of 42 delivered
+  // tasks carry branch + PR" is a traceability metric that will not say which
+  // task cannot be traced. Ruling 253 settled this shape for a knowledge base
+  // ("an agent cannot ask for a rule it cannot name"); a dashboard is the same
+  // rule with a person reading it.
+  const unclearTasks = active.filter(
+    (t) => t.waiting === "none" && t.owner_user_id == null,
+  );
+  const clearTasks = active.length - unclearTasks.length;
 
   // 2. Key↔branch↔PR traceability over DELIVERED tasks: a delivered revision
   // or a recorded PR. A branch alone is not a delivery — ruling 122 allocates
@@ -408,9 +431,10 @@ function oversightSummary(
   const delivered = tasks.filter(
     (t) => t.work_revision_sha != null || t.pr_json != null,
   );
-  const traced = delivered.filter(
-    (t) => t.branch != null && t.pr_json != null,
-  ).length;
+  const untracedTasks = delivered.filter(
+    (t) => t.branch == null || t.pr_json == null,
+  );
+  const traced = delivered.length - untracedTasks.length;
 
   // 3. Blocked-decision resolution: pair each packet-opened audit row with the
   // task's NEXT packet-resolved row. Withdrawn/superseded packets never resolve
@@ -482,16 +506,29 @@ function oversightSummary(
   }
   reviewDurations.sort((a, b) => a - b);
 
+  const longTimelineTasks = tasks.filter((t) => {
+    const threshold = compressionAt.get(t.project_slug);
+    // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
+    // opens with `if (events.length <= options.threshold) return events`, so a
+    // task sitting exactly ON the threshold is not compacted and is not one the
+    // readability machinery is managing. Counting it as "past their project's
+    // compression threshold" put a task in the card that the fold never touches
+    // — off by one against the only rule that decides.
+    return threshold != null && t.event_count > threshold;
+  });
+
   return {
     clarity: {
       activeTasks: active.length,
       clearTasks,
       pct: active.length ? clearTasks / active.length : null,
+      unclear: namedKeys(unclearTasks),
     },
     traceability: {
       deliveredTasks: delivered.length,
       tracedTasks: traced,
       pct: delivered.length ? traced / delivered.length : null,
+      untraced: namedKeys(untracedTasks),
     },
     packetResolution: {
       resolved: packetDurations.length,
@@ -510,12 +547,25 @@ function oversightSummary(
     // readability machinery is managing. Counting it as "past their project's
     // compression threshold" put a task in the card that the fold never touches
     // — off by one against the only rule that decides.
-    longTimelines: tasks.filter((t) => {
-      const threshold = compressionAt.get(t.project_slug);
-      return threshold != null && t.event_count > threshold;
-    }).length,
+    longTimelines: longTimelineTasks.length,
+    longTimelineKeys: namedKeys(longTimelineTasks),
     coordination,
   };
+}
+
+/**
+ * Ruling 290: how many exception KEYS a card names before it stops.
+ *
+ * Enough that a small set is named in full — a dashboard's job is to point at
+ * the thing — and few enough that a badly-drifted instance does not turn one
+ * card into a wall. Past it the card says how many more there are, so the
+ * number is never quietly smaller than the truth.
+ */
+export const INSIGHTS_NAMED_EXCEPTIONS = 8;
+
+/** `PROJ/KEY` for each row, capped, newest-looking order preserved. */
+function namedKeys(rows: readonly { project_slug: string; task_key: string }[]): string[] {
+  return rows.slice(0, INSIGHTS_NAMED_EXCEPTIONS).map((t) => `${t.project_slug}/${t.task_key}`);
 }
 
 export function getInsightsSummary(

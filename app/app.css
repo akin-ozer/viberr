@@ -5171,6 +5171,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .stat-val { font-size: 1.75rem; font-weight: 800; font-family: var(--font-display); line-height: 1.1; }
 .stat-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
 .stat-sub { font-size: .75rem; color: var(--faint); }
+/* Ruling 290: the exceptions a stat counts, by name and linked. Wraps rather
+   than truncates — a name a reader can see but not finish is the shape this
+   rule exists to end. */
+.stat-names { display: flex; flex-wrap: wrap; gap: .25rem .5rem; margin-top: .25rem; }
+.stat-names .linkish { font-family: var(--font-mono); font-size: .69rem; }
 .insights-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .breakdown, .daily { margin-bottom: 1rem; }
 .bar-list { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }

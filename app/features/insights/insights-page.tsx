@@ -3,6 +3,7 @@ import type {
   OversightSummary,
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
+import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
@@ -205,6 +206,8 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
             ? `${g.clarity.clearTasks} of ${g.clarity.activeTasks} active tasks have a definite next actor`
             : "no active tasks"
         }
+        names={g.clarity.unclear}
+        more={g.clarity.activeTasks - g.clarity.clearTasks - g.clarity.unclear.length}
       />
       <StatCard
         label="Branch & PR traceability"
@@ -214,6 +217,12 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
           g.traceability.deliveredTasks
             ? `${g.traceability.tracedTasks} of ${g.traceability.deliveredTasks} delivered tasks carry branch + PR`
             : "no delivered tasks yet"
+        }
+        names={g.traceability.untraced}
+        more={
+          g.traceability.deliveredTasks -
+          g.traceability.tracedTasks -
+          g.traceability.untraced.length
         }
       />
       <StatCard
@@ -246,6 +255,8 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         value={fmtCount(g.longTimelines)}
         icon="memory"
         sub="tasks past their project's compression threshold"
+        names={g.longTimelineKeys}
+        more={g.longTimelines - g.longTimelineKeys.length}
       />
       {/* F31-D6: pass 31 measured coordination at 63% of all run spend with
           no card saying so — coordination cost was invisible next to the
@@ -578,11 +589,20 @@ function StatCard({
   value,
   icon,
   sub,
+  /** Ruling 290: the exceptions this number counts, BY NAME. A card that
+   *  reports "41 of 42 delivered tasks carry branch + PR" and will not say
+   *  which one cannot be traced has withheld the only fact a reader needs. */
+  names,
+  /** How many more there are than the card names, so a capped list never reads
+   *  as the whole set. */
+  more,
 }: {
   label: string;
   value: string;
   icon: Parameters<typeof Icon>[0]["name"];
   sub?: string;
+  names?: readonly string[];
+  more?: number;
 }) {
   // An absent reading must not be the loudest thing on the card: "n/a" at
   // full stat emphasis reads like a data point.
@@ -595,8 +615,25 @@ function StatCard({
       <span className={"stat-val" + (absent ? " na" : "")}>{value}</span>
       <span className="stat-label">{label}</span>
       {sub && <span className="stat-sub">{sub}</span>}
+      {names && names.length > 0 && (
+        <span className="stat-sub stat-names">
+          {names.map((n) => (
+            <Link key={n} to={taskHref(n)} className="linkish">
+              {n.split("/")[1] ?? n}
+            </Link>
+          ))}
+          {more != null && more > 0 && <span className="dim">+{more} more</span>}
+        </span>
+      )}
     </div>
   );
+}
+
+/** `PROJ/KEY` → the task page. The query hands back the pair precisely so the
+ *  card can link rather than leave a reader searching for the key. */
+function taskHref(projectAndKey: string): string {
+  const [slug, key] = projectAndKey.split("/");
+  return `/projects/${slug}/tasks/${key}`;
 }
 
 /** A labelled horizontal bar list, each bar sized to the row's share of the

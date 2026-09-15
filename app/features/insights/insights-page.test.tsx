@@ -65,8 +65,8 @@ const FULL: InsightsSummary = {
       totalTokens: 4_000,
       tokenless: { delivery: 0, coordination: 0 },
     },
-    clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
-    traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
+    clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 , unclear: []},
+    traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 , untraced: []},
     packetResolution: {
       resolved: 3,
       avgMs: 400_000,
@@ -75,6 +75,7 @@ const FULL: InsightsSummary = {
     },
     timeToReview: { tasks: 4, avgMs: 3_600_000, medianMs: 1_800_000 },
     longTimelines: 2,
+    longTimelineKeys: [],
   },
   backendQuota: [
     {
@@ -207,7 +208,7 @@ describe("InsightsPage", () => {
         ...FULL.oversight,
         // FULL's traceability is a real 100%; move it so the only card that
         // could print "100%" here is the one under test.
-        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 , untraced: []},
         coordination: {
           ...FULL.oversight.coordination,
           coordinationCostUsd: 4.34,
@@ -240,7 +241,7 @@ describe("InsightsPage", () => {
       ...FULL,
       oversight: {
         ...FULL.oversight,
-        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 , untraced: []},
         coordination: {
           coordinationCostUsd: 13.38,
           totalCostUsd: 49.38,
@@ -288,7 +289,7 @@ describe("InsightsPage", () => {
       ...FULL,
       oversight: {
         ...FULL.oversight,
-        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 },
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 , untraced: []},
         coordination: {
           ...FULL.oversight.coordination,
           coordinationCostUsd: 13.38,
