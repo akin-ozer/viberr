@@ -290,7 +290,41 @@ const NPM_REACHABLE: ReadonlySet<keyof Toolchain> = new Set(["pnpm", "yarn"]);
  * npm-published tool, and nothing rescues one the operating system was meant
  * to provide, so the two cases must not read alike.
  */
-export function shellInventoryPrompt(tc: Toolchain): string {
+/**
+ * Ruling 275 (pass 37, F37-108): the tools a piece of PROSE plans around that
+ * this host does not have.
+ *
+ * Word-boundary, case-insensitive, over the labels the probe actually measured
+ * — so it can only ever name a tool that was measured and found absent, and it
+ * says nothing when the prose is clean. `go` is excluded: it is an ordinary
+ * English word and a persona saying "go and read the tests" is not a plan
+ * against a Go toolchain.
+ */
+function absentToolsNamedIn(tc: Toolchain, prose: string): string[] {
+  if (!prose.trim()) return [];
+  const named: string[] = [];
+  for (const [field, label] of SHELL_TOOLS) {
+    if (tc[field]) continue;
+    if (label === "go") continue;
+    if (new RegExp(`\\b${label}\\b`, "i").test(prose)) named.push(label);
+  }
+  return named;
+}
+
+export function shellInventoryPrompt(
+  tc: Toolchain,
+  /**
+   * Ruling 275: the run's OWN role description, when there is one. Ruling 191
+   * put this measurement into every prompt, and it says what the host lacks —
+   * it did not say "and the role description above plans around three of
+   * them". A contradiction inside one prompt is resolved by the model, and the
+   * persona is the half written with more authority and read first. Live, this
+   * instance's Infrastructure Engineer was told it owns "the Docker Compose
+   * stack" and that "`make up` is your headline deliverable" while running two
+   * tasks on a host with neither.
+   */
+  persona: string = "",
+): string {
   const present: string[] = [];
   const absent: string[] = [];
   const fetchable: string[] = [];
@@ -340,6 +374,21 @@ export function shellInventoryPrompt(tc: Toolchain): string {
     );
   } else {
     lines.push("", "Every tool this probe knows about is installed.");
+  }
+  // Ruling 275: named specifically, because "NOT installed: docker, make" a
+  // paragraph below a role description that says the stack is yours is a
+  // contradiction the reader has to notice on its own.
+  const conflicts = absentToolsNamedIn(tc, persona);
+  if (conflicts.length > 0) {
+    lines.push(
+      "",
+      `Your own role description above mentions ${conflicts
+        .map((t) => `\`${t}\``)
+        .join(", ")} — not on this host. Where it plans around ` +
+        `${conflicts.length === 1 ? "that" : "those"}, this measurement is the ` +
+        "one that is true today: say so and work to what is here, rather than " +
+        "following the description into a command that exits 127.",
+    );
   }
   return lines.join("\n");
 }

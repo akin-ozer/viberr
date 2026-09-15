@@ -6081,6 +6081,32 @@ by rewriting those paragraphs:*
     left wondering where the board went.
     (`controller-conversations.server.ts`, `settings-actions.server.ts`.)
 
+275. **A prompt does not contradict itself in silence (2026-09-15, pass 37; F37-108, extends
+    ruling 191).** Ruling 191 put the measured shell inventory into every specialist run,
+    operator run and controller turn, unasked, because "an inventory you must know to ask for
+    is not a fact the planner has". It says what the host lacks. It did not say "and the role
+    description above plans around three of them".
+    Found by the controller, reading personas it had twice reported it could not read. Four of
+    this instance's own agent templates carry a map of a machine that does not exist. The
+    Infrastructure Engineer — running two tasks at that moment — is told "you own the shared
+    surfaces: the workspace scaffolding, the Docker Compose stack", that "`make up` is your
+    headline deliverable and it must be honest: from a clean checkout it builds, starts
+    Postgres and Redis", and to "cache the pnpm store and Turborepo outputs". The Frontend
+    Engineer reports "the results of your component and Playwright runs". A persona is the
+    system prompt: read first, weighted heaviest, and written with more authority than a
+    measurement further down. A contradiction inside one prompt is resolved by the MODEL, and
+    the product had no opinion about which half was true.
+    The inventory now names them: "Your own role description above mentions `make`, `docker` —
+    not on this host. Where it plans around those, this measurement is the one that is true
+    today." Derived, never asserted — the scan runs over the labels the probe actually
+    measured, so it can only ever name a tool that was measured and found absent, and it says
+    nothing when the prose is clean. Word boundaries, because "curly braces" is not a plan
+    against `curl`; and `go` is excluded outright, because it is an ordinary English word and
+    "go and read the tests" is not a Go toolchain.
+    This does not rewrite anyone's persona. Whoever wrote it owns it; the product's job is to
+    stop a run acting on the wrong half of its own prompt without noticing.
+    (`toolchain.server.ts`, `specialist-run.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

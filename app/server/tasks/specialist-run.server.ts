@@ -2012,6 +2012,9 @@ async function dispatchAgentRun(
       input.triggeredByName,
     );
   }
+  // Ruling 275: the persona this run will actually carry, so the shell
+  // inventory can contradict it by name where the two disagree.
+  if (persona.trim()) promptInput.persona = persona;
   const basePrompt = buildAnalyzePrompt(promptInput);
   // The human needs the real reason too, and needs it BEFORE the agent's own
   // account of the run. Without this the only trace on the task page is the
@@ -3073,6 +3076,10 @@ export interface PromptCloneFailure {
 
 /** Everything the fresh-run prompt is composed from (`buildAnalyzePrompt`). */
 export interface AnalyzePromptInput {
+  /** Ruling 275: the run's own system prompt, read so the shell inventory can
+   *  name the tools that prompt plans around and this host does not have. Not
+   *  emitted — only scanned. */
+  persona?: string;
   role: string;
   taskKey: string;
   title: string;
@@ -3254,7 +3261,12 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   // was already measured (ruling 182) and reachable ONLY through the
   // controller's opt-in `instance_health`; the agents whose shell it is could
   // not see it at all.
-  prompt += `\n\n${shellInventoryPrompt(cachedToolchain())}`;
+  // Ruling 275: the inventory also names the absent tools the run's OWN
+  // persona plans around, because "NOT installed: docker, make" a paragraph
+  // below a role description saying the Compose stack is yours is a
+  // contradiction the reader has to spot unaided — and the persona is the half
+  // written with more authority.
+  prompt += `\n\n${shellInventoryPrompt(cachedToolchain(), input.persona ?? "")}`;
   // P19-G0: the canonical state goes AFTER the workspace/delivery contract and
   // BEFORE the directive — the contract is what the agent may do, the anchor is
   // where the task actually stands, and the directive is this turn's focus. The

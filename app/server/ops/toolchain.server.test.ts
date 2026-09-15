@@ -171,6 +171,53 @@ describe("shellInventoryPrompt (ruling 191)", () => {
     );
   });
 
+  /**
+   * Ruling 275 (pass 37, F37-108): ruling 191 put this measurement into every
+   * prompt and it says what the host lacks — it did not say "and the role
+   * description above plans around three of them". A contradiction inside one
+   * prompt is resolved by the model, and the persona is the half written with
+   * more authority and read first. Live on this instance: the Infrastructure
+   * Engineer's persona said "you own … the Docker Compose stack" and "`make
+   * up` is your headline deliverable and it must be honest", while it ran two
+   * tasks on a host with neither.
+   */
+  it("ruling 275: names the absent tools the run's OWN persona plans around", () => {
+    const persona =
+      "You own the shared surfaces: the workspace scaffolding, the Docker Compose stack, " +
+      "and the CI pipeline. `make up` is your headline deliverable.";
+    const text = shellInventoryPrompt(host({}), persona);
+    // CANARY: drop the persona scan and the prompt lists "NOT installed:
+    // make, docker, …" a paragraph under a role description that says the
+    // stack is yours, and leaves the reader to notice.
+    expect(text).toContain("Your own role description above mentions `make`, `docker`");
+    expect(text).toContain("not on this host");
+    expect(text).toContain("exits 127");
+  });
+
+  it("ruling 275: says nothing when the persona plans around what is actually here", () => {
+    // CANARY: match on substrings instead of word boundaries and "nodemon" or
+    // "encurl" would name `node`/`curl`; scan the PRESENT tools too and a
+    // persona that correctly says "run npm test" gets contradicted.
+    const clean = shellInventoryPrompt(
+      host({}),
+      "You write TypeScript and run the suite with npm. Read the git history first. " +
+        "Prefer curly braces on every block.",
+    );
+    // "curly" contains "curl", and `curl` is absent here — a substring match
+    // would name it off a sentence about brace style.
+    expect(clean).not.toContain("Your own role description");
+    // A tool that is PRESENT is never flagged, however often it is named.
+    expect(shellInventoryPrompt(host({ docker: "27.0" }), "Bring the docker stack up.")).not.toContain(
+      "Your own role description",
+    );
+    // `go` is excluded on purpose: it is an ordinary English word, and a
+    // persona saying "go and read the tests" is not a plan against a Go
+    // toolchain. CANARY: include it and every prose persona trips this.
+    expect(
+      shellInventoryPrompt(host({}), "Go and read the tests before you change anything."),
+    ).not.toContain("Your own role description");
+  });
+
   it("separates what `npx` can rescue from what the OS was meant to provide", () => {
     const text = shellInventoryPrompt(host({}));
     // The two cases must not read alike: `npx pnpm` genuinely works here and
