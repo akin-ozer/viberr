@@ -687,6 +687,61 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
+   * Ruling 289 (pass 37, F37-124): the excerpt SAYS it is one.
+   *
+   * `read_board` returned a bare `.slice` of another task's goal, so a long
+   * contract came back ending mid-word and read as the whole of it — the shape
+   * rulings 283, 285 and 288 closed on a knowledge base, an agent report and a
+   * goal draft, sitting in the reader those rulings' own author wrote the same
+   * day. The cap stays: this is the SHALLOW read of the tasks beside your own.
+   */
+  it("ruling 289: a clipped goal says it is clipped, and a short one is untouched", async () => {
+    const store = setupTestStore(ctxDb);
+    const long = `Deliverable: the thing. ${"detail ".repeat(500)}END-OF-CONTRACT`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
+      goal: long,
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "triage" }),
+      goal: "Short and whole.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    const call = async (taskKey: string) => {
+      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
+      // a shape change fails the assertions below rather than reading undefined.
+      const answer = (await read.handler({ taskKey } as never, {} as never)) as {
+        content: { text: string }[];
+      };
+      return answer.content[0]!.text;
+    };
+
+    // Canary: put the bare `.slice` back and the excerpt reads as the contract.
+    const clipped = await call("VIB-2");
+    expect(clipped).toContain("Deliverable: the thing.");
+    expect(clipped).not.toContain("END-OF-CONTRACT");
+    expect(clipped).toContain("[excerpt");
+    expect(clipped).toContain("the task's own page has all of it");
+
+    // …and a goal that fits carries no marker: a whole contract that claims to
+    // be an excerpt sends a reader looking for text that does not exist.
+    const whole = await call("VIB-3");
+    expect(whole).toContain("Short and whole.");
+    expect(whole).not.toContain("[excerpt");
+  });
+
+  /**
    * Ruling 285 (pass 37, F37-120): the coordinator could not read a report it
    * was handed half of. Its prompt clips an agent report at 4,000 characters,
    * `get_task` clips every `recentTimeline` entry at 1,500, and nothing in the

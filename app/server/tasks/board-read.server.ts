@@ -31,6 +31,33 @@ export interface BoardReadContext {
 }
 
 /**
+ * The goal, or its opening with a line SAYING it is an opening.
+ *
+ * The cap is deliberate (see {@link BOARD_READ_GOAL_CHARS}) and the silence was
+ * not: this returned a bare `.slice`, so a 6,000-character contract came back
+ * ending mid-word and read as the whole of it. That is the shape this pass
+ * spent the day closing everywhere else — a knowledge base (ruling 283), an
+ * agent report (ruling 285), a goal draft (ruling 288) — and it was in the
+ * reader those rulings' own author wrote the same day.
+ *
+ * There is no "read the rest" tool to name here on purpose: this is the SHALLOW
+ * read of the tasks beside your own, and a second task's whole contract
+ * competing with your own prompt is what the cap prevents. So the marker says
+ * where the full text is instead — the task page, which a person can open and
+ * an agent can be pointed at.
+ */
+function goalExcerpt(goal: string | null): string | null {
+  if (goal === null) return null;
+  if (goal.length <= BOARD_READ_GOAL_CHARS) return goal;
+  return (
+    `${goal.slice(0, BOARD_READ_GOAL_CHARS)}\n\n` +
+    `[excerpt — this goal is ${goal.length.toLocaleString("en-US")} characters and this is ` +
+    `its first ${BOARD_READ_GOAL_CHARS.toLocaleString("en-US")}. Do not treat what is above ` +
+    `as the whole contract; the task's own page has all of it.]`
+  );
+}
+
+/**
  * One task as JSON, or the sentence for a key this project does not have.
  * Archived tasks are INCLUDED: "SHOP-8 was archived" is a real answer to "does
  * SHOP-8 exist", and a reader told about a retired key must be able to learn
@@ -61,7 +88,7 @@ export function readBoardTask(
       waiting: row.waiting,
       archived: row.archived,
       waitsOn: row.blockedBy.map((e) => `${e.label} (${e.state})`),
-      goal: file ? file.parsed.goal.slice(0, BOARD_READ_GOAL_CHARS) : null,
+      goal: goalExcerpt(file?.parsed.goal ?? null),
     },
     null,
     1,
