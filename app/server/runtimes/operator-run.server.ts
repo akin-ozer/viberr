@@ -35,9 +35,9 @@ import {
 import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { stripUngovernedRepoCatalog } from "./skill-mount.server";
 import {
-  KB_INJECTION_BUDGET,
+  KB_INDEX_NOTE,
   KB_PRECEDENCE_NOTE,
-  readKbBodies,
+  readKbIndexes,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
@@ -3540,29 +3540,24 @@ export function buildOperatorSystemPrompt(
   for (const part of skillSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (skill)\n\n${part.body}`);
   }
-  // Inject declared knowledge-base docs into context (F6, FR9): the KB leg was
-  // decorative — no run ever received KB content. Load every declared KB folder
-  // that exists in the store, same as skills. The KB_INJECTION_BUDGET is a GLOBAL
-  // cap shared across ALL declared KBs (F9) — an agent with many KBs can't blow
-  // the prompt with N × 24k.
-  //
-  // P14-KM-05: nothing is skipped once the budget is spent — a KB that no longer
-  // fits emits an explicit "omitted entirely" marker, so the prompt names what
-  // was dropped instead of quietly shrinking.
-  const kbSet = readKbBodies(authority.kb, dataRoot, KB_INJECTION_BUDGET, {
-    // Ruling 261: the project's rulings keep a reserved floor. The operator
-    // writes the packets and scoping notes every specialist works from, so it
-    // is the worst agent on the board to starve of the project's settled rules
-    // — and, carrying the most grants, it was the first to be starved.
-    rulingsKb: authority.rulingsKb ?? null,
-  });
+  // Index every declared knowledge base (F6, FR9; ruling 283). The operator
+  // carries the most grants on most boards, which under the old shared
+  // character budget made it the FIRST agent starved of the project's settled
+  // rules — ruling 261 raised a floor for it and the floor was then eaten by
+  // the alphabetically-first document inside the KB it protected. An index has
+  // no budget to lose, so the operator now sees every document of every KB it
+  // holds and reads the ones the work needs.
+  const kbSet = readKbIndexes(authority.kb, dataRoot);
   // R19-2: the SAME precedence rule the specialist runtime injects — one exported
   // constant, so the operator and the agents it coordinates cannot be told two
   // different things about which source outranks the other. (The operator writes
   // the packets and scoping notes those agents work from, so an operator ranking
   // the KB above the repo would re-introduce the divergence through its own
   // instructions even with every specialist ranked correctly.)
-  if (kbSet.parts.length > 0) resourceParts.push(KB_PRECEDENCE_NOTE);
+  if (kbSet.parts.length > 0) {
+    resourceParts.push(KB_PRECEDENCE_NOTE);
+    resourceParts.push(KB_INDEX_NOTE);
+  }
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);
   }

@@ -34,7 +34,6 @@ import {
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import {
-  KB_INJECTION_BUDGET,
   KB_PRECEDENCE_NOTE,
 } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -2805,7 +2804,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     mkdirSync(path.join(dataRoot, "kb", "release-facts"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "release-facts", "facts.md"),
-      "# Facts\n\nSENTINEL-KB-1",
+      "# Facts SENTINEL-KB-1\n\nbody text",
     );
     const persona = buildSpecialistPersona({
       profileId: "docs-writer",
@@ -2842,7 +2841,7 @@ describe("buildSpecialistPersona — attached resources", () => {
       mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
       writeFileSync(
         path.join(dataRoot, "kb", name, "conventions.md"),
-        `# ${name}\n\n${sentinel}`,
+        `# ${name} ${sentinel}\n\nbody text`,
       );
     }
 
@@ -2858,7 +2857,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(
       persona.split("Which source wins (knowledge bases vs the repository)").length - 1,
     ).toBe(1);
-    // Both bodies arrived, and BOTH sit after the rule that ranks them.
+    // Both indexes arrived, and BOTH sit after the rule that ranks them.
     expect(persona.indexOf("Which source wins")).toBeLessThan(
       persona.indexOf("SENTINEL-KB-HOUSE"),
     );
@@ -2935,7 +2934,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     mkdirSync(path.join(dataRoot, "kb", "pass31-qa-conventions"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "pass31-qa-conventions", "conventions.md"),
-      "# QA conventions\n\nPASS31-KB-LOADED",
+      "# QA conventions PASS31-KB-LOADED\n\nbody text",
     );
     for (const [name, sentinel] of [
       ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
@@ -2967,28 +2966,26 @@ describe("buildSpecialistPersona — attached resources", () => {
   });
 
   /**
-   * T5 (pass 31) — the KB budget is shared across the whole grant list, and the
-   * squeezed-out KB says so IN THE PROMPT. `kb-injection.server.test.ts` proves
-   * `readKbBodies` returns the marker; nothing proved the persona then carries
-   * it, and the persona hardcodes the budget so this is the only layer where a
-   * regression (a fresh budget per KB, or the marker filtered out of the
-   * assembled sections) is visible. The skill twin of this is
-   * "many granted skills share ONE budget instead of N × the cap" above.
+   * Ruling 283 replaced this test's subject. T5 (pass 31) pinned the honest
+   * behaviour of a SHARED character budget: the squeezed-out KB said so in the
+   * prompt. That budget is gone — it had no allocation worth defending, because
+   * the docs inside one KB spent it in alphabetical order — so what this layer
+   * must now prove is that the persona carries INDEXES and that a huge KB costs
+   * the next one nothing. The skill budget above is untouched and still shared.
    */
-  it("T5/F9: KBs share ONE budget — a KB squeezed out by the one before it SAYS so in the prompt", () => {
-    // Canary: pass a fresh `KB_INJECTION_BUDGET` per name inside `readKbBodies`
-    // (drop the running `budget -= injection.body.length`) and SENTINEL-KB-SECOND
-    // arrives while both markers disappear.
+  it("ruling 283: a huge KB is indexed, not injected, and costs the next one nothing", () => {
+    // Canary: swap `readKbIndexes` back for a budgeted body reader in
+    // `buildSpecialistPersona` and SENTINEL-KB-SECOND.md stops being named.
     const dataRoot = tempRoot();
     mkdirSync(path.join(dataRoot, "kb", "big-kb"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "big-kb", "huge.md"),
-      "B".repeat(KB_INJECTION_BUDGET + 6_000),
+      `# Huge\n\n${"B".repeat(30_000)}`,
     );
     mkdirSync(path.join(dataRoot, "kb", "second-kb"), { recursive: true });
     writeFileSync(
-      path.join(dataRoot, "kb", "second-kb", "facts.md"),
-      `SENTINEL-KB-SECOND ${"S".repeat(5_000)}`,
+      path.join(dataRoot, "kb", "second-kb", "SENTINEL-KB-SECOND.md"),
+      "# Second\n\nfacts",
     );
 
     const persona = buildSpecialistPersona({
@@ -2998,16 +2995,15 @@ describe("buildSpecialistPersona — attached resources", () => {
       dataRoot,
     });
 
-    // The first KB spends the shared budget and says it was clipped …
-    expect(persona).toContain("knowledge base truncated");
-    // … the second contributes NO content, only the honest marker …
-    expect(persona).not.toContain("SENTINEL-KB-SECOND");
-    expect(persona).toContain("knowledge base omitted entirely");
-    // … and C1 rides along: what was dropped is named, with the reason.
-    expect(persona).toContain("**second-kb**");
-    expect(persona).toContain("did not fit the shared");
-    // One budget was spent, not two.
-    expect(persona.length).toBeLessThan(KB_INJECTION_BUDGET * 2);
+    // Both KBs are named in full, and neither is reported as having lost text.
+    expect(persona).toContain("`huge.md`");
+    expect(persona).toContain("SENTINEL-KB-SECOND.md");
+    expect(persona).not.toContain("**second-kb**");
+    // The 30,000-char document itself is not in the prompt — that is the point
+    // of an index, and it is why there is nothing left to ration.
+    expect(persona).not.toContain("B".repeat(200));
+    // …and the run is told how to turn a name into the text.
+    expect(persona).toContain("read_knowledge_doc");
   });
 
   /**
@@ -3363,7 +3359,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
 
   it("a reviewer with kb:[] resolves the delivering engagement's KB bodies", async () => {
     deployKbPair(["foo"], []);
-    writeKb("foo", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+    writeKb("foo", "# Conventions SENTINEL-DELIVERER-KB\n\nbody text");
     const sys = await engageAndRunCritic();
     expect(sys).toContain("foo (knowledge base)");
     expect(sys).toContain("SENTINEL-DELIVERER-KB");
@@ -3417,7 +3413,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
       path.join(store.dataRoot, "skills", "deliverer-craft", "SKILL.md"),
       "# Craft\n\nSENTINEL-DELIVERER-SKILL",
     );
-    writeKb("shared-kb", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+    writeKb("shared-kb", "# Conventions SENTINEL-DELIVERER-KB\n\nbody text");
 
     const sys = await engageAndRunCritic();
 
@@ -3439,7 +3435,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildSpecialistPersona and
     // the first two assertions fail.
     deployKbPair(["house"], []);
-    writeKb("house", "# House style\n\nSENTINEL-DELIVERER-KB");
+    writeKb("house", "# House style SENTINEL-DELIVERER-KB\n\nbody text");
     const sys = await engageAndRunCritic();
     expect(sys).toContain("Which source wins (knowledge bases vs the repository)");
     expect(sys).toContain("outrank the knowledge bases");
@@ -4124,7 +4120,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       mkdirSync(path.join(store.dataRoot, "kb", "house-kb"), { recursive: true });
       writeFileSync(
         path.join(store.dataRoot, "kb", "house-kb", "conventions.md"),
-        "# House\n\nSENTINEL-DELIVERER-KB",
+        "# House SENTINEL-DELIVERER-KB\n\nbody text",
       );
 
       await assignSpecialist(store.db,
@@ -4164,7 +4160,16 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
       expect(existsSync(path.join(criticWs, ".claude"))).toBe(false);
       expect(existsSync(path.join(path.dirname(ws), ".viberr-plugins"))).toBe(false);
-      const assembled = JSON.stringify(spec);
+      // The MCP servers are replaced by their NAMES before serialising: since
+      // ruling 283 this reviewer mounts a `viberr_agent` server (its inherited
+      // KB grant needs `read_knowledge_doc`) and an SDK server instance holds a
+      // reference back to itself, which `JSON.stringify` cannot walk. The names
+      // are what this assertion is about anyway — a skill leaking through a
+      // mounted server would leak through its NAME.
+      const assembled = JSON.stringify({
+        ...spec,
+        mcpServers: Object.keys(spec.mcpServers ?? {}),
+      });
       expect(assembled).not.toContain("deliverer-craft");
       expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
     });

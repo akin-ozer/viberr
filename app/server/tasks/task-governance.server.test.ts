@@ -3677,7 +3677,19 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       dataRoot: store.dataRoot,
     })!.parsed.goal;
 
-  it("writes a CUSTOM directive into the goal, so every re-anchor reads it", async () => {
+  /**
+   * Ruling 284 (owner's call, 2026-09-15) inverted this test's subject.
+   *
+   * Ruling 189 welded a typed directive into the goal "because a person wrote
+   * it". One text box takes both a scope decision and a word to the operator
+   * about its own tooling, so the kind of the answer was unknowable — and live
+   * on SHOP-27 a directive that was mostly "call read_board before you offer a
+   * create_task option" went into the goal of the orders service, where every
+   * future run on it re-anchors. The line is drawn by CHANNEL now: choosing a
+   * structured option is a decision and amends the contract; typing free text
+   * is conversation and does not.
+   */
+  it("ruling 284: a typed CUSTOM directive answers the packet and does NOT touch the goal", async () => {
     const store = prepared();
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     await resolvePacket(
@@ -3692,7 +3704,30 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       { dataRoot: store.dataRoot },
     );
     const goal = goalOf(store);
-    expect(goal).toContain("Mock-only, behind a PaymentProvider port");
+    expect(goal).not.toContain("Mock-only, behind a PaymentProvider port");
+    expect(goal).not.toContain("the decision wins");
+    // Nothing is lost by leaving it out: the directive is on the timeline
+    // verbatim, which is where a human and the operator both read it.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.timeline.map((e) => e.text).join("\n")).toContain(
+      "Mock-only, behind a PaymentProvider port",
+    );
+  });
+
+  it("ruling 189 still stands for a CHOSEN option: it amends the contract", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const goal = goalOf(store);
     expect(goal).toContain("Choose the payment provider");
     // The clause that settles the contradiction the amendment may create — the
     // reviewer must not read the answer as an agent overstepping.
@@ -3946,10 +3981,11 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(decision.type).toBe("note");
   });
 
-  it("DOES amend when a person types a directive, whatever packet they typed it on", async () => {
+  it("ruling 284: a directive typed on a RECOVERY packet stays out of the goal too", async () => {
     const store = prepared();
-    // A typed directive is content a person wrote; it binds the work even when
-    // the option beside it is a recovery choice.
+    // Ruling 189 amended here because "a typed directive is content a person
+    // wrote". Ruling 284 keeps free text out of the contract whatever packet it
+    // was typed on — the channel decides, not the packet.
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },
@@ -3970,7 +4006,18 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(goalOf(store)).toContain("Postgres advisory locks");
+    expect(goalOf(store)).not.toContain("Postgres advisory locks");
+    // …and it still reaches the record: the timeline carries it verbatim, and
+    // the operator's re-queue carries it in its own `note` field.
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!
+        .parsed.timeline.map((e) => e.text)
+        .join("\n"),
+    ).toContain("Postgres advisory locks");
   });
 
   it("does NOT amend when the packet stays open for a human to edit the goal", async () => {

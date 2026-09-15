@@ -9251,8 +9251,21 @@ export async function resolvePacket(
   // what the work IS, and appending those accumulates process noise in the text
   // every future run re-anchors on. Live on SHOP-7 the goal collected two
   // blocks: the provider decision (contract) and "Work stalled: pick a recovery
-  // path → Redirect with sharper guidance" (not). A typed CUSTOM directive
-  // always binds, whatever packet it was typed on, because a person wrote it.
+  // path → Redirect with sharper guidance" (not).
+  //
+  // Ruling 284 (owner's call, 2026-09-15) draws the second line by CHANNEL:
+  // choosing a structured option is a decision and amends the contract; typing
+  // free text is conversation and does not. The old rule was the opposite — a
+  // typed directive "always binds, whatever packet it was typed on, because a
+  // person wrote it" — and it made the kind of the answer unknowable, because
+  // one text box takes both a scope decision and a word to the operator about
+  // its own tooling. Live the same hour it was written: SHOP-27's packet was
+  // answered with a directive that was mostly "call read_board before you offer
+  // a create_task option", and that sentence is now welded into the goal of the
+  // orders service, where every future run on it re-anchors on a note about
+  // another actor's tools. Nothing is lost by leaving it out: the directive is
+  // written verbatim to the timeline, and it reaches the operator in its own
+  // `note` field on the re-queue, which is the channel it was actually for.
   const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
     "request_edit",
     "hold_runtime_debug",
@@ -9298,13 +9311,14 @@ export async function resolvePacket(
   const goalAmendment: string | null =
     endsTheTask ||
     !clearPacket ||
-    (!customDirective && PROCESS_ONLY_OPTION_KINDS.has(option.kind))
+    customDirective !== "" ||
+    PROCESS_ONLY_OPTION_KINDS.has(option.kind)
       ? null
       : (() => {
           const when = now.slice(0, 10);
-          const answer = customDirective
-            ? customDirective
-            : [option.t, option.d].filter((part) => part.trim()).join(" — ");
+          const answer = [option.t, option.d]
+            .filter((part) => part.trim())
+            .join(" — ");
           return (
             `---\n\n` +
             `**Decision — ${when}, ${human.nameHint} answered “${packet.title}”:**\n\n` +

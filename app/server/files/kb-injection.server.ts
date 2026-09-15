@@ -61,20 +61,77 @@ export function isInjectableKbDoc(fileName: string): boolean {
   return STORE_TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
 }
 
-/** Default per-run character budget across ALL of a KB's docs. */
-export const KB_INJECTION_BUDGET = 24_000;
-
 /**
- * Ruling 261: the slice of the shared budget a project's RULINGS knowledge base
- * (ruling 239) can never be starved out of.
+ * Ruling 283 (pass 37, F37-118): a knowledge base arrives as an INDEX, and the
+ * run pulls the documents it decides it needs.
  *
- * 8,000 characters — roughly the ten settled sections the live shopify-clone
- * board accumulated in two days, which is the size a rules file reaches before
- * it stops being read carefully by anything. A rulings KB shorter than this
- * costs the profile grants nothing: the floor is a ceiling on what the OTHERS
- * may take, not an allocation the rulings must spend.
+ * Injecting the text was a budget problem with no good allocation. The docs of
+ * one KB were served in ALPHABETICAL order out of a shared character budget,
+ * first-come-first-served, so whichever doc sorted first took everything it
+ * could and every doc behind it got nothing. Live on the shopify-clone board:
+ * `conventions.md` (20,632 chars) took all 15,817 chars that were left, cut
+ * itself mid-sentence in its own §9, and starved `published-history.md` (185
+ * chars) and `standing-corrections.md` (281 chars) to ZERO — 466 characters of
+ * whole documents lost to buy 466 characters of a document that was being
+ * truncated either way. A task goal on that board reads "See
+ * published-history.md in the project's rulings knowledge base", naming a
+ * document no run on it could ever receive.
+ *
+ * Ruling 261 had already raised a floor for exactly this — it was written
+ * because `standing-corrections.md` arrived cut off mid-word — and the floor
+ * was then eaten by the alphabetically-first document inside the very KB it
+ * was protecting. A second allocation rule would have had the same shape.
+ *
+ * So there is no allocation any more. The index names every document, with its
+ * size and its heading outline, and costs a few hundred characters whatever the
+ * KB weighs; the run reads what the index makes it want to read. A KB can now
+ * grow without silently pushing its own documents out of every prompt, and the
+ * "N docs · agents read the live folder" every UI has always shown is true
+ * again.
  */
-export const RULINGS_KB_FLOOR = 8_000;
+
+/** Heading outline per KB, shared across its docs. Past it, documents are still
+ *  NAMED — the index's whole job is that the run can ask for any of them. */
+export const KB_INDEX_OUTLINE_BUDGET = 4_000;
+
+/** Docs listed per KB. A folder with more says how many it did not name; no
+ *  real knowledge base is near this, and an index that walks 10,000 files is
+ *  the prompt problem this ruling exists to remove. */
+export const KB_INDEX_MAX_DOCS = 200;
+
+/** Cap on ONE `read_knowledge_doc` call. Generous — the point of the pull is
+ *  that a document arrives whole — but not unbounded. */
+export const KB_DOC_READ_CHARS = 48_000;
+
+/** Heading lines are cheap to extract and are what makes an index worth
+ *  reading; a doc far larger than any real KB doc is listed without them. */
+const OUTLINE_MAX_BYTES = 512 * 1024;
+
+/** Markdown heading lines, in order, flattened to `#### Title`. Returns [] for
+ *  a doc with no headings (`.txt`, `.json`, prose) — its path and size are
+ *  still the index entry. Fenced code is skipped so a shell comment inside a
+ *  ``` block is not read as a section of the document. */
+function outlineOf(abs: string, size: number): string[] {
+  if (size > OUTLINE_MAX_BYTES) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  let fenced = false;
+  for (const line of raw.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const m = /^(#{1,6})\s+(\S.*?)\s*#*$/.exec(line);
+    if (m) out.push(`${m[1]} ${m[2]}`);
+  }
+  return out;
+}
 
 interface KbDoc {
   /** Store-relative path within the KB folder (forward slashes), for headings. */
@@ -151,64 +208,26 @@ export interface UnresolvedKbGrant {
 }
 
 export interface KbInjection {
-  /** The text to inject ("" when nothing of this KB reached the run). */
+  /** The index text to inject ("" when this KB resolved to nothing). */
   body: string;
   /** Present when the grant did not deliver what every UI says it delivers. */
   unresolved?: UnresolvedKbGrant;
 }
 
 /**
- * Read a knowledge base's documents from the store, concatenated with per-doc
- * headings and bounded by {@link KB_INJECTION_BUDGET}. Returns "" when the KB
- * folder is absent (an unresolved KB reference injects nothing, exactly as
- * skills do). When the budget clips content a truncation marker is appended,
- * and when the remaining budget fits NOTHING the marker is returned on its own
- * (P14-KM-05) — a KB is never dropped silently, whether it was partly or wholly
- * squeezed out by the KBs ahead of it.
+ * Index ONE knowledge base: every document it holds, with its size and its
+ * sections. Returns "" with an `unresolved` row when the grant resolves to
+ * nothing a run can read — a missing folder, a symlink out of the store, an
+ * empty folder, an unreadable one. Those are now the ONLY ways a knowledge
+ * base fails to arrive: an index is never clipped by another KB's size, so a
+ * grant that resolves always names every document it holds (ruling 283).
  *
- * C1/pass-16: the "not silently" part was true of the LOG only. `unresolved` now
- * carries the same structured miss the MCP leg has reported since P14-LV-09, so
- * a renamed/typo'd KB folder reaches the run's own prompt instead of living in
- * a server log nobody reads while every UI still shows the grant attached.
+ * C1/pass-16: `unresolved` carries the same structured miss the MCP leg has
+ * reported since P14-LV-09, so a renamed/typo'd KB folder reaches the run's own
+ * prompt instead of living in a server log nobody reads while every UI still
+ * shows the grant attached.
  */
-/**
- * Ruling 261: roughly how many characters a KB would inject if nothing competed
- * — the file bytes plus each doc's `### <path>` heading, which
- * `readKbBodyDetailed` charges the same budget for (P13-KM-14).
- *
- * Approximate on purpose and safe in both directions: it only decides how much
- * of the shared budget the OTHER knowledge bases may not take, and being a few
- * hundred characters out costs a few hundred characters of reserve. Silent —
- * the real read does the resolving, the warning and the disclosure.
- */
-function kbNaturalSize(name: string, dataRoot?: string): number {
-  try {
-    const dir = kbDirPath(name, dataRoot);
-    if (!existsSync(dir) || lstatSync(dir).isSymbolicLink()) return 0;
-    return collectKbDocs(dir).reduce((total, doc) => {
-      try {
-        return total + statSync(doc.abs).size + `### ${doc.rel}\n\n`.length;
-      } catch {
-        return total;
-      }
-    }, 0);
-  } catch {
-    return 0;
-  }
-}
-
-/** Doc names for a human-readable sentence: `a.md`, `b.md` and `c.md`. */
-function listDocs(rels: readonly string[]): string {
-  const quoted = rels.map((r) => `\`${r}\``);
-  if (quoted.length <= 1) return quoted[0] ?? "";
-  return `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
-}
-
-export function readKbBodyDetailed(
-  name: string,
-  dataRoot?: string,
-  budgetChars: number = KB_INJECTION_BUDGET,
-): KbInjection {
+export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjection {
   const miss = (reason: string): KbInjection => ({
     body: "",
     unresolved: { name, reason },
@@ -231,7 +250,7 @@ export function readKbBodyDetailed(
     // C5/pass-16: the walk below realpath's the ROOT before enforcing
     // containment, so a KB folder that is ITSELF a symlink made every
     // containment check relative to the link's target — `data/kb/notes -> /etc`
-    // injected the target's files as trusted agent context. Every other store
+    // indexed the target's files as trusted agent context. Every other store
     // path refuses to follow a link out of the store (P14-RV-02); so does this.
     if (lstatSync(dir).isSymbolicLink()) {
       logger.warn(
@@ -249,94 +268,42 @@ export function readKbBodyDetailed(
       });
       return miss("its store folder holds no documents a run can read");
     }
-    const parts: string[] = [];
-    let budget = budgetChars;
-    // Ruling 253 (pass 37, F37-82): the NAMES, not just the counts. An agent
-    // cannot ask for a rule it cannot name, and a human debugging "why did the
-    // run ignore the standing correction" had nothing to read.
-    const omittedDocs: string[] = [];
-    const clippedDocs: string[] = [];
-    for (const doc of docs) {
-      if (budget <= 0) {
-        omittedDocs.push(doc.rel);
-        continue;
+    const listed = docs.slice(0, KB_INDEX_MAX_DOCS);
+    let outlineBudget = KB_INDEX_OUTLINE_BUDGET;
+    const entries = listed.map((doc) => {
+      const head = `- \`${doc.rel}\` · ${doc.size.toLocaleString("en-US")} chars`;
+      // Ruling 283: the outline budget clips OUTLINES, never the list. A doc
+      // whose sections do not fit is still named at full size, because the name
+      // is the only thing the run needs in order to ask for the document — and
+      // "a doc you cannot name" is the failure this ruling exists to end. The
+      // line that GUARANTEES that is the `kept.length === 0` return below, which
+      // every doc past the budget takes; this early exit only saves reading the
+      // file once nothing can fit, and is not the behaviour a test can pin.
+      if (outlineBudget <= 0) return head;
+      const outline = outlineOf(doc.abs, doc.size);
+      if (outline.length === 0) return head;
+      const kept: string[] = [];
+      for (const heading of outline) {
+        const line = `\n  ${heading}`;
+        if (line.length > outlineBudget) break;
+        outlineBudget -= line.length;
+        kept.push(line);
       }
-      let raw: string;
-      try {
-        raw = readFileSync(doc.abs, "utf8").trim();
-      } catch {
-        continue; // unreadable doc — skip (not counted as omitted)
-      }
-      if (!raw) continue;
-      // P13-KM-14: the per-doc heading was free — with many small docs the
-      // headings alone could add thousands of unbudgeted characters, so the
-      // "24k" cap was not the real ceiling. Charge the whole emitted chunk.
-      const heading = `### ${doc.rel}\n\n`;
-      const room = budget - heading.length;
-      if (room <= 0) {
-        omittedDocs.push(doc.rel);
-        continue;
-      }
-      const slice = raw.slice(0, room);
-      if (slice.length < raw.length) clippedDocs.push(doc.rel);
-      budget -= heading.length + slice.length;
-      parts.push(`${heading}${slice}`);
-    }
-    const omitted = omittedDocs.length;
-    if (parts.length === 0) {
-      if (omitted > 0) {
-        // P14-KM-05: NOTHING fit. The old `parts.length > 0` guard suppressed
-        // both the marker and the warn in exactly this branch, so an earlier KB
-        // that spent the shared budget made every later one vanish without a
-        // trace — no prompt section, no log — while every UI still showed the
-        // grant attached. Return the marker alone so the run's own prompt says
-        // the KB was dropped.
-        logger.warn(
-          "declared knowledge base did not fit the run's injection budget — NOTHING of it reached the run",
-          { kb: name, docs: omitted, budgetChars },
-        );
-        return {
-          body: `_(knowledge base omitted entirely — ${omitted} doc${omitted === 1 ? "" : "s"} dropped; only ${budgetChars} chars of the shared knowledge-base budget were left)_`,
-          unresolved: {
-            name,
-            reason: `it did not fit the shared ${KB_INJECTION_BUDGET}-char knowledge-base budget — none of its ${omitted} doc${omitted === 1 ? "" : "s"} reached this run`,
-          },
-        };
-      }
-      logger.warn(
-        "declared knowledge base holds no readable text — run proceeds WITHOUT it",
-        { kb: name, docs: docs.length },
+      if (kept.length === 0) return head;
+      const more =
+        kept.length < outline.length
+          ? `\n  … ${outline.length - kept.length} more section${outline.length - kept.length === 1 ? "" : "s"}`
+          : "";
+      return `${head}${kept.join("")}${more}`;
+    });
+    if (docs.length > listed.length) {
+      entries.push(
+        `- … ${docs.length - listed.length} more document${docs.length - listed.length === 1 ? "" : "s"} in this folder, not listed here.`,
       );
-      return miss("its documents hold no readable text");
     }
-    if (omitted > 0 || clippedDocs.length > 0) {
-      // Ruling 253: BOTH halves, and both by name. The old marker chose one
-      // sentence — "N more docs omitted" whenever anything was omitted — so a
-      // run that got half a rule AND lost two more docs was told only about the
-      // two, and never that the rule it did read stops mid-sentence.
-      const lost = [
-        ...(clippedDocs.length > 0
-          ? [`${listDocs(clippedDocs)} cut off mid-document`]
-          : []),
-        ...(omitted > 0 ? [`${listDocs(omittedDocs)} not included at all`] : []),
-      ].join("; ");
-      parts.push(
-        `_(knowledge base truncated — ${lost}; it exceeded the ${budgetChars}-char budget left for knowledge bases)_`,
-      );
-      // Ruling 253: a KB that delivered HALF is now reported on the SAME
-      // structured channel as one that delivered nothing. It was not: the
-      // `unresolved` row was returned only from the delivered-nothing branch, so
-      // the run-input disclosure a human reads (P19-G11) said every grant
-      // arrived while a project's binding rulings had been cut in half.
-      return {
-        body: parts.join("\n\n"),
-        unresolved: {
-          name,
-          reason: `only part of it fitted the shared knowledge-base budget — ${lost}`,
-        },
-      };
-    }
-    return { body: parts.join("\n\n") };
+    return {
+      body: `Folder \`${dir}\`. ${docs.length} document${docs.length === 1 ? "" : "s"}:\n\n${entries.join("\n")}`,
+    };
   } catch (error) {
     logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {
       kb: name,
@@ -346,88 +313,103 @@ export function readKbBodyDetailed(
   }
 }
 
-/** Read one KB's docs, or "" when it resolves to nothing. Thin wrapper over
- *  {@link readKbBodyDetailed} for callers that only inject. */
-export function readKbBody(
-  name: string,
-  dataRoot?: string,
-  budgetChars: number = KB_INJECTION_BUDGET,
-): string {
-  return readKbBodyDetailed(name, dataRoot, budgetChars).body;
-}
-
 export interface KbInjectionSet {
-  /** The KBs that contributed text, in declaration order. */
+  /** The KBs that produced an index, in declaration order. */
   parts: { name: string; body: string }[];
   /** Grants that delivered nothing (C1) — the caller owes the run these. */
   unresolved: UnresolvedKbGrant[];
 }
 
 /**
- * Read EVERY declared knowledge base under ONE shared budget (F9). Each KB draws
- * from what the ones before it left; a KB that no longer fits still emits its
- * "omitted entirely" marker (P14-KM-05) AND a structured `unresolved` row (C1),
- * so the run's prompt names what it did not get.
+ * Index EVERY declared knowledge base. There is no budget to share and so no
+ * ordering that decides who is starved (ruling 283): every declared KB that
+ * resolves is indexed in full, and `unresolved` now carries only the ways a
+ * grant can genuinely deliver nothing — a folder that is missing, a symlink, an
+ * empty folder, an unreadable one.
  */
-export function readKbBodies(
+export function readKbIndexes(
   names: readonly string[],
   dataRoot?: string,
-  budgetChars: number = KB_INJECTION_BUDGET,
-  /** Ruling 261: the project's rulings KB, when this run carries one. */
-  opts: { rulingsKb?: string | null } = {},
 ): KbInjectionSet {
   const parts: { name: string; body: string }[] = [];
   const unresolved: UnresolvedKbGrant[] = [];
-  // Ruling 261 (pass 37, owner's call): the project's RULINGS are guaranteed a
-  // floor, and read LAST so they can still use what nothing else needed.
-  //
-  // Ruling 239 appends the rulings KB after a profile's own grants so it never
-  // displaces them, and the cost of that ordering is that a project's binding
-  // rules are structurally the FIRST thing starved — on exactly the agents
-  // holding the most grants. It bit live: the operator received
-  // `standing-corrections.md` cut off mid-word at "fails in about thr", losing
-  // two of its three rules, because two project KBs totalled 27,928 against a
-  // 24,000 budget. The owner's call was to invert which side gives: a project's
-  // binding rules always arrive up to the floor, and a profile's optional craft
-  // is what trims on a heavily-granted agent.
-  //
-  // One read each. The others are capped at `budget - floor`, so the floor
-  // always survives; the rulings then take everything the others left, which is
-  // never less than the floor and is more whenever they were small — so this
-  // costs nothing at all when the rulings KB is short. Emission keeps ruling
-  // 239's order: grants first, rulings last.
-  const rulings =
-    opts.rulingsKb && names.includes(opts.rulingsKb) ? opts.rulingsKb : null;
-  // The reserve is the SMALLER of the floor and what the rulings actually need,
-  // so a short rulings KB costs the grants nothing at all — the floor is a
-  // ceiling on what the others may take, never an allocation the rulings must
-  // spend. Measured without reading the bodies, so a KB that cannot resolve
-  // still warns exactly once, on the real read below.
-  const floor = rulings
-    ? Math.min(RULINGS_KB_FLOOR, kbNaturalSize(rulings, dataRoot), budgetChars)
-    : 0;
-  let budget = budgetChars - floor;
+  // Ruling 239's emission order is untouched — a profile's own grants first,
+  // the project's rulings last — but the ORDER no longer decides anything: it
+  // is a reading order now, not an allocation. Ruling 261's floor existed only
+  // to survive the allocation and is retired with it.
   for (const name of names) {
-    if (name === rulings) continue;
-    const injection = readKbBodyDetailed(name, dataRoot, Math.max(0, budget));
-    if (injection.unresolved) unresolved.push(injection.unresolved);
-    if (injection.body) {
-      parts.push({ name, body: injection.body });
-      budget -= injection.body.length;
-    }
-  }
-  if (rulings) {
-    // `budget` can go slightly NEGATIVE: a truncation marker is appended to a
-    // body after that body was charged. Clamping here is what keeps the floor a
-    // floor rather than a number the last grant can overdraw.
-    const allowance = Math.max(floor, budget + floor);
-    const injection = readKbBodyDetailed(rulings, dataRoot, allowance);
-    if (injection.unresolved) unresolved.push(injection.unresolved);
-    if (injection.body) parts.push({ name: rulings, body: injection.body });
+    const index = readKbIndexDetailed(name, dataRoot);
+    if (index.unresolved) unresolved.push(index.unresolved);
+    if (index.body) parts.push({ name, body: index.body });
   }
   return { parts, unresolved };
 }
 
+/** One document out of one knowledge base, or `null` when this KB has no such
+ *  document. The caller decides WHICH knowledge bases may be asked for — this
+ *  reader does not know a run's grants and must never be handed an
+ *  unfiltered name (ruling 283). */
+export function readKbDoc(
+  kb: string,
+  docPath: string,
+  dataRoot?: string,
+): { text: string; truncated: boolean; rel: string } | null {
+  const dir = kbDirPath(kb, dataRoot);
+  // The doc path comes from a model, so it is treated exactly like a request
+  // from outside: normalised, then proven to land inside this KB's folder. The
+  // realpath comparison is what stops `../` and a symlink alike; `kbDirPath`
+  // has already contained the KB NAME the same way.
+  const rel = docPath.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+  if (!rel || !isInjectableKbDoc(path.basename(rel))) return null;
+  const abs = path.resolve(dir, rel);
+  let root: string;
+  try {
+    root = realpathSync(dir);
+  } catch {
+    return null;
+  }
+  let real: string;
+  try {
+    real = realpathSync(abs);
+  } catch {
+    return null;
+  }
+  if (!real.startsWith(root + path.sep)) return null;
+  let st;
+  try {
+    st = statSync(real);
+  } catch {
+    return null;
+  }
+  if (!st.isFile()) return null;
+  const raw = readFileSync(real, "utf8");
+  return {
+    rel: path.relative(root, real).split(path.sep).join("/"),
+    text: raw.slice(0, KB_DOC_READ_CHARS),
+    // Reported, never hidden: a clipped document that reads as complete is how
+    // a model states a half-read file as fact.
+    truncated: raw.length > KB_DOC_READ_CHARS,
+  };
+}
+
+/**
+ * The instruction that ships WITH every knowledge-base index (ruling 283).
+ *
+ * An index no one is told to follow is worse than the text it replaced. Both
+ * channels are named because the toolkit tool is Claude-only — a Codex run
+ * mounts no in-process Viberr tools at all, and its channel is the folder path
+ * the index prints, which is a real path on the machine the run executes on.
+ */
+export const KB_INDEX_NOTE =
+  "\n\n---\n# How to read a knowledge base\n\n" +
+  "Each knowledge base below is listed as an INDEX: every document it holds, " +
+  "its size, and its sections. The text is NOT in this prompt — read the " +
+  "documents you need. Call `read_knowledge_doc` with the knowledge base's " +
+  "name and the document's path; if that tool is not mounted for you, the " +
+  "index prints the folder's path on disk and you can read the file directly. " +
+  "Read a document before relying on what its title or a section heading " +
+  "suggests it says, and read the ones a task, a directive or another agent " +
+  "tells you to read by name.";
 /**
  * R19-2 — the PRECEDENCE rule that ships with every knowledge-base injection.
  *
@@ -459,3 +441,47 @@ export const KB_PRECEDENCE_NOTE =
   "(name the file and the conflicting knowledge base) so a human can reconcile " +
   "them. Never rewrite an existing file family into a knowledge base's style " +
   "just because the knowledge base describes one.";
+
+/**
+ * The `read_knowledge_doc` tool's whole body, shared by the three toolkits that
+ * mount it (specialist, operator, controller) — ONE implementation, because
+ * "what does standing-corrections.md say" must not have three answers.
+ *
+ * `granted` is the run's OWN knowledge-base list. A run may read the documents
+ * of the knowledge bases attached to it and no others: the index it was given
+ * names those and only those, and an org's other knowledge bases are not
+ * context this run was granted just because it can spell their names.
+ */
+export function readKbDocForRun(
+  granted: readonly string[],
+  kb: string,
+  docPath: string,
+  dataRoot?: string,
+): string {
+  const wanted = kb.trim();
+  if (!granted.includes(wanted)) {
+    // Ruling 246's shape: say what this reader IS rather than implying the
+    // knowledge base does not exist — it may well exist and belong to another
+    // profile, and a run told "no such knowledge base" goes looking for a
+    // deletion that never happened.
+    return (
+      `[noop] No knowledge base \`${wanted}\` is attached to this run. ` +
+      (granted.length > 0
+        ? `You hold: ${granted.map((n) => `\`${n}\``).join(", ")}. This reads the knowledge bases attached to YOUR profile; others in the org are not yours to read.`
+        : "None are attached to this run at all.")
+    );
+  }
+  const doc = readKbDoc(wanted, docPath, dataRoot);
+  if (!doc) {
+    const index = readKbIndexDetailed(wanted, dataRoot);
+    return (
+      `[noop] Knowledge base \`${wanted}\` has no document \`${docPath}\`. ` +
+      (index.body
+        ? `Its index:\n\n${index.body}`
+        : `It resolves to nothing this run can read${index.unresolved ? ` — ${index.unresolved.reason}` : ""}.`)
+    );
+  }
+  return doc.truncated
+    ? `${doc.text}\n\n_(cut off here — \`${doc.rel}\` is longer than the ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters one read returns; what is above is its opening, not the whole document)_`
+    : doc.text;
+}

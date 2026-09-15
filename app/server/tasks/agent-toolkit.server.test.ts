@@ -322,6 +322,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       actorRef: AGENT_REF,
       outcomeKey,
       collab: { ...collab, githubRead: collab.githubRead ?? false },
+      kb: [],
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
@@ -342,6 +343,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       actorRef: AGENT_REF,
       outcomeKey: "oc_load",
       collab: { comment: true, ask: true, verdict: true, evidence: true, githubRead: true },
+      kb: [],
     })!;
     const loading = toolLoading(built.mcpServers.viberr_agent);
     expect(loading.deferred).toEqual([]);
@@ -590,8 +592,43 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             evidence: false,
             githubRead: false,
           },
+          kb: [],
         }),
       ).toBeNull();
+
+    });
+
+    /**
+     * Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,
+     * so the grant only half-arrives without a way to pull a document. Its gate
+     * is the KB grant, not U11's collaboration grants — an agent granted a
+     * knowledge base and nothing else still has to be able to read it.
+     */
+    it("ruling 283: a KB grant alone mounts read_knowledge_doc, and nothing else", () => {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const built = buildAgentToolkit({
+        db: store.db,
+        ctx: { dataRoot: store.dataRoot },
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        actorRef: AGENT_REF,
+        outcomeKey: "oc_kb",
+        collab: {
+          comment: false,
+          ask: false,
+          verdict: false,
+          evidence: false,
+          githubRead: false,
+        },
+        kb: ["shop-rulings"],
+      });
+      expect(built).not.toBeNull();
+      const names = mountedTools.parse(built!.mcpServers.viberr_agent);
+      expect(Object.keys(names)).toEqual(["read_knowledge_doc"]);
     });
   });
 
@@ -659,6 +696,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         actorRef: AGENT_REF,
         outcomeKey: "oc_gr_ok",
         collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
+        kb: [],
       })!;
       return { store, tools: mountedTools.parse(built.mcpServers.viberr_agent) };
     }

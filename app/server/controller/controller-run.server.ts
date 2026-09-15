@@ -1,5 +1,4 @@
 import {
-  projectRulingsKb,
   withProjectRulings,
 } from "~/server/files/project-rulings.server";
 import path from "node:path";
@@ -8,7 +7,7 @@ import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { formatUsd } from "~/shared/run-failure";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { KB_INJECTION_BUDGET, KB_PRECEDENCE_NOTE, readKbBodies } from "~/server/files/kb-injection.server";
+import { KB_INDEX_NOTE, KB_PRECEDENCE_NOTE, readKbIndexes } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -148,6 +147,9 @@ export interface ControllerMountInput {
   taskKey: string | null;
   /** The ORG MCP grants that resolved and pre-flighted for this turn. */
   orgServers: RunMcpServers;
+  /** Ruling 283: the knowledge bases this turn's prompt indexes, so the tool
+   *  that reads them is mounted over the same list. */
+  kb: readonly string[];
   dataRoot?: string;
 }
 
@@ -173,6 +175,24 @@ export interface ControllerMounts {
  * backup reaches this spread, so the layer that decides what a run mounts is
  * the one that has to hold.
  */
+/**
+ * The knowledge bases ONE controller turn holds (ruling 239 + ruling 283).
+ *
+ * Read in two places that must not disagree: the system prompt indexes these,
+ * and the toolkit mounts `read_knowledge_doc` over exactly these. A run whose
+ * prompt names a knowledge base its tool refuses is a dead end invented by a
+ * second copy of this expression, so there is one.
+ */
+export function controllerKbNames(
+  kb: readonly string[],
+  projectSlug: string | null,
+  dataRoot?: string,
+): string[] {
+  return projectSlug
+    ? withProjectRulings([...kb], projectSlug, dataRoot ? { dataRoot } : {})
+    : [...kb];
+}
+
 export function buildControllerMounts(
   db: DatabaseSync,
   input: ControllerMountInput,
@@ -184,6 +204,7 @@ export function buildControllerMounts(
     user: input.user,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
+    kb: input.kb,
   });
   const ops = buildControllerOpsMcp({ db, ctx, user: input.user });
   return {
@@ -386,6 +407,7 @@ async function startTurnRun(
     projectSlug: conversation.projectSlug,
     taskKey: conversation.taskKey,
     orgServers,
+    kb: controllerKbNames(config.kb, conversation.projectSlug, dataRoot),
     dataRoot,
   });
 
@@ -900,25 +922,21 @@ export function buildControllerSystemPrompt(
   // where a project's stages, profiles, grants and knowledge bases are set up,
   // so it is the one actor that must not be planning against rules the project
   // has already settled without it.
-  const controllerKb = input.conversation.projectSlug
-    ? withProjectRulings(
-        input.config.kb,
-        input.conversation.projectSlug,
-        input.dataRoot ? { dataRoot: input.dataRoot } : {},
-      )
-    : input.config.kb;
-  const kbSet = readKbBodies(controllerKb, input.dataRoot, KB_INJECTION_BUDGET, {
-    // Ruling 261: the project's rulings keep their floor here too. The
-    // controller is the most heavily granted agent on most instances, which is
-    // exactly the shape that starved them.
-    rulingsKb: input.conversation.projectSlug
-      ? projectRulingsKb(
-          input.conversation.projectSlug,
-          input.dataRoot ? { dataRoot: input.dataRoot } : {},
-        )
-      : null,
-  });
-  if (kbSet.parts.length > 0) resourceParts.push(KB_PRECEDENCE_NOTE);
+  const controllerKb = controllerKbNames(
+    input.config.kb,
+    input.conversation.projectSlug,
+    input.dataRoot,
+  );
+  // Ruling 283: indexed, not injected. The controller is the most heavily
+  // granted agent on most instances, which is exactly the shape the old shared
+  // character budget starved — and it is the actor that sets up the projects,
+  // profiles and grants, so it is the worst one to plan from half a rulings
+  // document.
+  const kbSet = readKbIndexes(controllerKb, input.dataRoot);
+  if (kbSet.parts.length > 0) {
+    resourceParts.push(KB_PRECEDENCE_NOTE);
+    resourceParts.push(KB_INDEX_NOTE);
+  }
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);
   }

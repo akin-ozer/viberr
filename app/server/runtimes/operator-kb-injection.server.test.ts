@@ -30,7 +30,7 @@ function authorityWith(kb: string[]): OperatorAuthority {
 }
 
 describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
-  it("injects declared knowledge-base docs from the store into the system prompt", () => {
+  it("indexes declared knowledge bases into the system prompt (ruling 283)", () => {
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-"));
     const kbDir = path.join(dataRoot, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
@@ -43,7 +43,13 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith(["architecture-notes"]), dataRoot);
     // The KB leg was decorative before F6 — no run ever received KB content.
     expect(prompt).toContain("architecture-notes (knowledge base)");
-    expect(prompt).toContain("KB-MARKER-ARCH-42");
+    // Ruling 283: the INDEX, not the text. The doc and its sections are named
+    // so the operator can ask for it; the body is a `read_knowledge_doc` away.
+    expect(prompt).toContain("`overview.md`");
+    expect(prompt).toContain("# Architecture");
+    expect(prompt).not.toContain("KB-MARKER-ARCH-42");
+    // …and the prompt says how to turn a name into the text.
+    expect(prompt).toContain("read_knowledge_doc");
   });
 
   it("injects nothing for a KB name with no store folder (no throw)", () => {
@@ -97,7 +103,7 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
       ["team-facts", "KB-MARKER-TEAM"],
     ] as const) {
       mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
-      writeFileSync(path.join(dataRoot, "kb", name, "style.md"), `# ${name}\n\n${marker}.`, "utf8");
+      writeFileSync(path.join(dataRoot, "kb", name, `${marker}.md`), `# ${name}`, "utf8");
     }
 
     const prompt = buildOperatorSystemPrompt(
@@ -169,14 +175,14 @@ describe("buildOperatorSystemPrompt — grants are an allow-list, not a hint", (
 
   it("an UNGRANTED knowledge base in the same store is not injected either", () => {
     // Canary: pass the store's `kb/` listing instead of `authority.kb` to
-    // `readKbBodies` and the ungranted body appears in the prompt.
+    // `readKbIndexes` and the ungranted folder appears in the prompt.
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-kbdecoy-"));
     for (const [name, marker] of [
       ["architecture-notes", "KB-MARKER-GRANTED"],
       ["finance-runbook", "KB-MARKER-UNGRANTED"],
     ] as const) {
       mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
-      writeFileSync(path.join(dataRoot, "kb", name, "notes.md"), `# ${name}\n\n${marker}.`, "utf8");
+      writeFileSync(path.join(dataRoot, "kb", name, `${marker}.md`), `# ${name}`, "utf8");
     }
 
     const prompt = buildOperatorSystemPrompt(authorityWith(["architecture-notes"]), dataRoot);
@@ -270,34 +276,46 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
  * the only layer where "each KB re-armed the cap" or "the marker was filtered
  * out of the emitted sections" is observable.
  */
-describe("buildOperatorSystemPrompt — shared KB budget (F9 / P14-KM-05)", () => {
-  const writeKb = (dataRoot: string, name: string, body: string): void => {
+/**
+ * Ruling 283 replaced this describe's subject. There WAS a shared character
+ * budget here, and this test pinned the honest behaviour of spending it: a
+ * second KB could not re-arm what the first had taken, and the prompt said so.
+ * The budget is gone, so what is worth pinning is the inverse — the ordering
+ * effect the budget made structural no longer exists at all.
+ */
+describe("buildOperatorSystemPrompt — no KB starves another (ruling 283)", () => {
+  const writeKb = (dataRoot: string, name: string, doc: string, body: string): void => {
     const dir = path.join(dataRoot, "kb", name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "doc.md"), body, "utf8");
+    writeFileSync(path.join(dir, doc), body, "utf8");
   };
 
-  it("a second knowledge base cannot re-arm the budget the first one spent", () => {
-    // Canary: drop the running `budget -= injection.body.length` in
-    // `readKbBodies` and KB-MARKER-SECOND arrives while both markers vanish.
+  it("a huge knowledge base costs the one after it nothing", () => {
+    // Canary: cap `entries` in `readKbIndexDetailed` on a running character
+    // budget across KBs and `KB-MARKER-SECOND.md` stops being named.
     const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-kbbudget-"));
-    writeKb(dataRoot, "big-kb", "B".repeat(30_000));
-    writeKb(dataRoot, "second-kb", `KB-MARKER-SECOND ${"S".repeat(5_000)}`);
+    writeKb(dataRoot, "big-kb", "huge.md", `# Huge\n\n${"B".repeat(30_000)}`);
+    writeKb(dataRoot, "second-kb", "KB-MARKER-SECOND.md", "# Second");
 
     const prompt = buildOperatorSystemPrompt(
       authorityWith(["big-kb", "second-kb"]),
       dataRoot,
     );
 
-    // The first KB spends the shared budget and says it was clipped…
-    expect(prompt).toContain("knowledge base truncated");
-    // …and the second contributes NO content — only the honest marker.
-    expect(prompt).not.toContain("KB-MARKER-SECOND");
-    expect(prompt).toContain("knowledge base omitted entirely");
-    // C1 rides along: what was dropped is named, with the reason.
-    expect(prompt).toContain("**second-kb**");
-    expect(prompt).toContain("did not fit the shared");
-    // The whole prompt stays near one budget, not two.
+    // Both are named in full, in declaration order, and nothing reports a loss.
+    expect(prompt).toContain("big-kb (knowledge base)");
+    expect(prompt).toContain("`huge.md`");
+    expect(prompt).toContain("second-kb (knowledge base)");
+    expect(prompt).toContain("KB-MARKER-SECOND.md");
+    // Neither KB is reported as having lost anything. (The prompt's
+    // did-not-reach section can still stand for the authority's SKILL grants,
+    // which this fixture does not create — so assert on the names, not on the
+    // section's presence.)
+    expect(prompt).not.toContain("**big-kb**");
+    expect(prompt).not.toContain("**second-kb**");
+    // …and the 30,000-char document is not in the prompt at all: that is the
+    // point of an index, and it is why there is nothing left to ration.
+    expect(prompt).not.toContain("B".repeat(200));
     expect(prompt.length).toBeLessThan(48_000);
   });
 });
@@ -335,7 +353,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
     const root = mkdtempSync(path.join(tmpdir(), "viberr-op-res-"));
     const kbDir = path.join(root, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
-    writeFileSync(path.join(kbDir, "overview.md"), "KB-MARKER-TRUST-9", "utf8");
+    writeFileSync(path.join(kbDir, "KB-MARKER-TRUST-9.md"), "# Trust", "utf8");
     return { root, auth: authorityWith(["architecture-notes"]) };
   };
 

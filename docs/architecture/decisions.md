@@ -6260,6 +6260,59 @@ by rewriting those paragraphs:*
     plan enum must agree on — like `get_task` and `read_default_branch_file` before it.
     (`board-read.server.ts`, `operator-toolkit.server.ts`.)
 
+283. **A knowledge base arrives as an INDEX, and the run reads the documents it wants
+    (owner, 2026-09-15, pass 37; F37-118, supersedes 261).** Injecting the text was an
+    allocation problem with no good answer. A KB's documents were served in ALPHABETICAL
+    order out of a shared 24,000-character budget, first-come-first-served, so whichever
+    document sorted first took everything it could and every document behind it got
+    nothing. Measured live against this instance's store with the production reader:
+    `conventions.md` (20,632 chars) took all 15,817 chars the budget had left, cut itself
+    off mid-sentence inside its own §9 — "The gateway is a stronger boundary than a
+    service, no" — and left ZERO for `published-history.md` (185 chars) and
+    `standing-corrections.md` (281 chars). 466 characters of WHOLE documents were spent
+    buying 466 characters of a document that was being truncated either way. SHOP-27's own
+    goal says "See published-history.md in the project's rulings knowledge base"; no run on
+    that board could ever receive it, and the deliverer on SHOP-37 reported exactly that
+    from inside the run.
+    Ruling 261 had already raised a floor for this, because `standing-corrections.md` was
+    arriving cut off mid-word — and the floor was then eaten by the alphabetically-first
+    document inside the very knowledge base it was protecting. It is the pass's own pattern
+    a third time: a rule applied at one level and not the one below it. A second allocation
+    rule would have had the same shape, so there is no allocation now.
+    The prompt carries each KB's index — every document, its size, its heading outline and
+    the folder's path on disk — which costs a few hundred characters whatever the folder
+    weighs. `read_knowledge_doc` returns one document whole, and is mounted for the
+    specialist, the operator and the controller alike; a run may read the knowledge bases
+    attached to IT and no others, because the index it was given names those and only those.
+    The specialist toolkit mounts it on its OWN gate, not U11's collaboration gate: an agent
+    granted a knowledge base and nothing else still has to be able to read it. A Codex run
+    mounts no in-process Viberr tools at all, which is why the index prints the folder path
+    and the note names both channels.
+    Three things follow. The org-settings row that has always read "N docs · agents read the
+    live folder" is true again — it was counting documents a run could not receive. A rulings
+    knowledge base can grow without silently pushing its own rules out of every prompt. And
+    a run that ignores its index is visibly choosing not to read, where a run starved by a
+    budget could not tell it had been.
+    (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
+    `controller-run.server.ts`, and the three toolkits.)
+
+284. **A typed directive answers the packet; it does not amend the contract (owner,
+    2026-09-15, pass 37; F37-119, amends 189).** Ruling 189 welded a free-text answer into
+    the task's goal "because a person wrote it". One text box takes two different things,
+    though: a decision about the work, and a word to the operator about how it should work.
+    Live within the hour the rule was re-read: SHOP-27's packet was answered with a directive
+    that was mostly "you now have `read_board` — call it before you offer a create_task
+    option", and that sentence is now part of the contract of the orders service, where every
+    future run on it re-anchors. The very accumulation ruling 189 exists to stop, arriving
+    through the one door it held open.
+    The line is drawn by CHANNEL now. Choosing a structured option is a decision and amends
+    the goal, with `PROCESS_ONLY_OPTION_KINDS` still excluding the recovery choices. Typing
+    free text is conversation and never does. Nothing is lost: the directive is written to the
+    timeline verbatim, where the person and the operator both read it, and it reaches the
+    operator's next turn in its own `note` field on the re-queue — which is the channel it was
+    always actually for. A free-text answer that IS meant to bind the work is an edit to the
+    goal, which is its own action and says so. (`task-actions.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

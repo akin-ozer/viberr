@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   BACKEND_LABEL,
   assertEffortForBackend,
@@ -209,6 +210,10 @@ export interface ControllerToolkitDeps {
   /** Ruling 121: the conversation's anchored task, when it has one — every
    *  task tool's `taskKey` defaults to it. */
   taskKey?: string | null;
+  /** Ruling 283: the knowledge bases this turn's prompt INDEXED. The pull tool
+   *  is mounted over exactly these — `controllerKbNames` builds the list once
+   *  so the prompt and the tool cannot name different sets. */
+  kb?: readonly string[];
 }
 
 export interface ControllerToolkit {
@@ -549,6 +554,33 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     ),
     "set_user_org_role",
   );
+
+  // Ruling 283: the controller's own granted knowledge bases are indexed into
+  // its prompt, not injected, so it pulls the documents it needs. This is NOT
+  // `read_store_doc` (ruling 107), which reads ANY knowledge base or skill in
+  // the store and is org-admin only: this one reads only what was granted to
+  // this turn, and needs no admin, because the text it replaces needed none.
+  if (deps.kb && deps.kb.length > 0) {
+    const grantedKb = deps.kb;
+    add(
+      tool(
+        "read_knowledge_doc",
+        "Read ONE document out of a knowledge base attached to THIS conversation. Your prompt lists each one as an index — every document, its size and its sections — and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a project's settled rules before you plan against them, rather than working from what a document's title suggests it says. This reads YOUR OWN grants and needs no admin; `read_knowledge_base_doc` and `read_store_doc` read any knowledge base in the store by id and are org-admin only.",
+        {
+          kb: z
+            .string()
+            .describe("The knowledge base's name, as its index heading gives it."),
+          path: z
+            .string()
+            .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+        },
+        runWith((args: { kb: string; path: string }) =>
+          readKbDocForRun(grantedKb, args.kb, args.path, dataRoot),
+        ),
+      ),
+      "read_knowledge_doc",
+    );
+  }
 
   add(
     tool(

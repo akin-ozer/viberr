@@ -109,7 +109,9 @@ describe("the runtimes that build a run's knowledge call it", () => {
     const { writeFileSync } = await import("node:fs");
     const { kbDirPath } = await import("~/server/files/file-store-root.server");
     const marker = "LOCKFILE IS DERIVED, NOT SEPARATELY OWNED";
-    writeFileSync(`${kbDirPath(saved.kb.dir, store.dataRoot)}/rulings.md`, `# Rulings\n\n${marker}\n`);
+    // Ruling 283: the prompt carries the INDEX — the doc's name and its
+    // headings — so the marker has to live where an index can carry it.
+    writeFileSync(`${kbDirPath(saved.kb.dir, store.dataRoot)}/rulings.md`, `# ${marker}\n\nbody\n`);
     setRulings(saved.kb.dir);
 
     const { buildControllerSystemPrompt } = await import(

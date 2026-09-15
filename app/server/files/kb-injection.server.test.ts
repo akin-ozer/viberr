@@ -11,12 +11,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  KB_INJECTION_BUDGET,
+  KB_DOC_READ_CHARS,
   STORE_TEXT_EXTENSIONS,
   isInjectableKbDoc,
-  readKbBodies,
-  readKbBody,
-  readKbBodyDetailed,
+  readKbDocForRun,
+  readKbIndexDetailed,
+  readKbIndexes,
 } from "./kb-injection.server";
 
 function freshKb(dir = "notes") {
@@ -26,223 +26,152 @@ function freshKb(dir = "notes") {
   return { dataRoot, kbDir };
 }
 
-describe("readKbBody — recursive, multi-format KB injection", () => {
-  it("reads a top-level .md doc (the previously-working seed shape)", () => {
+describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => {
+  it("names a top-level doc with its size and its sections", () => {
     const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "overview.md"), "# Top\nMARKER-TOP", "utf8");
-    const body = readKbBody("notes", dataRoot);
-    expect(body).toContain("MARKER-TOP");
-    expect(body).toContain("### overview.md");
-  });
-
-  it("reads NESTED docs — the GitHub-import / folder-upload bug (was silently dropped)", () => {
-    const { dataRoot, kbDir } = freshKb();
-    // importGithubSnapshot always nests under <folder>/… — reproduce that shape.
-    const nested = path.join(kbDir, "my-repo", "docs");
-    mkdirSync(nested, { recursive: true });
-    writeFileSync(path.join(nested, "guide.md"), "# Guide\nMARKER-NESTED-DEEP", "utf8");
-    const body = readKbBody("notes", dataRoot);
-    expect(body).toContain("MARKER-NESTED-DEEP");
-    // heading carries the store-relative path so the agent can cite it
-    expect(body).toContain("### my-repo/docs/guide.md");
-  });
-
-  it("reads non-.md text docs (.txt/.mdx/.rst/.markdown), not only .md", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "a.txt"), "MARKER-TXT", "utf8");
-    writeFileSync(path.join(kbDir, "b.mdx"), "MARKER-MDX", "utf8");
-    writeFileSync(path.join(kbDir, "c.rst"), "MARKER-RST", "utf8");
-    writeFileSync(path.join(kbDir, "d.markdown"), "MARKER-MARKDOWN", "utf8");
-    const body = readKbBody("notes", dataRoot);
-    for (const m of ["MARKER-TXT", "MARKER-MDX", "MARKER-RST", "MARKER-MARKDOWN"]) {
-      expect(body).toContain(m);
-    }
-  });
-
-  it("ignores non-text binary-ish extensions", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "keep.md"), "MARKER-KEEP", "utf8");
-    writeFileSync(path.join(kbDir, "skip.png"), "not-text", "utf8");
-    writeFileSync(path.join(kbDir, "skip.pdf"), "%PDF", "utf8");
-    const body = readKbBody("notes", dataRoot);
-    expect(body).toContain("MARKER-KEEP");
-    expect(body).not.toContain("skip.png");
-    expect(body).not.toContain("skip.pdf");
-  });
-
-  /**
-   * C5/pass-16 — this test previously asserted the OPPOSITE (`skip.json` must
-   * not inject). The in-app "New document" editor has always been able to
-   * author `.json`/`.yaml`/`.yml` into a KB (`EDITABLE_EXTENSIONS`), and the
-   * store browser listed the result — while the injector's extension set
-   * excluded them, so the doc a human wrote in the product was invisible to
-   * every run and nothing said so. The authoring surface must not offer a
-   * dead-end format; structured docs inject.
-   */
-  it("injects the structured formats the in-app editor can author (.json/.yaml/.yml)", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "contract.json"), '{"MARKER":"JSON"}', "utf8");
-    writeFileSync(path.join(kbDir, "config.yaml"), "marker: YAML", "utf8");
-    writeFileSync(path.join(kbDir, "other.yml"), "marker: YML", "utf8");
-    const body = readKbBody("notes", dataRoot);
-    expect(body).toContain('{"MARKER":"JSON"}');
-    expect(body).toContain("marker: YAML");
-    expect(body).toContain("marker: YML");
-  });
-
-  it("skips dotfiles and dot-directories", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, ".hidden.md"), "MARKER-HIDDEN", "utf8");
-    const dotDir = path.join(kbDir, ".git");
-    mkdirSync(dotDir, { recursive: true });
-    writeFileSync(path.join(dotDir, "config.md"), "MARKER-GIT", "utf8");
-    writeFileSync(path.join(kbDir, "real.md"), "MARKER-REAL", "utf8");
-    const body = readKbBody("notes", dataRoot);
-    expect(body).toContain("MARKER-REAL");
-    expect(body).not.toContain("MARKER-HIDDEN");
-    expect(body).not.toContain("MARKER-GIT");
-  });
-
-  it("returns '' for an absent KB folder (no throw)", () => {
-    const { dataRoot } = freshKb();
-    expect(readKbBody("does-not-exist", dataRoot)).toBe("");
-  });
-
-  it("bounds total injected text at the budget and appends an honest truncation marker", () => {
-    const { dataRoot, kbDir } = freshKb();
-    // two docs that together blow a tiny budget — order is by relative path
-    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(50), "utf8");
-    writeFileSync(path.join(kbDir, "b.md"), "B".repeat(50), "utf8");
-    const body = readKbBody("notes", dataRoot, 40);
-    expect(body.length).toBeLessThan(50 + 50 + 200); // clipped, not full
-    expect(body).toContain("knowledge base truncated");
-  });
-
-  /**
-   * Ruling 253 (pass 37, F37-82), measured live on the shopify-clone board.
-   *
-   * The controller wrote `standing-corrections.md` into the project's rulings
-   * knowledge base, and the operator run an hour later received it clipped
-   * MID-SENTENCE, in the middle of "Every workflow run on every open pull
-   * request fails in about thr" — losing the other two standing rules
-   * entirely. The marker said only "this doc was clipped" and named nothing,
-   * and because the KB delivered SOME text it produced no `unresolved` row at
-   * all, so the run-input disclosure a human reads said every grant arrived.
-   */
-  it("ruling 253: names the docs it clipped and the docs it dropped, and both at once", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "a-conventions.md"), "A".repeat(200), "utf8");
-    writeFileSync(path.join(kbDir, "b-history.md"), "B".repeat(200), "utf8");
-    writeFileSync(path.join(kbDir, "c-corrections.md"), "C".repeat(200), "utf8");
-    // Enough for the first doc and part of the second; the third never starts.
-    const injection = readKbBodyDetailed("notes", dataRoot, 300);
-    // CANARY: keep the old single-sentence marker and the clip is invisible
-    // whenever anything was also omitted — which is the live shape.
-    expect(injection.body).toContain("`b-history.md` cut off mid-document");
-    expect(injection.body).toContain("`c-corrections.md` not included at all");
-    // CANARY: return `{ body }` alone from the truncated branch and this is
-    // undefined, so a half-delivered rulings KB reaches no human at all.
-    expect(injection.unresolved?.name).toBe("notes");
-    expect(injection.unresolved?.reason).toContain("only part of it fitted");
-    expect(injection.unresolved?.reason).toContain("`c-corrections.md`");
-  });
-
-  it("ruling 253: a KB that fits WHOLE reports nothing unresolved", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(50), "utf8");
-    const injection = readKbBodyDetailed("notes", dataRoot, 24_000);
-    // CANARY: report a partial unconditionally and every complete grant is
-    // announced to the agent as incomplete.
-    expect(injection.unresolved).toBeUndefined();
-    expect(injection.body).not.toContain("truncated");
-  });
-
-  /**
-   * Ruling 261 (pass 37, the owner's call on F37-82's residue).
-   *
-   * Ruling 239 appends a project's rulings KB after a profile's own grants so
-   * it never displaces them — and the cost of that ordering is that the
-   * project's BINDING rules are structurally the first thing starved, on
-   * exactly the agents holding the most grants. It bit live: the operator
-   * received `standing-corrections.md` cut off mid-word at "fails in about
-   * thr", losing two of its three rules, because two project KBs totalled
-   * 27,928 characters against a 24,000 budget.
-   *
-   * The owner inverted which side gives. The rulings get a floor; a profile's
-   * optional craft trims instead.
-   */
-  it("ruling 261: the rulings KB keeps its floor when the grants would have eaten it", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "rules.md"), "R".repeat(6_000), "utf8");
-    const craftDir = path.join(dataRoot, "kb", "craft");
-    mkdirSync(craftDir, { recursive: true });
-    writeFileSync(path.join(craftDir, "big.md"), "C".repeat(30_000), "utf8");
-
-    // Without the reservation the greedy grant, read first, takes everything.
-    const starved = readKbBodies(["craft", "notes"], dataRoot, 24_000);
-    expect(starved.parts.find((p) => p.name === "notes")?.body ?? "").toContain(
-      "omitted entirely",
+    writeFileSync(
+      path.join(kbDir, "overview.md"),
+      "# Top\n\nprose\n\n## Deploying\n\nmore",
+      "utf8",
     );
+    const body = readKbIndexDetailed("notes", dataRoot).body;
+    expect(body).toContain("`overview.md`");
+    expect(body).toContain("# Top");
+    expect(body).toContain("## Deploying");
+    // The TEXT is not in the index — that is the whole change.
+    expect(body).not.toContain("prose");
+  });
 
-    // CANARY: drop the `floor` from `readKbBodies` and this is the starved
-    // shape too — the project's binding rules dropped for a profile's craft.
-    const reserved = readKbBodies(["craft", "notes"], dataRoot, 24_000, {
-      rulingsKb: "notes",
+  it("indexes NESTED docs — the GitHub-import / folder-upload shape", () => {
+    const { dataRoot, kbDir } = freshKb();
+    mkdirSync(path.join(kbDir, "repo", "docs"), { recursive: true });
+    writeFileSync(path.join(kbDir, "repo", "docs", "api.md"), "# API", "utf8");
+    expect(readKbIndexDetailed("notes", dataRoot).body).toContain("`repo/docs/api.md`");
+  });
+
+  it("indexes non-.md text docs, which have no headings to outline", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "hosts.txt"), "a\nb\nc", "utf8");
+    writeFileSync(path.join(kbDir, "ports.json"), '{"gateway":4000}', "utf8");
+    const body = readKbIndexDetailed("notes", dataRoot).body;
+    expect(body).toContain("`hosts.txt`");
+    expect(body).toContain("`ports.json`");
+  });
+
+  it("ignores non-text files and dotfiles", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "real.md"), "# Real", "utf8");
+    writeFileSync(path.join(kbDir, "contract.pdf"), "%PDF-1.4", "utf8");
+    writeFileSync(path.join(kbDir, ".secret.md"), "# Secret", "utf8");
+    mkdirSync(path.join(kbDir, ".git"), { recursive: true });
+    writeFileSync(path.join(kbDir, ".git", "config.md"), "# Git", "utf8");
+    const body = readKbIndexDetailed("notes", dataRoot).body;
+    expect(body).toContain("`real.md`");
+    expect(body).not.toContain("contract.pdf");
+    expect(body).not.toContain("secret");
+    expect(body).not.toContain(".git");
+  });
+
+  /**
+   * THE motivating case, at the live sizes.
+   *
+   * On the shopify-clone board `conventions.md` was 20,632 chars and took the
+   * whole 15,817 that the shared budget had left, cut itself mid-sentence in
+   * its own §9, and left ZERO for `published-history.md` (185) and
+   * `standing-corrections.md` (281). A task goal on that board says "See
+   * published-history.md in the project's rulings knowledge base" — a document
+   * no run on it could receive. Alphabetical order decided which rules an agent
+   * was allowed to know.
+   */
+  it("a huge first doc does not starve the small docs behind it", () => {
+    const { dataRoot, kbDir } = freshKb("rulings");
+    writeFileSync(
+      path.join(kbDir, "conventions.md"),
+      `# Conventions\n\n${"x".repeat(20_000)}\n\n## Boundaries\n\ntail`,
+      "utf8",
+    );
+    writeFileSync(path.join(kbDir, "published-history.md"), "# History\n\nnever rebase", "utf8");
+    writeFileSync(
+      path.join(kbDir, "standing-corrections.md"),
+      "# Corrections\n\nthree rules",
+      "utf8",
+    );
+    const index = readKbIndexDetailed("rulings", dataRoot);
+    // Every document is named, whatever the one ahead of it weighs.
+    expect(index.body).toContain("`conventions.md`");
+    expect(index.body).toContain("`published-history.md`");
+    expect(index.body).toContain("`standing-corrections.md`");
+    // And nothing was clipped, so nothing is reported as lost.
+    expect(index.unresolved).toBeUndefined();
+    expect(index.body).not.toMatch(/truncat|omitted|budget/i);
+  });
+
+  it("the outline budget clips OUTLINES, never the list of documents", () => {
+    const { dataRoot, kbDir } = freshKb();
+    // Enough headings to spend the outline budget several times over, spread so
+    // the LAST documents are reached with nothing left. Each must still be
+    // NAMED: the name is the only thing a run needs in order to ask for the
+    // document, so the budget may cost an outline and never a document.
+    for (let i = 0; i < 150; i += 1) {
+      const key = String(i).padStart(3, "0");
+      writeFileSync(
+        path.join(kbDir, `doc-${key}.md`),
+        `# Document ${key} ${"y".repeat(60)}\n\nbody`,
+        "utf8",
+      );
+    }
+    const body = readKbIndexDetailed("notes", dataRoot).body;
+    expect(body).toContain("`doc-000.md`");
+    // The last doc is reached with the outline budget spent: named, no outline.
+    expect(body).toContain("`doc-149.md`");
+    expect(body).not.toContain("# Document 149");
+    // ...while an early one kept its heading, so the budget really did apply
+    // rather than outlines being off altogether.
+    expect(body).toContain("# Document 000");
+  });
+
+  it("does not read a fenced code block's comments as sections", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(
+      path.join(kbDir, "shell.md"),
+      "# Real heading\n\n```sh\n# not a heading\nmake up\n```\n",
+      "utf8",
+    );
+    const body = readKbIndexDetailed("notes", dataRoot).body;
+    expect(body).toContain("# Real heading");
+    expect(body).not.toContain("not a heading");
+  });
+
+  it("reports a missing KB folder as a structured unresolved grant", () => {
+    const { dataRoot } = freshKb();
+    const detailed = readKbIndexDetailed("renamed-away", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.unresolved).toEqual({
+      name: "renamed-away",
+      reason: "no knowledge-base folder by that name in the store",
     });
-    const rules = reserved.parts.find((p) => p.name === "notes")!;
-    expect(rules.body).toContain("RRRR");
-    expect(rules.body).not.toContain("omitted entirely");
-    expect(rules.body).not.toContain("truncated");
-    // Ruling 239's ORDER survives: the grants are read first, the rulings last.
-    expect(reserved.parts.map((p) => p.name)).toEqual(["craft", "notes"]);
-    // And the craft still got everything outside the floor, so the reservation
-    // is a ceiling on the OTHERS, not an allocation the rulings must spend.
-    expect(reserved.parts[0]!.body.length).toBeGreaterThan(15_000);
   });
 
-  it("ruling 261: a SHORT rulings KB costs the grants nothing", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "rules.md"), "R".repeat(100), "utf8");
-    const craftDir = path.join(dataRoot, "kb", "craft");
-    mkdirSync(craftDir, { recursive: true });
-    writeFileSync(path.join(craftDir, "big.md"), "C".repeat(30_000), "utf8");
-    const out = readKbBodies(["craft", "notes"], dataRoot, 24_000, {
-      rulingsKb: "notes",
-    });
-    // CANARY: subtract the whole floor unconditionally and the craft loses
-    // ~8,000 characters to rules that are 100 long.
-    expect(out.parts[0]!.body.length).toBeGreaterThan(23_000);
-    expect(out.parts.find((p) => p.name === "notes")!.body).toContain("RRRR");
+  it("reports an EMPTY KB folder (the grant is attached, the content is not)", () => {
+    const { dataRoot } = freshKb("hollow");
+    expect(readKbIndexDetailed("hollow", dataRoot).unresolved?.name).toBe("hollow");
   });
 
-  it("exposes a sane default budget", () => {
-    expect(KB_INJECTION_BUDGET).toBe(24_000);
-  });
-
-  it("P14-KM-05: a KB that fits NOTHING still says so instead of vanishing", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(500), "utf8");
-    writeFileSync(path.join(kbDir, "b.md"), "B".repeat(500), "utf8");
-    // The shared 24k budget is spent by the KBs ahead of this one, so the
-    // caller passes what's left. The old `parts.length > 0` guard suppressed
-    // both the marker AND the warn in exactly this branch, so the KB was
-    // dropped with zero signal anywhere.
-    const body = readKbBody("notes", dataRoot, 5);
-    expect(body).toContain("omitted entirely");
-    expect(body).toContain("2 docs dropped");
-    expect(body).not.toContain("AAAA");
-  });
-
-  it("an exhausted budget (0 chars left) is reported, not silently skipped", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(50), "utf8");
-    expect(readKbBody("notes", dataRoot, 0)).toContain("omitted entirely");
-  });
-
-  it("a KB whose docs are all EMPTY injects nothing and claims no budget drop", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "blank.md"), "   \n\n", "utf8");
-    expect(readKbBody("notes", dataRoot)).toBe("");
+  /**
+   * C5/pass-16 containment. `collectKbDocs` realpath's the ROOT and then checks
+   * every visited dir against it — so when the KB folder is ITSELF a symlink,
+   * containment was measured against the link's TARGET and the whole target
+   * tree was indexed as trusted agent context.
+   */
+  it("refuses a KB folder that is a symlink out of the store", () => {
+    const { dataRoot } = freshKb();
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE", "utf8");
+    symlinkSync(outside, path.join(dataRoot, "kb", "linked"));
+    const detailed = readKbIndexDetailed("linked", dataRoot);
+    expect(detailed.body).toBe("");
+    expect(detailed.unresolved?.reason).toContain("symlink");
+    expect(detailed.body).not.toContain("secret.md");
   });
 
   it("isInjectableKbDoc is the predicate the org doc count shares", () => {
@@ -253,69 +182,104 @@ describe("readKbBody — recursive, multi-format KB injection", () => {
       expect(isInjectableKbDoc(name)).toBe(false);
     }
   });
-
-  /**
-   * C5/pass-16 containment. `collectKbDocs` realpath's the ROOT and then checks
-   * every visited dir against it — so when the KB folder is ITSELF a symlink,
-   * containment was measured against the link's TARGET and the whole target
-   * tree was injected as trusted agent context. Every other store path refuses
-   * to follow a link out of the store (P14-RV-02, assertInsideRoot).
-   */
-  it("refuses a KB folder that is a symlink out of the store", () => {
-    const { dataRoot } = freshKb();
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
-    writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE", "utf8");
-    symlinkSync(outside, path.join(dataRoot, "kb", "linked"));
-    const detailed = readKbBodyDetailed("linked", dataRoot);
-    expect(detailed.body).toBe("");
-    expect(detailed.unresolved?.reason).toContain("symlink");
-    expect(readKbBody("linked", dataRoot)).not.toContain("MARKER-OUTSIDE");
-  });
 });
 
-/**
- * C1/pass-16 — a KB grant that resolves to nothing must reach the RUN, not only
- * a server log. The MCP leg has reported structured misses since P14-LV-09;
- * this is the KB half of the same honesty rule.
- */
-describe("readKbBodyDetailed / readKbBodies — structured misses (C1)", () => {
-  it("reports a missing KB folder as a structured unresolved grant", () => {
-    const { dataRoot } = freshKb();
-    const detailed = readKbBodyDetailed("renamed-away", dataRoot);
-    expect(detailed.body).toBe("");
-    expect(detailed.unresolved).toEqual({
-      name: "renamed-away",
-      reason: "no knowledge-base folder by that name in the store",
-    });
-  });
-
-  it("reports an EMPTY KB folder (the grant is attached, the content is not)", () => {
-    const { dataRoot } = freshKb("hollow");
-    expect(readKbBodyDetailed("hollow", dataRoot).unresolved?.name).toBe("hollow");
-  });
-
-  it("a resolvable KB carries NO unresolved row", () => {
-    const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "a.md"), "MARKER", "utf8");
-    expect(readKbBodyDetailed("notes", dataRoot).unresolved).toBeUndefined();
-  });
-
-  it("readKbBodies spends ONE shared budget and collects every miss", () => {
+describe("readKbIndexes — every declared KB, no shared budget (ruling 283)", () => {
+  it("indexes every KB and collects only the real misses", () => {
     const { dataRoot, kbDir } = freshKb("first");
-    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(300), "utf8");
+    writeFileSync(path.join(kbDir, "a.md"), `# First\n\n${"x".repeat(30_000)}`, "utf8");
     const second = path.join(dataRoot, "kb", "second");
     mkdirSync(second, { recursive: true });
-    writeFileSync(path.join(second, "b.md"), "B".repeat(300), "utf8");
-
-    const set = readKbBodies(["first", "second", "ghost"], dataRoot, 320);
-    // The first KB spends the shared budget; the second announces itself.
-    expect(set.parts[0]!.name).toBe("first");
-    expect(set.parts[1]!.body).toContain("omitted entirely");
-    expect(set.unresolved.map((u) => u.name)).toEqual(["second", "ghost"]);
+    writeFileSync(path.join(second, "b.md"), "# Second", "utf8");
+    const set = readKbIndexes(["first", "second", "gone"], dataRoot);
+    // The 30k first KB does not cost the second one anything — the failure the
+    // shared budget made structural, and the reason there is no budget now.
+    expect(set.parts.map((p) => p.name)).toEqual(["first", "second"]);
+    expect(set.parts[1]?.body).toContain("`b.md`");
+    expect(set.unresolved.map((u) => u.name)).toEqual(["gone"]);
   });
 });
 
-/* ------------- C5-followup: one list, three places that need it ----------- */
+describe("readKbDocForRun — the pull half of ruling 283", () => {
+  it("returns the document whole", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "conventions.md"), "# C\n\nMARKER-BODY", "utf8");
+    expect(readKbDocForRun(["notes"], "notes", "conventions.md", dataRoot)).toContain(
+      "MARKER-BODY",
+    );
+  });
+
+  it("reads a NESTED document by the path the index printed", () => {
+    const { dataRoot, kbDir } = freshKb();
+    mkdirSync(path.join(kbDir, "repo"), { recursive: true });
+    writeFileSync(path.join(kbDir, "repo", "api.md"), "MARKER-NESTED", "utf8");
+    expect(readKbDocForRun(["notes"], "notes", "repo/api.md", dataRoot)).toContain(
+      "MARKER-NESTED",
+    );
+  });
+
+  /** A run may read the knowledge bases attached to IT. The org's others are
+   *  not context this run was granted just because it can spell their names. */
+  it("refuses a knowledge base this run does not hold", () => {
+    const { dataRoot } = freshKb("other-teams-kb");
+    writeFileSync(
+      path.join(dataRoot, "kb", "other-teams-kb", "secret.md"),
+      "MARKER-UNGRANTED",
+      "utf8",
+    );
+    const out = readKbDocForRun(["mine"], "other-teams-kb", "secret.md", dataRoot);
+    expect(out).not.toContain("MARKER-UNGRANTED");
+    expect(out).toContain("[noop]");
+    expect(out).toContain("`mine`");
+  });
+
+  it("refuses a path that climbs out of the knowledge base", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "in.md"), "inside", "utf8");
+    const sibling = path.join(dataRoot, "kb", "sibling");
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(path.join(sibling, "out.md"), "MARKER-ESCAPED", "utf8");
+    const out = readKbDocForRun(["notes"], "notes", "../sibling/out.md", dataRoot);
+    expect(out).not.toContain("MARKER-ESCAPED");
+    expect(out).toContain("[noop]");
+  });
+
+  it("refuses a symlinked document pointing out of the store", () => {
+    const { dataRoot, kbDir } = freshKb();
+    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    writeFileSync(path.join(outside, "secret.md"), "MARKER-LINKED", "utf8");
+    symlinkSync(path.join(outside, "secret.md"), path.join(kbDir, "linked.md"));
+    expect(readKbDocForRun(["notes"], "notes", "linked.md", dataRoot)).not.toContain(
+      "MARKER-LINKED",
+    );
+  });
+
+  it("refuses a non-text file even inside the folder", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "contract.pdf"), "%PDF-MARKER", "utf8");
+    expect(readKbDocForRun(["notes"], "notes", "contract.pdf", dataRoot)).not.toContain(
+      "%PDF-MARKER",
+    );
+  });
+
+  /** A miss hands back the index, so the next call is a real path rather than
+   *  a second guess at the same one. */
+  it("a wrong path answers with the knowledge base's index", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "conventions.md"), "# C", "utf8");
+    const out = readKbDocForRun(["notes"], "notes", "convntions.md", dataRoot);
+    expect(out).toContain("[noop]");
+    expect(out).toContain("`conventions.md`");
+  });
+
+  it("says plainly when a document was cut, rather than reading as complete", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "big.md"), "z".repeat(KB_DOC_READ_CHARS + 500), "utf8");
+    const out = readKbDocForRun(["notes"], "notes", "big.md", dataRoot);
+    expect(out).toContain("cut off here");
+    expect(out).toContain("not the whole document");
+  });
+});
 
 describe("STORE_TEXT_EXTENSIONS is the ONLY store text-doc list", () => {
   /** Every app source file, so the assertion cannot be scoped away. */

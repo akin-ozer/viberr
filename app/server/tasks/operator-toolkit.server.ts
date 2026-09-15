@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readBoardList, readBoardTask } from "./board-read.server";
+import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -313,6 +314,33 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     ),
     "read_board",
   );
+
+  // Ruling 283: the operator's knowledge bases are INDEXED into its prompt, not
+  // injected, so it needs the same pull the agents it coordinates have. Its
+  // grant list already carries the project's rulings KB (ruling 239), which is
+  // the one it is likeliest to need and the one the old shared budget starved
+  // first.
+  if (authority.kb.length > 0) {
+    const grantedKb = authority.kb;
+    add(
+      tool(
+        "read_knowledge_doc",
+        "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index — every document, its size and its sections — and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read the project's settled rules before you scope a task, answer a packet or write a directive that depends on them, rather than working from what a document's title suggests it says.",
+        {
+          kb: z
+            .string()
+            .describe("The knowledge base's name, as its index heading gives it."),
+          path: z
+            .string()
+            .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args: { kb: string; path: string }) =>
+          textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot)),
+      ),
+      "read_knowledge_doc",
+    );
+  }
 
   // F21-21: the ONE anchored answer to "what is on the default branch?".
   //

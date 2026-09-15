@@ -14,6 +14,7 @@ import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.serv
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
 import { readBoardList, readBoardTask } from "./board-read.server";
+import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   readTaskFile,
   updateTaskFile,
@@ -86,6 +87,10 @@ interface AgentToolkitDeps {
   /** Staging key for report_outcome (threaded to the completion input). */
   outcomeKey: string;
   collab: AgentCollab;
+  /** Ruling 283: the knowledge bases attached to THIS run, by store directory.
+   *  Their documents are indexed into the prompt, not injected, so the run
+   *  needs a way to pull one — and may pull only from these. */
+  kb: readonly string[];
 }
 
 const prose = normalizeEscapedNewlines;
@@ -327,7 +332,7 @@ export async function openAgentQuestionPacket(
 /** Build the agent's collaboration toolkit for one run. Returns null when the
  * profile's grants allow none of the tools (no server mounted at all). */
 export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
-  const { db, ctx, projectSlug, taskKey, actorRef, outcomeKey, collab } = deps;
+  const { db, ctx, projectSlug, taskKey, actorRef, outcomeKey, collab, kb } = deps;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -642,6 +647,43 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               err: error instanceof Error ? error : new Error(String(error)),
             });
             return textResult("[error] The board could not be read.");
+          }
+        },
+      ),
+    );
+  }
+
+  // Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,
+  // so the grant is only half-delivered without a way to pull a document. Its
+  // gate is the KB grant itself, not the collaboration grants above — an agent
+  // granted a knowledge base and nothing else still has to be able to read it,
+  // and U11's gate was about collaboration, which this is not. (A Codex run
+  // mounts no in-process Viberr tools at all; its channel is the folder path
+  // the index prints, which `KB_INDEX_NOTE` names.)
+  if (kb.length > 0) {
+    tools.push(
+      tool(
+        "read_knowledge_doc",
+        "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index — every document, its size and its sections — and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name.",
+        {
+          kb: z
+            .string()
+            .describe("The knowledge base's name, as its index heading gives it."),
+          path: z
+            .string()
+            .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            return textResult(readKbDocForRun(kb, args.kb, args.path, ctx.dataRoot));
+          } catch (error) {
+            logger.warn("agent read_knowledge_doc failed", {
+              taskKey,
+              kb: args.kb,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+            return textResult("[error] That knowledge-base document could not be read.");
           }
         },
       ),
