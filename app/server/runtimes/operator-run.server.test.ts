@@ -3043,6 +3043,7 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(spec.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
+      "mcp__viberr__read_task_attachment",
       "mcp__viberr__read_timeline_entry",
     ]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");

@@ -1130,14 +1130,21 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
       prompt: "Pick this up and report what you find.",
     });
     const { readTaskFile } = await import("~/server/files/task-writer.server");
-    const top = readTaskFile({
+    const timeline = readTaskFile({
       projectSlug: SLUG,
       taskKey: "VIB-142",
       dataRoot: app.dataRoot,
-    })!.parsed.timeline[0]!;
+    })!.parsed.timeline;
+    // Found, not indexed. The dispatched run writes its OWN events
+    // asynchronously — on a host where the profile's backend is not connected
+    // it lands a `blocked` entry — and whether that beats this read is a race
+    // the assertion has no business depending on. It did: asserting
+    // `timeline[0]` passed alone and failed inside the file, which is the
+    // timing-fragile shape rather than a fact about the directive.
+    const top = timeline.find((e) => e.type === "comment")!;
     // CANARY: drop the `appendComment` call and the directive exists only
     // inside the agent's prompt, where supervision cannot read it.
-    expect(top.type).toBe("comment");
+    expect(top, "no comment carried the directive").toBeTruthy();
     expect(top.text).toBe("@Developer Pick this up and report what you find.");
     // Addressed to the agent (the routed tint), and authored by the PERSON
     // whose directive it is — the controller relayed it, it did not write it.

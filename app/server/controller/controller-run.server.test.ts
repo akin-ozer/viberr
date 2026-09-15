@@ -353,6 +353,82 @@ describe("the turn carries the context read (ruling 121)", () => {
 });
 
 /**
+ * Ruling 293 (pass 37, F37-128): the EVIDENCE, not only the sentence claiming
+ * it. Attachments are where every convention on this instance tells an agent to
+ * put its proof — a mutation run with both vitest outputs, before/after
+ * captures, a cold-stack log — and the actor a person asks "did it actually
+ * prove that?" could read the claim and never the file.
+ */
+describe("ruling 293: the coordinators can read the evidence", () => {
+  it("both mount read_task_attachment, in the same change", async () => {
+    // Canary: drop either mount. They are asserted TOGETHER on purpose —
+    // ruling 292 exists because ruling 285 gave one coordinator a reader and
+    // not the other, and this is the test that makes doing it twice a choice.
+    const { buildControllerMounts } = await import("./controller-run.server");
+    const mounts = buildControllerMounts(app.db, {
+      user,
+      projectSlug: "viberr-core",
+      taskKey: null,
+      orgServers: {},
+      kb: [],
+      dataRoot: app.dataRoot,
+    });
+    expect(mounts.allowedTools).toContain(
+      "mcp__viberr_controller__read_task_attachment",
+    );
+
+    const { buildOperatorToolkit } = await import("~/server/tasks/operator-toolkit.server");
+    const operator = buildOperatorToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      projectSlug: "viberr-core",
+      taskKey: "VIB-1",
+      authority: {
+        policy: new Map(),
+        autonomy: "supervised",
+        configuredAutonomy: "supervised",
+        kb: [],
+        skills: [],
+        mcps: [],
+        persona: null,
+        deployed: false,
+        backend: "claude",
+        model: "",
+        effort: "",
+        name: "Operator",
+        humanGatedBeforeWork: false,
+      },
+    });
+    expect(operator.allowedTools).toContain("mcp__viberr__read_task_attachment");
+  });
+
+  it("reads a text attachment whole, and refuses a binary by name", async () => {
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { readTaskAttachmentText } = await import(
+      "~/server/files/task-attachments.server"
+    );
+    const dir = `${app.dataRoot}/projects/viberr-core/tasks/VIB-1/attachments`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/proof.txt`, "MUTANT RED\nFIX GREEN\n");
+    writeFileSync(`${dir}/shot.png`, "not really a png");
+
+    const text = readTaskAttachmentText("viberr-core", "VIB-1", "proof.txt", app.dataRoot);
+    expect(text).toMatchObject({ truncated: false });
+    expect(text && "text" in text ? text.text : "").toContain("MUTANT RED");
+
+    // A PNG is not something this channel carries, and saying so beats handing
+    // back bytes a model will describe as if it had looked at the image.
+    const binary = readTaskAttachmentText("viberr-core", "VIB-1", "shot.png", app.dataRoot);
+    expect(binary && "unreadable" in binary ? binary.unreadable : "").toContain(".png");
+
+    // A name that climbs out of the task's own folder resolves to nothing.
+    expect(
+      readTaskAttachmentText("viberr-core", "VIB-1", "../../secrets.txt", app.dataRoot),
+    ).toBeNull();
+  });
+});
+
+/**
  * Ruling 292 (pass 37, F37-127): ruling 285 gave the OPERATOR a way to read a
  * report its prompt had cut. The controller got nothing — and it is the sharper
  * case of the two, because its `get_task` cuts at 700 rather than 1,500 and it

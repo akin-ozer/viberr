@@ -4231,6 +4231,32 @@ by rewriting those paragraphs:*
     the whole of it is: the agent's own report, on the same timeline, never truncated.
     (`controller-toolkit.server.ts`, `task-actions.server.ts`.)
 
+293. **The evidence, not only the sentence claiming it (2026-09-15, pass 37; F37-128).**
+    A task's attachments are where the proof lives, and every convention on this instance
+    tells agents to put it there. On this board the SHOP-37 deliverer attached its mutation
+    proof — the mutant diff and both vitest runs, raw; the SHOP-42 reviewer attached "full
+    before/after captures and audit table"; the SHOP-28 architect wrote two follow-up task
+    specs into one, "including the literal code to land". A timeline entry names them under
+    `attachments:` and carries none of their contents.
+    So the two actors a PERSON asks "did it actually prove that?" — the controller they
+    talk to, and the operator that recommends acceptance on the strength of a review —
+    could read the claim and never the file. That is the distinction this whole pass turns
+    on, and the controller had already named it about itself: "the citation is inherited,
+    not verified. If my paraphrase of §3 had been wrong, nothing in that run would have
+    caught it."
+    `read_task_attachment` returns one attachment as text, on BOTH toolkits, mounted in one
+    change and pinned by one test that asserts both. That pairing is deliberate: ruling 292
+    exists because ruling 285 gave one coordinator a reader and not the other, and a test
+    holding the two together is what turns doing it twice into a choice rather than an
+    oversight.
+    Text only, by name, and honest about the rest: a `.png` is named and refused rather
+    than handed back as bytes a model will describe as though it had looked at the image; a
+    name that climbs out of the task's own folder resolves to nothing (the containment every
+    store path uses); a file past the read cap says it was cut. A name this task does not
+    hold answers with what it DOES hold, rather than implying a deletion.
+    (`task-attachments.server.ts`, `controller-toolkit.server.ts`,
+    `operator-toolkit.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

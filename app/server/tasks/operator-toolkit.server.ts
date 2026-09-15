@@ -1,6 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import {
+  listTaskAttachments,
+  readTaskAttachmentText,
+} from "~/server/files/task-attachments.server";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -313,6 +317,41 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       },
     ),
     "read_board",
+  );
+
+  // Ruling 293: the EVIDENCE on its own task, not only the report's claim about
+  // it. Mounted here in the SAME change that mounts it on the controller —
+  // ruling 292 exists because ruling 285 gave one coordinator a reader and not
+  // the other, and doing that twice in one pass would be a choice rather than
+  // an oversight.
+  add(
+    tool(
+      "read_task_attachment",
+      "Read ONE of this task's attachments as text. Attachments are where the agents you dispatch put their PROOF - a mutation run with both outputs, before/after captures, a cold-stack log - and a report names them without carrying their contents. Call it before you tell a person something was proved, before you recommend acceptance on the strength of evidence you have not read, and before you repeat a report's claim about what its own attachment shows. Text files only (.txt .log .md .json .yml .yaml .csv .diff .patch); anything else is named and refused rather than guessed at. Read-only.",
+      {
+        name: z
+          .string()
+          .describe("The attachment's file name, exactly as the timeline lists it."),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { name: string }) => {
+        const read = readTaskAttachmentText(projectSlug, taskKey, args.name, ctx.dataRoot);
+        if (!read) {
+          const have = listTaskAttachments(projectSlug, taskKey, ctx.dataRoot).map(
+            (a) => a.name,
+          );
+          return textResult(
+            `[noop] ${taskKey} has no attachment \`${args.name}\`. ` +
+              (have.length
+                ? `It holds: ${have.join(", ")}.`
+                : "It has no attachments at all."),
+          );
+        }
+        if ("unreadable" in read) return textResult(`[noop] ${read.unreadable}`);
+        return textResult(JSON.stringify(read, null, 1));
+      },
+    ),
+    "read_task_attachment",
   );
 
   // Ruling 285 (F37-120): the coordinator could not read a report it was handed

@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
+  listTaskAttachments,
+  readTaskAttachmentText,
+} from "~/server/files/task-attachments.server";
+import {
   BACKEND_LABEL,
   assertEffortForBackend,
   assertModelForBackend,
@@ -1551,6 +1555,44 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "get_task",
+  );
+
+  // Ruling 293: the EVIDENCE, not only the sentence claiming it. Attachments
+  // are where every convention on this instance tells an agent to put its
+  // proof, and the actor a person asks "did it actually prove that?" could
+  // read the claim and never the file.
+  add(
+    tool(
+      "read_task_attachment",
+      "Read ONE of a task's attachments as text. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and a timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. Text files only (.txt .log .md .json .yml .yaml .csv .diff .patch); anything else is named and refused rather than guessed at. Read-only, membership gated.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        name: z
+          .string()
+          .describe("The attachment's file name, exactly as the timeline lists it."),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string; name: string }) => {
+        const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
+        requireVisible(slug, "read this task");
+        const read = readTaskAttachmentText(slug, key, args.name, dataRoot);
+        if (!read) {
+          const have = listTaskAttachments(slug, key, dataRoot).map((a) => a.name);
+          // Ruling 246's shape: say what this reader IS and what it holds,
+          // rather than implying the file was deleted.
+          return (
+            `[noop] ${key} has no attachment \`${args.name}\`. ` +
+            (have.length
+              ? `It holds: ${have.join(", ")}.`
+              : "It has no attachments at all.")
+          );
+        }
+        if ("unreadable" in read) return `[noop] ${read.unreadable}`;
+        return json(read);
+      }),
+    ),
+    "read_task_attachment",
   );
 
   // Ruling 292: the controller reads a timeline entry whole, exactly as the

@@ -166,6 +166,8 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     "read_board",
     "read_knowledge_doc",
     "read_timeline_entry",
+    // Ruling 293: the evidence a report only claims. A read like its siblings.
+    "read_task_attachment",
   ]);
   const RENAME = new Map([
     ["open_decision_packet", "open_packet"],
@@ -382,6 +384,7 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
     expect(toolkit.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
+      "mcp__viberr__read_task_attachment",
       "mcp__viberr__read_timeline_entry",
     ]);
     for (const write of [
