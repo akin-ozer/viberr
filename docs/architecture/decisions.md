@@ -6041,6 +6041,26 @@ by rewriting those paragraphs:*
     the sentence ruling 263 exists to stop.
     (`task-detail-page.tsx`, `controller-toolkit.server.ts`.)
 
+273. **A recovery option is not offered onto a backend already known to be spent (2026-09-15,
+    pass 37; F37-106).** `operatorOpenPacket` refuses to author an `accept_completion` away
+    from the acceptance boundary, a `resolve_remote_collision` with no collision recorded, and
+    a `discard_branch` on a revision that has left the workspace — all for one reason, in the
+    first guard's own words: "the human is left confirming a card that cannot succeed". The
+    kind whose entire job is RECOVERY had no such guard.
+    Live on SHOP-37: Codex was recorded exhausted for the task owner's credential at 03:26
+    ("try again at Sep 19th, 2026 9:36 AM"); the operator recommended "Re-run the Integration
+    Verifier on the Codex backend" six hours later; a person confirmed it; and the answer was
+    "The retry could not start: Held: Codex is out of quota until Sep 19 · 09:36 UTC;
+    Integration Verifier's run is scheduled for then." Nothing lied and nothing was lost — that
+    hold is ruling 152(c) working exactly as designed — but a decision was spent on a four-day
+    park that was knowable at the moment the option was written, and the task sat behind it.
+    Authoring now reads `backendDispatchHold` for the credential the run would bill (the task's
+    owner, ruling 127) and refuses a `retry_other_backend` onto a held backend, naming the hold
+    and the two kinds that fit instead: the other backend, or `wait_for_window` with the reopen
+    instant — which ruling 224 built for precisely this fact and which resumes by itself. The
+    hold is per (backend, credential), so a retry onto the backend that CAN run is untouched.
+    (`operator-actions.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

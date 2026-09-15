@@ -5094,6 +5094,84 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(stray.message).toContain("newTask only fits a create_task option");
   });
 
+  /**
+   * Ruling 273 (pass 37, F37-106): a retry onto a backend the instance already
+   * knows is spent. Live on SHOP-37 the operator recommended "Re-run the
+   * Integration Verifier on the Codex backend" six hours after Codex was
+   * recorded exhausted for the owner's credential; a person confirmed it and
+   * the answer was "The retry could not start: Held: Codex is out of quota
+   * until Sep 19… scheduled for then." Nothing lied and nothing was lost — the
+   * hold is ruling 152(c) working — but the decision was spent on a four-day
+   * park that was knowable when the option was written.
+   */
+  it("ruling 273: refuses a retry onto a backend already recorded out of quota for the owner", async () => {
+    packetsRoster();
+    seedTask("impl");
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 3600,
+      resetsAtPrecision: "clock",
+      providerText: "You've hit your usage limit",
+      runId: "run_spent",
+      observedAt: new Date().toISOString(),
+    });
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "The verifier never ran — pick a recovery",
+        options: [
+          {
+            kind: "retry_other_backend",
+            title: "Re-run the verifier on Codex",
+            recommended: true,
+            backend: "codex",
+          },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    // CANARY: remove the hold check and the operator may recommend a retry
+    // whose only possible outcome is a park until the window reopens.
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("already recorded Codex as out of quota");
+    expect(refused.message).toContain("wait_for_window");
+    expect(task().packet).toBeNull();
+
+    // The OTHER backend is unaffected: the hold is per (backend, credential),
+    // and this guard must not refuse a recovery that can actually run.
+    const allowed = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "The verifier never ran — pick a recovery",
+        options: [
+          {
+            kind: "retry_other_backend",
+            title: "Re-run the verifier on Claude",
+            recommended: true,
+            backend: "claude",
+          },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(allowed.outcome).toBe("done");
+    expect(task().packet?.options[0]).toMatchObject({ backend: "claude" });
+  });
+
   it("refuses to let the operator offer the head-check override at all", async () => {
     // Ruling 226: the waiver is granted against a (PR, revision, live head)
     // triple the ACCEPTANCE GATE read at the moment it refused. An operator

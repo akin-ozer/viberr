@@ -85,6 +85,7 @@ import {
   type AuditActor,
   type AuditEventInput,
 } from "~/server/audit/audit-recorder.server";
+import { backendDispatchHold } from "~/server/runtimes/backend-quota.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -1377,6 +1378,44 @@ export async function operatorOpenPacket(
     // Ruling 269: `create_task` carries the task it will create, and only that
     // kind reads it — the same two refusals `move_stage` gets, for the same
     // reason: an option must never be written in a shape the confirm refuses.
+    // Ruling 273 (pass 37, F37-106): a retry onto a backend the instance
+    // ALREADY knows is spent. The same rule the `accept_completion` and
+    // `resolve_remote_collision` guards apply — "the human is left confirming
+    // a card that cannot succeed" — on the kind whose whole job is recovery.
+    // Live on SHOP-37: Codex had been recorded exhausted for the owner's
+    // credential since 03:26 ("try again at Sep 19th"), the operator
+    // recommended "Re-run the Integration Verifier on the Codex backend" at
+    // 09:0x, a person confirmed it, and the answer was "The retry could not
+    // start: Held: Codex is out of quota until Sep 19… scheduled for then."
+    // Nothing lied and nothing was lost — the hold is ruling 152(c) working —
+    // but the decision was spent on a four-day park that was knowable when the
+    // option was written. `wait_for_window` is the honest kind for that, and
+    // ruling 224 built it for exactly this fact.
+    if (rawOptions.some((o) => o.kind === "retry_other_backend")) {
+      const ownerId = existing.parsed.frontmatter.ownerUserId;
+      const retryTargets = rawOptions
+        .filter((o) => o.kind === "retry_other_backend")
+        .map((o) => ({ option: o, backend: o.backend ?? null }));
+      for (const target of retryTargets) {
+        const backend = target.backend;
+        if (!backend || !ownerId) continue;
+        const hold = backendDispatchHold(db, backend, { credentialUserId: ownerId });
+        if (!hold) continue;
+        const label = backend === "codex" ? "Codex" : "Claude";
+        const until = hold.until
+          ? ` until ${new Date(hold.until).toISOString()}`
+          : "";
+        return {
+          outcome: "noop",
+          message:
+            `"${target.option.title}" retries on ${label}, and this instance already recorded ` +
+            `${label} as out of quota for ${input.taskKey}'s owner${until} — the dispatch would ` +
+            `be HELD and re-scheduled rather than run, so the person would spend a decision on a ` +
+            `wait. Offer the OTHER backend, or offer wait_for_window with dueAt set to the reopen ` +
+            `instant, which resumes by itself and says so.`,
+        };
+      }
+    }
     const strayNewTask = rawOptions.find(
       (o) => o.kind !== "create_task" && o.newTask !== undefined,
     );
