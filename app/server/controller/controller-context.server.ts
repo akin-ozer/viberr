@@ -10,7 +10,10 @@ import { storeRelativePath } from "~/server/files/file-store-root.server";
 import { getProject, listProjectTasks } from "~/server/projections/board-query.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { listGoals } from "~/server/tasks/goal-actions.server";
-import { listHomeProjectsForUser } from "~/features/home/home-query.server";
+import {
+  listHomeProjectsForUser,
+  type HomeProjectCard,
+} from "~/features/home/home-query.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
@@ -402,6 +405,40 @@ function boardContext(
   );
 }
 
+/**
+ * Ruling 307: one project's two lines for the instance context — its identity,
+ * and its STATE.
+ *
+ * Every number here was already computed by `listHomeProjectsForUser` for the
+ * home page's own cards, and this read was calling it and throwing them away.
+ * So an instance-scoped conversation opened knowing which projects exist and
+ * nothing whatever about them, and the controller had to spend `list_runs`,
+ * `list_decisions`, `list_tasks` and three `get_task`s before it could answer
+ * "what is blocked?" — which, for a person who asked only that, is the whole
+ * experience of talking to it.
+ */
+export function projectStateLines(
+  project: HomeProjectCard,
+  role: string,
+): string {
+  const terminal = project.stages.at(-1);
+  const doneCount = terminal ? (project.dist[terminal.id] ?? 0) : 0;
+  const open = project.total - doneCount;
+  // A zero says so in WORDS. A blank here reads as either "none" or "not
+  // computed", and the whole point is to answer before a tool call.
+  const waiting =
+    project.waiting > 0
+      ? `${project.waiting} waiting on YOU`
+      : project.overrideWaiting > 0
+        ? `${project.overrideWaiting} waiting on a member (yours only via the org-admin override)`
+        : "nothing waiting on you";
+  return (
+    `- ${project.slug} · ${project.name} · your role ${role}` +
+    `${project.archived ? " · archived" : ""}\n` +
+    `  ${project.total} tasks, ${open} not done · ${project.running} running · ${waiting}`
+  );
+}
+
 function instanceContext(
   db: DatabaseSync,
   user: ControllerContextInput["user"],
@@ -423,7 +460,7 @@ function instanceContext(
   const lines = projects.slice(0, INSTANCE_CONTEXT_PROJECTS).map((p) => {
     const role =
       roles.get(p.slug) ?? (admin ? "org admin override" : "not a member");
-    return `- ${p.slug} · ${p.name} · your role ${role}${p.archived ? " · archived" : ""}`;
+    return projectStateLines(p, role);
   });
   if (projects.length > INSTANCE_CONTEXT_PROJECTS) {
     lines.push(`- ... ${projects.length - INSTANCE_CONTEXT_PROJECTS} more; whoami lists them`);

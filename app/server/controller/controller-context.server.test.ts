@@ -4,6 +4,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
+import type { HomeProjectCard } from "~/features/home/home-query.server";
 
 /**
  * Ruling 121 — the per-turn context READ.
@@ -234,6 +235,69 @@ describe("gatherControllerContext", () => {
     expect(read.text).toContain("## Instance");
     expect(read.text).toContain(`${arda.name} (${arda.email}) · org role admin`);
     expect(read.text).toContain(`- ${SLUG} · Viberr Core · your role admin`);
+  });
+
+  /**
+   * Ruling 307 (pass 37, F37-142). The controller found this by describing what
+   * talking to it is actually like: "the turn's context block gives me your
+   * visible PROJECTS, not the board. So every board question starts from zero.
+   * On the turn where you said 'drive it', you waited through `list_runs`,
+   * `list_decisions`, `list_tasks` and three `get_task`s before I did one
+   * useful thing. For a person who just wants 'what is blocked?', that latency
+   * is the entire experience of talking to me."
+   *
+   * The numbers were never missing. `listHomeProjectsForUser` computes them for
+   * the home page's own cards, and this read called it and discarded them.
+   */
+  it("ruling 307: each project carries its state, not only its name", async () => {
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const read = gatherControllerContext(app.db, {
+      projectSlug: null,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: drop the second line and every board question starts from zero.
+    expect(read.text).toMatch(/\d+ tasks, \d+ not done · \d+ running/);
+    expect(read.text).toMatch(/waiting on YOU/);
+  });
+
+  it("ruling 307: a project with nothing waiting says so in words, never a blank", async () => {
+    const { projectStateLines } = await import("./controller-context.server");
+    const base: HomeProjectCard = {
+      slug: "p",
+      name: "P",
+      archived: false,
+      key: "P",
+      repo: null,
+      desc: "",
+      stages: [
+        { id: "build", name: "Build", color: "#111" },
+        { id: "done", name: "Done", color: "#222" },
+      ],
+      dist: { build: 3, done: 7 },
+      total: 10,
+      running: 1,
+      waiting: 0,
+      overrideWaiting: 0,
+      members: [],
+      updatedAt: "2026-09-16T00:00:00.000Z",
+      accent: "#5b76fe",
+      repoAccess: null,
+    };
+    // CANARY: render "" for the no-decisions case and this reads as either
+    // "none" or "not computed", which is the thing it exists to prevent.
+    const quiet = projectStateLines(base, "admin");
+    expect(quiet).toContain("10 tasks, 3 not done · 1 running · nothing waiting on you");
+
+    // The org-admin override is named as its own case, never folded into
+    // "waiting on YOU" — the home page's own rule (R8-3).
+    const viaOverride = projectStateLines(
+      { ...base, waiting: 0, overrideWaiting: 2 },
+      "org admin override",
+    );
+    expect(viaOverride).toContain("2 waiting on a member");
+    expect(viaOverride).not.toContain("waiting on YOU");
   });
 
   it("appends the surface hint when the dock supplied one, and never otherwise", async () => {

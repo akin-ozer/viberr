@@ -4715,6 +4715,31 @@ by rewriting those paragraphs:*
     sentence that says why it matters at all is the one worth keeping: a report saying a
     thing was proved and the file proving it are different objects, and only one of them is
     evidence.
+
+307. **A turn opens knowing what is happening, not only what exists (owner, 2026-09-16,
+    pass 37; F37-142).** An instance-scoped controller conversation opened each turn with a
+    server read listing the person's visible PROJECTS: slug, name, their role. Nothing about
+    any of them. A project-BOUND conversation has opened with a board snapshot all along, so
+    the actor with the widest scope was the one starting from zero.
+    The controller found it by being asked a different question. Every earlier round asked
+    where its toolkit ran out; this one asked where a PERSON talking to it gets a worse
+    outcome than they should. Its answer: "the turn's context block gives me your visible
+    projects, not the board. So every board question starts from zero. On the turn where you
+    said 'drive it', you waited through `list_runs`, `list_decisions`, `list_tasks` and three
+    `get_task`s before I did one useful thing. For a person who just wants 'what is
+    blocked?', that latency is the entire experience of talking to me."
+    The numbers were never missing and never cost anything. `listHomeProjectsForUser` already
+    computes `total`, `running` and a member-scoped `waiting` for the home page's own cards,
+    off the same `indexDecisionInbox` the notifications inbox reads, so the two surfaces
+    cannot answer "waiting on you" differently. This read was CALLING that function and
+    discarding the fields. One line per project now carries them, with no new query.
+    A zero says so in WORDS. "nothing waiting on you" and a blank are the same pixels and
+    opposite claims, and the whole point of the line is to be answerable before a tool call.
+    The org-admin override keeps its own case rather than being folded into "waiting on
+    YOU", which is R8-3's rule on the surface that rule was written for.
+    The controller's own framing of the class is worth keeping, because it is the bar for
+    everything after this: "The goal is not to let me hedge accurately. It is to stop me
+    needing to hedge."
     Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
     requests were accepted and merged carrying three failing checks each, and the ceremony
     named the PR, the branch, the base, the verdict and the skipped stages without once
