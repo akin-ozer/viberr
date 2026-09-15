@@ -6214,6 +6214,30 @@ by rewriting those paragraphs:*
     against a window written for 01:05. Stamped per render instead. A gate that cries wolf
     trains everyone to discount red, which is SHOP-35's own premise.)*
 
+281. **An agent can check a task it is told about (owner, 2026-09-15, pass 37; F37-114).** A
+    specialist could read its REPOSITORY — `github_read` returns pull requests, reviews, checks
+    and file contents — and not the BOARD it works on. Its whole Viberr toolkit was
+    `post_comment`, `ask_human` and `report_outcome`. So a task key it was told about, in a
+    document or a directive or another agent's report, could not be checked.
+    The cost, measured on SHOP-26. `services/cart/DESIGN.md:458` claimed "SHOP-39 was created
+    for this gap on 2026-09-15". Two agents read it, correctly refused to trust a document's
+    claim about the board — "a task named in a document is not a task until someone checks",
+    which is precisely the discipline the project's conventions ask for — and had no way to
+    check. So the mismatch was reported as open, the operator re-raised a decision that had
+    already been answered, and its recommended option carried a `create_task` whose title was
+    SHOP-39's word for word. Nothing on the card could have told the person confirming it.
+    `read_board` answers one key or lists the project: title, stage, readiness, what it waits
+    on, whether it is archived, and (for one task) its goal. THIS project only, read-only, and
+    no field a member could not read on the task page. Archived tasks are included, because
+    "SHOP-8 was archived" is a real answer to "does SHOP-8 exist" and an agent told about a
+    retired key must be able to learn that rather than read it as never having existed. A key
+    that is not on the board answers plainly that the claim was wrong.
+    It carries no capability grant — every one of these facts is already in the agent's own
+    prompt for its OWN task, so the gap was never permission, only the tasks beside it. It is
+    mounted only where a Viberr server is mounted anyway: a profile holding no collaboration
+    grant at all still gets nothing, which is the gate U11 pinned.
+    (`agent-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
