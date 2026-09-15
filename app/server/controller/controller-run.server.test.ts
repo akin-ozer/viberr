@@ -155,6 +155,13 @@ describe("controller mounts (ruling 107)", () => {
     // believes the categorical negative never calls the tools at all.
     expect(prompt).toContain("No org MCP servers are attached to you.");
     expect(prompt).not.toContain("No MCP servers are attached to you.");
+    // Ruling 297: it no longer NAMES that server's tools. This sentence used
+    // to read "instance health, run logs, store documents", and `list_runs`
+    // shipped after it and was never added, so the one written description of
+    // the server understated it. The list is generated into the server's own
+    // instructions now. CANARY: put the enumeration back.
+    expect(prompt).not.toMatch(/instance health, run logs, store/);
+    expect(prompt).toContain("the server's own instructions list its tools");
   });
 
   /**

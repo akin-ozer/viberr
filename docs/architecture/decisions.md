@@ -4396,6 +4396,41 @@ by rewriting those paragraphs:*
     first pass fixed only the one-line spellings of `z.object(`. That walk also broke a
     test that had been reading field descriptions off `inputSchema` as a raw field map; it
     reads the published JSON now, which is the only copy a model ever sees.
+
+297. **A server tells the model what it holds, in a list built from what it mounts
+    (owner, 2026-09-16, pass 37; F37-132).** The controller's two servers are mounted
+    DEFERRED behind ToolSearch, which is measured and deliberate: `alwaysLoad` on
+    44 tools tripled turn 1 and quadrupled a cold turn's cost, so the operator and agent
+    toolkits carry it and these do not. What nobody costed is that a deferred toolkit never
+    arrives as a LIST. The controller reported it from inside its own prompt, when asked to
+    report what it could see rather than reason about what should be there: three tools are
+    fully present (`ListAgents`, `ReportFindings`, `ToolSearch`), everything else is names
+    only in a `<system-reminder>`, and "the list is incremental, not a manifest. The turn
+    that shipped `list_decisions` listed four names, the turn that shipped
+    `read_timeline_entry` listed three. So the complete toolkit exists in my context only
+    as a union across eleven turns of reminders, never as one list."
+    The cost is not a wasted search. Asked to drive a board, it answered "do I have
+    `accept_completion`" by searching, finding nothing, and reporting a negative inferred
+    from absence, which is the weakest evidence there is and the shape that had already
+    burned it once. Four verbs it did not have had been attributed to it and it could not
+    check them against anything.
+    So each server's `instructions` now carry every tool it mounts: the name, and the first
+    sentence of the description as its purpose. Instructions were the right place and that
+    was MEASURED, not assumed. The controller confirmed they reach its prompt under
+    `# MCP Server Instructions` and quoted both back verbatim; they sit in the system
+    prompt, so on a 95.8% cache hit rate the manifest is paid once. Schemas stay deferred,
+    because the shape of a call is what ToolSearch is good at; what was missing was knowing
+    the verb EXISTS. The list says so in as many words: if a verb is not on it you do not
+    have it, and say that rather than reporting a search that found nothing.
+    GENERATED FROM THE REGISTRY, never written, and the proof that this is the binding half
+    was already in the controller's prompt. The one hand-written description of a Viberr
+    toolkit said "Built-in diagnostics (viberr_ops) are always attached: instance health,
+    run logs, store documents" and named three capabilities; `list_runs` shipped after that
+    sentence and was never added to it. That sentence stops enumerating, and the tests
+    check the list BOTH ways, because a hand-written one fails in the second direction
+    first: every mounted tool appears, and nothing appears that is not mounted. A purpose
+    longer than 150 characters is cut at a word and SAYS it was cut, naming where the rest
+    is, which is ruling 285's rule again on a smaller string.
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

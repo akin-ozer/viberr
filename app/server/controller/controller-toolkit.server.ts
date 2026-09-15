@@ -33,6 +33,7 @@ import {
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
+import { toolManifest } from "~/server/runtimes/tool-manifest.server";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
@@ -3390,7 +3391,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   const server = createSdkMcpServer({
     name: "viberr_controller",
     version: "1.0.0",
-    instructions: CONTROLLER_TOOLKIT_INSTRUCTIONS,
+    // Ruling 297: these tools are deferred behind ToolSearch and arrive as
+    // per-turn name DELTAS, so the model never sees its toolkit as a list.
+    // The instructions carry one, generated from `tools` itself.
+    instructions: CONTROLLER_TOOLKIT_INSTRUCTIONS + toolManifest(tools, "viberr_controller"),
     tools,
   });
 

@@ -985,10 +985,17 @@ export function buildControllerSystemPrompt(
         : "") +
       // Ruling 107: this line is true on every turn by construction — the mount
       // reads no config, so the model is never told about tools it does not have.
-      "Built-in diagnostics (viberr_ops) are always attached: instance health, run logs, store " +
-      "documents. They are read-only, and every call is checked against the asking person's own " +
-      "permission level, so use them to answer how this instance and its runs are really doing " +
-      "instead of guessing.\n" +
+      //
+      // Ruling 297: it no longer NAMES them. This sentence used to enumerate
+      // "instance health, run logs, store documents" and had already drifted:
+      // `list_runs` shipped after it and was never added, so the one written
+      // description of that server understated it. Each server now carries a
+      // manifest generated from its own registry, which is where the list
+      // belongs, and this says what the server is FOR.
+      "Built-in diagnostics (viberr_ops) are always attached. They are read-only, every call is " +
+      "checked against the asking person's own permission level, and the server's own " +
+      "instructions list its tools. Use them to answer how this instance and its runs are really " +
+      "doing instead of guessing.\n" +
       "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.",
   );
 

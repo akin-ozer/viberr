@@ -71,3 +71,22 @@ export async function publishedSchemas(
   }
   return out;
 }
+
+/**
+ * Ruling 297: the instructions a server publishes, read the way a model
+ * receives them — through `initialize`, not off the object we passed in.
+ */
+export async function publishedInstructions(
+  server: McpSdkServerConfigWithInstance | SpecialistMcpServerConfig | undefined,
+): Promise<string> {
+  if (!server || !("instance" in server)) {
+    throw new Error("publishedInstructions needs an in-process MCP server");
+  }
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverEnd);
+  const client = new Client({ name: "instructions-read", version: "1" }, { capabilities: {} });
+  await client.connect(clientEnd);
+  return client.getInstructions() ?? "";
+}
