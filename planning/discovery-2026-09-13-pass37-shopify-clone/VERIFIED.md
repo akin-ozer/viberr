@@ -2059,3 +2059,51 @@ Re-run in isolation, three times: **728ms, 917ms, 1415ms — all green.** It onl
 `make test` runs the whole workspace in parallel while five agent runs compete for the same CPU.
 Classified rather than reported: flaky under load, against a 5,000ms budget roughly 3.5x its
 isolated runtime. Handed to the board as a product finding, not recorded as a viberr defect.
+
+---
+
+## The controller audit: 98 agents, 45 candidates, 29 confirmed, 16 refuted
+
+Run as a workflow over eight dimensions of controller behaviour — tool authority, tool honesty,
+run lifecycle, scope binding, prompt assembly, the two UI surfaces, whether its writes reach
+people, and the human-decision boundary. Every candidate was then put to two independent
+refuters: one checking that each citation resolves to what the claim says, one checking that the
+harm clears this pass's bar. A finding survived only by beating both.
+
+**16 were killed**, and the kills are the reason to trust the 29. Among them: the seeded controller
+playbook "telling it to push a task forward with an @operator comment" (high, certain — refuted);
+a stopped turn "throwing away the prose the controller already wrote" (high, certain — refuted);
+the dock's "Open the full controller page" destroying the draft; `update_agent_deployment`
+reporting "old → requested" rather than what was written. All plausible, all wrong.
+
+Two of the 29 confirmed what I had found independently an hour earlier by hand — `get_project`
+handing back raw leases, and `list_decisions` carrying an anchor across projects — which is the
+useful kind of duplication: the same defect reached from two directions.
+
+### The one that could not have been found by reading code alone
+
+```
+controller comments still in the task files:   8
+controller comments in the audit log:         19
+```
+
+Eleven of the owner's own published comments deleted from canonical `task.md`, from `task_events`,
+and from the audit payload, by a compaction rule that folds any comment whose actor is not
+`"human"` — and ruling 99(b) deliberately makes a controller write a *different* actor kind,
+because the person is the authority and the controller is the instrument. The marker that replaced
+the prose reads *"human comments are never compacted."*
+
+The audit found it by reading the rule against ruling 99(b)'s intent. Confirming it took two
+commands. Neither would have happened without asking "is what this line says true of the live
+board?"
+
+### And the one the board found while the audit ran
+
+SHOP-32's verifier approved `f5470f05` at 05:14:33. At 05:14:35 the react loop's depth cap opened
+*"Work stalled: pick a recovery path"* — redirect, send back, hold — on work that had just passed,
+and the packet then blocked the acceptance it should have been waiting for. The packet's own
+sentence already asserted the test nobody had written: it says the loop stopped *"without reaching
+a boundary"*.
+
+Nine rulings came out of the afternoon (253–261). Two of them — 256 and 257 — are defects in code
+this same pass shipped earlier the same day.
