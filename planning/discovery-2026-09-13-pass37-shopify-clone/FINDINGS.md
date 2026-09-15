@@ -4417,3 +4417,42 @@ deployment changes before you answer, the run follows the deployment. Re-derivin
 render time was the alternative and was rejected: `mapPacket` is a pure mapping with no project
 read, and plumbing one in to restate a fact the run already resolves correctly buys less than a
 sentence that is true whenever it is read. Canaried on the existing F36-8 test.
+
+## F37-84 · A task's own creation wrote two events out of order — LOW
+
+Found by re-running the timeline-ordering scan across the whole board, because the last one covered
+266 events and there are now 2,388.
+
+```
+task files scanned: 33
+timeline events:    2388
+order inversions:   3
+  SHOP-24: 2      <- historical, pre-fix, already recorded
+  SHOP-27: 1      <- new
+```
+
+SHOP-27's:
+
+```
+### 2026-09-14T19:27:52.529Z · note · user:… (Arda)   title: Waits on other work
+### 2026-09-14T19:27:52.530Z · assign · user:… (Arda)  Took task ownership by creating the task.
+```
+
+The file is newest-first, so a `.529` entry above a `.530` entry is an inversion. `createTask`
+stamps the wait note with the frontmatter's `now` and then calls `ownerAssignEvent`, which reads
+`new Date()` again; the note is unshifted above it. One millisecond, and only because nothing slow
+sits between the two writes.
+
+Low severity and reported as such — both entries are present and readable. It earns its place
+because **viberr ships a diagnostic that scans timelines for exactly this**, so the defect makes
+the product's own instrument report a fault on a healthy board, and the cost is a person
+investigating an instrument that is working correctly.
+
+**Fix (ruling 255).** Every event one write puts on a timeline carries that write's instant. Equal
+stamps are the honest relation between two events of a single act.
+
+**The test lesson is worth more than the finding.** The first canary PASSED with the defect
+restored: both clock reads landed in the same millisecond, so the assertion could only fail on a
+slow machine. `CreateTaskInput.now` is now a test seam — the shape the reset-label clock already
+uses — and the canary fixes the creation instant, so the assertion is a fact about the code rather
+than about how fast the machine ran. A canary that can only go red under load is not a canary.

@@ -5633,6 +5633,23 @@ by rewriting those paragraphs:*
     buys less than a sentence that is true whenever it is read.
     (`run-failure-remedy.server.ts`.)
 
+255. **One creation is one instant (2026-09-15, pass 37; F37-84).** A task created with a
+    `blockedBy` list writes two timeline events: the wait note, stamped with the frontmatter's
+    own `now`, and the ownership `assign`, which read the clock again. In a newest-first file
+    the note is unshifted above the assign, so when the second clock read landed a millisecond
+    later the file claimed an order its own stamps contradicted. Measured on SHOP-27: note at
+    `19:27:52.529Z` above assign at `19:27:52.530Z`. Small, and viberr ships a diagnostic that
+    scans every timeline for exactly this and duly reported the board as carrying an inversion,
+    so the cost is a person investigating an instrument that is working.
+    Every event one write puts on a timeline now carries that write's instant. Equal stamps are
+    the honest relation between two events of one act, and they leave the file's order as the
+    deliberate arrangement rather than a race between two `new Date()` calls.
+    The first version of the canary PASSED with the defect restored, because both clock reads
+    landed in the same millisecond on a fast machine — a test that could only fail on a slow
+    one. `CreateTaskInput.now` is a test seam for that reason, in the shape the reset-label
+    clock already uses.
+    (`task-actions.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

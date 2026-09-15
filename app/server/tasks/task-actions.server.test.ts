@@ -297,9 +297,12 @@ describe("createTask", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-999 is not a task in this project") });
+    // Ruling 255: a fixed creation instant, so the invariant below is a fact
+    // about the code and not about how fast the machine ran.
+    const CREATED_AT = "2026-09-15T09:00:00.000Z";
     const held = await createTask(
       store.db,
-      { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"] },
+      { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"], now: CREATED_AT },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -313,6 +316,27 @@ describe("createTask", () => {
     expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
     expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
+
+    /**
+     * Ruling 255 (pass 37, F37-84): one creation is one instant.
+     *
+     * Measured live on SHOP-27: the wait note read `…19:27:52.529Z` and the
+     * assign event below it read `…19:27:52.530Z` — a 1ms inversion in a
+     * newest-first file, because the note took the frontmatter's `now` and the
+     * assign read the clock again a millisecond later. Viberr ships a
+     * diagnostic that scans timelines for exactly this and reported the board
+     * as having inversions; the only reason it is one millisecond is that
+     * nothing slow sits between the two writes.
+     *
+     * CANARY: drop the `now` argument from the `ownerAssignEvent` calls in
+     * `createTask` and the assign's stamp runs ahead of the note above it.
+     */
+    expect(parsed.timeline[1]).toMatchObject({ type: "assign" });
+    // One act, one instant: equal is the honest relation between two events of
+    // one write, and it is what keeps a newest-first file from claiming an
+    // order its own stamps contradict.
+    expect(parsed.timeline.map((e) => e.occurredAt)).toEqual([CREATED_AT, CREATED_AT]);
+    expect(parsed.frontmatter.createdAt).toBe(CREATED_AT);
   });
 
   it("writes task.md with the mock create defaults and projects it", async () => {

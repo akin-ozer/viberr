@@ -500,9 +500,16 @@ function ownerAssignEvent(
   db: DatabaseSync,
   actor: TaskActor,
   text: string,
+  /**
+   * Ruling 255 (pass 37, F37-84): the instant to stamp, when the caller is
+   * writing SEVERAL events for one act and the clock would otherwise put them
+   * in an order the arrangement contradicts. Creation passes its own `now`;
+   * every other caller keeps reading the clock here.
+   */
+  occurredAt: string = new Date().toISOString(),
 ): TaskFileEvent {
   return {
-    occurredAt: new Date().toISOString(),
+    occurredAt,
     type: "assign",
     actor: humanActorRef(db, actor),
     title: null,
@@ -566,6 +573,11 @@ export interface CreateTaskInput {
    *  task.md write, before the operator's `create` trigger. Absent: the
    *  creator is seated (ruling 127). */
   ownerUserId?: string | null;
+  /** Ruling 255: the instant this creation happened. Every field and every
+   *  timeline event it writes carries it, so the file's order is the
+   *  arrangement and not a race between clock reads. Test seam only — the
+   *  routes never pass it, and it defaults to now. */
+  now?: string;
 }
 
 /**
@@ -670,7 +682,7 @@ export async function createTask(
     dataRoot: ctx.dataRoot,
   };
   const key = await allocateTaskKey(projectRef);
-  const now = new Date().toISOString();
+  const now = input.now ?? new Date().toISOString();
 
   const frontmatter: TaskFrontmatter = {
     key,
@@ -731,12 +743,16 @@ export async function createTask(
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
+  // Ruling 255: ONE creation is one instant. Every event this write puts on the
+  // timeline carries the frontmatter's own `now`, so the file's order is the
+  // deliberate arrangement and not a race between two `new Date()` calls.
   if (creator && seat === "named" && namedOwner) {
     createInput.timeline = [
       ownerAssignEvent(
         db,
         creator,
         `Seated ${namedOwner.name} as owner at creation. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
+        now,
       ),
     ];
   } else if (creator) {
@@ -745,6 +761,7 @@ export async function createTask(
         db,
         creator,
         "Took task ownership by creating the task. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.",
+        now,
       ),
     ];
   }
