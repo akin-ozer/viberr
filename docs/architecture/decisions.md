@@ -6357,6 +6357,44 @@ by rewriting those paragraphs:*
     (`board-read.server.ts`, `operator-toolkit.server.ts`, `operator-actions.server.ts`,
     `operator-run.server.ts`.)
 
+286. **An index needs teeth when the documents behind it BIND (owner, 2026-09-15, pass 37;
+    F37-121, completes 283).** Ruling 283 made every knowledge base a pull, and the
+    controller named the regression that creates within the hour, with evidence from the
+    board it coordinates: "Under injection, reading is not a decision. Under
+    index-and-fetch it becomes one, and it competes with the agent's own turns — which on
+    this board are scarce and frequently interrupted." And the structural half, which is
+    the part that decided it: "An optional craft KB is consulted when an agent recognises
+    a need. A rulings KB binds decisions the agent does not know it is making. Nobody
+    fetches the never-rebase rule while about to rebase — at that moment they feel
+    certain, not uncertain. The failure mode is not laziness, it is the absence of a
+    trigger." Its evidence that these rules are load-bearing rather than decorative:
+    SHOP-42's Code Reviewer cited §1, §4 and §7 by number in its verdict, and the operator
+    cited §3 as its reason for raising two defects as TASKS rather than footnotes — and
+    every one of those citations came from a run where the text was still injected.
+    So a project's RULINGS knowledge base (ruling 239) gets three things a profile's
+    optional craft knowledge base does not. Its index says **BINDING on this run**, as an
+    obligation rather than an invitation, on the index itself where it is read with the
+    document list. A note names the TRIGGERS rather than only the contents — before
+    choosing a branch or merge strategy, before widening a path set, before reporting a
+    check as passed, before calling work done or judging someone else's — because the
+    index says what exists and never says when a rule applies. And the run is asked to
+    state in its report which rulings sections it relied on, and to say plainly if it
+    opened none: a delivery contradicting a rule its author never read should be something
+    a reviewer can SEE rather than rediscover.
+    Machinery, not a directive — also the controller's call, and its reason is the pass's
+    own lesson: a rule living in the coordinator's directive covers only the tasks whose
+    directives it writes, and misses reviewer engagements, verifier runs, chain-created
+    tasks and every project it is not in, which makes it "a deferral recorded in a
+    document with no mechanism behind it".
+    What this deliberately is NOT is a gate refusing delivery until the document is
+    fetched. The controller ruled that out and was right: "that is the serialisation
+    answer — it works today and rots, and it taxes every run that legitimately did not
+    need it."
+    The obligation ships only when a rulings KB actually RESOLVED. A run told its project's
+    rules bind it, on a project that names none or whose folder is gone, is handed an
+    obligation it cannot discharge and sent looking for a document that reached it in no
+    form at all. (`kb-injection.server.ts` and the three runtimes.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

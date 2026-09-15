@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   KB_DOC_READ_CHARS,
+  KB_RULINGS_NOTE,
   STORE_TEXT_EXTENSIONS,
   isInjectableKbDoc,
   readKbDocForRun,
@@ -329,5 +330,65 @@ describe("STORE_TEXT_EXTENSIONS is the ONLY store text-doc list", () => {
     // that IS the fix — so assert the module simply loads against the shared
     // set without redeclaring one (the scan above proves the negative).
     expect(editor.readStoreDoc).toBeTypeOf("function");
+  });
+});
+
+/**
+ * Ruling 286 (pass 37, F37-121) — the teeth an index needs when the documents
+ * behind it BIND.
+ *
+ * Ruling 283 made every knowledge base a pull, and the controller named the
+ * regression, with evidence from its own board: "Under injection, reading is
+ * not a decision. Under index-and-fetch it becomes one… An optional craft KB is
+ * consulted when an agent recognises a need. A rulings KB binds decisions the
+ * agent does not know it is making. Nobody fetches the never-rebase rule while
+ * about to rebase — at that moment they feel certain, not uncertain."
+ */
+describe("readKbIndexes — a rulings KB says it binds (ruling 286)", () => {
+  const twoKbs = () => {
+    const { dataRoot } = freshKb("craft");
+    writeFileSync(path.join(dataRoot, "kb", "craft", "style.md"), "# Style", "utf8");
+    mkdirSync(path.join(dataRoot, "kb", "rules"), { recursive: true });
+    writeFileSync(path.join(dataRoot, "kb", "rules", "conventions.md"), "# Rules", "utf8");
+    return dataRoot;
+  };
+
+  it("marks the rulings KB binding and leaves an optional craft KB alone", () => {
+    const dataRoot = twoKbs();
+    const set = readKbIndexes(["craft", "rules"], dataRoot, { rulingsKb: "rules" });
+    const craft = set.parts.find((p) => p.name === "craft")!;
+    const rules = set.parts.find((p) => p.name === "rules")!;
+    expect(rules.body).toContain("BINDING on this run");
+    expect(rules.body).toContain("ruling 239");
+    // The distinction IS the ruling: an optional craft KB must not inherit it,
+    // or "binding" means nothing when it appears on the one that is.
+    expect(craft.body).not.toContain("BINDING");
+    // Both still carry their index — the mark is added, nothing is displaced.
+    expect(rules.body).toContain("`conventions.md`");
+    expect(craft.body).toContain("`style.md`");
+  });
+
+  it("marks nothing when the project names no rulings KB", () => {
+    const dataRoot = twoKbs();
+    const set = readKbIndexes(["craft", "rules"], dataRoot);
+    for (const part of set.parts) expect(part.body).not.toContain("BINDING");
+  });
+
+  it("the rulings note names the TRIGGERS, not just the contents", () => {
+    // The controller's second ask, and the reason it gave: the index "tells you
+    // what exists; it does not tell you when a rule applies", and the moments a
+    // rule is needed are moments an agent feels certain rather than uncertain.
+    // Canary: delete any bullet and its moment stops being named.
+    expect(KB_RULINGS_NOTE).toContain("before choosing a branch or merge strategy");
+    expect(KB_RULINGS_NOTE).toContain("before widening the set of paths");
+    expect(KB_RULINGS_NOTE).toContain("before reporting a check as passed");
+    expect(KB_RULINGS_NOTE).toContain("before calling the work done");
+    // The third ask: make the read observable in the report.
+    expect(KB_RULINGS_NOTE).toContain("state which rulings sections you relied on");
+    expect(KB_RULINGS_NOTE).toContain("say so plainly if you did not open them");
+    // What it must NOT be — the controller ruled a hard gate out and was right:
+    // "it works today and rots, and it taxes every run that legitimately did not
+    // need it."
+    expect(KB_RULINGS_NOTE).not.toMatch(/refus|blocked until|cannot deliver until/i);
   });
 });

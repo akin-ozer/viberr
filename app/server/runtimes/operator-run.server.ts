@@ -37,6 +37,7 @@ import { stripUngovernedRepoCatalog } from "./skill-mount.server";
 import {
   KB_INDEX_NOTE,
   KB_PRECEDENCE_NOTE,
+  KB_RULINGS_NOTE,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
@@ -3547,7 +3548,11 @@ export function buildOperatorSystemPrompt(
   // the alphabetically-first document inside the KB it protected. An index has
   // no budget to lose, so the operator now sees every document of every KB it
   // holds and reads the ones the work needs.
-  const kbSet = readKbIndexes(authority.kb, dataRoot);
+  const kbSet = readKbIndexes(authority.kb, dataRoot, {
+    rulingsKb: authority.rulingsKb ?? null,
+  });
+  const hasRulings =
+    !!authority.rulingsKb && kbSet.parts.some((p) => p.name === authority.rulingsKb);
   // R19-2: the SAME precedence rule the specialist runtime injects — one exported
   // constant, so the operator and the agents it coordinates cannot be told two
   // different things about which source outranks the other. (The operator writes
@@ -3557,6 +3562,9 @@ export function buildOperatorSystemPrompt(
   if (kbSet.parts.length > 0) {
     resourceParts.push(KB_PRECEDENCE_NOTE);
     resourceParts.push(KB_INDEX_NOTE);
+    // Ruling 286: only when a rulings KB actually resolved — an obligation a
+    // run cannot discharge is worse than none.
+    if (hasRulings) resourceParts.push(KB_RULINGS_NOTE);
   }
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);

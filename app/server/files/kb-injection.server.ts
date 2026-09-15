@@ -330,6 +330,12 @@ export interface KbInjectionSet {
 export function readKbIndexes(
   names: readonly string[],
   dataRoot?: string,
+  /** Ruling 286: which of these names is the project's RULINGS knowledge base
+   *  (ruling 239). A LABEL, not an allocation — ruling 283 removed the budget
+   *  this argument used to feed, and it is back for the opposite reason: to say
+   *  which index the run is OBLIGED to read rather than which one may take the
+   *  most characters. */
+  opts: { rulingsKb?: string | null } = {},
 ): KbInjectionSet {
   const parts: { name: string; body: string }[] = [];
   const unresolved: UnresolvedKbGrant[] = [];
@@ -340,10 +346,26 @@ export function readKbIndexes(
   for (const name of names) {
     const index = readKbIndexDetailed(name, dataRoot);
     if (index.unresolved) unresolved.push(index.unresolved);
-    if (index.body) parts.push({ name, body: index.body });
+    if (!index.body) continue;
+    parts.push({
+      name,
+      body:
+        name === opts.rulingsKb
+          ? `${RULINGS_BINDING_LINE}\n\n${index.body}`
+          : index.body,
+    });
   }
   return { parts, unresolved };
 }
+
+/** Ruling 286: the sentence that separates a BINDING index from an optional
+ *  one, on the index itself — so it is read with the document list rather than
+ *  in a note the run may have scrolled past. */
+export const RULINGS_BINDING_LINE =
+  "**BINDING on this run.** This is the project's settled rulings knowledge base " +
+  "(ruling 239): an administrator made it binding on every run this project makes, " +
+  "you included. Read it — the obligation is not conditional on your finding it " +
+  "interesting.";
 
 /** One document out of one knowledge base, or `null` when this KB has no such
  *  document. The caller decides WHICH knowledge bases may be asked for — this
@@ -485,3 +507,47 @@ export function readKbDocForRun(
     ? `${doc.text}\n\n_(cut off here — \`${doc.rel}\` is longer than the ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters one read returns; what is above is its opening, not the whole document)_`
     : doc.text;
 }
+
+/**
+ * Ruling 286 (2026-09-15, pass 37; F37-121) — the teeth an index needs when the
+ * documents behind it BIND.
+ *
+ * Ruling 283 made every knowledge base a pull, and the controller named the
+ * regression that creates, with evidence from its own board: "Under injection,
+ * reading is not a decision. Under index-and-fetch it becomes one, and it
+ * competes with the agent's own turns — which on this board are scarce and
+ * frequently interrupted." And the structural half: "An optional craft KB is
+ * consulted when an agent recognises a need. A rulings KB binds decisions the
+ * agent does not know it is making. Nobody fetches the never-rebase rule while
+ * about to rebase — at that moment they feel certain, not uncertain. The failure
+ * mode is not laziness, it is the absence of a trigger."
+ *
+ * So this names the TRIGGERS rather than only the contents, and asks the run to
+ * say what it read. It is machinery and not a directive on purpose, also the
+ * controller's call: a rule that lives in the coordinator's directive covers
+ * only the tasks whose directives it writes, and misses reviewer engagements,
+ * verifier runs, chain-created tasks and every project it is not in — which is
+ * "a deferral recorded in a document with no mechanism behind it", the shape of
+ * the defect this whole pass keeps finding.
+ *
+ * What it deliberately is NOT: a gate that refuses a delivery until the document
+ * is fetched. The controller ruled that out and was right — "that is the
+ * serialisation answer: it works today and rots, and it taxes every run that
+ * legitimately did not need it."
+ */
+export const KB_RULINGS_NOTE =
+  "\n\n---\n# The project's rulings are binding on you\n\n" +
+  "One of the knowledge bases above is this project's settled RULINGS. Its index " +
+  "tells you what exists; it does not tell you when a rule applies, and a rule you " +
+  "have not read cannot stop you. Read the rulings document BEFORE each of these, " +
+  "not after:\n\n" +
+  "- before choosing a branch or merge strategy;\n" +
+  "- before widening the set of paths you are going to change;\n" +
+  "- before reporting a check as passed, or a check you could not run;\n" +
+  "- before calling the work done, or judging whether someone else's is.\n\n" +
+  "These are the moments the rules were written for, and they are moments you will " +
+  "feel certain rather than uncertain — which is exactly why the trigger is the " +
+  "situation and not your sense of needing help.\n\n" +
+  "In your final report, state which rulings sections you relied on, and say so " +
+  "plainly if you did not open them. A delivery that contradicts a rule its author " +
+  "never read is a thing a reviewer should be able to SEE, rather than rediscover.";

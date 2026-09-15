@@ -586,3 +586,65 @@ describe("buildOperatorSystemPrompt — shell inventory (ruling 191)", () => {
     expect(prompt).toContain("never treat one as the deliverable's fault");
   });
 });
+
+/**
+ * Ruling 286 at the PROMPT layer. `kb-injection.server.test.ts` proves the
+ * reader marks the rulings index and builds the note; nothing proved the
+ * runtime then carries it — which is the gap that produced ruling 270 and
+ * ruling 224 both, a payload with no door.
+ */
+describe("buildOperatorSystemPrompt — the rulings obligation (ruling 286)", () => {
+  const withRulings = (rulingsKb: string | null) => {
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-r286-"));
+    mkdirSync(path.join(dataRoot, "kb", "team-rules"), { recursive: true });
+    writeFileSync(
+      path.join(dataRoot, "kb", "team-rules", "conventions.md"),
+      "# Rules",
+      "utf8",
+    );
+    const auth = authorityWith(["team-rules"]);
+    auth.rulingsKb = rulingsKb;
+    return { dataRoot, auth };
+  };
+
+  it("carries the binding mark and the trigger moments when a rulings KB resolved", () => {
+    // Canary: drop the `KB_RULINGS_NOTE` push, or stop passing `rulingsKb` to
+    // `readKbIndexes`, and each half fails separately.
+    const { dataRoot, auth } = withRulings("team-rules");
+    const prompt = buildOperatorSystemPrompt(auth, dataRoot);
+    expect(prompt).toContain("BINDING on this run");
+    expect(prompt).toContain("before widening the set of paths");
+    expect(prompt).toContain("state which rulings sections you relied on");
+  });
+
+  it("says nothing about binding rulings on a project that names none", () => {
+    // An obligation a run cannot discharge is worse than no obligation: it
+    // sends the run looking for a knowledge base the project never declared.
+    const { dataRoot, auth } = withRulings(null);
+    const prompt = buildOperatorSystemPrompt(auth, dataRoot);
+    expect(prompt).toContain("team-rules (knowledge base)");
+    expect(prompt).not.toContain("BINDING on this run");
+    expect(prompt).not.toContain("before widening the set of paths");
+  });
+
+  it("says nothing when the named rulings KB did not resolve", () => {
+    // The project names one and its folder is gone: the grant is reported
+    // unresolved (C1) and the run is NOT told it is bound by a document that
+    // reached it in no form at all.
+    //
+    // A SECOND, resolvable KB is deliberately present. Without it the whole
+    // resource block is skipped for having no parts, and the guard under test
+    // would pass for a reason that has nothing to do with it — which is how a
+    // canary comes out green on a mutation it was written to catch.
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-r286-miss-"));
+    mkdirSync(path.join(dataRoot, "kb", "craft"), { recursive: true });
+    writeFileSync(path.join(dataRoot, "kb", "craft", "style.md"), "# Style", "utf8");
+    const auth = authorityWith(["craft", "renamed-away"]);
+    auth.rulingsKb = "renamed-away";
+    const prompt = buildOperatorSystemPrompt(auth, dataRoot);
+    expect(prompt).toContain("craft (knowledge base)");
+    expect(prompt).toContain("Attached resources that did NOT fully reach this run");
+    expect(prompt).not.toContain("BINDING on this run");
+    expect(prompt).not.toContain("before widening the set of paths");
+  });
+});

@@ -1,4 +1,5 @@
 import {
+  projectRulingsKb,
   withProjectRulings,
 } from "~/server/files/project-rulings.server";
 import { activeFileLeases } from "./file-leases.server";
@@ -72,6 +73,7 @@ import {
 import {
   KB_INDEX_NOTE,
   KB_PRECEDENCE_NOTE,
+  KB_RULINGS_NOTE,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
@@ -1885,6 +1887,7 @@ async function dispatchAgentRun(
   const unresolvedResources: { name: string; reason: string }[] = [];
   const personaInput: SpecialistPersonaInput = {
     profileId: engagement.profileId,
+    rulingsKb: projectRulingsKb(input.projectSlug, ctx),
     backend,
     skills,
     nativeSkills: skillMount.mounted,
@@ -2724,6 +2727,11 @@ export function githubReadForRun(input: {
 
 export interface SpecialistPersonaInput {
   profileId: string;
+  /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
+   *  239), so its index can say it BINDS and the run can be told the moments it
+   *  has to read it at. A label; ruling 283 removed the budget this used to
+   *  feed. */
+  rulingsKb?: string | null;
   /** F-P4 (pass 25): the run's backend, so backend-asymmetric persona text (the
    *  browser section — Codex screenshots do not return to the model) is honest. */
   backend?: RealBackend;
@@ -2837,7 +2845,11 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // An index costs a few hundred characters whatever the folder weighs, so
   // every declared KB now names every document it holds, and the run pulls the
   // ones it needs through `read_knowledge_doc`.
-  const kbSet = readKbIndexes(input.kb ?? [], input.dataRoot);
+  const kbSet = readKbIndexes(input.kb ?? [], input.dataRoot, {
+    rulingsKb: input.rulingsKb ?? null,
+  });
+  const hasRulings =
+    !!input.rulingsKb && kbSet.parts.some((p) => p.name === input.rulingsKb);
   // R19-2: the precedence rule rides WITH the KB text — pushed ONCE (not per KB)
   // and BEFORE the bodies it ranks, so the rule is read before the guidance it
   // qualifies. Gated on real KB text, so a run with no knowledge base never
@@ -2849,6 +2861,10 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
     // knowledge base is never told how to read one, and a run WITH one is
     // never handed a list of documents and left to work out the channel.
     resourceParts.push(KB_INDEX_NOTE);
+    // Ruling 286: only when a rulings KB actually RESOLVED. A run told its
+    // project's rulings bind it, on a project that names none or whose folder
+    // is missing, is being given an obligation it cannot discharge.
+    if (hasRulings) resourceParts.push(KB_RULINGS_NOTE);
   }
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);
@@ -3600,6 +3616,7 @@ export async function resolveResumeConfinement(
     const resumeRepo = projectRepo(ctx, input.projectSlug);
     const personaInput: SpecialistPersonaInput = {
       profileId: input.profileId,
+      rulingsKb: projectRulingsKb(input.projectSlug, ctx),
       // undefined on a run with no backend (no-op) → no backend-specific persona.
       backend: input.backend,
       skills: resolved.skills,

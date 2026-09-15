@@ -1,4 +1,5 @@
 import {
+  projectRulingsKb,
   withProjectRulings,
 } from "~/server/files/project-rulings.server";
 import path from "node:path";
@@ -7,7 +8,12 @@ import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { formatUsd } from "~/shared/run-failure";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { KB_INDEX_NOTE, KB_PRECEDENCE_NOTE, readKbIndexes } from "~/server/files/kb-injection.server";
+import {
+  KB_INDEX_NOTE,
+  KB_PRECEDENCE_NOTE,
+  KB_RULINGS_NOTE,
+  readKbIndexes,
+} from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -932,10 +938,20 @@ export function buildControllerSystemPrompt(
   // character budget starved — and it is the actor that sets up the projects,
   // profiles and grants, so it is the worst one to plan from half a rulings
   // document.
-  const kbSet = readKbIndexes(controllerKb, input.dataRoot);
+  const rulings = input.conversation.projectSlug
+    ? projectRulingsKb(
+        input.conversation.projectSlug,
+        input.dataRoot ? { dataRoot: input.dataRoot } : {},
+      )
+    : null;
+  const kbSet = readKbIndexes(controllerKb, input.dataRoot, { rulingsKb: rulings });
   if (kbSet.parts.length > 0) {
     resourceParts.push(KB_PRECEDENCE_NOTE);
     resourceParts.push(KB_INDEX_NOTE);
+    // Ruling 286: only when a rulings KB actually resolved.
+    if (rulings && kbSet.parts.some((p) => p.name === rulings)) {
+      resourceParts.push(KB_RULINGS_NOTE);
+    }
   }
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);

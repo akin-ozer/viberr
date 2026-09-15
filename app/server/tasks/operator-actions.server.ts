@@ -1,4 +1,5 @@
 import {
+  projectRulingsKb,
   withProjectRulings,
 } from "~/server/files/project-rulings.server";
 import {
@@ -159,6 +160,11 @@ export type OperatorAutonomy = "supervised" | "full";
 export interface OperatorAuthority {
   /** capabilityId → mode, from the project's operator deployment. */
   policy: Map<string, CapabilityMode>;
+  /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
+   *  239), so its index can say it BINDS. A label; ruling 283 removed the
+   *  budget this used to feed. On the authority because that is where `kb`
+   *  already lives, and hand-built test literals may omit it. */
+  rulingsKb?: string | null;
   /** The autonomy this run ACTUALLY holds — already clamped to
    *  {@link OperatorAuthority.configuredAutonomy}. Never above it (R19-A). */
   autonomy: OperatorAutonomy;
@@ -535,6 +541,10 @@ export function resolveOperatorAuthority(
     // agents work from, so an operator that had not read the project's settled
     // rules would re-open questions the project had closed.
     kb: withProjectRulings(view.resources.kb ?? [], projectSlug, ctx),
+    // Ruling 286: which of those names binds. The operator writes the packets
+    // and scoping notes every specialist works from, so it is the worst actor
+    // on the board to be planning from rules it never opened.
+    rulingsKb: projectRulingsKb(projectSlug, ctx),
     mcps: view.resources.mcps ?? [],
     persona: definition?.persona?.trim() || null,
     deployed: true,
