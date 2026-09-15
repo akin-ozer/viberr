@@ -4569,3 +4569,48 @@ a read would only have made the destruction deliberate and still blind.
 
 Canaried both ways: restoring `overwrite: true` makes the refusal disappear, and emptying
 `documents` blinds the model to the collision.
+
+## F37-89 · Finished work was handed to a person as three ways to redo it — HIGH
+
+Found by reading a task the board said was waiting on me, and disbelieving the packet.
+
+SHOP-32, at Verify:
+
+```
+validation = healthy
+verdict code-reviewer        f5470f05 approve
+verdict integration-verifier f5470f05 approve      <- the current work revision
+```
+
+Both required verdicts approving the head. The work is done. And the only thing waiting on a
+person was this, raised **two seconds after** that approving verdict:
+
+```
+### 05:14:35.879Z · blocked · operator   "Work stalled: pick a recovery path"
+### 05:14:33.881Z · quality · agent:claude/integration-verifier  "Review passed"
+```
+
+The packet's three options: **Redirect with sharper guidance** (recommended), **Send back for
+another attempt**, **Hold for runtime debugging**. Every one re-dispatches work that had passed.
+
+And the packet blocked the acceptance it should have been waiting for. From the task page:
+
+> **Not acceptable yet.** This task has an open blocked decision. Resolve the operator's packet
+> before accepting it.
+
+So the doors available to a person were: redo finished work, or press **Force accept (override
+review gate)** — recording a bypass of a review that had run and succeeded. Both misdescribe what
+happened, which is the definition of the bar this pass works to.
+
+**Mechanism.** `depthCapped` in the react block is `finished && currentDepth >= CAP`, with no test
+for whether the task arrived. The packet's own text already asserts the missing test — "hit its
+depth cap **without reaching a boundary**" — and acceptable-at-the-review-boundary is reaching one.
+The same sentence-asserts-a-mechanism shape, in the sentence that describes the mechanism.
+
+**Fix (ruling 258).** The stuck-loop packet is not raised when `acceptanceRefusalFor` says the task
+could be accepted right now. Asked before any packet exists, so the gate answers about the work and
+not about the packet the branch is deciding not to open. The skip is logged, so a chain that goes
+quiet is still traceable.
+
+Canaried: removing the guard opens `pkt_…` on an acceptable task and the acceptance is blocked
+behind it.

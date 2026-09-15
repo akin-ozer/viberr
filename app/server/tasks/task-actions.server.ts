@@ -5042,7 +5042,40 @@ export async function applyAgentCompletionEffects(
         runId: finished.id,
       });
     }
-    if (noProgress || depthCapped) {
+    // Ruling 258 (pass 37, F37-89): a chain that stopped because the work is
+    // FINISHED did not get stuck, and must not be handed to a person as three
+    // ways to redo it.
+    //
+    // Live on SHOP-32: the Integration Verifier approved `f5470f05` at
+    // 05:14:33, both required verdicts sat on the current head, validation read
+    // `healthy` — and two seconds later the depth cap opened "Work stalled:
+    // pick a recovery path", whose options are redirect the specialist, send it
+    // back for another attempt, or hold for runtime debugging. Every one of
+    // them re-dispatches work that had passed. The packet then BLOCKED the
+    // acceptance it should have been waiting for ("This task has an open
+    // blocked decision. Resolve the operator's packet before accepting it"), so
+    // the only doors left were to redo finished work or to force-accept past a
+    // review gate that had passed — recording a bypass that never happened.
+    //
+    // The packet's own sentence already claimed the test this adds: "hit its
+    // depth cap WITHOUT REACHING A BOUNDARY". Acceptable at the review boundary
+    // IS reaching one. Asked here, before any packet exists, so the gate answers
+    // about the work rather than about the packet this branch is deciding not to
+    // open.
+    const acceptableNow =
+      (noProgress || depthCapped) &&
+      acceptanceRefusalFor(
+        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        ctx,
+      ) === null;
+    if (acceptableNow) {
+      logger.info("stuck-loop packet skipped — the task is acceptable, so the chain reached a boundary", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        why: noProgress ? "no_progress" : "depth_capped",
+      });
+    }
+    if ((noProgress || depthCapped) && !acceptableNow) {
       await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,

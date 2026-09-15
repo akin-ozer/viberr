@@ -37,6 +37,7 @@ import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { stageOutcome } from "./agent-outcome.server";
 import {
+  acceptanceRefusalFor,
   applyAgentCompletionEffects,
   classifyReviewerVerdict,
   markWaitingAgent,
@@ -1037,6 +1038,117 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ),
     ).toBe(false);
     expect(taskFile().parsed.packet).toBeNull();
+  });
+
+  /**
+   * Ruling 258 (pass 37, F37-89): a chain that stopped because the work is
+   * FINISHED did not get stuck.
+   *
+   * Live on SHOP-32: the Integration Verifier approved `f5470f05`, both
+   * required verdicts sat on the current head and validation read `healthy` —
+   * and two seconds later the depth cap opened "Work stalled: pick a recovery
+   * path", offering redirect, send-back and hold-for-debugging. Every option
+   * re-dispatches work that had passed, and the packet then blocked the
+   * acceptance it should have been waiting for: "This task has an open blocked
+   * decision. Resolve the operator's packet before accepting it." The only
+   * remaining doors were to redo finished work, or to force-accept past a
+   * review gate that had PASSED and record a bypass that never happened.
+   */
+  it("ruling 258: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
+    // An operator that CAN open packets, so the absence below is a decision
+    // rather than a missing grant.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    // A task at the review boundary with its required verdict already in.
+    writeReviewTask({
+      validation: "healthy",
+      pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
+    });
+    const runId = await finishedRunWith("Approved. Everything in the done signal is proven.");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (f) => {
+        f.frontmatter.verdicts = [
+          {
+            profileId: "reviewer",
+            revisionId: f.frontmatter.workRevision!.id,
+            headSha: f.frontmatter.workRevision!.headSha,
+            result: "approve",
+            reason: "Approved.",
+            at: new Date().toISOString(),
+            rounds: 1,
+          },
+        ];
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const acceptable =
+      acceptanceRefusalFor(
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        { dataRoot: store.dataRoot },
+      ) === null;
+
+    const skipLog = vi.spyOn(logger, "info");
+    skipLog.mockClear();
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        // At the cap, which is what fired on SHOP-32.
+        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+
+    // The premise of the test: this task really is acceptable, so the chain
+    // reached a boundary rather than running out of road.
+    expect(acceptable).toBe(true);
+    // CANARY: drop the `!acceptableNow` guard and a "Work stalled: pick a
+    // recovery path" packet opens here, and then BLOCKS the acceptance —
+    // three options, every one of them re-running work that passed.
+    expect(taskFile().parsed.packet).toBeNull();
+    expect(
+      skipLog.mock.calls.some(([msg]) =>
+        String(msg).includes("stuck-loop packet skipped"),
+      ),
+    ).toBe(true);
+    // And acceptance is still open, which is the whole point.
+    expect(
+      acceptanceRefusalFor(
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        { dataRoot: store.dataRoot },
+      ),
+    ).toBeNull();
   });
 
   it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {

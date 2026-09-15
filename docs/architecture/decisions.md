@@ -5703,6 +5703,24 @@ by rewriting those paragraphs:*
     be handed.
     (`timeline-compaction.server.ts`, `controller-toolkit.server.ts`.)
 
+258. **A chain that stopped because the work is FINISHED did not get stuck (2026-09-15, pass 37;
+    F37-89).** The operator react loop opens a "Work stalled: pick a recovery path" packet when
+    it hits the depth cap or sees a verbatim repeat. It never asked whether the task had
+    arrived. Live on SHOP-32: the Integration Verifier approved `f5470f05` at 05:14:33, both
+    required verdicts sat on the current head and validation read `healthy` — and two seconds
+    later the cap opened that packet, offering redirect the specialist, send it back for another
+    attempt, or hold for runtime debugging. Every option re-dispatches work that had passed.
+    Then the packet blocked the acceptance it should have been waiting for: the task page read
+    "Not acceptable yet. This task has an open blocked decision. Resolve the operator's packet
+    before accepting it." The doors left to a person were to redo finished work, or to
+    force-accept past a review gate that had PASSED — recording a bypass of a review that
+    happened and succeeded.
+    The packet's own sentence already claimed the test this adds: "hit its depth cap WITHOUT
+    REACHING A BOUNDARY". Acceptable at the review boundary IS reaching one. The gate is asked
+    before any packet exists, so it answers about the work rather than about the packet the
+    branch is deciding not to open, and the skip is logged so a quiet chain is still traceable.
+    (`task-actions.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is
