@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { readBoardList, readBoardTask } from "./board-read.server";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -272,6 +273,45 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         ),
     ),
     "get_task",
+  );
+
+  // Ruling 282 (pass 37, F37-115): the operator plans ACROSS a board it could
+  // not read. `get_task` takes no arguments — it answers this task and only
+  // this task — and there was no listing anywhere in this toolkit. So the one
+  // actor that writes `blockedBy` (`set_dependencies`), that decides ordering,
+  // and that is the ONLY author of a `create_task` option (ruling 269) could
+  // not check whether the work it was about to ask for already had an owner.
+  //
+  // Two duplicates in one hour, from that one cause. On SHOP-26 it proposed
+  // creating "Inventory: serve the published stock batch contract on GET
+  // /stock" — SHOP-39's title, word for word, created by its own earlier
+  // packet. On SHOP-27 it proposed "Gateway routes for orders, cart and
+  // inventory" while SHOP-29, "Gateway routes for inventory, cart and
+  // checkout", already stood and already waited on SHOP-27. Both times a
+  // person was one confirm away from a second task for work that had one.
+  //
+  // The same tool ruling 281 gave a specialist, on the same implementation, so
+  // "is SHOP-39 real" has one answer whoever asks.
+  add(
+    tool(
+      "read_board",
+      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about — in a document, a report or a directive — is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
+      {
+        taskKey: z
+          .string()
+          .optional()
+          .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { taskKey?: string }) => {
+        const boardDeps = { db, ctx, projectSlug };
+        const wanted = args.taskKey?.trim();
+        return textResult(
+          wanted ? readBoardTask(boardDeps, wanted) : readBoardList(boardDeps),
+        );
+      },
+    ),
+    "read_board",
   );
 
   // F21-21: the ONE anchored answer to "what is on the default branch?".

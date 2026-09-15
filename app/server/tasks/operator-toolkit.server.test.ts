@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import {
   buildOperatorToolkit,
@@ -147,7 +153,11 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // get_task / read_default_branch_file are read-only Claude tools with no plan
   // mirror (Codex gets that information embedded in its prompt). The two packet
   // tools carry different display names either side; everything else matches.
-  const READ_ONLY = new Set(["get_task", "read_default_branch_file"]);
+  // Ruling 282: `read_board` is a READ, like its two siblings — it changes
+  // nothing, so it is not part of the governed vocabulary the two toolkits
+  // must agree on. (Codex operators get board facts in their prompt, which is
+  // why no read here has a plan mirror.)
+  const READ_ONLY = new Set(["get_task", "read_default_branch_file", "read_board"]);
   const RENAME = new Map([
     ["open_decision_packet", "open_packet"],
     ["resolve_decision_packet", "resolve_packet"],
@@ -348,10 +358,18 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
     });
     // R19-1: the operator reads the repository from the full read-only checkout
     // under its cwd (Read/Grep/Glob), not from an MCP tool — so the in-process
-    // toolkit floor is just `get_task`. What "read-only" excludes is every
-    // WRITE, and that is what this asserts: the floor is exactly the one read,
-    // and nothing that changes state is reachable.
-    expect(toolkit.allowedTools).toEqual(["mcp__viberr__get_task"]);
+    // toolkit floor is the READS. What "read-only" excludes is every WRITE, and
+    // that is what this asserts: the floor is exactly the reads, and nothing
+    // that changes state is reachable.
+    //
+    // Ruling 282: `read_board` joins that floor. An undeployed operator holds
+    // no authority, and being able to SEE the board it holds no authority over
+    // takes nothing: the whole point of the floor is that reading is never the
+    // thing being withheld.
+    expect(toolkit.allowedTools).toEqual([
+      "mcp__viberr__get_task",
+      "mcp__viberr__read_board",
+    ]);
     for (const write of [
       "mcp__viberr__deliver_for_review",
       "mcp__viberr__transition_stage",
@@ -597,6 +615,61 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const declared = JSON.stringify(z.toJSONSchema(options));
     expect(declared).toContain('"toStage"');
     expect(declared).toContain("move_stage only");
+  });
+
+  /**
+   * Ruling 282 (pass 37, F37-115): the operator plans ACROSS a board it could
+   * not read. `get_task` takes no arguments — it answers this task and only
+   * this task — and nothing in this toolkit listed the others. So the one actor
+   * that writes `blockedBy`, decides ordering, and is the ONLY author of a
+   * `create_task` option (ruling 269) could not check whether the work it was
+   * about to ask for already had an owner. Two duplicates in one hour: SHOP-39's
+   * title proposed again word for word, and "Gateway routes for orders, cart
+   * and inventory" proposed while SHOP-29 stood.
+   */
+  it("ruling 282: read_board answers one key, lists the board, and denies a key that is not there", async () => {
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "The task the operator is coordinating.",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
+      goal: "Serve the published batch contract.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
+    // a shape change fails the assertions rather than reading undefined.
+    const call = async (args: { taskKey?: string }) =>
+      ((await read.handler(args as never, {} as never)) as { content: { text: string }[] })
+        .content[0]!.text;
+
+    // CANARY: remove the tool and the operator is back to planning a board it
+    // can only see one task of, which is what produced both duplicates.
+    const other = await call({ taskKey: "VIB-2" });
+    expect(other).toContain('"key": "VIB-2"');
+    expect(other).toContain("Serve the published batch contract");
+
+    const all = await call({});
+    expect(all).toContain('"key": "VIB-1"');
+    expect(all).toContain('"key": "VIB-2"');
+
+    // The answer the whole tool exists for.
+    expect(await call({ taskKey: "VIB-404" })).toContain(
+      "[noop] No task VIB-404 in this project",
+    );
   });
 
   /**

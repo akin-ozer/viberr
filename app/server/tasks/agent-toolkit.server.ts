@@ -13,6 +13,7 @@ import {
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
+import { readBoardList, readBoardTask } from "./board-read.server";
 import {
   readTaskFile,
   updateTaskFile,
@@ -88,11 +89,6 @@ interface AgentToolkitDeps {
 }
 
 const prose = normalizeEscapedNewlines;
-
-/** Ruling 281: how much of ANOTHER task's goal `read_board` hands back. Enough
- *  to answer "is this the work I was told about", not enough to make a second
- *  task's whole contract compete with this run's own prompt. */
-const GOAL_READ_CHARS = 2_000;
 
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
@@ -632,68 +628,13 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             .optional()
             .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
         },
+        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
-            const { listProjectTasks } = await import(
-              "~/server/projections/board-query.server"
-            );
-            // Archived tasks are INCLUDED: "SHOP-8 was archived" is a real and
-            // useful answer to "does SHOP-8 exist", and an agent told about a key
-            // that has been retired must be able to learn that rather than read
-            // it as never having existed.
-            const listOpts: NonNullable<Parameters<typeof listProjectTasks>[2]> = {
-              includeArchived: true,
-            };
-            if (ctx.dataRoot !== undefined) listOpts.dataRoot = ctx.dataRoot;
-            const rows = listProjectTasks(db, projectSlug, listOpts);
+            const deps = { db, ctx, projectSlug };
             const wanted = args.taskKey?.trim();
-            if (wanted) {
-              const row = rows.find((t) => t.key === wanted);
-              if (!row) {
-                // The honest answer to the question that prompted this tool: a
-                // key that does not exist here is a claim that was wrong, and
-                // saying so plainly is the whole point.
-                return textResult(
-                  `[noop] No task ${wanted} in this project. If a document or a report named it, ` +
-                    `that claim is wrong — say so rather than acting on it.`,
-                );
-              }
-              const file = readTaskFile({
-                projectSlug,
-                taskKey: row.key,
-                dataRoot: ctx.dataRoot,
-              });
-              return textResult(
-                JSON.stringify(
-                  {
-                    key: row.key,
-                    title: row.title,
-                    stage: row.stage,
-                    readiness: row.readiness,
-                    waiting: row.waiting,
-                    archived: row.archived,
-                    waitsOn: row.blockedBy.map((e) => `${e.label} (${e.state})`),
-                    goal: file ? file.parsed.goal.slice(0, GOAL_READ_CHARS) : null,
-                  },
-                  null,
-                  1,
-                ),
-              );
-            }
             return textResult(
-              JSON.stringify(
-                rows.map((t) => ({
-                  key: t.key,
-                  title: t.title,
-                  stage: t.stage,
-                  readiness: t.readiness,
-                  waiting: t.waiting,
-                  archived: t.archived,
-                  waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
-                })),
-                null,
-                1,
-              ),
+              wanted ? readBoardTask(deps, wanted) : readBoardList(deps),
             );
           } catch (error) {
             logger.warn("agent read_board failed", {
