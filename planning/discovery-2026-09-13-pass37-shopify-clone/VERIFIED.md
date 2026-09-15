@@ -1946,3 +1946,87 @@ with no steps recorded. The annotation on check-run `104166998395` says why:
 GitHub Actions is billing-blocked on this account. CI red on this repository carries no signal about
 the code, and nothing on the board should wait on it. Recorded so no later reader mistakes it for a
 finding.
+
+---
+
+## The clone, from a clean clone, minutes after observability merged
+
+Not "the tests pass". A fresh `git clone` of `main` at `f01dbad` (the SHOP-5 merge), `pnpm install
+--frozen-lockfile`, `make up`:
+
+```
+Service              Port       PID  Health
+-------------------- --------- ------ ---------
+cart                      4004  98005 healthy
+catalog                   4002  98016 healthy
+fixture-ready             4101  98030 healthy
+fixture-dependent         4102  98034 healthy
+gateway                   8080  98039 healthy
+identity                  4001  98047 healthy
+inventory                 4003  98051 healthy
+[stack] all 7 services healthy
+```
+
+`make up` exit 0. `pnpm install --frozen-lockfile` exit 0 — SHOP-5's lockfile regeneration, the
+thing the lease ordered and the Integration Verifier refused the branch over, is correct on main.
+
+### The gateway still says exactly what is missing
+
+```
+GET /ready → 503
+{"dependencies":{"identity":true,"catalog":true,"inventory":true,"cart":true,"orders":false}}
+```
+
+Four of five true, `orders:false`, and orders is the one service still in an open PR. The board and
+the running product agree, with no human keeping them in step.
+
+### SHOP-5's done signal, satisfied on main, against a route it was never tested on
+
+One `curl` through the gateway with a request id I chose, then `make trace REQ=<id>`:
+
+```
+trace 0e17ae81cd6357db48d2a6fafd5898db requestId=probe-1789445925
+  gateway HTTP GET /catalog/products 14.000ms [ok]
+    gateway HTTP GET /products 11.000ms [ok]
+      catalog HTTP GET /products 3.000ms [ok]
+        catalog sqlite.all 1.000ms [ok]
+```
+
+Four spans, one trace, reconstructed from **two separate process trace files**
+(`.data/traces/gateway.ndjson` 2 spans, `.data/traces/catalog.ndjson` 2 spans; the other three
+service files hold none for this id). SHOP-5 proved this against the **identity** route. It holds on
+the **catalog** route, which nobody instrumented for it — which is the point of putting the
+instrumentation in `packages/http` rather than in each service, and is a stronger statement than
+the one the task was accepted on.
+
+### Near-miss #17, killed by reading the evidence
+
+`POST /identity/register` and `/identity/login` return 404 through the gateway. SHOP-14's goal said
+to "assert register, login, refresh and /me still work through the identity routing already on
+main", and SHOP-14 was accepted and merged. That reads like an accepted task whose done signal was
+not met.
+
+It is not. Its verifier's own attachment records the truth, labelled as such:
+
+```
+### identity register through gateway (known gap probe)
+HTTP/1.1 404 Not Found
+{"error":{"code":"NOT_FOUND","message":"Route not found","requestId":"shop14-identity-register"}}
+```
+
+The gateway's `identity.ts` exposes `PATCH /users/:userId/roles` and nothing else; the auth edge
+belongs to a later link. The verifier probed it, found the gap, labelled it a known gap and
+attached the 404. Nothing lied. The finding dissolved in the evidence the machinery had already
+collected — which is what the evidence machinery is for.
+
+### `make test` on main: one red, and it is this machine
+
+```
+× catalog service over real HTTP > rejects incremental writes beyond product cardinality
+  limits and rolls them back   →  Test timed out in 5000ms   (5137ms)
+```
+
+Re-run in isolation, three times: **728ms, 917ms, 1415ms — all green.** It only times out when
+`make test` runs the whole workspace in parallel while five agent runs compete for the same CPU.
+Classified rather than reported: flaky under load, against a 5,000ms budget roughly 3.5x its
+isolated runtime. Handed to the board as a product finding, not recorded as a viberr defect.
