@@ -27,6 +27,8 @@ function detail(patch: Partial<AcceptConfirmTask> = {}): AcceptConfirmTask {
     validation: "healthy",
     branch: "vib-151",
     pr: null,
+    // Ruling 304: nothing reported, which reads as "not reported", never green.
+    prChecks: null,
     stages: STAGES,
     ...patch,
   };
@@ -502,5 +504,81 @@ describe("ruling 162: a standing refusal disables the confirm", () => {
     expect(forced.dialog.textContent).toContain("Bypassing");
     expect(forced.button.disabled).toBe(false);
     expect(forced.button.getAttribute("aria-describedby")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 304 (pass 37, F37-139): the dialog that authorizes an irreversible
+ * merge says what CI thinks of the head it is about to merge.
+ *
+ * Checks are deliberately NOT an acceptance gate -- the reviewers' verdicts
+ * are -- which is precisely why the person clicking has to be told. The pill
+ * lived one panel up on the task page and was absent from the ceremony. Found
+ * by using it: with GitHub Actions quota-blocked on the clone repo, four PRs
+ * were accepted and merged carrying three failing checks each, and the dialog
+ * named the PR, the branch, the base, the verdict and the skipped stages
+ * without ever mentioning them.
+ */
+describe("ruling 304: the accept ceremony states the checks it merges past", () => {
+  const PR = { number: 41, state: "review" as const, title: "[VIB-151] work" };
+
+  function ceremonyText(prChecks: AcceptConfirmTask["prChecks"]): string {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ pr: PR, prChecks })}
+        workRevisionSha="abc1234"
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        atBoundary
+        blockedReason={null}
+        openPacketTitle={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialogs = container.ownerDocument.querySelectorAll(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    );
+    return dialogs[dialogs.length - 1]?.textContent ?? "";
+  }
+
+  it("names failing checks, and says plainly that they do not block this merge", () => {
+    // CANARY: drop the `prChecks` row and this is the state shipped before.
+    const text = ceremonyText({
+      total: 5,
+      passing: 0,
+      failing: 3,
+      pending: 0,
+      state: "failing",
+    });
+    expect(text).toContain("3/5 checks failing");
+    // The half that stops it reading as a block: it is the person's call.
+    expect(text).toContain("not a gate");
+    expect(text).toContain("your call");
+  });
+
+  it("names checks that have not finished, and does not promise to wait", () => {
+    const text = ceremonyText({
+      total: 4,
+      passing: 1,
+      failing: 0,
+      pending: 3,
+      state: "pending",
+    });
+    expect(text).toContain("3/4 checks running");
+    expect(text).toContain("does not wait");
+  });
+
+  it("stays silent when the checks are green, and when nothing reported at all", () => {
+    // A row that fires on green is noise on the screen that most needs to be
+    // read. CANARY: render the row unconditionally.
+    const green = ceremonyText({ total: 5, passing: 5, failing: 0, pending: 0, state: "passing" });
+    expect(green).not.toContain("5 checks passing");
+    expect(green).not.toMatch(/checks (failing|running|unknown)/);
+    // Nothing reported is NOT "green": no claim either way, no row at all.
+    const none = ceremonyText(null);
+    expect(none).not.toMatch(/checks (failing|running|unknown|passing)/);
   });
 });

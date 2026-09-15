@@ -4639,6 +4639,30 @@ by rewriting those paragraphs:*
     and answered with the sentence that stops a relay: this call produced no answer, so do
     not report one, because not getting a result is different from getting an empty one.
 
+304. **The ceremony that merges says what CI thinks of the head it is merging (owner,
+    2026-09-16, pass 37; F37-139).** The acceptance dialog is the last screen before an
+    irreversible merge into the default branch, and it is built to state what the click
+    does: it names the pull request, the base, the branch it refreshes first, the verdict
+    that cleared the gate, any stage it skips, and the decision it withdraws. It did not
+    name the CHECKS.
+    Checks are deliberately not an acceptance gate on this product; the reviewers' verdicts
+    are. That is the reason to show them, not the reason to omit them: the product has
+    decided not to decide, which leaves the decision with the person clicking, and it was
+    not telling them. The pill existed and was rendered one panel up on the same page
+    (`task-side-panels.tsx`), so the dialog's `AcceptConfirmTask` simply never carried the
+    field.
+    Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
+    requests were accepted and merged carrying three failing checks each, and the ceremony
+    named the PR, the branch, the base, the verdict and the skipped stages without once
+    mentioning them. Ruling 246's rule decides it: name the door AND say whether it is
+    open.
+    The row appears ONLY when the checks are not green, because a row that fires on a pass
+    is noise on the screen that most needs reading, and it carries the sentence that keeps
+    it from reading as a block: checks are not a gate here, so merging anyway is your call.
+    Pending says the merge does not wait. Nothing reported stays silent rather than
+    rendering as green, which is the same rule `wire-format.server` already states for that
+    field.
+
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

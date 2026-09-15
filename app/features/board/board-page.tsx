@@ -1318,6 +1318,9 @@ function AcceptOnBoardConfirm({
         validation: task.validation,
         branch: task.branch,
         pr: task.pr,
+        // Ruling 304: the board summary carries the checks too, so the same
+        // dialog says the same thing from either door.
+        prChecks: task.prChecks ?? null,
       }}
       workRevisionSha={task.workRevisionSha ?? null}
       noChanges={false}
