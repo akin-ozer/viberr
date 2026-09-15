@@ -613,6 +613,9 @@ describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
 
   const RUNS_REPLY = z.object({
     scope: z.string(),
+    // Ruling 302: always the real count, and the note only when it clipped.
+    total: z.number(),
+    truncated: z.string().optional(),
     runs: z.array(
       z.object({
         runId: z.string(),
@@ -727,6 +730,39 @@ describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
     // refusal that proves a run exists there.
     expect(body.runs.map((r) => r.runId)).not.toContain(HIDDEN_LIVE);
     expect(JSON.stringify(body)).not.toContain("not-a-project-deniz-can-see");
+  });
+
+  /**
+   * Ruling 302's third sibling. `list_runs` clipped at `limit` and said
+   * nothing: a caller asking "which runs are live right now" got a list that
+   * looked complete and could not reconcile it with the count
+   * `instance_health` reports for the same instant. `read_run_log` beside it
+   * has carried `olderExist`/`newerExist` since pass 32, and
+   * `inspect_audit_log` has carried `total`/`shown` since ruling 279.
+   */
+  it("ruling 302: a clipped listing says how many it left out, and is silent when it left out none", async () => {
+    const full = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
+    );
+    // Nothing hidden: no note at all, rather than a note claiming zero.
+    // CANARY: return the note unconditionally.
+    expect(full.total).toBe(full.runs.length);
+    expect(full.truncated).toBeUndefined();
+
+    const clipped = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs", {
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        limit: 1,
+      }),
+    );
+    // CANARY: drop `total` and the window looks like the whole history.
+    expect(clipped.runs).toHaveLength(1);
+    expect(clipped.total).toBe(full.total);
+    expect(clipped.truncated).toContain(String(full.total - 1));
+    expect(clipped.truncated).toContain("limit");
   });
 
   it("a taskKey lists that task's runs, finished included, and needs its project", async () => {

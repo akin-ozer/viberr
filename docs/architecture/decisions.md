@@ -4606,6 +4606,16 @@ by rewriting those paragraphs:*
     surface over." Its reply carries `timelineTotal` always now, and `timelineOlder` only
     when something is hidden, naming `events` to widen and `read_timeline_entry` to read
     one whole: the same two ways out, worded the same way, on both actors.
+    AND A THIRD SIBLING, found by finally sweeping for the shape instead of waiting to be
+    told: `list_runs` clipped at `limit` and said nothing. A caller asking "which runs are
+    live right now" got a list that looked complete and could not reconcile it with the
+    count `instance_health` reports for the same instant. Its two neighbours on that same
+    server were already correct, which is what makes it the family and not an oversight:
+    `read_run_log` has carried `olderExist` / `newerExist` and recovery cursors since pass
+    32, and `inspect_audit_log` has carried `total` / `shown` / `noMatch` since ruling 279.
+    It carries `total` always and `truncated` only when rows were left out, naming the
+    count and the `limit` that returns them.
+
 
 303. **An unexpected failure answers in words, on every surface (owner, 2026-09-16,
     pass 37; F37-138).** Found by reading what the product actually returned rather than by

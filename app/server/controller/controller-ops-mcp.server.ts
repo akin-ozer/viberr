@@ -124,6 +124,12 @@ const MAX_LOG_LINES = 500;
 const DEFAULT_RUN_ROWS = 50;
 const MAX_RUN_ROWS = 200;
 
+/** Ruling 302: present on a `list_runs` reply ONLY when rows were left out,
+ *  naming how many and the argument that returns them. */
+interface RunWindowNote {
+  truncated?: string;
+}
+
 /** Uniform not-visible copy for a run: a run that does not exist and one the
  *  asker may not read answer identically, so a probe cannot walk run ids
  *  (the R15-4 posture the toolkit applies to projects). */
@@ -339,6 +345,24 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     "instance_health",
   );
 
+  /**
+   * Ruling 302, third sibling. `list_runs` clipped at `limit` and said nothing:
+   * a caller asking "which runs are live right now" got a list that looked
+   * complete, and could not reconcile it with the count `instance_health`
+   * reports for the same instant. `read_run_log` beside it has carried
+   * `olderExist`/`newerExist` and recovery cursors since pass 32, and
+   * `inspect_audit_log` has carried `total`/`shown` since ruling 279. This is
+   * the one that did not.
+   */
+  const windowNote = (total: number, shown: number): RunWindowNote => {
+    if (total <= shown) return {};
+    return {
+      truncated:
+        `${total - shown} more run${total - shown === 1 ? "" : "s"} matched and ` +
+        `${shown} are shown, newest first. Pass limit up to ${MAX_RUN_ROWS} for the rest.`,
+    };
+  };
+
   add(
     tool(
       "list_runs",
@@ -376,18 +400,29 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // asked FOR a project, so "you cannot see this project" is the true
           // and useful refusal, not an empty list.
           requireVisible(slug, "read this task's runs");
-          const rows = listRunsForTaskRows(db, slug, args.taskKey)
+          const visible = listRunsForTaskRows(db, slug, args.taskKey)
             .filter(runVisible)
-            .reverse()
-            .slice(0, limit);
+            .reverse();
+          const rows = visible.slice(0, limit);
           auditRead("list_runs", `${slug}/${args.taskKey}`);
-          return json({ scope: `${slug}/${args.taskKey}`, runs: rows.map(runRow) });
+          return json({
+            scope: `${slug}/${args.taskKey}`,
+            total: visible.length,
+            ...windowNote(visible.length, rows.length),
+            runs: rows.map(runRow),
+          });
         }
         // The LIVE listing spans every project, so an invisible row is dropped
         // rather than refused — the same posture `list_projects` takes.
-        const rows = listLiveRunRows(db).filter(runVisible).slice(0, limit);
+        const visible = listLiveRunRows(db).filter(runVisible);
+        const rows = visible.slice(0, limit);
         auditRead("list_runs", "live");
-        return json({ scope: "live", runs: rows.map(runRow) });
+        return json({
+          scope: "live",
+          total: visible.length,
+          ...windowNote(visible.length, rows.length),
+          runs: rows.map(runRow),
+        });
       }),
     ),
     "list_runs",
