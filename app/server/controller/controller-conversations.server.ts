@@ -435,6 +435,60 @@ export function appendMessage(
   );
 }
 
+/**
+ * Ruling 274 (pass 37, F37-107): a deleted project releases its conversations
+ * instead of leaving them bound to a slug that no longer exists.
+ *
+ * `controller_conversations` is app-owned state with no FK cascade, the same
+ * family as the notification, credential-binding and repo-health rows
+ * `deleteProject` already clears — and it was the one that kept its binding. A
+ * conversation left pointing at a deleted project is not merely stale: the
+ * binding is what `slugOf()` DEFAULTS to, so the next message typed into it
+ * acts on that slug. Create a project with the same name — slugs are derived
+ * from the name, so this is the ordinary way a slug comes back — and the old
+ * conversation silently becomes a conversation about the NEW board, carrying a
+ * transcript about work that has nothing to do with it, with every tool call
+ * aimed at a project its author never chose.
+ *
+ * Released, not deleted: the transcript is the record of what somebody asked
+ * and what the controller did, and this product does not destroy records
+ * (ruling 17's posture, and `update_goal`'s "completed and cancelled chains
+ * stay readable"). The conversation becomes instance-scoped, which is a real
+ * scope, and carries a message saying why so its author is not left wondering
+ * where the board went.
+ */
+export function releaseProjectConversations(
+  db: DatabaseSync,
+  projectSlug: string,
+  projectName: string,
+): number {
+  // SAFETY: `id` is the TEXT PRIMARY KEY of `controller_conversations`
+  // (0001_baseline), so every row answers this single-column select.
+  const rows = db
+    .prepare(`SELECT id FROM controller_conversations WHERE project_slug = ?`)
+    .all(projectSlug) as { id: string }[];
+  for (const row of rows) {
+    // The note goes on BEFORE the unbind, so a reader sees the last thing that
+    // happened while the conversation was still about that board.
+    appendMessage(db, {
+      conversationId: row.id,
+      author: "controller",
+      text:
+        `The project "${projectName}" was deleted, so this conversation is no longer bound to ` +
+        `it. Everything above stays on the record. From here it is an instance conversation: ` +
+        `name a project on any board tool, or start a new conversation on the board you mean.`,
+    });
+    // Both columns, because a task key without a project is not a scope (the
+    // table's own CHECK says so).
+    db.prepare(
+      `UPDATE controller_conversations
+       SET project_slug = NULL, task_key = NULL, updated_at = ?
+       WHERE id = ?`,
+    ).run(new Date().toISOString(), row.id);
+  }
+  return rows.length;
+}
+
 /** First user message, flattened and clipped, as the conversation title. */
 export function deriveTitle(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();

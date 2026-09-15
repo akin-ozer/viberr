@@ -893,6 +893,69 @@ describe("deleteProject leaves no app-owned rows behind", () => {
   });
 });
 
+/**
+ * Ruling 274 (pass 37, F37-107): `controller_conversations` is the fourth
+ * app-owned table with no FK cascade, and the only one whose orphan is worse
+ * than stale. A conversation's `project_slug` is what the controller
+ * toolkit's `slugOf()` DEFAULTS to, so a conversation left bound to a deleted
+ * slug acts on whatever comes back under it — and a slug comes back the
+ * ordinary way, by creating a project with the same name.
+ */
+describe("deleteProject releases the conversations bound to it (ruling 274)", () => {
+  it("unbinds them to instance scope, keeps the transcript, and says why", async () => {
+    const store = setupTestStore(ctx);
+    const actor = admin(store);
+    const { createConversation, appendMessage, getConversation, listMessages } =
+      await import("~/server/controller/controller-conversations.server");
+    const bound = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: "arda@viberr.dev",
+      projectSlug: store.slug,
+    });
+    appendMessage(store.db, {
+      conversationId: bound.id,
+      author: "user",
+      userId: store.users.arda.id,
+      text: "What is on this board?",
+    });
+    // An instance conversation must not be touched by a project's delete.
+    const instance = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: "arda@viberr.dev",
+      projectSlug: null,
+    });
+
+    const name = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.name;
+    await deleteProject(
+      store.db,
+      { projectSlug: store.slug, confirmName: name },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+
+    // CANARY: drop `releaseProjectConversations` from deleteProject and this
+    // conversation keeps pointing at the dead slug — so recreating a project
+    // under that name silently hands it this transcript AND makes every
+    // unqualified board tool in it act on the new project.
+    const after = getConversation(store.db, bound.id)!;
+    expect(after.projectSlug).toBeNull();
+    expect(after.taskKey).toBeNull();
+    // The record is kept: this product does not destroy transcripts.
+    const messages = listMessages(store.db, bound.id);
+    expect(messages.some((m) => m.text === "What is on this board?")).toBe(true);
+    // …and its author is told where the board went.
+    const last = messages[messages.length - 1]!;
+    expect(last.author).toBe("controller");
+    expect(last.text).toContain(`"${name}" was deleted`);
+    expect(last.text).toContain("instance conversation");
+    // Untouched, because it was never bound to this project.
+    expect(listMessages(store.db, instance.id)).toEqual([]);
+  });
+});
+
 describe("deleteProject stops the agents it is deleting", () => {
   it("interrupts in-flight runs before the files go", async () => {
     // Nothing stopped them, so a delete left every running agent going against

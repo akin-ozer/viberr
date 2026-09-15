@@ -41,6 +41,7 @@ import {
   getProjectGithubContext,
   type GithubContextOptions,
 } from "~/server/github/github-context.server";
+import { releaseProjectConversations } from "~/server/controller/controller-conversations.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -1416,6 +1417,13 @@ export async function deleteProject(
     label: actor.label,
   });
   deleteRepoHealth(db, input.projectSlug);
+  // Ruling 274 (F37-107): the fourth app-owned table, and the one whose orphan
+  // is not merely stale. A conversation's `project_slug` is what `slugOf()`
+  // defaults to, so a conversation left bound to a deleted slug acts on
+  // whatever comes back under it — and a slug comes back the ordinary way, by
+  // creating a project with the same name. The transcript is kept; only the
+  // binding is released, with a message on the conversation saying why.
+  releaseProjectConversations(db, input.projectSlug, projectName);
 
   recordAudit(db, {
     action: "project.deleted",

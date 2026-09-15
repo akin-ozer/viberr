@@ -6061,6 +6061,26 @@ by rewriting those paragraphs:*
     hold is per (backend, credential), so a retry onto the backend that CAN run is untouched.
     (`operator-actions.server.ts`.)
 
+274. **A deleted project releases its conversations (2026-09-15, pass 37; F37-107).**
+    `deleteProject` already clears three app-owned tables that no foreign key cascades and no
+    rebuild touches — notifications, the credential binding, the cached repo probe — each for a
+    named consequence. `controller_conversations` is the fourth, and it kept its binding.
+    The orphan is not merely stale. A conversation's `project_slug` is what the controller
+    toolkit's `slugOf()` DEFAULTS to, so a conversation bound to a deleted slug acts on
+    whatever comes back under it — and a slug comes back the ordinary way, because slugs are
+    derived from names: create a project called the same thing and the old conversation
+    silently becomes a conversation about the NEW board. Its transcript, about work that has
+    nothing to do with that project, is now listed under it, and every unqualified board tool
+    in it aims at a project its author never chose. The repo-health row had the same shape and
+    the same fix note already on it ("a new project reusing the slug inherited the dead one's
+    probe verdict"); the conversation was the one nobody came back for.
+    RELEASED, not deleted. The transcript is the record of what somebody asked and what the
+    controller did, and this product does not destroy records. The conversation becomes
+    instance-scoped — a real scope, with both columns cleared because a task key without a
+    project is not one — and carries a message naming the deleted project, so its author is not
+    left wondering where the board went.
+    (`controller-conversations.server.ts`, `settings-actions.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
