@@ -27,7 +27,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
-import type { AuditActor } from "~/server/audit/audit-recorder.server";
+import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import {
   queryAuditEventsForExport,
   type AuditExportFilters,
@@ -138,7 +138,10 @@ import {
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
-import { PRIORITY_VALUES } from "~/schemas/task-file.schema";
+import {
+  PRIORITY_VALUES,
+  revisionLeftWorkspace,
+} from "~/schemas/task-file.schema";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { StartAgentRunInput } from "~/server/tasks/specialist-run.server";
 import { canRunAgents } from "~/server/auth/project-authority.server";
@@ -2073,6 +2076,90 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "get_github_state",
+  );
+
+  add(
+    tool(
+      "read_pull_request",
+      "What a task's review pull request CHANGED: every changed file with its status, its added/deleted counts, and its unified-diff hunks. Membership gated, read-only, one GitHub read. Use it to judge a delivery yourself instead of from a filename list - a reviewer's verdict says what an agent concluded, this says what is in the branch. Large diffs are bounded: the reply lists every file either way and says when a patch was withheld for the byte budget, and `path` reads one file's hunks in full. `prNumber` overrides the task's own PR (it must belong to this project's repository).",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        prNumber: z
+          .number()
+          .int()
+          .optional()
+          .describe("A PR in this project's repository; omit to read the task's own."),
+        path: z
+          .string()
+          .optional()
+          .describe("Read only this file's hunks (the path as the PR lists it)."),
+      },
+      runWith(
+        async (args: {
+          projectSlug?: string;
+          taskKey?: string;
+          prNumber?: number;
+          path?: string;
+        }) => {
+          const slug = slugOf(args.projectSlug);
+          requireVisible(slug, "read this project's pull requests");
+          let number = args.prNumber ?? null;
+          let from = `#${number ?? 0}`;
+          if (number === null) {
+            const key = keyOf(args.taskKey, slug);
+            const file = readTaskFile({ projectSlug: slug, taskKey: key, dataRoot });
+            if (!file) throw AppError.notFound(`No task ${key} in ${slug}.`);
+            const departure = revisionLeftWorkspace(file.parsed.frontmatter);
+            if (!departure || departure.kind === "pushed") {
+              // Say which of the two it is: a task that never opened a PR and
+              // one whose branch is pushed but unreviewed need different moves.
+              return (
+                `[noop] ${key} has no pull request to read` +
+                `${departure ? " yet — its branch is pushed but no PR is open" : ""}. ` +
+                `Name prNumber to read another PR in this repository.`
+              );
+            }
+            number = departure.number;
+            from = `${key} (#${number})`;
+          }
+          const { readPullRequestDiff } = await import(
+            "~/server/github/pr-diff.server"
+          );
+          const diffOpts: Parameters<typeof readPullRequestDiff>[3] = {};
+          if (args.path) diffOpts.path = args.path;
+          const result = await readPullRequestDiff(db, slug, number, diffOpts);
+          if (!result.ok) return `[error] Could not read ${from}: ${result.reason}`;
+          if (args.path && result.files.length === 0) {
+            // An empty file list under a path filter means the PR does not
+            // touch it — which is an ANSWER, and a different one from "the PR
+            // changed nothing".
+            return `[noop] PR #${number} does not change \`${args.path}\`.`;
+          }
+          // Ruling 266: this is the only controller tool that reads OUTSIDE
+          // the instance on somebody's behalf — the request is made by the
+          // server with the project's sealed credential, exactly the class
+          // E32-5 made auditable in `viberr_ops`. "Who read which pull request
+          // through the controller" has to be answerable from the trail.
+          recordAudit(db, {
+            action: "controller.github.read",
+            actor: auditActor,
+            subjectKind: "project",
+            subjectId: slug,
+            projectSlug: slug,
+            details: { pr: number, files: result.files.length },
+          });
+          return json({
+            repo: result.repo,
+            number: result.number,
+            files: result.files,
+            moreFiles: result.moreFiles,
+            patchesWithheldForSize: result.truncated,
+          });
+        },
+      ),
+    ),
+    "read_pull_request",
   );
 
   add(

@@ -5871,6 +5871,30 @@ by rewriting those paragraphs:*
     named project. It stays read-only, and it audits like every other diagnostics read.
     (`controller-ops-mcp.server.ts`, `run-store.server.ts`.)
 
+266. **A controller asked to judge a delivery can read it (owner, 2026-09-15, pass 37;
+    F37-96).** Asked to say, per PR, whether it would merge or send back three open pull
+    requests, the controller had `get_task`'s `pr.paths.changed` — a filename list — the commit
+    subjects, and `changed: {files: 4, add: 1528, del: 67}`. No tool in either of its servers
+    returned a diff, a hunk, or a file at a revision. It answered honestly and the answer was
+    the finding: "my judgement on PR #32 rests on a four-line filename list and a reviewer
+    verdict that had not arrived. I can commission a review; I cannot check one." A +1528/-67
+    rewrite of a process supervisor is a lot of surface for a false-green to hide in.
+    `read_pull_request` reads one task's PR: every changed file with its status, its counts and
+    its hunks. Membership gated, read-only, one endpoint.
+    Asked which shape it should take, the owner chose the NARROW one. Specialists already hold
+    `read-github-api`, a GET-only passthrough scoped to their task's repo, and mounting that
+    would have been fewer lines — but the controller runs with an END USER's permissions across
+    every project they can see, so it gets one named question with no caller-supplied path to
+    scope rather than an API surface to reason about. It is also the only controller tool that
+    reads outside the instance on somebody's behalf (the request is made by the server with the
+    project's sealed credential), so it audits, like the diagnostics reads E32-5 covered.
+    Bounded in the two ways a model cannot see: a patch withheld for the byte budget still
+    LISTS its file, flagged, because dropping the row reads as a PR that does not touch it; and
+    a file GitHub sent no patch for (binary, or too large for it to diff) is distinguished from
+    a budget cut, because those two call for different next moves. `path` reads one file's
+    hunks in full, including by its pre-rename name.
+    (`pr-diff.server.ts`, `controller-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

@@ -1058,6 +1058,33 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(handOffsNow().length).toBe(before);
   });
 
+  /**
+   * Ruling 266 (pass 37, F37-96). Asked to say whether three open PRs should
+   * merge, the controller had `get_task`'s filename list and
+   * `changed: {files: 4, add: 1528, del: 67}` and nothing else, and said so:
+   * "my judgement on PR #32 rests on a four-line filename list… I can
+   * commission a review; I cannot check one."
+   */
+  it("read_pull_request: membership gated, and a task with no PR says so rather than erroring", async () => {
+    const denied = await call(ids.nonMember, "read_pull_request", { taskKey: "VIB-142" });
+    // The members-only posture (R15-4): a non-member must not learn the
+    // project exists, so the gate answers before the task is resolved.
+    expect(denied).toContain("is visible to you");
+    // CANARY: drop the `revisionLeftWorkspace` arm and a task with no PR
+    // reaches GitHub with a bogus number and comes back as an [error] about a
+    // request nobody should have made. VIB-148 has none.
+    const none = await call(ids.projectAdmin, "read_pull_request", { taskKey: "VIB-148" });
+    expect(none).toContain("[noop]");
+    expect(none).toContain("has no pull request to read");
+    expect(none).toContain("prNumber");
+    // VIB-142 carries PR #318, so the resolution reaches GitHub and stops on
+    // the fixture's real obstacle — named, with the PR it resolved, rather
+    // than a bare failure. (This project has no credential configured.)
+    const configured = await call(ids.projectAdmin, "read_pull_request", { taskKey: "VIB-142" });
+    expect(configured).toContain("VIB-142 (#318)");
+    expect(configured).toContain("no GitHub credential is configured");
+  });
+
   it("project settings, stages, boundaries, members, deployments: MAINTAINER refused, project ADMIN granted", async () => {
     const arms: { tool: string; args: Record<string, JsonValue> }[] = [
       {
