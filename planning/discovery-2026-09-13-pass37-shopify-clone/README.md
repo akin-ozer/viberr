@@ -9,14 +9,52 @@ Read in this order:
 | file | what it is |
 |---|---|
 | [`SETUP.md`](SETUP.md) | what the controller built for itself, unaided, in one turn |
-| [`FINDINGS.md`](FINDINGS.md) | seventy-one findings — two withdrawn, each with its measurements kept |
+| [`FINDINGS.md`](FINDINGS.md) | eighty-three findings — two withdrawn, each with its measurements kept |
 | [`VERIFIED.md`](VERIFIED.md) | what held up under deliberate probing, and how it was probed |
 | [`DECISIONS.md`](DECISIONS.md) | the owner decisions taken mid-pass |
 | [`PLAN.md`](PLAN.md) | the implementation plan each fix commit follows |
 | [`VALIDATION.md`](VALIDATION.md) | red-proof and live-proof for every fix |
 
-Rulings **186–242** in `docs/architecture/decisions.md`. Fixes on
+Rulings **186–254** in `docs/architecture/decisions.md`. Fixes on
 `pass37/shopify-clone-fixes`, PR akin-ozer/viberr#302.
+
+## Day seven, in one paragraph
+
+The seventh session began by finding the same defect in my own work. **F37-76**: ruling 245's
+`FileLease` documented "released when the holder reaches a terminal stage" and nothing implemented
+it — a comment asserting a mechanism, which is the shape this pass has confirmed more often than
+any other, written by me, an hour after I shipped it. The controller read that contract, believed
+it, and wrote it into the first real lease's own stored reason: "Lease releases when SHOP-11
+merges." SHOP-11 merged; the lease stood.
+
+Then the session's centre. **F37-77**: the Code Reviewer's checkout failed to provision, so viberr
+told it — in viberr's own words, and ordered it to quote them verbatim — "this is a server-side
+FAILURE, not something you can fix". It quoted them, returned `verdict: null`, and wrote "No
+content verdict recorded". Viberr recorded `request_changes`, because the prose classifier matched
+the word *failure* inside the sentence viberr composed. Delete that one word and the classifier
+returns null: it was the entire verdict. The fabricated objection was the second in a row, so
+ruling 237's counter raised a decision packet putting three options to a person — interrogate a
+reviewer that never judged, force-accept past a verdict that did not exist, or rework again. The
+operator read the reviewer's own report, said so on the task, and could not withdraw a packet the
+policy engine had raised. **F37-78** was one layer down in the same incident: viberr told everyone
+"No GitHub credential is attached to this project" about a project holding a working one, because
+the supporting checkout's arm never fetches the token — and the operator believed it and wrote it
+onto the task.
+
+The rest of the day was the controller, which is what the owner asked to have inspected. **F37-79**:
+a turn that ran 201 seconds for $4.11 showed `Controller is working…` and nothing else, while the
+same page rendered the live tool call below it. **F37-80**: told "I want to lean on you rather than
+clicking through task pages myself", the controller answered — twice, correctly — that it had no
+tool for packet resolution and could not even see what was waiting. The owner kept the boundary and
+made it navigable. **F37-81**, caught in flight *because* F37-79 had shipped an hour earlier and the
+working row was showing the live tool call: the controller tagged an agent, briefed it at length,
+and nothing was sent. **F37-82**: the standing corrections it wrote reached the operator cut off
+mid-word at "fails in about thr". **F37-83**, raised by the controller itself and confirmed against
+the run rows: four open packets promising a model the project no longer deployed.
+
+The board ended the day at **23 done, 23 merged pull requests**, with nothing waiting on a human —
+and with every specialist moved from a spent Codex window onto Claude opus, through the controller,
+in one instruction.
 
 ## Day six, in one paragraph
 
@@ -219,3 +257,12 @@ By using it, not by reading it. Every finding came from a real run on a real rep
   run. Use `LIKE 'run_x%'`.
 - **A held task is the cheapest place to find dispatch bugs**, because everything that should
   not happen is enumerable.
+- **Ship an observability fix and the next defect walks into it.** Ruling 250 put the live tool
+  call on the controller's working row at 03:5x; F37-81 was caught at 04:0x by reading that row
+  while the controller wrote a comment tagging an agent. The fix found the bug.
+- **Disbelieve the agent's own report of what it wrote, then read the file.** The controller said
+  its standing corrections were in the rulings KB. True. What a run RECEIVED was half of rule one.
+- **Read the rendered surface, not the frontmatter.** SHOP-30's file says `waiting: human` with no
+  packet and no recommendation, which reads as a dead end. The task page renders it as "Waiting on
+  **a schedule · Sep 19 · 14:37**". That near-miss died in one screenshot; it would have been the
+  pass's sixteenth.
