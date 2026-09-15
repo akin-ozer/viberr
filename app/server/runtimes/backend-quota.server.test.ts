@@ -6,7 +6,8 @@ import {
   parseQuotaResetAt,
   recordBackendCredentialRefusal,
   recordBackendQuotaExhaustion,
-  retireBackendRefusalsFor,
+  recordBackendRateLimit,
+  retireBackendRecordsFor,
   UNDATED_HOLD_MS,
   type BackendCredentialRefusal,
   type BackendQuotaExhaustion,
@@ -156,11 +157,11 @@ describe("backendDispatchHold (ruling 152(c))", () => {
  * Live (2026-09-07) a Claude card kept "usage window spent · reopens 21:30"
  * after its owner signed the backend into another account.
  *
- * Canaries: drop the `credentialUserId` comparison in `retireBackendRefusalsFor`
+ * Canaries: drop the `credentialUserId` comparison in `retireBackendRecordsFor`
  * and the ruling-146 case fails; drop either `deleteSetting` and the first case
  * fails on that record.
  */
-describe("retireBackendRefusalsFor (ruling 165)", () => {
+describe("retireBackendRecordsFor (ruling 165)", () => {
   const OBSERVED = "2026-09-07T15:33:00.000Z";
   const nowMs = Date.parse(OBSERVED) + 5 * 60_000;
   const nowIso = new Date(nowMs).toISOString();
@@ -197,7 +198,7 @@ describe("retireBackendRefusalsFor (ruling 165)", () => {
     recordBackendQuotaExhaustion(db, "codex", exhaustion());
     expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).not.toBeNull();
 
-    retireBackendRefusalsFor(db, "claude", OWNER);
+    retireBackendRecordsFor(db, "claude", OWNER);
 
     const rows = rowsOf(db);
     expect(rows.get("claude")).toMatchObject({ exhausted: null, credentialRefused: null });
@@ -213,7 +214,7 @@ describe("retireBackendRefusalsFor (ruling 165)", () => {
     recordBackendQuotaExhaustion(db, "claude", exhaustion({ credentialUserId: "u_murat", credentialLabel: "Murat" }));
     recordBackendCredentialRefusal(db, "claude", refusal({ credentialUserId: null, credentialLabel: null }));
 
-    retireBackendRefusalsFor(db, "claude", OWNER);
+    retireBackendRecordsFor(db, "claude", OWNER);
 
     const claude = rowsOf(db).get("claude")!;
     expect(claude.exhausted?.credentialUserId).toBe("u_murat");
@@ -223,9 +224,47 @@ describe("retireBackendRefusalsFor (ruling 165)", () => {
     expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).toBeNull();
   });
 
+  /**
+   * Ruling 294 (pass 37, F37-129): the utilization READING goes with the
+   * account too. Ruling 165's own sentence is "the refusal Viberr observed on
+   * the slot goes with it", and it was applied to two of the three records this
+   * module keeps.
+   *
+   * The live failure, on this instance while it was written: the owner
+   * connected a Claude account with a fresh window and /insights went on
+   * reading "claude · 95% of seven day" — a figure about an account no longer
+   * connected, on the surface a person checks to decide whether there is room
+   * to run. The refusal beside it retired correctly; only the percentage lied.
+   */
+  it("ruling 294: retires the READING naming the person, and leaves another account's alone", () => {
+    const db = ctx.makeDb();
+    const reading = {
+      credentialUserId: OWNER,
+      credentialLabel: "Arda",
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      utilization: 0.95,
+      resetsAt: Math.round(nowMs / 1000) + 3600,
+      isUsingOverage: false,
+      observedAt: OBSERVED,
+    };
+    recordBackendRateLimit(db, "claude", reading);
+    recordBackendRateLimit(db, "codex", { ...reading, credentialUserId: "u_murat", credentialLabel: "Murat" });
+    expect(rowsOf(db).get("claude")!.reading).not.toBeNull();
+
+    // CANARY: drop the KEY_PREFIX branch from `retireBackendRecordsFor` and the
+    // old account's 95% survives its own disconnection.
+    retireBackendRecordsFor(db, "claude", OWNER);
+
+    expect(rowsOf(db).get("claude")!.reading).toBeNull();
+    // A reading about SOMEONE ELSE's account is not this person's to retire,
+    // the same line the exhaustion and the refusal take.
+    expect(rowsOf(db).get("codex")!.reading?.credentialUserId).toBe("u_murat");
+  });
+
   it("nothing recorded, nothing to retire, no error", () => {
     const db = ctx.makeDb();
-    expect(() => retireBackendRefusalsFor(db, "codex", OWNER)).not.toThrow();
+    expect(() => retireBackendRecordsFor(db, "codex", OWNER)).not.toThrow();
     expect(rowsOf(db).get("codex")).toMatchObject({ exhausted: null, credentialRefused: null });
   });
 });

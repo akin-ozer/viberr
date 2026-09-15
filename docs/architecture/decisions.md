@@ -4268,6 +4268,52 @@ by rewriting those paragraphs:*
     (`task-attachments.server.ts`, `controller-toolkit.server.ts`,
     `operator-toolkit.server.ts`.)
 
+294. **A usage reading belongs to an account, and the person whose account it is
+    (owner, 2026-09-16, pass 37; F37-129, completes 146(a) and 165).** Three things, one
+    idea, asked for as a UI change and mostly not one.
+    THE READING NOW GOES WITH THE ACCOUNT. Ruling 165's own sentence is "the refusal
+    Viberr observed on the slot goes with it", and `retireBackendRefusalsFor` applied it to
+    two of the three records this module keeps: the exhaustion, the credential refusal, and
+    not the utilization reading. Live, an hour before this was written: the owner connected
+    a Claude account with a fresh window and `/insights` went on reading "claude · 95% of
+    seven day · resets Sep 17" — a figure about an account no longer connected, on the
+    surface a person checks to decide whether there is room to run. The refusal beside it
+    retired correctly; only the percentage lied. A reading is never "stale but roughly
+    right" after a credential change, because a new account's window has no relationship to
+    the old one's, so it is deleted rather than aged. The function is
+    `retireBackendRecordsFor` now, because it retires records and no longer only refusals.
+    THE READING REACHES THE PERSON'S OWN CARD, which ruling 146(a) said it already did:
+    "they are already rendered per person on Insights … and on Profile, which is where a
+    fact about somebody's account belongs." Profile never rendered one. So this closes a
+    drift rather than opening a disclosure — and "per person" is the binding half. The
+    store keeps ONE reading per backend for the whole instance, stamped with whichever run
+    reported it, and `/insights` renders that unscoped behind `requireRole("admin")`. The
+    Agent accounts card is the first NON-admin surface to carry a utilization figure at
+    all, so an unscoped field here would not duplicate an existing disclosure: it would put
+    one member's account consumption in front of every member, under their own name. Two
+    gates, and the second is not redundant — the principal check cannot catch a person's
+    OWN older account, and the panel revalidates the loader the instant a sign-in succeeds,
+    which is exactly when a surviving reading from the account just replaced would be
+    re-rendered as the new one's.
+    It is an observation, never a probe, and the card says so: the age of the reading, and
+    that Viberr cannot ask the provider how much of a window is left. A missing utilization
+    reads "not reported" and never a fabricated 0% (the rule `wire-format.server` already
+    states for the same field); a percentage is clamped, because a provider on overage
+    reports above 1 and an unclamped round renders "118% of seven day"; an empty
+    `rateLimitType` falls back to "window" rather than composing "62% of " with a dangling
+    preposition. Only Claude runs report readings today (`rate_limit_event` has no Codex
+    counterpart), so a Codex card shows nothing rather than an empty row that reads as
+    broken.
+    THE SIGN-IN LINK IS COPYABLE, on both backends, from the step that offers it. Opening
+    it in place only works when the browser reading the page is the one holding the vendor
+    session, and often it is not: the instance runs on a server, the person is on another
+    machine, the sign-in has to finish in a different profile. The only way to move that
+    URL was to right-click an anchor whose href is a 300-character OAuth redirect. Same
+    fixture as the code button beside it, deliberately — one gesture on this card, learned
+    once — and the `copied` flag is keyed by WHICH button copied, because one boolean made
+    both read "Copied" at once on the one backend that shows both.
+    (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

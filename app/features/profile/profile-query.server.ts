@@ -92,6 +92,30 @@ export interface ProfileBackendRefusal {
   resetsAtPrecision: "exact" | "prose" | "clock" | null;
 }
 
+/**
+ * Ruling 294: what this backend last told Viberr about THIS person's window.
+ *
+ * An observation, never a probe — Viberr has no way to ask a provider how much
+ * of a window is left, so this is whatever the last run billed to this person
+ * happened to report. That is why it carries `observedAt` and why the card
+ * renders the age beside the number: a percentage with no age reads as current
+ * when it may be hours old, and the honest failure here is a person deciding
+ * they have room to run on a figure from this morning.
+ */
+export interface ProfileBackendUsage {
+  /** Provider's own status word, e.g. "allowed" / "allowed_warning". */
+  status: string;
+  /** The window the reading is about, e.g. "seven_day" / "five_hour". */
+  rateLimitType: string;
+  /** 0..1 of the window consumed; null when the provider omitted it. */
+  utilization: number | null;
+  /** ISO instant the window resets; null when the provider omitted it. */
+  resetsAt: string | null;
+  isUsingOverage: boolean;
+  /** ISO instant of the run line this reading was read off. */
+  observedAt: string;
+}
+
 export interface ProfileBackend {
   backend: RealBackend;
   health: UserBackendHealth;
@@ -103,6 +127,62 @@ export interface ProfileBackend {
   /** The viewer's own last observed refusal on this backend, or null. Optional
    *  so fixtures that predate it stay valid; the loader always sets it. */
   lastRefusal?: ProfileBackendRefusal | null;
+  /** Ruling 294: the viewer's OWN last reading on this backend, or null.
+   *  Optional so fixtures that predate it stay valid; the loader always sets
+   *  it. */
+  usage?: ProfileBackendUsage | null;
+}
+
+/** True when `iso` is a later instant than `thanIso`. Same comparison
+ *  /insights makes (`insights-page.tsx`), so the two surfaces cannot disagree
+ *  about which of two provider claims is the fresher one. */
+function observedAfter(iso: string | undefined, thanIso: string): boolean {
+  if (!iso) return false;
+  const a = Date.parse(iso);
+  const b = Date.parse(thanIso);
+  return Number.isFinite(a) && Number.isFinite(b) && a > b;
+}
+
+/**
+ * Ruling 294: the viewer's OWN reading, or null.
+ *
+ * The store keeps ONE reading per backend for the whole instance (`KEY_PREFIX`
+ * in backend-quota.server), written with the principal of whichever run
+ * reported it. Rendering that unscoped on a personal card would put a
+ * colleague's "91% of seven day" under the viewer's own name, on the one page
+ * whose entire premise is that it is YOUR account. That is the defect ruling
+ * 130(d) fixed for refusals, one field over, so this takes the same line
+ * `ownRefusal` does — including for a record that names NOBODY, which predates
+ * principals and is therefore not evidence about this account either.
+ */
+function ownReading(
+  row: BackendQuotaRow | undefined,
+  userId: string,
+  /** When the credential now in the slot was connected, or null when nothing is
+   *  connected. A reading OLDER than that describes the account this one
+   *  replaced. */
+  connectedAt: string | null,
+): ProfileBackendUsage | null {
+  const reading = row?.reading;
+  if (!reading || reading.credentialUserId !== userId) return null;
+  // Ruling 294, the second gate, and it is belt to `retireBackendRecordsFor`'s
+  // braces rather than a duplicate of it. That function deletes the reading
+  // when the credential changes, which closes the case at the source; this
+  // catches a reading that outlived a connection some OTHER path replaced, and
+  // the specific moment it matters is the panel's own
+  // `revalidator.revalidate()` on a completed sign-in — the instant a person
+  // finishes connecting a DIFFERENT account is exactly when a surviving reading
+  // would be re-rendered as their current usage. The principal check above
+  // cannot catch that one: the same person owns both accounts.
+  if (connectedAt && !observedAfter(reading.observedAt, connectedAt)) return null;
+  return {
+    status: reading.status,
+    rateLimitType: reading.rateLimitType,
+    utilization: reading.utilization,
+    resetsAt: reading.resetsAt === null ? null : new Date(reading.resetsAt * 1000).toISOString(),
+    isUsingOverage: reading.isUsingOverage,
+    observedAt: reading.observedAt,
+  };
 }
 
 /** The record is this person's only when the run it was read off billed them
@@ -121,7 +201,15 @@ function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBa
     };
   }
   const spent = row?.exhausted;
-  if (spent && spent.credentialUserId === userId) {
+  // Ruling 294: a READING observed after an exhaustion record supersedes it,
+  // the rule /insights has applied since pass 31 (V4) and this projection never
+  // had. It was invisible while the card showed no usage; the moment it does,
+  // the same card would carry "12% of seven day, observed 14:02" beside "usage
+  // window spent, observed 09:30" — two claims from one provider with the
+  // older one winning. An exhaustion is a claim about ONE moment; a later
+  // reading is fresher evidence from the same source that the backend is
+  // answering again.
+  if (spent && spent.credentialUserId === userId && !observedAfter(row?.reading?.observedAt, spent.observedAt)) {
     return {
       kind: "quota",
       providerText: providerSentence(spent.providerText),
@@ -149,11 +237,14 @@ export function getProfileBackends(
 ): ProfileBackend[] {
   // One read of the quota store for both cards (ruling 130(d)).
   const limits = new Map(latestBackendRateLimits(db).map((row) => [row.backend, row]));
-  return PROFILE_BACKENDS.map((backend) => ({
+  return PROFILE_BACKENDS.map((backend) => {
+    const health = userBackendHealth(db, userId, backend);
+    return {
     backend,
-    health: userBackendHealth(db, userId, backend),
+    health,
     login: getBackendLogin(userId, backend),
     lastRefusal: ownRefusal(limits.get(backend), userId),
+    usage: ownReading(limits.get(backend), userId, health.connectedAt),
     methods: {
       // The sign-in list is the DRIVER's own table, not a copy of it: a card
       // that offered a flow `startBackendLogin` refuses would post a button
@@ -165,7 +256,8 @@ export function getProfileBackends(
       // `setBackendApiKey` can only refuse.
       paste: [...BACKEND_PASTE_KINDS[backend]],
     },
-  }));
+    };
+  });
 }
 
 export interface ProfileView {
