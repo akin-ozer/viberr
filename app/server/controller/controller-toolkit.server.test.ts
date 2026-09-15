@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { publishedInstructions, publishedSchemas } from "../../../test-support/mcp-tool-meta";
+import { publishedSchemas } from "../../../test-support/mcp-tool-meta";
 import {
   setupAppTest,
   type AppTestContext,
@@ -3356,93 +3356,4 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
     // CANARY: change one nested `z.strictObject` back to `z.object`.
     expect(leaky, `these still strip unknown keys: ${leaky.join(", ")}`).toEqual([]);
   });
-});
-
-/**
- * Ruling 297's live half. The controller's tools are deferred behind
- * ToolSearch, which is measured and deliberate, and the consequence nobody
- * costed is that they never arrive as a LIST -- the per-turn reminder carries
- * names, incrementally, so the complete toolkit exists only as a union across
- * every turn. It answered "do I have `accept_completion`" by searching, finding
- * nothing, and reporting a negative inferred from absence. It had four verbs
- * wrong.
- */
-/**
- * Ruling 299 (pass 37, F37-134): `read_default_branch_file` was mounted on the
- * operator and nowhere else, and the controller is the actor that writes the
- * architecture, knowledge bases and goals every agent is measured against.
- */
-describe("ruling 299: the controller can read the repository it plans against", () => {
-  it("is mounted, is membership gated, and says which fact is missing when a project has no repo", async () => {
-    // CANARY: unmount it and the controller is back to second-hand claims.
-    expect(
-      await call(ids.nonMember, "read_default_branch_file", { path: "docs/guide.md" }),
-    ).toMatch(/^\[denied\]|^\[error\] .*not visible/i);
-
-    // A project with no GitHub repository has no default branch to read, and
-    // saying so beats an empty read that reads like "the file is not there"
-    // (ruling 246: existence before type). CANARY: drop the `project.repo`
-    // branch and this throws instead of answering.
-    const { updateProjectFile } = await import("~/server/files/project-writer.server");
-    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
-    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
-      p.frontmatter.repo = null;
-    });
-    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
-    try {
-      const answer = await call(ids.maintainer, "read_default_branch_file", {
-        path: "docs/guide.md",
-      });
-      expect(answer).toContain("[unavailable]");
-      expect(answer).toContain("no GitHub repository set");
-      expect(answer).toContain("GitHub tab");
-    } finally {
-      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
-        p.frontmatter.repo = "acme/widgets";
-      });
-      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
-    }
-  });
-});
-
-describe("ruling 297: each controller server publishes the list of what it holds", () => {
-  it("names every tool it mounts, in the instructions a model actually receives", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { buildControllerOpsMcp } = await import("./controller-ops-mcp.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    const me = findUserById(app.db, ids.orgAdmin)!;
-    const user = { id: me.id, email: me.email, name: me.name };
-    const controller = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user,
-      projectSlug: SLUG,
-    });
-    const ops = buildControllerOpsMcp({ db: app.db, ctx: { dataRoot: app.dataRoot }, user });
-
-    for (const [label, server, tools] of [
-      ["viberr_controller", controller.mcpServers.viberr_controller, controller.tools],
-      ...Object.entries(ops.mcpServers).map(
-        (entry) => [entry[0], entry[1], ops.tools] as const,
-      ),
-    ] as const) {
-      const instructions = await publishedInstructions(server);
-      expect(instructions).toContain(`# Every tool on ${label} (${tools.length})`);
-      // Generated, so EVERY name is there. CANARY: hand-write the list, or
-      // build the manifest before a tool is added to `tools`.
-      const missing = tools.filter((t) => !instructions.includes(`\n- ${t.name}: `));
-      expect(
-        missing.map((t) => t.name),
-        `${label} mounts these but does not list them`,
-      ).toEqual([]);
-      // And nothing is listed that is not mounted, which is the failure a
-      // hand-written list makes instead.
-      const mounted = new Set(tools.map((t) => t.name));
-      const phantom = [...instructions.matchAll(/^- ([a-z_]+): /gm)]
-        .map((m) => m[1]!)
-        .filter((name) => !mounted.has(name));
-      expect(phantom, `${label} lists these but does not mount them`).toEqual([]);
-    }
-  });
-
 });

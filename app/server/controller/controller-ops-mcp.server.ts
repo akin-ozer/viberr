@@ -8,7 +8,6 @@ import {
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
-import { toolManifest } from "~/server/runtimes/tool-manifest.server";
 import {
   recordAudit,
   type AuditDetails,
@@ -595,9 +594,9 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   const server = createSdkMcpServer({
     name: CONTROLLER_OPS_MCP_NAME,
     version: "1.0.0",
-    // Ruling 297: the same list, for the same reason. This server's prose
-    // description in the controller's prompt had already drifted past it.
-    instructions: CONTROLLER_OPS_INSTRUCTIONS + toolManifest(tools, CONTROLLER_OPS_MCP_NAME),
+    // Ruling 297, corrected: the manifest rides in the system prompt, which
+    // is rebuilt per turn, not here, which is captured once per session.
+    instructions: CONTROLLER_OPS_INSTRUCTIONS,
     tools,
   });
 

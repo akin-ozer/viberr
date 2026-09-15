@@ -4387,6 +4387,12 @@ by rewriting those paragraphs:*
     reflection inside the wrapper: rebuilding drops the `.describe()` text that IS the
     agent's instructions, and a rule you can read in the field map beats one you have to
     know a wrapper applies. Eleven nested objects existed and every one was stripping.
+    AMENDED the same day, from the controller taking the refusal and calling it "the least
+    helpful of the five": it named the rejected key and not the accepted ones, and `status`
+    was a near-miss of `state`, which IS a field of that tool's output. A refusal you have
+    to guess your way out of is still a guess. The message now names the tool, the key it
+    does not have, the arguments it DOES take, and that nothing ran; a tool with no
+    arguments says that rather than printing an empty list.
     Three tests, because each one alone passes while the product is broken. A wrapper test
     drives a real MCP client against a real server, since the stripping happens ABOVE the
     handler and Viberr's toolkit tests all call handlers directly. A sweep fails if any
@@ -4422,6 +4428,18 @@ by rewriting those paragraphs:*
     because the shape of a call is what ToolSearch is good at; what was missing was knowing
     the verb EXISTS. The list says so in as many words: if a verb is not on it you do not
     have it, and say that rather than reporting a search that found nothing.
+    CORRECTED the same day, by the controller looking for the manifest and not finding it.
+    It first shipped in the two servers' `instructions`, on the controller's OWN
+    measurement that those reach its prompt, which they do. What that measurement could not
+    see is that a server's instructions are captured ONCE, when a session starts. Its
+    conversation had been running for hours, so the deploy gave it the new TOOLS (the
+    deferred-name reminder is regenerated every turn) and not the new instructions: "297 is
+    the only one of the five I cannot observe, and the pattern, new tool names arriving
+    while instructions stay frozen, suggests the manifest reaches new conversations and not
+    running ones." That is exactly backwards for what a manifest is for, because the
+    sessions open longest are the ones whose toolkit has changed most. It rides in the
+    SYSTEM PROMPT now, which Viberr rebuilds and re-sends on every turn, and the frozen
+    channel carries no copy at all so there is nothing beside it that can go stale.
     GENERATED FROM THE REGISTRY, never written, and the proof that this is the binding half
     was already in the controller's prompt. The one hand-written description of a Viberr
     toolkit said "Built-in diagnostics (viberr_ops) are always attached: instance health,

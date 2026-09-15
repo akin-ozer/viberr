@@ -33,7 +33,6 @@ import {
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
-import { toolManifest } from "~/server/runtimes/tool-manifest.server";
 import { tasksReleasedBy } from "~/server/projections/dependencies.server";
 import {
   DEFAULT_BRANCH_READ_MAX_BYTES,
@@ -3482,10 +3481,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   const server = createSdkMcpServer({
     name: "viberr_controller",
     version: "1.0.0",
-    // Ruling 297: these tools are deferred behind ToolSearch and arrive as
-    // per-turn name DELTAS, so the model never sees its toolkit as a list.
-    // The instructions carry one, generated from `tools` itself.
-    instructions: CONTROLLER_TOOLKIT_INSTRUCTIONS + toolManifest(tools, "viberr_controller"),
+    // Ruling 297, corrected: the manifest is NOT here. A server's
+    // `instructions` are captured once, when a session starts, so a running
+    // conversation kept a stale copy while new tool names arrived beside it.
+    // `buildControllerMounts` hands the list to the system prompt instead,
+    // which Viberr rebuilds every turn.
+    instructions: CONTROLLER_TOOLKIT_INSTRUCTIONS,
     tools,
   });
 

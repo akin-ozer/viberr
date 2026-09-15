@@ -65,7 +65,11 @@ import {
   readControllerDefinition,
   resolveControllerConfig,
 } from "./controller-profile.server";
-import { buildControllerOpsMcp } from "./controller-ops-mcp.server";
+import { toolManifest } from "~/server/runtimes/tool-manifest.server";
+import {
+  buildControllerOpsMcp,
+  CONTROLLER_OPS_MCP_NAME,
+} from "./controller-ops-mcp.server";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
 import { buildControllerToolkit } from "./controller-toolkit.server";
 
@@ -162,6 +166,10 @@ export interface ControllerMountInput {
 export interface ControllerMounts {
   mcpServers: RunMcpServers;
   allowedTools: string[];
+  /** Ruling 297: every tool the two in-process servers mount, for the system
+   *  prompt. Generated from the registries that were just built, so it names
+   *  what THIS turn actually holds. */
+  toolManifest: string;
 }
 
 /**
@@ -214,6 +222,17 @@ export function buildControllerMounts(
   });
   const ops = buildControllerOpsMcp({ db, ctx, user: input.user });
   return {
+    // Ruling 297, corrected: the manifest rides in the SYSTEM PROMPT, which
+    // Viberr rebuilds and re-sends on every turn, not in the servers'
+    // `instructions`, which the SDK captures once when a session starts. A
+    // conversation that was already running when a tool shipped kept the old
+    // instructions while new tool NAMES arrived beside them, so the one thing
+    // the manifest exists to prevent -- a controller unsure what it holds --
+    // survived in exactly the sessions that had been open longest.
+    toolManifest:
+      toolManifest(toolkit.tools, "viberr_controller") +
+      "\n" +
+      toolManifest(ops.tools, CONTROLLER_OPS_MCP_NAME),
     mcpServers: {
       ...toolkit.mcpServers,
       ...ops.mcpServers,
@@ -408,7 +427,7 @@ async function startTurnRun(
     { backend: "claude" },
   );
 
-  const { mcpServers, allowedTools } = buildControllerMounts(db, {
+  const { mcpServers, allowedTools, toolManifest: manifest } = buildControllerMounts(db, {
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     projectSlug: conversation.projectSlug,
     taskKey: conversation.taskKey,
@@ -421,6 +440,7 @@ async function startTurnRun(
     conversation,
     user: input.user,
     config,
+    toolManifest: manifest,
     mountedMcps: Object.keys(orgServers),
     unresolvedMcps: unresolved.filter((u) => !u.mounted).map((u) => u.name),
     dataRoot,
@@ -904,6 +924,10 @@ interface SystemPromptInput {
   config: ReturnType<typeof resolveControllerConfig>;
   mountedMcps: string[];
   unresolvedMcps: string[];
+  /** Ruling 297: the list of every tool this turn mounts, from
+   *  `buildControllerMounts`. Rebuilt per turn, so a conversation that was
+   *  already running when a tool shipped is told about it. */
+  toolManifest?: string;
   dataRoot?: string;
 }
 
@@ -996,7 +1020,9 @@ export function buildControllerSystemPrompt(
       "checked against the asking person's own permission level, and the server's own " +
       "instructions list its tools. Use them to answer how this instance and its runs are really " +
       "doing instead of guessing.\n" +
-      "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.",
+      "You have no filesystem or shell: the viberr_controller tools are how you read and change anything." +
+      // Ruling 297: generated from the registries this very turn mounted.
+      (input.toolManifest ?? ""),
   );
 
   // Ruling 191: the controller has no shell, but it writes the profiles, the

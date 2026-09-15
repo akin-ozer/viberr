@@ -69,10 +69,26 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
   fields: Fields,
   handler: (args: z.infer<z.ZodObject<Fields>>) => Promise<ToolText>,
 ): SdkMcpToolDefinition {
+  const declared = Object.keys(fields);
   return wholeSchemaTool(
     name,
     description,
-    z.strictObject(fields),
+    z.strictObject(fields, {
+      // Ruling 296, amended: name the arguments that DO exist, not only the
+      // one that does not. The controller took the first version and said it
+      // was "the least helpful of the five... it names the rejected key but
+      // not the accepted ones", noting that `status` was a near-miss of a real
+      // output field. A refusal that leaves you to guess the next move is
+      // still a refusal you have to guess your way out of.
+      error: (issue) =>
+        issue.code === "unrecognized_keys"
+          ? `\`${name}\` has no ${issue.keys.map((k) => `\`${k}\``).join(", ")}. ` +
+            (declared.length === 0
+              ? "It takes no arguments at all."
+              : `Its arguments are: ${declared.join(", ")}.`) +
+            " Nothing ran: the call was refused before the tool saw it."
+          : undefined,
+    }),
     // Ruling 303: no tool hands the SDK a bare handler.
     guarded(name, handler),
   );

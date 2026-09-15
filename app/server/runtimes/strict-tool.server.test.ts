@@ -52,8 +52,16 @@ describe("strictTool (ruling 296)", () => {
       name: "list_runs",
       arguments: { taskKey: "VIB-1", status: "failed" },
     });
-    expect(textOf(wrong)).toContain("status");
-    expect(textOf(wrong)).not.toContain("answered");
+    const text = textOf(wrong);
+    expect(text).toContain("status");
+    expect(text).not.toContain("answered");
+    // Ruling 296, amended after the controller called the first version "the
+    // least helpful of the five... it names the rejected key but not the
+    // accepted ones". CANARY: drop the `error` callback and this is a bare
+    // Zod issue array.
+    expect(text).toContain("`list_runs` has no `status`");
+    expect(text).toContain("Its arguments are: taskKey.");
+    expect(text).toContain("Nothing ran");
     expect(reached, "the handler ran on a request it had not understood").toEqual([]);
 
     // And the same call without the invented key still works, so this is a
@@ -74,6 +82,19 @@ describe("strictTool (ruling 296)", () => {
    * operator's 17 tools handed the SDK a bare handler, while the controller's
    * guards and the agent toolkit's per-tool catches both converted.
    */
+  it("ruling 296: a tool that takes NO arguments says that, rather than listing nothing", async () => {
+    const client = await connect([
+      strictTool("whoami", "probe", {}, async () => ({
+        content: [{ type: "text" as const, text: "me" }],
+      })),
+    ]);
+    const text = textOf(
+      await client.callTool({ name: "whoami", arguments: { projectSlug: "p" } }),
+    );
+    // CANARY: `Its arguments are: .` is worse than saying there are none.
+    expect(text).toContain("It takes no arguments at all.");
+  });
+
   it("ruling 303: an unexpected throw answers in words, and names the tool", async () => {
     const client = await connect([
       strictTool("get_task", "probe", {}, async () => {

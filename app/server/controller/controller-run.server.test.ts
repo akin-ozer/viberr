@@ -121,6 +121,72 @@ describe("controller mounts (ruling 107)", () => {
     app.db.prepare(`DELETE FROM org_mcp_servers WHERE id = ?`).run("mcp_shadow");
   });
 
+  /**
+   * Ruling 297, and its correction, which the controller found by looking for
+   * the manifest and not seeing it.
+   *
+   * The list first shipped in the two servers' `instructions`, on a
+   * measurement the controller itself took: they DO reach its prompt, and it
+   * quoted both back verbatim. What that measurement could not see is that a
+   * server's instructions are captured ONCE, when a session starts. Its own
+   * conversation had been running for hours, so a deploy gave it the new tools
+   * (the deferred-name reminder is regenerated per turn) and not the new
+   * instructions: "297 is the only one of the five I cannot observe, and the
+   * pattern -- new tool names arriving while instructions stay frozen --
+   * suggests the manifest reaches new conversations and not running ones."
+   *
+   * Exactly backwards for what a manifest is FOR. The sessions that have been
+   * open longest are the ones whose toolkit has changed most. So it rides in
+   * the system prompt, which Viberr rebuilds and re-sends every turn.
+   */
+  it("ruling 297: the tool manifest rides in the PER-TURN system prompt, not in the servers' frozen instructions", async () => {
+    const { buildControllerSystemPrompt, buildControllerMounts } = await import(
+      "./controller-run.server"
+    );
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { publishedInstructions } = await import("../../../test-support/mcp-tool-meta");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+    });
+    const mounts = buildControllerMounts(app.db, {
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: null,
+      taskKey: null,
+      orgServers: {},
+      kb: [],
+      dataRoot: app.dataRoot,
+    });
+    const prompt = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: resolveControllerConfig(app.dataRoot),
+      mountedMcps: [],
+      unresolvedMcps: [],
+      toolManifest: mounts.toolManifest,
+      dataRoot: app.dataRoot,
+    });
+
+    // CANARY: leave the manifest on the servers' `instructions` and a running
+    // conversation never learns what it now holds.
+    expect(prompt).toContain("# Every tool on viberr_controller");
+    expect(prompt).toContain("# Every tool on viberr_ops");
+    expect(prompt).toContain("- whoami: ");
+    expect(prompt).toContain("- read_default_branch_file: ");
+    // The absence half of the promise, which is what the controller could not
+    // answer: a verb it does NOT have is not on the list.
+    expect(prompt).not.toContain("- accept_completion: ");
+    expect(prompt).toContain("you do not have it");
+
+    // And the frozen channel carries no copy at all, so there is nothing that
+    // can go stale beside it. CANARY: leave it in both places.
+    for (const server of Object.values(mounts.mcpServers)) {
+      const instructions = await publishedInstructions(server);
+      expect(instructions).not.toContain("# Every tool on");
+    }
+  });
+
   it("tells the model the diagnostics are attached, on every turn", async () => {
     const { buildControllerSystemPrompt } = await import(
       "./controller-run.server"
