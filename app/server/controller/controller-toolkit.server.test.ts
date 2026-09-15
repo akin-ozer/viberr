@@ -236,6 +236,58 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
    * number that should order a decision queue does not exist, so the ordering
    * depends on whoever happens to have walked the graph recently."
    */
+  /**
+   * Ruling 302, extended to the sibling it was first written without.
+   *
+   * It fixed the OPERATOR's timeline window and left the controller's, which
+   * is the defect shape ruling 292's own comment had already named inside this
+   * pass's own fix: "a rule applied to one actor and not its sibling, which is
+   * this pass's own defect shape inside this pass's own fix." The controller
+   * found it within the hour, on live work: "I read 5 of 121 entries on
+   * SHOP-36 and 4 of 111 on SHOP-27, and coordinated from them. I can derive
+   * the gap from `eventCount` minus what I got, but nothing prompts me to."
+   */
+  it("ruling 302: get_task says how many entries the timeline HAS and how to widen the window", async () => {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile(
+      { projectSlug: SLUG, taskKey: "VIB-148", dataRoot: app.dataRoot },
+      (parsed) => {
+        for (let i = 0; i < 20; i += 1) {
+          parsed.timeline.unshift({
+            occurredAt: new Date(Date.UTC(2026, 8, 16, 2, i)).toISOString(),
+            type: "note",
+            actor: { kind: "operator" },
+            title: `Entry ${i}`,
+            text: `entry ${i}`,
+            toAgent: false,
+            evidence: null,
+          });
+        }
+      },
+    );
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+
+    const narrow = JSON.parse(
+      await callAnchored(ids.maintainer, "get_task", { events: 3 }, "VIB-148"),
+    );
+    // CANARY: drop `timelineTotal` and a window looks like a history.
+    expect(narrow.newestEvents).toHaveLength(3);
+    expect(narrow.timelineTotal).toBeGreaterThan(20);
+    // CANARY: drop the note. The count AND both ways out.
+    expect(narrow.timelineOlder).toContain("older");
+    expect(narrow.timelineOlder).toContain("events");
+    expect(narrow.timelineOlder).toContain("read_timeline_entry");
+    expect(narrow.timelineOlder).toContain(String(narrow.timelineTotal - 3));
+
+    // Widened to cover everything, the note is absent rather than claiming zero.
+    const wide = JSON.parse(
+      await callAnchored(ids.maintainer, "get_task", { events: 50 }, "VIB-148"),
+    );
+    expect(wide.newestEvents.length).toBe(wide.timelineTotal);
+    expect(wide.timelineOlder).toBeUndefined();
+  });
+
   it("ruling 300: every decision says what answering it releases, down the chain", async () => {
     await openPacketOn(PACKET_TASK);
     const { updateTaskFile } = await import("~/server/files/task-writer.server");

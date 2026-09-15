@@ -281,6 +281,21 @@ function divergedSentence(diverged: TemplateCopyDrift[]): string {
 const SCHEDULE_MAX_MINUTES = 40_320;
 
 /** Build the toolkit for one controller turn. */
+/**
+ * Ruling 302: the controller's own timeline window, and the most it will widen
+ * to. The operator's twins are OPERATOR_TIMELINE_DEFAULT / _MAX; this window
+ * is larger because a controller reads across tasks rather than coordinating
+ * one, and smaller than the whole history because it reads MANY tasks a turn.
+ */
+const CONTROLLER_EVENTS_DEFAULT = 12;
+const CONTROLLER_EVENTS_MAX = 50;
+
+/** Ruling 302: present on a `get_task` reply ONLY when entries were left out,
+ *  naming the count and both ways to reach them. */
+interface TimelineWindowNote {
+  timelineOlder?: string;
+}
+
 export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerToolkit {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;
@@ -1489,7 +1504,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
-        events: z.number().int().min(1).max(50).optional().describe("Newest timeline events to include (default 12)."),
+        events: z
+          .number()
+          .int()
+          .min(1)
+          .max(CONTROLLER_EVENTS_MAX)
+          .optional()
+          .describe(
+            `Newest timeline events to include (default ${CONTROLLER_EVENTS_DEFAULT}, max ${CONTROLLER_EVENTS_MAX}). The reply always says how many the timeline HAS, and names this argument when it is showing you fewer.`,
+          ),
       },
       runWith((args: { projectSlug?: string; taskKey?: string; events?: number }) => {
         const slug = slugOf(args.projectSlug);
@@ -1497,8 +1520,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         requireVisible(slug, "read this task");
         const summary = getTaskSummary(db, slug, key);
         if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
-        const events = listTaskEvents(db, slug, key)
-          .slice(0, args.events ?? 12)
+        const allEvents = listTaskEvents(db, slug, key);
+        const events = allEvents
+          .slice(0, args.events ?? CONTROLLER_EVENTS_DEFAULT)
           .map((e) => ({
             at: e.occurredAt,
             type: e.type,
@@ -1549,6 +1573,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // `notAcceptableReason` carries: every gate included, the stage one
         // among them.
         const { blockReason: _projectedBlockReason, ...task } = summary;
+        const hidden = allEvents.length - events.length;
+        const olderNote: TimelineWindowNote = {};
+        if (hidden > 0) {
+          olderNote.timelineOlder =
+            `${hidden} older ${hidden === 1 ? "entry is" : "entries are"} not shown, ` +
+            `newest first. Pass events up to ${CONTROLLER_EVENTS_MAX} to widen this ` +
+            "window, and read_timeline_entry with an `at` for one in full.";
+        }
         return json({
           task: {
             ...task,
@@ -1558,7 +1590,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             ),
           },
           schedules,
+          // Ruling 302, extended to the sibling it was first written without.
+          // It fixed the OPERATOR's window and left this one, which is the
+          // defect shape ruling 292's own comment had already named inside
+          // this pass's own fix. The controller found it the way it finds
+          // these: it read "5 of 121 entries on SHOP-36 and 4 of 111 on
+          // SHOP-27, and coordinated from them". `eventCount` was there and
+          // nothing prompted it to subtract.
+          timelineTotal: allEvents.length,
           newestEvents: events,
+          ...olderNote,
         });
       }),
     ),

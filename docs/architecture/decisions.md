@@ -4594,6 +4594,18 @@ by rewriting those paragraphs:*
     default staying six is what respects it. The disclosure is the better for it: both
     prompt callers take the default, so `timelineTotal` and `timelineOlder` now reach the
     operator in its PROMPT as well as through the tool, which is where it needed them.
+    EXTENDED, within the hour, to the sibling it was first written without -- which is the
+    defect this ruling is ABOUT, and which ruling 292's own comment had already named
+    inside this pass's own fix: "a rule applied to one actor and not its sibling, which is
+    this pass's own defect shape inside this pass's own fix." 302 fixed the OPERATOR's
+    window and left the controller's `get_task`, where `eventCount` was present and
+    nothing prompted anyone to subtract from it. The controller found it on live work the
+    same turn the fix shipped: "I read 5 of 121 entries on SHOP-36 and 4 of 111 on
+    SHOP-27, and coordinated from them. I can derive the gap from `eventCount` minus what
+    I got, but nothing prompts me to, which is exactly the failure you just fixed one
+    surface over." Its reply carries `timelineTotal` always now, and `timelineOlder` only
+    when something is hidden, naming `events` to widen and `read_timeline_entry` to read
+    one whole: the same two ways out, worded the same way, on both actors.
 
 303. **An unexpected failure answers in words, on every surface (owner, 2026-09-16,
     pass 37; F37-138).** Found by reading what the product actually returned rather than by
