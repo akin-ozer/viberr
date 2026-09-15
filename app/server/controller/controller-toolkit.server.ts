@@ -27,10 +27,12 @@ import { capabilityPatchRefusal,
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
@@ -667,7 +669,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // mode that was silently coerced to "on change" behind its back.
         refresh: z.enum(KB_REFRESH_MODES).optional(),
         doc: z
-          .object({
+          .strictObject({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
             content: z.string().describe("The WHOLE file. There is no append; what you omit is gone."),
             replace: z
@@ -1261,12 +1263,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         policy: z.enum(["strict", "balanced", "auto"]).describe("strict = humans gate every advance · balanced = defaults · auto = full operator autonomy."),
         description: z.string().optional(),
         stages: z
-          .array(z.object({ name: z.string(), color: z.string().optional() }))
+          .array(z.strictObject({ name: z.string(), color: z.string().optional() }))
           .optional()
           .describe("Custom stage list, 2 to 8, ordered, terminal LAST."),
         boundaries: z
           .array(
-            z.object({
+            z.strictObject({
               from: z.string().describe("Stage name."),
               to: z.string().describe("Adjacent next stage name."),
               boundary: z.enum(["auto", "approval", "human"]),
@@ -1275,7 +1277,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .optional(),
         members: z
           .array(
-            z.object({
+            z.strictObject({
               email: z.string(),
               role: z.enum(PROJECT_ROLES),
             }),
@@ -2495,7 +2497,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       {
         projectSlug: z.string().optional(),
         rules: z
-          .array(z.object({ stageId: z.string(), profileId: z.string() }))
+          .array(z.strictObject({ stageId: z.string(), profileId: z.string() }))
           .describe("The full list; [] clears every rule."),
       },
       runWith(
@@ -2549,7 +2551,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         projectSlug: z.string().optional(),
         leases: z
           .array(
-            z.object({
+            z.strictObject({
               paths: z.array(z.string()).describe("Globs, e.g. [\"pnpm-lock.yaml\"] or [\"make/**\"]."),
               taskKey: z.string().describe("The one task that owns them until it merges."),
               reason: z.string().describe("Why, in one line. It is quoted in every refusal."),
@@ -2788,7 +2790,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         projectSlug: z.string().optional(),
         profileId: z.string(),
         capabilities: z
-          .array(z.object({ capabilityId: z.string(), mode: z.enum(["direct", "recommend", "human", "off"]) }))
+          .array(z.strictObject({ capabilityId: z.string(), mode: z.enum(["direct", "recommend", "human", "off"]) }))
           .optional(),
         backend: z.enum(["claude", "codex"]).optional(),
         model: z.string().optional(),
@@ -3147,7 +3149,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .describe("pause (default): a failed link parks the chain for humans · continue: skip past failures."),
         links: z
           .array(
-            z.object({
+            z.strictObject({
               title: z.string(),
               goal: z.string().describe("Self-standing task text: deliverable plus the done signal."),
               blockedBy: z

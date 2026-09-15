@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { toolLoading } from "../../../test-support/mcp-tool-meta";
+import { publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -579,7 +579,7 @@ describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (
 /** Ruling 138: the Claude tool declares `goalDraft` on packet options, with a
  *  description that says to write it AS the goal. */
 describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 138)", () => {
-  it("the option schema carries goalDraft and says what it is", () => {
+  it("the option schema carries goalDraft and says what it is", async () => {
     // Canary: remove the field from the option schema.
     const toolkit = buildOperatorToolkit({
       db: ctxDb.makeDb(),
@@ -592,12 +592,13 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
         return auth;
       })(),
     });
-    const def = toolkit.tools.find((t) => t.name === "open_decision_packet");
-    expect(def).toBeDefined();
-    // SAFETY: the SDK types the raw input fields loosely; this tool's `options`
-    // is a zod array whose JSON Schema form carries `goalDraft` and its text.
-    const options = (def!.inputSchema as { options: z.ZodType }).options;
-    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(toolkit.tools.some((t) => t.name === "open_decision_packet")).toBe(true);
+    // Ruling 296 made the schema a whole strict object, so the field texts are
+    // read off the JSON Schema of the whole tool -- which is the copy the model
+    // is handed, and the only one that can be wrong in a way that matters.
+    const declared = JSON.stringify(
+      (await publishedSchemas(toolkit.mcpServers.viberr)).get("open_decision_packet"),
+    );
     expect(declared).toContain('"goalDraft"');
     expect(declared).toContain("written AS a goal");
     expect(declared).toContain("Refused on any other kind");
@@ -609,7 +610,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * The operator wrote "Force-accept as admin ..." as a `custom` title because
    * nothing here told it there was another way.
    */
-  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", () => {
+  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", async () => {
     // Canary: restore the description and the option schema from before S18.
     const toolkit = buildOperatorToolkit({
       db: ctxDb.makeDb(),
@@ -623,13 +624,11 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       })(),
     });
     const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
     expect(def.description).toContain("An option TITLE is a promise the resolution keeps");
     expect(def.description).toContain("'force_accept'");
     expect(def.description).toContain("'move_stage'");
-    // SAFETY: as above, the SDK types the raw input fields loosely; `options`
-    // is the zod array whose JSON Schema form carries the per-option fields.
-    const options = (def.inputSchema as { options: z.ZodType }).options;
-    const declared = JSON.stringify(z.toJSONSchema(options));
+    const declared = JSON.stringify(published.get("open_decision_packet"));
     expect(declared).toContain('"toStage"');
     expect(declared).toContain("move_stage only");
   });
@@ -894,7 +893,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * called `operatorOpenPacket` directly, which accepts the field; the DOOR was
    * never exercised.
    */
-  it("ruling 270: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", () => {
+  it("ruling 270: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", async () => {
     // Canary: remove either field from the option schema and its kind becomes
     // unauthorable again — named, refused, and impossible to satisfy.
     const toolkit = buildOperatorToolkit({
@@ -908,11 +907,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
         return auth;
       })(),
     });
-    const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
-    // SAFETY: as above, the SDK types the raw input fields loosely; `options`
-    // is the zod array whose JSON Schema form carries the per-option fields.
-    const options = (def.inputSchema as { options: z.ZodType }).options;
-    const declared = JSON.stringify(z.toJSONSchema(options));
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    const declared = JSON.stringify(published.get("open_decision_packet"));
     expect(declared).toContain('"blockedBy"');
     expect(declared).toContain("block_on_dependencies only");
     expect(declared).toContain('"dueAt"');

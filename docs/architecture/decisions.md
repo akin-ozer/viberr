@@ -4359,6 +4359,43 @@ by rewriting those paragraphs:*
     all render, so a silently truncated one is wrong in more places than a truncated goal.
     Saving the same words is a `[noop]` that says so, not a `[done]` about a write that
     never happened.
+
+296. **An argument Viberr does not know is a refusal, not a silent drop (owner,
+    2026-09-16, pass 37; F37-131).** The SDK's `tool()` takes a raw Zod field map and
+    builds a plain object from it. A plain Zod object STRIPS keys it does not declare, so
+    a caller that invents or misspells an argument has its call run without that argument
+    and gets an answer computed from whatever survived; the published JSON Schema carried
+    no `additionalProperties: false` either, so the model was never told the key was
+    invalid. Measured at the real MCP boundary before this was written, with a live client
+    and server: `{ a: "x", status: "failed" }` reached the handler as `{ a: "x" }` and the
+    call returned success.
+    The controller hit the read half live and ranked it third of five gaps. It asked
+    `list_runs` for failed runs; `list_runs` has no `status` argument; it got the LIVE
+    listing back as though that were the answer. Its words: "it returned a
+    plausible-looking wrong answer rather than refusing." The write half is worse and
+    nobody had hit it yet, because the same machinery backs `update_task`,
+    `run_agent_on_task` and `accept_completion`: a misspelled `duedate` rides along beside
+    a good `goal`, and the tool answers "[done] VIB-1 updated: goal." while the date it was
+    also asked for was never written. That is ruling 292's sentence again, a true one that
+    implies a false one.
+    `strictTool` is now the only way Viberr builds a tool, on all four surfaces (agent,
+    operator, controller, controller-ops; 76 tools). The schema is a whole strict object:
+    the call is refused, the offending key is named, and the handler is never reached, so
+    nothing is half-applied. The refusal is predictable because `additionalProperties:
+    false` is published alongside it, which is the difference between a rule and a trap.
+    NESTED objects are strict at their own call sites with `z.strictObject`, not rebuilt by
+    reflection inside the wrapper: rebuilding drops the `.describe()` text that IS the
+    agent's instructions, and a rule you can read in the field map beats one you have to
+    know a wrapper applies. Eleven nested objects existed and every one was stripping.
+    Three tests, because each one alone passes while the product is broken. A wrapper test
+    drives a real MCP client against a real server, since the stripping happens ABOVE the
+    handler and Viberr's toolkit tests all call handlers directly. A sweep fails if any
+    source imports the SDK's own `tool()`, so a fifth surface cannot quietly opt out. And a
+    walk over every schema the live controller servers PUBLISH finds any object at any
+    depth that would still strip, which is what caught `save_knowledge_base.doc` after a
+    first pass fixed only the one-line spellings of `z.object(`. That walk also broke a
+    test that had been reading field descriptions off `inputSchema` as a raw field map; it
+    reads the published JSON now, which is the only copy a model ever sees.
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

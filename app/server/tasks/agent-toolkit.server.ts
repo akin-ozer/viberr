@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import {
   normalizeEvidenceRows,
   type FileActorRef,
@@ -377,7 +379,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             .describe("Context a human needs to answer (no raw logs/secrets)."),
           options: z
             .array(
-              z.object({
+              z.strictObject({
                 title: z.string().describe("A concrete answer choice."),
                 detail: z.string().optional().describe("Short clarification."),
               }),
@@ -452,7 +454,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     // holds the grant, so an agent without it cannot see or use it.
     const evidenceField = z
       .array(
-        z.object({
+        z.strictObject({
           label: z
             .string()
             .describe(

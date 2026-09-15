@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { publishedSchemas } from "../../../test-support/mcp-tool-meta";
 import {
   setupAppTest,
   type AppTestContext,
@@ -2859,12 +2861,16 @@ describe("the effort descriptions are generated from the catalog (U36-5)", () =>
       user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
       projectSlug: SLUG,
     });
+    // Ruling 296 made a tool's schema a whole strict Zod object, so the field
+    // texts are read where the model reads them: off the PUBLISHED JSON
+    // schema, which is the only copy that matters.
+    const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
     for (const name of ["save_global_agent", "deploy_agent", "update_agent_deployment"]) {
-      const def = toolkit.tools.find((t) => t.name === name)!;
-      // SAFETY: `tool()` keeps the raw zod shape it was given, and `effort` is
-      // the `z.string().optional().describe(…)` field each of the three declares.
-      const declared = def.inputSchema as Record<string, { description?: string }>;
-      const description = declared.effort?.description ?? "";
+      const description = z
+        .object({
+          properties: z.object({ effort: z.object({ description: z.string() }) }),
+        })
+        .parse(published.get(name)).properties.effort.description;
       for (const backend of ["claude", "codex"] as const) {
         const label = backend === "codex" ? "Codex" : "Claude";
         expect(description, `${name}.effort names the ${label} tiers`).toContain(
@@ -3229,5 +3235,88 @@ describe("ruling 197: a template's persona is readable, and a summary-only edit 
     );
     const list = toolkit.tools.find((t) => t.name === "list_global_agents")!;
     expect(list.description).toContain("its full persona");
+  });
+});
+
+/**
+ * Ruling 296's live half: what the SERVERS actually publish, not what a probe
+ * of the wrapper proves.
+ *
+ * strict-tool.server.test.ts proves `strictTool` refuses unknown keys and
+ * that every surface routes through it. Neither one looks at a real toolkit,
+ * and a nested object declared with plain `z.object` strips unknown keys
+ * while the file around it looks correct. This walks every schema Viberr
+ * hands the controller and finds any object that would still strip.
+ */
+describe("ruling 296: every published controller schema refuses unknown keys", () => {
+  /** The two JSON Schema nodes a walk can descend into. Parsed rather than
+   *  `typeof`-checked, so each branch is a contract and not a representation
+   *  guess. */
+  const jsonNode: z.ZodType<JsonValue> = z.lazy(() =>
+    z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.null(),
+      z.array(jsonNode),
+      z.record(z.string(), jsonNode),
+    ]),
+  );
+  const listNode = z.array(jsonNode);
+  const mapNode = z.record(z.string(), jsonNode);
+
+  /** Each object in a JSON Schema that does NOT refuse unknown keys, named by
+   *  the path a reader would follow to reach it. */
+  function stripping(node: JsonValue, at: string, found: string[] = []): string[] {
+    const list = listNode.safeParse(node);
+    if (list.success) {
+      list.data.forEach((item, i) => stripping(item, `${at}[${i}]`, found));
+      return found;
+    }
+    const map = mapNode.safeParse(node);
+    if (!map.success) return found;
+    const entries = Object.entries(map.data);
+    if (
+      entries.some(([k, v]) => k === "type" && v === "object") &&
+      !entries.some(([k, v]) => k === "additionalProperties" && v === false)
+    ) {
+      found.push(at);
+    }
+    for (const [key, value] of entries) stripping(value, `${at}.${key}`, found);
+    return found;
+  }
+
+  it("finds no stripping object in any tool the controller mounts", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { buildControllerOpsMcp } = await import("./controller-ops-mcp.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const me = findUserById(app.db, ids.orgAdmin)!;
+    const user = { id: me.id, email: me.email, name: me.name };
+
+    const servers = [
+      buildControllerToolkit({
+        db: app.db,
+        ctx: { dataRoot: app.dataRoot },
+        user,
+        projectSlug: SLUG,
+      }).mcpServers.viberr_controller,
+      ...Object.values(
+        buildControllerOpsMcp({ db: app.db, ctx: { dataRoot: app.dataRoot }, user }).mcpServers,
+      ),
+    ];
+
+    const leaky: string[] = [];
+    let published = 0;
+    for (const server of servers) {
+      for (const [name, schema] of await publishedSchemas(server)) {
+        published += 1;
+        leaky.push(...stripping(schema, name));
+      }
+    }
+
+    // A vacuous pass is the exact failure this ruling is about.
+    expect(published).toBeGreaterThan(40);
+    // CANARY: change one nested `z.strictObject` back to `z.object`.
+    expect(leaky, `these still strip unknown keys: ${leaky.join(", ")}`).toEqual([]);
   });
 });

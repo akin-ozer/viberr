@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@oxlint/plugins": "^1.79.0",
     "@playwright/test": "^1.62.1",
     "@react-router/dev": "^8.3.0",

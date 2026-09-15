@@ -8,10 +8,12 @@ import {
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   deliverGate,
@@ -553,7 +555,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           body: z.string().optional().describe("One or two sentences of context (no raw logs/secrets)."),
           observations: z
             .array(
-              z.object({
+              z.strictObject({
                 k: z.string().describe("Label, e.g. 'Branch' or 'Reviewer verdict'."),
                 v: z.string().describe("Value."),
                 code: z.boolean().optional().describe("Render the value as code."),
@@ -563,7 +565,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe("Typed observed facts shown above the options."),
           options: z
             .array(
-              z.object({
+              z.strictObject({
                 kind: z
                   .enum(PACKET_OPTION_KINDS)
                   .describe(
@@ -615,7 +617,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                     "wait_for_window only (ruling 224): the instant the provider said its window reopens, as an ISO timestamp — the resolution schedules the re-dispatch just after it. Required on that kind and refused on every other one. Viberr raises the quota packet itself, so author one only when no packet was raised.",
                   ),
                 newTask: z
-                  .object({
+                  .strictObject({
                     title: z.string().describe("The new task's title."),
                     goal: z
                       .string()

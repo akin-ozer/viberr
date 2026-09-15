@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import {
   recordAudit,
   type AuditDetails,

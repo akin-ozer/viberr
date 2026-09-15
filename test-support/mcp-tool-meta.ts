@@ -1,6 +1,7 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
+import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
  * Which of a mounted in-process MCP server's tools the model sees up front and
@@ -40,4 +41,33 @@ export function toolLoading(
   const loaded = tools.filter(([, t]) => t._meta?.["anthropic/alwaysLoad"] === true);
   const deferred = tools.filter(([, t]) => t._meta?.["anthropic/alwaysLoad"] !== true);
   return { loaded: loaded.map(([name]) => name), deferred: deferred.map(([name]) => name) };
+}
+
+/**
+ * Ruling 296: every tool's schema is a whole strict Zod object now, so a test
+ * can no longer read a field off `inputSchema` as though it were the raw field
+ * map the SDK's own `tool()` used to keep. It reads the PUBLISHED JSON Schema
+ * instead, through a real MCP client, which is the copy a model is handed and
+ * the only one whose wrongness could reach anybody.
+ */
+export async function publishedSchemas(
+  server: McpSdkServerConfigWithInstance | SpecialistMcpServerConfig | undefined,
+): Promise<Map<string, JsonValue>> {
+  // A run's `mcpServers` mixes in-process servers with portable HTTP/stdio
+  // declarations; only the first kind has a registry to ask.
+  if (!server || !("instance" in server)) {
+    throw new Error("publishedSchemas needs an in-process MCP server");
+  }
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverEnd);
+  const client = new Client({ name: "schema-read", version: "1" }, { capabilities: {} });
+  await client.connect(clientEnd);
+  const out = new Map<string, JsonValue>();
+  for (const listed of (await client.listTools()).tools) {
+    // SAFETY: `inputSchema` crossed the MCP wire as JSON, so it is JSON.
+    out.set(listed.name, listed.inputSchema as JsonValue);
+  }
+  return out;
 }
