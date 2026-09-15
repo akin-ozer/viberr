@@ -4459,6 +4459,58 @@ by rewriting those paragraphs:*
     be acted on, and never destroy where it cannot. So the packet builder does no cutting
     at all now, and the only cap that exists is the one an agent is told about before it
     writes.
+
+299. **The controller reads the repository it plans against (owner, 2026-09-16, pass 37;
+    F37-134).** `read_default_branch_file` was mounted on the operator and nowhere else.
+    The controller is the actor that writes the architecture, the knowledge bases and the
+    goals every agent is then measured against, and that reviews the packets those agents
+    raise, and it could not open a single file in the repository all of that is about. It
+    has `read_pull_request` for a PR's CHANGED files, `read_task_attachment` for evidence,
+    `read_knowledge_doc` and `read_store_doc` for the store. None of them reads the tree.
+    It found this from inside a live decision rather than in the abstract. A packet on
+    SHOP-47 turned entirely on "the goal names four anonymous routes, `origin/main` has
+    nine", a fact the operator had verified by reading the file. The controller endorsed an
+    option on structural reasoning and flagged that its own central claim was second-hand,
+    and named the cost: "verify the claim against the repository yourself is the
+    most-repeated rule in this project's own rulings, four worked incidents, and I am
+    structurally unable to follow it."
+    The checkout was never the source. `resolveReadSource` already prefers the project
+    MIRROR and only falls back to a checkout's clone-time ref, so the operator's signature
+    takes a workspace for the fallback's sake, not the read's.
+    `readProjectDefaultBranchFile` takes the repo and the branch from the PROJECT instead,
+    and therefore has nothing to fall back TO, which is the right shape: when the mirror
+    cannot be built it says which branch it could not reach and why, rather than answering
+    from a tree that is not that branch, which is the error this whole module exists to
+    stop (F21-21, where an operator read the deliverer's own uncommitted row and declared
+    it had landed out-of-band). It passes `create: true` where the operator's read passes
+    false, because a missing mirror would otherwise make the tool permanently unanswerable
+    on exactly the project where nothing has run yet, which is when the controller is doing
+    the architecture work that most needs to read the repository.
+    A project with no GitHub repository at all is answered, not thrown at: it names the
+    missing fact and the tab where a person sets it (ruling 246, existence before type). A
+    path that is not on the branch is `[absent]`, which is an ANSWER. A file past 60,000
+    characters says it clipped and what to do instead (ruling 285).
+
+300. **A decision says what answering it releases (owner, 2026-09-16, pass 37; F37-135).**
+    `list_decisions` told the controller what is waiting for a person and what each card
+    asks. It did not say what any of them UNBLOCKS. That five tasks sat behind three cards
+    (SHOP-46 to SHOP-48; SHOP-41 to SHOP-28; SHOP-49 to SHOP-29 to SHOP-28) the controller
+    worked out by reading each task's `blockedBy` and walking the chain by hand, across two
+    turns, and it named the cost precisely: "the one number that should order a decision
+    queue does not exist, so the ordering depends on whoever happens to have walked the
+    graph recently."
+    Every entry now carries `releases`: the tasks that come unblocked, down the chain, once
+    that one completes. The chain matters as much as the count. A card that frees one task
+    which in turn frees three is not a one-task decision, and the direct dependents are
+    exactly what a person can see for themselves by opening the task, so stopping there
+    would have published the number they already had.
+    A wait that can NEVER clear is not counted, and that is the half a naive walk gets
+    wrong. A task also blocked on an archived task, a cancelled goal or a reference nothing
+    answers to is not waiting on this decision, and counting it inflates the one number a
+    person is meant to order their queue by. So does an open goal link with no task yet: it
+    is a real wait, no task key completing satisfies it, and dropping unmatched entries
+    would quietly clear it. The number argues for a decision only when the decision would
+    actually free something.
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

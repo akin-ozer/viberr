@@ -13,6 +13,7 @@ import {
   dependenciesSatisfied,
   listHeldTasks,
   resolveDependencies,
+  tasksReleasedBy,
 } from "./dependencies.server";
 
 /**
@@ -117,5 +118,99 @@ describe("resolveDependencies (ruling 131)", () => {
     expect(listHeldTasks(store.db, store.slug)).toEqual([
       { taskKey: "VIB-4", blockedBy: ["VIB-1", "goal-1 link 2"] },
     ]);
+  });
+});
+
+/**
+ * Ruling 300 (pass 37, F37-135): what answering a decision RELEASES.
+ *
+ * The controller read three decision cards and worked out by hand, across two
+ * turns, that five tasks sat behind them: "the one number that should order a
+ * decision queue does not exist, so the ordering depends on whoever happens to
+ * have walked the graph recently."
+ */
+describe("tasksReleasedBy (ruling 300)", () => {
+  function chain(store: TestStore) {
+    // A → B → C, plus D which also waits on something that can never clear,
+    // plus E which waits on A and on a goal link that has no task yet.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl", archived: true }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", blockedBy: ["VIB-1"] }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl", blockedBy: ["VIB-2"] }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-4", { stage: "impl", blockedBy: ["VIB-1", "VIB-9"] }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-5", {
+        stage: "impl",
+        blockedBy: ["VIB-1", "goal-1 link 2"],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("counts the whole chain, not just what waits on it directly", () => {
+    const store = setupTestStore(ctx);
+    chain(store);
+    // CANARY: stop after the direct dependents and VIB-3 disappears, which is
+    // exactly the number the controller had to compute by hand.
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-1").sort()).toEqual(["VIB-2", "VIB-3"]);
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-2").sort()).toEqual(["VIB-3"]);
+  });
+
+  it("never counts a task whose OTHER wait can never clear", () => {
+    const store = setupTestStore(ctx);
+    chain(store);
+    // VIB-4 also waits on an ARCHIVED task. Finishing VIB-1 frees nothing for
+    // it, and counting it would inflate the one number a person orders their
+    // queue by. CANARY: drop the dead-wait filter.
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-1")).not.toContain("VIB-4");
+  });
+
+  it("never counts a task still waiting on a goal link that has no task yet", async () => {
+    const store = setupTestStore(ctx);
+    chain(store);
+    // A link that is genuinely OPEN and has no task: `state: "open"`,
+    // `taskKey: null`. It is a real wait, and no task key completing satisfies
+    // it, so it must survive the walk rather than being dropped as unmatched.
+    const { createGoal } = await import("~/server/tasks/goal-actions.server");
+    const created = await createGoal(
+      store.db,
+      {
+        projectSlug: store.slug,
+        title: "Foundation",
+        links: [
+          { title: "one", goal: "first" },
+          { title: "two", goal: "second" },
+        ],
+      },
+      ACTOR(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(created.goalId).toBe("goal-1");
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(
+      resolveDependencies(store.db, store.slug, ["goal-1 link 2"])[0],
+    ).toMatchObject({ state: "open", taskKey: null });
+
+    // CANARY: `.map((e) => e.taskKey).filter(Boolean)` drops it, VIB-5's set
+    // empties on VIB-1 alone, and a task that is still waiting is counted as
+    // released.
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-1")).not.toContain("VIB-5");
+  });
+
+  it("a task nothing waits on releases nothing, and says so as an empty list", () => {
+    const store = setupTestStore(ctx);
+    chain(store);
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-3")).toEqual([]);
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-404")).toEqual([]);
   });
 });

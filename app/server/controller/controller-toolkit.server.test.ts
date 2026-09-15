@@ -230,6 +230,43 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     expect(names.filter((n) => /resolve_packet|answer_packet|decide/.test(n))).toEqual([]);
   });
 
+  /**
+   * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
+   * out by hand, across two turns, that five tasks sat behind them: "the one
+   * number that should order a decision queue does not exist, so the ordering
+   * depends on whoever happens to have walked the graph recently."
+   */
+  it("ruling 300: every decision says what answering it releases, down the chain", async () => {
+    await openPacketOn(PACKET_TASK);
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const waiters: [string, string[]][] = [
+      ["VIB-148", [PACKET_TASK]],
+      ["VIB-151", ["VIB-148"]],
+    ];
+    for (const [key, blockedBy] of waiters) {
+      await updateTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.blockedBy = blockedBy;
+      });
+    }
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
+      const row = out.forYou.find(
+        (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
+      );
+      // CANARY: drop `releases` and the queue has no number to order by.
+      expect(row.releases.sort()).toEqual(["VIB-148", "VIB-151"]);
+    } finally {
+      for (const [key] of waiters) {
+        await updateTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot }, (p) => {
+          p.frontmatter.blockedBy = [];
+        });
+      }
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
+
   it("reads the packet's own options and hands over the link", async () => {
     await openPacketOn(PACKET_TASK);
     try {
@@ -3330,6 +3367,44 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
  * nothing, and reporting a negative inferred from absence. It had four verbs
  * wrong.
  */
+/**
+ * Ruling 299 (pass 37, F37-134): `read_default_branch_file` was mounted on the
+ * operator and nowhere else, and the controller is the actor that writes the
+ * architecture, knowledge bases and goals every agent is measured against.
+ */
+describe("ruling 299: the controller can read the repository it plans against", () => {
+  it("is mounted, is membership gated, and says which fact is missing when a project has no repo", async () => {
+    // CANARY: unmount it and the controller is back to second-hand claims.
+    expect(
+      await call(ids.nonMember, "read_default_branch_file", { path: "docs/guide.md" }),
+    ).toMatch(/^\[denied\]|^\[error\] .*not visible/i);
+
+    // A project with no GitHub repository has no default branch to read, and
+    // saying so beats an empty read that reads like "the file is not there"
+    // (ruling 246: existence before type). CANARY: drop the `project.repo`
+    // branch and this throws instead of answering.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+      p.frontmatter.repo = null;
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const answer = await call(ids.maintainer, "read_default_branch_file", {
+        path: "docs/guide.md",
+      });
+      expect(answer).toContain("[unavailable]");
+      expect(answer).toContain("no GitHub repository set");
+      expect(answer).toContain("GitHub tab");
+    } finally {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.repo = "acme/widgets";
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
+});
+
 describe("ruling 297: each controller server publishes the list of what it holds", () => {
   it("names every tool it mounts, in the instructions a model actually receives", async () => {
     const { buildControllerToolkit } = await import("./controller-toolkit.server");

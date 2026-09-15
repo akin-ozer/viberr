@@ -34,6 +34,11 @@ import {
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { toolManifest } from "~/server/runtimes/tool-manifest.server";
+import { tasksReleasedBy } from "~/server/projections/dependencies.server";
+import {
+  DEFAULT_BRANCH_READ_MAX_BYTES,
+  readProjectDefaultBranchFile,
+} from "~/server/tasks/operator-repo-read.server";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
@@ -1599,6 +1604,83 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "read_task_attachment",
   );
 
+  /**
+   * Ruling 299: the controller reads the default branch, the way the operator
+   * already could. It writes the architecture, the knowledge bases and the
+   * goals every agent is measured against, and it reviews the packets those
+   * agents raise -- and it could not open a file in the repository those are
+   * all about. It reported the gap from inside a live decision: "verify the
+   * claim against the repository yourself is the most-repeated rule in this
+   * project's own rulings, and I am structurally unable to follow it."
+   */
+  add(
+    tool(
+      "read_default_branch_file",
+      "Read one file AS THE PROJECT'S DEFAULT BRANCH HAS IT, out of the project's own git mirror. This is how you check a claim about the repository yourself instead of repeating somebody's read of it: what a goal says a file contains, whether a route or a contract is already there, what a report asserts about the tree. It answers about the DEFAULT branch only, never a task's branch or a pull request's head - `read_pull_request` is the one that reads a PR's changed files. A path that is not on that branch is named and reported ABSENT, which is an answer and not a failure. Read-only, membership gated.",
+      {
+        projectSlug: z.string().optional(),
+        path: z
+          .string()
+          .describe("Repository-relative file path, e.g. 'docs/guide.md' (no leading slash)."),
+      },
+      runWith(async (args: { projectSlug?: string; path: string }) => {
+        const slug = slugOf(args.projectSlug);
+        requireVisible(slug, "read this project's repository");
+        const project = getProject(db, slug);
+        if (!project) throw new NotVisibleError(notVisible(slug));
+        if (!project.repo) {
+          // A project can exist with no remote at all. Saying which fact is
+          // missing beats an empty read that reads like "the file is not
+          // there" (ruling 246: existence before type).
+          return (
+            `[unavailable] ${project.name} has no GitHub repository set, so it has no default ` +
+            "branch to read. Set one on the project's GitHub tab first."
+          );
+        }
+        const request: Parameters<typeof readProjectDefaultBranchFile>[1] = {
+          projectSlug: slug,
+          repo: project.repo,
+          defaultBranch: project.defaultBranch,
+          path: args.path,
+        };
+        if (dataRoot) request.dataRoot = dataRoot;
+        const read = await readProjectDefaultBranchFile(db, request);
+        recordAudit(db, {
+          action: "controller.repo.read",
+          actor,
+          subjectKind: "project",
+          subjectId: slug,
+          projectSlug: slug,
+          details: { path: args.path, branch: project.defaultBranch, result: read.kind },
+        });
+        if (read.kind === "absent") {
+          return `[absent] \`${args.path}\` does NOT exist on \`${project.defaultBranch}\`.`;
+        }
+        if (read.kind === "unavailable") {
+          // Ruling 251: a refusal that names no way out is the defect. This one
+          // says which branch it could not reach and why, so the answer is
+          // never "I read something else instead".
+          return (
+            `[unavailable] \`${args.path}\` could not be read from \`${project.defaultBranch}\`: ` +
+            `${read.reason}. Say so rather than answering from a task's workspace or a PR head, ` +
+            "which are not this branch."
+          );
+        }
+        const freshness = read.refreshed
+          ? `\`${project.defaultBranch}\`, just refreshed from GitHub`
+          : `\`${project.defaultBranch}\` as the project's mirror last had it (the refresh from ` +
+            "GitHub did not run, so treat it as slightly stale)";
+        // Ruling 285: a cut says it cut, and says where the rest is.
+        const cut = read.truncated
+          ? `\n\n[clipped at ${DEFAULT_BRANCH_READ_MAX_BYTES} characters. This file is longer ` +
+            "than one read; ask for a narrower question about it, or read it on GitHub.]"
+          : "";
+        return `[found] \`${args.path}\` on ${freshness}:\n\n${read.text}${cut}`;
+      }),
+    ),
+    "read_default_branch_file",
+  );
+
   // Ruling 292: the controller reads a timeline entry whole, exactly as the
   // operator has since ruling 285. Project-scoped and membership gated like
   // every other task read here; `read_run_log` is the RUN's log, which is a
@@ -2990,7 +3072,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_decisions",
-      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
+      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`: the tasks that come unblocked, down the chain, once this one completes. That is the number to order the queue by, and it counts only waits that can actually clear. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
       {
         projectSlug: z.string().optional().describe("One project. Omit inside a project conversation to use it; omit outside one to read every project this person can see."),
         taskKey: z.string().optional().describe("Just this task. Defaults to the conversation's task when it is anchored to one."),
@@ -3041,6 +3123,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 // The one thing this tool exists to hand over. Same form the
                 // move refusal uses, so a person meets one shape of link.
                 answerAt: `projects/${ref.projectSlug}/tasks/${ref.taskKey}`,
+                // Ruling 300: what answering this RELEASES, down the chain.
+                // The controller had to walk `blockedBy` by hand across two
+                // turns to learn that five tasks sat behind three cards, and
+                // said it plainly: "the one number that should order a
+                // decision queue does not exist, so the ordering depends on
+                // whoever happens to have walked the graph recently." A wait
+                // that can never clear is not counted, so this number never
+                // argues for a decision that would free nothing.
+                releases: tasksReleasedBy(db, ref.projectSlug, ref.taskKey),
                 packet:
                   ref.kind === "packet" && packet
                     ? {

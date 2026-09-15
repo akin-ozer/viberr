@@ -196,3 +196,52 @@ export function listHeldTasks(
     blockedBy: parseBlockedByColumn(row.blocked_by_json),
   }));
 }
+
+/**
+ * Ruling 300: which tasks a task's completion would RELEASE, directly and
+ * down the chain.
+ *
+ * The controller asked for this from a decision queue: `list_decisions` gave it
+ * three cards, and that five tasks sat behind them (SHOP-46 → SHOP-48;
+ * SHOP-41 → SHOP-28; SHOP-49 → SHOP-29 → SHOP-28) it worked out by reading each
+ * task's `blockedBy` and walking the chain by hand, across two turns. Its own
+ * words: "the one number that should order a decision queue does not exist, so
+ * the ordering depends on whoever happens to have walked the graph recently."
+ *
+ * A wait that can NEVER clear is not counted. A task blocked on an archived
+ * task, a cancelled goal or a reference nothing answers to is not waiting on
+ * this decision, and counting it would inflate the one number a person is meant
+ * to order their queue by. The same goes for an open goal link with no task
+ * yet: it is a real wait, and no task key completing satisfies it.
+ */
+export function tasksReleasedBy(
+  db: DatabaseSync,
+  slug: string,
+  taskKey: string,
+): string[] {
+  const waiting = new Map<string, Set<string>>();
+  for (const held of listHeldTasks(db, slug)) {
+    const entries = resolveDependencies(db, slug, held.blockedBy);
+    if (entries.some((e) => e.state !== "open" && e.state !== "done")) continue;
+    const unmet = entries
+      .filter((e) => e.state === "open")
+      // A goal link with no task yet keeps its own spelling, which no task key
+      // can equal, so the wait stands rather than silently clearing.
+      .map((e) => e.taskKey ?? e.ref);
+    if (unmet.length > 0) waiting.set(held.taskKey, new Set(unmet));
+  }
+
+  const released: string[] = [];
+  const completed = [taskKey];
+  while (completed.length > 0) {
+    const done = completed.shift()!;
+    for (const [key, blockers] of waiting) {
+      if (!blockers.delete(done)) continue;
+      if (blockers.size > 0) continue;
+      waiting.delete(key);
+      released.push(key);
+      completed.push(key);
+    }
+  }
+  return released;
+}
