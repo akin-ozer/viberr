@@ -5565,6 +5565,30 @@ by rewriting those paragraphs:*
     finding.
     (`controller-toolkit.server.ts`, `decisions.server.ts`.)
 
+252. **A comment that tags an agent says so, whoever wrote it (2026-09-15, pass 37; F37-81).**
+    Ruling 214 gave the operator this sentence after it put a completeness question to
+    "@Code Reviewer" in a comment, no reviewer ever read it, and the stranded backstop then
+    paused a task five others were waiting behind. The reasoning was never operator-specific:
+    a comment writes a timeline line and starts nothing, whoever writes it. It was applied to
+    one writer.
+    The CONTROLLER had the same hazard, none of the disclosure, and the worst blast radius,
+    because it is the surface a person drives a board from. Live on SHOP-26 it wrote
+    "@operator @platform-architect The funded amendment now exists as a task", then "Two
+    standing facts for the implementation run when this task is released", and closed with
+    nothing but "Posted by the controller for Arda". Its own tool text promised "@mentions
+    notify people" - true of people, silent for agents. And the asymmetry is sharp: the SAME
+    words typed by that person on the task page DO reach the agent, because `commentToAgent`
+    resolves the mention and starts a run. Typed by the controller on their behalf they reach
+    nobody. A mid-run agent tagging another agent had it too, at the same seam.
+    The disclosure now lives beside the resolver and both writers call it, so the wording
+    cannot drift; `postAgentComment` stamps it, which covers the controller and every agent at
+    once. `@operator` stays excluded exactly as in ruling 214: several writes in a controller
+    turn wake the operator on their own, so claiming nothing was sent to it could be the false
+    half of an honest sentence. The controller's tool text now says plainly that an agent
+    mention reaches nobody and names `run_agent_on_task`.
+    (`agent-reply.server.ts`, `agent-toolkit.server.ts`, `operator-actions.server.ts`,
+    `controller-toolkit.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

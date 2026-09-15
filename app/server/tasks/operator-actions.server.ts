@@ -708,15 +708,6 @@ function opCtx(ctx: TaskMutationContext): TaskMutationContext {
  * model then built on narration that did not exist and, on Codex, settled the
  * task to `waiting:human` with no packet or note (a silent strand).
  */
-/** Ruling 214: what an operator comment says when it tagged an agent. The
- *  operator narrates for the humans; only a run reaches an agent. */
-function unreachedAgentNote(agentName: string): string {
-  return (
-    `_@${agentName} is an agent, and an operator comment starts no run \u2014 ` +
-    `nothing was sent to it. Run the agent to put this to it._`
-  );
-}
-
 async function writeOperatorComment(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -768,11 +759,13 @@ async function writeOperatorComment(
   // were waiting behind. The doctrine now names `run_agent`. This is the
   // backstop for when it tags an agent anyway: the record says plainly that
   // nothing was sent, instead of the tag going nowhere in silence.
-  const { resolveMentionedAgent } = await import("./agent-reply.server");
+  // Ruling 252: the sentence itself now lives beside the resolver, because the
+  // controller and a mid-run agent needed the same one.
+  const { resolveMentionedAgent, unreachedAgentNote } = await import("./agent-reply.server");
   const taggedAgent = resolveMentionedAgent(db, ctx, projectSlug, taskKey, text2);
   const text3 =
     taggedAgent && !taggedAgent.isOperator
-      ? `${text2}\n\n${unreachedAgentNote(taggedAgent.name)}`
+      ? `${text2}\n\n${unreachedAgentNote(taggedAgent.name, "operator")}`
       : text2;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),

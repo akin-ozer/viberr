@@ -4283,3 +4283,47 @@ Measured at 1024px with the dock open, `main` spans x232–1024 unchanged while 
 covers x604–1004, and a hit-test at x964 returns `section.dock-body`. Owner's call: **leave it
 overlaying** — the dock is a panel you open, ask, and close, and reflowing the app on every
 open would be worse. No change made.
+
+## F37-81 · The controller tagged an agent, briefed it at length, and nothing was sent — MEDIUM
+
+Caught in flight. Ruling 250 had shipped an hour earlier, so the controller's working row was
+showing me its live tool call:
+
+```
+Controller is working…  mcp__viberr_controller__comment_on_task · {"taskKey":"SHOP-26","text":"@operator @platform-architect The funded amendme…
+```
+
+The comment it wrote, on SHOP-26's timeline, in full shape:
+
+> **@operator @platform-architect** The funded amendment now exists as a task: **SHOP-32** …
+> **Two standing facts for the implementation run when this task is released**, both now in the
+> project's rulings knowledge base …
+>
+> _Posted by the controller for Arda._
+
+Nothing else. No agent read it. `comment_on_task` calls `postAgentComment`, which writes the
+timeline line, reprojects, audits and calls `notifyMentionedUsers` — **users**. An @tagged agent
+reaches nobody and nothing said so.
+
+**Ruling 214 already exists for exactly this**, written after the operator put a completeness
+question to "@Code Reviewer" in a comment that no reviewer ever read, and the stranded backstop
+paused a task five others were waiting behind. It appends
+`_@Name is an agent, and an operator comment starts no run — nothing was sent to it._` It was
+applied to `writeOperatorComment` and nowhere else. Two entries below the controller's comment on
+that same SHOP-26 timeline, the operator's own comment carries it.
+
+**The asymmetry is the sharp part.** The same words typed by a person on the task page DO reach
+the agent: `commentToAgent` resolves the mention and starts a run. Typed by the controller *on
+that person's behalf* — the surface whose composer says "Acts with your permissions" — they reach
+nobody, silently. And the tool's own description said "@mentions notify people", which a model
+reads as covering the agents it just tagged.
+
+**Fix (ruling 252).** The sentence moves beside the resolver so both writers call one function and
+the wording cannot drift, and `postAgentComment` stamps it — which covers the controller and every
+mid-run agent at the same seam, rather than fixing the instance and leaving the family. `@operator`
+stays excluded as in ruling 214: several writes in a controller turn wake the operator on their
+own, so claiming nothing was sent to it could be the false half of an honest sentence. The tool
+text now says an agent mention reaches nobody and names `run_agent_on_task`.
+
+Two tests, canaried in both directions: removing the arm loses the disclosure, and stamping it
+unconditionally grows a paragraph about unreached agents onto every ordinary status comment.

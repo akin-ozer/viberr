@@ -757,6 +757,54 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(denied).toContain("is visible to you");
   });
 
+  /**
+   * Ruling 252 (pass 37, F37-81). Ruling 214 gave the OPERATOR this sentence
+   * after it put a completeness question to "@Code Reviewer" in a comment that
+   * no reviewer ever read, and the stranded backstop paused a task five others
+   * were waiting behind. The controller had the identical hazard and none of
+   * the disclosure — live on SHOP-26 it wrote "@operator @platform-architect
+   * The funded amendment now exists as a task", then "Two standing facts for
+   * the implementation run", and closed with nothing but "Posted by the
+   * controller for Arda". The same words typed by that person on the task page
+   * DO reach the agent.
+   */
+  it("comment_on_task: an @tagged AGENT is disclosed as unreached (ruling 252)", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@reviewer Two standing facts for your next pass on this task.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: drop the `unreachedAgentNote` arm from `postAgentComment` and the
+    // tag goes nowhere in silence, which is the live shape.
+    expect(top.text).toContain("is an agent, and a controller comment starts no run");
+    expect(top.text).toContain("nothing was sent to it");
+    // Named as the controller's OWN tool, so the sentence is actionable by the
+    // reader it is addressed to rather than a generic instruction.
+    expect(top.text).toContain("run_agent_on_task");
+  });
+
+  it("comment_on_task: a comment that tags only PEOPLE carries no such note", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@Arda status published, nothing needed from an agent here.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: stamp the note unconditionally and every ordinary status comment
+    // grows a paragraph telling a person an agent was not reached, on a
+    // comment that named no agent.
+    expect(top.text).not.toContain("starts no run");
+  });
+
   it("set_task_owner: a viewer is refused; a contributor takes an unowned seat", async () => {
     // A fresh, UNOWNED task: VIB-142 ships owned, and taking an occupied seat
     // is a different (acceptance-tier) authority than self-assigning.

@@ -141,7 +141,32 @@ export async function postAgentComment(
   // resolves to a real person who is NOT a member of this project — the
   // fan-out drops those, and without the slug this call could only ever
   // disclose the AMBIGUOUS half, so a non-member tag went silently nowhere.
-  const text = withAmbiguityDisclosure(db, input.text, input.projectSlug);
+  const ambiguity = withAmbiguityDisclosure(db, input.text, input.projectSlug);
+  // Ruling 252 (F37-81): the same disclosure ruling 214 gave the operator, for
+  // the two writers that share this seam. A comment writes a timeline line and
+  // starts nothing, so an @tagged AGENT read it only in the writer's head.
+  //
+  // The controller is the live case and the sharp one: it is the surface a
+  // person drives a board from, its own tool text promises "@mentions notify
+  // people", and the same words typed by that person on the task page DO reach
+  // the agent (`commentToAgent` starts a run). Typed by the controller on their
+  // behalf they reach nobody, and nothing said so.
+  //
+  // `@operator` is excluded, exactly as in ruling 214: several writes in a
+  // controller turn wake the operator on their own, so claiming nothing was
+  // sent to it could be the false half of an honest sentence.
+  const { resolveMentionedAgent, unreachedAgentNote } = await import("./agent-reply.server");
+  const tagged = resolveMentionedAgent(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    ambiguity,
+  );
+  const text =
+    tagged && !tagged.isOperator
+      ? `${ambiguity}\n\n${unreachedAgentNote(tagged.name, input.actorRef.kind === "controller" ? "controller" : "agent")}`
+      : ambiguity;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),

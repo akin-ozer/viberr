@@ -1450,7 +1450,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "comment_on_task",
-      "Post a controller comment on a task's timeline: publish information for humans, or brief agents. @mentions notify people. It never starts a run by itself; use run_agent_on_task to put an agent to work.",
+      "Post a controller comment on a task's timeline: publish information for the PEOPLE reading it. @mentions of people notify them. An @mention of an AGENT reaches nobody - a comment starts no run, and the line is stamped saying so (ruling 252); a later run reads it only if it happens to read the timeline. To put something to an agent, use run_agent_on_task.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
