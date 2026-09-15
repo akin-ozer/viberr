@@ -5941,6 +5941,34 @@ by rewriting those paragraphs:*
     its `conversationId` and carries no task.
     (`pr-diff.server.ts`, `controller-toolkit.server.ts`, `controller-ops-mcp.server.ts`.)
 
+269. **An option that instructs the reader is not a decision they can take (2026-09-15, pass
+    37; F37-101).** Rulings 164, 224, 230 and 237 each found the same defect in a different
+    verb: an operator writes a `custom` option describing an action, the person confirms it,
+    and the resolution does nothing but re-run the operator. The verb missing this time is the
+    most common structural remedy a multi-service board has — "this belongs in its own task".
+    Live on SHOP-26 the operator found `stockBatchResponseSchema` published on main with no
+    producer, and the project's own conventions say a reported gap has to end up owned by a
+    live task rather than sitting as a footnote. Its recommended option's text ends, verbatim:
+    "You create the task — no option here can." It was right: sixteen kinds, and not one makes
+    a task.
+    `create_task` carries `newTask` (title, goal, and optionally what the NEW task waits on and
+    its labels) and creates it through `createTask` — the same door the board and both toolkits
+    use — under the RESOLVING person's own authority. Every possible resolver already holds
+    `create-task` (packet resolution is admin, maintainer, or the task's human owner, and
+    owning a task is itself contributor-and-above), so the kind needs no new tier.
+    Three things it deliberately does NOT do. It does not amend this task's goal: ruling 189
+    binds a decision to the contract, and this decision is about work that is not this task —
+    the exclusion list gets its fifth entry for the reason the other four are there. It does
+    not touch this task's state at all (the one case in the switch whose mutation is a
+    deliberate no-op) and its event is a note rather than a transition, because nothing here
+    moved. And the join between the two is written on both records: the new key lands on this
+    task's timeline the moment it exists, so "which task came out of that decision" is
+    answerable without reading a goal chain.
+    The card shows what is about to be created — the new task's title and goal, on the selected
+    option — so the person confirms the task rather than the sentence describing it.
+    (`task-file.schema.ts`, `operator-actions.server.ts`, `operator-toolkit.server.ts`,
+    `task-actions.server.ts`, `decision-packet.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

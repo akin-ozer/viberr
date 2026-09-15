@@ -227,6 +227,18 @@ export const PACKET_OPTION_KINDS = [
   // resolution merely re-runs the operator would have repeated that; this one
   // starts the reviewer itself.
   "question_reviewer",
+  // Ruling 269 (pass 37, F37-101): "this belongs in its own task." The most
+  // common structural remedy on a multi-service board, and the only one whose
+  // recommended option had to end with an instruction to the reader instead of
+  // an action. Live on SHOP-26 the operator wrote, verbatim, "You create the
+  // task — no option here can": it had found a published contract with no
+  // producer, the project's own conventions say a reported gap has to end up
+  // owned by a live task, and the packet mechanism could not make one. Payload:
+  // `newTask` (title, goal, and optionally what it waits on and its labels).
+  // Resolution creates it through `createTask` — the same door the board and
+  // the toolkits use — under the RESOLVING person's authority, and names the
+  // new key on both timelines so the two are joined on the record.
+  "create_task",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -892,6 +904,19 @@ export const packetOptionSchema = z
     /** Ruling 230: `block_on_dependencies` — what this task waits on, in the
      *  same spellings `blockedBy` stores (a task key, or a goal link). */
     blockedBy: z.array(dependencyRefTextSchema).optional(),
+    /** create_task — ruling 269: the task the resolution creates. `title` and
+     *  `goal` are required on the kind (authoring refuses one without them)
+     *  and the whole field is refused on every other kind. */
+    newTask: z
+      .object({
+        title: z.string().min(1),
+        goal: z.string().min(1),
+        /** What the NEW task waits on, in `blockedBy`'s own spellings. Not the
+         *  same field as `block_on_dependencies`'s, which holds THIS task's. */
+        blockedBy: z.array(dependencyRefTextSchema).optional(),
+        labels: z.array(z.string()).optional(),
+      })
+      .optional(),
     /** redirect — ruling 163 (pass 35, F35-13): the resolution RETURNS the
      *  task to the review stage when it stands at or past it, so the reworked
      *  revision gets its verdict where the reviewers are eligible. Written by

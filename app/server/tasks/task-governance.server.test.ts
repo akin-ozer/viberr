@@ -28,7 +28,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { getBoard } from "~/server/projections/board-query.server";
+import { getBoard, listProjectTasks } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
   completeTaskMerge,
@@ -3867,6 +3867,83 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       );
       expect(goalOf(store)).toBe(before);
     }
+  });
+
+  /**
+   * Ruling 269 (pass 37, F37-101): the resolution CREATES the task. Live on
+   * SHOP-26 the recommended option's own text read "You create the task — no
+   * option here can", because no kind could: the operator had found a
+   * published contract with no producer, the project's conventions say a
+   * reported gap has to end up owned by a live task, and the packet mechanism
+   * could only describe one.
+   */
+  it("ruling 269: a create_task resolution makes the task, joins the record, and leaves this one alone", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "A published contract has no producer",
+        options: [
+          {
+            kind: "create_task",
+            t: "Inventory serves the batch contract",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Inventory: serve the batch stock contract",
+              goal: "GET /stock serves the batch shape. Done when a producer exists.",
+              labels: ["service"],
+            },
+          },
+        ],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop the post-write `createTask` hook and the decision resolves
+    // into a closed packet and nothing else — the promise unkept, silently.
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Inventory: serve the batch stock contract",
+    );
+    expect(made, "the decision created no task").toBeTruthy();
+    expect(made!.labels).toContain("service");
+    // The goal is the CONTRACT, so it has to reach the task the agent reads.
+    const madeFile = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: made!.key,
+      dataRoot: store.dataRoot,
+    })!;
+    expect(madeFile.parsed.goal).toContain("GET /stock serves the batch shape");
+
+    const after = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    // The two are joined on the record: this option says something about work
+    // that is NOT this task, so the connection is the only thing it leaves here.
+    expect(after.parsed.timeline.some((e) => e.text.includes(made!.key))).toBe(true);
+    expect(after.parsed.packet).toBeNull();
+    // …and it changes nothing else about this task. CANARY: add a `mutate`
+    // that flips `waiting`, and a decision about other work starts claiming
+    // this one.
+    expect(goalOf(store)).toBe(before);
+    expect(after.parsed.frontmatter.stage).toBe("impl");
+    // The decision event is a NOTE, not a transition: sibling kinds write a
+    // transition because they move this task, and this one does not.
+    // CANARY: write it as `type: "transition"` and the timeline claims a state
+    // change that never happened.
+    const decision = after.parsed.timeline.find((e) =>
+      e.text.includes("Inventory serves the batch contract"),
+    )!;
+    expect(decision.type).toBe("note");
   });
 
   it("DOES amend when a person types a directive, whatever packet they typed it on", async () => {

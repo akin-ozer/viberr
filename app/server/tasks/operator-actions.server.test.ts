@@ -4942,6 +4942,105 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 
+  /**
+   * Ruling 269 (pass 37, F37-101): "this belongs in its own task" — the most
+   * common structural remedy on a multi-service board, and the only one whose
+   * recommended option had to end with an instruction to the reader. Live on
+   * SHOP-26 the operator wrote, verbatim: "You create the task — no option
+   * here can."
+   */
+  it("authors a create_task option, and refuses one with no task on it", async () => {
+    packetsRoster();
+    seedTask("impl");
+    const authored = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "A published contract has no producer — who owns closing it?",
+        options: [
+          {
+            kind: "create_task",
+            title: "Inventory serves the batch contract",
+            recommended: true,
+            newTask: {
+              title: "Inventory: serve the batch stock contract",
+              goal: "GET /stock serves stockBatchResponseSchema. Done when the batch shape is produced.",
+              blockedBy: ["VIB-2"],
+              labels: ["service"],
+            },
+          },
+          { kind: "custom", title: "Leave it as it is" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(authored.outcome).toBe("done");
+    const packet = task().packet!;
+    // CANARY: drop the `create_task` arm from the option builder and the
+    // payload the resolution reads never lands, so the confirm creates nothing.
+    expect(packet.options[0]).toMatchObject({
+      kind: "create_task",
+      newTask: {
+        title: "Inventory: serve the batch stock contract",
+        blockedBy: ["VIB-2"],
+        labels: ["service"],
+      },
+    });
+
+  });
+
+  it("refuses a create_task option with no task on it, and newTask on any other kind", async () => {
+    packetsRoster();
+    seedTask("impl");
+    // An option that names no task resolves into nothing, which is the shape
+    // the whole ruling exists to stop. CANARY: remove the empty-newTask arm.
+    const empty = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Who owns it?",
+        options: [
+          { kind: "create_task", title: "Make a task for it", recommended: true },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(empty.outcome).toBe("noop");
+    expect(empty.message).toContain("create_task option with no task on it");
+
+    // …and the payload is refused on every other kind, like `toStage` and
+    // `blockedBy` before it. CANARY: remove the stray-newTask arm.
+    const stray = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Who owns it?",
+        options: [
+          {
+            kind: "redirect",
+            title: "Have the developer redo it",
+            recommended: true,
+            newTask: { title: "Something else", goal: "Elsewhere." },
+          },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(stray.outcome).toBe("noop");
+    expect(stray.message).toContain("newTask only fits a create_task option");
+  });
+
   it("refuses to let the operator offer the head-check override at all", async () => {
     // Ruling 226: the waiver is granted against a (PR, revision, live head)
     // triple the ACCEPTANCE GATE read at the moment it refused. An operator

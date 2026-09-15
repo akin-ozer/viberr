@@ -434,7 +434,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                 kind: z
                   .enum(PACKET_OPTION_KINDS)
                   .describe(
-                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too. Ruling 164: 'force_accept' performs the admin force-accept itself, on the same disclosure and the same audited bypass record as the task page's Force accept button, and only an admin may resolve it, so offer it when a wedged gate leaves no other route and never as a custom option that merely describes one. 'move_stage' carries `toStage` and performs the move on the stage picker's own path; it is how a person shows the task at another stage when you cannot make the move yourself. Ruling 237: 'question_reviewer' carries `profileId` and starts THAT reviewer with the standing question about everything it would still block on, asking for a comment and no fresh verdict; it is the option for a reviewer that keeps objecting, and Viberr opens it itself at the second consecutive objection, so author one only when no packet was raised. Neither kind, and no other, can edit an agent profile: name the Agents surface as the remedy instead.",
+                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too. Ruling 164: 'force_accept' performs the admin force-accept itself, on the same disclosure and the same audited bypass record as the task page's Force accept button, and only an admin may resolve it, so offer it when a wedged gate leaves no other route and never as a custom option that merely describes one. 'move_stage' carries `toStage` and performs the move on the stage picker's own path; it is how a person shows the task at another stage when you cannot make the move yourself. Ruling 237: 'question_reviewer' carries `profileId` and starts THAT reviewer with the standing question about everything it would still block on, asking for a comment and no fresh verdict; it is the option for a reviewer that keeps objecting, and Viberr opens it itself at the second consecutive objection, so author one only when no packet was raised. Ruling 269: 'create_task' carries `newTask` and CREATES that task when the person confirms, under their own authority — it is the option for work you have found that belongs outside this task's scope (another service, a contract nobody produces, a gap a report named). Offer it instead of writing 'you create the task' in an option's text: an option that instructs the reader is not a decision they can take. Neither kind, and no other, can edit an agent profile: name the Agents surface as the remedy instead.",
                   ),
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
@@ -469,6 +469,26 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .describe(
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
                   ),
+                newTask: z
+                  .object({
+                    title: z.string().describe("The new task's title."),
+                    goal: z
+                      .string()
+                      .describe(
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria) — it is the contract whoever works it is held to.",
+                      ),
+                    blockedBy: z
+                      .array(z.string())
+                      .optional()
+                      .describe(
+                        "What the NEW task waits on (task keys, or `goal-N link M`) — not what THIS task waits on.",
+                      ),
+                    labels: z.array(z.string()).optional().describe("Labels for the new task."),
+                  })
+                  .optional()
+                  .describe(
+                    "create_task only (ruling 269): the task this option creates when the person confirms. Required on that kind and refused on every other one.",
+                  ),
               }),
             )
             .describe("The 2-4 resolvable options; exactly one recommended."),
@@ -494,6 +514,18 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               // Ruling 138: the goal draft is prose bound for the goal editor;
               // `operatorOpenPacket` caps it and refuses it off edit_goal.
               if (o.goalDraft) option.goalDraft = prose(o.goalDraft);
+              // Ruling 269: the task a create_task option will create;
+              // `operatorOpenPacket` refuses it off that kind and refuses the
+              // kind without it.
+              if (o.newTask) {
+                const newTask: NonNullable<OperatorPacketOptionInput["newTask"]> = {
+                  title: prose(o.newTask.title),
+                  goal: prose(o.newTask.goal),
+                };
+                if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+                if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
+                option.newTask = newTask;
+              }
               return option;
             }),
           };

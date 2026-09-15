@@ -1059,6 +1059,15 @@ export interface OperatorPacketOptionInput {
    *  waits on. The resolution writes them through `setTaskDependencies`, so
    *  Viberr releases the task when the last entry finishes. */
   blockedBy?: string[];
+  /** create_task only — ruling 269: the task the resolution creates. Required
+   *  on the kind and refused on every other one. */
+  newTask?: {
+    title: string;
+    goal: string;
+    /** What the NEW task waits on — not this one. */
+    blockedBy?: string[];
+    labels?: string[];
+  };
 }
 
 export interface OperatorOpenPacketInput {
@@ -1365,6 +1374,35 @@ export async function operatorOpenPacket(
     // `move_stage` names the stage it moves to, and only that kind carries the
     // field: the same two refusals `resolvePacket` makes, made here so the
     // option is never written in a shape the confirm would refuse.
+    // Ruling 269: `create_task` carries the task it will create, and only that
+    // kind reads it — the same two refusals `move_stage` gets, for the same
+    // reason: an option must never be written in a shape the confirm refuses.
+    const strayNewTask = rawOptions.find(
+      (o) => o.kind !== "create_task" && o.newTask !== undefined,
+    );
+    if (strayNewTask) {
+      return {
+        outcome: "noop",
+        message:
+          `newTask only fits a create_task option. "${strayNewTask.title}" is ` +
+          `${strayNewTask.kind}, and its resolution creates nothing.`,
+      };
+    }
+    const emptyNewTask = rawOptions.find(
+      (o) =>
+        o.kind === "create_task" &&
+        ((o.newTask?.title ?? "").trim() === "" || (o.newTask?.goal ?? "").trim() === ""),
+    );
+    if (emptyNewTask) {
+      return {
+        outcome: "noop",
+        message:
+          `"${emptyNewTask.title}" is a create_task option with no task on it. ` +
+          "Give newTask a title and a goal — the goal is the contract the new task is " +
+          "worked to, so write it as one (deliverable plus acceptance criteria). " +
+          "Without them the confirm would create nothing.",
+      };
+    }
     const strayStage = rawOptions.find(
       (o) => o.kind !== "move_stage" && (o.toStage ?? "").trim() !== "",
     );
@@ -1576,6 +1614,17 @@ export async function operatorOpenPacket(
     if (o.kind === "wait_for_window" && o.dueAt) option.dueAt = o.dueAt;
     if (o.kind === "block_on_dependencies" && o.blockedBy?.length) {
       option.blockedBy = [...o.blockedBy];
+    }
+    // Ruling 269: the task the create_task resolution will make, validated
+    // above. Trimmed here, the one chokepoint both operator backends reach.
+    if (o.kind === "create_task" && o.newTask) {
+      const newTask: NonNullable<PacketOption["newTask"]> = {
+        title: o.newTask.title.trim(),
+        goal: o.newTask.goal.trim().slice(0, GOAL_DRAFT_MAX_CHARS),
+      };
+      if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+      if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
+      option.newTask = newTask;
     }
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.

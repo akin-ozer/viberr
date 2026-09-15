@@ -8974,6 +8974,42 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "create_task": {
+      // Ruling 269 (F37-101): the decision IS the new task. Everything the
+      // resolution needs is on the option; the creation itself runs AFTER this
+      // write, through `createTask` — the same door the board and both
+      // toolkits use, so the key allocation, the goal-header shape, the
+      // dependency validation and the auto-invoke are the ones every other
+      // caller gets (ruling 164: an option performs the real action through
+      // the real door).
+      const spec = option.newTask;
+      if (!spec || spec.title.trim() === "" || spec.goal.trim() === "") {
+        throw AppError.conflict(
+          `"${option.t}" carries no task to create, so confirming it would create nothing. ` +
+            `Ask the operator to offer the option again with the task's title and goal.`,
+        );
+      }
+      event = {
+        occurredAt: now,
+        type: "note",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. A new task is being created for it: "${spec.title}". ` +
+            `${key} is unchanged; the new task carries the work.`,
+        toAgent: false,
+        evidence: null,
+      };
+      // A deliberate NO-OP mutation: this option says something about work
+      // that is NOT this task. Every sibling flips a field here — `waiting`,
+      // a stage, a disposition — and flipping any of them would be the
+      // decision claiming a reach it does not have. The packet closing and
+      // the two timeline lines are the whole of its effect on this task.
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
     case "block_on_dependencies": {
       // Ruling 230 (F37-50): the decision IS the wait. `blockedBy` is ruling
       // 131's mechanism and it is already good — the board renders it, the
@@ -9246,6 +9282,12 @@ export async function resolvePacket(
     // runs next, and the answer that comes back is the reviewer's, not the
     // person's. Nothing about the deliverable changed.
     "question_reviewer",
+    // Ruling 269: the decision is about work that is NOT this task — it names
+    // a gap and puts it on the board somewhere else. Amending THIS contract
+    // with it would bind every future run here to a paragraph about another
+    // task's job, which is exactly the accumulation ruling 189 exists to stop.
+    // The two timeline lines name the new key; that is the join.
+    "create_task",
   ]);
   // Ruling 189 excludes "a resolution that ENDS the task", and `acceptsInto`
   // catches only ONE of the two doors that do: `force_accept` closes the task
@@ -10037,6 +10079,62 @@ export async function resolvePacket(
             `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
             `The decision stands and nothing was started, but nothing releases this task either — ` +
             `set what it waits on from the task page.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
+  }
+
+  // create_task (ruling 269, pass 37, F37-101): make the task the decision
+  // promised, through the door every other creator uses, under the RESOLVING
+  // person's own authority (`createTask` runs its own `create-task` gate on
+  // `actor`). Best-effort like its siblings: a refused create never
+  // un-resolves a decision a human already made, and its outcome lands on the
+  // timeline in plain words — which on this option matters more than most,
+  // because the whole promise was that a task would exist.
+  if (option.kind === "create_task" && option.newTask) {
+    const spec = option.newTask;
+    try {
+      const createInput: CreateTaskInput = {
+        projectSlug: input.projectSlug,
+        title: spec.title,
+        goal: spec.goal,
+      };
+      if (spec.blockedBy?.length) createInput.blockedBy = [...spec.blockedBy];
+      if (spec.labels?.length) createInput.labels = [...spec.labels];
+      const made = await createTask(db, createInput, actor, ctx);
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Task created from a decision",
+          text:
+            `**${made.key}** — ${spec.title} — was created by this decision. ` +
+            `It carries the work; ${input.taskKey} is unchanged.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("create_task resolution could not create the task", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `The task "${spec.title}" was **not** created: ${message} The decision stands and ` +
+            `${input.taskKey} is unchanged, but the work it named has no task — create it from ` +
+            `the board, or ask the operator to offer the decision again.`,
           toAgent: false,
           evidence: null,
         });
