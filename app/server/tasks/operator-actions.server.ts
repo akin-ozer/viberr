@@ -1445,6 +1445,48 @@ export async function operatorOpenPacket(
           "Without them the confirm would create nothing.",
       };
     }
+    // Ruling 288 (F37-123): a goal too long to carry is REFUSED, never cut. Both
+    // of these texts become a task's CONTRACT — the one document every future
+    // run on it re-anchors on (ruling 189) — and both were a bare
+    // `.slice(0, GOAL_DRAFT_MAX_CHARS)`, so an over-long draft was committed
+    // ending mid-sentence with nothing anywhere saying it had been cut.
+    //
+    // Live on SHOP-29 this afternoon: a person's decision asked the operator to
+    // write the REASONING into a corrected acceptance criterion, precisely so a
+    // later reader would not "fix" it back. The draft came out at 4,000
+    // characters exactly, ending "…a 403 there would be", and the sentence
+    // carrying the reason was gone. The editor showed it as ordinary text. Only
+    // counting the characters revealed it, and the operator's own words were
+    // unrecoverable by then — the slice happened at write time, so what was cut
+    // was never stored anywhere.
+    //
+    // Refusing is ruling 139's rule applied to prose: check before anything is
+    // written, name what is wrong, and write nothing. The operator can shorten
+    // and re-offer inside the same turn; a truncated contract cannot be
+    // repaired by anyone who does not already know what it said.
+    const tooLong = rawOptions.find(
+      (o) =>
+        (o.goalDraft ?? "").trim().length > GOAL_DRAFT_MAX_CHARS ||
+        (o.newTask?.goal ?? "").trim().length > GOAL_DRAFT_MAX_CHARS,
+    );
+    if (tooLong) {
+      const draftLen = (tooLong.goalDraft ?? "").trim().length;
+      const which =
+        draftLen > GOAL_DRAFT_MAX_CHARS
+          ? { field: "goalDraft", len: draftLen }
+          : { field: "newTask.goal", len: (tooLong.newTask?.goal ?? "").trim().length };
+      return {
+        outcome: "noop",
+        message:
+          `"${tooLong.title}" carries a ${which.field} of ${which.len.toLocaleString("en-US")} ` +
+          `characters and the limit is ${GOAL_DRAFT_MAX_CHARS.toLocaleString("en-US")}. ` +
+          `Nothing was written. A goal is the contract every future run on the task ` +
+          `re-anchors on, so Viberr will not commit one that stops mid-sentence — shorten ` +
+          `it and offer the option again. Cut narrative and worked examples before you cut ` +
+          `a deliverable or an acceptance criterion; detail that does not fit belongs in ` +
+          `the packet's own text or a comment, which have no such limit.`,
+      };
+    }
     const strayStage = rawOptions.find(
       (o) => o.kind !== "move_stage" && (o.toStage ?? "").trim() !== "",
     );
@@ -1662,7 +1704,9 @@ export async function operatorOpenPacket(
     if (o.kind === "create_task" && o.newTask) {
       const newTask: NonNullable<PacketOption["newTask"]> = {
         title: o.newTask.title.trim(),
-        goal: o.newTask.goal.trim().slice(0, GOAL_DRAFT_MAX_CHARS),
+        // Ruling 288: within the cap by construction — an over-long goal was
+        // refused above, with nothing written.
+        goal: o.newTask.goal.trim(),
       };
       if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
       // Ruling 287: the reverse edge reaches the stored option, which is the
@@ -1674,7 +1718,9 @@ export async function operatorOpenPacket(
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();
-    if (goalDraft) option.goalDraft = goalDraft.slice(0, GOAL_DRAFT_MAX_CHARS);
+    // Ruling 288: within the cap by construction (refused above). It was a
+    // silent `.slice` here, which is how a contract came to end mid-sentence.
+    if (goalDraft) option.goalDraft = goalDraft;
     return option;
   });
   if (!recSeen && options[0]) options[0].rec = true;

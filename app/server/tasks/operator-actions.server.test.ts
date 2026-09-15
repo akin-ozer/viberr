@@ -4702,10 +4702,26 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet?.options[1]?.goalDraft).toBeUndefined();
   });
 
-  it("caps an over-long goalDraft at GOAL_DRAFT_MAX_CHARS instead of refusing it", async () => {
+  /**
+   * Ruling 288 (pass 37, F37-123) REVERSES this test, which used to assert the
+   * cap "instead of refusing it".
+   *
+   * A `goalDraft` and a `newTask.goal` both become a task's CONTRACT — the one
+   * document every future run on it re-anchors on (ruling 189) — and both were
+   * a bare `.slice`. Live on SHOP-29: a person's decision asked the operator to
+   * write the REASONING into a corrected acceptance criterion, exactly so a
+   * later reader would not undo it. The draft came back 4,000 characters long
+   * to the character, ending "…a 403 there would be", and the sentence carrying
+   * the reason was gone. The editor rendered it as ordinary text; only counting
+   * the characters showed it. By then the operator's words were unrecoverable,
+   * because the slice ran at write time and what it cut was never stored.
+   */
+  it("ruling 288: refuses an over-long goalDraft by name and writes nothing", async () => {
+    // Canary: restore the `.slice(0, GOAL_DRAFT_MAX_CHARS)` and a contract that
+    // stops mid-sentence is committed with nothing saying it was cut.
     packetsRoster();
     seedTask("impl");
-    await operatorOpenPacket(
+    const r = await operatorOpenPacket(
       store.db,
       { dataRoot: store.dataRoot },
       {
@@ -4717,7 +4733,68 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       },
       authority("full"),
     );
-    expect(task().packet?.options[0]?.goalDraft).toHaveLength(GOAL_DRAFT_MAX_CHARS);
+    expect(r.outcome).toBe("noop");
+    // Named, with both numbers, so the operator can shorten rather than guess.
+    expect(r.message).toContain("goalDraft");
+    expect(r.message).toContain("4,500");
+    expect(r.message).toContain("4,000");
+    expect(r.message).toContain("Nothing was written");
+    // …and nothing WAS: no packet, so no half-written contract to discover.
+    expect(task().packet).toBeNull();
+  });
+
+  it("ruling 288: refuses an over-long newTask.goal too — the same contract, the other field", async () => {
+    // Canary: check only `goalDraft` in the refusal and a created task's whole
+    // contract goes back to being silently cut.
+    packetsRoster();
+    seedTask("impl");
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "A gap has no owner",
+        options: [
+          {
+            kind: "create_task",
+            title: "Create the task",
+            recommended: true,
+            newTask: {
+              title: "The new task",
+              goal: "y".repeat(GOAL_DRAFT_MAX_CHARS + 1),
+            },
+          },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("newTask.goal");
+    expect(task().packet).toBeNull();
+  });
+
+  it("ruling 288: a goal exactly AT the limit is accepted whole", async () => {
+    // The boundary is the thing worth pinning: an off-by-one here either
+    // refuses a legitimate goal or lets one character through the guard.
+    packetsRoster();
+    seedTask("impl");
+    const exact = "z".repeat(GOAL_DRAFT_MAX_CHARS);
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: exact }],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().packet?.options[0]?.goalDraft).toBe(exact);
   });
 
   it("the operator's snapshot reports the decided packet's awaiting stamp, so it does not re-ask", async () => {

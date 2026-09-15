@@ -6426,6 +6426,34 @@ by rewriting those paragraphs:*
     from. (`task-file.schema.ts`, `task-actions.server.ts`, `operator-toolkit.server.ts`,
     `operator-actions.server.ts`, `decision-packet.tsx`.)
 
+288. **A goal too long to carry is refused, never cut (2026-09-15, pass 37; F37-123,
+    amends 138).** `goalDraft` and `newTask.goal` are the two texts a packet option can
+    turn into a task's GOAL, and a goal is the contract every future run on that task
+    re-anchors on (ruling 189). Both were a bare `.slice(0, GOAL_DRAFT_MAX_CHARS)`, and
+    the test that pinned it said so in its own title: "caps an over-long goalDraft …
+    instead of refusing it".
+    Live on SHOP-29 this afternoon. A person's decision asked the operator to correct an
+    acceptance criterion and to write the REASONING into it — explicitly so that a later
+    reader would not read the bare rule as sloppiness and undo it. The draft came back
+    4,000 characters long to the character, ending "…a 403 there would be", and the
+    sentence carrying the reason was gone. The editor rendered it as ordinary text with
+    nothing marking a cut; only counting the characters revealed it. By then the
+    operator's own words were unrecoverable, because the slice ran at WRITE time and what
+    it removed was never stored anywhere. A person had to finish the sentence by hand,
+    guessing at what had been meant.
+    This is the write-side member of the family ruling 283 and ruling 285 close on the
+    read side, and it is the worst of the three: those clipped what a run could SEE, this
+    one clipped what a task permanently SAYS. So it is refused at authoring time instead —
+    ruling 139's rule applied to prose. The refusal names the field, both numbers, and
+    that nothing was written, and it says what to cut first: narrative and worked examples
+    before a deliverable or an acceptance criterion, with the overflow belonging in the
+    packet's own text or a comment, neither of which has a limit. The operator can shorten
+    and re-offer inside the same turn; a truncated contract cannot be repaired by anyone
+    who does not already know what it said.
+    Ruling 138's cap itself stands — an unbounded goal is its own problem. What changes is
+    what happens at the boundary, and a goal exactly AT the limit is accepted whole.
+    (`operator-actions.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
