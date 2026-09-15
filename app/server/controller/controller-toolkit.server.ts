@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   BACKEND_LABEL,
   assertEffortForBackend,
@@ -1491,7 +1492,21 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             type: e.type,
             by: e.actor.kind === "human" ? e.actor.name : e.actor.kind === "system" ? e.actor.name : `${e.actor.name} (agent)`,
             title: e.title,
-            text: e.text.length > 700 ? `${e.text.slice(0, 700)}…` : e.text,
+            // Ruling 292: the cut says it is a cut and names the way out. This
+            // is ruling 285 for the CONTROLLER, which that ruling gave only to
+            // the operator — a rule applied to one actor and not its sibling,
+            // which is this pass's own defect shape inside this pass's own fix.
+            // It is the sharper case of the two: the operator's cut was 1,500,
+            // this one is 700, and the controller is the actor a PERSON asks
+            // about an agent's report. `at` above is already the address the
+            // reader takes, so nothing needed inventing.
+            ...(e.text.length > 700
+              ? {
+                  text: `${e.text.slice(0, 700)}…`,
+                  clipped:
+                    "cut at 700 chars - read_timeline_entry with this `at` returns it whole",
+                }
+              : { text: e.text }),
           }));
         // Ruling 153: the pending schedules, read from the task file itself
         // (the summary mapping carries none), so the controller can name and
@@ -1536,6 +1551,35 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "get_task",
+  );
+
+  // Ruling 292: the controller reads a timeline entry whole, exactly as the
+  // operator has since ruling 285. Project-scoped and membership gated like
+  // every other task read here; `read_run_log` is the RUN's log, which is a
+  // different thing from what an agent chose to report on the task.
+  add(
+    tool(
+      "read_timeline_entry",
+      "Read ONE timeline entry of a task in full, addressed by the `at` stamp `get_task` prints for it. `get_task` cuts every entry at 700 characters; this is how you read the rest. Call it before you summarise an agent's report for a person, before you raise anything that turns on what a report said, and before you conclude a report did not mention something - findings are routinely past the cut, and a report you only half-read is one you cannot coordinate from. Read-only.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        at: z
+          .string()
+          .describe("The entry's `at` stamp, exactly as get_task prints it (ISO, to the millisecond)."),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string; at: string }) => {
+        const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
+        requireVisible(slug, "read this task");
+        return readTimelineEntry(
+          { db, ctx: { dataRoot }, projectSlug: slug },
+          key,
+          args.at,
+        );
+      }),
+    ),
+    "read_timeline_entry",
   );
 
   add(

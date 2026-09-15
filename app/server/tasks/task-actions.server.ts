@@ -3191,6 +3191,31 @@ function deadlockAgentNames(
   return file ? agentNamesOf(file.parsed.frontmatter) : new Map();
 }
 
+/**
+ * Ruling 292: the longest verdict justification stored on a task, and the
+ * sentence that ships when it does not fit.
+ *
+ * 2,000 characters is a generous paragraph and a short essay, which is the
+ * right size for the reason a reviewer gives beside its verdict. What was
+ * wrong was the silence: a bare `.slice` meant a long justification was stored
+ * ending mid-word and read, on the task page, as the whole of what the reviewer
+ * said. The full text is never lost - the agent's own report is on the same
+ * timeline, untruncated - so the marker's job is to send the reader there.
+ */
+export const VERDICT_REASON_MAX_CHARS = 2_000;
+
+function clipVerdictReason(text: string): string {
+  const reason = text.trim();
+  if (reason.length <= VERDICT_REASON_MAX_CHARS) return reason;
+  return (
+    `${reason.slice(0, VERDICT_REASON_MAX_CHARS)}\n\n` +
+    `[cut here - the reviewer's justification ran to ` +
+    `${reason.length.toLocaleString("en-US")} characters and this is its first ` +
+    `${VERDICT_REASON_MAX_CHARS.toLocaleString("en-US")}. Its full report is on this ` +
+    `task's timeline, whole.]`
+  );
+}
+
 export async function recordAgentCompletion(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -3421,7 +3446,13 @@ export async function recordAgentCompletion(
               revisionId: rev.id,
               headSha: rev.headSha,
               result: verdict,
-              reason: (replyText ?? "").trim().slice(0, 2000),
+              // Ruling 292: a verdict's justification is a STORED record a
+              // person reads on the task page, and it was a bare `.slice` -
+              // the write-side shape ruling 288 closed for a goal. The cut
+              // stays (a verdict reason is a paragraph, not a report), and it
+              // now says it was cut and where the whole of it is: the agent's
+              // own report, on the same timeline, which is never truncated.
+              reason: clipVerdictReason(replyText ?? ""),
               at: new Date().toISOString(),
               rounds,
             },

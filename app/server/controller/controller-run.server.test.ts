@@ -353,6 +353,36 @@ describe("the turn carries the context read (ruling 121)", () => {
 });
 
 /**
+ * Ruling 292 (pass 37, F37-127): ruling 285 gave the OPERATOR a way to read a
+ * report its prompt had cut. The controller got nothing — and it is the sharper
+ * case of the two, because its `get_task` cuts at 700 rather than 1,500 and it
+ * is the actor a PERSON asks about an agent's report. A rule applied to one
+ * actor and not its sibling, inside this pass's own fix for that shape.
+ */
+describe("ruling 292: the controller can read an entry its own read cut", () => {
+  it("mounts read_timeline_entry, unconditionally", async () => {
+    const { buildControllerMounts } = await import("./controller-run.server");
+    const mounts = buildControllerMounts(app.db, {
+      user,
+      projectSlug: "viberr-core",
+      taskKey: null,
+      orgServers: {},
+      kb: [],
+      dataRoot: app.dataRoot,
+    });
+    // Canary: drop the mount and the controller is back to summarising reports
+    // from their first 700 characters with nowhere to go for the rest.
+    expect(mounts.allowedTools).toContain(
+      "mcp__viberr_controller__read_timeline_entry",
+    );
+    // It is a READ, so it belongs with the other reads and needs no grant:
+    // `read_run_log` is the RUN's log, a different thing from what an agent
+    // chose to report on the task.
+    expect(mounts.allowedTools).toContain("mcp__viberr_ops__read_run_log");
+  });
+});
+
+/**
  * Ruling 283 — the controller's prompt INDEXES its knowledge bases and its
  * toolkit reads them. Two reads of "which knowledge bases does this turn hold"
  * is how a run ends up with a prompt naming a knowledge base its own tool

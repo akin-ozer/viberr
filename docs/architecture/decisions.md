@@ -4209,6 +4209,28 @@ by rewriting those paragraphs:*
     `github-reconciler.server.ts`, `operator-run.server.ts`, `decision-packet.tsx`,
     `github-view.tsx`, and the sweep that counts them.)
 
+292. **Ruling 285 for the controller, and the verdict reason that was cut in silence
+    (2026-09-15, pass 37; F37-127, completes 285 and 288).** Ruling 285 gave the OPERATOR
+    `read_timeline_entry` so a report its prompt had cut at 4,000 characters could be read
+    whole. The controller got nothing — and it is the SHARPER of the two cases: its
+    `get_task` cuts every timeline entry at 700 rather than 1,500, and it is the actor a
+    PERSON asks about an agent's report. A rule applied to one actor and not its sibling,
+    written into the very ruling that exists to end that shape. Found by sweeping every
+    remaining `.slice(0, N)` on model-facing text rather than by tripping over it, which is
+    the only reason it was found at all.
+    The controller now mounts the same reader, over the same implementation. Its `get_task`
+    payload already printed `at` — the exact address the reader takes — so nothing needed
+    inventing, and a cut entry now carries a `clipped` line naming the tool beside the text
+    it cut. It is a read, so it joins the other reads and needs no grant; `read_run_log` is
+    the RUN's log, which is a different thing from what an agent chose to report.
+    The same sweep found the WRITE-side twin. A reviewer's verdict `reason` — a stored
+    record a person reads on the task page beside approve or request_changes — was a bare
+    `.slice(0, 2000)`, so a long justification was stored ending mid-word and read as the
+    whole of what the reviewer said. Ruling 288's shape, in a second field. The cut stays
+    (a verdict reason is a paragraph, not a report) and it now says it was cut and where
+    the whole of it is: the agent's own report, on the same timeline, never truncated.
+    (`controller-toolkit.server.ts`, `task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
