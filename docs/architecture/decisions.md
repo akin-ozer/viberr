@@ -6269,11 +6269,25 @@ by rewriting those paragraphs:*
     `conventions.md` (20,632 chars) took all 15,817 chars the budget had left, cut itself
     off mid-sentence inside its own §9 — "The gateway is a stronger boundary than a
     service, no" — and left ZERO for `published-history.md` (185 chars) and
-    `standing-corrections.md` (281 chars). 466 characters of WHOLE documents were spent
-    buying 466 characters of a document that was being truncated either way. SHOP-27's own
-    goal says "See published-history.md in the project's rulings knowledge base"; no run on
-    that board could ever receive it, and the deliverer on SHOP-37 reported exactly that
-    from inside the run.
+    `standing-corrections.md` (281 chars). SHOP-27's own goal says "See
+    published-history.md in the project's rulings knowledge base"; no run on that board
+    could ever receive it, and the deliverer on SHOP-37 reported exactly that from inside
+    the run.
+    THE COST, corrected by the controller the hour this shipped, because the first account
+    of it — the two small documents — was the visible half and the cheap half. Both of
+    them turned out to be tombstones: "Merged into conventions.md §2 on 2026-09-15 to fit
+    the shared KB budget. Nothing was lost." They held no rules, and SHOP-27's dangling
+    pointer was harmless because §2 sits near the top and arrived by the surviving route.
+    What was actually lost was the OTHER end — the tail of the document that won. Past the
+    cut sat the project's definition of DONE ("deliverable at the declared paths and
+    nothing outside them; lint, typecheck and tests pass for the touched workspaces; new
+    behaviour has tests that fail without it"), "close a finding by mutation, not by the
+    deliverer's summary", and the whole of §10: one task = one branch = one PR, keep the
+    diff inside the declared path set, raise conflicts at DESIGN. No run on this board had
+    ever read any of it. SHOP-42 sat blocked that same afternoon because a delivery left
+    the suite red — the first clause of a definition of Done no deliverer could read. A
+    budget does not drop the least important thing; it drops whatever is last, and rules
+    accrete at the end of a document.
     Ruling 261 had already raised a floor for this, because `standing-corrections.md` was
     arriving cut off mid-word — and the floor was then eaten by the alphabetically-first
     document inside the very knowledge base it was protecting. It is the pass's own pattern
