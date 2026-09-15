@@ -1694,7 +1694,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_default_branch_file",
-      "Read one file AS THE PROJECT'S DEFAULT BRANCH HAS IT, out of the project's own git mirror. This is how you check a claim about the repository yourself instead of repeating somebody's read of it: what a goal says a file contains, whether a route or a contract is already there, what a report asserts about the tree. It answers about the DEFAULT branch only, never a task's branch or a pull request's head - `read_pull_request` is the one that reads a PR's changed files. A path that is not on that branch is named and reported ABSENT, which is an answer and not a failure. Read-only, membership gated.",
+      "Read one file AS THE PROJECT'S DEFAULT BRANCH HAS IT, out of the project's own git mirror. This is how you check a claim about the repository yourself instead of repeating somebody's read of it: what a goal says a file contains, whether a route or a contract is already there, what a report asserts about the tree. It answers about the DEFAULT branch only, never a task's branch or a pull request's head - `read_pull_request` is the one that reads a PR's changed files. A path that is not on that branch is named and reported ABSENT, which is an answer and not a failure. On a project whose repository has never been cloned here, the FIRST call builds the mirror and can take minutes; every call after it is fast. Read-only, membership gated.",
       {
         projectSlug: z.string().optional(),
         path: z

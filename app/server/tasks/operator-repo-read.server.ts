@@ -282,6 +282,12 @@ export async function readProjectDefaultBranchFile(
     // doing the architecture work that most needs to read the repository.
     create: true,
   };
+  // The residual, stated: on a project whose repository has never been cloned
+  // on this instance, this builds the mirror inside the tool call, bounded by
+  // the clone timeout (15 minutes by default). The controller's tool text says
+  // so. The alternative was a tool that can never answer on exactly the
+  // project where the architecture work happens, which is worse, and every
+  // call after the first is a fetch.
   const cred = getProjectCredential(db, input.projectSlug);
   if (cred) request.token = getPatToken(db, cred.id);
   if (input.dataRoot) request.dataRoot = input.dataRoot;

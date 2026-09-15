@@ -4514,6 +4514,11 @@ by rewriting those paragraphs:*
     missing fact and the tab where a person sets it (ruling 246, existence before type). A
     path that is not on the branch is `[absent]`, which is an ANSWER. A file past 60,000
     characters says it clipped and what to do instead (ruling 285).
+    The residual is stated rather than papered over: on a project whose repository has
+    never been cloned here, that first call BUILDS the mirror inside the tool call, bounded
+    by the clone timeout (15 minutes by default), and the tool's own text says so. The
+    alternative was a tool that can never answer on exactly the project where the
+    architecture work happens. Every call after the first is a fetch.
 
 300. **A decision says what answering it releases (owner, 2026-09-16, pass 37; F37-135).**
     `list_decisions` told the controller what is waiting for a person and what each card
