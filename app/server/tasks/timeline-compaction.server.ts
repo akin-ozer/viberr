@@ -18,6 +18,10 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
  *    and the marker keeps only a count, so folding a person's prose deletes it
  *    from the source of truth permanently, to save noise the person did not
  *    make. Machine prose is regenerable and cheap to lose; a person's is not.
+ *  - Ruling 257: neither is a CONTROLLER comment, for the same reason. It is a
+ *    person publishing through an instrument, not a machine narrating; the
+ *    actor kind records the instrument, and reading it as authorship deleted
+ *    eleven of the owner's own comments from the live board.
  *  - AGENT replies now DO fold, except the newest one still in the older
  *    region. Excluding agents outright meant an agent-heavy timeline — the
  *    flood case anti-noise exists for — never compacted at all. Keeping the
@@ -93,6 +97,25 @@ export function compactTimelineEvents(
     !e.toAgent &&
     // B-FD9: a person's prose is never deleted from canonical task.md.
     e.actor.kind !== "human" &&
+    // Ruling 257 (pass 37, F37-87): a CONTROLLER comment is a person's prose
+    // too. Ruling 99(b) deliberately made the controller a different actor kind
+    // — the person is the authority, the controller is the instrument — and
+    // every other seam honours that: the audit row reads
+    // "arda@viberr.dev · via controller", the comment is signed "Posted by the
+    // controller for Arda", `auditActorDisplay` renders "Arda (via the
+    // controller)". This was the one place that read `kind` as a proxy for
+    // AUTHORSHIP, so the instrument disclosure turned the person's own
+    // publication into machine noise and deleted it.
+    //
+    // Measured on the live board before the fix: 19 controller comments in the
+    // audit log, 8 left in the files. Eleven of the owner's own published
+    // comments gone from canonical `task.md`, from `task_events`, and from the
+    // audit payload (`details_json` is `{"actorRef":"controller"}` and nothing
+    // else) — including the two on SHOP-5 that explained a `pnpm-lock.yaml`
+    // lease the board was still enforcing. And the line that replaced them says
+    // "human comments are never compacted", so nobody who noticed the gap would
+    // even look.
+    e.actor.kind !== "controller" &&
     // Ruling 209: a comment carrying EVIDENCE is not prose — it is the pointer
     // to files the evidence-separation guardrail moved out of the timeline and
     // onto disk. Folding it keeps a count and drops the reference, orphaning

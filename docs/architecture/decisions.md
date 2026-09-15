@@ -5670,6 +5670,39 @@ by rewriting those paragraphs:*
     The anchor now applies only when the project asked about IS the project it was anchored in.
     (`controller-toolkit.server.ts`.)
 
+257. **The controller writes on a person's behalf, and nothing may delete what a person wrote
+    (2026-09-15, pass 37; F37-87, F37-88).** Two ways the product destroyed the owner's own
+    words, found by an adversarial audit of the controller and both verified against the live
+    board.
+    (a) Timeline compaction folds any comment whose actor is not `human`. Ruling 99(b)
+    deliberately made a controller write a DIFFERENT actor kind — the person is the authority,
+    the controller is the instrument — and every other seam honours that: the audit row reads
+    "arda@viberr.dev · via controller", the comment is signed "Posted by the controller for
+    Arda", `auditActorDisplay` renders "Arda (via the controller)". Compaction was the one place
+    that read `kind` as a proxy for AUTHORSHIP, so the instrument disclosure turned a person's
+    publication into machine noise. Measured before the fix: **19 controller comments in the
+    audit log, 8 left in the files.** Eleven of the owner's own comments gone from canonical
+    `task.md`, from `task_events`, and from the audit payload — including the two on SHOP-5 that
+    explained a `pnpm-lock.yaml` lease the board was still enforcing. And the line that replaced
+    them reads "human comments are never compacted", so a reader who noticed the gap would not
+    look. A controller comment is now never folded, and the marker's promise is true of
+    everything it covers.
+    (b) `save_knowledge_base`'s `doc` passed `overwrite: true` unconditionally, so
+    `writeStoreDoc`'s own collision guard could never fire and its `replaced` flag was thrown
+    away: the reply read "Document conventions.md written" whether it created a file or
+    destroyed one. The HUMAN door for the same write refuses the collision unless a replace
+    confirmation says otherwise, and its toast says "replaced" or "saved" from that same flag
+    (P14-UI-59, which exists because this exact bug was fixed on the UI). It is also the ONLY
+    way into an existing KB, since a no-id create is refused once the folder has a metadata row
+    — so the project's rulings KB, injected into every run on the project, was one call away
+    from erasure by a model writing the obvious filename, which the tool's own example gives as
+    `conventions.md`. A collision is now refused without `replace: true`, the reply says which
+    happened and how many bytes a replace destroyed, `list_knowledge_bases` names the documents
+    rather than counting them, and `read_knowledge_base_doc` lets a write carry the text forward
+    instead of guessing at it. A tool that can only destroy blind is not a tool a model should
+    be handed.
+    (`timeline-compaction.server.ts`, `controller-toolkit.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

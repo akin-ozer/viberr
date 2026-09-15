@@ -108,6 +108,43 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     ).toBe(true);
   });
 
+  /**
+   * Ruling 257 (pass 37, F37-87). Ruling 99(b) made a controller write a
+   * DIFFERENT actor kind on purpose — the person is the authority, the
+   * controller is the instrument — and every other seam honours that: the audit
+   * row reads "arda@viberr.dev · via controller", the comment is signed "Posted
+   * by the controller for Arda". This was the one place that read `kind` as a
+   * proxy for AUTHORSHIP.
+   *
+   * Measured on the live shopify-clone board before the fix: 19 controller
+   * comments in the audit log, 8 left in the task files. Eleven of the owner's
+   * own published comments deleted from canonical `task.md`, from `task_events`
+   * and from the audit payload, including the two on SHOP-5 that explained a
+   * lease the board was still enforcing — under a marker that says human
+   * comments are never compacted, so nobody who saw the gap would look.
+   */
+  it("ruling 257: never folds a CONTROLLER comment either — it is a person publishing", () => {
+    const controller = (i: number, text: string) =>
+      comment(i, { actor: { kind: "controller" }, text });
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),
+      ...Array.from({ length: 6 }, (_, i) => comment(20 + i)),
+      controller(9, "pnpm-lock.yaml is leased to SHOP-20; here is why.\n\n_Posted by the controller for Arda._"),
+      ...Array.from({ length: 6 }, (_, i) => comment(i)),
+    ];
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    // CANARY: drop the `kind !== "controller"` clause and this prose is gone,
+    // replaced by a line asserting that human comments are never compacted.
+    expect(out.length).toBeLessThan(events.length); // machine prose still folds
+    expect(out.some((e) => e.text.startsWith("pnpm-lock.yaml is leased"))).toBe(true);
+    // And the marker's promise is now true of everything it covers.
+    const marker = out.find((e) => e.title === COMPACTION_TITLE)!;
+    expect(marker.text).toContain("human comments are never compacted");
+    expect(
+      out.filter((e) => e.actor.kind === "controller" || e.actor.kind === "human"),
+    ).toHaveLength(1);
+  });
+
   it("folds an AGENT-reply flood but keeps the newest reply of each run", () => {
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),

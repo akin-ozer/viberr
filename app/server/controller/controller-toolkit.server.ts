@@ -58,7 +58,11 @@ import {
   saveGlobalAgentProfile,
   type SaveGagentInput,
 } from "~/server/org/gagents.server";
-import { writeStoreDoc } from "~/server/org/store-files.server";
+import {
+  readStoreDoc,
+  scanStoreTree,
+  writeStoreDoc,
+} from "~/server/org/store-files.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
@@ -277,6 +281,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     return slug;
   }
   const boundTask = deps.taskKey ?? null;
+
+  /** Ruling 257: the document names a KB folder holds, so a write can see a
+   *  collision coming. Names only — content comes from
+   *  `read_knowledge_base_doc`, which is org-admin gated like every other read
+   *  here. Best effort: a folder that cannot be scanned lists nothing rather
+   *  than failing the whole listing. */
+  function kbDocumentNames(kbId: string): string[] {
+    const target = resolveStoreTarget(db, "kb", kbId, { dataRoot });
+    if (!target) return [];
+    try {
+      return scanStoreTree(target.rootAbs)
+        .filter((n) => n.type === "file")
+        .map((n) => n.name);
+    } catch {
+      return [];
+    }
+  }
   /**
    * Resolve a task tool's key against the conversation's anchor (ruling 121).
    *
@@ -542,6 +563,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             dir: kb.dir,
             refresh: kb.refresh,
             files: kb.fileCount,
+            // Ruling 257 (F37-88): the NAMES, not just a count. A `doc` write
+            // replaces a whole file, and the model could not see that the name
+            // it was about to write was already taken — the tool's own example
+            // path, `conventions.md`, is the live rulings file on this very
+            // instance.
+            documents: kbDocumentNames(kb.id),
           })),
         );
       }),
@@ -551,8 +578,38 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   add(
     tool(
+      "read_knowledge_base_doc",
+      "Read one document out of a knowledge base, so a `save_knowledge_base` write can carry the text forward instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type).",
+      {
+        id: z.string().describe("KB id, from list_knowledge_bases."),
+        path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
+      },
+      runWith((args: { id: string; path: string }) => {
+        requireOrgAdmin("read the org knowledge bases");
+        const target = resolveStoreTarget(db, "kb", args.id, { dataRoot });
+        if (!target) return `[denied] No knowledge base with id ${args.id}.`;
+        const doc = readStoreDoc(target, [args.path]);
+        if (!doc) {
+          return (
+            `[denied] ${args.path} is not a document in that knowledge base. ` +
+            `list_knowledge_bases names what it holds.`
+          );
+        }
+        return json({
+          path: args.path,
+          bytes: doc.text.length,
+          truncated: doc.truncated,
+          text: doc.text,
+        });
+      }),
+    ),
+    "read_knowledge_base_doc",
+  );
+
+  add(
+    tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. No delete exists here. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes).",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` (ruling 257): read the existing text first with read_knowledge_base_doc and send it back with your change, or nothing you leave out survives. The reply says which happened, and how many bytes a replace destroyed.",
       {
         id: z
           .string()
@@ -569,7 +626,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         doc: z
           .object({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
-            content: z.string(),
+            content: z.string().describe("The WHOLE file. There is no append; what you omit is gone."),
+            replace: z
+              .boolean()
+              .optional()
+              .describe(
+                "Required to overwrite a file that already exists. Read it first; `content` replaces all of it.",
+              ),
           })
           .optional()
           .describe("A document to write into the KB folder."),
@@ -579,7 +642,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           id?: string;
           name: string;
           refresh?: KbRefreshMode;
-          doc?: { path: string; content: string };
+          doc?: { path: string; content: string; replace?: boolean };
         }) => {
           requireOrgAdmin("manage knowledge bases");
           const saved = await saveKnowledgeBase(
@@ -598,10 +661,30 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (!target) {
               return `${head} The document could not be written: the KB folder did not resolve.`;
             }
-            writeStoreDoc(db, target, [], args.doc.path, args.doc.content, auditActor, {
-              overwrite: true,
-            });
-            docNote = ` Document ${args.doc.path} written.`;
+            // Ruling 257 (pass 37, F37-88): `overwrite: true` used to be
+            // hardcoded, so the writer's own collision guard could never fire
+            // and the returned `replaced` flag was discarded — the reply read
+            // "Document conventions.md written" whether it created a file or
+            // destroyed one. The HUMAN door for the same write refuses the
+            // collision unless a replace confirmation says otherwise, and its
+            // toast says "replaced" or "saved" from this same flag. Live, this
+            // tool is the only way into an existing KB (a no-id create is
+            // refused once the folder has a metadata row), and the project's
+            // rulings KB — injected into EVERY run on the project — is one call
+            // away from being erased by a model writing the obvious filename.
+            const before = readStoreDoc(target, [args.doc.path]);
+            const written = writeStoreDoc(
+              db,
+              target,
+              [],
+              args.doc.path,
+              args.doc.content,
+              auditActor,
+              { overwrite: args.doc.replace === true },
+            );
+            docNote = written.replaced
+              ? ` Document ${written.path.join("/")} REPLACED: its previous ${before?.text.length ?? "unknown"} bytes are gone, ${written.bytes} written.`
+              : ` Document ${written.path.join("/")} saved (${written.bytes} bytes).`;
           }
           return `${head}${docNote}`;
         },

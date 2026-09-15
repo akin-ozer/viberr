@@ -2188,6 +2188,76 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     expect(rows[0]).toMatchObject({ id, refresh: "on change" });
   });
 
+  /**
+   * Ruling 257 (pass 37, F37-88): a `doc` write REPLACES a whole file, so it
+   * says so and refuses a silent clobber.
+   *
+   * `overwrite: true` was hardcoded, so `writeStoreDoc`'s own collision guard
+   * could never fire and its `replaced` flag was discarded — the reply read
+   * "Document conventions.md written" whether it created a file or destroyed
+   * one. The HUMAN door for the same write refuses the collision unless a
+   * replace confirmation says otherwise, and its toast says "replaced" or
+   * "saved" from that same flag. Live, this is the ONLY way into an existing KB
+   * (a no-id create is refused once the folder has a metadata row), and the
+   * shopify-clone board's rulings KB — injected into every run on the project —
+   * was one call away from erasure by a model writing the obvious filename.
+   */
+  it("ruling 257: a doc that would overwrite is refused, names itself, and says REPLACED when told to", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "ORIGINAL RULES, 20 bytes+" },
+    });
+    expect(created).toContain("saved (");
+    expect(created).not.toContain("REPLACED");
+    const id = /id (kb_[A-Za-z0-9_-]+)/.exec(created)![1]!;
+
+    // The model can SEE the collision coming: names, not just a count.
+    // CANARY: drop `documents` from list_knowledge_bases and the model has no
+    // way to know the name it is about to write is taken.
+    // SAFETY: `list_knowledge_bases` answers `json()` over rows that always
+    // carry `id` and, since ruling 257, `documents`.
+    const kbs = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as {
+      id: string;
+      documents: string[];
+    }[];
+    expect(kbs.find((k) => k.id === id)!.documents).toContain("conventions.md");
+
+    // …and it can read it, so a write can carry the text forward.
+    // SAFETY: `read_knowledge_base_doc` answers `json()` over an object that
+    // always carries `text` when it does not return a `[denied]` string, and the
+    // document was just written by the call above.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "conventions.md" }),
+    ) as { text: string };
+    expect(read.text).toBe("ORIGINAL RULES, 20 bytes+");
+
+    // Writing the same name WITHOUT `replace` is refused by the writer's own
+    // sentence, and the original survives.
+    // CANARY: restore `overwrite: true` and this call reports "[done] … written"
+    // while the original is gone.
+    const refused = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "the model's new note" },
+    });
+    expect(refused).toContain("already exists");
+    // SAFETY: same reader, same document, and the refusal above means it is
+    // still there.
+    const after = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "conventions.md" }),
+    ) as { text: string };
+    expect(after.text).toBe("ORIGINAL RULES, 20 bytes+");
+
+    // Told to replace, it does — and says what it destroyed.
+    const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "ORIGINAL RULES, 20 bytes+\n\nand the new note", replace: true },
+    });
+    expect(replaced).toContain("REPLACED");
+    expect(replaced).toContain("previous 25 bytes are gone");
+  });
+
   it("save_skill's reply carries the skill id and grant key the same way", async () => {
     const created = await call(ids.orgAdmin, "save_skill", {
       name: "reply-probe-craft",

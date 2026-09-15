@@ -4498,3 +4498,74 @@ confident "nothing" stops them looking.
 **Fix (ruling 256b).** The anchor applies only when the project asked about is the project it was
 anchored in. Canaried: restoring the old line makes the cross-project read come back empty while
 the packet sits there.
+
+## F37-87 · Compaction deleted eleven of the owner's own comments, under a line saying it never does — HIGH
+
+Found by the pass-37 controller audit, verified independently against the live board in two
+commands.
+
+```
+controller comments still in the task files:   8
+controller comments in the audit log:         19
+```
+
+Eleven gone. SHOP-5 carries **zero** occurrences of the string "controller" and two audited
+controller comments; `task_events` for SHOP-5 with `actor_ref='controller'` returns 0; the audit
+row's whole payload is `{"actorRef":"controller"}`. The prose is unrecoverable from anywhere.
+
+Among the missing: the two SHOP-5 comments that explained why `pnpm-lock.yaml` was leased. The lease
+was still being enforced this morning — the Integration Verifier refused a delivery over it — while
+the explanation existed nowhere.
+
+**Mechanism.** `isRoutineComment` decides "is this a person's prose?" with `e.actor.kind !==
+"human"`. Ruling 99(b) deliberately made a controller write a *different* actor kind, because the
+person is the authority and the controller is the instrument. Every other seam honours that: the
+audit row is `arda@viberr.dev · via controller`, the comment is signed `_Posted by the controller
+for Arda._`, `auditActorDisplay` renders "Arda (via the controller)". Compaction is the one place
+that reads `kind` as a proxy for **authorship**.
+
+**And the marker lies about it**, in the Operator's name:
+
+> `_5 earlier routine comments compacted to keep the task readable — human comments are never
+> compacted._`
+
+So a reader who notices the gap is told, on the very line that replaced the prose, not to look.
+
+**Fix (ruling 257a).** A controller comment is never folded. Canaried: removing the clause deletes
+the prose and leaves the marker asserting the opposite.
+
+## F37-88 · The one door into an existing knowledge base could only destroy, and called it "written" — HIGH
+
+`save_knowledge_base`'s `doc` passed `overwrite: true` unconditionally:
+
+```ts
+writeStoreDoc(db, target, [], args.doc.path, args.doc.content, auditActor, { overwrite: true });
+docNote = ` Document ${args.doc.path} written.`;
+```
+
+`writeStoreDoc` has a collision guard (`if (existed && !opts.overwrite) throw AppError.conflict(…)`)
+that could never fire, and returns `replaced: existed` so a caller can disclose — discarded. The
+reply is the same string whether it created a file or destroyed one.
+
+**The human door for the identical write does the opposite on both counts**, and only because this
+exact bug was already fixed there once:
+
+> `// P14-UI-59: writing was create-OR-overwrite behind one "saved" toast, so authoring a name that
+> already existed destroyed the old file with a success message.`
+
+**Why it is not an edge case.** `saveKnowledgeBase` refuses a no-id create whose folder already has
+a metadata row, so **every** controller write into an existing KB goes through the `id` path — the
+one that hardcoded the clobber. The controller also had no way to see it coming:
+`list_knowledge_bases` returned a file *count*, and no read tool existed. The tool's own example
+path is `conventions.md` — the live filename of this board's rulings KB, which ruling 239 injects
+into every run on the project. One model writing the obvious name erases the settled rules for the
+operator, every specialist and the controller itself, and is told `[done] … Document conventions.md
+written.`
+
+**Fix (ruling 257b).** A collision is refused without `replace: true`; the reply says which happened
+and how many bytes a replace destroyed; `list_knowledge_bases` names the documents; and
+`read_knowledge_base_doc` lets a write carry the existing text forward. Requiring `replace` without
+a read would only have made the destruction deliberate and still blind.
+
+Canaried both ways: restoring `overwrite: true` makes the refusal disappear, and emptying
+`documents` blinds the model to the collision.
