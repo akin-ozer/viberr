@@ -4387,6 +4387,12 @@ by rewriting those paragraphs:*
     reflection inside the wrapper: rebuilding drops the `.describe()` text that IS the
     agent's instructions, and a rule you can read in the field map beats one you have to
     know a wrapper applies. Eleven nested objects existed and every one was stripping.
+    MEASURED SAFE against live traffic, because a strictness that starts refusing real
+    calls is a worse defect than the one it fixes: 191 tool calls across the stored run
+    logs used only declared top-level arguments, and 94 nested objects (a packet's
+    `observations` and `options`, a goal's `links`) used only declared fields --
+    `code`, `goalDraft`, `newTask` and the rest are all in the schemas. Nothing any
+    agent does today is refused by this.
     AMENDED the same day, from the controller taking the refusal and calling it "the least
     helpful of the five": it named the rejected key and not the accepted ones, and `status`
     was a near-miss of `state`, which IS a field of that tool's output. A refusal you have
