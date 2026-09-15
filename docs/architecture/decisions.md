@@ -4265,6 +4265,22 @@ by rewriting those paragraphs:*
     name that climbs out of the task's own folder resolves to nothing (the containment every
     store path uses); a file past the read cap says it was cut. A name this task does not
     hold answers with what it DOES hold, rather than implying a deletion.
+    WHAT IT WAS FOR, an hour after it shipped. The controller had written SHOP-50's goal
+    from a reviewer's summary, asserting as settled that cart's integration suite times out
+    under unconstrained parallelism. Reading the reports and their attachments in full, it
+    found a second run on the SAME head, 40 minutes later, with the SAME unconstrained
+    command, at exit 0 — and a third failure shape again on a clean workspace. It stopped
+    its own dispatch, rewrote the goal to open "the premise of this task is contested, and
+    establishing which account is true IS the first deliverable … Do not inherit it", laid
+    out the three observations with their times and heads, and said in the goal itself: "I
+    have read that report and its attachments in full; this is quoted from them, not from a
+    summary." Then it fenced the work — reproduce before you repair, profile before you
+    assume, a raised timeout is the same defect with a bigger number, and a cost found in
+    production code is a scope question rather than a licence.
+    That is the whole argument for this ruling in one turn: the difference between a
+    coordinator that relays a claim and one that checks it is whether it can open the file
+    the claim was made from. Without it the false premise reaches an agent as settled fact,
+    in a goal, which is the one text every future run re-anchors on (ruling 189).
     (`task-attachments.server.ts`, `controller-toolkit.server.ts`,
     `operator-toolkit.server.ts`.)
 
