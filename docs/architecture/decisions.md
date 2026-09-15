@@ -4559,9 +4559,16 @@ by rewriting those paragraphs:*
     mistaken for the whole history, and `timelineOlder` appears ONLY when something is
     hidden, naming how many were left out and both ways to reach them: `events` to widen,
     `read_timeline_entry` to read one in full. The default stays six, because the size was
-    never the defect; the silence was. The prompt-size rationale in the original comment
-    did not survive checking either: `operatorSnapshot` has exactly one caller, this tool,
-    so the window was never riding in every prompt.
+    never the defect; the silence was.
+    CORRECTED, same day, before this ruling had been standing an hour. It first said the
+    prompt-size rationale "did not survive checking" because `operatorSnapshot` had "exactly
+    one caller, this tool, so the window was never riding in every prompt". That was wrong,
+    and wrong the way this pass keeps finding things wrong: a grep scoped to the two
+    directories I was already looking at. `operator-run.server.ts` calls it twice more, to
+    build the prompt, exactly as the original comment said. The bound is real and the
+    default staying six is what respects it. The disclosure is the better for it: both
+    prompt callers take the default, so `timelineTotal` and `timelineOlder` now reach the
+    operator in its PROMPT as well as through the tool, which is where it needed them.
 
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
