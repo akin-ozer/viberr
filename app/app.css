@@ -1757,6 +1757,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-left: 2px solid var(--border);
 }
 .opt .pkt-new-task strong { color: var(--fg); font-weight: 600; }
+.opt .pkt-new-task-goal { max-height: 11rem; overflow-y: auto; white-space: pre-wrap; }
 .opt .rec-tag { margin-left: auto; flex: none; margin-top: .05rem; }
 /* Questionnaire shortcut chip (digit selects the choice). `margin-left: auto`
    pushes it right; a rec-tag already claiming the auto margin leaves the chip

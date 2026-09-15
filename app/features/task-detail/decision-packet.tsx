@@ -1198,25 +1198,28 @@ export function DecisionPacket({
                     {o.d}
                     {refusal ? refusal.note : ""}
                   </div>
-                </span>
-                {/* Ruling 269: a create_task option writes a NEW task, and
+                  {/* Ruling 269: a create_task option writes a NEW task, and
                     until it is confirmed that task exists only inside the
                     option's payload. Show what is about to be created — the
                     title and the goal it will be worked to — so the person is
                     confirming the task rather than the sentence describing it.
                     Selected only: unselected, four options each carrying a
                     goal would bury the choice. */}
-                {o.kind === "create_task" && o.newTask && sel === i && (
-                  <span className="od pkt-new-task">
-                    <strong>Creates {o.newTask.title}</strong>
-                    <span className="fine">{o.newTask.goal}</span>
-                    {o.newTask.blockedBy && o.newTask.blockedBy.length > 0 && (
-                      <span className="fine dim">
-                        waits on {o.newTask.blockedBy.join(", ")}
-                      </span>
-                    )}
-                  </span>
-                )}
+                  {o.kind === "create_task" && o.newTask && sel === i && (
+                    <span className="od pkt-new-task">
+                      <strong>Creates {o.newTask.title}</strong>
+                      {/* A task goal is a contract, and a good one runs to
+                          paragraphs — it scrolls in place rather than pushing
+                          the other choices off the card. */}
+                      <span className="fine pkt-new-task-goal">{o.newTask.goal}</span>
+                      {o.newTask.blockedBy && o.newTask.blockedBy.length > 0 && (
+                        <span className="fine dim">
+                          waits on {o.newTask.blockedBy.join(", ")}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </span>
                 {/* The destructive half of archive_task is loud: this option
                     doesn't just file the task away, it deletes the remote
                     branch. */}
