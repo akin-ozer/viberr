@@ -164,6 +164,61 @@ export function listTemplateResourceDrift(
   return out;
 }
 
+/**
+ * Ruling 277 (pass 37, F37-110): the projects whose deployed copy carries an
+ * OLDER persona or summary than the template's.
+ *
+ * `listTemplateResourceDrift` compares `definition.resources` and nothing else,
+ * because ruling 156 was written about grants. The same copy also holds the
+ * `persona` — the run's whole system prompt — and the `desc` the operator
+ * selects agents by, and nothing compared either. P13-AP-07 already settled
+ * that a deployment is a SNAPSHOT and that a later org-level "persona fix never
+ * reaches it"; what was missing is anyone SAYING so at the moment of the fix.
+ * Live: the controller rewrote four templates whose personas described a
+ * machine this host is not, checked `copiesDiffering` afterwards, read `[]`,
+ * and reported the job done — while the four agents running at that moment
+ * still mounted the old text. A drift report that answers "no copy differs"
+ * about a copy that differs is worse than no drift report.
+ */
+export interface TemplateTextDrift {
+  projectSlug: string;
+  projectName: string;
+  /** Which fields the copy holds an older value for. */
+  fields: ("persona" | "summary")[];
+}
+
+export function listTemplateTextDrift(
+  db: DatabaseSync,
+  profileId: string,
+  ctx: PropagationContext = {},
+): TemplateTextDrift[] {
+  const template = readTemplate(profileId, ctx.dataRoot);
+  if (!template) return [];
+  const out: TemplateTextDrift[] = [];
+  for (const row of liveProjectRows(db)) {
+    const file = readProjectFile({ projectSlug: row.slug, dataRoot: ctx.dataRoot });
+    if (!file) continue;
+    const def = file.parsed.frontmatter.agents.find(
+      (a) => a.profileId === profileId,
+    )?.definition;
+    // A deployment with no definition resolves the template live, so it cannot
+    // be behind it — the same exclusion the resource drift makes.
+    if (!def) continue;
+    const fields: ("persona" | "summary")[] = [];
+    // A template's persona is its markdown BODY (F10-30), the same value
+    // `identityOverride` compares against. An ABSENT key on the copy is not
+    // drift: it means the copy never snapshotted one and resolves live.
+    if (def.persona !== undefined && def.persona !== template.description) {
+      fields.push("persona");
+    }
+    if (def.desc !== undefined && def.desc !== template.desc) fields.push("summary");
+    if (fields.length > 0) {
+      out.push({ projectSlug: row.slug, projectName: file.parsed.frontmatter.name, fields });
+    }
+  }
+  return out;
+}
+
 export interface PropagatedCopy {
   projectSlug: string;
   projectName: string;

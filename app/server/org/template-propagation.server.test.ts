@@ -243,8 +243,13 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
       drift: { missing: { mcps: ["github"] } },
     });
     expect(edited.propagated).toEqual([]);
+    // Ruling 277: the same edit also left this copy's SUMMARY behind — a
+    // deployment snapshots it and `propagate` rewrites only the grants. This
+    // fixture always had that drift; nothing said so until now.
     expect(edited.toast).toBe(
-      "Developer updated · running threads re-anchor on the next turn · 1 project copy keeps its own grants",
+      "Developer updated · running threads re-anchor on the next turn · 1 project copy keeps its own grants" +
+        " · 1 project copy still runs the older summary: viberr-core. A deployment snapshots the" +
+        " summary, and propagate does not rewrite it — fix each copy on that project's Agents page",
     );
     expect(copyOf(store).definition?.resources?.mcps).toEqual([]);
 
@@ -253,7 +258,9 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
     expect(propagated.propagated.map((p) => p.projectSlug)).toEqual(["viberr-core"]);
     expect(propagated.diverged).toEqual([]);
     expect(propagated.toast).toBe(
-      "Developer updated · running threads re-anchor on the next turn · grants copied to 1 project",
+      "Developer updated · running threads re-anchor on the next turn · grants copied to 1 project" +
+        " · 1 project copy still runs the older summary: viberr-core. A deployment snapshots the" +
+        " summary, and propagate does not rewrite it — fix each copy on that project's Agents page",
     );
     expect(copyOf(store).definition?.resources?.mcps).toEqual(["github"]);
     const updated = listAuditEvents(store.db, { action: "org.agent_profile.updated" })[0]!;

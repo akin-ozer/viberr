@@ -1837,6 +1837,60 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(audit).toMatchObject({ projectSlug: SLUG, subjectId: AGENT_ID });
     expect(audit.actorLabel).toContain("via controller");
   });
+
+  /**
+   * Ruling 277 (pass 37, F37-110): a deployment SNAPSHOTS the persona and the
+   * summary as well as the grants (P13-AP-07), `propagate` rewrites only the
+   * grants, and nothing compared the text — so `copiesDiffering: []` read as
+   * "every copy is current" about copies that were not. Live: the controller
+   * rewrote four templates whose personas described a machine this host is
+   * not, checked the drift afterwards, read `[]`, and reported the job done
+   * while the four agents running at that moment still mounted the old text.
+   */
+  it("ruling 277: a persona edit that reaches no deployed copy says so", async () => {
+    // Self-contained: its own template, with a body, deployed before the edit.
+    const ID = "persona-drift-probe";
+    const created = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Persona Drift Probe",
+      backend: "claude",
+      summary: "Probes whether a persona edit reaches a deployed copy.",
+      persona: "You own the Docker Compose stack.",
+      stages: ["impl"],
+    });
+    expect(created).toContain("[done]");
+    expect(await call(ids.projectAdmin, "deploy_agent", { profileId: ID })).toContain("[done]");
+
+    // The grants are untouched, so the RESOURCE drift stays empty — which is
+    // precisely the reading that misled: nothing about the grants changed.
+    const edited = await call(ids.orgAdmin, "save_global_agent", {
+      id: ID,
+      name: "Persona Drift Probe",
+      backend: "claude",
+      summary: "Probes whether a persona edit reaches a deployed copy.",
+      persona: "This host has no Docker. You own the local stack supervisor.",
+      stages: ["impl"],
+    });
+    // CANARY: drop the text-drift clause and this edit reports success with no
+    // mention that the project running this profile still has the old prompt.
+    expect(edited).toContain("still runs the older persona");
+    expect(edited).toContain(SLUG);
+    expect(edited).toContain("Agents page");
+
+    interface Listed {
+      id: string;
+      copiesDiffering: string[];
+      copiesWithOlderText: string[];
+    }
+    const listed = await listJson<Listed>("list_global_agents");
+    const row = listed.find((r) => r.id === ID)!;
+    // CANARY: report only `copiesDiffering` and a reader checking whether the
+    // edit landed is told "no copy differs" about a copy that does.
+    expect(row.copiesWithOlderText).toEqual([`${SLUG} (persona)`]);
+    // The grants really are in step — the two fields mean different things and
+    // must not be merged.
+    expect(row.copiesDiffering).toEqual([]);
+  });
+
 });
 
 /**

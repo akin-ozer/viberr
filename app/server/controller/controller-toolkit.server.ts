@@ -155,6 +155,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   describeDriftLists,
   listTemplateResourceDrift,
+  listTemplateTextDrift,
   type TemplateCopyDrift,
 } from "~/server/org/template-propagation.server";
 import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
@@ -881,7 +882,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_global_agents",
-      "List the org's global agent templates (specialists a project can deploy), each with its full persona, the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 156). Org admins only. Read this before save_global_agent so an edit is not blind.",
+      "List the org's global agent templates (specialists a project can deploy), each with its full persona, the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 156). A deployment is a SNAPSHOT: editing a template does NOT reach a project that already deployed it, for the persona or the summary any more than for the grants, so `copiesWithOlderText` lists the projects still running the older text and which field it is (ruling 277). Fixing one is a project-level edit on that project's Agents page, or save_global_agent with propagate for the grants. Org admins only. Read this before save_global_agent so an edit is not blind.",
       {},
       run(() => {
         requireOrgAdmin("read the global agent templates");
@@ -913,6 +914,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // without a run.
             copiesDiffering: listTemplateResourceDrift(db, g.id, { dataRoot }).map(
               (d) => d.projectSlug,
+            ),
+            // Ruling 277 (F37-110): the grants are not the only thing a
+            // deployment SNAPSHOTS. The same copy holds the persona — the
+            // run's whole system prompt — and the summary the operator selects
+            // by, and nothing compared either, so `copiesDiffering: []` read as
+            // "every copy is current" about copies that were not. Live, four
+            // templates were rewritten to correct a persona describing a
+            // machine this host is not; the check said no copy differed; the
+            // four agents running at that moment still mounted the old text.
+            copiesWithOlderText: listTemplateTextDrift(db, g.id, { dataRoot }).map(
+              (d) => `${d.projectSlug} (${d.fields.join(", ")})`,
             ),
           })),
         );
@@ -1027,6 +1039,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // it; a propagation names what each copy gained.
           const verb = args.id ? "updated" : "created";
           const head = `[done] ${saved.profile.name} ${verb}.`;
+          // Ruling 277 (F37-110): a deployment SNAPSHOTS the persona and the
+          // summary, `propagate` rewrites only the grants, and every arm below
+          // is built from `diverged` — which compares grants. So an edit that
+          // corrected a persona reported success, and the agents running that
+          // profile kept the old system prompt. Live, four templates were
+          // rewritten to fix a persona describing a machine this host is not,
+          // the grants check answered "every copy carries the template's
+          // grants", and four runs still mounted the old text. This rides
+          // EVERY arm because the two facts are independent: grants can be in
+          // step while the text is not, which is exactly the case that misled.
+          const behind =
+            saved.textBehind.length > 0
+              ? ` ${saved.textBehind.length} project cop${saved.textBehind.length === 1 ? "y" : "ies"} still ` +
+                `run${saved.textBehind.length === 1 ? "s" : ""} the older ` +
+                `${[...new Set(saved.textBehind.flatMap((d) => d.fields))].join(" and ")}: ` +
+                `${saved.textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots ` +
+                `that text and propagate does not rewrite it — an org admin fixes each copy on ` +
+                `that project's Agents page.`
+              : "";
           if (saved.propagated.length > 0) {
             const per = saved.propagated.map((p) => {
               const parts: string[] = [];
@@ -1034,15 +1065,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (p.removed.length) parts.push(`dropped ${p.removed.join(", ")}`);
               return `${p.projectSlug}${parts.length ? ` (${parts.join("; ")})` : ""}`;
             });
-            return `${head} Grants copied to ${saved.propagated.length} project${saved.propagated.length === 1 ? "" : "s"}: ${per.join("; ")}.${defaults}`;
+            return `${head} Grants copied to ${saved.propagated.length} project${saved.propagated.length === 1 ? "" : "s"}: ${per.join("; ")}.${behind}${defaults}`;
           }
           if (saved.diverged.length > 0) {
-            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${defaults}`;
+            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${behind}${defaults}`;
           }
           if (args.id && saved.profile.used > 0) {
-            return `${head} Every project copy carries the template's grants.${defaults}`;
+            return `${head} Every project copy carries the template's grants.${behind}${defaults}`;
           }
-          return `${head}${defaults}`;
+          return `${head}${behind}${defaults}`;
         },
       ),
     ),

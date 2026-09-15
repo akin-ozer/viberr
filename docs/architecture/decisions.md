@@ -6125,6 +6125,29 @@ by rewriting those paragraphs:*
     had to work out for itself.
     (`task.server.ts`, `github-query.server.ts`, `controller-toolkit.server.ts`.)
 
+277. **A drift report that compares one field answers about one field (2026-09-15, pass 37;
+    F37-110).** Ruling 156 built copy-drift detection for GRANTS, because that was the finding
+    it was written for. The same deployment record also snapshots the PERSONA — the run's whole
+    system prompt — and the `desc` the operator selects agents by, and nothing compared either.
+    P13-AP-07 had already settled the snapshot model and warned a human editing a copy that "a
+    later org-level rename, stage change, resource change or persona fix never reaches it";
+    what was missing was anyone saying so at the moment of the fix.
+    The cost, measured within the hour it shipped: the controller found four agent templates
+    whose personas describe a machine this host is not — the Infrastructure Engineer, running
+    two tasks at that moment, was told it owns "the Docker Compose stack" — rewrote all four,
+    checked the drift report afterwards, read `copiesDiffering: []`, and reported the job done.
+    Every one of those four runs still mounted the old text. A report that answers "no copy
+    differs" about a copy that differs is worse than no report, because it is believed.
+    `listTemplateTextDrift` is the second comparison, kept apart from the first because the two
+    facts are independent and the case that misled is exactly "grants in step, text behind":
+    `list_global_agents` gains `copiesWithOlderText` naming the project AND the field, and every
+    arm of `save_global_agent`'s reply carries the sentence — including the "every project copy
+    carries the template's grants" arm, which is the one that was read as all-clear. An ABSENT
+    key on a copy is not drift: it means the copy snapshotted nothing and resolves the template
+    live. The remedy named is the true one (P13-AP-07's): propagate rewrites grants only, so a
+    copy's text is fixed on that project's own Agents page.
+    (`template-propagation.server.ts`, `gagents.server.ts`, `controller-toolkit.server.ts`.)
+
     *(And one flake, in this repository's own suite, of exactly the kind SHOP-35 is fixing in
     the clone: `controller-page.test.tsx` asserts an elapsed cell to the second against a
     `startedAt` stamped once when the describe body evaluates — so every test that ran before
