@@ -265,6 +265,43 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
+  /**
+   * Ruling 271 (pass 37, F37-103): the card ALWAYS offers one more answer than
+   * the packet stores — a free-text directive, composed with the fixed choices
+   * as their last choice. This tool listed the stored options and nothing
+   * else, so the one tool whose job is to "brief the person fully" left out
+   * the only answer that is always available. Live, the controller read a
+   * packet whose recommended option said "You create the task — no option here
+   * can", found (correctly) that a manual operator run is refused while a
+   * packet is open, and reported a deadlock: "there is no way to say 'these
+   * options are wrong' except to pick one of them." There was; it was the
+   * choice under the ones it could see.
+   */
+  it("briefs the free-text answer the card always offers (ruling 271)", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
+      const row = out.forYou.find(
+        (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
+      );
+      // CANARY: drop `ownWords` and a person told "these are your options" is
+      // told something untrue about the card in front of them.
+      expect(row.packet.ownWords).toMatchObject({
+        // Numbered where the card puts it: after the stored options, because
+        // the reader has to find the same choice there.
+        n: row.packet.options.length + 1,
+        title: "Write your own directive",
+      });
+      expect(row.packet.ownWords.detail).toContain("instead of picking an option");
+      expect(row.packet.ownWords.detail).toContain("options are wrong");
+      // It is NOT a stored option kind and must never be relayed as one.
+      expect(row.packet.options.map((o: { kind: string }) => o.kind)).not.toContain("own_words");
+      expect(row.packet.ownWords.kind).toBeUndefined();
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
   it("a viewer is told nothing is theirs, rather than shown someone else's inbox", async () => {
     await openPacketOn(PACKET_TASK);
     try {

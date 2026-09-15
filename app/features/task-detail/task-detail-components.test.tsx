@@ -3785,6 +3785,12 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     // The composed choice renders after the authored options.
     const custom = getByText("Write your own directive").closest("button")!;
     expect(custom.getAttribute("role")).toBe("radio");
+    // Ruling 271: `list_decisions` numbers this choice `options.length + 1` so
+    // a person reading the controller's briefing finds the same one here. Pin
+    // the position the briefing promises. CANARY: render the composed choice
+    // before the authored options and the two stop agreeing.
+    const choices = [...custom.parentElement!.querySelectorAll('[role="radio"]')];
+    expect(choices.indexOf(custom)).toBe(packet142.options.length);
     // No input until the choice is selected; the note field shows instead.
     expect(document.querySelector("#pkt-custom")).toBeNull();
     expect(document.querySelector("#pkt-note")).not.toBeNull();

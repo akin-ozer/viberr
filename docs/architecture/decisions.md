@@ -5989,6 +5989,33 @@ by rewriting those paragraphs:*
     that needs it can reach it.
     (`operator-toolkit.server.ts`.)
 
+271. **The briefing includes the answer the card always offers (2026-09-15, pass 37;
+    F37-103).** A decision card offers one more choice than the packet stores: a free-text
+    directive in the person's own words, composed with the fixed options as their last choice
+    (`customOffered = canResolve`). It is not a stored option, so `list_decisions` — whose
+    whole stated purpose is "so you can brief the person fully" — listed the fixed choices and
+    nothing else, and the one answer that is ALWAYS available was the one it never mentioned.
+    What that cost, live: the controller was asked to have SHOP-26's decision re-raised,
+    because its recommended option's text was "You create the task — no option here can" and
+    ruling 269 had since made that possible. It found, correctly, that only the operator can
+    open a packet, that a manual operator run is refused while one is open (ruling 76/141), and
+    that it holds no withdraw of its own. From those three true facts it concluded a deadlock
+    and reported it in exactly these words: "there is no way to say 'these options are wrong'
+    except to pick one of them." There was, and it is the choice sitting directly under the
+    ones it could read: the free-text answer resolves the packet with the person's directive
+    and puts that directive to the operator, which is precisely "these options are wrong, put
+    the decision again". Three facts, each true, and a false conclusion — because the briefing
+    tool omitted the fourth.
+    `list_decisions` now carries `ownWords` on every packet, numbered where the card puts it
+    (`options.length + 1`, so a person reading the briefing finds the same choice), named apart
+    from `options` because it is not a `PacketOptionKind` and must never be relayed as one, and
+    the card's own test pins that position from the other side.
+    The refusals themselves are not loosened. An open packet SHOULD freeze its options — the
+    person answering must not have the question changed under them — and a manual operator run
+    with a packet open is the paid no-op ruling 76 refused for good reason. Nothing was
+    deadlocked; the map was incomplete.
+    (`controller-toolkit.server.ts`, `task-detail-components.test.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

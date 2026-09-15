@@ -2703,7 +2703,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_decisions",
-      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
+      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
       {
         projectSlug: z.string().optional().describe("One project. Omit inside a project conversation to use it; omit outside one to read every project this person can see."),
         taskKey: z.string().optional().describe("Just this task. Defaults to the conversation's task when it is anchored to one."),
@@ -2774,6 +2774,37 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                           detail: o.d,
                           recommended: o.rec === true,
                         })),
+                        // Ruling 271 (pass 37, F37-103): the card ALWAYS offers
+                        // one more answer than the packet stores — a directive
+                        // in the person's own words, composed with the fixed
+                        // choices as their last choice (`customOffered =
+                        // canResolve`, decision-packet.tsx). It is not a stored
+                        // option, so this tool listed the fixed choices and
+                        // nothing else, and the one tool whose job is to "brief
+                        // the person fully" left out the only answer that is
+                        // always available. Live, the controller read a packet
+                        // whose recommended option said "You create the task —
+                        // no option here can", found no way to withdraw or
+                        // re-raise it (a manual operator run is refused while a
+                        // packet is open, correctly), and reported a deadlock:
+                        // "there is no way to say 'these options are wrong'
+                        // except to pick one of them." There was; it was the
+                        // choice under the ones it could see.
+                        //
+                        // Numbered like the others, because a person reading
+                        // the briefing has to find the same choice on the card,
+                        // and named apart from them because it is not a
+                        // PacketOptionKind and must never be passed as one.
+                        ownWords: {
+                          n: packet.options.length + 1,
+                          title: "Write your own directive",
+                          detail:
+                            "Anyone who can resolve this packet can answer in their own words " +
+                            "instead of picking an option. It is the last choice on the card; it " +
+                            "resolves the packet and puts the directive to the operator (and to " +
+                            "the agent that asked, when one raised it). This is how a person says " +
+                            "the options are wrong, or asks for the decision to be put again.",
+                        },
                         // Ruling 138: a decided edit_goal packet still waits,
                         // and saying so stops you reporting it as unanswered.
                         awaitingGoalEdit: packet.awaiting === "goal_edit",
