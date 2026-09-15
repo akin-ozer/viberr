@@ -3912,6 +3912,140 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * reported gap has to end up owned by a live task, and the packet mechanism
    * could only describe one.
    */
+  /**
+   * Ruling 287 (pass 37, F37-122): connect it in the direction the work runs.
+   *
+   * Ruling 269 let a decision CREATE a task and say what the new task waits on.
+   * A task is usually created to UNBLOCK something, though, so the dependency
+   * points the other way — from the existing work to the new task — and that
+   * direction could not be expressed at all. Live on SHOP-28 the operator wrote
+   * it into its own packet prose: "add the new amendment key to SHOP-41's
+   * waits… only you can add it; I can only set SHOP-28's own." The ordering was
+   * settled and recorded, and delivered as a chore in a person's head, with
+   * nothing on SHOP-41 saying an edit was owed.
+   */
+  it("ruling 287: create_task makes the EXISTING task wait on the new one, and says so on both", async () => {
+    const store = prepared();
+    // The task that must not start until the new one lands.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "triage" }),
+      goal: "Mount the route against the published shapes.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "The shapes this needs are not published",
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the contracts amendment",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              blocks: ["VIB-9"],
+            },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Contracts amendment: publish the webhook shapes",
+    )!;
+    // CANARY: drop the `spec.blocks` loop and VIB-9 keeps an empty wait while
+    // the decision reads as fully delivered.
+    const other = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-9",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(other.parsed.frontmatter.blockedBy).toContain(made.key);
+    // A wait that appears with no reason on a task nobody was looking at reads
+    // as Viberr deciding something on its own, so the provenance lands THERE.
+    //
+    // Matched on THIS note's own words, not merely on the new key: the
+    // dependency writer posts its own "waits on" note naming the same key, so
+    // a looser assertion passes with the provenance note written to the wrong
+    // task entirely — which is how a canary comes out green on the mutation it
+    // was written to catch.
+    const note = other.parsed.timeline.find((e) =>
+      e.text.includes("to unblock this task"),
+    );
+    expect(note, "VIB-9 was not told why its wait grew").toBeTruthy();
+    expect(note!.text).toContain(made.key);
+    expect(note!.text).toContain("VIB-1");
+    expect(note!.title).toBe("Now waits on a new task");
+    // …and it is NOT on the deciding task, which already carries its own join
+    // note and would otherwise read as if its own wait had changed.
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(here.parsed.timeline.some((e) => e.text.includes("to unblock this task"))).toBe(
+      false,
+    );
+  });
+
+  it("ruling 287: a reverse wait that CANNOT be written says so, and never undoes the task", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "The shapes this needs are not published",
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the contracts amendment",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              // A key this project does not have — the operator can offer one
+              // it read from a document, which is a claim until it is checked.
+              blocks: ["VIB-404"],
+            },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // The task the person confirmed still exists: one unwritable edge must not
+    // undo a decision they made or the work it already produced.
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Contracts amendment: publish the webhook shapes",
+    );
+    expect(made, "a bad reverse key destroyed the created task").toBeTruthy();
+    // …and the half that did NOT happen is on the record, with the remedy.
+    // CANARY: swallow the catch and a settled ordering silently is not applied.
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const failure = here.parsed.timeline.find((e) => e.text.includes("was NOT set to wait on it"));
+    expect(failure, "the unwritten wait was silent").toBeTruthy();
+    expect(failure!.text).toContain("VIB-404");
+  });
+
   it("ruling 269: a create_task resolution makes the task, joins the record, and leaves this one alone", async () => {
     const store = prepared();
     withTask(

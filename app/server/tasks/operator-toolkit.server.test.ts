@@ -764,6 +764,69 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
+   * Ruling 287's DOOR, tested for the reason ruling 270 exists: rulings 224 and
+   * 230 each added an option payload and never added the field to the tool that
+   * AUTHORS options, so the only actor that could have sent one could not.
+   */
+  it("ruling 287: the option schema carries `blocks`, and it reaches the stored packet", async () => {
+    // Canary: drop `blocks` from the authoring schema, or from the forwarder
+    // beneath it, and the reverse edge becomes unauthorable — a field the
+    // resolver reads and nothing can ever write.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "triage" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const open = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    // SAFETY: the SDK types a tool handler's argument as its own generic; this
+    // object is the shape the zod schema above declares, and a field the schema
+    // rejects fails the call rather than reaching the handler — which is the
+    // assertion this test makes.
+    const answer = await open.handler(
+      {
+        title: "The shapes this needs are not published",
+        detail: "Three exports are missing and no task opens them.",
+        options: [
+          {
+            kind: "create_task",
+            title: "Create the contracts amendment",
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              blocks: ["VIB-9"],
+            },
+          },
+        ],
+      } as never,
+      {} as never,
+    );
+    expect(JSON.stringify(answer)).toContain("[done]");
+    // Read the FILE, which is the canonical record the resolver later reads —
+    // not a projection, and not the tool's own reply about itself.
+    const { readFileSync } = await import("node:fs");
+    const raw = readFileSync(
+      `${store.dataRoot}/projects/${store.slug}/tasks/VIB-1/task.md`,
+      "utf8",
+    );
+    expect(raw).toContain("blocks:");
+    expect(raw).toContain("VIB-9");
+  });
+
+  /**
    * Ruling 270 (pass 37, F37-102): rulings 230 and 224 each added an option
    * kind with a payload, wrote the two authoring refusals for it, and never
    * added the field to the tool that AUTHORS options. So the operator could

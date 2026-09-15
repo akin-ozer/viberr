@@ -81,6 +81,7 @@ import {
 import {
   maybeReleaseDependents,
   noteDeadDependency,
+  setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
 import type { DependencyReleasePayload } from "~/shared/dependencies";
@@ -10133,6 +10134,89 @@ export async function resolvePacket(
         });
       });
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      // Ruling 287 (F37-122): connect it in the direction the work runs. A task
+      // is usually created to UNBLOCK something, so the dependency points from
+      // the EXISTING work to the new task — and that is the one direction
+      // ruling 269 could not express, because `newTask.blockedBy` only says
+      // what the new task waits on.
+      //
+      // Live on SHOP-28: the person's decision routed three frozen contract
+      // shapes to a narrow amendment task, the operator created it, and then
+      // had to write "add the new amendment key to SHOP-41's waits… only you
+      // can add it; I can only set SHOP-28's own" into the packet's own prose.
+      // The ordering was settled, recorded, and delivered as a chore in a
+      // human's head — nothing on SHOP-41 said an edit was owed, so a forgotten
+      // one would have set SHOP-41 building against contracts that did not
+      // exist, which is the divergence the amendment task existed to prevent.
+      //
+      // Best-effort per key, like the create above: one refusal must not undo
+      // a decision a person made or the task it already produced, and each
+      // outcome lands on the timeline in plain words. The write goes through
+      // `setTaskDependencies`, so the cycle check, the archived-task refusal,
+      // the board projection and the release engine are the ones every other
+      // caller gets.
+      for (const blocked of spec.blocks ?? []) {
+        const other = blocked.trim();
+        if (!other) continue;
+        try {
+          const target = readTaskFile(taskRef(ctx, input.projectSlug, other));
+          if (!target) throw AppError.notFound(`Task ${other} not found.`);
+          const already = target.parsed.frontmatter.blockedBy.includes(made.key);
+          if (!already) {
+            await setTaskDependencies(
+              db,
+              {
+                projectSlug: input.projectSlug,
+                taskKey: other,
+                blockedBy: [...target.parsed.frontmatter.blockedBy, made.key],
+              },
+              actor,
+              ctx,
+            );
+          }
+          // The provenance note lands on the task whose wait GREW. A wait that
+          // appears with no reason on a task nobody was looking at reads as
+          // Viberr deciding something on its own.
+          await updateTaskFile(taskRef(ctx, input.projectSlug, other), (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: already ? "Already waiting on that task" : "Now waits on a new task",
+              text: already
+                ? `A decision on **${input.taskKey}** created **${made.key}** — ${spec.title} — ` +
+                  `to unblock this task, which already waited on it. Nothing changed here.`
+                : `A decision on **${input.taskKey}** created **${made.key}** — ${spec.title} — ` +
+                  `to unblock this task. This task now waits on it and is released when it is done.`,
+              toAgent: false,
+              evidence: null,
+            });
+          });
+          reprojectTask(db, ctx, input.projectSlug, other);
+        } catch (error) {
+          const why = error instanceof Error ? error.message : String(error);
+          logger.warn("create_task resolution could not record the reverse wait", {
+            taskKey: input.taskKey,
+            blocked: other,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+          await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text:
+                `**${made.key}** was created, but **${other}** was NOT set to wait on it: ${why} ` +
+                `Add the wait on ${other}'s own page, or ${other} may start work the new task ` +
+                `was created to come first.`,
+              toAgent: false,
+              evidence: null,
+            });
+          });
+          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("create_task resolution could not create the task", {

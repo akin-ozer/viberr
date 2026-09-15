@@ -914,6 +914,17 @@ export const packetOptionSchema = z
         /** What the NEW task waits on, in `blockedBy`'s own spellings. Not the
          *  same field as `block_on_dependencies`'s, which holds THIS task's. */
         blockedBy: z.array(dependencyRefTextSchema).optional(),
+        /**
+         * Ruling 287: the EXISTING tasks that must wait on the new one — the
+         * reverse edge, which ruling 269 could not express at all.
+         *
+         * A task is usually created to UNBLOCK something, so the dependency
+         * runs from the existing work to the new task, and that is the
+         * direction `blockedBy` cannot say. Each key is written into THAT
+         * task's own `blockedBy`, checked exactly as its own editor would check
+         * it, and only because a person confirmed the option.
+         */
+        blocks: z.array(dependencyRefTextSchema).optional(),
         labels: z.array(z.string()).optional(),
       })
       .optional(),

@@ -1068,6 +1068,8 @@ export interface OperatorPacketOptionInput {
     goal: string;
     /** What the NEW task waits on — not this one. */
     blockedBy?: string[];
+    /** Ruling 287: the EXISTING tasks that must wait on the new one. */
+    blocks?: string[];
     labels?: string[];
   };
 }
@@ -1663,6 +1665,9 @@ export async function operatorOpenPacket(
         goal: o.newTask.goal.trim().slice(0, GOAL_DRAFT_MAX_CHARS),
       };
       if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+      // Ruling 287: the reverse edge reaches the stored option, which is the
+      // only place the resolver can read it from.
+      if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
       if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
       option.newTask = newTask;
     }

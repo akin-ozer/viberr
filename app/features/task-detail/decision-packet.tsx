@@ -1217,6 +1217,18 @@ export function DecisionPacket({
                           waits on {o.newTask.blockedBy.join(", ")}
                         </span>
                       )}
+                      {/* Ruling 287: confirming this option also edits tasks
+                          that are NOT on this page — it adds the new key to
+                          each of these tasks' own waits. That is the one part
+                          of a create_task decision a person cannot see the
+                          consequence of anywhere else, so it is shown before
+                          the confirm rather than discovered on another board
+                          card afterwards. */}
+                      {o.newTask.blocks && o.newTask.blocks.length > 0 && (
+                        <span className="fine dim">
+                          {o.newTask.blocks.join(", ")} will wait on it
+                        </span>
+                      )}
                     </span>
                   )}
                 </span>

@@ -589,6 +589,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                       .describe(
                         "What the NEW task waits on (task keys, or `goal-N link M`) — not what THIS task waits on.",
                       ),
+                    blocks: z
+                      .array(z.string())
+                      .optional()
+                      .describe(
+                        "Ruling 287: the EXISTING tasks that must WAIT ON the new one — the reverse direction of `blockedBy`, and usually the one that matters, because a task is normally created to unblock something. Each key listed here gets the new task added to its own `blockedBy` when the person confirms, with a note on that task saying which decision did it. Use it whenever other work must not start until the new task lands; read_board first, since every key is checked and a bad one is refused by name.",
+                      ),
                     labels: z.array(z.string()).optional().describe("Labels for the new task."),
                   })
                   .optional()
@@ -637,6 +643,10 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   goal: prose(o.newTask.goal),
                 };
                 if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+                // Ruling 287: the reverse edge. Forwarded here for the reason
+                // ruling 270 exists — a payload the schema accepts and the
+                // AUTHOR cannot send is a field that does nothing.
+                if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
                 if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
                 option.newTask = newTask;
               }

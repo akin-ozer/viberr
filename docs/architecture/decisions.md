@@ -6395,6 +6395,37 @@ by rewriting those paragraphs:*
     obligation it cannot discharge and sent looking for a document that reached it in no
     form at all. (`kb-injection.server.ts` and the three runtimes.)
 
+287. **A created task can be connected in the direction the work runs (2026-09-15, pass 37;
+    F37-122, completes 269).** Ruling 269 let a decision CREATE a task and say what the NEW
+    task waits on. But a task is normally created to UNBLOCK something, so the dependency
+    points the other way — from the existing work to the new task — and that direction could
+    not be expressed by anything in the product except a person editing the other task's
+    page, or the controller, which the operator cannot call.
+    Live on SHOP-28, in the operator's own packet prose: "Two things it asks for are edits to
+    OTHER tasks, which no packet option can perform — they need you on those task pages: add
+    the new amendment key to SHOP-41's waits… I will set SHOP-28's own wait myself as soon as
+    the amendment task has a key." Every part of that was right. A person had routed three
+    frozen contract shapes to a narrow amendment task; the operator created it and then
+    handed back a chore. Nothing on SHOP-41 said an edit was owed, so a forgotten one would
+    have left SHOP-41 free to start building against contracts that did not exist — the exact
+    divergence the amendment task was created to prevent. The ordering was settled, recorded,
+    and delivered into a human's memory.
+    `newTask.blocks` is the reverse edge: existing task keys that get the new key written into
+    their OWN `blockedBy` when the person confirms. It goes through `setTaskDependencies`, so
+    the cycle check, the archived-task refusal, the projection and the release engine are the
+    ones every other caller gets; it is authored by the operator and written only because a
+    person confirmed the option, which is the same authority `create_task` already runs under.
+    Three honesty properties, each of which had to be built rather than assumed. The
+    provenance note lands on the task whose wait GREW — a wait appearing with no reason on a
+    task nobody was looking at reads as Viberr deciding something on its own. A key that
+    cannot be written (missing, archived, cyclic) is reported on the deciding task WITH the
+    remedy, and never undoes the decision or the task it already produced: one unwritable
+    edge is not a reason to discard work a person confirmed. And the option card names the
+    tasks that will start waiting, BEFORE the confirm — it is the one consequence of a
+    `create_task` decision a person cannot see anywhere else on the page they are confirming
+    from. (`task-file.schema.ts`, `task-actions.server.ts`, `operator-toolkit.server.ts`,
+    `operator-actions.server.ts`, `decision-packet.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
