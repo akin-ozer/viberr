@@ -5612,6 +5612,27 @@ by rewriting those paragraphs:*
     total misses could appear under it.
     (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
 
+254. **A packet option that names a model says WHEN that was true (2026-09-15, pass 37;
+    F37-83).** F36-8 put the model into the `retry_other_backend` option because the old text
+    said only "re-run the same agent there and continue", the retry ran on `sonnet`, and
+    nothing on the task named it. The sentence is composed when the option is AUTHORED and
+    frozen into the packet, and a packet can sit open for hours.
+    Live: four of these packets were open on SHOP-5, SHOP-13, SHOP-27 and SHOP-32 because
+    Codex refused every run on a spent usage window. The owner then moved all eight specialist
+    deployments from `gpt-5.6-luna` to `opus`, and each packet went on offering "re-run the
+    same agent there on `sonnet` (Claude's default: the profile's `gpt-5.6-luna` is a Codex
+    model)" — two claims, both false by then — to the person choosing between the options. The
+    controller caught it while briefing, said it could not verify the resolution rule from
+    where it sat, and asked for the first run's record to be checked. The record says `claude`
+    and `opus` on all four: the behaviour was right and only the promise was wrong.
+    The option pins a BACKEND, never a model, so the sentence now names today's model as
+    today's ("on `opus` as deployed right now") and states the rule that survives any edit:
+    if the deployment changes before you answer, the run follows the deployment. Re-deriving
+    it at render time was the alternative and was rejected — `mapPacket` is a pure mapping with
+    no project read, and plumbing one in to restate a fact the run already resolves correctly
+    buys less than a sentence that is true whenever it is read.
+    (`run-failure-remedy.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

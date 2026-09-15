@@ -4377,3 +4377,43 @@ appear under it.
 Two tests, canaried in both directions: restoring the single-sentence marker hides the clip, and
 dropping the `unresolved` return hides the partial from every human surface; reporting a partial
 unconditionally announces every complete grant as incomplete.
+
+## F37-83 · Four open packets promised a model the project no longer deployed — LOW/MEDIUM
+
+**Raised by the controller, confirmed by me against the run rows.** Worth recording for that
+alone: it flagged a claim it could not verify from where it sat and asked for the measurement,
+rather than asserting either way.
+
+Codex refused every run on this account — over its usage limit until Sep 19 — so four tasks sat
+on "Work stalled: pick a recovery path" packets. The owner then moved all eight specialist
+deployments from `gpt-5.6-luna` to Claude `opus` at effort `medium`. The packets stayed open, and
+each went on offering:
+
+> Retry @backend-engineer on Claude now — "The owner has Claude connected; re-run the same agent
+> there **on `sonnet` (Claude's default: the profile's `gpt-5.6-luna` is a Codex model)** and
+> continue."
+
+Two claims, both false by the time anyone read them. The sentence is composed by
+`describeRunFailure` when the option is **authored** and frozen into the packet; a packet can sit
+open for hours, and a deployment edit does not rewrite it.
+
+**What actually ran, from `agent_runs` after answering all four:**
+
+```
+03:46:59  SHOP-5   integration-verifier  claude  model=opus  running
+03:47:26  SHOP-27  backend-engineer      claude  model=opus  running
+03:48:04  SHOP-32  platform-architect    claude  model=opus  running
+03:48:34  SHOP-13  frontend-engineer     claude  model=opus  running
+```
+
+The behaviour is right — the run resolves the live deployment — and the promise was the only
+wrong thing. Benign in this direction; the same staleness runs the other way when a deployment is
+downgraded between authoring and answering, and then a person accepts "it will run on opus" and
+gets sonnet.
+
+**Fix (ruling 254).** The option pins a BACKEND, never a model. It now names today's model *as
+today's* ("on `opus` as deployed right now") and states the rule that survives any edit: if the
+deployment changes before you answer, the run follows the deployment. Re-deriving the model at
+render time was the alternative and was rejected: `mapPacket` is a pure mapping with no project
+read, and plumbing one in to restate a fact the run already resolves correctly buys less than a
+sentence that is true whenever it is read. Canaried on the existing F36-8 test.

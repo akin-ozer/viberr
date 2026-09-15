@@ -223,6 +223,23 @@ describe("describeRunFailure", () => {
     const keep = native.options.find((o) => o.kind === "retry_other_backend")!;
     expect(keep.detail).toContain(`on its own \`${defaultModelFor("codex")}\``);
     expect(keep.detail).not.toContain("is a Claude model");
+
+    /**
+     * Ruling 254 (pass 37, F37-83): F36-8 named the model, and the sentence is
+     * FROZEN into the packet when the option is authored. Live, the owner moved
+     * eight profiles from `gpt-5.6-luna` to `opus` while four of these packets
+     * sat open, and every one went on offering "on `sonnet` (Claude's default:
+     * the profile's `gpt-5.6-luna` is a Codex model)" — two now-false claims —
+     * to the person choosing between them. The runs used `opus`, correctly; the
+     * promise was the only wrong thing.
+     *
+     * CANARY: drop "as deployed right now" and the caveat and the sentence goes
+     * back to asserting a model it cannot know will still be deployed.
+     */
+    expect(retry.detail).toContain("as deployed right now");
+    expect(retry.detail).toContain("pins the backend, not the model");
+    expect(retry.detail).toContain("the run follows the deployment");
+    expect(keep.detail).toContain("as deployed right now");
   });
 
   /**

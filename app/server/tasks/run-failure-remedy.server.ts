@@ -385,14 +385,29 @@ function specialistOptions(
   // (`startRun` substitutes and discloses it, F21-13); one the other backend
   // knows keeps its own. Live, the option read "re-run the same agent there and
   // continue", the retry ran on `sonnet`, and nothing on the task named it.
+  // Ruling 254 (pass 37, F37-83): and it says WHEN it was true. This sentence
+  // is frozen into the packet when the option is authored, and a packet can sit
+  // open for hours — live, the owner moved eight profiles from `gpt-5.6-luna`
+  // to `opus` while four of these packets waited, and every one of them went on
+  // offering "on `sonnet` (Claude's default: the profile's `gpt-5.6-luna` is a
+  // Codex model)", a sentence with two now-false claims, to a person choosing
+  // between them. The runs resolved the live deployment and correctly used
+  // `opus`; the promise was the only thing that was wrong. The option pins a
+  // BACKEND, never a model, so the honest sentence names today's model and says
+  // what happens if the deployment moves first.
   const retryModel = profileModel
     ? (() => {
         const swap = substituteRunModel(other, profileModel);
         return swap.foreignBackend
-          ? `on \`${swap.model}\` (${BACKEND_NAME[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_NAME[swap.foreignBackend]} model)`
-          : `on its own \`${profileModel}\``;
+          ? `on \`${swap.model}\` as deployed right now (${BACKEND_NAME[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_NAME[swap.foreignBackend]} model)`
+          : `on its own \`${profileModel}\` as deployed right now`;
       })()
-    : `on ${BACKEND_NAME[other]}'s default model`;
+    : `on ${BACKEND_NAME[other]}'s default model as deployed right now`;
+  /** Ruling 254: the option carries a backend, not a model, so a deployment
+   *  edit between authoring and answering moves the run and not the text. */
+  const retryModelCaveat =
+    " This option pins the backend, not the model: if the deployment changes " +
+    "before you answer, the run follows the deployment rather than the model named here.";
   const redirect: OperatorPacketOptionInput = {
     kind: "redirect",
     title: "Redirect with sharper guidance",
@@ -437,6 +452,7 @@ function specialistOptions(
         detail:
           `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. ` +
           `Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.` +
+          retryModelCaveat +
           // Ruling 212: when the fault is THIS deployment's network path, the
           // other provider is reached over the same path, so switching is not a
           // remedy — and it permanently moves the task off the model its
