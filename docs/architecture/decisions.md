@@ -5969,6 +5969,26 @@ by rewriting those paragraphs:*
     (`task-file.schema.ts`, `operator-actions.server.ts`, `operator-toolkit.server.ts`,
     `task-actions.server.ts`, `decision-packet.tsx`.)
 
+270. **A kind whose payload the authoring tool does not carry is not offerable (2026-09-15,
+    pass 37; F37-102, amends rulings 224 and 230).** Ruling 230 gave `block_on_dependencies` a
+    `blockedBy` payload and two authoring refusals — one for an option that names nothing to
+    wait on, one for the field on any other kind. Ruling 224 did the same for
+    `wait_for_window` and `dueAt`. Neither added the field to `open_decision_packet`, the tool
+    that AUTHORS options. So an operator could name `block_on_dependencies`, receive "A
+    block_on_dependencies option needs the work it waits on", and have no way to say it — and
+    nothing else in the product writes that kind either, so ruling 230's whole mechanism was
+    unreachable from the moment it shipped. Its own words were that the mechanism "simply could
+    not be reached from the surface where the decision is actually made"; it stayed that way.
+    Both rulings' tests called `operatorOpenPacket` directly, which accepts both fields. The
+    writer was proven and the DOOR was never opened. The canary for this one goes through the
+    tool handler, which is the surface an operator actually authors from.
+    The lesson is the pass's third sighting of one shape: ruling 252's stamp skipped the live
+    comment that motivated it (262), ruling 192's terminal guard closed the window on the goal
+    it was written for (267), and here two rulings shipped payloads their only author could not
+    send. A ruling is not finished when the mechanism works; it is finished when the surface
+    that needs it can reach it.
+    (`operator-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

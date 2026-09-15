@@ -4992,6 +4992,59 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
 
   });
 
+  /**
+   * Ruling 270 (pass 37, F37-102): through the TOOL, which is the surface an
+   * operator actually authors from. Rulings 230 and 224 each added a kind with
+   * a payload, wrote its two authoring refusals, and never added the field to
+   * `open_decision_packet` — so the operator could name `block_on_dependencies`
+   * and be told "needs the work it waits on" with no way to say. Both rulings'
+   * tests called `operatorOpenPacket` directly, which accepts the field, so the
+   * door was never exercised and the kind was dead in the product.
+   */
+  it("ruling 270: block_on_dependencies and wait_for_window are authorable THROUGH the tool", async () => {
+    packetsRoster();
+    seedTask("impl");
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+    });
+    const tool = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    const dueAt = new Date(Date.now() + 3_600_000).toISOString();
+    await tool.handler(
+      {
+        packetType: "blocked",
+        title: "Wait, hold, or push on?",
+        options: [
+          {
+            kind: "block_on_dependencies",
+            title: "Hold this until the gateway lands",
+            recommended: true,
+            blockedBy: ["VIB-2"],
+          },
+          {
+            kind: "wait_for_window",
+            title: "Wait for the window and pick it back up",
+            dueAt,
+          },
+        ],
+      },
+      {},
+    );
+    const packet = task().packet;
+    // CANARY: drop either field from the tool's forwarding (or its schema) and
+    // the write is refused for the payload it was never given a way to send.
+    expect(packet, "the tool could not author a payload-bearing kind").toBeTruthy();
+    expect(packet!.options[0]).toMatchObject({
+      kind: "block_on_dependencies",
+      blockedBy: ["VIB-2"],
+    });
+    expect(packet!.options[1]).toMatchObject({ kind: "wait_for_window", dueAt });
+  });
+
   it("refuses a create_task option with no task on it, and newTask on any other kind", async () => {
     packetsRoster();
     seedTask("impl");

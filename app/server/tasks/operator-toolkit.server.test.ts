@@ -600,6 +600,44 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
+   * Ruling 270 (pass 37, F37-102): rulings 230 and 224 each added an option
+   * kind with a payload, wrote the two authoring refusals for it, and never
+   * added the field to the tool that AUTHORS options. So the operator could
+   * name `block_on_dependencies`, be told "needs the work it waits on", and
+   * have no way to say — and `block_on_dependencies` has no server-side writer
+   * either, so nothing in the product could produce one. Both rulings' tests
+   * called `operatorOpenPacket` directly, which accepts the field; the DOOR was
+   * never exercised.
+   */
+  it("ruling 270: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", () => {
+    // Canary: remove either field from the option schema and its kind becomes
+    // unauthorable again — named, refused, and impossible to satisfy.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    // SAFETY: as above, the SDK types the raw input fields loosely; `options`
+    // is the zod array whose JSON Schema form carries the per-option fields.
+    const options = (def.inputSchema as { options: z.ZodType }).options;
+    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(declared).toContain('"blockedBy"');
+    expect(declared).toContain("block_on_dependencies only");
+    expect(declared).toContain('"dueAt"');
+    expect(declared).toContain("wait_for_window only");
+    // Ruling 269's payload rides the same door, and was written with it.
+    expect(declared).toContain('"newTask"');
+    expect(declared).toContain("create_task only");
+  });
+
+  /**
    * Pass-35 cluster review: ONE description carried both halves of a
    * contradiction. Ruling 164's new sentence refuses "a custom option that asks
    * a person to edit an agent profile", while the older ruling-85 clause still

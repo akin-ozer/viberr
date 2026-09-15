@@ -469,6 +469,18 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .describe(
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
                   ),
+                blockedBy: z
+                  .array(z.string())
+                  .optional()
+                  .describe(
+                    "block_on_dependencies only (ruling 230): what THIS task waits on — task keys, or `goal-N link M`. Required on that kind (an option that names nothing to wait on resolves into a hold that releases on nothing) and refused on every other one.",
+                  ),
+                dueAt: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "wait_for_window only (ruling 224): the instant the provider said its window reopens, as an ISO timestamp — the resolution schedules the re-dispatch just after it. Required on that kind and refused on every other one. Viberr raises the quota packet itself, so author one only when no packet was raised.",
+                  ),
                 newTask: z
                   .object({
                     title: z.string().describe("The new task's title."),
@@ -514,6 +526,14 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               // Ruling 138: the goal draft is prose bound for the goal editor;
               // `operatorOpenPacket` caps it and refuses it off edit_goal.
               if (o.goalDraft) option.goalDraft = prose(o.goalDraft);
+              // Ruling 270 (F37-102): rulings 230 and 224 each added a kind
+              // whose payload this schema never carried, so the operator could
+              // name the kind and never satisfy the refusal it got back — the
+              // two kinds were unreachable from the one surface that authors
+              // packets. Their tests proved the WRITER, which accepts both, and
+              // never the door.
+              if (o.blockedBy?.length) option.blockedBy = [...o.blockedBy];
+              if (o.dueAt) option.dueAt = o.dueAt.trim();
               // Ruling 269: the task a create_task option will create;
               // `operatorOpenPacket` refuses it off that kind and refuses the
               // kind without it.
