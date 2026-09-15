@@ -141,6 +141,7 @@ import {
   setTaskMetadata,
   transitionStage,
   updateTaskGoal,
+  updateTaskTitle,
   userName,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
@@ -1838,10 +1839,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_task",
-      "Edit a task's goal text, its metadata (priority, labels, due date) and/or what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Never edits the title, stage, owner or engaged agents.",
+      "Edit a task's goal text, its metadata (priority, labels, due date) and/or what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 295: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        title: z
+          .string()
+          .optional()
+          .describe(
+            "A corrected title. This is the line every person scanning the board reads, so correct it when the goal's own evidence has outrun it rather than leaving the correction in a body nobody opens.",
+          ),
         goal: z.string().optional().describe("The new goal text (deliverable plus the done signal)."),
         priority: z.enum(PRIORITY_VALUES).optional(),
         labels: z.array(z.string()).optional().describe("The full label set; [] clears it."),
@@ -1855,6 +1862,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         async (args: {
           projectSlug?: string;
           taskKey?: string;
+          title?: string;
           goal?: string;
           priority?: (typeof PRIORITY_VALUES)[number];
           labels?: string[];
@@ -1867,9 +1875,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const hasMeta =
             args.priority !== undefined || args.labels !== undefined || args.dueDate !== undefined;
           const hasWait = args.blockedBy !== undefined;
-          if (args.goal === undefined && !hasMeta && !hasWait) {
+          if (args.title === undefined && args.goal === undefined && !hasMeta && !hasWait) {
             throw AppError.validation(
-              "Pass a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy).",
+              "Pass a title and/or a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy).",
             );
           }
           // Two writers, two gates. Each part reports on its own so a goal that
@@ -1886,6 +1894,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const unchanged: string[] = [];
           const refused: string[] = [];
           let firstError: AppError | null = null;
+          // Ruling 295: its own axis, reported on its own, exactly like the
+          // goal and the metadata beside it — a title that wrote must not be
+          // hidden behind a goal that was refused, or the reverse.
+          if (args.title !== undefined) {
+            try {
+              const { changed } = await updateTaskTitle(
+                db,
+                { projectSlug: slug, taskKey: key, title: prose(args.title) },
+                actor,
+                { dataRoot },
+              );
+              if (changed) applied.push("title");
+              else unchanged.push("title");
+            } catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              firstError ??= error;
+              refused.push(`title: ${error.userMessage}`);
+            }
+          }
           if (args.goal !== undefined) {
             try {
               const { changed } = await updateTaskGoal(

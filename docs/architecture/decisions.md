@@ -4328,6 +4328,37 @@ by rewriting those paragraphs:*
     fixture as the code button beside it, deliberately — one gesture on this card, learned
     once — and the `copied` flag is keyed by WHICH button copied, because one boolean made
     both read "Copied" at once on the one backend that shows both.
+
+295. **A task's title is a claim, so it can be corrected like one (owner, 2026-09-16,
+    pass 37; F37-130).** Viberr wrote a title once, at creation, and then never again by
+    anyone: not the controller, not the task page, not an operator. `updateTaskGoal` wrote
+    the contract every future run re-anchors on; nothing wrote the one-line summary of it.
+    The controller found this about a title it had authored itself and then disproved, and
+    ranked it first of five gaps: "What I wanted: change six words in the title I wrote.
+    What I did instead: rewrote the entire 6,000-character goal. The title is what every
+    person scanning the board reads; the correction lives in a body almost nobody opens. A
+    false claim I authored is still on the board an hour after being disproved." It named
+    the asymmetry exactly: `update_task` writes the goal, the priority, the labels, the due
+    date and the wait, the goal being by far the most consequential of those, and then
+    stops at the summary of all of it. There is no safety rationale in that shape. A title
+    and a goal are the same claim at two lengths, and the shorter one was the harder to
+    correct, which is backwards: it is the one that travels.
+    So `updateTaskTitle` exists, behind the GOAL's gate (`update-goal`, maintainer and
+    above) rather than `edit-task-meta`, because a title asserts what the work is and a
+    label only files it. On the controller it is a field of `update_task` reporting on its
+    OWN axis beside goal, metadata and wait: a title that wrote is never hidden behind a
+    goal that was refused, and the reverse, which is the rule that tool already followed
+    for every other field.
+    The rename NOTES BOTH TITLES. A silent rename is the quiet half of this defect: the old
+    wording is what every existing reference to the task says, in a comment, in another
+    task's goal, in somebody's memory, and after a silent rename each of those looks like a
+    reference to something else. The note carries the old title, the new one, and the fact
+    that the key did not change. Ruling 288's rule applies one field over: a title longer
+    than 200 characters is refused by name with NOTHING written and never cut, because a
+    title is the one string the board card, the review-queue row and the goal-chain link
+    all render, so a silently truncated one is wrong in more places than a truncated goal.
+    Saving the same words is a `[noop]` that says so, not a `[done]` about a write that
+    never happened.
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

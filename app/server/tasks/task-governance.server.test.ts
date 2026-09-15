@@ -3913,6 +3913,95 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * could only describe one.
    */
   /**
+   * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
+   *
+   * It could not be, by anyone: `updateTaskGoal` wrote the contract every
+   * future run re-anchors on, and nothing anywhere wrote the one-line summary
+   * of it. The controller found it, about a title it had authored itself and
+   * then disproved: "The title is what every person scanning the board reads;
+   * the correction lives in a body almost nobody opens. A false claim I
+   * authored is still on the board an hour after being disproved."
+   */
+  it("ruling 295: a rename writes the title and records BOTH, so old references still join", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
+    const { updateTaskTitle } = await import("./task-actions.server");
+    // CANARY: drop the writer and the board keeps a title its own goal disproved.
+    const { changed } = await updateTaskTitle(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // Whitespace is collapsed: a title is one line by construction.
+        title: "  Cart   integration suite: establish whether it times out  ",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(changed).toBe(true);
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.title).toBe(
+      "Cart integration suite: establish whether it times out",
+    );
+    // The note carries the OLD wording too. A silent rename makes every
+    // existing reference to the old words look like a reference to something
+    // else. CANARY: drop `before` from the note text.
+    const note = file.parsed.timeline.find((e) => e.title === "Title updated")!;
+    expect(note, "the rename was silent").toBeTruthy();
+    expect(note.text).toContain("Renamed from");
+    expect(note.text).toContain("Cart integration suite");
+    expect(note.text).toContain("VIB-1");
+  });
+
+  it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
+    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-actions.server");
+    const current = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.title;
+
+    // Saving the same words is not an edit: no note, no audit row.
+    const same = await updateTaskTitle(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", title: current },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(same.changed).toBe(false);
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.timeline.some((e) => e.title === "Title updated"),
+    ).toBe(false);
+
+    // Ruling 288's rule one field over: refused by name with nothing written,
+    // never cut. CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
+    await expect(
+      updateTaskTitle(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          title: "x".repeat(TASK_TITLE_MAX_CHARS + 1),
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Nothing was written/);
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter.title,
+    ).toBe(current);
+  });
+
+  /**
    * Ruling 287 (pass 37, F37-122): connect it in the direction the work runs.
    *
    * Ruling 269 let a decision CREATE a task and say what the new task waits on.

@@ -1411,7 +1411,7 @@ describe("task anchoring (ruling 121)", () => {
     const { getTaskSummary } = await import("~/server/projections/task-query.server");
     // Nothing to do is an error, not a silent no-op.
     expect(await callAnchored(ids.maintainer, "update_task", {}, "VIB-148")).toContain(
-      "[error] Pass a goal and/or at least one metadata field",
+      "[error] Pass a title and/or a goal and/or at least one metadata field",
     );
     // A viewer edits nothing.
     expect(
@@ -1451,6 +1451,54 @@ describe("task anchoring (ruling 121)", () => {
     expect(
       await callAnchored(ids.maintainer, "update_task", { dueDate: "not-a-date" }, "VIB-148"),
     ).toMatch(/^\[error\]/);
+  });
+
+  /**
+   * Ruling 295 (pass 37, F37-130), from the controller's own top-ranked gap:
+   * "I cannot edit a task title - and the board is wrong right now because of
+   * it. What I wanted: change six words in the title I wrote. What I did
+   * instead: rewrote the entire 6,000-character goal." Nothing anywhere wrote
+   * a title after creation, so the shorter of a task's two claims was the
+   * harder to correct.
+   */
+  it("ruling 295: update_task corrects the title on its own axis, and a refused title never hides a goal that wrote", async () => {
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    // CANARY: drop the `title` branch and this is "[error] unknown field".
+    expect(
+      await callAnchored(
+        ids.maintainer,
+        "update_task",
+        { title: "Cart checkout: establish whether the timeout is real" },
+        "VIB-148",
+      ),
+    ).toBe("[done] VIB-148 updated: title.");
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.title).toBe(
+      "Cart checkout: establish whether the timeout is real",
+    );
+    // Same words again is not an edit, and says so rather than claiming a write.
+    expect(
+      await callAnchored(
+        ids.maintainer,
+        "update_task",
+        { title: "Cart checkout: establish whether the timeout is real" },
+        "VIB-148",
+      ),
+    ).toBe("[noop] VIB-148: title already had that value; nothing was written.");
+    // The title rides the goal's gate, so a contributor is refused it - and the
+    // metadata beside it still lands, reported separately. CANARY: fold the
+    // title into the goal's try block and the label write disappears with it.
+    const partial = await callAnchored(
+      ids.contributor,
+      "update_task",
+      { title: "A title a contributor may not set at all", labels: ["triaged"] },
+      "VIB-148",
+    );
+    expect(partial).toContain("[done] VIB-148 updated: labels.");
+    expect(partial).toContain("Not applied: title:");
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.title).toBe(
+      "Cart checkout: establish whether the timeout is real",
+    );
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.labels).toEqual(["triaged"]);
   });
 
   /**

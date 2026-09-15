@@ -12964,3 +12964,100 @@ export async function dismissRecommendation(
 
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
 }
+
+/**
+ * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
+ *
+ * It could not be, by anyone. `updateTaskGoal` writes the goal — the contract
+ * every future run re-anchors on (ruling 189) — and nothing anywhere wrote the
+ * one-line summary of it. Not the controller, not the task page, not an
+ * operator. A title was whatever it was at creation, permanently.
+ *
+ * The controller found it and put the cost plainly, about a title it had
+ * written itself: "Its own run measured both halves of its title false … What I
+ * wanted: change six words in the title I wrote. What I did instead: rewrote the
+ * entire 6,000-character goal to say the premise is contested, and then told you
+ * 'that one needs you on the task page' — twice, in two consecutive turns …
+ * The title is what every person scanning the board reads; the correction lives
+ * in a body almost nobody opens. A false claim I authored is still on the board
+ * an hour after being disproved."
+ *
+ * There was no safety in the omission. A title is display prose: the KEY is the
+ * stable reference (`SHOP-50`), the branch is derived from the key at first
+ * dispatch (ruling 122), and a pull request is titled from the commit subject.
+ * Nothing downstream is pinned to these words. So the gate is the goal's own —
+ * a title and a goal are the same claim at two lengths, and it would be strange
+ * for the shorter one to be harder to correct than the longer.
+ *
+ * The rename is NOTED, and that is not ceremony: a title is how people refer to
+ * a task out loud and in other documents, so a silent rename makes every
+ * existing reference to the old words look like a reference to something else.
+ * The note carries both, which is what lets a reader join them.
+ */
+/**
+ * Ruling 295: the longest task title, and the length a refusal names.
+ *
+ * 200 characters is well past any title a person writes and short of the point
+ * where a board card stops being scannable. There is no cap on creation today,
+ * so this bounds only what a RENAME may set: a task that arrived with a longer
+ * title keeps it until someone edits it, and is then held to this.
+ */
+export const TASK_TITLE_MAX_CHARS = 200;
+
+export async function updateTaskTitle(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; title: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; changed: boolean }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "update-goal", "edit the task title");
+  const title = input.title.trim().replace(/\s+/g, " ");
+  if (title.length < 3) {
+    throw AppError.validation("A title of at least 3 characters is required.");
+  }
+  if (title.length > TASK_TITLE_MAX_CHARS) {
+    // Ruling 288's rule, one field over: a contract Viberr will not write half
+    // of. A title is the one string every board card, every review-queue row
+    // and every goal-chain link renders, so a silently cut one is wrong in more
+    // places than a cut goal.
+    throw AppError.validation(
+      `A title is at most ${TASK_TITLE_MAX_CHARS} characters and this one is ${title.length}. ` +
+        "Nothing was written. Shorten it: the detail belongs in the goal, which has room.",
+    );
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const before = existing.parsed.frontmatter.title;
+  if (before.trim() === title) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false };
+  }
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.title = title;
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Title updated",
+      // BOTH titles, because the old one is what every existing reference to
+      // this task says — in a comment, another task's goal, a person's memory.
+      text:
+        `Renamed from "${before}" to "${title}". The task key is unchanged, so ` +
+        `references to ${input.taskKey} still resolve; references by the old ` +
+        `wording are this task.`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.title.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { from: before, to: title },
+  });
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true };
+}
