@@ -36,15 +36,27 @@ const MAX_PAGES = 6;
 const PER_PAGE = 100;
 
 /**
- * Total patch bytes one reply may carry.
+ * Total patch bytes one reply may carry, measured AS THE REPLY CARRIES THEM.
  *
- * A model holds no scrollbar: the whole reply lands in a context window at
- * once. 120 KB is a large but readable diff (roughly 2,000 changed lines);
- * beyond it the caller reads one path at a time, which is what `path` is for.
- * Bounded by DEFAULT, like `read_run_log`'s page — a max the caller has to opt
- * into protects the call nobody tunes.
+ * Ruling 268 (pass 37, F37-98): the first version of this counted raw patch
+ * characters against 120 KB, and the reply is JSON — every newline in a diff
+ * becomes `\n` and every quote `\"`, so a hunk roughly doubles on the way out.
+ * The controller called this on PR #32 (4 files) and the protection never
+ * engaged: `patchesWithheldForSize` stayed false, `patchOmitted` stayed null,
+ * and the 83,196-byte reply tripped the Agent SDK's own offload instead — which
+ * wrote the result to a file under the run's home and told the model to read it
+ * in chunks. The controller has no filesystem tool. So a guard calibrated to
+ * the wrong quantity handed a path that could not be opened, carrying
+ * instructions addressed to an agent it is not.
+ *
+ * Two corrections. The budget is spent in ENCODED characters
+ * (`JSON.stringify(patch).length`), which is the quantity that actually reaches
+ * the ceiling. And the default is set well UNDER the measured trip point —
+ * 83,196 bytes offloaded on 2026-09-15 — rather than above it, because the
+ * caller cannot recover from the other side's truncation and can always ask for
+ * another page.
  */
-const MAX_PATCH_BYTES = 120_000;
+const MAX_PATCH_BYTES = 40_000;
 
 const prFileSchema = z.object({
   filename: z.string(),
@@ -68,10 +80,12 @@ export interface PrDiffFile {
    *  file too large for it to diff) — distinguished from an EMPTY patch by
    *  `patchOmitted`. */
   patch: string | null;
-  /** Why `patch` is null, when it is: GitHub sent none, or this reply's byte
-   *  budget ran out before this file. A reader must never mistake a budget cut
-   *  for "this file changed nothing". */
-  patchOmitted: "none-from-github" | "budget" | null;
+  /** Why `patch` is null, when it is: the caller asked for a files-only
+   *  listing, GitHub sent no diff at all (binary, or too large for it), or this
+   *  reply's byte budget ran out before this file. A reader must never mistake
+   *  any of the three for "this file changed nothing", and the three call for
+   *  different next moves. */
+  patchOmitted: "not-requested" | "none-from-github" | "budget" | null;
   renamedFrom?: string;
 }
 
@@ -100,7 +114,15 @@ export async function readPullRequestDiff(
   db: DatabaseSync,
   projectSlug: string,
   prNumber: number,
-  opts: GithubContextOptions & { path?: string; maxPatchBytes?: number } = {},
+  opts: GithubContextOptions & {
+    path?: string;
+    maxPatchBytes?: number;
+    /** Ruling 268: list the changed files WITHOUT their hunks. A caller that
+     *  wants one file's diff needs the file list first, and asking for every
+     *  patch to obtain it is the call most likely to be too big — the loop the
+     *  controller hit. This makes the first call always safe. */
+    patches?: boolean;
+  } = {},
 ): Promise<PrDiffResult> {
   if (!Number.isInteger(prNumber) || prNumber < 1) {
     return { ok: false, reason: "a pull request number is a positive integer" };
@@ -144,18 +166,23 @@ export async function readPullRequestDiff(
         patchOmitted: null,
       };
       if (f.previous_filename) row.renamedFrom = f.previous_filename;
-      if (f.patch === undefined) {
+      const encoded = f.patch === undefined ? 0 : JSON.stringify(f.patch).length;
+      if (opts.patches === false) {
+        // Files-only: not a truncation, so `truncated` stays false — the caller
+        // asked for exactly this and nothing was cut from under it.
+        row.patchOmitted = "not-requested";
+      } else if (f.patch === undefined) {
         // A binary file, or one GitHub declined to diff. The counts above are
         // still real, so the row stays and says why there are no hunks.
         row.patchOmitted = "none-from-github";
-      } else if (spent + f.patch.length > budget) {
+      } else if (spent + encoded > budget) {
         // The file is still LISTED with its counts — dropping the row would
         // read as a PR that does not touch it.
         row.patchOmitted = "budget";
         truncated = true;
       } else {
         row.patch = f.patch;
-        spent += f.patch.length;
+        spent += encoded;
       }
       files.push(row);
     }

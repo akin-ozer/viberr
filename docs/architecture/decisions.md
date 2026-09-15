@@ -5914,6 +5914,33 @@ by rewriting those paragraphs:*
     ever carry the new one.
     (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
 
+268. **A guard calibrated to the wrong quantity is not a guard (2026-09-15, pass 37; F37-98
+    and F37-100, both raised by the controller against rulings 265 and 266 on the day they
+    shipped).** Ruling 266 bounded `read_pull_request` at 120,000 characters of patch, counted
+    RAW. The reply is JSON: every newline in a diff becomes `\n` and every quote `\"`, so a
+    hunk roughly doubles on the way out. The controller called it on PR #32 — four files — and
+    the guard never fired: `patchesWithheldForSize` false, every `patchOmitted` null, and an
+    83,196-byte reply. What caught it was the Agent SDK's own offload, which wrote the result
+    to a file under the run's home and instructed the model to read it in chunks. The
+    controller has no filesystem tool: "the safety net handed me a path I cannot open, and the
+    instructions attached to it are addressed to an agent with a Read tool that I am not."
+    The budget is now spent in ENCODED characters — the quantity that actually reaches the
+    ceiling — and the default is 40,000, set UNDER the measured trip point rather than above
+    it, because the caller cannot recover from the other side's truncation and can always ask
+    for another page.
+    The same report named the loop that made the failure unavoidable: `path` reads one file,
+    and the only way to learn the file names from this tool was to ask for every patch — the
+    call most likely to be too big. `patches: false` now lists every changed file with its
+    counts and no hunks, so the first call on a PR of unknown size is always safe, and it is
+    flagged `not-requested` rather than `budget`, because a caller who asked for no patches
+    had nothing cut from under them.
+    And `list_runs` reported a controller turn as `projectSlug: ""` with
+    `taskKey: "cnv_…"`. Ruling 99 stores a conversation id in the runs table's `task_key`
+    because that table has one identity column; a storage shape is not a reply shape, and
+    "anything filtering by task has to know to discard that row". A controller row now names
+    its `conversationId` and carries no task.
+    (`pr-diff.server.ts`, `controller-toolkit.server.ts`, `controller-ops-mcp.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

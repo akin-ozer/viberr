@@ -26,6 +26,11 @@ import {
   runLineStats,
 } from "~/server/runtimes/run-store.server";
 import type { AgentRunRow } from "~/server/runtimes/run-store.server";
+import type {
+  RunBackend,
+  RunKind,
+  RunState,
+} from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   countConnectedUsers,
@@ -221,14 +226,45 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     if (!runVisible(row)) throw new NotVisibleError(notVisibleRun(row.id));
   }
 
+  /** One `list_runs` row. Named, because ruling 268 adds a key that is present
+   *  on exactly one kind of run and the shape has to say so. */
+  interface RunRowView {
+    runId: string;
+    /** Null on a CONTROLLER turn: it belongs to a conversation, not a board. */
+    projectSlug: string | null;
+    taskKey: string | null;
+    /** Present only on a controller turn (ruling 268). */
+    conversationId?: string;
+    kind: RunKind;
+    agent: string;
+    agentProfileId: string;
+    role: string;
+    backend: RunBackend;
+    model: string;
+    state: RunState;
+    phase: string | null;
+    step: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+    turns: number;
+    logLines: number;
+  }
+
   /** Ruling 265: one run, as `list_runs` reports it. Enough to decide which log
    *  to read and what a run is doing, and nothing a `get_task` read would not
    *  already tell the same asker. */
-  function runRow(row: AgentRunRow) {
-    return {
+  function runRow(row: AgentRunRow): RunRowView {
+    // Ruling 268 (F37-100): a CONTROLLER turn has no project and no task —
+    // ruling 99 stores the conversation id in `task_key` because the runs
+    // table has one identity column. Reporting that raw put a `cnv_…` in a
+    // field named `taskKey` with `projectSlug: ""`, so "anything filtering by
+    // task has to know to discard that row". A storage shape is not a reply
+    // shape: a controller row names its conversation and carries no task.
+    const controllerTurn = row.kind === "controller";
+    const view: RunRowView = {
       runId: row.id,
-      projectSlug: row.project_slug,
-      taskKey: row.task_key,
+      projectSlug: controllerTurn ? null : row.project_slug,
+      taskKey: controllerTurn ? null : row.task_key,
       kind: row.kind,
       agent: row.agent_name ?? row.agent_profile_id,
       agentProfileId: row.agent_profile_id,
@@ -245,6 +281,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
       turns: row.turns,
       logLines: runLineStats(db, row.id).count,
     };
+    if (controllerTurn) view.conversationId = row.task_key;
+    return view;
   }
 
   add(

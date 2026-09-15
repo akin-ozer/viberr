@@ -106,6 +106,65 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
     expect(result.truncated).toBe(true);
   });
 
+  /**
+   * Ruling 268 (pass 37, F37-98). The first version budgeted RAW patch
+   * characters against 120 KB. The reply is JSON, where every newline in a diff
+   * becomes `\n` and every quote `\"`, so a hunk roughly doubles on the way
+   * out. Live, PR #32's four files came back as 83,196 bytes with
+   * `patchesWithheldForSize: false` — this guard never fired, and the Agent
+   * SDK's own offload caught it instead, writing the result to a file and
+   * telling a model with no filesystem tool to read it in chunks.
+   */
+  it("spends the budget in ENCODED characters, which is what the reply carries", async () => {
+    const store = configuredStore();
+    // A patch whose RAW length is under the budget and whose JSON encoding is
+    // over it: every character is a newline, and each becomes two.
+    const raw = "\n".repeat(600);
+    const gh = fakeGithubFetch({ [FILES_ROUTE]: { body: [file("a.ts", raw), file("b.ts", raw)] } });
+    const result = await readPullRequestDiff(store.db, store.slug, 7, {
+      fetchImpl: gh.fetchImpl,
+      maxPatchBytes: 1_300,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // CANARY: spend `f.patch.length` again and BOTH patches fit under 1,300 by
+    // the raw count while the reply carries over 2,400 — the guard reports
+    // nothing withheld and the reply is twice the size it was bounded to.
+    expect(result.files[0]!.patch).not.toBeNull();
+    expect(result.files[1]!.patchOmitted).toBe("budget");
+    expect(result.truncated).toBe(true);
+    // The measurable claim: what the reply actually carries stays under the
+    // budget it was given.
+    const carried = result.files.reduce(
+      (n, f) => n + (f.patch === null ? 0 : JSON.stringify(f.patch).length),
+      0,
+    );
+    expect(carried).toBeLessThanOrEqual(1_300);
+  });
+
+  it("`patches: false` lists every file with no hunks, and is not a truncation", async () => {
+    const store = configuredStore();
+    const gh = fakeGithubFetch({
+      [FILES_ROUTE]: { body: [file("a.ts", "@@ a"), file("b.ts", "@@ b")] },
+    });
+    const result = await readPullRequestDiff(store.db, store.slug, 7, {
+      fetchImpl: gh.fetchImpl,
+      patches: false,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The loop this closes: `path` needs the file list, and the only way to get
+    // the list used to be asking for every patch — the call most likely to be
+    // too big. CANARY: drop the `patches === false` arm and the safe first call
+    // is the unsafe one again.
+    expect(result.files.map((f) => f.path)).toEqual(["a.ts", "b.ts"]);
+    expect(result.files.every((f) => f.patch === null)).toBe(true);
+    expect(result.files.every((f) => f.patchOmitted === "not-requested")).toBe(true);
+    // Nothing was cut from under the caller, so nothing claims it was.
+    expect(result.truncated).toBe(false);
+    expect(result.files[0]!.additions).toBe(3);
+  });
+
   it("tells a binary file apart from a budget cut", async () => {
     const store = configuredStore();
     const gh = fakeGithubFetch({

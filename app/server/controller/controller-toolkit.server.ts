@@ -2081,7 +2081,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_pull_request",
-      "What a task's review pull request CHANGED: every changed file with its status, its added/deleted counts, and its unified-diff hunks. Membership gated, read-only, one GitHub read. Use it to judge a delivery yourself instead of from a filename list - a reviewer's verdict says what an agent concluded, this says what is in the branch. Large diffs are bounded: the reply lists every file either way and says when a patch was withheld for the byte budget, and `path` reads one file's hunks in full. `prNumber` overrides the task's own PR (it must belong to this project's repository).",
+      "What a task's review pull request CHANGED: every changed file with its status, its added/deleted counts, and its unified-diff hunks. Membership gated, read-only, one GitHub read. Use it to judge a delivery yourself instead of from a filename list - a reviewer's verdict says what an agent concluded, this says what is in the branch. On a PR of any size, START with `patches: false`: that lists every changed file with its counts and no hunks, so the first call is always small, and `path` then reads one file's hunks in full. Asking for every patch at once is bounded by a byte budget - the reply still lists every file and flags each one whose patch was withheld (`patchOmitted`), so nothing is dropped silently. `prNumber` overrides the task's own PR (it must belong to this project's repository).",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2094,6 +2094,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe("Read only this file's hunks (the path as the PR lists it)."),
+        patches: z
+          .boolean()
+          .optional()
+          .describe(
+            "false lists the changed files with their counts and NO hunks - the safe first call on a PR whose size you do not know.",
+          ),
       },
       runWith(
         async (args: {
@@ -2101,6 +2107,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           taskKey?: string;
           prNumber?: number;
           path?: string;
+          patches?: boolean;
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "read this project's pull requests");
@@ -2128,6 +2135,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           );
           const diffOpts: Parameters<typeof readPullRequestDiff>[3] = {};
           if (args.path) diffOpts.path = args.path;
+          if (args.patches === false) diffOpts.patches = false;
           const result = await readPullRequestDiff(db, slug, number, diffOpts);
           if (!result.ok) return `[error] Could not read ${from}: ${result.reason}`;
           if (args.path && result.files.length === 0) {

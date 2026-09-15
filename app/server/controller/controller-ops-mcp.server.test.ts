@@ -616,8 +616,8 @@ describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
     runs: z.array(
       z.object({
         runId: z.string(),
-        projectSlug: z.string(),
-        taskKey: z.string(),
+        projectSlug: z.string().nullable(),
+        taskKey: z.string().nullable(),
         state: z.string(),
         agent: z.string(),
       }).loose(),
@@ -676,6 +676,48 @@ describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
       await call(ids.projectAdmin, "read_run_log", { runId: body.runs[0]!.runId }),
     );
     expect(log.run.id).toBe(body.runs[0]!.runId);
+  });
+
+  /**
+   * Ruling 268 (F37-100): ruling 99 stores a controller turn's CONVERSATION id
+   * in the runs table's `task_key` column, because that table has one identity
+   * column. Reporting it raw put a `cnv_…` in a field named `taskKey` with
+   * `projectSlug: ""` — the controller's own words: "a conversation id in a
+   * field named taskKey, so anything filtering by task has to know to discard
+   * that row". A storage shape is not a reply shape.
+   */
+  it("a controller turn names its conversation and carries no task (ruling 268)", async () => {
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, {
+      userId: ids.projectAdmin,
+      userLabel: "elif@viberr.dev",
+    });
+    upsertRun(app.db, {
+      id: "run_ops_live_ctl",
+      projectSlug: "",
+      taskKey: conversation.id,
+      threadId: "thread_ops_live_ctl",
+      role: "Controller",
+      kind: "controller",
+      agentProfileId: "controller",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    const body = parsed(RUNS_REPLY, await call(ids.projectAdmin, "list_runs"));
+    const row = body.runs.find((r) => r.runId === "run_ops_live_ctl")!;
+    // CANARY: report `row.task_key` straight through again and a caller
+    // filtering `taskKey` picks up a conversation id.
+    expect(row.taskKey).toBeNull();
+    expect(row.projectSlug).toBeNull();
+    expect(row).toMatchObject({ conversationId: conversation.id, kind: "controller" });
+    // A TASK run is untouched: the correction is scoped to the kind whose
+    // column means something else.
+    const task = body.runs.find((r) => r.runId === LIVE_RUN)!;
+    expect(task.taskKey).toBe("VIB-142");
+    expect(task).not.toHaveProperty("conversationId");
   });
 
   it("a run in a project you cannot see is absent, never refused", async () => {
