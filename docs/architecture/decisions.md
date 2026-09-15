@@ -6236,7 +6236,29 @@ by rewriting those paragraphs:*
     prompt for its OWN task, so the gap was never permission, only the tasks beside it. It is
     mounted only where a Viberr server is mounted anyway: a profile holding no collaboration
     grant at all still gets nothing, which is the gate U11 pinned.
-    (`agent-toolkit.server.ts`.)
+    (`agent-toolkit.server.ts`, `board-read.server.ts`.)
+
+282. **The actor that plans across the board can read it (2026-09-15, pass 37; F37-115,
+    extends 281).** The operator's `get_task` takes NO arguments: it answers the task it is
+    coordinating and only that one. Nothing else in its toolkit listed a task. So the one actor
+    that writes `blockedBy` through `set_dependencies`, that decides ordering, and that is the
+    ONLY author of a `create_task` option (ruling 269) planned across a board it could not read.
+    Two duplicates in one hour, from that single cause. On SHOP-26 it proposed creating
+    "Inventory: serve the published stock batch contract on GET /stock" — SHOP-39's title, word
+    for word, created by its OWN earlier packet on the same task. On SHOP-27 it proposed
+    "Gateway routes for orders, cart and inventory" while SHOP-29, "Gateway routes for
+    inventory, cart and checkout", already stood and already waited on SHOP-27. Both times a
+    person was one confirm away from a second task for work that had an owner, and nothing on
+    either card could have said so. Ruling 269 handed a new verb to the actor least able to
+    check whether it was needed.
+    `read_board` is the same tool ruling 281 gave a specialist, on the same implementation, so
+    "is SHOP-39 real" has one answer whoever asks. `get_task` stays the deep read of the task
+    being coordinated; this is the shallow read of everything beside it.
+    It joins the read-only FLOOR an undeployed operator keeps (A4): seeing a board it holds no
+    authority over takes nothing away, and reading has never been the thing withheld there. It
+    is a read, so it is not part of the governed vocabulary the Claude toolkit and the Codex
+    plan enum must agree on — like `get_task` and `read_default_branch_file` before it.
+    (`board-read.server.ts`, `operator-toolkit.server.ts`.)
 
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
