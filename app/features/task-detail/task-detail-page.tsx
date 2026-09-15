@@ -1073,7 +1073,18 @@ export function TaskDetailPage({
         <ConfirmDialog
           screenLabel="Interrupt run dialog"
           title="Interrupt this run?"
-          body="The agent stops where it is. Anything it has not already committed or delivered is lost. You can start a new run afterward."
+          /* Ruling 272 (pass 37, F37-104): this said "Anything it has not
+             already committed or delivered is lost", and nothing is. An
+             interrupt kills the PROCESS; it never touches the task's
+             workspace, and the next run reuses that checkout as it stands
+             (`cloneRepo`'s reuse path fast-forwards only a tree that is clean
+             on the default branch, so a dirty one is left exactly alone). The
+             sentence was wrong in the direction that costs most: it tells a
+             person that stopping a stuck run destroys work — discouraging the
+             one action the product wants them to be able to take — and it
+             tells whoever runs next that the tree is clean when a half-written
+             edit is sitting in it. */
+          body="The agent stops mid-turn. It never reports, so nothing it was about to deliver, record or answer lands. Its edits stay in the task's workspace exactly as it left them, which may be half-finished, and the next run continues from that tree rather than a fresh one."
           confirmLabel="Interrupt run"
           busy={runBusy}
           onCancel={() => setConfirmInterrupt(null)}

@@ -1072,6 +1072,53 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(top.actor).toMatchObject({ kind: "human", userId: ids.maintainer });
   });
 
+  /**
+   * Ruling 272 (pass 37, F37-105): ruling 263 put R21-9's law on the SPECIALIST
+   * arm of `run_agent_on_task` and returned above it for the operator, so the
+   * one dispatch door still sending a human's words off the record was the
+   * operator half of the door ruling 263 had just fixed. The controller caught
+   * it three minutes after the deploy by counting the task's own comments
+   * across two reads: "my directive is nowhere in the +1".
+   */
+  it("run_agent_on_task: an OPERATOR directive is recorded too, not just a specialist's (ruling 272)", async () => {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const handOffs = (key: string): string[] =>
+      readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
+        .parsed.timeline.filter(
+          (e) => e.type === "comment" && e.text.trim().startsWith("@operator"),
+        )
+        .map((e) => e.text);
+    // VIB-148 carries no decision packet, so the operator run is not refused.
+    const before = handOffs("VIB-148").length;
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-148",
+      agent: "operator",
+      prompt: "Check in on this task and say what is blocking it.",
+    });
+    const after = handOffs("VIB-148");
+    // CANARY: return above the appendComment for the operator arm again (as
+    // ruling 263 shipped) and the directive exists only inside the operator's
+    // prompt, where nobody watching the task can read it.
+    expect(after.length).toBe(before + 1);
+    expect(after[0]).toBe("@operator Check in on this task and say what is blocking it.");
+
+    // …and a REFUSED run strands no comment: VIB-142 has an open packet, so
+    // the operator is not run and there is nothing for a directive to address.
+    // Two things hold this: the refusal arms return before the write, and the
+    // write's own `!result.refused` guard. Either alone is enough today, which
+    // is why this pins the OUTCOME rather than one mechanism — remove both and
+    // a refused dispatch leaves an "@operator …" hand-off with no run behind
+    // it, the orphaned hand-off `operatorPromptAgent` learned to avoid.
+    const refusedBefore = handOffs("VIB-142").length;
+    const denied = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "operator",
+      prompt: "This one cannot start.",
+    });
+    expect(denied).toContain("[denied]");
+    expect(handOffs("VIB-142").length).toBe(refusedBefore);
+  });
+
   it("run_agent_on_task: a dispatch with no directive writes no hand-off comment", async () => {
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const handOffsNow = (): unknown[] =>

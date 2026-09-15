@@ -1827,6 +1827,46 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (result.refused === "closed") {
               return `[denied] ${result.refusalReason ?? `${key} is closed`} There is nothing for the operator to coordinate on a closed task.`;
             }
+            // Ruling 272: every OTHER refusal, named rather than fallen
+            // through. The two arms above cover the two a manual trigger can
+            // produce today; `blocked-by` is refused only for create,
+            // transition and scheduled triggers (ruling 131(d)), so it cannot
+            // reach here now. A third value added later must not arrive as
+            // `[done] Operator run started` — which is exactly the sentence
+            // ruling 263 exists to stop, and the one this arm would print.
+            if (result.refused) {
+              return (
+                `[refused] The operator did not start on ${key}: ` +
+                `${result.refusalReason ?? `the run was refused (${result.refused})`}`
+              );
+            }
+            // Ruling 272 (F37-105): ruling 263 put R21-9's law on the
+            // SPECIALIST arm and returned above it for the operator, so the
+            // one dispatch door that still sent a human's words off the record
+            // was the operator half of the door ruling 263 had just fixed.
+            // Measured by the controller three minutes after the deploy, by
+            // counting the task's own comments across two reads: "my directive
+            // is nowhere in the +1". The task page's Run-operator control has
+            // written this comment since 2026-08-21, for the reason its own
+            // note gives — a directive that reaches an agent off the record is
+            // invisible to supervision — and passes `humanComment` as well, as
+            // this arm does. Written only when the run was NOT refused, like
+            // the task page: a refused run would strand a comment with nothing
+            // to address it.
+            if (args.prompt && !result.refused) {
+              const { appendComment } = await import("~/server/tasks/task-actions.server");
+              await appendComment(
+                db,
+                {
+                  projectSlug: slug,
+                  taskKey: key,
+                  text: `@operator ${prose(args.prompt)}`,
+                  forceToAgent: true,
+                },
+                actor,
+                { dataRoot },
+              );
+            }
             if (result.queued) {
               return `[done] The operator is already working ${key}; your directive was queued for it.`;
             }

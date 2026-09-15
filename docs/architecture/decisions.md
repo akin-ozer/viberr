@@ -6016,6 +6016,31 @@ by rewriting those paragraphs:*
     deadlocked; the map was incomplete.
     (`controller-toolkit.server.ts`, `task-detail-components.test.tsx`.)
 
+272. **Two sentences that were wrong about what survives (2026-09-15, pass 37; F37-104 and
+    F37-105).** The Interrupt dialog on the task page said: "The agent stops where it is.
+    Anything it has not already committed or delivered is lost." Nothing is lost. An interrupt
+    kills the PROCESS and never touches the task's workspace — `cloneRepo`'s reuse path hands
+    the next run that same checkout and fast-forwards only a tree that is clean on the default
+    branch, so a dirty one is left exactly as the interrupted agent left it. The sentence was
+    wrong in the direction that costs most: it tells a person that stopping a stuck run
+    destroys work, discouraging the one action the product wants them to be able to take, and
+    it tells whoever runs next that the tree is clean when a half-written edit is sitting in
+    it. It now says what actually happens — the turn is lost, the edits are not, and the next
+    run continues from that tree rather than a fresh one. (The controller's own Interrupt
+    dialog was already right: a controller turn has no workspace, and it says so.)
+    And ruling 263 put R21-9's law — a directive that reaches an agent goes on the record — on
+    `run_agent_on_task`'s SPECIALIST arm, and returned above it for the operator. So the one
+    dispatch door still sending a human's words off the record was the operator half of the
+    door ruling 263 had just fixed. The controller caught it three minutes after the deploy, by
+    counting the task's own comments across two reads: "the three new events are the PR push,
+    the operator's own comment to the Backend Engineer, and the run start. My directive is
+    nowhere in the +1." The task page's Run-operator control has written that comment since
+    2026-08-21 for exactly the stated reason; the controller's arm now writes the same one,
+    only when the run was not refused, so a refused dispatch strands no hand-off. Every other
+    refusal value is named rather than falling through to "[done] Operator run started" —
+    the sentence ruling 263 exists to stop.
+    (`task-detail-page.tsx`, `controller-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
