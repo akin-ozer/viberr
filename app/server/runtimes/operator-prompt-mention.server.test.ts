@@ -104,3 +104,46 @@ describe("operator triage gate — disclose a substituted delegated ask (R20-9)"
     expect(prompt).toContain("on the delivering agent's behalf");
   });
 });
+
+/**
+ * Ruling 285 (pass 37, F37-120). The clip on an agent report was already
+ * honest — the header said "first 4,000 chars" — and honesty about a dead end
+ * is still a dead end. Live on SHOP-42 the operator raised a packet to a human
+ * saying "the reviewer's report reached me truncated at '### Item 3 —', so I
+ * have not read its cross-service audit conclusion; the full text is on the
+ * timeline". It was right about every part of that, including that the text was
+ * somewhere it could not go — and what it could not read named two unowned
+ * defects the reviewer had gone looking for.
+ */
+describe("a clipped agent report names the way out (ruling 285)", () => {
+  const long = `## Findings\n\n${"filler ".repeat(900)}\n\nSENTINEL-PAST-THE-CLIP`;
+
+  it("a report past the clip is cut, says so, and names the tool that finishes it", () => {
+    // Canary: drop the `more` string from `agentReportBlock` and the operator is
+    // back to being told its report is cut with nowhere to go.
+    const prompt = buildOperatorTurnPrompt(
+      SNAPSHOT,
+      "agent-reply",
+      undefined,
+      long,
+    );
+    expect(prompt).toContain("This report is CUT");
+    expect(prompt).toContain("read_timeline_entry");
+    expect(prompt).toContain("before you raise a packet about it");
+    // The clip itself still holds — a prompt carrying every report in full is
+    // the problem the clip exists to prevent.
+    expect(prompt).not.toContain("SENTINEL-PAST-THE-CLIP");
+  });
+
+  it("a report that FITS says nothing about being cut", () => {
+    const prompt = buildOperatorTurnPrompt(
+      SNAPSHOT,
+      "agent-reply",
+      undefined,
+      "Short report. SENTINEL-FITS.",
+    );
+    expect(prompt).toContain("SENTINEL-FITS");
+    expect(prompt).not.toContain("This report is CUT");
+    expect(prompt).not.toContain("read_timeline_entry");
+  });
+});

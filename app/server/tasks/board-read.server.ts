@@ -92,3 +92,75 @@ function boardRows(deps: BoardReadContext) {
   if (deps.ctx.dataRoot !== undefined) listOpts.dataRoot = deps.ctx.dataRoot;
   return listProjectTasks(deps.db, deps.projectSlug, listOpts);
 }
+
+/**
+ * Ruling 285 (pass 37, F37-120): the coordinator can read a report it was
+ * handed half of.
+ *
+ * An agent's report reaches the operator's prompt clipped at 4,000 characters,
+ * and `get_task`'s `recentTimeline` clips every entry at 1,500 — so a thorough
+ * reviewer's report was readable in neither place, and no tool in the operator's
+ * toolkit returned one whole. Live on SHOP-42 the operator said so itself, in
+ * the packet it raised to a human: "The reviewer's report reached me truncated
+ * at '### Item 3 —', so I have not read its cross-service audit conclusion; the
+ * full text is on the timeline." It was right about all of it, including that
+ * the text was somewhere it could not go. What it could not read named two
+ * unowned defects the reviewer had gone looking for — `services/orders` red on
+ * `main`, and a stale `.env.example` — and neither would have reached a person
+ * if that reviewer had not also written them into its summary.
+ *
+ * The clip itself stays: a prompt carrying every 20,000-character report in
+ * full is the problem the clip exists to prevent. What changes is that there is
+ * now somewhere to go, exactly as ruling 283 did for a knowledge base — index
+ * in the prompt, document on demand.
+ */
+export const TIMELINE_ENTRY_READ_CHARS = 40_000;
+
+/** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
+ *  prints. */
+export function readTimelineEntry(
+  deps: BoardReadContext,
+  taskKey: string,
+  occurredAt: string,
+): string {
+  const file = readTaskFile({
+    projectSlug: deps.projectSlug,
+    taskKey,
+    dataRoot: deps.ctx.dataRoot,
+  });
+  if (!file) {
+    return `[noop] No task ${taskKey} in this project.`;
+  }
+  const wanted = occurredAt.trim();
+  const entry = file.parsed.timeline.find((e) => e.occurredAt === wanted);
+  if (!entry) {
+    // Ruling 246's shape: say what this reader IS and how to address it, rather
+    // than implying the entry was deleted. The likeliest caller error is a
+    // stamp retyped by hand or trimmed of its milliseconds.
+    const recent = file.parsed.timeline
+      .slice(0, 8)
+      .map((e) => `${e.occurredAt} · ${e.type} · ${e.actor.kind}`);
+    return (
+      `[noop] ${taskKey} has no timeline entry stamped \`${wanted}\`. The stamp must ` +
+      `match exactly, to the millisecond, as \`get_task\` prints it. The eight most ` +
+      `recent:\n${recent.join("\n")}`
+    );
+  }
+  const text = entry.text;
+  const clipped = text.length > TIMELINE_ENTRY_READ_CHARS;
+  return JSON.stringify(
+    {
+      occurredAt: entry.occurredAt,
+      type: entry.type,
+      actor: entry.actor.kind === "human" ? (entry.actor.nameHint ?? "human") : entry.actor.kind,
+      title: entry.title,
+      // Reported, never hidden: a clipped entry that reads as complete is how a
+      // model states a half-read report as fact — the very failure this tool
+      // exists to end.
+      truncated: clipped,
+      text: clipped ? text.slice(0, TIMELINE_ENTRY_READ_CHARS) : text,
+    },
+    null,
+    1,
+  );
+}

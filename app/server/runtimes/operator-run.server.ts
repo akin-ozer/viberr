@@ -3772,8 +3772,25 @@ function transitionContextOf(input: RunOperatorInput): TransitionContext | undef
 function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string {
   if (trigger !== "agent-reply" || !agentReply?.trim()) return "";
   const report = agentReply.slice(0, 4000);
-  const suffix = agentReply.length > report.length ? " (first 4,000 chars)" : "";
-  return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\``;
+  // Ruling 285 (F37-120): the clip was already honest — it said "first 4,000
+  // chars" — and honesty about a dead end is still a dead end. A thorough
+  // reviewer's report runs past this routinely, and what is past it is where a
+  // reviewer puts the findings it went out of its way to make: live on SHOP-42
+  // the clipped half held two unowned defects, and the operator raised a packet
+  // to a human saying it had not read them. Name the way out beside the cut.
+  const suffix =
+    agentReply.length > report.length
+      ? " (first 4,000 chars — the rest is NOT below)"
+      : "";
+  const more =
+    agentReply.length > report.length
+      ? "\n\nThis report is CUT. The full text is this task's newest agent comment on " +
+        "the timeline: `get_task` prints its `occurredAt`, and `read_timeline_entry` " +
+        "returns it whole. Read it before you summarise this report for a person, " +
+        "before you raise a packet about it, and before you conclude it did not " +
+        "mention something."
+      : "";
+  return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\`${more}`;
 }
 
 /**

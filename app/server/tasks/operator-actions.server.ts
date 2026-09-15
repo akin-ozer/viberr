@@ -2010,7 +2010,7 @@ export interface OperatorTaskSnapshot {
      *  packet is decided and waits for the edited goal, so do not re-ask. */
     awaiting: "goal_edit" | null;
   } | null;
-  recentTimeline: { type: string; actor: string; text: string }[];
+  recentTimeline: OperatorTimelineRow[];
   /** [1] The coordinator's OWN proposals — what it already asked for, and what a
    *  human already refused. Without this the supervised loop spins: a supervisor
    *  declines "move to Review", the next drive cannot see the refusal (the
@@ -2329,6 +2329,20 @@ const liveRunRowsSchema = z.array(
 );
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
+/** One row of {@link OperatorTaskSnapshot.recentTimeline} — the shape the
+ *  snapshot builder writes and the operator reads. Named rather than inline so
+ *  the builder and the contract cannot drift over what `clipped` means. */
+export interface OperatorTimelineRow {
+  /** Ruling 285: the ADDRESS `read_timeline_entry` takes. */
+  occurredAt: string;
+  type: string;
+  actor: string;
+  text: string;
+  /** Ruling 285: present ONLY when the text was cut, naming the tool that
+   *  returns it whole. */
+  clipped?: string;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2480,17 +2494,31 @@ export function operatorSnapshot(
           awaiting: file.parsed.packet.awaiting ?? null,
         }
       : null,
-    recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
-      type: e.type,
-      actor:
-        e.actor.kind === "human"
-          ? (e.actor.nameHint ?? "human")
-          : e.actor.kind,
+    recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => {
       // Timeline comments store the agent's FULL report (no 1,200-char cap
       // since 2026-07-17) — cap here so six entries can't balloon the prompt.
-      text:
-        e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
-    })),
+      //
+      // Ruling 285 (F37-120): the cap stays and the ADDRESS ships with it. The
+      // stamp is what `read_timeline_entry` takes, and a clipped entry says it
+      // is clipped — an entry that ends mid-sentence with a "…" and no way to
+      // ask for the rest is how a coordinator states half a report as the whole
+      // of it, which it did, live, on SHOP-42.
+      const clipped = e.text.length > 1500;
+      const row: OperatorTimelineRow = {
+        occurredAt: e.occurredAt,
+        type: e.type,
+        actor:
+          e.actor.kind === "human"
+            ? (e.actor.nameHint ?? "human")
+            : e.actor.kind,
+        text: clipped ? e.text.slice(0, 1497) + "…" : e.text,
+      };
+      if (clipped) {
+        row.clipped =
+          "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole";
+      }
+      return row;
+    }),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.
     recommendations: {

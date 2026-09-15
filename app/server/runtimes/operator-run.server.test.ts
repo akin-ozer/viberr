@@ -3036,11 +3036,14 @@ describe("runOperator — authority, ordering, orphans", () => {
     // R19-1: an undeployed operator may LOOK at the repository — but through the
     // read-only checkout under its cwd (Read/Grep/Glob), so the in-process MCP
     // floor is the READS, and they still change nothing. Ruling 282 adds
-    // `read_board` to that floor: seeing a board it holds no authority over
-    // takes nothing away, and reading is never the thing being withheld.
+    // `read_board` to that floor and ruling 285 adds `read_timeline_entry`:
+    // seeing a board it holds no authority over takes nothing away, the task
+    // page already shows a person the whole comment that tool returns, and
+    // reading is never the thing being withheld.
     expect(spec.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
+      "mcp__viberr__read_timeline_entry",
     ]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
   });

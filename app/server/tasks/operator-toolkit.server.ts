@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { readBoardList, readBoardTask } from "./board-read.server";
+import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import { z } from "zod";
 import {
@@ -313,6 +313,32 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       },
     ),
     "read_board",
+  );
+
+  // Ruling 285 (F37-120): the coordinator could not read a report it was handed
+  // half of. Its prompt clips an agent report at 4,000 chars and `get_task`
+  // clips every `recentTimeline` entry at 1,500, and nothing here returned one
+  // whole — so on SHOP-42 it raised a packet to a human saying "the reviewer's
+  // report reached me truncated … the full text is on the timeline", which was
+  // true and was somewhere it could not go. The clip stays; the way out is new.
+  add(
+    tool(
+      "read_timeline_entry",
+      "Read ONE timeline entry of this task in full, addressed by the `occurredAt` stamp `get_task` prints for it. The agent report in your prompt is clipped at 4,000 characters and every `recentTimeline` entry is clipped at 1,500 — this is how you read the rest. Call it before you summarise a report for a human, before you raise a packet about one, and before you conclude a report did not mention something: an agent's findings are routinely past the clip, and a report you only half-read is a report you cannot coordinate from. Read-only.",
+      {
+        occurredAt: z
+          .string()
+          .describe(
+            "The entry's `occurredAt` stamp, exactly as get_task prints it (ISO, to the millisecond).",
+          ),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { occurredAt: string }) =>
+        textResult(
+          readTimelineEntry({ db, ctx, projectSlug }, taskKey, args.occurredAt),
+        ),
+    ),
+    "read_timeline_entry",
   );
 
   // Ruling 283: the operator's knowledge bases are INDEXED into its prompt, not

@@ -6313,6 +6313,36 @@ by rewriting those paragraphs:*
     always actually for. A free-text answer that IS meant to bind the work is an edit to the
     goal, which is its own action and says so. (`task-actions.server.ts`.)
 
+285. **The coordinator can read a report it was handed half of (2026-09-15, pass 37;
+    F37-120, same shape as 283).** An agent's report reaches the operator's prompt cut at
+    4,000 characters and `get_task`'s `recentTimeline` cuts every entry at 1,500, and no
+    tool in the operator's toolkit returned one whole. Both cuts were HONEST — the prompt
+    header said "first 4,000 chars" — and honesty about a dead end is still a dead end.
+    Live on SHOP-42 the operator raised a decision packet to a person carrying its own
+    disclosure: "The reviewer's report reached me truncated at `### Item 3 —`, so I have
+    not read its cross-service audit conclusion; the full text is on the timeline." Every
+    part of that was true, including that the text was somewhere it could not go. What it
+    could not read was the half where that reviewer put the work nobody asked it for — two
+    unowned defects on `main`, a red `services/orders` suite and a stale `.env.example` —
+    and neither would have reached a person if the reviewer had not also written them into
+    the summary that did fit.
+    The cut stays: a prompt carrying every 20,000-character report in full is the problem
+    the cut exists to prevent. What is new is somewhere to go. `recentTimeline` rows now
+    carry the `occurredAt` stamp and, when cut, a line naming the tool; `read_timeline_entry`
+    takes that stamp and returns the entry whole. The clipped prompt block says the same in
+    its own words, and says WHEN it matters: before summarising a report for a person,
+    before raising a packet about one, and before concluding a report did not mention
+    something.
+    It joins the read-only FLOOR an undeployed operator keeps (A4), more plainly than
+    `read_board` did: the task page already shows any member the whole comment this
+    returns, so withholding it from the coordinator withheld it from nobody else. Like the
+    other reads it is not part of the governed vocabulary the Claude toolkit and the Codex
+    plan enum must agree on.
+    This is ruling 283's shape one level over — a budget with no pull channel — found the
+    same afternoon, in the operator's own words, in a packet raised for a different reason.
+    (`board-read.server.ts`, `operator-toolkit.server.ts`, `operator-actions.server.ts`,
+    `operator-run.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

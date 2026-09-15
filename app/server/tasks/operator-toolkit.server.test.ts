@@ -157,7 +157,16 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // nothing, so it is not part of the governed vocabulary the two toolkits
   // must agree on. (Codex operators get board facts in their prompt, which is
   // why no read here has a plan mirror.)
-  const READ_ONLY = new Set(["get_task", "read_default_branch_file", "read_board"]);
+  // Ruling 283 (`read_knowledge_doc`) and ruling 285 (`read_timeline_entry`) add
+  // two more reads for the same reason: each is the pull half of something the
+  // prompt now carries only a clipped or indexed form of.
+  const READ_ONLY = new Set([
+    "get_task",
+    "read_default_branch_file",
+    "read_board",
+    "read_knowledge_doc",
+    "read_timeline_entry",
+  ]);
   const RENAME = new Map([
     ["open_decision_packet", "open_packet"],
     ["resolve_decision_packet", "resolve_packet"],
@@ -365,10 +374,15 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
     // Ruling 282: `read_board` joins that floor. An undeployed operator holds
     // no authority, and being able to SEE the board it holds no authority over
     // takes nothing: the whole point of the floor is that reading is never the
-    // thing being withheld.
+    // thing being withheld. Ruling 285's `read_timeline_entry` joins it for the
+    // same reason — and more sharply, because the task page shows a person the
+    // whole comment this returns, so withholding it from the coordinator
+    // withholds nothing from anyone. (`read_knowledge_doc` is NOT here: it is
+    // gated on the run's own KB grants, and this authority holds none.)
     expect(toolkit.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
+      "mcp__viberr__read_timeline_entry",
     ]);
     for (const write of [
       "mcp__viberr__deliver_for_review",
@@ -670,6 +684,83 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(await call({ taskKey: "VIB-404" })).toContain(
       "[noop] No task VIB-404 in this project",
     );
+  });
+
+  /**
+   * Ruling 285 (pass 37, F37-120): the coordinator could not read a report it
+   * was handed half of. Its prompt clips an agent report at 4,000 characters,
+   * `get_task` clips every `recentTimeline` entry at 1,500, and nothing in the
+   * toolkit returned one whole. Live on SHOP-42 it said so in a packet it put
+   * to a human — "the reviewer's report reached me truncated at '### Item 3 —',
+   * so I have not read its cross-service audit conclusion; the full text is on
+   * the timeline" — which was true, and was somewhere it could not go. What it
+   * could not read named two unowned defects the reviewer had gone looking for.
+   */
+  it("ruling 285: read_timeline_entry returns a clipped report whole, by its stamp", async () => {
+    const store = setupTestStore(ctxDb);
+    // A report past BOTH clips: the prompt's 4,000 and the snapshot's 1,500.
+    const report = `## Findings\n\n${"filler ".repeat(900)}\n\nSENTINEL-PAST-THE-CLIP`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review" }),
+      goal: "The task the operator is coordinating.",
+      timeline: [
+        {
+          occurredAt: "2026-09-15T13:53:26.000Z",
+          type: "comment",
+          actor: {
+            kind: "agent",
+            backend: "claude",
+            profileId: "code-reviewer",
+            roleHint: "Code Reviewer",
+          },
+          title: null,
+          text: report,
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const textOf = async (
+      name: string,
+      args: { occurredAt?: string },
+    ): Promise<string> => {
+      const tool = toolkit.tools.find((t) => t.name === name)!;
+      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
+      // a shape change fails the assertions below rather than reading undefined.
+      const answer = (await tool.handler(args as never, {} as never)) as {
+        content: { text: string }[];
+      };
+      return answer.content[0]!.text;
+    };
+
+    // What `get_task` shows: the entry CLIPPED, and its address beside the cut.
+    const snapshot = await textOf("get_task", {});
+    expect(snapshot).not.toContain("SENTINEL-PAST-THE-CLIP");
+    expect(snapshot).toContain('"occurredAt": "2026-09-15T13:53:26.000Z"');
+    expect(snapshot).toContain("read_timeline_entry with this occurredAt");
+
+    // …and what the tool returns: the report whole.
+    const full = await textOf("read_timeline_entry", {
+      occurredAt: "2026-09-15T13:53:26.000Z",
+    });
+    expect(full).toContain("SENTINEL-PAST-THE-CLIP");
+    expect(full).toContain('"truncated": false');
+
+    // A stamp that is close but not exact is the likeliest caller error, so the
+    // refusal names the real ones rather than implying a deletion.
+    const missed = await textOf("read_timeline_entry", {
+      occurredAt: "2026-09-15T13:53:26Z",
+    });
+    expect(missed).toContain("[noop]");
+    expect(missed).toContain("2026-09-15T13:53:26.000Z");
   });
 
   /**
