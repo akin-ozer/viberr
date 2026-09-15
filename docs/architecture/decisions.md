@@ -4511,6 +4511,34 @@ by rewriting those paragraphs:*
     is a real wait, no task key completing satisfies it, and dropping unmatched entries
     would quietly clear it. The number argues for a decision only when the decision would
     actually free something.
+
+301. **A background tab holds no live connection (owner, 2026-09-16, pass 37; F37-136).**
+    Four open Viberr tabs deadlock Viberr, in every tab at once, with no error anywhere.
+    An SSE stream is a PERMANENT connection; a browser allows about six per origin on
+    HTTP/1.1; the shipped deployment serves HTTP/1.1 (`curl -w %{http_version}` against
+    `localhost:5173` answers `1.1`); and a task page holds TWO streams, the layout's
+    `useLiveUpdates` and the console's `use-run-log-stream`. Four tabs is eight, the pool is
+    gone, and every request from every tab queues forever.
+    Measured live on the running instance, while resolving a real decision packet: with one
+    tab a `fetch` of `/resources/health` returned in 21ms and with two in 10ms; with four,
+    the page's own POST sat pending and a tool call against that tab was still hung after
+    300 seconds, while the SAME endpoint answered `curl` from the host in 12ms. Closing
+    tabs recovered it. The server was never the problem, which is exactly why this is so
+    hard to see from the inside: nothing is slow, nothing errors, the loaders simply never
+    resolve and a submitted form's button stays busy forever. It is this pass's worst
+    failure shape, a path blocked with no way out, and the way out (close tabs) is
+    unguessable.
+    A hidden tab now holds no stream. Both hooks close on `visibilitychange` and reopen on
+    return, and neither needed new catch-up machinery, which is the sign it was the right
+    cut: `useLiveUpdates` already pulls the loaders on any connect that FOLLOWS a previous
+    stream, so a returning tab revalidates rather than rendering the snapshot it had when it
+    left, and the run-log tail already resumes from its own per-run cursor. A background tab
+    never needed a push. It needs to be correct when you come back to it.
+    The residual is stated rather than papered over. This bounds the steady state by VISIBLE
+    surfaces, not by tabs, so two windows side by side hold four connections and three would
+    still reach the cap. Two streams per page is the remaining constant, and merging them is
+    the next cut if anyone meets it; the proper fix for the class is one shared stream per
+    origin, or a protocol that multiplexes, and neither is this change.
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

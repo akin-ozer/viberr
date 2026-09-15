@@ -112,6 +112,13 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
   // reopen can succeed and the loop stops. `paused` stays true — the topbar
   // keeps its chip, whose retry calls `reconnect` and clears this.
   const [signedOut, setSignedOut] = useState(false);
+  // Ruling 301: a BACKGROUND tab holds no stream. An SSE connection is a
+  // permanent one, Viberr is served over HTTP/1.1, and a browser allows about
+  // six connections per origin — so four open tabs deadlock the whole app for
+  // every tab at once, with no error anywhere. A hidden tab does not need a
+  // push; it needs to be correct when you come back, and the reopen below
+  // already revalidates on any connect that follows a previous stream.
+  const [hidden, setHidden] = useState(false);
   // True once ANY stream of this surface's life has opened — the marker that a
   // later `onopen` is a REconnect (scope change or recovery), not the first.
   const everOpenedRef = useRef(false);
@@ -130,6 +137,16 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
   // The human asked for a retry: forget the 401 verdict and the backoff with it
   // (they may have signed in again in another tab, which is exactly the case
   // this affordance exists for).
+  useEffect(() => {
+    // SSR and any host without a document: nothing to listen to, and the
+    // stream effect's own guards already cover it.
+    if (!("document" in globalThis)) return;
+    const sync = () => setHidden(document.visibilityState === "hidden");
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, []);
+
   const reconnect = useCallback(() => {
     failuresRef.current = 0;
     setSignedOut(false);
@@ -141,6 +158,9 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     // SSR / jsdom-without-EventSource: live updates are progressive
     // enhancement, silently skip where the host provides no EventSource.
     if (!("EventSource" in globalThis)) return;
+    // Ruling 301: hidden means no connection held. The cleanup below closes
+    // the stream this tab had, and the effect re-runs on the way back.
+    if (hidden) return;
     // OBS-6: a probe proved this session is not authenticated — opening another
     // stream would 401 again, on a loop nothing breaks out of.
     if (signedOut) return;
@@ -227,7 +247,11 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     // EventSource). `signedOut` is the STOP: it re-runs the effect once so the
     // cleanup above closes the dead stream, and the guard at the top keeps it
     // from opening another until `reconnect` clears it.
-  }, [scopeKey, attempt, signedOut]);
+    // `hidden` is ruling 301's trigger, on both edges: going hidden re-runs the
+    // effect so the cleanup closes the connection, coming back opens a fresh
+    // one, and `onopen` treats that as the REconnect it is and pulls the
+    // loaders once.
+  }, [scopeKey, attempt, signedOut, hidden]);
 
   return { paused, reconnect };
 }

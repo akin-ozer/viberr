@@ -264,6 +264,37 @@ describe("UI-30 / UI-03: the tail says when it stopped", () => {
     expect(FakeEventSource.instances).toHaveLength(0);
   });
 
+  /**
+   * Ruling 301 (pass 37, F37-136): this is the SECOND permanent SSE connection
+   * a task page holds. With HTTP/1.1's six-per-origin budget, two per page
+   * means four open tabs deadlock every tab at once, with no error anywhere.
+   */
+  it("ruling 301: a hidden tab holds no tail connection, and reopens on return", () => {
+    const visibility = { current: "visible" };
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility.current,
+    });
+    render(<Probe />, { wrapper: DataRouter });
+    const first = FakeEventSource.last();
+    expect(first.closed).toBe(false);
+
+    // CANARY: drop the `hiddenTab` guard.
+    act(() => {
+      visibility.current = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(first.closed, "a background console kept its connection").toBe(true);
+
+    // CANARY: leave `hiddenTab` out of the effect's deps.
+    act(() => {
+      visibility.current = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.last().closed).toBe(false);
+  });
+
   it("reports a 403 instead of swallowing it", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
     render(<Probe />, { wrapper: DataRouter });
