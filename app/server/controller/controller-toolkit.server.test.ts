@@ -543,6 +543,79 @@ describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
   });
 });
 
+/**
+ * Ruling 279 (pass 37, F37-112): `inspect_audit_log`'s headline said "action
+ * prefix" and its parameter said "Exact action id" — two descriptions of one
+ * field, contradicting each other in the same tool, and the behaviour followed
+ * the stricter one. Live, the controller filtered `action: "task."`, received
+ * `total: 0` with no error, and wrote: "a wrong filter is indistinguishable
+ * from a quiet period."
+ */
+describe("inspect_audit_log: the action filter is a prefix, and an empty result says so", () => {
+  it("matches by prefix, names the vocabulary, and explains a no-match", async () => {
+    // SAFETY: the tool answers the JSON it built; every field read here is its
+    // own, and a shape change fails the assertions rather than passing.
+    const all = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { limit: 1 }),
+    ) as { total: number; actions: string[]; noMatch: string | null };
+    // The vocabulary rides every reply, so an id never has to be guessed. It
+    // also answers "how many of X happened" without paging the whole log,
+    // which is what the controller had to do at 200 rows a call.
+    expect(all.actions.length).toBeGreaterThan(0);
+    expect(all.actions.every((a) => /\(\d+\)$/.test(a))).toBe(true);
+    expect(all.noMatch).toBeNull();
+
+    // SAFETY: `actions` is non-empty (asserted above) and every id this
+    // instance records is dotted (`task.created`, `runtime.run.started`), so
+    // both lookups below resolve; the assertions fail loudly if that changes.
+    const someTaskAction = all.actions
+      .map((a) => a.replace(/ \(\d+\)$/, ""))
+      .find((a) => a.includes("."))!;
+    // SAFETY: the id was just matched on containing a dot, so split yields at
+    // least two parts and the first is defined.
+    const prefix = `${someTaskAction.split(".")[0]!}.`;
+    // SAFETY: as above — the tool's own reply shape.
+    const byPrefix = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { action: prefix, limit: 1 }),
+    ) as { total: number; rows: { action: string }[] };
+    // CANARY: map `action` back onto the EXACT filter and this is 0 — the
+    // reading that told the controller nothing had happened.
+    expect(byPrefix.total).toBeGreaterThan(0);
+    expect(byPrefix.rows[0]!.action.startsWith(prefix)).toBe(true);
+
+    // A whole id still matches exactly that action.
+    // SAFETY: as above — the tool answers the JSON it built, and these are its
+    // own fields; a shape change fails the assertions rather than passing.
+    const exact = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { action: someTaskAction, limit: 1 }),
+    ) as { total: number };
+    expect(exact.total).toBeGreaterThan(0);
+
+    // …and a spelling nothing matches is NAMED, not answered with a bare zero.
+    // SAFETY: the same tool answer, read for the same tool-owned fields.
+    const miss = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { action: "taks.", limit: 1 }),
+    ) as { total: number; noMatch: string | null; actions: string[] };
+    // CANARY: drop the `noMatch` arm and a typo reads exactly like a quiet
+    // window, which is the whole finding.
+    expect(miss.total).toBe(0);
+    expect(miss.noMatch).toContain('starting with "taks."');
+    expect(miss.actions.length).toBeGreaterThan(0);
+  });
+
+  it("a prefix cannot smuggle a LIKE pattern", async () => {
+    // SAFETY: the tool answers the JSON it built and `total` is its own field;
+    // a shape change fails the assertions below rather than passing silently.
+    const totalOf = (text: string) => (JSON.parse(text) as { total: number }).total;
+    // CANARY: drop the escape and `%` matches everything, so a filter that
+    // should find nothing returns the whole log.
+    expect(totalOf(await call(ids.orgAdmin, "inspect_audit_log", { action: "%", limit: 1 }))).toBe(0);
+    expect(
+      totalOf(await call(ids.orgAdmin, "inspect_audit_log", { action: "task_", limit: 1 })),
+    ).toBe(0);
+  });
+});
+
 // -------------------------------------------------------- instance scope
 
 describe("instance scope: org-role gate on every management tool", () => {

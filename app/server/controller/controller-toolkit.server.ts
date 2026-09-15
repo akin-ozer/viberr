@@ -1108,10 +1108,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_audit_log",
-      "Read the audit trail with filters (project, action prefix, actor, time range). Org admins only. Rows are retained 90 days.",
+      "Read the audit trail with filters (project, action, actor, time range). `action` is a PREFIX: \"task.\" reads every task action, \"task.transition\" narrows, a whole id matches exactly that one. A filter that matches nothing says so and lists the action ids the window DOES contain, because a wrong spelling and a quiet period used to look identical (ruling 279). `actions` on every reply is the vocabulary with a count each, so you never have to know an id before you can ask for it. Org admins only. Rows are retained 90 days.",
       {
         projectSlug: z.string().optional(),
-        action: z.string().optional().describe("Exact action id, e.g. task.created."),
+        action: z
+          .string()
+          .optional()
+          .describe('Action id PREFIX, e.g. "task." for all task actions or "task.created" for one.'),
         actorUserId: z.string().optional(),
         since: z.string().optional().describe("ISO timestamp lower bound."),
         until: z.string().optional().describe("ISO timestamp upper bound."),
@@ -1129,15 +1132,43 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           requireOrgAdmin("inspect the audit log");
           const filters: AuditExportFilters = {};
           if (args.projectSlug) filters.projectSlug = args.projectSlug;
-          if (args.action) filters.action = args.action;
+          // Ruling 279 (F37-112): a PREFIX. The headline said "action prefix"
+          // and the parameter said "Exact action id" — two descriptions of one
+          // field, contradicting each other, and the behaviour followed the
+          // stricter one. Live, the controller filtered `action: "task."`,
+          // received `total: 0` with no error, and could not tell a wrong
+          // spelling from a quiet period.
+          if (args.action) filters.actionPrefix = args.action;
           if (args.actorUserId) filters.actorUserId = args.actorUserId;
           if (args.since) filters.since = args.since;
           if (args.until) filters.until = args.until;
           const rows = queryAuditEventsForExport(db, filters);
           const limit = args.limit ?? 50;
+          // Ruling 279: the vocabulary, from the same window MINUS the action
+          // filter — so an empty result can name what IS there instead of
+          // leaving the caller to guess an id. It also answers "how many
+          // decisions happened" without paging 8,282 rows at 200 a call, which
+          // is what the controller had to do.
+          const unfiltered = { ...filters };
+          delete unfiltered.actionPrefix;
+          delete unfiltered.action;
+          const counts = new Map<string, number>();
+          for (const r of queryAuditEventsForExport(db, unfiltered)) {
+            counts.set(r.action, (counts.get(r.action) ?? 0) + 1);
+          }
+          const actions = [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([action, n]) => `${action} (${n})`);
           return json({
             total: rows.length,
             shown: Math.min(limit, rows.length),
+            // Named, not just counted: an empty result under a filter is the
+            // case this exists for.
+            noMatch:
+              rows.length === 0 && args.action
+                ? `No audit row in this window has an action starting with "${args.action}". The actions present are listed in \`actions\`.`
+                : null,
+            actions,
             rows: rows.slice(0, limit).map((r) => ({
               at: r.occurredAt,
               action: r.action,

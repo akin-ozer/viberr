@@ -6174,6 +6174,24 @@ by rewriting those paragraphs:*
     the row, and the description says to probe rather than relay a stale red.
     (`resources.server.ts`, `controller-toolkit.server.ts`.)
 
+279. **A filter that matches nothing does not look like a quiet period (2026-09-15, pass 37;
+    F37-112).** `inspect_audit_log`'s headline said "filters (project, action PREFIX, actor,
+    time range)" and its `action` parameter said "Exact action id, e.g. task.created" — two
+    descriptions of one field, contradicting each other inside the same tool, and the behaviour
+    followed the stricter one. Live, the controller filtered `action: "task."` across 8,282
+    rows, received `total: 0` with no error, and wrote the finding itself: "a wrong filter is
+    indistinguishable from a quiet period."
+    The prefix is the useful reading and now the real one, through a separate `actionPrefix`
+    on the export filters so the CSV/JSON export's exact-match contract is untouched. The
+    wildcard is anchored at the end and the caller's own `%` and `_` are escaped, so a prefix
+    cannot become a pattern that matches the whole log.
+    Two more from the same report, both about an answer you cannot act on. An empty result
+    under an action filter now SAYS it matched nothing and points at the list; and every reply
+    carries `actions` — the vocabulary in that window with a count each. That was the other
+    half of the complaint: with no facets, "how many decisions happened" meant paging 8,282
+    rows at 200 a call, and the action ids were reachable only by already knowing them.
+    (`audit-export.server.ts`, `controller-toolkit.server.ts`.)
+
     *(And one flake, in this repository's own suite, of exactly the kind SHOP-35 is fixing in
     the clone: `controller-page.test.tsx` asserts an elapsed cell to the second against a
     `startedAt` stamped once when the describe body evaluates — so every test that ran before
