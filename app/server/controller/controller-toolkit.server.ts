@@ -75,6 +75,7 @@ import {
 import {
   readStoreDoc,
   scanStoreTree,
+  storeDocVersion,
   writeStoreDoc,
 } from "~/server/org/store-files.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
@@ -664,6 +665,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           path: args.path,
           bytes: doc.text.length,
           truncated: doc.truncated,
+          // Ruling 305: hand back the version this text IS, so a replace can
+          // say which one it is replacing and Viberr can refuse when the
+          // document moved underneath it.
+          version: storeDocVersion(target, [args.path]),
           text: doc.text,
         });
       }),
@@ -674,7 +679,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` (ruling 257): read the existing text first with read_knowledge_base_doc and send it back with your change, or nothing you leave out survives. The reply says which happened, and how many bytes a replace destroyed.",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed.",
       {
         id: z
           .string()
@@ -698,6 +703,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               .describe(
                 "Required to overwrite a file that already exists. Read it first; `content` replaces all of it.",
               ),
+            replaces: z
+              .string()
+              .optional()
+              .describe(
+                "Ruling 305: the `version` read_knowledge_base_doc returned beside the text you are replacing. Required to overwrite an existing file. If the document has changed since that read, the write is refused with nothing written and both versions named, because somebody else's edit is in there and a whole-document replace would delete it.",
+              ),
           })
           .optional()
           .describe("A document to write into the KB folder."),
@@ -707,7 +718,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           id?: string;
           name: string;
           refresh?: KbRefreshMode;
-          doc?: { path: string; content: string; replace?: boolean };
+          doc?: { path: string; content: string; replace?: boolean; replaces?: string };
         }) => {
           requireOrgAdmin("manage knowledge bases");
           const saved = await saveKnowledgeBase(
@@ -738,6 +749,33 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // rulings KB — injected into EVERY run on the project — is one call
             // away from being erased by a model writing the obvious filename.
             const before = readStoreDoc(target, [args.doc.path]);
+            // Ruling 305: a whole-document replace names the version it read.
+            // `writeStoreDoc`'s own collision guard (ruling 257) asks whether
+            // the file EXISTS; this asks whether it is still the one you read.
+            // The controller hit the difference live: correcting one paragraph
+            // of the 26 KB rulings document, it re-read first and found that
+            // "§9 had grown a whole existence-oracle section I had not
+            // written". A blind replace would have deleted that section and
+            // reported only how many bytes it destroyed.
+            if (before) {
+              const current = storeDocVersion(target, [args.doc.path]);
+              if (args.doc.replaces === undefined) {
+                return (
+                  `${head} Nothing was written. ${args.doc.path} already exists, and a ` +
+                  `replace must name the version it read: pass replaces: "${current}", ` +
+                  "which read_knowledge_base_doc returns beside the text. Read it first " +
+                  "and send the whole document back with your change."
+                );
+              }
+              if (args.doc.replaces !== current) {
+                return (
+                  `${head} Nothing was written. ${args.doc.path} has changed since you ` +
+                  `read it: you replaced version ${args.doc.replaces}, it is now ` +
+                  `${current}. Somebody else's edit is in there. Read it again and ` +
+                  "redo your change on top of what is there now."
+                );
+              }
+            }
             const written = writeStoreDoc(
               db,
               target,

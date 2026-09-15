@@ -2809,8 +2809,10 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // document was just written by the call above.
     const read = JSON.parse(
       await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "conventions.md" }),
-    ) as { text: string };
+    ) as { text: string; version: string };
     expect(read.text).toBe("ORIGINAL RULES, 20 bytes+");
+    // Ruling 305: the read hands back the version this text IS.
+    expect(read.version).toMatch(/^[0-9a-f]{12}$/);
 
     // Writing the same name WITHOUT `replace` is refused by the writer's own
     // sentence, and the original survives.
@@ -2829,14 +2831,105 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     ) as { text: string };
     expect(after.text).toBe("ORIGINAL RULES, 20 bytes+");
 
-    // Told to replace, it does — and says what it destroyed.
+    // Ruling 305: `replace: true` is no longer enough on its own. Naming the
+    // version you read is what makes the write safe, and the refusal says
+    // which version to pass.
+    const unversioned = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "no version named", replace: true },
+    });
+    expect(unversioned).toContain("Nothing was written");
+    expect(unversioned).toContain(`replaces: "${read.version}"`);
+
+    // Told to replace AND naming the version it read, it does — and says what
+    // it destroyed.
     const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
       id,
       name: "Clobber Probe",
-      doc: { path: "conventions.md", content: "ORIGINAL RULES, 20 bytes+\n\nand the new note", replace: true },
+      doc: {
+        path: "conventions.md",
+        content: "ORIGINAL RULES, 20 bytes+\n\nand the new note",
+        replace: true,
+        replaces: read.version,
+      },
     });
     expect(replaced).toContain("REPLACED");
     expect(replaced).toContain("previous 25 bytes are gone");
+  });
+
+  /**
+   * Ruling 305 (pass 37, F37-140): a whole-document replace names the version
+   * it read, and a document that moved underneath it is refused.
+   *
+   * Ruling 257's guard asks whether the file EXISTS. This asks whether it is
+   * still the one you read. The controller hit the difference live, correcting
+   * one paragraph of the 26,693-character rulings document that is injected
+   * into every run on the board: it re-read first and found that "§9 had grown
+   * a whole existence-oracle section I had not written". A blind replace would
+   * have deleted that section and reported only how many bytes it destroyed.
+   */
+  it("ruling 305: a replace whose base moved is refused, names both versions, and writes nothing", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "Stale Base Probe",
+      doc: { path: "rules.md", content: "one\ntwo\nthree" },
+    });
+    const id = /id (kb_[A-Za-z0-9_-]+)/.exec(created)![1]!;
+    // SAFETY: `read_knowledge_base_doc` answers `json()` carrying `version`
+    // for a document the call above just wrote, so it is not the denial string.
+    const first = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "rules.md" }),
+    ) as { version: string };
+
+    // Somebody else lands a change between that read and our write.
+    await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Stale Base Probe",
+      doc: {
+        path: "rules.md",
+        content: "one\ntwo\nthree\nfour, added by somebody else",
+        replace: true,
+        replaces: first.version,
+      },
+    });
+
+    // Our write, built on the version we read, is refused whole.
+    // CANARY: drop the version comparison and this overwrites the other edit.
+    const stale = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Stale Base Probe",
+      doc: {
+        path: "rules.md",
+        content: "one\ntwo\nthree, with my correction",
+        replace: true,
+        replaces: first.version,
+      },
+    });
+    expect(stale).toContain("Nothing was written");
+    expect(stale).toContain("has changed since you read it");
+    expect(stale).toContain(first.version);
+    expect(stale).toContain("Somebody else's edit is in there");
+
+    // And the other person's line is still there.
+    // SAFETY: same reader, same document, and the refusal above means it is
+    // still there.
+    const survived = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "rules.md" }),
+    ) as { text: string; version: string };
+    expect(survived.text).toContain("four, added by somebody else");
+
+    // Re-reading and redoing the change on top of it lands.
+    const ok = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Stale Base Probe",
+      doc: {
+        path: "rules.md",
+        content: `${survived.text}\nfive, mine`,
+        replace: true,
+        replaces: survived.version,
+      },
+    });
+    expect(ok).toContain("REPLACED");
   });
 
   it("save_skill's reply carries the skill id and grant key the same way", async () => {

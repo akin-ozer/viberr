@@ -4651,6 +4651,29 @@ by rewriting those paragraphs:*
     not telling them. The pill existed and was rendered one panel up on the same page
     (`task-side-panels.tsx`), so the dialog's `AcceptConfirmTask` simply never carried the
     field.
+
+305. **A whole-document replace names the version it read (owner, 2026-09-16, pass 37;
+    F37-140).** Ruling 257's guard asks whether a knowledge-base document EXISTS, and
+    refuses a write that would collide unless it is told to replace. It never asked whether
+    the document is still the one the writer READ. Between a read and a write, anybody
+    else's edit lands, and a whole-document replace deletes it and reports only how many
+    bytes it destroyed. That is a lost update, on the one file this instance injects into
+    every run on a board.
+    Not hypothetical. The controller reported it from inside the work: correcting one
+    paragraph of the 26,693-character rulings document, it "re-read the source first
+    specifically to avoid clobbering changes someone else had made since (there were
+    several -- §9 had grown a whole existence-oracle section I had not written)." The
+    product's affordances are what let it avoid the loss: ruling 257's refusal, the byte
+    count in the reply, and a reader to carry the text forward. But avoiding it was
+    DISCIPLINE, and a shape that only careful writers survive is not safe.
+    So `read_knowledge_base_doc` hands back a `version` and a replace must name it.
+    `replace: true` alone is no longer enough, because a flag that says "yes, overwrite"
+    answers a different question from "yes, overwrite THIS". A write whose base has moved
+    is refused whole, with nothing written, naming both versions and saying plainly that
+    somebody else's edit is in there and the change should be redone on top of what is
+    there now. The version is hashed from the FILE, never from `readStoreDoc`'s text, which
+    caps at 256 KB: a version computed from a truncated read would call two different
+    documents the same one.
     Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
     requests were accepted and merged carrying three failing checks each, and the ceremony
     named the PR, the branch, the base, the verdict and the skipped stages without once
