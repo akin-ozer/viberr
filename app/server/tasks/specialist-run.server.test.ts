@@ -2128,7 +2128,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments",
     );
     expect(path.isAbsolute(attachments)).toBe(true);
-    expect(sys).toContain("Posting files on the task thread");
+    expect(sys).toContain("Files on the task thread");
     expect(sys).toContain(`\`${attachments}\``);
     expect(sys).not.toContain(`\`projects/${store.slug}/tasks/VIB-1/attachments\``);
     expect(sys).not.toContain("reachable from your working directory");
@@ -2635,7 +2635,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(without).toContain("Work ONLY inside the current working directory");
   });
 
-  it("the posting-files drop section rides the evidence grant (owner ask 2026-08-20)", () => {
+  it("the task-files section rides the evidence grant (owner ask 2026-08-20)", () => {
     // The live gap: an agent committed its screenshot into the PR because
     // nothing told it the task thread could carry files. The section names the
     // real directory and the contract (files landing there during the run are
@@ -2645,7 +2645,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       skills: [],
       attachmentsDrop: { attachmentsDir: "/data/projects/p/tasks/T-1/attachments" },
     });
-    expect(withDrop).toContain("Posting files on the task thread");
+    expect(withDrop).toContain("Files on the task thread");
     expect(withDrop).toContain("`/data/projects/p/tasks/T-1/attachments`");
     expect(withDrop).toContain("posted on your reply");
     // Ruling 159: an absolute path, outside the checkout, never committed.
@@ -2655,7 +2655,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     // pipeline would still stamp the files, but the prompt must not invite a
     // mechanic the capability matrix withholds.
     const without = buildSpecialistPersona({ profileId: "dev", skills: [] });
-    expect(without).not.toContain("Posting files on the task thread");
+    expect(without).not.toContain("Files on the task thread");
   });
 
   it("F4: renders the github_read guardrails only when the reader mounted (grant + repo)", () => {
@@ -3771,7 +3771,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(existsSync(attachments)).toBe(true);
     // The persona carries the same drop section the fresh run gets, and
     // (ruling 159) it names the ABSOLUTE dir, never the store-relative form.
-    expect(confinement.systemPrompt ?? "").toContain("Posting files on the task thread");
+    expect(confinement.systemPrompt ?? "").toContain("Files on the task thread");
     expect(confinement.systemPrompt ?? "").toContain(`\`${attachments}\``);
     expect(confinement.systemPrompt ?? "").not.toContain(
       `\`projects/${store.slug}/tasks/VIB-1/attachments\``,

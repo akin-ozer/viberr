@@ -4692,6 +4692,29 @@ by rewriting those paragraphs:*
     there now. The version is hashed from the FILE, never from `readStoreDoc`'s text, which
     caps at 256 KB: a version computed from a truncated read would call two different
     documents the same one.
+
+306. **The attachments directory is read as well as written, and it now says so (owner,
+    2026-09-16, pass 37; F37-141).** It shipped as a DROP BOX -- "to put a file in front of
+    the humans on this task, copy it into ..." -- which is half of what it is. It is a real
+    absolute path, and on a task that has run before it already holds every file those runs
+    attached: 27 on SHOP-11 of this instance's board, 90 on SHOP-15, 44 on SHOP-16. An
+    agent reworking such a task was standing next to the evidence its directive was
+    summarising, told only where to put things.
+    That is rulings 285, 292 and 293 one actor over. Each of those gave a COORDINATOR the
+    thing it was relaying claims about -- a report past its clip, a timeline entry whole, an
+    attachment rather than the sentence claiming it -- and 293's own text says "call it
+    before you tell a person a thing was proved, and before you repeat a report's claim
+    about what its own evidence shows". The agent DOING the work was the one left repeating
+    them, and it was the only actor with no tool for it. The capability was already there:
+    the path is absolute, outside the checkout, and readable by anything with a filesystem.
+    Nothing named it.
+    So the section is two-way, and the reading half carries its own bound: list it, and read
+    what your directive or the timeline actually CITES, by name, never the whole folder,
+    which on this board can be ninety files. A prompt that sends an agent to sweep an
+    evidence directory has traded one silent failure for a context it cannot afford. The
+    sentence that says why it matters at all is the one worth keeping: a report saying a
+    thing was proved and the file proving it are different objects, and only one of them is
+    evidence.
     Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
     requests were accepted and merged carrying three failing checks each, and the ceremony
     named the PR, the branch, the base, the verdict and the skipped stages without once
