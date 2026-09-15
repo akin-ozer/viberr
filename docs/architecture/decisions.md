@@ -6107,6 +6107,31 @@ by rewriting those paragraphs:*
     stop a run acting on the wrong half of its own prompt without noticing.
     (`toolchain.server.ts`, `specialist-run.server.ts`.)
 
+276. **A null that means two things says which (2026-09-15, pass 37; F37-109).** `prRefSchema`
+    keeps "never read" (the `checks` key is absent) apart from "read, and GitHub reported no
+    check runs" (`total: 0`), and its own comment says so: "an absent key is 'never read',
+    which is not the same as 'no checks'". `mapPrChecks` collapses both to null — correctly, a
+    display has nothing to draw either way — and every reader inherited that collapse,
+    including the one for whom the difference IS the answer. Live, the controller read
+    `checks: null` on all thirty pull requests, could not tell which, reconstructed review
+    state from task timelines instead, and learned only from prose an operator had written into
+    a task goal that this account's GitHub Actions are billing-blocked. "No CI is configured"
+    and "we have not looked" ask for opposite next moves.
+    `prChecksRead` is the one derivation, carried beside the render rather than folded into it,
+    so the GitHub page's "no pill for zero checks" is byte-for-byte unchanged and
+    `get_github_state` gains `checksRead`. Its description now also says what `review` is: it
+    is GITHUB's review verdict, null on a repository where humans do not review there, and
+    Viberr's own reviewer verdicts live on the task — which is the second thing the controller
+    had to work out for itself.
+    (`task.server.ts`, `github-query.server.ts`, `controller-toolkit.server.ts`.)
+
+    *(And one flake, in this repository's own suite, of exactly the kind SHOP-35 is fixing in
+    the clone: `controller-page.test.tsx` asserts an elapsed cell to the second against a
+    `startedAt` stamped once when the describe body evaluates — so every test that ran before
+    it spent part of that assertion's budget, and under a full suite the clock read 01:07
+    against a window written for 01:05. Stamped per render instead. A gate that cries wolf
+    trains everyone to discount red, which is SHOP-35's own premise.)*
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

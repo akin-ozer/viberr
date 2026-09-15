@@ -23,6 +23,7 @@ import {
 import type { SyncState } from "./github-pills";
 import {
   mapPrChecks,
+  prChecksRead,
   mapPrMergeable,
   mapPrReview,
   type PrChecksRender,
@@ -57,6 +58,10 @@ export interface PrRowView {
    *  discarded or never read; the narrowing right here to number/state/title
    *  IS the "every consumer narrows" the finding describes. */
   checks: PrChecksRender | null;
+  /** Ruling 276: whether GitHub's check state has ever been read for this PR.
+   *  `checks: null` with `checksRead: true` means GitHub reported NO check
+   *  runs; with `checksRead: false` it means nobody has looked. */
+  checksRead: boolean;
   review: PrReviewState | null;
   /** P14-LV-07 / F17-L6: GitHub's last-read mergeability for an open PR — the
    *  conflict state the acceptance chain already knows but this page did not
@@ -236,6 +241,10 @@ export async function getGithubViewData(
       title: t.pr!.title,
       branch: t.branch,
       checks: mapPrChecks(t.pr),
+      // Ruling 276: a null `checks` is two different facts, and the file keeps
+      // them apart. Carried beside the render rather than folded into it, so
+      // the page's "no pill for zero checks" stays exactly as it was.
+      checksRead: prChecksRead(t.pr),
       review: mapPrReview(t.pr),
       mergeable: mapPrMergeable(t.pr),
     }))

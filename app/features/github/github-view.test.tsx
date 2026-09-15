@@ -102,6 +102,7 @@ const prs: PrRowView[] = [
     title: "Attach execution workspace",
     branch: "vib-142-attach-workspace",
     checks: null,
+    checksRead: false,
     review: null,
     // F17-L6: an open PR that conflicts with the base branch.
     mergeable: "conflicting",
@@ -113,6 +114,7 @@ const prs: PrRowView[] = [
     title: "Policy split",
     branch: "vib-139-policy-split",
     checks: null,
+    checksRead: false,
     review: null,
     mergeable: null,
   },
@@ -123,6 +125,7 @@ const prs: PrRowView[] = [
     title: "Abandoned spike",
     branch: "vib-777-spike",
     checks: null,
+    checksRead: false,
     review: null,
     mergeable: null,
   },

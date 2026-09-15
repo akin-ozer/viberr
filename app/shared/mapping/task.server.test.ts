@@ -5,6 +5,7 @@ import {
   isAtAcceptanceBoundary,
   mapOperatorRef,
   mapPrChecks,
+  prChecksRead,
   mapPrReview,
   mapTaskProjectionRow,
   nextScheduleDueAt,
@@ -433,6 +434,32 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
     expect(
       mapPrChecks(pr({ checks: { total: 2, passing: 2, failing: 0, pending: 0 } })),
     ).toMatchObject({ state: "passing" });
+  });
+
+  /**
+   * Ruling 276 (pass 37, F37-109): `prRefSchema` keeps "never read" (the key is
+   * absent) apart from "read, and GitHub reported no check runs" (`total: 0`),
+   * and says so in its own comment. `mapPrChecks` collapses both to null —
+   * correctly, a display has nothing to draw either way — and every reader
+   * inherited the collapse, including the one for whom the difference IS the
+   * answer. Live, the controller read `checks: null` on all 30 PRs and could
+   * not tell which; "no CI is configured" and "we have not looked" ask for
+   * opposite next moves.
+   */
+  it("ruling 276: `never read` and `GitHub reported none` are told apart", () => {
+    // CANARY: return `pr?.checks != null` without the undefined check, or read
+    // it off `mapPrChecks`, and the two collapse again.
+    expect(prChecksRead(pr())).toBe(false);
+    expect(prChecksRead(pr({ checks: { total: 0, passing: 0, failing: 0, pending: 0 } }))).toBe(
+      true,
+    );
+    // The DISPLAY is deliberately unchanged: both still render nothing.
+    expect(mapPrChecks(pr())).toBeNull();
+    expect(mapPrChecks(pr({ checks: { total: 0, passing: 0, failing: 0, pending: 0 } }))).toBeNull();
+    // A hand-edited null is "never read" too — the writers omit rather than
+    // persist one, so a null that reaches here came from outside.
+    expect(prChecksRead(pr({ checks: null }))).toBe(false);
+    expect(prChecksRead(null)).toBe(false);
   });
 
   it("F21-7: runs nobody could read degrade to unknown — never to passing", () => {

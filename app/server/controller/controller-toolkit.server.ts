@@ -2086,7 +2086,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_github_state",
-      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. Membership gated. Read-only; Update status lives on the GitHub page.",
+      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in two different cases and `checksRead` tells them apart: false means GitHub's check state has never been read for it, true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported). `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
       { projectSlug: z.string().optional() },
       runWith(async (args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -2104,6 +2104,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             state: p.state,
             title: p.title,
             checks: p.checks,
+            // Ruling 276 (F37-109): a null `checks` is TWO different facts and
+            // the task file keeps them apart — an absent key is "never read",
+            // a present one with `total: 0` is "GitHub reported no check runs".
+            // `mapPrChecks` collapses both because a display has nothing to
+            // draw either way, and every reader inherited that collapse. Live,
+            // the controller read `checks: null` on all 30 PRs, could not tell
+            // which it was, reconstructed review state from task timelines
+            // instead, and learned only from prose an operator had written into
+            // a task goal that this account's Actions are billing-blocked.
+            // "No CI is configured" and "we have not looked" ask for opposite
+            // next moves.
+            checksRead: p.checksRead,
             review: p.review,
             mergeable: p.mergeable,
           })),

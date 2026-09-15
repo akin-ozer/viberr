@@ -424,7 +424,15 @@ describe("the open conversation's execution", () => {
       conversation,
       viewerOwnsActive: true,
       turn: { working: true, runId: "run_ctl", phase: null, step: null },
-      runtime: [run],
+      // The elapsed cell below is asserted to the second, and `run.startedAt`
+      // is stamped once when this describe body evaluates — so every test that
+      // runs BEFORE it spent part of that assertion's budget, and under a full
+      // suite the clock read 01:07 against a window written for 01:05–01:06.
+      // Stamped per render instead: the only gap left is this call to
+      // `useElapsed`'s first tick, which is milliseconds. (The same defect
+      // SHOP-35 is fixing in the clone — a fixture's cost sitting inside a
+      // waiting test's budget — in Viberr's own suite.)
+      runtime: [{ ...run, startedAt: new Date(Date.now() - 65_000).toISOString() }],
       canInterruptTurn: true,
       ...over,
     });

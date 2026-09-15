@@ -419,6 +419,22 @@ function unaccountedChecks(checks: PrChecks): number {
  * every one of `total` runs was counted and concluded well. The precedence is
  * the worst TRUE statement first — failing, then still-running, then unknown.
  */
+/**
+ * Ruling 276 (pass 37, F37-109): has GitHub's check state ever been READ for
+ * this PR?
+ *
+ * `prRefSchema` keeps the two apart on purpose — an absent `checks` key is
+ * "never read", a present one with `total: 0` is "read, and GitHub reported no
+ * check runs" — and its own comment says so in as many words. `mapPrChecks`
+ * collapses both to null because a display has nothing to draw either way, and
+ * every reader inherited that collapse, including the one reader for whom the
+ * difference is the whole answer: "no CI is configured" and "we have not
+ * looked" call for opposite next moves.
+ */
+export function prChecksRead(pr: PrRef | null): boolean {
+  return pr?.checks !== undefined && pr.checks !== null;
+}
+
 export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
   const checks = pr?.checks;
   if (!checks || checks.total <= 0) return null;
