@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { TurnStep } from "./turn-step";
 import {
   Link,
   useFetcher,
@@ -572,6 +573,10 @@ function DockShell({ context }: { context: DockContext }) {
                   {current.turn.working && (
                     <div className="ctl-working" role="status">
                       <span className="live-dot" /> {current.controllerName} is working…
+                      {/* Ruling 250: the dock follows a person onto every page
+                          and has no live-run panel at all, so this row is the
+                          ONLY place the turn's own step can reach them here. */}
+                      <TurnStep turn={current.turn} />
                     </div>
                   )}
                 </div>

@@ -440,7 +440,10 @@ describe("stopping a turn", () => {
     const { listMessages } = await import("./controller-conversations.server");
     const { getRun } = await import("~/server/runtimes/run-store.server");
     const { conversationId, runId } = await startWorkingTurn();
-    expect(conversationTurnState(app.db, conversationId)).toEqual({ working: true, runId });
+    expect(conversationTurnState(app.db, conversationId)).toMatchObject({
+      working: true,
+      runId,
+    });
 
     const result = await interruptControllerTurn(
       app.db,
@@ -460,6 +463,56 @@ describe("stopping a turn", () => {
       text: "This turn was stopped before I could answer.",
     });
     expect(conversationTurnState(app.db, conversationId).working).toBe(false);
+  });
+
+  /**
+   * Ruling 250 (pass 37, F37-79): the live turn says what it is doing.
+   *
+   * Both facts are on the run row and both already render in the live-run panel
+   * on the controller page; the conversation row, where the person actually
+   * waits, showed a static sentence for turns measured in minutes, and the dock
+   * has no run panel to fall back to at all.
+   */
+  it("ruling 250: the turn state carries the run's phase and step, minus the generic phase", async () => {
+    const { conversationTurnState } = await import("./controller-run.server");
+    const { patchRun } = await import("~/server/runtimes/run-store.server");
+    const { conversationId, runId } = await startWorkingTurn();
+
+    patchRun(app.db, runId, {
+      phase: "Working",
+      step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+    });
+    // CANARY: return `run.phase` unconditionally and `phase` reads "Working",
+    // which the row's own sentence already says.
+    expect(conversationTurnState(app.db, conversationId)).toEqual({
+      working: true,
+      runId,
+      phase: null,
+      step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+    });
+
+    // A phase that means something else survives.
+    patchRun(app.db, runId, { phase: "Preparing workspace", step: null });
+    expect(conversationTurnState(app.db, conversationId)).toMatchObject({
+      phase: "Preparing workspace",
+      step: null,
+    });
+
+    const { interruptControllerTurn } = await import("./controller-run.server");
+    await interruptControllerTurn(
+      app.db,
+      { conversationId, runId, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    await settled(runId);
+    // A finished turn reports nothing to show, not a stale step. (The lease is
+    // released with the turn, so the run id goes with it.)
+    expect(conversationTurnState(app.db, conversationId)).toEqual({
+      working: false,
+      runId: null,
+      phase: null,
+      step: null,
+    });
   });
 
   it("another member gets the not-found shape; an org admin may stop it", async () => {

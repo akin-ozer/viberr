@@ -25,7 +25,7 @@ import {
   type RunPrincipalRefusal,
 } from "~/server/runtimes/run-principal.server";
 import type { UserBackendHealth } from "~/server/runtimes/backend-credentials.server";
-import type { RunMcpServers } from "~/server/runtimes/adapter.server";
+import { RUN_PHASE, type RunMcpServers } from "~/server/runtimes/adapter.server";
 import {
   interruptRun,
   registerRunCompletion,
@@ -693,19 +693,46 @@ export async function interruptControllerTurn(
 export interface ConversationTurnState {
   working: boolean;
   runId: string | null;
+  /**
+   * Ruling 250 (pass 37, F37-79): what the turn is DOING, for the place the
+   * person is actually waiting.
+   *
+   * Both are already on the run row and both already render in the live-run
+   * panel further down the controller page (`.ph` and `.step mono`). The
+   * conversation showed one static line for turns measured at 201s, 11 turns
+   * and $4.11 — and the dock, the surface that follows a person onto every
+   * page, has no run panel at all, so there the fact was unreachable.
+   * `phase` is omitted when it is the generic "Working": the sentence beside it
+   * already says that, and repeating it is noise.
+   */
+  phase: string | null;
+  step: string | null;
 }
+
+/** Nothing running: the shape a caller reads when there is no live turn. */
+const IDLE_TURN: ConversationTurnState = {
+  working: false,
+  runId: null,
+  phase: null,
+  step: null,
+};
 
 export function conversationTurnState(
   db: DatabaseSync,
   conversationId: string,
 ): ConversationTurnState {
   const entry = leases().get(conversationId);
-  if (!entry?.runId) return { working: false, runId: null };
+  if (!entry?.runId) return IDLE_TURN;
   const run = getRun(db, entry.runId);
   if (!run || run.state === "finished" || run.state === "error" || run.state === "interrupted") {
-    return { working: false, runId: entry.runId };
+    return { ...IDLE_TURN, runId: entry.runId };
   }
-  return { working: true, runId: entry.runId };
+  return {
+    working: true,
+    runId: entry.runId,
+    phase: run.phase === RUN_PHASE.working ? null : run.phase,
+    step: run.step,
+  };
 }
 
 /**

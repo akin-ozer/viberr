@@ -13,7 +13,10 @@ import {
   type ListConversationsInput,
 } from "~/server/controller/controller-conversations.server";
 import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
-import { conversationTurnState } from "~/server/controller/controller-run.server";
+import {
+  conversationTurnState,
+  type ConversationTurnState,
+} from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, type GoalView } from "~/server/tasks/goal-actions.server";
@@ -36,7 +39,9 @@ export interface ControllerSurfaceView {
   conversations: ConversationListItem[];
   conversation: ControllerConversation | null;
   messages: ControllerMessage[];
-  turn: { working: boolean; runId: string | null };
+  /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
+   *  the person is watching. */
+  turn: ConversationTurnState;
   /**
    * The open conversation's controller runs, projected the way the task page's
    * runtime is: one console entry (every turn of a thread resumes the same
@@ -136,7 +141,7 @@ export function getControllerSurface(
     messages: conversation ? listMessages(db, conversation.id) : [],
     turn: conversation
       ? conversationTurnState(db, conversation.id)
-      : { working: false, runId: null },
+      : { working: false, runId: null, phase: null, step: null },
     // Ruling 99: a controller run is stored at `project_slug = ''` with the
     // conversation id for its task key, which is the scope the grouping
     // projection is asked for here.

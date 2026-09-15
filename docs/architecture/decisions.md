@@ -5527,6 +5527,44 @@ by rewriting those paragraphs:*
     guess is a false lead in both directions.
     (`git-clone-auth.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
 
+250. **A live controller turn says what it is doing (2026-09-15, pass 37; F37-79).** A turn
+    measured on this board ran 201 seconds over 11 turns for $4.11, and the conversation
+    showed `Controller is working...` and nothing else for all of it. The same page rendered
+    `Working` and `mcp__viberr_controller__get_task · {"taskKey":"SHOP-31","events":2}` in the
+    live-run panel below. The fact was already computed, already on the run row and already
+    streaming to that page; it simply never reached the place the person was waiting. The dock
+    is worse: it follows a person onto every page and carries no run panel, so there the step
+    had nowhere to appear at all. `ConversationTurnState` carries `phase` and `step`, and both
+    surfaces render them on the row that says it is working. `phase` is null while it is the
+    generic "Working", because the sentence beside it already says that, and one line only:
+    the step is a hint the adapter refreshes several times a minute, and a wrapping tool
+    payload would shove the conversation around under the reader.
+    (`controller-run.server.ts`, `turn-step.tsx`, `controller-page.tsx`, `controller-dock.tsx`.)
+
+251. **The human-decision boundary stays, and stops being a dead end (2026-09-15, pass 37;
+    F37-80; the owner's call).** Ruling 88 keeps merge, acceptance, force-accept, packet
+    resolution and the terminal move off the controller's tool surface. That line is right and
+    it was unnavigable. Live, a person told the controller "I want to lean on you to finish
+    this clone rather than clicking through task pages myself" and got, twice: "Resolving it is
+    yours on the task page - I have no tool for packet resolution", and "I tried to withdraw
+    it; it was raised by the policy engine, so only you can close it." Both true, neither
+    actionable. Nothing let the controller even SEE what was waiting: `get_task` shows one
+    task's packet, and only to someone who already suspected that task.
+    Asked whether to let the controller answer packets, the owner said no, and said to make it
+    navigable instead: a model between a person and the product's one explicit request to them
+    defeats the point of asking. So `list_decisions` reads the whole inbox - open packets with
+    every option spelled out and numbered, pending recommendations, completions ready to
+    accept - and hands over `answerAt`, the link that opens the control. It decides nothing,
+    and `list_` is the only verb it is allowed.
+    It reads through `decisionsRequiring`, the same source the home page's "N decisions waiting
+    on you" counts, so the controller and the page can never answer this question differently -
+    which is the entire reason to read rather than re-derive. Org-admin reach is reported
+    separately and never folded into the count: reach is not a personal inbox, and telling
+    someone it is would be false. The open-packet refusal on `run_agent_on_task` now names the
+    tool and the page, because a refusal that names no way out is the defect this pass keeps
+    finding.
+    (`controller-toolkit.server.ts`, `decisions.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

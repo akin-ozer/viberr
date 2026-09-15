@@ -49,7 +49,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     },
     conversation: null,
     messages: [],
-    turn: { working: false, runId: null },
+    turn: { working: false, runId: null, phase: null, step: null },
     threads: [],
     viewerOwnsActive: false,
     ...over,
@@ -358,7 +358,7 @@ describe("the controller dock (ruling 121)", () => {
     let working = true;
     const { loads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working, runId: "run_1" } }),
+      view: () => taskView({ turn: { working, runId: "run_1", phase: null, step: null } }),
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
     // The poll is armed by an effect of the VIEW that says a turn is working —
@@ -433,7 +433,7 @@ describe("the controller dock (ruling 121)", () => {
             viewerOwnsActive: true,
             // A working turn is what makes the dock poll, which is how the
             // second message arrives while the panel is up.
-            turn: { working: true, runId: "run_1" },
+            turn: { working: true, runId: "run_1", phase: null, step: null },
           }),
       });
       fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
@@ -561,7 +561,7 @@ describe("the controller dock (ruling 121)", () => {
             { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", createdAt: "2026-09-01T10:00:00.000Z" },
             { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
-          turn: { working: true, runId: "run_2" },
+          turn: { working: true, runId: "run_2", phase: null, step: null },
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z" }],
           viewerOwnsActive: true,
         }),

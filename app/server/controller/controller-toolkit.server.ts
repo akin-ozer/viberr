@@ -99,6 +99,10 @@ import {
 } from "~/features/policy/policy-actions.server";
 import { getProject, listProjectTasks } from "~/server/projections/board-query.server";
 import {
+  decisionsRequiring,
+  type DecisionRef,
+} from "~/server/projections/decisions.server";
+import {
   getTaskSummary,
   listTaskEvents,
 } from "~/server/projections/task-query.server";
@@ -170,6 +174,16 @@ import {
  * decisions (merge, acceptance, force-accept, packet resolution, a move into
  * the terminal stage) have no tool here at all — the move tool refuses a
  * terminal target and points at the task page's own ceremony (ruling 88).
+ *
+ * Ruling 251 (pass 37, F37-80) keeps that line and fixes what it cost. The
+ * boundary was right and unnavigable: live, the controller answered a person
+ * who had said "I want to lean on you rather than clicking through task pages
+ * myself" with "Resolving it is yours on the task page — I have no tool for
+ * packet resolution", and earlier "I tried to withdraw it; only you can close
+ * it". Both true, neither actionable: there was no way to SEE what was waiting
+ * without calling `get_task` on a task you already suspected. `list_decisions`
+ * reads the whole inbox — packets with every option, pending recommendations,
+ * completions ready to accept — and hands over the link. It decides nothing.
  */
 
 export interface ControllerToolkitDeps {
@@ -196,7 +210,9 @@ export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "checked by the server per call: instance tools follow their org role, board tools follow " +
   "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +
   "are your ground truth; call them before asserting state. Nothing here deletes, merges, " +
-  "accepts completions, resolves decision packets, or moves a task into its final stage. " +
+  "accepts completions, resolves decision packets, or moves a task into its final stage \u2014 " +
+  "ruling 251: those stay with the person, and `list_decisions` is how you put each one in " +
+  "front of them, with its options and the link that opens it. " +
   "When the conversation is bound to a project, tools default to it; when it is anchored to a " +
   "task, the task tools default to that task as well.";
 
@@ -1698,7 +1714,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (dataRoot) operatorInput.dataRoot = dataRoot;
             const result = await runOperator(db, operatorInput);
             if (result.refused === "open-packet") {
-              return "[denied] The operator is not run while a decision packet is open. Answer the packet first.";
+              // Ruling 251: a refusal that names no way out is the defect this
+              // pass keeps finding. `list_decisions` reads the packet's own
+              // options and the link that opens it.
+              return (
+                `[denied] The operator is not run while a decision packet is open on ${key}. ` +
+                `Answer it first: call list_decisions for its options, then open ` +
+                `projects/${slug}/tasks/${key}.`
+              );
             }
             if (result.refused === "closed") {
               return `[denied] ${result.refusalReason ?? `${key} is closed`} There is nothing for the operator to coordinate on a closed task.`;
@@ -2427,6 +2450,116 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "update_agent_deployment",
+  );
+
+
+  add(
+    tool(
+      "list_decisions",
+      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
+      {
+        projectSlug: z.string().optional().describe("One project. Omit inside a project conversation to use it; omit outside one to read every project this person can see."),
+        taskKey: z.string().optional().describe("Just this task. Defaults to the conversation's task when it is anchored to one."),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string }) => {
+        // Scope, in the order a person means it: an explicit argument, then the
+        // conversation's own anchor, then everything they can see.
+        const explicit = args.projectSlug ?? boundSlug ?? null;
+        if (explicit) requireVisible(explicit, "read this project's decisions");
+        const onlyTask = args.taskKey ?? (explicit ? boundTask : null);
+
+        // The SAME source the home page's "N decisions waiting on you" counts
+        // (`decisionsRequiring`), so the controller and the page can never
+        // answer this question differently — which is the whole point of
+        // reading rather than re-deriving.
+        const found = decisionsRequiring(
+          db,
+          user.id,
+          explicit ? { projectSlug: explicit } : {},
+        );
+
+        const render = (refs: readonly DecisionRef[]) =>
+          refs
+            .filter((r) => !onlyTask || r.taskKey === onlyTask)
+            .map((ref) => {
+              const summary = getTaskSummary(db, ref.projectSlug, ref.taskKey);
+              // `packet` lives on the parsed FILE and `recommendations` on its
+              // frontmatter, so both come off one read.
+              const parsed = readTaskFile({
+                projectSlug: ref.projectSlug,
+                taskKey: ref.taskKey,
+                dataRoot,
+              })?.parsed;
+              const packet = summary?.packet ?? null;
+              return {
+                project: ref.projectSlug,
+                task: ref.taskKey,
+                title: summary?.title ?? ref.taskKey,
+                stage: ref.stage,
+                kind: ref.kind,
+                // The one thing this tool exists to hand over. Same form the
+                // move refusal uses, so a person meets one shape of link.
+                answerAt: `projects/${ref.projectSlug}/tasks/${ref.taskKey}`,
+                packet:
+                  ref.kind === "packet" && packet
+                    ? {
+                        id: parsed?.packet?.id ?? null,
+                        kind: packet.kind,
+                        from: packet.from,
+                        title: packet.title,
+                        body: packet.body,
+                        // Numbered, because a person reading your summary has to
+                        // find the same option on the card.
+                        // The stored keys are terse (`t`/`d`/`rec`) because a
+                        // packet rides in every operator prompt; spell them out
+                        // here, where a person reads the answer.
+                        options: packet.options.map((o, i) => ({
+                          n: i + 1,
+                          kind: o.kind,
+                          title: o.t,
+                          detail: o.d,
+                          recommended: o.rec === true,
+                        })),
+                        // Ruling 138: a decided edit_goal packet still waits,
+                        // and saying so stops you reporting it as unanswered.
+                        awaitingGoalEdit: packet.awaiting === "goal_edit",
+                      }
+                    : null,
+                recommendations:
+                  ref.kind === "recommendation"
+                    ? (parsed?.frontmatter.recommendations ?? []).map((r) => ({
+                        id: r.id,
+                        kind: r.kind,
+                        label: r.label,
+                        detail: r.detail,
+                      }))
+                    : [],
+                // Ruling 188's lesson: report the gate's own verdict, never a
+                // sentence derived somewhere else. Null here means acceptable.
+                notAcceptableReason: acceptanceRefusalFor(
+                  { projectSlug: ref.projectSlug, taskKey: ref.taskKey },
+                  { dataRoot },
+                ),
+              };
+            });
+
+        const forYou = render(found.mine);
+        const viaOverride = render(found.overrideEligible);
+        return json({
+          forYou,
+          // Named separately and never folded into the count: reach as an org
+          // admin is not a personal inbox (the same line `decisionsRequiring`
+          // draws), and telling someone these are "waiting on you" would be
+          // false.
+          onlyViaOrgAdminOverride: viaOverride,
+          howToAnswer:
+            forYou.length + viaOverride.length === 0
+              ? "Nothing is waiting on a person here."
+              : "Open the task page at `answerAt`, pick the option by its number, and confirm. A packet also takes a typed note that is recorded on the task's contract and read by every later run.",
+        });
+      }),
+    ),
+    "list_decisions",
   );
 
   // ================================================================ goals

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { TurnStep } from "./turn-step";
 import {
   Link,
   useFetcher,
@@ -472,6 +473,13 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
         {view.turn.working && (
           <div className="ctl-working" role="status">
             <span className="live-dot" /> {view.controllerName} is working…
+            {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
+                the person is waiting. Both are on the run row already and both
+                already render in the live-run panel further down this page;
+                the conversation showed one static line for turns measured in
+                minutes. `phase` is null while it is the generic "Working" —
+                the sentence above already says that. */}
+            <TurnStep turn={view.turn} />
           </div>
         )}
         <div ref={endRef} />

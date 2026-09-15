@@ -39,7 +39,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     ],
     conversation: null,
     messages: [],
-    turn: { working: false, runId: null },
+    turn: { working: false, runId: null, phase: null, step: null },
     runtime: [],
     canInterruptTurn: false,
     goals: [],
@@ -326,11 +326,69 @@ describe("the open conversation's execution", () => {
     view({
       conversation,
       viewerOwnsActive: true,
-      turn: { working: true, runId: "run_ctl" },
+      turn: { working: true, runId: "run_ctl", phase: null, step: null },
       runtime: [run],
       canInterruptTurn: true,
       ...over,
     });
+
+  /**
+   * Ruling 250 (pass 37, F37-79). A controller turn measured live ran 201s over
+   * 11 turns for $4.11 and the conversation said `Controller is working…` for
+   * all of it, while the SAME page rendered the phase and step in the live-run
+   * panel below. The fact was on the run row and already streaming here.
+   */
+  it("ruling 250: the working row carries the turn's own step", async () => {
+    renderPage(
+      working({
+        turn: {
+          working: true,
+          runId: "run_ctl",
+          phase: null,
+          step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+        },
+      }),
+      "?c=cnv_b",
+    );
+    // CANARY: drop <TurnStep> from the ctl-working row and this is gone, while
+    // the run panel below keeps showing it — the live shape.
+    const row = await screen.findByRole("status");
+    expect(row.textContent).toContain("is working");
+    expect(row.textContent).toContain('get_task · {"taskKey":"SHOP-31"}');
+  });
+
+  it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {
+    // The server sends `phase: null` while it is the generic "Working" — the
+    // row already says that in prose. CANARY: render `turn.phase ?? "Working"`
+    // and the row reads "Controller is working… Working · npm test".
+    renderPage(
+      working({
+        turn: { working: true, runId: "run_ctl", phase: null, step: "Bash · npm test" },
+      }),
+      "?c=cnv_b",
+    );
+    const row = await screen.findByRole("status");
+    const step = row.querySelector(".ctl-working-step");
+    expect(step?.textContent).toBe("Bash · npm test");
+
+    // A phase that MEANS something still shows, ahead of the step.
+    cleanup();
+    renderPage(
+      working({
+        turn: {
+          working: true,
+          runId: "run_ctl",
+          phase: "Preparing workspace",
+          step: "Cloning acme/widgets",
+        },
+      }),
+      "?c=cnv_b",
+    );
+    const row2 = await screen.findByRole("status");
+    expect(row2.querySelector(".ctl-working-step")?.textContent).toBe(
+      "Preparing workspace · Cloning acme/widgets",
+    );
+  });
 
   it("renders the strip (elapsed, turns, tokens, model, View logs, Interrupt) and the console", async () => {
     // Canary: render only the transcript's "is working" row again and every

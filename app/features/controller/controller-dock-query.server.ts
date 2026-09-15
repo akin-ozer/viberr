@@ -14,7 +14,10 @@ import {
   type ConversationScope,
 } from "~/server/controller/controller-conversations.server";
 import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
-import { conversationTurnState } from "~/server/controller/controller-run.server";
+import {
+  conversationTurnState,
+  type ConversationTurnState,
+} from "~/server/controller/controller-run.server";
 
 /**
  * The controller DOCK's view (ruling 121): what the floating panel shows for
@@ -69,7 +72,9 @@ export interface ControllerDockView {
   scope: ControllerDockScope;
   conversation: ControllerConversation | null;
   messages: ControllerMessage[];
-  turn: { working: boolean; runId: string | null };
+  /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
+   *  the person is watching. */
+  turn: ConversationTurnState;
   threads: ControllerDockThread[];
   viewerOwnsActive: boolean;
 }
@@ -191,7 +196,7 @@ export function getControllerDock(
     messages: conversation ? listMessages(db, conversation.id) : [],
     turn: conversation
       ? conversationTurnState(db, conversation.id)
-      : { working: false, runId: null },
+      : { working: false, runId: null, phase: null, step: null },
     threads: rows.map((c) => ({
       id: c.id,
       title: c.title || "New conversation",
@@ -247,7 +252,7 @@ export function unavailableDockView(
     },
     conversation: null,
     messages: [],
-    turn: { working: false, runId: null },
+    turn: { working: false, runId: null, phase: null, step: null },
     threads: [],
     viewerOwnsActive: false,
   };

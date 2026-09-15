@@ -157,6 +157,152 @@ describe("the tool surface itself encodes the invariants", () => {
 });
 
 /**
+ * Ruling 251 (pass 37, F37-80): the human-decision boundary stays, and stops
+ * being a dead end.
+ *
+ * Live, the owner told the controller "I want to lean on you to finish this
+ * clone rather than clicking through task pages myself". It answered, twice and
+ * correctly, that it could do nothing: "Resolving it is yours on the task page
+ * — I have no tool for packet resolution", and "I tried to withdraw it; it was
+ * raised by the policy engine, so only you can close it." Both true, neither
+ * actionable — nothing let it even SEE what was waiting without calling
+ * `get_task` on a task someone already suspected.
+ */
+describe("list_decisions briefs the person and decides nothing (ruling 251)", () => {
+  const PACKET_TASK = "VIB-142";
+
+  async function openPacketOn(taskKey: string): Promise<void> {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot }, (f) => {
+      f.packet = {
+        id: "pkt_test_001",
+        type: "input",
+        kind: "Decision required",
+        from: "policy-engine",
+        title: "Code Reviewer has requested changes 2 times running",
+        body: "Two rounds is where another rework stops being the obvious move.",
+        observations: [],
+        options: [
+          {
+            kind: "question_reviewer",
+            t: "Ask Code Reviewer what else it would block on",
+            d: "One question, no rework behind it.",
+            rec: true,
+            profileId: "reviewer",
+          },
+          {
+            kind: "custom",
+            t: "Let the rework continue",
+            d: "Hands the task back to the operator.",
+            rec: false,
+          },
+        ],
+      };
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+  }
+
+  async function clearPacket(taskKey: string): Promise<void> {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot }, (f) => {
+      f.packet = null;
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+  }
+
+  it("still has no tool that ANSWERS a decision", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const names = toolkit.tools.map((t) => t.name);
+    // The owner's call (2026-09-15): brief and link, never decide. `list_` is
+    // the whole permitted verb here.
+    expect(names).toContain("list_decisions");
+    expect(names.filter((n) => /resolve_packet|answer_packet|decide/.test(n))).toEqual([]);
+  });
+
+  it("reads the packet's own options and hands over the link", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
+      const row = out.forYou.find(
+        (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
+      );
+      // CANARY: drop the `packet` block and the controller can say a decision
+      // exists but not what it asks or what the choices are — which is the
+      // state this ruling exists to end.
+      expect(row).toBeTruthy();
+      expect(row.packet.id).toBe("pkt_test_001");
+      expect(row.packet.title).toContain("requested changes 2 times running");
+      expect(row.packet.options).toEqual([
+        {
+          n: 1,
+          kind: "question_reviewer",
+          title: "Ask Code Reviewer what else it would block on",
+          detail: "One question, no rework behind it.",
+          recommended: true,
+        },
+        {
+          n: 2,
+          kind: "custom",
+          title: "Let the rework continue",
+          detail: "Hands the task back to the operator.",
+          recommended: false,
+        },
+      ]);
+      // The one thing the tool exists to give a person.
+      expect(row.answerAt).toBe(`projects/${SLUG}/tasks/${PACKET_TASK}`);
+      expect(out.howToAnswer).toContain("answerAt");
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  it("a viewer is told nothing is theirs, rather than shown someone else's inbox", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.viewer, "list_decisions"));
+      // CANARY: read the packets straight off the projection instead of
+      // through `decisionsRequiring` and a viewer sees the whole board's
+      // decisions listed as waiting on them.
+      expect(out.forYou).toEqual([]);
+      expect(out.onlyViaOrgAdminOverride).toEqual([]);
+      expect(out.howToAnswer).toContain("Nothing is waiting");
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  it("an org admin outside the project gets it as OVERRIDE reach, never as their inbox", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.orgAdminOutsider, "list_decisions"));
+      // `decisionsRequiring` draws this line and the tool must not blur it:
+      // reach as an org admin is not a personal inbox. CANARY: merge
+      // `overrideEligible` into `forYou`.
+      expect(out.forYou).toEqual([]);
+      expect(
+        out.onlyViaOrgAdminOverride.map((d: { task: string }) => d.task),
+      ).toContain(PACKET_TASK);
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  it("a non-member is refused without learning the project exists", async () => {
+    await expect(
+      call(ids.nonMember, "list_decisions", { projectSlug: SLUG }, null),
+    ).resolves.toMatch(/\[denied\]/);
+  });
+});
+
+/**
  * Ruling 153 (pass 35, G35-1): the controller had no schedule tool at all, so
  * the one agent meant to set a project up could not do the wall-clock half of
  * it ("There is no scheduling tool in my set"). Both tools take the tier the

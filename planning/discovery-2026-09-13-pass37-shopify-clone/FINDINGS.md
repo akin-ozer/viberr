@@ -4211,3 +4211,75 @@ real local clone and asserts the prompt makes no credential claim.
 **Still open:** *why* that local clone failed with "already exists and is not an empty
 directory" when the arm `rmSync`s the destination first. Not reproduced; recorded rather than
 guessed at.
+
+## F37-79 · A controller turn runs for minutes and the conversation says one static sentence — MEDIUM
+
+Found by using the controller the way the goal asks end users to, and waiting.
+
+A turn on this board: **201s, 11 turns, $4.11**. For the whole of it the conversation showed:
+
+```html
+<div class="ctl-working" role="status"><span class="live-dot"></span> Controller is working…</div>
+```
+
+While the SAME page, scrolled down, rendered:
+
+```html
+<span><div class="ph">Working</div>
+<div class="step mono">mcp__viberr_controller__get_task · {"taskKey":"SHOP-31","events":2}</div></span>
+```
+
+The fact was on the run row, already streaming to the page, already rendered once. It never
+reached the place the person waits. And the **dock** — the surface that follows a person onto
+every page, and the one this pass's goal wants them living in — carries no run panel at all, so
+there the step had nowhere to appear.
+
+**Fix (ruling 250).** `ConversationTurnState` carries `phase` and `step`; both surfaces render
+them beside the working sentence, one clipped line. `phase` is null while it is the generic
+`"Working"` (the sentence already says that) and non-null when it means something else
+("Preparing workspace"). Three tests, all canaried: removing the component, defaulting the
+phase, and returning `run.phase` unconditionally each redden one.
+
+## F37-80 · The controller could see a decision existed and do nothing about it, including say where — MEDIUM
+
+**The owner's own words to it, this session:** *"I want to lean on you to finish this clone
+rather than clicking through task pages myself, so treat this thread as the place I drive the
+board from."*
+
+**The controller's answers, twice:**
+
+> "Resolving it is yours on the task page — shopify-clone-platform / SHOP-11 — **I have no tool
+> for packet resolution**."
+
+> "I tried to withdraw it; it was raised by the policy engine, so **only you can close it**."
+
+Both correct. Ruling 88 deliberately keeps merge, acceptance, force-accept, packet resolution
+and the terminal move off the tool surface, and the toolkit's instruction says so. The problem
+is not the boundary, it is that the boundary had no other side: the controller had **no way to
+see what was waiting** without calling `get_task` on a task someone already suspected. Across
+44 tools there was no inbox, no option list, and no link.
+
+Measured against the rest of the surface, the silence is the odd one out: the controller can
+create users, set org roles, deploy agents, rewrite a task's goal, move tasks between stages,
+set file leases and author goal chains. The one thing viberr explicitly asks a *person* for was
+the one thing it could not even describe.
+
+**The owner's call, asked with the above as background: keep the boundary, make it navigable.**
+"A model between a person and the product's one explicit request to them defeats the point."
+
+**Fix (ruling 251).** `list_decisions`: the whole inbox — open packets with every option spelled
+out and numbered, pending recommendations, completions ready to accept — plus `answerAt`, the
+link that opens the control. It decides nothing. It reads through `decisionsRequiring`, the
+same source the home page's "N decisions waiting on you" counts, so the two surfaces cannot
+drift; org-admin reach is reported separately and never folded in, because reach is not an
+inbox. `run_agent_on_task`'s open-packet refusal now names the tool and the page.
+
+Five tests, two canaried hard: dropping the option block leaves the controller able to say a
+decision exists but not what it asks, and reading the projection directly instead of through
+`decisionsRequiring` shows a viewer the whole board's decisions as theirs.
+
+**Also asked and answered:** whether the dock should reserve space instead of overlaying.
+Measured at 1024px with the dock open, `main` spans x232–1024 unchanged while the dock panel
+covers x604–1004, and a hit-test at x964 returns `section.dock-body`. Owner's call: **leave it
+overlaying** — the dock is a panel you open, ask, and close, and reflowing the app on every
+open would be worse. No change made.

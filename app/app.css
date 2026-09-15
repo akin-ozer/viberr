@@ -5803,12 +5803,28 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-msg-who svg { width: 14px; height: 14px; color: var(--agent-dark); }
 .ctl-msg .md-body { font-size: .88rem; }
 .ctl-working {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
   gap: .5rem;
   color: var(--muted);
   font-size: .88rem;
   padding: .25rem .25rem;
+}
+/* Ruling 250: the live turn's own step, beside the sentence that says it is
+   working. One line, clipped: the step is a hint the adapter refreshes several
+   times a minute, and a wrapping tool payload would shove the conversation
+   around under the reader. `min-width: 0` is what actually lets the ellipsis
+   happen inside a flex row. */
+.ctl-working-step {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The secondary step, one down from the row it sits in (.88rem). */
+  font-size: .75rem;
+  color: var(--faint);
 }
 .ctl-composer {
   border: 1px solid var(--border-control);
