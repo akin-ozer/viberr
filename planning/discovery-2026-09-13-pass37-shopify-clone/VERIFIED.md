@@ -2019,6 +2019,35 @@ belongs to a later link. The verifier probed it, found the gap, labelled it a kn
 attached the 404. Nothing lied. The finding dissolved in the evidence the machinery had already
 collected — which is what the evidence machinery is for.
 
+### And then the board found the trap I had just walked past
+
+An hour after that verification, SHOP-30's Integration Verifier reported this mid-run:
+
+> "My first cold `make up` on `d0dce4e` reported services **healthy** but every one of my child
+> processes had already died with `listen EADDRINUSE`. Another workspace on this same host — the
+> SHOP-5 Integration Verifier checkout — is holding 4001-4004, 4101, 4102 and 8080, so the health
+> probes were answered by its stack."
+
+The stack binds fixed ports, so `make up` can report every service healthy while your own stack is
+dead and you are probing somebody else's. Not a flaky red — a **silent green**, the failure class
+that merges code that does not work. Harmless when one thing ran at a time on this host, and newly
+dangerous now that several verifiers run at once.
+
+**Which means my verification above was exposed to it, and it is worth being exact about what it
+actually proves.** I ran `make up` while five verifier runs were in flight. The trace settles the
+two services I exercised and only those: the request id I chose appears in
+`/tmp/sc-verify/.data/traces/gateway.ndjson` and `catalog.ndjson` — **my** workspace. A neighbour's
+gateway answering would have written those spans into its own workspace, not mine. So the gateway
+and catalog that served that request were mine, and the four-span trace is a real proof.
+
+`identity`, `inventory` and `cart` I did not exercise; their "healthy" lines are exactly the ones
+the verifier showed can be answered by someone else's process. I am not claiming them.
+
+That is the identity check done by hand and after the fact, which is what the fix has to make
+automatic and before the fact: the owner's call was per-workspace ports **and** an instance token
+the probe compares, because ports alone leave a stale process answering just as happily as a
+neighbour.
+
 ### `make test` on main: one red, and it is this machine
 
 ```
