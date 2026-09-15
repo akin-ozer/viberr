@@ -4223,6 +4223,17 @@ by rewriting those paragraphs:*
     inventing, and a cut entry now carries a `clipped` line naming the tool beside the text
     it cut. It is a read, so it joins the other reads and needs no grant; `read_run_log` is
     the RUN's log, which is a different thing from what an agent chose to report.
+    PROVEN THE SAME EVENING, by the tool itself. Asked which claims in SHOP-43's review it
+    had verified and which it was relaying, the controller read the verdict whole with
+    `read_timeline_entry` and reported: "the clip stopped before every one of the caveats
+    below". What the 700 characters cut was the reviewer's own §5 honesty section — that its
+    exit-0 test result required `--workspace-concurrency=1`, and that unconstrained, cart's
+    suite times out and aborts the run before orders ever executes. Its conclusion is the
+    sentence this ruling is for: "if I had relayed 'orders is green on main again' without
+    this, I would have handed you a true sentence that implies a false one." A person was
+    one confirmation from accepting on that sentence. Working from the clip, in good faith,
+    the controller would have supplied it — and nothing afterwards would have looked like a
+    failure.
     The same sweep found the WRITE-side twin. A reviewer's verdict `reason` — a stored
     record a person reads on the task page beside approve or request_changes — was a bare
     `.slice(0, 2000)`, so a long justification was stored ending mid-word and read as the
