@@ -2072,6 +2072,13 @@ export interface OperatorTaskSnapshot {
     awaiting: "goal_edit" | null;
   } | null;
   recentTimeline: OperatorTimelineRow[];
+  /** Ruling 302: how many entries this task's timeline HAS, against the
+   *  `recentTimeline.length` shown. Present always, so a coordinator never has
+   *  to infer from a full-looking window that it saw everything. */
+  timelineTotal: number;
+  /** Ruling 302: present ONLY when entries were left out, naming the count and
+   *  the way to reach them. */
+  timelineOlder?: string;
   /** [1] The coordinator's OWN proposals — what it already asked for, and what a
    *  human already refused. Without this the supervised loop spins: a supervisor
    *  declines "move to Review", the next drive cannot see the refusal (the
@@ -2390,6 +2397,15 @@ const liveRunRowsSchema = z.array(
 );
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
+/**
+ * Ruling 302: how many timeline entries `get_task` returns by default, and the
+ * most it will return when asked. The controller's own `get_task` has taken an
+ * `events` count (1..50, default 12) for as long as it has existed; the
+ * operator's took no arguments at all and returned six.
+ */
+export const OPERATOR_TIMELINE_DEFAULT = 6;
+export const OPERATOR_TIMELINE_MAX = 50;
+
 /** One row of {@link OperatorTaskSnapshot.recentTimeline} — the shape the
  *  snapshot builder writes and the operator reads. Named rather than inline so
  *  the builder and the contract cannot drift over what `clipped` means. */
@@ -2410,6 +2426,7 @@ export function operatorSnapshot(
   projectSlug: string,
   taskKey: string,
   authority: OperatorAuthority,
+  events: number = OPERATOR_TIMELINE_DEFAULT,
 ): OperatorTaskSnapshot {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) throw AppError.notFound(`Task ${taskKey} not found.`);
@@ -2423,6 +2440,11 @@ export function operatorSnapshot(
   // F37-11: the reconciler's own last compare, read the same way the GitHub
   // page's sync pill reads it.
   const behindByLookup = createReconcileBehindByLookup(db);
+  // Ruling 302: the window, clamped the way the controller's own `events` is.
+  const timelineWindow = Math.min(
+    Math.max(Math.trunc(events), 1),
+    OPERATOR_TIMELINE_MAX,
+  );
   const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
@@ -2464,7 +2486,7 @@ export function operatorSnapshot(
       ).data?.name ?? null)
     : null;
 
-  return {
+  const snapshot: OperatorTaskSnapshot = {
     key: fm.key,
     title: fm.title,
     goal: file.parsed.goal,
@@ -2555,7 +2577,8 @@ export function operatorSnapshot(
           awaiting: file.parsed.packet.awaiting ?? null,
         }
       : null,
-    recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => {
+    timelineTotal: file.parsed.timeline.length,
+    recentTimeline: file.parsed.timeline.slice(0, timelineWindow).map((e) => {
       // Timeline comments store the agent's FULL report (no 1,200-char cap
       // since 2026-07-17) — cap here so six entries can't balloon the prompt.
       //
@@ -2691,6 +2714,17 @@ export function operatorSnapshot(
       mcps: listMcpServerNames(db),
     },
   };
+  if (snapshot.timelineTotal > snapshot.recentTimeline.length) {
+    // Ruling 302: the same rule the per-ENTRY clip beside it already follows.
+    // A window that does not say it is a window is how a coordinator states
+    // part of a history as the whole of it.
+    const older = snapshot.timelineTotal - snapshot.recentTimeline.length;
+    snapshot.timelineOlder =
+      `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. ` +
+      `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
+      "and read_timeline_entry with an occurredAt for one in full.";
+  }
+  return snapshot;
 }
 
 // ------------------------------------------------------------- actions

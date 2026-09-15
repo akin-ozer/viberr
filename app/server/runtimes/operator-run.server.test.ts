@@ -1164,6 +1164,8 @@ describe("pr-diverged turn instruction (both backends)", () => {
   ): OperatorTaskSnapshot {
     return {
       key: "VIB-9",
+      // Ruling 302: the window's own size, always present.
+      timelineTotal: 0,
       title: "T",
       goal: "Do the thing.",
       priority: "normal",
@@ -1407,6 +1409,8 @@ describe("stranded auto-stage resume", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
       {
         key: "VIB-1",
+        // Ruling 302: the window's own size, always present.
+        timelineTotal: 0,
         title: "t",
         goal: "Goal to be refined at the triage quality gate.",
         priority: "normal",
@@ -2002,6 +2006,8 @@ describe("stranded auto-stage resume", () => {
 describe("transition trigger carries from → to and who moved it", () => {
   const snap = (): OperatorTaskSnapshot => ({
     key: "VIB-2",
+    // Ruling 302: the window's own size, always present.
+    timelineTotal: 0,
     title: "t",
     goal: "Write the post.",
     priority: "normal",
@@ -2089,6 +2095,8 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     over: Partial<OperatorTaskSnapshot> = {},
   ): OperatorTaskSnapshot => ({
     key: "VIB-6",
+    // Ruling 302: the window's own size, always present.
+    timelineTotal: 0,
     title: "Improve the docs",
     // The live goal that sailed through the gate: no file, no change, no
     // acceptance criteria — and NOT the unspecified placeholder, so the

@@ -4539,6 +4539,30 @@ by rewriting those paragraphs:*
     still reach the cap. Two streams per page is the remaining constant, and merging them is
     the next cut if anyone meets it; the proper fix for the class is one shared stream per
     origin, or a protocol that multiplexes, and neither is this change.
+
+302. **A window says it is a window (owner, 2026-09-16, pass 37; F37-137).** Ruling 285
+    fixed the per-ENTRY cut in `operatorSnapshot` and left the cut immediately beside it
+    silent. A clipped entry now carries a `clipped` note naming the tool and the
+    `occurredAt` that reads it whole, because "an entry that ends mid-sentence with a '…'
+    and no way to ask for the rest is how a coordinator states half a report as the whole
+    of it, which it did, live, on SHOP-42". The very next expression was
+    `file.parsed.timeline.slice(0, 6)`, which said nothing at all: not that there were more
+    entries, not how many, not how to reach one.
+    Both of this pass's defect families, in one function, one of them already fixed. The
+    operator could not know the window was a window, and could not widen it: its `get_task`
+    took NO arguments, while the controller's has taken `events` (1..50, default 12) for as
+    long as it has existed. So the coordinator with the least context about a task's
+    history was the one actor who could not ask for more of it, and a task whose seventh
+    newest entry is a human's instruction, a reviewer's verdict or a packet answer is one
+    the operator would reason about as though that entry did not exist.
+    The snapshot now always carries `timelineTotal`, so a full-looking window is never
+    mistaken for the whole history, and `timelineOlder` appears ONLY when something is
+    hidden, naming how many were left out and both ways to reach them: `events` to widen,
+    `read_timeline_entry` to read one in full. The default stays six, because the size was
+    never the defect; the silence was. The prompt-size rationale in the original comment
+    did not survive checking either: `operatorSnapshot` has exactly one caller, this tool,
+    so the window was never riding in every prompt.
+
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

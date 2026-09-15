@@ -13,6 +13,8 @@ import type { OperatorTaskSnapshot } from "~/server/tasks/operator-actions.serve
 
 const SNAPSHOT: OperatorTaskSnapshot = {
   key: "VIB-1",
+  // Ruling 302: the window's own size, always present.
+  timelineTotal: 0,
   title: "Add the file listing",
   goal: "Ship the file-listing deliverable.",
   priority: "normal",

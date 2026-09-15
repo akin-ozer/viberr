@@ -3199,15 +3199,64 @@ describe("applyRecommendation / dismissRecommendation", () => {
   // recommendations at all — so the supervised loop could spin: propose,
   // decline, re-propose, decline.
 
-  function snapshot() {
+  function snapshot(events?: number) {
     return operatorSnapshot(
       store.db,
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
       authority("supervised"),
+      events,
     );
   }
+
+  /**
+   * Ruling 302 (pass 37, F37-137): the operator's timeline WINDOW says it is a
+   * window.
+   *
+   * Ruling 285 fixed the per-ENTRY cut in this very function: a clipped entry
+   * now carries a `clipped` note and the `occurredAt` that reads it whole,
+   * because "an entry that ends mid-sentence with a '…' and no way to ask for
+   * the rest is how a coordinator states half a report as the whole of it,
+   * which it did, live, on SHOP-42." The `.slice(0, 6)` immediately beside it
+   * stayed silent, and the controller's own `get_task` has taken an `events`
+   * count all along while the operator's took no arguments at all.
+   */
+  it("ruling 302: says how many entries exist, how to widen the window, and stays silent when nothing is hidden", async () => {
+    seedTask("impl");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        for (let i = 0; i < 9; i += 1) {
+          parsed.timeline.unshift({
+            occurredAt: new Date(Date.UTC(2026, 8, 16, 1, i)).toISOString(),
+            type: "note",
+            actor: { kind: "operator" },
+            title: `Entry ${i}`,
+            text: `entry ${i}`,
+            toAgent: false,
+            evidence: null,
+          });
+        }
+      },
+    );
+    const six = snapshot();
+    // CANARY: drop `timelineTotal` and a full-looking window is all there is.
+    expect(six.recentTimeline).toHaveLength(6);
+    expect(six.timelineTotal).toBeGreaterThan(6);
+    // CANARY: drop the `timelineOlder` note. The count AND the way out.
+    expect(six.timelineOlder).toContain("older");
+    expect(six.timelineOlder).toContain("events");
+    expect(six.timelineOlder).toContain("read_timeline_entry");
+    expect(six.timelineOlder).toContain(String(six.timelineTotal - 6));
+
+    // The window widens on request, exactly like the controller's.
+    // CANARY: ignore the argument and keep the hardcoded six.
+    const wide = snapshot(50);
+    expect(wide.recentTimeline.length).toBe(wide.timelineTotal);
+    // Nothing hidden, nothing claimed: no note at all.
+    expect(wide.timelineOlder).toBeUndefined();
+  });
 
   it("ruling 131(d): the snapshot carries blockedBy with resolved states", async () => {
     // Canary: omit `blockedBy` from `operatorSnapshot`'s return object.
