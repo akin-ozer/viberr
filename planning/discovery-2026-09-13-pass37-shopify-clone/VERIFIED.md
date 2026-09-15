@@ -1860,3 +1860,89 @@ inversions among those:                                           0
 
 266 events across 26 files since the fix, every one strictly ordered. That is a stronger statement
 than the fix's unit test makes, and it came from viberr's own instrument rather than from mine.
+
+---
+
+## Day seven: three fixes verified on the live board within an hour of shipping
+
+### Ruling 247 (F37-76) — a lease released itself, twice, with nobody remembering
+
+The defect was a contract nothing implemented: `FileLease.taskKey` documented as "released when it
+reaches a terminal stage", with no code that released it. The controller believed the comment and
+wrote it into the first real lease's stored reason.
+
+Measured against the live data root through the shipped resolver, immediately after deploying:
+
+```
+ACTIVE []
+STALE  [ { paths: ["pnpm-lock.yaml"], taskKey: "SHOP-11",
+           reason: "… Lease releases when SHOP-11 merges." } ]
+```
+
+SHOP-11 was `done`. The row stood in `project.md` — which is honest, the declaration was made —
+and bound nobody.
+
+Then the same thing happened for real, from the other end. The controller leased `pnpm-lock.yaml`
+and five other paths to SHOP-20. SHOP-5's Integration Verifier **enforced that lease in a verdict**:
+
+> "The blocker is the leased boundary: `git diff --name-only origin/main...HEAD` exited 0 with 14
+> paths and includes `pnpm-lock.yaml` … This conflicts with ruling 245 assigning the lockfile to
+> SHOP-20. The runtime is clean, but delivery should wait for SHOP-20."
+
+SHOP-20 was accepted and PR #27 merged. Re-probed:
+
+```
+SHOP-20 stage: done
+ACTIVE []          ← binds nobody
+STALE  [ the SHOP-20 row, still present in project.md ]
+```
+
+The whole chain ran without a sweep, a hook, or a person: ruling 245 ordered the work, the reviewer
+refused the branch that tried to jump the queue, ruling 247 released the lease when the holder
+finished, and SHOP-5 and SHOP-27 were both freed by one acceptance.
+
+### Ruling 248 (F37-77) — the reviewer that was fabricated into an objection approved the real work
+
+The fabricated row was bound to `81ae03e`. SHOP-5 reworked and delivered `1f960c5`:
+
+```
+code-reviewer        81ae03e  request_changes   ← fabricated from viberr's own word "failure"
+code-reviewer        1f960c5  approve           ← real checkout, real verdict, "No standing findings"
+integration-verifier 1f960c5  request_changes   ← the lease, above; a real finding
+```
+
+Verdicts are per revision, so the fabricated row stopped governing the moment a new head landed —
+which is the door the controller named when asked how to clear it without hand-editing. No file was
+edited by hand.
+
+### Rulings 250 and 251 — both visible in one screenshot, on the controller's first turn after deploy
+
+The working row, which had read `Controller is working…` and nothing else for a 201-second turn:
+
+```
+Controller is working…  mcp__viberr_controller__list_decisions · {}
+```
+
+Ruling 250 put the step there. Ruling 251 is the tool the step names: the controller found
+`list_decisions` unprompted, called it first, and opened its reply with
+
+> "list_decisions works — five things are waiting on you, and they have a strict best order because
+> two of them are unblocked by the first."
+
+then gave five numbered recommendations with option numbers and `answerAt` links. Every one was
+acted on in that order. It also argued **against** one packet's own recommended option, with the
+verdict text as evidence — which is the briefing this tool exists to make possible.
+
+Board at the end of that sequence: **23 merged PRs, 23 tasks done, nothing waiting on a human.**
+
+### One environmental fact, measured rather than assumed
+
+Every open PR on `akin-ozer/shopify-clone` reads `UNSTABLE`, and every check fails in 3-4 seconds
+with no steps recorded. The annotation on check-run `104166998395` says why:
+
+> "The job was not started because recent account payments have failed or your spending limit needs
+> to be increased."
+
+GitHub Actions is billing-blocked on this account. CI red on this repository carries no signal about
+the code, and nothing on the board should wait on it. Recorded so no later reader mistakes it for a
+finding.
