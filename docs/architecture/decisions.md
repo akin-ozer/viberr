@@ -6148,6 +6148,32 @@ by rewriting those paragraphs:*
     copy's text is fixed on that project's own Agents page.
     (`template-propagation.server.ts`, `gagents.server.ts`, `controller-toolkit.server.ts`.)
 
+278. **An MCP pointed inside Viberr's own store is named as what it is (owner, 2026-09-15,
+    pass 37; F37-111).** Found by the controller, asked to use the instance tools nobody had
+    used. `kb-conventions` spawned `@modelcontextprotocol/server-filesystem` pointed at
+    `/data/kb/shopify-clone-conventions` — the project's rulings knowledge base, which
+    `set_project_rulings_kb` injects into every run on that board. Fourteen tools, nothing
+    withheld, granted to three profiles, two of them reviewers. A reviewer could rewrite the
+    rules it is judged against, and the operator reads those rules on every turn.
+    The sharp half is that ruling 176's marking would NOT have closed it. Marked write tools
+    are withheld only from a run that WITHHOLDS `execute-code-or-write-repo`, and every
+    realistic holder of a filesystem MCP has it — a reviewer needs it to run a test suite. The
+    guard is shaped for a read-only profile that barely exists on a working board, so the
+    protection existed and did not reach the case.
+    Asked what the product should do, the owner chose the warning over a new gate kind. Viberr
+    owns that directory, so it can see the overlap and say so, wherever a person configures or
+    reads the server: `save_mcp_server`'s reply at the moment the path is chosen, and every
+    `list_mcp_servers` row. The sentence names the path, what an agent can do with it, and
+    that the write-tool marking is not the answer — because an admin who thinks it is will
+    mark the tools and stop looking. It withholds nothing on its own; the decision stays a
+    person's.
+    Two corrections rode along, from the same report. `list_mcp_servers` reported `up` — a
+    CACHED verdict — without `lastCheckedAt` or `warmingSince`, so a server the controller
+    probed and found healthy in 10.3s was listed red with no way to judge the reading's age
+    (R19-18's whole point is that a first-run install is not a broken server). Both are now on
+    the row, and the description says to probe rather than relay a stale red.
+    (`resources.server.ts`, `controller-toolkit.server.ts`.)
+
     *(And one flake, in this repository's own suite, of exactly the kind SHOP-35 is fixing in
     the clone: `controller-page.test.tsx` asserts an elapsed cell to the second against a
     `startedAt` stamped once when the describe body evaluates — so every test that ran before

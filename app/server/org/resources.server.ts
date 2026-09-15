@@ -31,6 +31,7 @@ import {
   sealSecret,
 } from "~/server/secrets/secret-box.server";
 import {
+  getDataRoot,
   kbDirPath,
   kbRootDir,
   skillDirPath,
@@ -658,6 +659,9 @@ export interface McpView {
   /** Ruling 176: the tool names the last successful probe listed, offered in
    *  the editor. Null before any probe answered with a list. */
   discoveredTools: string[] | null;
+  /** Ruling 278: paths in this server's command that lie inside Viberr's own
+   *  data root. Empty for an HTTP server and for a command that names none. */
+  storePaths: string[];
 }
 
 type McpRow = {
@@ -740,6 +744,64 @@ function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((name) => b.includes(name));
 }
 
+/**
+ * Ruling 278 (pass 37, F37-111): the paths in a stdio MCP's command that lie
+ * inside VIBERR'S OWN store.
+ *
+ * Found live. `kb-conventions` spawned `@modelcontextprotocol/server-filesystem`
+ * pointed at `/data/kb/shopify-clone-conventions` — the project's rulings
+ * knowledge base, which `set_project_rulings_kb` injects into every run on that
+ * board. Fourteen tools, nothing withheld, granted to three profiles, two of
+ * them reviewers. A reviewer could rewrite the rules it is judged against, and
+ * the operator reads those rules on every turn.
+ *
+ * Ruling 176's marking would not have closed it: marked write tools are
+ * withheld only from a run that WITHHOLDS `execute-code-or-write-repo`, and
+ * every realistic holder of a filesystem MCP has it — a reviewer needs it to
+ * run a test suite. So the guard is shaped for a read-only profile that barely
+ * exists on a working board.
+ *
+ * Viberr owns this directory, so it can see the overlap and say so. That is
+ * the whole fix (owner's call, 2026-09-15): name the case that is
+ * QUALITATIVELY different from writing a repo — governance material the server
+ * itself feeds into runs — wherever a person configures or reads the server.
+ * It withholds nothing on its own; an admin decides.
+ */
+export function storePathsInMcpTarget(
+  target: string,
+  dataRoot?: string,
+): string[] {
+  const root = path.resolve(getDataRoot(dataRoot));
+  const hits: string[] = [];
+  // The command is one string; its arguments are whitespace-separated. Quotes
+  // are stripped so a quoted path is still seen.
+  for (const raw of target.split(/\s+/)) {
+    const token = raw.replace(/^["']|["']$/g, "");
+    // Only an absolute path can name the store from inside a spawned command —
+    // a relative one resolves against the run's own cwd, not this process's.
+    if (!token.startsWith("/")) continue;
+    const resolved = path.resolve(token);
+    if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) {
+      hits.push(resolved);
+    }
+  }
+  return hits;
+}
+
+/** Ruling 278: the sentence every surface uses for that overlap. */
+export function mcpStoreAccessNote(paths: readonly string[]): string | null {
+  if (paths.length === 0) return null;
+  return (
+    `This command is pointed at ${paths.join(", ")}, inside Viberr's own store. ` +
+    "An agent holding this grant can read and (if the server offers write tools) " +
+    "REWRITE the knowledge bases, skills and agent profiles Viberr injects into " +
+    "runs — including the rules its own reviewers judge it against. Ruling 176's " +
+    "write-tool marking does not cover this: it binds only on a run that withholds " +
+    "execute-code-or-write-repo, and an agent that runs tests holds it. Grant this " +
+    "server deliberately, or point it somewhere else."
+  );
+}
+
 function mapMcp(row: McpRow): McpView {
   const writeTools = storedWriteTools(row.tool_policy_json);
   return {
@@ -763,6 +825,8 @@ function mapMcp(row: McpRow): McpView {
     writeTools: writeTools ?? [],
     writeToolsReviewed: writeTools !== null,
     discoveredTools: storedToolNames(row.tool_names_json),
+    // Ruling 278: computed from the stored command, so it cannot go stale.
+    storePaths: row.transport === "stdio" ? storePathsInMcpTarget(row.target) : [],
   };
 }
 

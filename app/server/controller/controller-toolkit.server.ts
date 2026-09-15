@@ -43,6 +43,7 @@ import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import {
   listKnowledgeBases,
   listMcpServers,
+  mcpStoreAccessNote,
   listSkills,
   resolveStoreTarget,
   KB_REFRESH_MODES,
@@ -763,7 +764,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. Org admins only. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -778,6 +779,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             transport: m.transport,
             target: m.target,
             up: m.up,
+            // Ruling 278 (F37-111): `up` is a CACHED verdict and the row
+            // carries when it was taken — this read did not. Live, the
+            // controller saw `up: false` with the reason "no response in 20s.
+            // npx fetches its package on first use, so this is probably still
+            // downloading", probed it itself, and found it healthy in 10.3s: a
+            // red server that is fine, with no way to tell how old the reading
+            // was. `warmingSince` is the other half — a first-run install is
+            // not a broken server (R19-18).
+            lastCheckedAt: m.lastCheckedAt,
+            warmingSince: m.warmingSince,
             tools: m.tools,
             hasCredential: m.hasCred,
             lastError: m.lastError,
@@ -795,6 +806,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 : m.writeToolsReviewed
                   ? "Reviewed: no tool on this server is marked as a write tool, so none is withheld."
                   : "Not reviewed yet: nothing is withheld. Viberr makes no claim about the tools nobody has marked.",
+            // Ruling 278: the one case that is qualitatively different from
+            // writing a repo — a server pointed INSIDE Viberr's own store can
+            // rewrite the knowledge bases, skills and agent profiles Viberr
+            // injects into runs, including the rules its reviewers judge
+            // against. Found live on this instance.
+            storePaths: m.storePaths,
+            storeAccessNote: mcpStoreAccessNote(m.storePaths),
           })),
         );
       }),
@@ -849,6 +867,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // the marking that actually landed rather than the one we asked for.
           const policy = saved.mcp.writeTools;
           const suggestion = saved.writeToolsSuggestion;
+          // Ruling 278 (F37-111): said at the moment the server is saved,
+          // because this is where the path is chosen. A command pointed inside
+          // Viberr's own store is the one case ruling 176's marking cannot
+          // cover — it binds only on a run that withholds
+          // execute-code-or-write-repo, and an agent that runs tests holds it.
+          const storeNote = mcpStoreAccessNote(saved.mcp.storePaths);
           return (
             `[done] ${saved.toast}. ` +
             (policy.length > 0
@@ -856,6 +880,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               : suggestion.length > 0
                 ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
+            (storeNote ? `${storeNote} ` : "") +
             "If it needs a credential, the admin adds it in " +
             "Org settings (secrets never travel through this chat)."
           );

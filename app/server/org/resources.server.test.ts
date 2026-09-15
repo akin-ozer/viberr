@@ -34,6 +34,8 @@ import {
   reindexKnowledgeBaseByDir,
   saveKnowledgeBase,
   saveMcpServer,
+  storePathsInMcpTarget,
+  mcpStoreAccessNote,
   saveSkill,
   splitMcpCommand,
   testMcpServer,
@@ -659,6 +661,55 @@ describe("skills", () => {
     const { toast } = await deleteSkill(db, skill.id, ACTOR, ctx);
     expect(toast).toBe("Skill api-guidelines deleted");
     expect(existsSync(skillDirPath("api-guidelines", dataRoot))).toBe(false);
+  });
+});
+
+/**
+ * Ruling 278 (pass 37, F37-111): found live. `kb-conventions` spawned
+ * `@modelcontextprotocol/server-filesystem` pointed at
+ * `/data/kb/shopify-clone-conventions` — the project's rulings knowledge base,
+ * which Viberr injects into every run on that board. Fourteen tools, nothing
+ * withheld, granted to three profiles, two of them reviewers: a reviewer could
+ * rewrite the rules it is judged against.
+ *
+ * Ruling 176's write-tool marking would not have closed it — marked tools are
+ * withheld only from a run that WITHHOLDS `execute-code-or-write-repo`, and an
+ * agent that runs a test suite holds it. Viberr owns this directory, so it can
+ * see the overlap and say so.
+ */
+describe("ruling 278: an MCP pointed inside Viberr's own store is named", () => {
+  it("finds the store paths in a stdio command, and only those", () => {
+    const root = dbCtx.makeTempDir();
+    const cmd = (args: string) => storePathsInMcpTarget(args, root);
+    // CANARY: drop the resolve-and-prefix check and a command pointed at the
+    // rulings KB reads the same as one pointed at a workspace.
+    expect(cmd(`npx -y @modelcontextprotocol/server-filesystem ${root}/kb/conventions`)).toEqual([
+      `${root}/kb/conventions`,
+    ]);
+    // The root ITSELF is the worst case, and must not be missed by a check
+    // that only looks for a separator after it.
+    expect(cmd(`npx -y server-filesystem ${root}`)).toEqual([root]);
+    // A quoted path is still seen.
+    expect(cmd(`npx -y server-filesystem "${root}/skills"`)).toEqual([`${root}/skills`]);
+    // A sibling directory that merely SHARES A PREFIX is not inside the store.
+    // CANARY: compare with `startsWith(root)` and this one is flagged.
+    expect(cmd(`npx -y server-filesystem ${root}-other/kb`)).toEqual([]);
+    // Anywhere else is not the store, and a relative token resolves against the
+    // spawned command's own cwd, not this process's — so it is never claimed.
+    expect(cmd("npx -y server-filesystem /tmp/scratch")).toEqual([]);
+    expect(cmd("npx -y server-filesystem ./kb")).toEqual([]);
+    expect(cmd("npx -y @some/other-server --flag")).toEqual([]);
+  });
+
+  it("the note names the path, the reach, and why the write-tool marking does not cover it", () => {
+    expect(mcpStoreAccessNote([])).toBeNull();
+    const note = mcpStoreAccessNote(["/data/kb/shopify-clone-conventions"])!;
+    // CANARY: shorten the note to "this server can write Viberr's store" and
+    // the reader loses the two facts that make it actionable — what an agent
+    // can do with it, and that ruling 176's marking is not the answer.
+    expect(note).toContain("/data/kb/shopify-clone-conventions");
+    expect(note).toContain("rules its own reviewers judge it against");
+    expect(note).toContain("execute-code-or-write-repo");
   });
 });
 
