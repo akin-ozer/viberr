@@ -231,11 +231,21 @@ function DockShell({ context }: { context: DockContext }) {
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
   const sentUnder = useRef(context.key);
+  /** Ruling 259: what was submitted, held until the server answers. */
+  const pending = useRef<string | null>(null);
   useFetcherResult(send, (result) => {
     if (!result.ok) {
+      // The text is still in the composer, and Send is live again: the person
+      // can retry or copy it out.
       push(result.error ?? "The controller could not take that. Try again.", "error");
+      pending.current = null;
       return;
     }
+    // Ruling 259: cleared HERE, and only if the box still holds exactly what
+    // went out — somebody who started typing the next message while this one
+    // was in flight keeps it.
+    setText((cur) => (cur === pending.current ? "" : cur));
+    pending.current = null;
     const key = sentUnder.current;
     setSelected((s) =>
       s[key] === result.conversationId ? s : { ...s, [key]: result.conversationId },
@@ -407,8 +417,15 @@ function DockShell({ context }: { context: DockContext }) {
         : (current.conversation?.id ?? "");
     body.set("conversationId", target === NEW_THREAD ? NEW_THREAD : target);
     sentUnder.current = context.key;
+    // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
+    // takes them. `setText("")` used to run here, optimistically, and nothing
+    // anywhere held the string — so an expired CSRF token, a 404 on a scope
+    // that is not open, or any transport failure destroyed what the person had
+    // written, leaving only a toast that unmounts itself after 2.6 seconds.
+    // Four of the five longest messages on the live board are 1,800 to 2,200
+    // characters, typed into a two-row textarea.
+    pending.current = value;
     send.submit(body, { method: "post", action: "/resources/controller" });
-    setText("");
   };
 
   const pick = (id: string) => {

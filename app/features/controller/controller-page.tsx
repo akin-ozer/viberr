@@ -193,6 +193,7 @@ export function ControllerPage({
               goals={view.goals}
               csrf={csrf}
               canRedirect={canRedirectGoals}
+              viewerId={view.viewerId}
             />
           )}
           <ConversationList view={view} />
@@ -502,6 +503,24 @@ function Composer({
   const [text, setText] = useState("");
   const location = useLocation();
   const busy = send.state !== "idle";
+  // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
+  // takes them. `setText("")` used to run at submit, optimistically, and
+  // nothing anywhere held the string — an expired CSRF token (refused before
+  // the engine runs, so the text reaches no transcript), a 404 on a scope that
+  // is not open, or any transport failure destroyed what the person wrote, and
+  // the only account of it was a toast that unmounts itself after 2.6 seconds.
+  const pending = useRef<string | null>(null);
+  const settled = useRef<ActionResult | null>(null);
+  useEffect(() => {
+    if (send.state !== "idle" || !send.data || settled.current === send.data) return;
+    settled.current = send.data;
+    // Cleared only on success, and only if the box still holds exactly what
+    // went out — somebody who started typing the next message while this one
+    // was in flight keeps it. On a failure the text and the Send button both
+    // stay, so the person can retry or copy it out.
+    if (send.data.ok) setText((cur) => (cur === pending.current ? "" : cur));
+    pending.current = null;
+  }, [send.state, send.data]);
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
   const submit = () => {
@@ -513,8 +532,8 @@ function Composer({
     body.set("text", value);
     body.set("surface", `${location.pathname}${location.search}`);
     if (conversationId) body.set("conversationId", conversationId);
+    pending.current = value;
     send.submit(body, { method: "post" });
-    setText("");
   };
   return (
     <div className="ctl-composer">
@@ -603,10 +622,13 @@ function GoalsPanel({
   goals,
   csrf,
   canRedirect,
+  viewerId,
 }: {
   goals: GoalView[];
   csrf: string;
   canRedirect: boolean;
+  /** Ruling 260: the viewer, so a chain's own creator gets its controls. */
+  viewerId: string;
 }) {
   return (
     <section className="panel ctl-goals" aria-label="Goal chains">
@@ -622,7 +644,19 @@ function GoalsPanel({
         </p>
       ) : (
         goals.map((g) => (
-          <GoalCard key={g.id} goal={g} csrf={csrf} canRedirect={canRedirect} />
+          <GoalCard
+            key={g.id}
+            goal={g}
+            csrf={csrf}
+            // Ruling 260 (F37-91): the server's gate is creator OR run-agents
+            // (`requireGoalAuthority`). The page knew only the role half, so a
+            // contributor who created a chain — `create-task` is a contributor
+            // action, `run-agents` is not — was shown their own chain with no
+            // Pause, Resume, Cancel, Retry or Skip, and this is the ONLY goal
+            // redirect UI in the product. The server stays the authority; this
+            // just stops the page refusing on its behalf.
+            canRedirect={canRedirect || g.createdBy === viewerId}
+          />
         ))
       )}
     </section>

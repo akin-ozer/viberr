@@ -522,7 +522,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(form.get("_csrf")).toBe("tok");
     expect(form.get("conversationId")).toBe("");
     await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));
-    // The composer is cleared once the send went out.
+    // Ruling 259: cleared once the server TOOK it, not when it went out.
     expect(composer.value).toBe("");
   });
 
@@ -539,6 +539,19 @@ describe("the controller dock (ruling 121)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByText("That request expired.");
     expect(screen.getByText("task page")).toBeTruthy();
+    /**
+     * Ruling 259 (pass 37, F37-90): the composer keeps the words until the
+     * server takes them. `setText("")` ran synchronously after
+     * `fetcher.submit`, so this refusal — which happens BEFORE the controller
+     * engine is reached, leaving the text in no transcript anywhere — used to
+     * destroy what the person had written, with a toast that unmounts itself
+     * after 2,600 ms as the only account of it.
+     *
+     * CANARY: move `setText("")` back beside `send.submit(...)` and this is "".
+     */
+    // SAFETY: `findByLabelText("Message to the controller")` resolves the
+    // composer, which the dock renders as a `<textarea>`.
+    expect((composer as HTMLTextAreaElement).value).toBe("hello");
   });
 
   it("renders the transcript and the working state, and shows the dot on the trigger", async () => {

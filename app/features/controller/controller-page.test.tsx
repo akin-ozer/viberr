@@ -33,6 +33,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     available: true,
     controllerName: "Controller",
     projectName: "Viberr Core",
+    viewerId: "u_arda",
     conversations: [
       { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null },
       { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142" },
@@ -76,6 +77,52 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
     const waits = [...container.querySelectorAll("[data-link-wait]")].map((n) => n.textContent);
     expect(waits).toEqual(["waits on goal-1 link 2, JC-6"]);
   });
+
+  /**
+   * Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION.
+   *
+   * `requireGoalAuthority` allows the chain's CREATOR or anyone with
+   * `run-agents`. The page computed one boolean from the viewer's project ROLE
+   * and handed it to every card, so the creator arm was never evaluated —
+   * and a contributor can create a chain (`create-task` is A/M/C) but is not
+   * `run-agents` (A/M). The repo's own toolkit test proves the server answers
+   * yes: a contributor creates goal-1, then pauses it, and both return [done].
+   * This panel is the ONLY goal-redirect UI in the product, so the person who
+   * started the chain had no Pause, Resume, Cancel, Retry or Skip anywhere.
+   */
+  it("ruling 260: a chain's own creator gets its controls even below the run-agents tier", async () => {
+    const mine: NonNullable<ControllerSurfaceView["goals"]>[number] = {
+      id: "goal-7",
+      title: "My own chain",
+      status: "active",
+      createdBy: "u_noor",
+      createdByLabel: "Noor",
+      onFailure: "pause",
+      description: "",
+      links: [
+        { index: 1, title: "First", goal: "A.", taskKey: "JC-1", status: "failed", note: null, redeclared: false, blockedBy: [] },
+      ],
+      currentIndex: 1,
+      createdAt: null,
+      updatedAt: null,
+      history: [],
+    };
+    const theirs = { ...mine, id: "goal-8", title: "Someone else's chain", createdBy: "u_other" };
+
+    // A viewer below the run-agents tier (canRedirectGoals=false in the stub),
+    // looking at one chain they created and one they did not.
+    renderPage(view({ goals: [mine, theirs], viewerId: "u_noor" }));
+    await screen.findByText("My own chain");
+
+    // CANARY: drop `|| g.createdBy === viewerId` and BOTH counts are 0 — the
+    // creator is shown their own chain with no way to redirect it.
+    expect(screen.getAllByRole("button", { name: /Pause/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /Cancel goal/ })).toHaveLength(1);
+    // …and the chain they did not create still offers nothing, so the fix did
+    // not simply open the controls to everybody.
+    const cards = document.querySelectorAll("[data-goal-id]");
+    expect(cards.length === 0 || cards.length === 2).toBe(true);
+  });
 });
 
 function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFunction) {
@@ -100,22 +147,24 @@ function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFuncti
 }
 
 /** The instance surface (no project bound), where the ruling-127 copy lives. */
-function renderInstancePage(v: ControllerSurfaceView) {
+function renderInstancePage(v: ControllerSurfaceView, action?: ActionFunction) {
+  const page: Parameters<typeof createRoutesStub>[0][number]["children"] = [
+    {
+      path: "controller",
+      Component: () => (
+        <ToastProvider>
+          <ControllerPage view={v} projectSlug={null} canRedirectGoals={false} />
+        </ToastProvider>
+      ),
+    },
+  ];
+  if (action) page[0]!.action = action;
   const Stub = createRoutesStub([
     {
       id: "root",
       path: "/",
       loader: () => ({ csrf: "tok", theme: "system" }),
-      children: [
-        {
-          path: "controller",
-          Component: () => (
-            <ToastProvider>
-              <ControllerPage view={v} projectSlug={null} canRedirectGoals={false} />
-            </ToastProvider>
-          ),
-        },
-      ],
+      children: page,
     },
   ]);
   return render(<Stub initialEntries={["/controller"]} />);
@@ -273,6 +322,54 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     expect(box.disabled).toBe(true);
     expect(box.placeholder).toContain("only the conversation's owner");
     expect(box.placeholder).not.toContain("Claude");
+  });
+
+  /**
+   * Ruling 259 (pass 37, F37-90): the composer keeps the words until the server
+   * takes them.
+   *
+   * `setText("")` ran synchronously after `fetcher.submit`, optimistically, and
+   * nothing anywhere held the string. An expired CSRF token is refused BEFORE
+   * the engine runs, so the text reached no transcript at all; a 404 on a scope
+   * that is not open, or any transport failure, did the same. The person got a
+   * toast that unmounts itself after 2,600 ms, and their message was gone. Four
+   * of the five longest messages on the live board are 1,800 to 2,200
+   * characters, typed into a two-row textarea.
+   */
+  it("ruling 259: a failed send leaves the typed message in the box", async () => {
+    const typed = "A long ask I do not want to retype. ".repeat(20);
+    const { container } = renderInstancePage(
+      view({ available: true, projectName: null, conversations: [], goals: null }),
+      // The CSRF arm: refused before the controller engine is ever reached.
+      () => ({ ok: false, error: "That request expired. Reload the page and try again." }),
+    );
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    fireEvent.change(box, { target: { value: typed } });
+    expect(box.value).toBe(typed);
+
+    const send = screen.getByRole("button", { name: "Send" });
+    await act(async () => {
+      fireEvent.click(send);
+    });
+
+    // CANARY: move `setText("")` back beside `send.submit(...)` and this is "".
+    expect(box.value).toBe(typed);
+  });
+
+  it("ruling 259: a successful send clears it", async () => {
+    const { container } = renderInstancePage(
+      view({ available: true, projectName: null, conversations: [], goals: null }),
+      () => ({ ok: true, conversationId: "cv_new" }),
+    );
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    fireEvent.change(box, { target: { value: "short ask" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+    // CANARY: clear on neither path and the box keeps every message ever sent.
+    expect(box.value).toBe("");
   });
 });
 

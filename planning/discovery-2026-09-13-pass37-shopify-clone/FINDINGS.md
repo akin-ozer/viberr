@@ -4614,3 +4614,63 @@ quiet is still traceable.
 
 Canaried: removing the guard opens `pkt_…` on an acceptable task and the acceptance is blocked
 behind it.
+
+## F37-90 · Every failed send destroyed what the person had typed — HIGH
+
+Both controller composers:
+
+```ts
+send.submit(body, { method: "post", action: "/resources/controller" });
+setText("");                       // <- optimistic, and nothing holds the string
+```
+
+Nothing anywhere keeps it: the fetcher's `formData` is never read back, and neither result
+handler restores it. The failure arms reachable from there:
+
+- `csrfError` returns 403 *"That request expired. Reload the page and try again"* **before
+  `runControllerTurn` is ever called** — so the text reached no transcript at all;
+- `404 "That project or task is not open to you."`, the 409, and any transport failure.
+
+All three produce a toast, and `TOAST_DISMISS_MS = 2600` with no exemption for `kind: "error"`.
+So the message is gone and, 2.6 seconds later, so is the reason.
+
+**Weight:** `controller_messages` holds a live 1,945-character user message sent with
+`surface: "/"` — the dock's two-row textarea on Home. Four of the five longest live user messages
+are 1,825–2,199 characters.
+
+**Fix (ruling 259).** Clear on success, not on submit, and only when the box still holds exactly
+what went out, so somebody typing the next message while this one is in flight keeps it. On a
+failure the text and the Send button both stay: a retry rather than a rewrite. Canaried on both
+surfaces.
+
+## F37-91 · The Goals panel hid the controls from the person who created the chain — HIGH
+
+`requireGoalAuthority` is a disjunction:
+
+```ts
+if (actor.userId === createdBy) { …"any-member"…; if (decision.allowed) return; }
+requireAction(db, project, actor, "run-agents", what);
+```
+
+The page computed one boolean from the viewer's project ROLE and passed it to every card:
+
+```ts
+const canRedirectGoals = memberRole.success ? roleCan(memberRole.data, "run-agents") : …
+```
+
+The creator arm was never evaluated — and the two tiers genuinely differ: `create-task` is
+admin/maintainer/**contributor**, `run-agents` is admin/maintainer. So a contributor may start a
+chain and is then shown their own chain with no Pause, Resume, Cancel, Retry or Skip. This panel is
+the **only** goal-redirect UI in the product; `grep` for the ops returns `controller-page.tsx` and
+`project.controller.tsx` and nothing else.
+
+The server's answer was already pinned by the repo's own test — a contributor creates goal-1, then
+pauses it, both `[done]`. The page was refusing on the server's behalf, and refusing wrongly.
+`createdBy` was already on every `GoalView` the loader handed the component.
+
+Live: `project_members` on shopify-clone-platform holds `noor@viberr.dev` as a contributor — a
+person this hits today.
+
+**Fix (ruling 260).** The gate is per goal: `canRedirect || goal.createdBy === viewerId`. Canaried:
+removing the creator arm takes both controls away from their own chain while leaving the other
+chain's correctly absent.

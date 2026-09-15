@@ -5721,6 +5721,33 @@ by rewriting those paragraphs:*
     branch is deciding not to open, and the skip is logged so a quiet chain is still traceable.
     (`task-actions.server.ts`.)
 
+259. **A composer keeps the words until the server takes them (2026-09-15, pass 37; F37-90).**
+    Both controller composers called `setText("")` synchronously after `fetcher.submit`, as if
+    the POST always succeeds, and nothing anywhere held the string — the fetcher's `formData` is
+    never read back, and neither result handler restored it. So an expired CSRF token, which is
+    refused BEFORE the controller engine runs and therefore leaves the text in no transcript at
+    all, destroyed what the person had written. So did a 404 on a scope not open to them, and
+    any transport failure. The only account of it was a toast that unmounts itself after
+    2,600 ms. Four of the five longest messages on the live board are 1,800 to 2,200 characters,
+    typed into a two-row textarea.
+    Cleared on SUCCESS now, and only when the box still holds exactly what went out, so somebody
+    who started typing the next message while this one was in flight keeps it. On a failure the
+    text and the Send button both stay, which is the difference between a retry and a rewrite.
+    (`controller-dock.tsx`, `controller-page.tsx`.)
+
+260. **A chain's own creator gets its controls (2026-09-15, pass 37; F37-91).** The goal-redirect
+    gate is a DISJUNCTION — `requireGoalAuthority` allows the creator, or anyone with
+    `run-agents`. The Goals panel computed ONE boolean from the viewer's project role and handed
+    it to every card, so the creator arm was never evaluated. A contributor may create a chain
+    (`create-task` is admin/maintainer/contributor) and is not `run-agents`
+    (admin/maintainer), so the person who started a chain was shown it with no Pause, Resume,
+    Cancel, Retry or Skip — and this panel is the only goal-redirect UI in the product. The
+    repository's own toolkit test already proved the server says yes: a contributor creates
+    goal-1 and then pauses it, both `[done]`. `createdBy` was on every row the loader already
+    handed the component. The server stays the authority; the page has stopped refusing on its
+    behalf.
+    (`controller-page.tsx`, `controller-query.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

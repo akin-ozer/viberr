@@ -59,6 +59,8 @@ export interface ControllerSurfaceView {
   /** Org admin reading every conversation (?all=1). */
   showingAll: boolean;
   viewerIsOrgAdmin: boolean;
+  /** Ruling 260: who is looking, so a goal's own creator gets its controls. */
+  viewerId: string;
 }
 
 export interface ConversationListItem {
@@ -150,6 +152,11 @@ export function getControllerSurface(
       ? conversation.userId === viewer.id || admin
       : false,
     goals: scope ? listGoals(db, scope) : null,
+    // Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION —
+    // the chain's creator, or run-agents. The page knew only the role half, so
+    // it hid Pause, Resume, Cancel, Retry and Skip from the person who created
+    // the chain. Carry the viewer so the other half can be answered per goal.
+    viewerId: viewer.id,
     viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
     showingAll,
     viewerIsOrgAdmin: admin,
