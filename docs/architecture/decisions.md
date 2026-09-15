@@ -6192,6 +6192,21 @@ by rewriting those paragraphs:*
     rows at 200 a call, and the action ids were reachable only by already knowing them.
     (`audit-export.server.ts`, `controller-toolkit.server.ts`.)
 
+280. **A toolkit sentence is not a product statement (2026-09-15, pass 37; F37-113).**
+    `deploy_agent`'s description said "No removal exists here." True of that toolkit and false
+    of the product: `deleteAgentProfile` removes a deployment from the project's Agents page,
+    and has since the agents surface existed. A sentence in a tool's own description is read as
+    a statement about what CAN be done, not about which door offers it — and it was believed.
+    Auditing this instance, the controller found two deployed profiles used by nothing, scoped
+    to stages this board does not have, and wrote: "deploy_agent has no inverse — its own
+    description says 'No removal exists here.' I cannot un-deploy them. The only lever is
+    neutering a live deployment, which is a workaround, not a fix." It was about to do the
+    workaround.
+    Ruling 85's rule, on a new surface: a refusal that lists only workarounds hides the fix.
+    The sentence now says which door removes a deployment, names the one profile that is never
+    removable, and says outright not to offer the neutering instead.
+    (`controller-toolkit.server.ts`.)
+
     *(And one flake, in this repository's own suite, of exactly the kind SHOP-35 is fixing in
     the clone: `controller-page.test.tsx` asserts an elapsed cell to the second against a
     `startedAt` stamped once when the describe body evaluates — so every test that ran before

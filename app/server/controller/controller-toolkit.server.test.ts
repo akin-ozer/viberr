@@ -1694,6 +1694,34 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
    * `execute-code-or-write-repo: direct`, so every deploy of it produced a
    * profile that can push to the repo under a reply promising the opposite.
    */
+  /**
+   * Ruling 280 (pass 37, F37-113): `deploy_agent` said "No removal exists
+   * here." It is true of this toolkit and false of the product —
+   * `deleteAgentProfile` removes a deployment from the project's Agents page.
+   * A toolkit sentence that reads as a product statement is believed: the
+   * controller, auditing this instance, found two dead deployments and wrote
+   * "I cannot un-deploy them. The only lever is neutering a live deployment,
+   * which is a workaround, not a fix." Ruling 85's rule, on a new surface: a
+   * refusal that lists only workarounds hides the fix.
+   */
+  it("ruling 280: deploy_agent names the removal path instead of denying one exists", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.projectAdmin, email: "elif@viberr.dev", name: "Elif" },
+      projectSlug: SLUG,
+    });
+    // SAFETY: `deploy_agent` is unconditionally registered on this toolkit —
+    // the gate is on the CALL, not on whether the tool exists.
+    const def = toolkit.tools.find((t) => t.name === "deploy_agent")!;
+    // CANARY: restore "No removal exists here." and the reader is told the
+    // product cannot do something it does.
+    expect(def.description).not.toContain("No removal exists here");
+    expect(def.description).toContain("Agents page");
+    expect(def.description).toContain("Operator is a system profile");
+  });
+
   it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
     // A template with repo write. `save_global_agent` has no capability field,
     // so the grants have to be written the way a shipped template carries them.
