@@ -4644,6 +4644,13 @@ by rewriting those paragraphs:*
     refusals this codebase spends its care on. Anything else is logged with the tool's name
     and answered with the sentence that stops a relay: this call produced no answer, so do
     not report one, because not getting a result is different from getting an empty one.
+    It is the OUTERMOST wrapper and never the only one, which is what keeps it from
+    swallowing a refusal somebody worded carefully. The controller's own guards sit inside
+    it and catch `AppError`, `NotVisibleError` (404-shaped by design, controller-only) and
+    everything else first; the operator and agent toolkits throw nothing but `AppError`,
+    which keeps its words here. Checked rather than assumed, because a generic "failed
+    unexpectedly" over a deliberate refusal would be a worse defect than the leak this
+    fixes.
 
 304. **The ceremony that merges says what CI thinks of the head it is merging (owner,
     2026-09-16, pass 37; F37-139).** The acceptance dialog is the last screen before an

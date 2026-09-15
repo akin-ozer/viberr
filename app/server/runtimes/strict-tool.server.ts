@@ -116,6 +116,15 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
  * words, because those are written for the caller. Anything else is logged
  * with the tool's name and answered with a sentence that says what is true:
  * this call produced no answer, so do not report one.
+ *
+ * It is the OUTERMOST wrapper, never the only one, and that ordering is what
+ * keeps it from swallowing a deliberate refusal. The controller's own
+ * `run`/`runWith` guards sit inside it and catch `AppError`, `NotVisibleError`
+ * (404-shaped by design, and controller-only) and everything else first, so
+ * nothing they mean to say ever reaches this arm. The operator and agent
+ * toolkits throw nothing but `AppError`, which keeps its words here. Checked,
+ * because a generic "failed unexpectedly" over a refusal somebody worded
+ * carefully would be a worse defect than the leak this fixes.
  */
 function guarded(
   name: string,
