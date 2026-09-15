@@ -4740,6 +4740,28 @@ by rewriting those paragraphs:*
     The controller's own framing of the class is worth keeping, because it is the bar for
     everything after this: "The goal is not to let me hedge accurately. It is to stop me
     needing to hedge."
+
+308. **A breakdown says what its window left out, and there is one for the two questions
+    people actually ask (owner, 2026-09-16, pass 37; F37-143).** Insights groups runs by
+    backend, kind, project and model, keeps the top eight of each (half the slots reserved
+    for the busiest groups, so a cost view still shows where the work happens) and dropped
+    everything else in silence. Eight of thirty groups, presented as the instance, on the
+    one surface a person opens to decide where their money goes. Every breakdown now
+    carries `hidden`, `hiddenRuns` and `hiddenCost`, and a dropped-group cost follows
+    `CountRow`'s own rule: null means UNKNOWN, never zero, because only the Claude result
+    envelope reports one.
+    And the two dimensions that were missing are the two a person asks for. The controller
+    put it plainly when asked where someone talking to it gets a worse answer than they
+    should: "'What did SHOP-27 cost across eleven rework rounds' has no answer. 'Which
+    reviewer earns its runs' has no answer. You are running this instance and cannot see
+    what it costs you." `byKind` cannot answer the second, because every reviewer is one
+    kind. `byProfile` and `byTask` are the same `group()` helper on two columns that were
+    already in the table.
+    A task key is unique only inside its project, so an unscoped read labels each row
+    `project/task` and a scoped one drops the prefix, which is noise once the keys are
+    local. Grouping on `task_key` alone would collapse two projects' `A-1` into one row
+    belonging to neither, which is the failure this ruling is about wearing a different
+    hat: a number presented as an answer to a question it is not the answer to.
     Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
     requests were accepted and merged carrying three failing checks each, and the ceremony
     named the PR, the branch, the base, the verdict and the skipped stages without once

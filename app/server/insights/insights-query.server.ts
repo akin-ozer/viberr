@@ -41,6 +41,24 @@ export interface InsightsTotals {
   turns: number;
 }
 
+/**
+ * Ruling 308: one breakdown dimension, and what its window left out.
+ *
+ * `rows` is the TOP_N kept (half the slots reserved for the busiest groups so a
+ * cost view still shows where the work happens). `hidden` is how many groups
+ * that dropped, with their runs and — when any of them reported one — their
+ * cost. A breakdown that shows eight of thirty and says nothing reads as the
+ * whole instance.
+ */
+export interface Breakdown {
+  rows: CountRow[];
+  hidden: number;
+  hiddenRuns: number;
+  /** Null when NO hidden group reported a cost, never 0 — the same rule
+   *  `CountRow.cost` follows for the same reason. */
+  hiddenCost: number | null;
+}
+
 export interface CountRow {
   label: string;
   runs: number;
@@ -188,10 +206,16 @@ export interface InsightsSummary {
      *  null when that denominator is zero. */
     successRate: number | null;
   };
-  byBackend: CountRow[];
-  byKind: CountRow[];
-  byProject: CountRow[];
-  byModel: CountRow[];
+  byBackend: Breakdown;
+  byKind: Breakdown;
+  byProject: Breakdown;
+  byModel: Breakdown;
+  /** Ruling 308: cost and runs per TASK. Labelled `project/task` when the read
+   *  is not scoped to one project, because a task key is project-local. */
+  byTask: Breakdown;
+  /** Ruling 308: cost and runs per agent PROFILE — "which reviewer earns its
+   *  runs", which `byKind` cannot answer because every reviewer is one kind. */
+  byProfile: Breakdown;
   /** Mean wall-clock duration of finished runs with both timestamps, in ms. */
   avgDurationMs: number | null;
   /** Runs + cost per day over the last WINDOW_DAYS, oldest first, gap-filled. */
@@ -746,7 +770,7 @@ export function getInsightsSummary(
   // first thing the LIMIT dropped. A label is a backend/kind/model/project, a
   // handful of real entities, so grouping over the whole set is cheap; the top
   // by RUNS is unioned in so no group is dropped purely for being unpriced.
-  const group = (column: string): CountRow[] => {
+  const group = (column: string): Breakdown => {
     const rows: CountRow[] = z
       .array(groupSchema)
       .parse(
@@ -780,9 +804,22 @@ export function getInsightsSummary(
       if (kept.size >= TOP_N) break;
       kept.set(row.label, row);
     }
-    return [...kept.values()].sort(
+    const shown = [...kept.values()].sort(
       (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.runs - a.runs,
     );
+    // Ruling 308: say what the window left out. A breakdown that shows eight
+    // of thirty groups and says nothing reads as the whole instance, which is
+    // the same defect ruling 302 fixed on the timeline windows — and this one
+    // is on the surface a person opens to decide where their money goes.
+    const hiddenRows = rows.filter((r) => !kept.has(r.label));
+    return {
+      rows: shown,
+      hidden: hiddenRows.length,
+      hiddenRuns: hiddenRows.reduce((n, r) => n + r.runs, 0),
+      hiddenCost: hiddenRows.some((r) => r.cost !== null)
+        ? hiddenRows.reduce((n, r) => n + (r.cost ?? 0), 0)
+        : null,
+    };
   };
 
   const duration = durationSchema.parse(
@@ -856,6 +893,14 @@ export function getInsightsSummary(
     byKind: group("kind"),
     byProject: group("project_slug"),
     byModel: group("model"),
+    // Ruling 308: the two the controller asked for and could not answer —
+    // "what did SHOP-27 cost across eleven rework rounds" and "which reviewer
+    // earns its runs". A task key is only unique inside its project, so an
+    // unscoped read labels each row with the project it belongs to.
+    byTask: group(
+      filter.projectSlug ? "task_key" : "project_slug || '/' || task_key",
+    ),
+    byProfile: group("agent_profile_id"),
     avgDurationMs: duration.avg_ms,
     daily,
     oversight: oversightSummary(db, filter, coordination),

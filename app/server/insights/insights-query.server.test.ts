@@ -28,6 +28,9 @@ function insertRun(
     interruptedReason?: "restart" | null;
     /** F35-1: 0 while the row holds a live estimate (default 1: a total). */
     usageFinal?: 0 | 1;
+    /** Ruling 308: the two columns the task and profile breakdowns group on. */
+    taskKey?: string;
+    agentProfileId?: string;
   },
 ) {
   seq += 1;
@@ -38,10 +41,10 @@ function insertRun(
         output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
         interrupted_reason)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer', ?)`,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?)`,
   ).run(
     `run_${seq}`,
-    `VIB-${seq}`,
+    r.taskKey ?? `VIB-${seq}`,
     r.project ?? "viberr-core",
     `t_${seq}`,
     r.kind ?? "primary",
@@ -56,6 +59,7 @@ function insertRun(
     r.outTok ?? 0,
     r.usageFinal ?? 1,
     r.cost ?? null,
+    r.agentProfileId ?? "developer",
     r.interruptedReason ?? null,
   );
 }
@@ -219,17 +223,17 @@ describe("getInsightsSummary", () => {
     insertRun(db, { backend: "codex", kind: "operator", project: "p2", model: "gpt-5", cost: 0.3 });
 
     const s = getInsightsSummary(db, NOW);
-    const claude = s.byBackend.find((r) => r.label === "claude")!;
+    const claude = s.byBackend.rows.find((r) => r.label === "claude")!;
     expect(claude.runs).toBe(2);
     expect(claude.cost).toBeCloseTo(0.2, 5);
-    expect(s.byBackend.find((r) => r.label === "codex")?.runs).toBe(1);
-    expect(s.byKind.map((r) => r.label).sort()).toEqual([
+    expect(s.byBackend.rows.find((r) => r.label === "codex")?.runs).toBe(1);
+    expect(s.byKind.rows.map((r) => r.label).sort()).toEqual([
       "operator",
       "primary",
       "reviewer",
     ]);
-    expect(s.byProject.find((r) => r.label === "p2")?.cost).toBeCloseTo(0.3, 5);
-    expect(s.byModel.find((r) => r.label === "gpt-5")?.runs).toBe(1);
+    expect(s.byProject.rows.find((r) => r.label === "p2")?.cost).toBeCloseTo(0.3, 5);
+    expect(s.byModel.rows.find((r) => r.label === "gpt-5")?.runs).toBe(1);
   });
 
   it("averages finished-run wall-clock duration in ms", () => {
@@ -279,10 +283,84 @@ describe("getInsightsSummary", () => {
       }
     }
     const s = getInsightsSummary(db, NOW);
-    expect(s.byModel).toHaveLength(8);
+    expect(s.byModel.rows).toHaveLength(8);
     // The expensive outlier is present (a run-first order would have dropped it).
-    expect(s.byModel[0]?.label).toBe("pricey-xl");
-    expect(s.byModel.some((r) => r.label === "pricey-xl")).toBe(true);
+    expect(s.byModel.rows[0]?.label).toBe("pricey-xl");
+    expect(s.byModel.rows.some((r) => r.label === "pricey-xl")).toBe(true);
+  });
+
+  /**
+   * Ruling 308 (pass 37, F37-143): the window says what it left out.
+   *
+   * The cap keeps eight groups and reserves half the slots for the busiest, so
+   * a cost view still shows where the work happens. It dropped everything else
+   * in silence, on the one surface a person opens to decide where their money
+   * goes: eight of thirty groups, presented as the instance.
+   */
+  it("ruling 308: a capped breakdown reports the groups it dropped, their runs and their cost", () => {
+    const db = ctx.makeDb();
+    // 12 models — four more than the cap — so four are dropped.
+    for (let m = 0; m < 12; m++) {
+      insertRun(db, { model: `m-${m}`, cost: 1, state: "finished" });
+      insertRun(db, { model: `m-${m}`, cost: 1, state: "finished" });
+    }
+    const s = getInsightsSummary(db, NOW);
+    expect(s.byModel.rows).toHaveLength(8);
+    // CANARY: return the rows alone and eight of twelve reads as all of them.
+    expect(s.byModel.hidden).toBe(4);
+    expect(s.byModel.hiddenRuns).toBe(8);
+    expect(s.byModel.hiddenCost).toBe(8);
+    // Nothing dropped says so as zero, never as a missing field.
+    expect(s.byBackend.hidden).toBe(0);
+    expect(s.byBackend.hiddenRuns).toBe(0);
+  });
+
+  /**
+   * Ruling 308's other half, from the controller: "'What did SHOP-27 cost
+   * across eleven rework rounds' has no answer. 'Which reviewer earns its runs'
+   * has no answer. You are running this instance and cannot see what it costs
+   * you." `byKind` cannot answer the second, because every reviewer is one kind.
+   */
+  it("ruling 308: breaks down by task and by agent profile, and labels a task with its project when unscoped", () => {
+    const db = ctx.makeDb();
+    insertRun(db, {
+      project: "alpha",
+      taskKey: "A-1",
+      agentProfileId: "code-reviewer",
+      cost: 2,
+      state: "finished",
+    });
+    insertRun(db, {
+      project: "beta",
+      taskKey: "A-1",
+      agentProfileId: "code-reviewer",
+      cost: 3,
+      state: "finished",
+    });
+    insertRun(db, {
+      project: "alpha",
+      taskKey: "A-2",
+      agentProfileId: "backend-engineer",
+      cost: 5,
+      state: "finished",
+    });
+
+    // CANARY: group on `task_key` alone when unscoped and the two projects'
+    // A-1 collapse into one row that belongs to neither.
+    const all = getInsightsSummary(db, NOW);
+    const labels = all.byTask.rows.map((r) => r.label).sort();
+    expect(labels).toContain("alpha/A-1");
+    expect(labels).toContain("beta/A-1");
+
+    // Scoped to a project, the prefix is noise: the keys are already local.
+    const scoped = getInsightsSummary(db, NOW, { projectSlug: "alpha" });
+    expect(scoped.byTask.rows.map((r) => r.label).sort()).toEqual(["A-1", "A-2"]);
+
+    // The question byKind cannot answer: which PROFILE earns its runs.
+    // CANARY: drop byProfile.
+    const reviewer = all.byProfile.rows.find((r) => r.label === "code-reviewer");
+    expect(reviewer?.runs).toBe(2);
+    expect(reviewer?.cost).toBe(5);
   });
 
   /**
@@ -303,7 +381,7 @@ describe("getInsightsSummary", () => {
     }
 
     const s = getInsightsSummary(db, NOW);
-    const busiest = s.byModel.find((r) => r.label === "gpt-5");
+    const busiest = s.byModel.rows.find((r) => r.label === "gpt-5");
     expect(busiest, "the busiest model must survive the cap").toBeTruthy();
     expect(busiest!.runs).toBe(12);
     // Unknown, never "$0.00".

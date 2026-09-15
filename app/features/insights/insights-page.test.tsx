@@ -35,17 +35,50 @@ const FULL: InsightsSummary = {
     queued: 0,
     successRate: 30 / 40,
   },
-  byBackend: [
-    { label: "claude", runs: 28, cost: 2.5 },
-    { label: "codex", runs: 14, cost: 1.0 },
-  ],
-  byKind: [
-    { label: "primary", runs: 20, cost: 2.0 },
-    { label: "reviewer", runs: 15, cost: 1.0 },
-    { label: "operator", runs: 7, cost: 0.5 },
-  ],
-  byProject: [{ label: "viberr-core", runs: 42, cost: 3.5 }],
-  byModel: [{ label: "claude-sonnet-4-5", runs: 28, cost: 2.5 }],
+  // Ruling 308: a breakdown is its rows PLUS what the window left out.
+  byBackend: {
+    rows: [
+      { label: "claude", runs: 28, cost: 2.5 },
+      { label: "codex", runs: 14, cost: 1.0 },
+    ],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byKind: {
+    rows: [
+      { label: "primary", runs: 20, cost: 2.0 },
+      { label: "reviewer", runs: 15, cost: 1.0 },
+      { label: "operator", runs: 7, cost: 0.5 },
+    ],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byProject: {
+    rows: [{ label: "viberr-core", runs: 42, cost: 3.5 }],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byModel: {
+    rows: [{ label: "claude-sonnet-4-5", runs: 28, cost: 2.5 }],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byProfile: {
+    rows: [{ label: "code-reviewer", runs: 15, cost: 1.0 }],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byTask: {
+    rows: [{ label: "viberr-core/VIB-1", runs: 9, cost: 0.75 }],
+    hidden: 3,
+    hiddenRuns: 11,
+    hiddenCost: 0.4,
+  },
   avgDurationMs: 185_000,
   daily: Array.from({ length: 30 }, (_, i) => ({
     date: `2026-07-${String(i + 1).padStart(2, "0")}`,

@@ -1285,7 +1285,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_run_analytics",
-      "Agent-run analytics: totals, success rate, cost and tokens, per-backend/kind/project/model breakdowns, oversight stats. Org admins only. Optionally scoped to one project.",
+      "Agent-run analytics: totals, success rate, cost and tokens, oversight stats, and breakdowns by backend, run kind, project, model, agent PROFILE and TASK. Org admins only, optionally scoped to one project. `byProfile` is how you answer which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` is how you answer what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: it carries `hidden`, `hiddenRuns` and `hiddenCost` for the groups the cap dropped, so eight of thirty never reads as thirty. A group whose runs never reported a cost is `null`, which means UNKNOWN and never zero: only the Claude result envelope carries one, so a Codex group's spend is unobservable rather than free.",
       { projectSlug: z.string().optional() },
       runWith((args: { projectSlug?: string }) => {
         requireOrgAdmin("inspect run analytics");
@@ -1301,6 +1301,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           byKind: summary.byKind,
           byProject: summary.byProject,
           byModel: summary.byModel,
+          // Ruling 308: the two the controller asked for and could not answer
+          // — "what did SHOP-27 cost across eleven rework rounds" and "which
+          // reviewer earns its runs". Every breakdown also carries what its
+          // window left out, so eight of thirty never reads as thirty.
+          byProfile: summary.byProfile,
+          byTask: summary.byTask,
           avgDurationMs: summary.avgDurationMs,
           oversight: summary.oversight,
         });

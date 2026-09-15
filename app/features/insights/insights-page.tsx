@@ -1,5 +1,5 @@
 import type {
-  CountRow,
+  Breakdown,
   OversightSummary,
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
@@ -149,10 +149,12 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
           <OversightCards oversight={summary.oversight} />
 
           <div className="insights-cols">
-            <BreakdownCard title="By backend" rows={summary.byBackend} />
-            <BreakdownCard title="By run kind" rows={summary.byKind} />
-            <BreakdownCard title="By project" rows={summary.byProject} />
-            <BreakdownCard title="By model" rows={summary.byModel} />
+            <BreakdownCard title="By backend" data={summary.byBackend} />
+            <BreakdownCard title="By run kind" data={summary.byKind} />
+            <BreakdownCard title="By project" data={summary.byProject} />
+            <BreakdownCard title="By model" data={summary.byModel} />
+            <BreakdownCard title="By agent profile" data={summary.byProfile} />
+            <BreakdownCard title="By task" data={summary.byTask} />
           </div>
 
           <BackendQuotaPanel quota={summary.backendQuota} />
@@ -638,7 +640,8 @@ function taskHref(projectAndKey: string): string {
 
 /** A labelled horizontal bar list, each bar sized to the row's share of the
  *  busiest row (by runs). Cost rides the value column. */
-function BreakdownCard({ title, rows }: { title: string; rows: CountRow[] }) {
+function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
+  const rows = data.rows;
   const max = rows.reduce((m, r) => Math.max(m, r.runs), 0) || 1;
   return (
     <section className="panel breakdown">
@@ -679,6 +682,18 @@ function BreakdownCard({ title, rows }: { title: string; rows: CountRow[] }) {
           ))}
         </ul>
       )}
+      {/* Ruling 308: the window says what it left out. Eight of thirty groups
+          with nothing said reads as the whole instance, on the surface a
+          person opens to decide where their money goes. The cost follows
+          `CountRow`'s own rule: absent is "not reported", never $0. */}
+      {data.hidden > 0 ? (
+        <p className="fine dim">
+          {fmtCount(data.hidden)} more {data.hidden === 1 ? "group" : "groups"} not
+          shown, {fmtCount(data.hiddenRuns)}{" "}
+          {data.hiddenRuns === 1 ? "run" : "runs"} between them
+          {data.hiddenCost == null ? ", cost not reported" : `, ${fmtCost(data.hiddenCost)}`}.
+        </p>
+      ) : null}
     </section>
   );
 }
