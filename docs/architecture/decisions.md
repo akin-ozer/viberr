@@ -4431,6 +4431,34 @@ by rewriting those paragraphs:*
     first: every mounted tool appears, and nothing appears that is not mounted. A purpose
     longer than 150 characters is cut at a word and SAYS it was cut, naming where the rest
     is, which is ruling 285's rule again on a smaller string.
+
+298. **An agent's answer choices are refused or kept, never quietly deleted (owner,
+    2026-09-16, pass 37; F37-133).** `ask_human` told agents to give "2-4 answer choices",
+    and nothing enforced it except a `.slice(0, 4)` in the packet builder and a second one
+    in the Codex envelope parser. An agent that offered five got a decision card with four.
+    Neither the agent nor the person reading the card was told a choice had been removed,
+    and the removed one was the least likely to be reconstructed, because the surviving
+    four read as a complete set.
+    This is the pass's two defect families at once, on the one surface where they cost the
+    most. A cap that truncates with no way out: a decision card is where a person picks,
+    and an option deleted before it is rendered is a choice they never learn they had. And
+    a rule applied to some siblings and not the rest: the OPERATOR authors packet options
+    with no cap at all, and the stored packet schema has none either, so four was never a
+    storage or rendering limit. It was a guideline, enforced by deletion, against one of
+    the two authors.
+    The number stays four for a LIVE question and is declared on `ask_human`'s own schema,
+    so a fifth is refused by name with nothing written and the agent re-asks inside the
+    same run at no cost. That is only possible because of ruling 296: before it, a `.max()`
+    on a field the model overshot would have been a validation the caller was never told
+    about. The refusal names the remedy too, in the field's own text: keep the ones that
+    are really different and put the rest in `body`.
+    The envelope path keeps EVERY option instead, and the asymmetry is the point rather
+    than an oversight. That parse runs after the run has ENDED: it is the agent's last
+    word, there is nobody to hand a refusal to, and refusing would discard the whole
+    outcome rather than one field. Ruling 288's rule decides it: refuse where refusing can
+    be acted on, and never destroy where it cannot. So the packet builder does no cutting
+    at all now, and the only cap that exists is the one an agent is told about before it
+    writes.
     (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The

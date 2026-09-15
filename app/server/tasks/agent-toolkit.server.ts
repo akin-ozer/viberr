@@ -331,6 +331,15 @@ export async function openAgentQuestionPacket(
   return true;
 }
 
+/**
+ * Ruling 298: how many answer choices a live agent question may carry. The
+ * number was always four; what changed is that it is DECLARED here and
+ * refused at the boundary, instead of being applied by a silent `.slice(0, 4)`
+ * in the packet builder. A decision card is the one surface where a dropped
+ * option is a choice the person never learns they had.
+ */
+const ASK_HUMAN_MAX_OPTIONS = 4;
+
 /** Build the agent's collaboration toolkit for one run. Returns null when the
  * profile's grants allow none of the tools (no server mounted at all). */
 export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
@@ -384,8 +393,13 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
                 detail: z.string().optional().describe("Short clarification."),
               }),
             )
+            .max(ASK_HUMAN_MAX_OPTIONS)
             .optional()
-            .describe("2-4 answer choices (first is presented as suggested)."),
+            .describe(
+              `2-${ASK_HUMAN_MAX_OPTIONS} answer choices (first is presented as suggested). ` +
+                `More than ${ASK_HUMAN_MAX_OPTIONS} is refused, not trimmed: pick the ones that ` +
+                "are really different and put the rest in `body`.",
+            ),
         },
         async (args) => {
           try {

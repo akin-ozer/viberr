@@ -328,6 +328,76 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     return mountedTools.parse(built.mcpServers.viberr_agent);
   }
 
+  /** The live server for one build, so a call crosses real validation. */
+  function mountFor(collab: { comment: boolean; ask: boolean; verdict: boolean; evidence?: boolean; githubRead?: boolean }) {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const built = buildAgentToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      actorRef: AGENT_REF,
+      outcomeKey: "ok_max_options",
+      collab: {
+        ...collab,
+        evidence: collab.evidence ?? false,
+        githubRead: collab.githubRead ?? false,
+      },
+      kb: [],
+    })!;
+    lastStore = store;
+    return built.mcpServers.viberr_agent;
+  }
+
+  /**
+   * Ruling 298 (pass 37, F37-133). The cap was always four; it used to be
+   * applied by a silent `.slice(0, 4)` in the packet builder, so an agent that
+   * offered five got a decision card with four and nobody -- agent or person --
+   * was told a choice had been removed. It is declared on the schema now, so a
+   * fifth is refused by name, nothing is written, and the agent re-asks inside
+   * the same run at no cost.
+   */
+  it("ruling 298: a fifth answer choice is refused by name, not trimmed away", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, ask: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+
+    const five = ["a", "b", "c", "d", "e"].map((t) => ({ title: t }));
+    const refused = await client.callTool({
+      name: "ask_human",
+      arguments: { title: "Which DB?", options: five },
+    });
+    const text = z
+      .object({ content: z.array(z.object({ text: z.string() })) })
+      .parse(refused)
+      .content.map((c) => c.text)
+      .join("\n");
+    // CANARY: drop `.max(ASK_HUMAN_MAX_OPTIONS)` and this answers "[done]".
+    expect(text).toMatch(/too big|at most|maximum|expected array to have/i);
+    // Nothing was written: no packet reached the task.
+    const after = readTaskFile({
+      projectSlug: lastStore.slug,
+      taskKey: "VIB-3",
+      dataRoot: lastStore.dataRoot,
+    })!;
+    expect(after.parsed.packet).toBeFalsy();
+
+    // And four still works, so this is a bound and not a wall.
+    const ok = await client.callTool({
+      name: "ask_human",
+      arguments: { title: "Which DB?", options: five.slice(0, 4) },
+    });
+    expect(JSON.stringify(ok)).not.toMatch(/too big|at most|maximum/i);
+  });
+
   let lastStore: ReturnType<typeof setupTestStore>;
 
   const BASE = { comment: false, ask: false, verdict: true };

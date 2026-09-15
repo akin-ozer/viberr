@@ -217,13 +217,16 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
       question.body = envelope.question.body;
     }
     if (envelope.question.options !== undefined) {
-      question.options = envelope.question.options
-        .slice(0, 4)
-        .map((opt) => {
-          const choice: AgentOutcomeChoice = { title: opt.title };
-          if (opt.detail !== undefined) choice.detail = opt.detail;
-          return choice;
-        });
+      // Ruling 298: EVERY option the agent wrote. This used to cut at four,
+      // silently, and this path has nobody to refuse to -- the envelope is the
+      // agent's last word, parsed after the run is over, so a refusal here
+      // costs the whole outcome and a cut destroys a choice the person was
+      // meant to have. `ask_human` holds the four; this holds the truth.
+      question.options = envelope.question.options.map((opt) => {
+        const choice: AgentOutcomeChoice = { title: opt.title };
+        if (opt.detail !== undefined) choice.detail = opt.detail;
+        return choice;
+      });
     }
     outcome.question = question;
   }
@@ -494,7 +497,10 @@ export function buildAgentQuestionPacket(
   actorRef: FileActorRef,
   question: AgentOutcomeQuestion,
 ): TaskPacket {
-  const choices = (question.options ?? []).slice(0, 4);
+  // Ruling 298: no cut here either. The cap that belongs on an agent's live
+  // question is declared on `ask_human`'s own schema, where exceeding it is
+  // refused by name and the agent re-asks inside the same run.
+  const choices = question.options ?? [];
   const options: PacketOption[] = choices.length
     ? choices.map((o, i) => ({
         kind: "custom" as const,
