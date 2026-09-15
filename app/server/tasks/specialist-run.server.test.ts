@@ -2887,10 +2887,10 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("was-renamed-away (knowledge base)");
     expect(persona).not.toContain("Attached resources (trusted");
     // …but the run is told what it did NOT get, and why.
-    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("was-renamed-away");
     expect(persona).toContain("no knowledge-base folder by that name in the store");
-    expect(persona).toContain("do not treat their absence as your own failure");
+    expect(persona).toContain("do not treat the gap as your own failure");
   });
 
   it("a skill that resolves to nothing is NAMED in the prompt too (C1)", () => {
@@ -2900,7 +2900,7 @@ describe("buildSpecialistPersona — attached resources", () => {
       skills: ["typo-expertise"],
       dataRoot,
     });
-    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("typo-expertise");
     expect(persona).toContain("no skill folder by that name in the store");
   });
@@ -2915,7 +2915,7 @@ describe("buildSpecialistPersona — attached resources", () => {
       kb: ["release-facts"],
       dataRoot,
     });
-    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+    expect(persona).not.toContain("Attached resources that did NOT fully reach this run");
   });
 
   /**
@@ -2963,7 +2963,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
     expect(persona).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
     // An empty grant list is not a MISS either — nothing was promised.
-    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+    expect(persona).not.toContain("Attached resources that did NOT fully reach this run");
   });
 
   /**
@@ -4529,7 +4529,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
  * — which knowledge bases it carried, which granted skills actually mounted,
  * which MCP grants resolved to nothing, what canonical state it re-anchored on
  * — could not be checked by the human the disclosures exist for. The
- * "Attached resources that did NOT reach this run" honesty in particular
+ * "Attached resources that did NOT fully reach this run" honesty in particular
  * reached the AGENT only: a human learned about a KB grant that resolved to
  * nothing solely if the agent chose to repeat it.
  */
@@ -4657,7 +4657,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputs!.knowledge).toEqual(["house-style"]);
     expect(inputs!.unresolvedResources.map((r) => r.name)).toContain("house-style");
     // The persona still tells the agent too — both audiences, one resolution.
-    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT reach this run");
+    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT fully reach this run");
   });
 
   it("ruling 176: a read-only agent's run withholds the org server's marked write tools, on the spec, the prompt and the record", async () => {

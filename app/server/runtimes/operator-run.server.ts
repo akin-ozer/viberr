@@ -3688,12 +3688,15 @@ export function buildOperatorSystemPrompt(
   const missing = [...skillSet.unresolved, ...kbSet.unresolved];
   if (missing.length > 0) {
     parts.push(
-      "\n\n---\n# Attached resources that did NOT reach this run\n\n" +
-        "Your profile grants these, but their content is not in your context:\n" +
+      // Ruling 253: "did NOT reach" was true of every row when only a total
+      // miss could appear here. A partial now appears too, so the heading and
+      // the instruction have to cover both or they misdescribe half the list.
+      "\n\n---\n# Attached resources that did NOT fully reach this run\n\n" +
+        "Your profile grants these, and what is in your context is incomplete or absent:\n" +
         missing.map((m) => `- **${m.name}** — ${m.reason}`).join("\n") +
-        "\n\nDo not claim knowledge or craft from them, and do not treat their " +
-        "absence as your own failure — say plainly in your reply that the grant " +
-        "reached this run empty so a human can fix the configuration.",
+        "\n\nDo not claim knowledge or craft you did not receive, and do not treat " +
+        "the gap as your own failure — say plainly in your reply what arrived " +
+        "empty or incomplete so a human can fix the configuration.",
     );
   }
   // F21-16: the heading and the note say WHOSE policy this is. Live (VIB-5) the

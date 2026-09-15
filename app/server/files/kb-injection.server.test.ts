@@ -118,6 +118,45 @@ describe("readKbBody — recursive, multi-format KB injection", () => {
     expect(body).toContain("knowledge base truncated");
   });
 
+  /**
+   * Ruling 253 (pass 37, F37-82), measured live on the shopify-clone board.
+   *
+   * The controller wrote `standing-corrections.md` into the project's rulings
+   * knowledge base, and the operator run an hour later received it clipped
+   * MID-SENTENCE, in the middle of "Every workflow run on every open pull
+   * request fails in about thr" — losing the other two standing rules
+   * entirely. The marker said only "this doc was clipped" and named nothing,
+   * and because the KB delivered SOME text it produced no `unresolved` row at
+   * all, so the run-input disclosure a human reads said every grant arrived.
+   */
+  it("ruling 253: names the docs it clipped and the docs it dropped, and both at once", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "a-conventions.md"), "A".repeat(200), "utf8");
+    writeFileSync(path.join(kbDir, "b-history.md"), "B".repeat(200), "utf8");
+    writeFileSync(path.join(kbDir, "c-corrections.md"), "C".repeat(200), "utf8");
+    // Enough for the first doc and part of the second; the third never starts.
+    const injection = readKbBodyDetailed("notes", dataRoot, 300);
+    // CANARY: keep the old single-sentence marker and the clip is invisible
+    // whenever anything was also omitted — which is the live shape.
+    expect(injection.body).toContain("`b-history.md` cut off mid-document");
+    expect(injection.body).toContain("`c-corrections.md` not included at all");
+    // CANARY: return `{ body }` alone from the truncated branch and this is
+    // undefined, so a half-delivered rulings KB reaches no human at all.
+    expect(injection.unresolved?.name).toBe("notes");
+    expect(injection.unresolved?.reason).toContain("only part of it fitted");
+    expect(injection.unresolved?.reason).toContain("`c-corrections.md`");
+  });
+
+  it("ruling 253: a KB that fits WHOLE reports nothing unresolved", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "a.md"), "A".repeat(50), "utf8");
+    const injection = readKbBodyDetailed("notes", dataRoot, 24_000);
+    // CANARY: report a partial unconditionally and every complete grant is
+    // announced to the agent as incomplete.
+    expect(injection.unresolved).toBeUndefined();
+    expect(injection.body).not.toContain("truncated");
+  });
+
   it("exposes a sane default budget", () => {
     expect(KB_INJECTION_BUDGET).toBe(24_000);
   });

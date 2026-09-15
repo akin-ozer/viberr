@@ -158,6 +158,13 @@ export interface KbInjection {
  * a renamed/typo'd KB folder reaches the run's own prompt instead of living in
  * a server log nobody reads while every UI still shows the grant attached.
  */
+/** Doc names for a human-readable sentence: `a.md`, `b.md` and `c.md`. */
+function listDocs(rels: readonly string[]): string {
+  const quoted = rels.map((r) => `\`${r}\``);
+  if (quoted.length <= 1) return quoted[0] ?? "";
+  return `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
+}
+
 export function readKbBodyDetailed(
   name: string,
   dataRoot?: string,
@@ -205,11 +212,14 @@ export function readKbBodyDetailed(
     }
     const parts: string[] = [];
     let budget = budgetChars;
-    let omitted = 0;
-    let truncatedADoc = false;
+    // Ruling 253 (pass 37, F37-82): the NAMES, not just the counts. An agent
+    // cannot ask for a rule it cannot name, and a human debugging "why did the
+    // run ignore the standing correction" had nothing to read.
+    const omittedDocs: string[] = [];
+    const clippedDocs: string[] = [];
     for (const doc of docs) {
       if (budget <= 0) {
-        omitted += 1;
+        omittedDocs.push(doc.rel);
         continue;
       }
       let raw: string;
@@ -225,14 +235,15 @@ export function readKbBodyDetailed(
       const heading = `### ${doc.rel}\n\n`;
       const room = budget - heading.length;
       if (room <= 0) {
-        omitted += 1;
+        omittedDocs.push(doc.rel);
         continue;
       }
       const slice = raw.slice(0, room);
-      if (slice.length < raw.length) truncatedADoc = true;
+      if (slice.length < raw.length) clippedDocs.push(doc.rel);
       budget -= heading.length + slice.length;
       parts.push(`${heading}${slice}`);
     }
+    const omitted = omittedDocs.length;
     if (parts.length === 0) {
       if (omitted > 0) {
         // P14-KM-05: NOTHING fit. The old `parts.length > 0` guard suppressed
@@ -259,14 +270,32 @@ export function readKbBodyDetailed(
       );
       return miss("its documents hold no readable text");
     }
-    if (omitted > 0 || truncatedADoc) {
-      const tail =
-        omitted > 0
-          ? `${omitted} more doc${omitted === 1 ? "" : "s"} omitted`
-          : `this doc was clipped`;
+    if (omitted > 0 || clippedDocs.length > 0) {
+      // Ruling 253: BOTH halves, and both by name. The old marker chose one
+      // sentence — "N more docs omitted" whenever anything was omitted — so a
+      // run that got half a rule AND lost two more docs was told only about the
+      // two, and never that the rule it did read stops mid-sentence.
+      const lost = [
+        ...(clippedDocs.length > 0
+          ? [`${listDocs(clippedDocs)} cut off mid-document`]
+          : []),
+        ...(omitted > 0 ? [`${listDocs(omittedDocs)} not included at all`] : []),
+      ].join("; ");
       parts.push(
-        `_(knowledge base truncated — ${tail}; it exceeded the ${budgetChars}-char budget left for knowledge bases)_`,
+        `_(knowledge base truncated — ${lost}; it exceeded the ${budgetChars}-char budget left for knowledge bases)_`,
       );
+      // Ruling 253: a KB that delivered HALF is now reported on the SAME
+      // structured channel as one that delivered nothing. It was not: the
+      // `unresolved` row was returned only from the delivered-nothing branch, so
+      // the run-input disclosure a human reads (P19-G11) said every grant
+      // arrived while a project's binding rulings had been cut in half.
+      return {
+        body: parts.join("\n\n"),
+        unresolved: {
+          name,
+          reason: `only part of it fitted the shared knowledge-base budget — ${lost}`,
+        },
+      };
     }
     return { body: parts.join("\n\n") };
   } catch (error) {

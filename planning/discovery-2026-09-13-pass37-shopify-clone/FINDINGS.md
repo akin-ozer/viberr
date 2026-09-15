@@ -4327,3 +4327,53 @@ text now says an agent mention reaches nobody and names `run_agent_on_task`.
 
 Two tests, canaried in both directions: removing the arm loses the disclosure, and stamping it
 unconditionally grows a paragraph about unreached agents onto every ordinary status comment.
+
+## F37-82 · The project's binding rulings reached the operator cut off mid-sentence, and nothing said so — MEDIUM
+
+Found by disbelieving a claim the controller made in a comment, then measuring it.
+
+The controller wrote, on SHOP-26: *"Two standing facts for the implementation run when this task
+is released, both now in the project's rulings knowledge base (`standing-corrections.md`)."* The
+claim is true — the file is there, it is excellent, and `rulingsKb: shopify-clone-conventions`
+means ruling 239 carries it to every agent on the project.
+
+Then I read what an actual run received. From `runtimes/codex/run_fqAXvN2Pyb8V.jsonl`:
+
+> GitHub Actions on this account is blocked for billing. Every workflow run on every open
+> pull request fails in about thr
+>
+> _(knowledge base truncated — this doc was clipped; it exceeded the 15817-char budget left for
+> knowledge bases)_
+
+Cut mid-word, in the middle of rule 1. Rules 2 (who owns a stack manifest) and 3 (verify the
+"already frozen by SHOP-9" claim) never arrived at all — the two the controller wrote *precisely
+so nobody would re-derive them*.
+
+**The arithmetic is not a coincidence.** `KB_INJECTION_BUDGET` is 24,000 chars, shared. The
+operator grants both project KBs: `architecture.md` 8,189 + `conventions.md` 10,936 +
+`published-history.md` 4,361 + `standing-corrections.md` 4,442 = **27,928**. It cannot fit, and
+ruling 239 appends the rulings KB LAST by design so it never displaces a profile's own grants —
+which makes the project's own binding rulings structurally the first thing starved, on exactly the
+agents holding the most grants.
+
+**The defect is not the budget. It is that two honesty rules were each applied to one case.**
+
+1. `unresolved` exists so "the run's own prompt names what it did not get", and it was returned
+   only from the delivered-NOTHING branch. A KB that delivered half returned `{ body }` alone, so
+   the human-facing run-input disclosure said every grant arrived.
+2. The marker counted docs and never named them, and picked ONE sentence: `omitted > 0 ? "N more
+   docs omitted" : "this doc was clipped"`. A run that got half a rule **and** lost two more docs
+   was told about the two, and never that the rule it did read stops mid-sentence. An agent cannot
+   ask for a rule it cannot name, and a human debugging "why did the run ignore the standing
+   correction" had nothing to read.
+
+**Fix (ruling 253).** Both halves are said, together, by name:
+`_(knowledge base truncated — `b-history.md` cut off mid-document; `c-corrections.md` not included
+at all; …)_`, and a partial delivery returns the same structured `unresolved` row a total miss
+does. The prompt heading becomes "Attached resources that did NOT **fully** reach this run",
+because a heading that is true of every row beats one that was true while only total misses could
+appear under it.
+
+Two tests, canaried in both directions: restoring the single-sentence marker hides the clip, and
+dropping the `unresolved` return hides the partial from every human surface; reporting a partial
+unconditionally announces every complete grant as incomplete.

@@ -5589,6 +5589,29 @@ by rewriting those paragraphs:*
     (`agent-reply.server.ts`, `agent-toolkit.server.ts`, `operator-actions.server.ts`,
     `controller-toolkit.server.ts`.)
 
+253. **A knowledge base that arrived HALF says so, on the same channel as one that arrived
+    not at all (2026-09-15, pass 37; F37-82).** Measured on the live board: the controller
+    wrote three standing corrections into the project's rulings knowledge base, and the very
+    next operator run received the document clipped MID-SENTENCE — "Every workflow run on
+    every open pull request fails in about thr" — losing the other two rules entirely. The
+    marker said "this doc was clipped" and named nothing, and because the KB had delivered
+    SOME text it returned no `unresolved` row at all, so the run-input disclosure a human
+    reads (P19-G11) reported every grant as arrived.
+    Two halves of one rule, applied to one case each. `unresolved` existed so "the run's own
+    prompt names what it did not get", and it fired only from the delivered-NOTHING branch;
+    the marker counted docs and never named them, and chose ONE sentence, so a run that got
+    half a rule and lost two more docs was told about the two and never that the rule it did
+    read stops mid-sentence. Both now name the documents, both halves are said together, and
+    a partial delivery returns the same structured row a total miss does.
+    The exposure is structural rather than accidental: ruling 239 appends the project's
+    rulings KB LAST so it never displaces a profile's own grants, which makes it the first
+    thing starved on exactly the agents that hold the most grants — the operator among them.
+    The budget stays where it is; what changes is that nobody has to guess what fell out of
+    it. "Attached resources that did NOT reach this run" became "did NOT FULLY reach", because
+    a heading that is true of every row is worth more than a heading that was true when only
+    total misses could appear under it.
+    (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

@@ -51,7 +51,7 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith(["does-not-exist"]), dataRoot);
     expect(prompt).not.toContain("does-not-exist (knowledge base)");
     // C1: it is not injected AND it is not silent — see the section below.
-    expect(prompt).toContain("Attached resources that did NOT reach this run");
+    expect(prompt).toContain("Attached resources that did NOT fully reach this run");
   });
 
   it("R19-2: the operator gets the SAME repo-wins precedence rule the specialists get", () => {
@@ -203,10 +203,10 @@ describe("buildOperatorSystemPrompt — unresolved skill/KB grants (C1)", () => 
       skills: ["typod-skill"],
     };
     const prompt = buildOperatorSystemPrompt(auth, dataRoot);
-    expect(prompt).toContain("Attached resources that did NOT reach this run");
+    expect(prompt).toContain("Attached resources that did NOT fully reach this run");
     expect(prompt).toContain("**renamed-kb**");
     expect(prompt).toContain("**typod-skill**");
-    expect(prompt).toContain("do not treat their absence as your own failure");
+    expect(prompt).toContain("do not treat the gap as your own failure");
     // Nothing was injected under a trusted banner it never earned.
     expect(prompt).not.toContain("renamed-kb (knowledge base)");
     expect(prompt).not.toContain("typod-skill (skill)");
