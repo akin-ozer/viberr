@@ -315,3 +315,25 @@ force-accept is the answer.
 **The owner took (a).** The pin stays wherever any authored commit is in the drift, which is the
 case ruling 179 exists for. (c) was named as the most disruptive in the question itself: it would
 stale passing approvals too, so a refresh on a task ready to accept would cost a full re-review.
+
+## 2026-09-15 · Which side gives when the knowledge-base budget runs out
+
+**Background put to the owner.** Ruling 239 injects a project's rulings KB into every run and
+appends it LAST so it never displaces a profile's own grants. The consequence is the inverse of
+the intent: the project's binding rules are structurally the first thing starved, on exactly the
+agents holding the most grants. It bit the same day — the operator received
+`standing-corrections.md` cut off mid-word at *"fails in about thr"*, losing two of three rules,
+because two project KBs totalled 27,928 characters against a 24,000 budget.
+
+Ruling 253 had already made that visible rather than silent. Visible turned out not to be enough:
+the controller consolidated three docs into one (19,739 → 10,616 bytes), kept writing settled rules
+there because that is what it was told to do, and reported itself back at roughly 23,350 within
+hours — with the number in hand, because the disclosure now gives it one.
+
+**Options offered:** reserve a floor for the rulings KB · raise the total budget · leave it to
+curation.
+
+**Owner's answer: reserve a floor.** Implemented as ruling 261, with the floor defined as a ceiling
+on what the OTHER knowledge bases may take rather than an allocation the rulings must spend — so a
+short rulings KB costs a profile's grants nothing, and a long one still takes whatever they left.
+What trims on a heavily-granted agent is now the optional craft rather than the binding rules.

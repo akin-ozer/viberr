@@ -5748,6 +5748,27 @@ by rewriting those paragraphs:*
     behalf.
     (`controller-page.tsx`, `controller-query.server.ts`.)
 
+261. **A project's rulings are never the thing that gets starved (2026-09-15, pass 37; the
+    owner's call on F37-82's residue).** Ruling 239 appends the project's rulings knowledge base
+    AFTER a profile's own grants so it never displaces them. The cost of that ordering is that
+    the rules a project made binding on every run are structurally the FIRST thing trimmed, on
+    exactly the agents carrying the most grants — the operator, which writes the packets and
+    scoping notes every specialist works from, and the controller. It bit live: two project KBs
+    totalling 27,928 characters against a 24,000 budget, and the operator received
+    `standing-corrections.md` cut off mid-word at "fails in about thr", losing two of its three
+    rules. Ruling 253 made that visible; visible was not enough, because the controller kept
+    writing settled rules there, which is what it was asked to do, and was back at ~23,350
+    within hours.
+    Asked which side should give, the owner reserved a floor. `RULINGS_KB_FLOOR` (8,000) is a
+    CEILING ON WHAT THE OTHERS MAY TAKE, not an allocation the rulings must spend: the reserve
+    is the smaller of the floor and what the rulings actually need, so a short rulings KB costs
+    a profile's grants nothing, and a long one still takes everything the grants left over.
+    One read each; ruling 239's emission order is unchanged, so the rules are read after the
+    craft they qualify. What trims on a heavily-granted agent is now the optional craft rather
+    than the binding rules, and ruling 253 still names whatever fell out.
+    (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
+    `controller-run.server.ts`, `operator-actions.server.ts`.)
+
     *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
     lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
     `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is

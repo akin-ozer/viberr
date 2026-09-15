@@ -1,4 +1,7 @@
-import { withProjectRulings } from "~/server/files/project-rulings.server";
+import {
+  projectRulingsKb,
+  withProjectRulings,
+} from "~/server/files/project-rulings.server";
 import path from "node:path";
 import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
@@ -904,7 +907,17 @@ export function buildControllerSystemPrompt(
         input.dataRoot ? { dataRoot: input.dataRoot } : {},
       )
     : input.config.kb;
-  const kbSet = readKbBodies(controllerKb, input.dataRoot, KB_INJECTION_BUDGET);
+  const kbSet = readKbBodies(controllerKb, input.dataRoot, KB_INJECTION_BUDGET, {
+    // Ruling 261: the project's rulings keep their floor here too. The
+    // controller is the most heavily granted agent on most instances, which is
+    // exactly the shape that starved them.
+    rulingsKb: input.conversation.projectSlug
+      ? projectRulingsKb(
+          input.conversation.projectSlug,
+          input.dataRoot ? { dataRoot: input.dataRoot } : {},
+        )
+      : null,
+  });
   if (kbSet.parts.length > 0) resourceParts.push(KB_PRECEDENCE_NOTE);
   for (const part of kbSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);

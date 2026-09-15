@@ -3549,7 +3549,13 @@ export function buildOperatorSystemPrompt(
   // P14-KM-05: nothing is skipped once the budget is spent — a KB that no longer
   // fits emits an explicit "omitted entirely" marker, so the prompt names what
   // was dropped instead of quietly shrinking.
-  const kbSet = readKbBodies(authority.kb, dataRoot, KB_INJECTION_BUDGET);
+  const kbSet = readKbBodies(authority.kb, dataRoot, KB_INJECTION_BUDGET, {
+    // Ruling 261: the project's rulings keep a reserved floor. The operator
+    // writes the packets and scoping notes every specialist works from, so it
+    // is the worst agent on the board to starve of the project's settled rules
+    // — and, carrying the most grants, it was the first to be starved.
+    rulingsKb: authority.rulingsKb ?? null,
+  });
   // R19-2: the SAME precedence rule the specialist runtime injects — one exported
   // constant, so the operator and the agents it coordinates cannot be told two
   // different things about which source outranks the other. (The operator writes

@@ -157,6 +157,64 @@ describe("readKbBody — recursive, multi-format KB injection", () => {
     expect(injection.body).not.toContain("truncated");
   });
 
+  /**
+   * Ruling 261 (pass 37, the owner's call on F37-82's residue).
+   *
+   * Ruling 239 appends a project's rulings KB after a profile's own grants so
+   * it never displaces them — and the cost of that ordering is that the
+   * project's BINDING rules are structurally the first thing starved, on
+   * exactly the agents holding the most grants. It bit live: the operator
+   * received `standing-corrections.md` cut off mid-word at "fails in about
+   * thr", losing two of its three rules, because two project KBs totalled
+   * 27,928 characters against a 24,000 budget.
+   *
+   * The owner inverted which side gives. The rulings get a floor; a profile's
+   * optional craft trims instead.
+   */
+  it("ruling 261: the rulings KB keeps its floor when the grants would have eaten it", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "rules.md"), "R".repeat(6_000), "utf8");
+    const craftDir = path.join(dataRoot, "kb", "craft");
+    mkdirSync(craftDir, { recursive: true });
+    writeFileSync(path.join(craftDir, "big.md"), "C".repeat(30_000), "utf8");
+
+    // Without the reservation the greedy grant, read first, takes everything.
+    const starved = readKbBodies(["craft", "notes"], dataRoot, 24_000);
+    expect(starved.parts.find((p) => p.name === "notes")?.body ?? "").toContain(
+      "omitted entirely",
+    );
+
+    // CANARY: drop the `floor` from `readKbBodies` and this is the starved
+    // shape too — the project's binding rules dropped for a profile's craft.
+    const reserved = readKbBodies(["craft", "notes"], dataRoot, 24_000, {
+      rulingsKb: "notes",
+    });
+    const rules = reserved.parts.find((p) => p.name === "notes")!;
+    expect(rules.body).toContain("RRRR");
+    expect(rules.body).not.toContain("omitted entirely");
+    expect(rules.body).not.toContain("truncated");
+    // Ruling 239's ORDER survives: the grants are read first, the rulings last.
+    expect(reserved.parts.map((p) => p.name)).toEqual(["craft", "notes"]);
+    // And the craft still got everything outside the floor, so the reservation
+    // is a ceiling on the OTHERS, not an allocation the rulings must spend.
+    expect(reserved.parts[0]!.body.length).toBeGreaterThan(15_000);
+  });
+
+  it("ruling 261: a SHORT rulings KB costs the grants nothing", () => {
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "rules.md"), "R".repeat(100), "utf8");
+    const craftDir = path.join(dataRoot, "kb", "craft");
+    mkdirSync(craftDir, { recursive: true });
+    writeFileSync(path.join(craftDir, "big.md"), "C".repeat(30_000), "utf8");
+    const out = readKbBodies(["craft", "notes"], dataRoot, 24_000, {
+      rulingsKb: "notes",
+    });
+    // CANARY: subtract the whole floor unconditionally and the craft loses
+    // ~8,000 characters to rules that are 100 long.
+    expect(out.parts[0]!.body.length).toBeGreaterThan(23_000);
+    expect(out.parts.find((p) => p.name === "notes")!.body).toContain("RRRR");
+  });
+
   it("exposes a sane default budget", () => {
     expect(KB_INJECTION_BUDGET).toBe(24_000);
   });

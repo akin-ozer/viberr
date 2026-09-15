@@ -4,6 +4,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  statSync,
 } from "node:fs";
 import path from "node:path";
 import { logger } from "~/server/logging/logger.server";
@@ -62,6 +63,18 @@ export function isInjectableKbDoc(fileName: string): boolean {
 
 /** Default per-run character budget across ALL of a KB's docs. */
 export const KB_INJECTION_BUDGET = 24_000;
+
+/**
+ * Ruling 261: the slice of the shared budget a project's RULINGS knowledge base
+ * (ruling 239) can never be starved out of.
+ *
+ * 8,000 characters — roughly the ten settled sections the live shopify-clone
+ * board accumulated in two days, which is the size a rules file reaches before
+ * it stops being read carefully by anything. A rulings KB shorter than this
+ * costs the profile grants nothing: the floor is a ceiling on what the OTHERS
+ * may take, not an allocation the rulings must spend.
+ */
+export const RULINGS_KB_FLOOR = 8_000;
 
 interface KbDoc {
   /** Store-relative path within the KB folder (forward slashes), for headings. */
@@ -158,6 +171,32 @@ export interface KbInjection {
  * a renamed/typo'd KB folder reaches the run's own prompt instead of living in
  * a server log nobody reads while every UI still shows the grant attached.
  */
+/**
+ * Ruling 261: roughly how many characters a KB would inject if nothing competed
+ * — the file bytes plus each doc's `### <path>` heading, which
+ * `readKbBodyDetailed` charges the same budget for (P13-KM-14).
+ *
+ * Approximate on purpose and safe in both directions: it only decides how much
+ * of the shared budget the OTHER knowledge bases may not take, and being a few
+ * hundred characters out costs a few hundred characters of reserve. Silent —
+ * the real read does the resolving, the warning and the disclosure.
+ */
+function kbNaturalSize(name: string, dataRoot?: string): number {
+  try {
+    const dir = kbDirPath(name, dataRoot);
+    if (!existsSync(dir) || lstatSync(dir).isSymbolicLink()) return 0;
+    return collectKbDocs(dir).reduce((total, doc) => {
+      try {
+        return total + statSync(doc.abs).size + `### ${doc.rel}\n\n`.length;
+      } catch {
+        return total;
+      }
+    }, 0);
+  } catch {
+    return 0;
+  }
+}
+
 /** Doc names for a human-readable sentence: `a.md`, `b.md` and `c.md`. */
 function listDocs(rels: readonly string[]): string {
   const quoted = rels.map((r) => `\`${r}\``);
@@ -334,17 +373,57 @@ export function readKbBodies(
   names: readonly string[],
   dataRoot?: string,
   budgetChars: number = KB_INJECTION_BUDGET,
+  /** Ruling 261: the project's rulings KB, when this run carries one. */
+  opts: { rulingsKb?: string | null } = {},
 ): KbInjectionSet {
   const parts: { name: string; body: string }[] = [];
   const unresolved: UnresolvedKbGrant[] = [];
-  let budget = budgetChars;
+  // Ruling 261 (pass 37, owner's call): the project's RULINGS are guaranteed a
+  // floor, and read LAST so they can still use what nothing else needed.
+  //
+  // Ruling 239 appends the rulings KB after a profile's own grants so it never
+  // displaces them, and the cost of that ordering is that a project's binding
+  // rules are structurally the FIRST thing starved — on exactly the agents
+  // holding the most grants. It bit live: the operator received
+  // `standing-corrections.md` cut off mid-word at "fails in about thr", losing
+  // two of its three rules, because two project KBs totalled 27,928 against a
+  // 24,000 budget. The owner's call was to invert which side gives: a project's
+  // binding rules always arrive up to the floor, and a profile's optional craft
+  // is what trims on a heavily-granted agent.
+  //
+  // One read each. The others are capped at `budget - floor`, so the floor
+  // always survives; the rulings then take everything the others left, which is
+  // never less than the floor and is more whenever they were small — so this
+  // costs nothing at all when the rulings KB is short. Emission keeps ruling
+  // 239's order: grants first, rulings last.
+  const rulings =
+    opts.rulingsKb && names.includes(opts.rulingsKb) ? opts.rulingsKb : null;
+  // The reserve is the SMALLER of the floor and what the rulings actually need,
+  // so a short rulings KB costs the grants nothing at all — the floor is a
+  // ceiling on what the others may take, never an allocation the rulings must
+  // spend. Measured without reading the bodies, so a KB that cannot resolve
+  // still warns exactly once, on the real read below.
+  const floor = rulings
+    ? Math.min(RULINGS_KB_FLOOR, kbNaturalSize(rulings, dataRoot), budgetChars)
+    : 0;
+  let budget = budgetChars - floor;
   for (const name of names) {
+    if (name === rulings) continue;
     const injection = readKbBodyDetailed(name, dataRoot, Math.max(0, budget));
     if (injection.unresolved) unresolved.push(injection.unresolved);
     if (injection.body) {
       parts.push({ name, body: injection.body });
       budget -= injection.body.length;
     }
+  }
+  if (rulings) {
+    // `budget` can go slightly NEGATIVE: a truncation marker is appended to a
+    // body after that body was charged. Clamping here is what keeps the floor a
+    // floor rather than a number the last grant can overdraw.
+    const allowance = Math.max(floor, budget + floor);
+    const injection = readKbBodyDetailed(rulings, dataRoot, allowance);
+    if (injection.unresolved) unresolved.push(injection.unresolved);
+    if (injection.body) parts.push({ name: rulings, body: injection.body });
   }
   return { parts, unresolved };
 }

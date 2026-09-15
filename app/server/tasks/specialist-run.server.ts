@@ -1,4 +1,7 @@
-import { withProjectRulings } from "~/server/files/project-rulings.server";
+import {
+  projectRulingsKb,
+  withProjectRulings,
+} from "~/server/files/project-rulings.server";
 import { activeFileLeases } from "./file-leases.server";
 import { type ReviewSubject, reviewSubjectSha } from "~/shared/revision-drift";
 import { execFile } from "node:child_process";
@@ -1868,6 +1871,7 @@ async function dispatchAgentRun(
   const unresolvedResources: { name: string; reason: string }[] = [];
   const personaInput: SpecialistPersonaInput = {
     profileId: engagement.profileId,
+    rulingsKb: projectRulingsKb(input.projectSlug, ctx),
     backend,
     skills,
     nativeSkills: skillMount.mounted,
@@ -2701,6 +2705,10 @@ export function githubReadForRun(input: {
 
 export interface SpecialistPersonaInput {
   profileId: string;
+  /** Ruling 261: the project's rulings KB (ruling 239), when this run carries
+   *  one — so the shared budget can reserve it a floor instead of starving the
+   *  one knowledge base the project made binding. */
+  rulingsKb?: string | null;
   /** F-P4 (pass 25): the run's backend, so backend-asymmetric persona text (the
    *  browser section — Codex screenshots do not return to the model) is honest. */
   backend?: RealBackend;
@@ -2816,7 +2824,12 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // fits emits an explicit "omitted entirely" marker, so the prompt names what
   // was dropped instead of quietly shrinking. (An agent silently missing a
   // granted KB reports on the ones it got and nobody learns the difference.)
-  const kbSet = readKbBodies(input.kb ?? [], input.dataRoot, KB_INJECTION_BUDGET);
+  const kbSet = readKbBodies(input.kb ?? [], input.dataRoot, KB_INJECTION_BUDGET, {
+    // Ruling 261 (owner's call): the project's rulings are guaranteed a floor
+    // and read last, so a heavily-granted agent trims its optional craft rather
+    // than the rules the project made binding on every run.
+    rulingsKb: input.rulingsKb ?? null,
+  });
   // R19-2: the precedence rule rides WITH the KB text — pushed ONCE (not per KB)
   // and BEFORE the bodies it ranks, so the rule is read before the guidance it
   // qualifies. Gated on real KB text, so a run with no knowledge base never
