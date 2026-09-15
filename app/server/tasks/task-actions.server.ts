@@ -183,7 +183,7 @@ import type {
   RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
-import type { startAgentRun } from "./specialist-run.server";
+import type { startAgentRun, StartAgentRunResult } from "./specialist-run.server";
 import type {
   openTaskPr,
   OpenTaskPrContext,
@@ -5386,7 +5386,7 @@ export async function operatorPromptAgent(
     handle: string;
   },
   ctx: TaskMutationContext = {},
-): Promise<{ runId: string }> {
+): Promise<StartAgentRunResult> {
   const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
   const directive = withMention(input.handle, input.directive);
 
@@ -5434,7 +5434,9 @@ export async function operatorPromptAgent(
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
-  let runId: string;
+  // Ruling 263: the dispatch's own verdict travels back to the operator's tool
+  // reply, which used to say "started its run" for a refused one too.
+  let started: StartAgentRunResult;
   try {
     const dispatch: Parameters<typeof startAgentRun>[1] = {
       projectSlug: input.projectSlug,
@@ -5443,8 +5445,7 @@ export async function operatorPromptAgent(
       directive,
     };
     if (input.delivers !== undefined) dispatch.delivers = input.delivers;
-    const started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
-    runId = started.runId;
+    started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
     // REFUSES (stage eligibility, backend down, policy) must not leave it
@@ -5488,7 +5489,7 @@ export async function operatorPromptAgent(
   //    `ctx.operatorRun` from opCtx (preserved from this operator run) and pass
   //    the real workspace clone dir. So the chain continues at depth+1 with the
   //    correct workdir — no separate registration here.
-  return { runId };
+  return started;
 }
 
 /** Prepend an `@handle` mention to a directive if it does not already lead with

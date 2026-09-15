@@ -1768,7 +1768,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "run_agent_on_task",
-      "Put an agent to work on a task with a directive: the operator (coordination) or a deployed agent profile (stage work). Maintainer or above. The result reports honestly whether a run started.",
+      "Put an agent to work on a task with a directive: the operator (coordination) or a deployed agent profile (stage work). Maintainer or above. The result reports honestly whether a run started, was queued behind the concurrent-run cap, or was refused before any process existed. The directive is also written on the task timeline as a comment addressed to the agent, so the people watching the task can read what it was asked to do.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -1844,6 +1844,49 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             runInput.directiveFrom = display;
           }
           const started = await startAgentRun(db, runInput, actor, { dataRoot });
+          // Ruling 263 (F37-93), second half: R21-9's law applied to the
+          // dispatch prompt, on the one door that skipped it. The task page
+          // writes `@<agent> <prompt>` as the dispatcher's own comment after
+          // the start, and the operator's `run_agent` writes one before it —
+          // so a directive that reaches an agent is on the record and
+          // supervision can read it. Through the controller the same words
+          // went into the prompt and NOWHERE else: the timeline showed a run
+          // appearing for no stated reason, and the person who asked for it
+          // could not see what they had asked for. After the start, like the
+          // task page, so a dispatch that throws leaves no orphan hand-off.
+          if (args.prompt) {
+            const { appendComment } = await import("~/server/tasks/task-actions.server");
+            await appendComment(
+              db,
+              {
+                projectSlug: slug,
+                taskKey: key,
+                text: `@${started.name} ${prose(args.prompt)}`,
+                forceToAgent: true,
+              },
+              actor,
+              { dataRoot },
+            );
+          }
+          // Ruling 263, first half: this tool's own description promises it
+          // "reports honestly whether a run started". A refused run is a row
+          // recording why no process will exist; a queued one is parked behind
+          // the concurrency cap. Neither had a sentence of its own.
+          if (started.outcome === "refused") {
+            return (
+              `[refused] ${started.name}'s run on ${key} did not start: ` +
+              `${started.refusal ?? "the run was refused before any process started."} ` +
+              `${args.prompt ? "The directive is on the timeline. " : ""}` +
+              `Run it again once that is resolved.`
+            );
+          }
+          if (started.outcome === "queued") {
+            return (
+              `[done] ${started.name} is queued on ${key} (${started.backend}): ` +
+              `the instance is at its concurrent-run cap, so it starts when a slot frees. ` +
+              `get_task shows it as queued until then.`
+            );
+          }
           return `[done] ${started.name} run started on ${key} (${started.backend}).`;
         },
       ),

@@ -126,6 +126,7 @@ import {
   reserveRun,
   startRun,
   type RunReservation,
+  type RunStartOutcome,
   type StartRunInput,
   repoWriteWithheldFromDenylist,
 } from "~/server/runtimes/run-service.server";
@@ -1138,6 +1139,20 @@ export interface StartAgentRunResult {
   role: string;
   /** The agent's display name (deployment name; profile id when unresolvable). */
   name: string;
+  /**
+   * Ruling 263 (pass 37, F37-93): what the dispatch actually did.
+   *
+   * A dispatch that returns is not a dispatch that started a provider process.
+   * A run whose principal has no credential for this backend becomes a run ROW
+   * recording the refusal and nothing else (ruling 127), and a run that finds
+   * the concurrency cap full is parked as `queued` until a slot frees. Both
+   * used to be indistinguishable here from a live run, so `run_agent_on_task`
+   * answered `[done] … run started` for all three under a tool description
+   * promising it "reports honestly whether a run started".
+   */
+  outcome: RunStartOutcome;
+  /** The refusal sentence the run recorded, when `outcome` is `"refused"`. */
+  refusal: string | null;
 }
 
 /** The reservation `dispatchAgentRun` claims mid-flight, so the exported
@@ -2205,7 +2220,7 @@ async function dispatchAgentRun(
   // minting a second one.
   if (pending.reservation) runInput.reservation = pending.reservation;
 
-  const { runId } = await startRun(db, runInput);
+  const { runId, outcome, refusal } = await startRun(db, runInput);
   // Adopted: from here the row belongs to the RUN, and the wrapper's catch must
   // not finalize it as an error just because a post-start write threw — nor
   // remove the plugin the run is reading (run-service removes it at settle).
@@ -2417,7 +2432,7 @@ async function dispatchAgentRun(
   if (ctx.operatorRun) completion.operatorRun = ctx.operatorRun;
   await registerAgentCompletion(db, ctx, completion);
 
-  return { runId, backend, role: engagement.role, name: agentName };
+  return { runId, backend, role: engagement.role, name: agentName, outcome, refusal };
 }
 
 // -------------------------------------------------------------- quota hold

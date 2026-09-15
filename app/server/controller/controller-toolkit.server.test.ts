@@ -881,6 +881,51 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(top.text).toContain("run_agent_on_task");
   });
 
+  /**
+   * Ruling 262 (pass 37, F37-92). This is the LIVE text from SHOP-26 that
+   * motivated ruling 252 — and under ruling 252 alone it still carried no
+   * stamp. `resolveMentionedAgent` answers "which ONE agent would a run go
+   * to", and `@operator` is precedence 1, so it returned the operator, the
+   * stamp was skipped for being the operator, and @platform-architect was
+   * never mentioned. A ruling has to fix the case it was written for.
+   */
+  it("comment_on_task: @operator alongside an agent still discloses the agent (ruling 262)", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@operator @reviewer The funded amendment now exists as a task.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: resolve the stamp through `resolveMentionedAgent` again and this
+    // goes back to silence, which is the shape that shipped live.
+    expect(top.text).toContain("@reviewer is an agent");
+    expect(top.text).toContain("nothing was sent to it");
+    // The operator is still excluded by name (ruling 214): a controller turn's
+    // other writes wake it on their own.
+    expect(top.text).not.toContain("@operator is an agent");
+  });
+
+  it("comment_on_task: EVERY tagged agent is named, not the first (ruling 262)", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@reviewer @developer both of you should see the amendment.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: swap `specialists.filter` back to `.find` in `unreachedAgents`
+    // and the second agent drops out of a sentence that claims to list them.
+    expect(top.text).toContain("@reviewer, @developer are agents");
+    expect(top.text).toContain("nothing was sent to them");
+  });
+
   it("comment_on_task: a comment that tags only PEOPLE carries no such note", async () => {
     await call(ids.projectAdmin, "comment_on_task", {
       taskKey: "VIB-142",
@@ -934,6 +979,82 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     // reply reports the real outcome, never a permission refusal.
     expect(reply).not.toContain("maintainer role");
     expect(reply).toMatch(/\[(done|denied|error)\]/);
+  });
+
+  /**
+   * Ruling 263 (pass 37, F37-93). The tool's own description promises it
+   * "reports honestly whether a run started", and it answered `[done] … run
+   * started on VIB-142 (codex)` for a dispatch that started nothing: the task
+   * owner has no Codex account, so ruling 127 turns the dispatch into a run ROW
+   * recording the refusal and no process at all. The person reading the
+   * controller was told work had begun; the board showed an errored run.
+   */
+  it("run_agent_on_task: a refused run is reported as refused, with the reason (ruling 263)", async () => {
+    const reply = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+      prompt: "Pick this up and report what you find.",
+    });
+    // CANARY: return `[done] … run started` unconditionally again (drop the
+    // `outcome` arms) and this reads as work that began.
+    expect(reply).toContain("[refused]");
+    expect(reply).not.toContain("run started");
+    // The reason is the run's own sentence, not a restatement: the owner has no
+    // Codex account and this task's runs bill the owner (ruling 127).
+    expect(reply).toContain("the task owner");
+    expect(reply).toContain("Run it again once that is resolved.");
+  });
+
+  /**
+   * Ruling 263's second half: R21-9's law on the one dispatch door that skipped
+   * it. The task page writes `@<agent> <prompt>` after the start and the
+   * operator's `run_agent` writes one before it; through the controller the
+   * directive went into the agent's prompt and nowhere else, so the timeline
+   * showed a run appearing for no stated reason.
+   */
+  it("run_agent_on_task: the directive is recorded on the timeline (ruling 263)", async () => {
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+      prompt: "Pick this up and report what you find.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: drop the `appendComment` call and the directive exists only
+    // inside the agent's prompt, where supervision cannot read it.
+    expect(top.type).toBe("comment");
+    expect(top.text).toBe("@Developer Pick this up and report what you find.");
+    // Addressed to the agent (the routed tint), and authored by the PERSON
+    // whose directive it is — the controller relayed it, it did not write it.
+    expect(top.toAgent).toBe(true);
+    expect(top.actor).toMatchObject({ kind: "human", userId: ids.maintainer });
+  });
+
+  it("run_agent_on_task: a dispatch with no directive writes no hand-off comment", async () => {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const handOffsNow = (): unknown[] =>
+      readTaskFile({
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        dataRoot: app.dataRoot,
+      })!.parsed.timeline.filter(
+        (e) => e.type === "comment" && e.text.trim().startsWith("@Developer"),
+      );
+    // Sibling tests in this describe share the task, so measure the DELTA.
+    const before = handOffsNow().length;
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+    });
+    // CANARY: append the comment unconditionally and a bare re-run grows an
+    // empty "@Developer" line addressed to nobody about nothing. (The refused
+    // run writes its OWN lines here, so this counts hand-off comments rather
+    // than events.)
+    expect(handOffsNow().length).toBe(before);
   });
 
   it("project settings, stages, boundaries, members, deployments: MAINTAINER refused, project ADMIN granted", async () => {

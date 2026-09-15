@@ -1463,6 +1463,24 @@ describe("acceptance disclosure (ruling 88) — the indirect HTTP doors", () => 
  * grants, which nothing after it should inherit.
  */
 describe("run-agent auto-engage — reviewer vs supporting agent, and release-agent", () => {
+  /**
+   * Ruling 127 + ruling 263: both tasks below ship OWNERLESS in the seed, and a
+   * run bills the owner's accounts — so the dispatch was refused for a missing
+   * principal and, until ruling 263, still toasted "Claude run started for
+   * Reviewer · streaming to agent logs". Owning the task is what a person has
+   * already done before they run an agent on it; these tests are about the
+   * engagement's posture, not about ownership.
+   */
+  async function ownFor(key: string): Promise<void> {
+    const { setOwner } = await import("~/server/tasks/task-actions.server");
+    await setOwner(
+      app.db,
+      { projectSlug: "viberr-core", taskKey: key, targetUserId: ids.arda },
+      { userId: ids.arda, label: "test" },
+      { dataRoot: app.dataRoot },
+    );
+  }
+
   /** Interrupt every live run the dispatch under test started. */
   async function stopRuns(key: string) {
     const { listRunsForTaskRows } = await import(
@@ -1492,6 +1510,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
       lines: [{ t: "", ev: "text", tag: "assistant", text: "reviewing" }],
       keepRunning: true,
     }, "claude");
+    await ownFor("VIB-153");
     // SAFETY: VIB-153 sits at Implementation (the Reviewer's eligible stages are
     // impl/review) and arda is a project admin, so this returns the success arm.
     const result = (await postIntent("VIB-153", ids.arda, {
@@ -1546,6 +1565,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
       lines: [{ t: "", ev: "text", tag: "assistant", text: "supporting" }],
       keepRunning: true,
     }, "claude");
+    await ownFor("VIB-145");
     // SAFETY: VIB-145 sits at Review (also an eligible Reviewer stage) with no
     // engagement for this profile, so the dispatch returns the success arm.
     const result = (await postIntent("VIB-145", ids.arda, {

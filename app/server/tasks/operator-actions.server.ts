@@ -772,12 +772,13 @@ async function writeOperatorComment(
   // nothing was sent, instead of the tag going nowhere in silence.
   // Ruling 252: the sentence itself now lives beside the resolver, because the
   // controller and a mid-run agent needed the same one.
-  const { resolveMentionedAgent, unreachedAgentNote } = await import("./agent-reply.server");
-  const taggedAgent = resolveMentionedAgent(db, ctx, projectSlug, taskKey, text2);
-  const text3 =
-    taggedAgent && !taggedAgent.isOperator
-      ? `${text2}\n\n${unreachedAgentNote(taggedAgent.name, "operator")}`
-      : text2;
+  // Ruling 262: all of them, in one sentence, from the disclosure resolver.
+  const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
+  const note = unreachedAgentNote(
+    unreachedAgents(ctx, projectSlug, taskKey, text2),
+    "operator",
+  );
+  const text3 = note ? `${text2}\n\n${note}` : text2;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -3129,11 +3130,32 @@ export async function operatorDispatchAgent(
     // the same rule as the trace above, and an explicit `true` is what asks
     // assignSpecialist for a delivery hand-off.
     if (input.delivers !== undefined) promptInput.delivers = input.delivers;
+    let prompted: Awaited<ReturnType<typeof operatorPromptAgent>>;
     try {
-      await operatorPromptAgent(db, promptInput, ctx);
+      prompted = await operatorPromptAgent(db, promptInput, ctx);
     } catch (error) {
       if (isDispatchHeld(error)) return heldNoop(error);
       throw error;
+    }
+    // Ruling 263 (F37-93): "and started its run" was said for a run that was
+    // refused before any process existed, and for one parked behind the cap.
+    // The operator plans its next move on this sentence.
+    if (prompted.outcome === "refused") {
+      return {
+        outcome: "noop",
+        message:
+          `The prompt is on the timeline for @${agent.name} (${as}), but no run started: ` +
+          `${prompted.refusal ?? "the run was refused before any process started."} ` +
+          `Re-send it once that is resolved.`,
+      };
+    }
+    if (prompted.outcome === "queued") {
+      return {
+        outcome: "done",
+        message:
+          `Prompted @${agent.name} (${as}). The instance is at its concurrent-run cap, ` +
+          `so the run is queued and starts when a slot frees.`,
+      };
     }
     return {
       outcome: "done",
@@ -3152,6 +3174,23 @@ export async function operatorDispatchAgent(
   } catch (error) {
     if (isDispatchHeld(error)) return heldNoop(error);
     throw error;
+  }
+  if (result.outcome === "refused") {
+    return {
+      outcome: "noop",
+      message:
+        `No run started for ${agent.name} (${as}): ` +
+        `${result.refusal ?? "the run was refused before any process started."} ` +
+        `Try again once that is resolved.`,
+    };
+  }
+  if (result.outcome === "queued") {
+    return {
+      outcome: "done",
+      message:
+        `${agent.name}'s (${as}) run is queued: the instance is at its concurrent-run cap, ` +
+        `so it starts when a slot frees.`,
+    };
   }
   return {
     outcome: "done",

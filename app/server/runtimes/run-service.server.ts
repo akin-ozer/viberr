@@ -788,6 +788,24 @@ type RunStartedAudit = {
  */
 const sqliteErrorSchema = z.object({ errcode: z.number(), message: z.string() });
 
+/**
+ * Ruling 263 (pass 37, F37-93): what a start DID, for the doors that report it.
+ *
+ * `startRun` has three endings and used to return the same `{ runId }` for all
+ * three, so every caller that wanted to tell a person what happened had to
+ * either guess or say "started" and be wrong twice. A refused run is a row that
+ * records why no process will exist; a queued one is parked behind the
+ * concurrency cap and starts when a slot frees. Neither is a run that started.
+ */
+export type RunStartOutcome = "started" | "queued" | "refused";
+
+export interface RunStartResult {
+  runId: string;
+  outcome: RunStartOutcome;
+  /** The whole sentence a refused run recorded; null for the other two. */
+  refusal: string | null;
+}
+
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
 export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
@@ -802,12 +820,12 @@ export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
  * `error`. That routes the failure through the EXISTING error-run path
  * (completion callbacks fire immediately, `applyAgentCompletionEffects`
  * posts the typed blocked event and escalation packet via runFailureReason).
- * Returns the run id.
+ * Returns the run id and, since ruling 263, what actually happened to it.
  */
 export async function startRun(
   db: DatabaseSync,
   input: StartRunInput,
-): Promise<{ runId: string }> {
+): Promise<RunStartResult> {
   const state = getState();
   // R21-4: a reserved row already carries this run's identity — adopt it whole
   // (id AND thread) so the strip the human has been watching becomes this run
@@ -1021,7 +1039,7 @@ export async function startRun(
     details,
   });
 
-  const refuse = (message: string) => {
+  const refuse = (message: string): RunStartResult => {
     // F26-1: a reserved run that fails here never launches — release its slot
     // and let a run parked behind the cap take it.
     if (reservation) {
@@ -1031,7 +1049,7 @@ export async function startRun(
     failRunUnavailable(db, spec, message, reservation?.startedAt);
     // Ruling 180: a refused run never spawns, so its plugin has no reader.
     removeSkillPlugin(spec.skillPlugin);
-    return { runId };
+    return { runId, outcome: "refused", refusal: message };
   };
   if (!credential.ok) return refuse(credential.message);
   if (refusal !== null) return refuse(refusal);
@@ -1053,10 +1071,10 @@ export async function startRun(
   if (reservation) {
     state.reserved.delete(reservation.runId);
     launchThunk();
-  } else {
-    admitRun(db, runId, launchThunk, input.kind);
+    return { runId, outcome: "started", refusal: null };
   }
-  return { runId };
+  const admitted = admitRun(db, runId, launchThunk, input.kind);
+  return { runId, outcome: admitted ? "started" : "queued", refusal: null };
 }
 
 /** What `startRun` got when it asked for its principal's credential. */
@@ -1729,18 +1747,21 @@ function coordinationLiveCount(state: ServiceState): number {
  * non-reserved run) and its launch thunk waits in the lane's queue, promoted by
  * `drainRunQueue` when a live slot frees.
  */
+/** True when the run launched now; false when it was parked behind the cap
+ *  (ruling 263: the caller reports which, instead of saying "started" for
+ *  both). */
 function admitRun(
   db: DatabaseSync,
   runId: string,
   launchThunk: () => void,
   kind: RunKind,
-): void {
+): boolean {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
   const lane = laneOf(kind);
   if (canAdmit(state, cap, lane)) {
     launchThunk();
-    return;
+    return true;
   }
   const queue = state.pending[lane];
   queue.push({ runId, launch: launchThunk });
@@ -1752,6 +1773,7 @@ function admitRun(
     coordinationLane: coordinationLane(cap),
     queuedAhead: queue.length - 1,
   });
+  return false;
 }
 
 /**

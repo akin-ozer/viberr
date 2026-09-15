@@ -41,6 +41,8 @@ import {
   normalizeWorkspacePaths,
   resumeWorkdir,
   resolveMentionedAgent,
+  unreachedAgents,
+  unreachedAgentNote,
   runFailureReason,
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
@@ -285,6 +287,65 @@ describe("resolveMentionedAgent", () => {
         "@security-reviewer take a look",
       ),
     ).toBeNull();
+  });
+
+  /**
+   * Ruling 262 (pass 37, F37-92): the DISCLOSURE question, not the dispatch
+   * question. `resolveMentionedAgent` returns at most one target because a run
+   * needs exactly one; ruling 252 reused it as a completeness report, so three
+   * more shapes fell through the stamp on top of the operator case.
+   */
+  describe("unreachedAgents reports every handle that reads nothing", () => {
+    function report(text: string, taskKey = "VIB-1") {
+      return unreachedAgents({ dataRoot: store.dataRoot }, store.slug, taskKey, text);
+    }
+
+    it("names an AMBIGUOUS backend handle and the profiles it covers", () => {
+      deployReviewerSpecialist(); // a second claude → `@claude` engages nobody
+      const r = report("@claude please look at this");
+      expect(r.named).toEqual([]);
+      expect(r.ambiguousBackend).toEqual({
+        handle: "claude",
+        candidates: ["dev", "reviewer"],
+      });
+      // CANARY: drop the `backendCandidates.length > 1` arm and the comment
+      // says nothing at all, on the one case a HUMAN writing the same words
+      // gets a policy-engine note for.
+      const note = unreachedAgentNote(r, "controller");
+      expect(note).toContain("@claude names a runtime, not an agent");
+      expect(note).toContain("@dev");
+      expect(note).toContain("@reviewer");
+    });
+
+    it("names @agent on a task with no delivering engagement", () => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-2", {
+          stage: "impl",
+          ownerUserId: store.users.arda.id,
+          title: "Nobody is delivering this yet",
+          engagements: [],
+        }),
+        goal: "No deliverer.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const r = report("@agent status?", "VIB-2");
+      expect(r.agentWithNoDeliverer).toBe(true);
+      expect(r.named).toEqual([]);
+      // CANARY: report `agentWithNoDeliverer: false` and the tag is silent.
+      expect(unreachedAgentNote(r, "operator")).toContain(
+        "@agent addresses the agent delivering this task",
+      );
+    });
+
+    it("says nothing when every handle reaches somebody who reads it", () => {
+      // A person's @handle is not an agent handle; the operator is excluded by
+      // ruling 214 because a controller turn's other writes wake it anyway.
+      expect(unreachedAgentNote(report("@operator over to you"), "controller")).toBeNull();
+      expect(unreachedAgentNote(report("status published, nothing needed"), "controller")).toBeNull();
+      // CANARY: return a sentence for an empty report and every ordinary
+      // comment grows a paragraph about an agent it never tagged.
+      expect(report("@agent status?").agentWithNoDeliverer).toBe(false);
+    });
   });
 
   it("a backend handle that identifies exactly ONE deployed specialist still resolves", () => {

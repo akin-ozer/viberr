@@ -821,6 +821,8 @@ const QUESTION_RUN: StartAgentRunResult = {
   backend: "claude",
   role: "Code review",
   name: "rev",
+  outcome: "started",
+  refusal: null,
 };
 
 const recordDispatch =

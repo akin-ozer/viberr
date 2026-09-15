@@ -155,18 +155,18 @@ export async function postAgentComment(
   // `@operator` is excluded, exactly as in ruling 214: several writes in a
   // controller turn wake the operator on their own, so claiming nothing was
   // sent to it could be the false half of an honest sentence.
-  const { resolveMentionedAgent, unreachedAgentNote } = await import("./agent-reply.server");
-  const tagged = resolveMentionedAgent(
-    db,
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-    ambiguity,
+  //
+  // Ruling 262 (F37-92): EVERY unreached handle, not the one a run would have
+  // gone to. `resolveMentionedAgent` answers the dispatch question, so it
+  // returned the operator for the very comment above and the stamp was skipped
+  // — ruling 252 did not cover its own motivating example until this resolver
+  // replaced it.
+  const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
+  const note = unreachedAgentNote(
+    unreachedAgents(ctx, input.projectSlug, input.taskKey, ambiguity),
+    input.actorRef.kind === "controller" ? "controller" : "agent",
   );
-  const text =
-    tagged && !tagged.isOperator
-      ? `${ambiguity}\n\n${unreachedAgentNote(tagged.name, input.actorRef.kind === "controller" ? "controller" : "agent")}`
-      : ambiguity;
+  const text = note ? `${ambiguity}\n\n${note}` : ambiguity;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),

@@ -5782,6 +5782,61 @@ by rewriting those paragraphs:*
     pass: it asked whether a queue entry EXISTS, which answers yes for one somebody else left
     behind, and now carries the flag saying whether THIS resolution queued.)*
 
+262. **A disclosure names everyone it left out, not the one a run would have gone to
+    (2026-09-15, pass 37; F37-92).** Ruling 252 stamped a comment that tagged an agent with the
+    sentence saying nothing was sent to it, and computed that stamp with
+    `resolveMentionedAgent` — a resolver written to pick exactly ONE target, because
+    `commentToAgent` needs one agent to start. Answering the dispatch question does not answer
+    the disclosure question, and reused as a completeness report it under-reported four ways.
+    The first one is ruling 252's own motivating example. Live on SHOP-26 the controller wrote
+    `@operator @platform-architect The funded amendment now exists as a task`; `@operator` is
+    precedence 1, the resolver returned the operator, the stamp was skipped for being the
+    operator (ruling 214, correctly — a controller turn's other writes wake the operator on
+    their own), and @platform-architect was never mentioned. Ruling 252 shipped without fixing
+    the comment it was written for. The other three: a second specialist tagged beside the
+    first is dropped by `specialists.find`; `@claude` on a board running two claude profiles
+    resolves to null (B-AG2) and so is silent; and `@agent` on a task with no delivering
+    engagement resolves to null and is silent. The last two are exactly the cases a HUMAN
+    writing the same words gets a policy-engine note for, so the person was told and the
+    controller doing it on their behalf was not.
+    `unreachedAgents` asks the disclosure question instead: which handles are in this text, and
+    which of them will read nothing. It needs no backend, session or model, so it is a pure
+    read of the project file and the task frontmatter, and it returns all of them — every named
+    specialist in the order the TEXT tags them, the ambiguous backend handle with the profiles
+    it covers, and `@agent` with no deliverer. `unreachedAgentNote` takes that report and
+    returns null when there is nothing to say, so the ordinary status comment that tagged only
+    people still grows no paragraph. Handles are stamped through `agentMentionHandle`
+    (P14-RT-12), so the sentence telling somebody to run an agent names a handle that routes.
+    (`agent-reply.server.ts`, `agent-toolkit.server.ts`, `operator-actions.server.ts`.)
+
+263. **A dispatch that returns is not a run that started (2026-09-15, pass 37; F37-93).**
+    `startRun` has three endings — launched, parked behind the concurrent-run cap, or refused
+    before any process could exist — and returned the same `{ runId }` for all three. So every
+    door that reports a dispatch to a person either guessed or said "started" and was wrong
+    twice. Measured in the repository's own fixture: `run_agent_on_task` on a task whose owner
+    has no Codex account answered `[done] Developer run started on VIB-142 (codex)`, under a
+    tool description promising it "reports honestly whether a run started", for a dispatch that
+    ruling 127 had already turned into a run ROW recording the refusal and nothing else. The
+    person reading the controller was told work had begun; the board showed an errored run.
+    The task page's toast said the same thing, and promised a stream of agent logs a refused
+    run never produces; the operator's own `run_agent` reply said "and started its run", which
+    is what the operator then plans its next move on.
+    `startRun` now returns `{ runId, outcome, refusal }`, `admitRun` returns whether it
+    launched or parked, and `StartAgentRunResult` carries both up. The three doors each say
+    which of the three happened, in their own voice, and a refusal quotes the run's OWN
+    sentence rather than restating it.
+    The same tool skipped R21-9's law on the way in. Every sibling dispatch door records the
+    human's directive on the timeline — the task page appends `@<agent> <prompt>` as the
+    dispatcher's own comment after the start, the operator writes one before it — so a
+    directive that reaches an agent is something supervision can read. Through the controller
+    the directive went into the agent's prompt and NOWHERE else: a run appeared on the task for
+    no stated reason, and the person who asked for it could not see what they had asked for.
+    It now writes the same comment, authored by the PERSON whose words they are (the controller
+    relayed them, it did not write them) and addressed to the agent, after the start so a
+    dispatch that throws leaves no orphan hand-off.
+    (`run-service.server.ts`, `specialist-run.server.ts`, `controller-toolkit.server.ts`,
+    `operator-actions.server.ts`, `task-actions.server.ts`, `project.task.tsx`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

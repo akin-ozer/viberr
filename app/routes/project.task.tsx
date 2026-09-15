@@ -960,6 +960,24 @@ export async function action({ request, params }: Route.ActionArgs) {
             actor,
           );
         }
+        // Ruling 263 (F37-93): the toast said "run started" for a run refused
+        // before any process existed, and for one parked behind the cap. The
+        // agent-logs half of that sentence is a promise of a stream that a
+        // refused run never produces.
+        if (result.outcome === "refused") {
+          return {
+            ok: true as const,
+            intent,
+            toast: `No run started for ${result.name}: ${result.refusal ?? "it was refused before any process started."}`,
+          };
+        }
+        if (result.outcome === "queued") {
+          return {
+            ok: true as const,
+            intent,
+            toast: `${result.name} is queued behind the concurrent-run cap · it starts when a slot frees`,
+          };
+        }
         return {
           ok: true as const,
           intent,

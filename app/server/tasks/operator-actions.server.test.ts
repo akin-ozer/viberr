@@ -161,6 +161,21 @@ beforeEach(async () => {
     "~/server/runtimes/operator-run.server"
   );
   resetOperatorLeasesForTests();
+  // Ruling 127: an agent run bills the TASK OWNER's accounts, so a dispatch
+  // only reaches an adapter when the owner has that backend connected. Arda
+  // owns VIB-1 in `seedTask`. Ruling 263 is why this is here: seventeen tests
+  // in this file named "and starts its run" were asserting the sentence
+  // "Started a Claude run for Dev" on a dispatch that ruling 127 had already
+  // refused for the missing credential, because every ending of a dispatch
+  // reported the same "started". The owner having an account is the ordinary
+  // state of somebody using the product; nothing here tests the refusal.
+  const { connectFakeBackend } = await import(
+    "../../../test-support/backend-credentials"
+  );
+  // CLAUDE only: ruling 207(h)'s test asserts the "no Codex fallback either"
+  // half on this same fixture, and connects Codex itself when it wants the
+  // other arm.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
 });
 
 afterEach(() => {
