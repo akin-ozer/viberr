@@ -4529,6 +4529,13 @@ by rewriting those paragraphs:*
     is a real wait, no task key completing satisfies it, and dropping unmatched entries
     would quietly clear it. The number argues for a decision only when the decision would
     actually free something.
+    AMENDED the same day, from the controller using it: "it orders the BLOCKING queue
+    correctly and only that... Sorting by `releases` alone would rank three finished tasks
+    that need one click last, behind a design packet. The number answers what does this
+    unblock, not what does this finish, and on a queue that has become mostly acceptances
+    those diverge. It is the right number and it should not be the sort key by itself."
+    Exactly right, and the tool says so in its own description now rather than leaving the
+    next reader to rediscover it: `kind` and `notAcceptableReason` carry the other half.
 
 301. **A background tab holds no live connection (owner, 2026-09-16, pass 37; F37-136).**
     Four open Viberr tabs deadlock Viberr, in every tab at once, with no error anywhere.
