@@ -1452,7 +1452,12 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
       },
     });
     expect(text).toContain("conflicts with the base branch");
-    expect(text).toContain("Rebase the branch and re-review");
+    // Ruling 291: the remedy viberr actually implements — merge the base IN.
+    // CANARY: put "Rebase the branch" back and this fails, which is the point:
+    // that sentence recommended the one operation the product forbids
+    // everywhere else, and the one that diverged SHOP-11's branch from its PR.
+    expect(text).toContain("merging the base INTO it");
+    expect(text).not.toContain("Rebase the branch");
   });
 
   it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
@@ -1467,7 +1472,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     });
     expect(text).toContain("delivered revision `9999999` is not on PR #124");
     expect(text).toContain("Deliver the branch to push it");
-    expect(text).not.toContain("Rebase the branch");
+    expect(text).not.toContain("merging the base INTO it");
   });
 
   it("stays silent on a PR that merges cleanly", () => {

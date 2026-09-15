@@ -5324,7 +5324,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
     await expect(rejected).rejects.toThrow(
-      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.",
     );
     expect(taskFile(store).frontmatter.stage).toBe("review");
   });
@@ -5404,7 +5404,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         actor(store.users.arda),
         { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
-    ).rejects.toThrow(/conflicts with the base branch.*Rebase the branch and re-review, or archive the task/);
+    ).rejects.toThrow(/conflicts with the base branch[\s\S]*merging the base INTO it/);
     expect(mergeMock).not.toHaveBeenCalled();
     const parsed = taskFile(store);
     expect(parsed.frontmatter.stage).toBe("review");

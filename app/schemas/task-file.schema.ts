@@ -1439,7 +1439,15 @@ export function conflictingPrBlockedReason(
   const pr = fm.pr;
   if (!pr || pr.mergeable !== "conflicting") return null;
   if (pr.state === "merged" || pr.state === "closed") return null;
-  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`;
+  // Ruling 291 (F37-126): NOT "rebase the branch". Viberr's own remedy is a
+  // MERGE — `update_branch_from_base` "merge[s] the base into the branch and
+  // push[es] it", and that same tool's text tells the operator to "never ask an
+  // agent to rebase, merge or force-push". This sentence was the one place the
+  // product recommended the operation it forbids everywhere else, to the one
+  // reader with no tool and the most freedom to do it by hand. It is also the
+  // operation that broke a branch on this very board: "Live on SHOP-11: a
+  // rebase diverged the branch from its own PR #15" (operator-actions.server).
+  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`;
 }
 
 /**

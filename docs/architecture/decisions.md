@@ -4171,6 +4171,29 @@ by rewriting those paragraphs:*
     runs at all really did spend everything it spent on coordination.
     (`insights-query.server.ts`, `insights-page.tsx`.)
 
+291. **The conflict remedy names the operation Viberr actually performs (2026-09-15, pass
+    37; F37-126).** A pull request that conflicts with its base blocked acceptance with
+    this sentence, on the board card, the accept dialog, the projected column and the
+    operator's own `notAcceptableReason`: "Rebase the branch and re-review, or archive the
+    task."
+    Viberr does not rebase. `update_branch_from_base` "merge[s] the base into the branch
+    and push[es] it", and that same tool's text tells the operator to "never ask an agent
+    to rebase, merge or force-push". So the product recommended, to the ONE reader holding
+    no tool and the most freedom to do it by hand, the single operation it forbids
+    everywhere else. It is also the operation that broke a branch on this instance:
+    `operator-actions.server.ts` carries the note "Live on SHOP-11: a rebase diverged the
+    branch from its own PR #15", and the shopify-clone board's own rulings open with "a
+    branch with an open PR is published history — merge main in, never rebase".
+    The sentence now names the merge, and says why the alternative is wrong rather than
+    only that it is: rebasing rewrites commits the pull request already published. One
+    string, shared by `conflictingPrBlockedReason` and the acceptance ceremony's refusal,
+    so the two cannot drift.
+    Nothing about the MECHANISM changed here. That is the point: the mechanism was right
+    and the instruction beside it told a person to do the opposite, which is the cheapest
+    kind of defect to ship and among the more expensive to undo — a rewritten branch cannot
+    be un-rewritten by the person who followed the advice.
+    (`task-file.schema.ts`, `task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

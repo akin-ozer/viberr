@@ -7827,7 +7827,9 @@ async function refreshBranchForAcceptance(
     kind: "unmergeable",
     reason:
       reason ??
-      `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`,
+      // Ruling 291: the same sentence as `conflictingPrBlockedReason`, and for
+      // the same reason — the remedy viberr actually implements is a merge.
+      `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`,
     cause: "the PR conflicts with the base branch; rebase it, then merge",
   };
 }

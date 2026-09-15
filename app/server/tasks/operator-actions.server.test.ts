@@ -5351,7 +5351,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(snap.pr?.mergeable).toBe("conflicting");
     expect(snap.notAcceptableReason).toContain("VIB-1's review PR #7 conflicts with the base branch");
-    expect(snap.notAcceptableReason).toContain("Rebase the branch and re-review, or archive the task.");
+    expect(snap.notAcceptableReason).toContain("merging the base INTO it");
     seedReviewedWithPr("review", "clean");
     const clean = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(clean.pr?.mergeable).toBe("clean");

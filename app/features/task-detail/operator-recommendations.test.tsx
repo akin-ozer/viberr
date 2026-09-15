@@ -59,7 +59,7 @@ afterEach(cleanup);
  */
 describe("OperatorRecommendations: the acceptance gate's refusal on the card (ruling 162)", () => {
   const REFUSAL =
-    "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.";
+    "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.";
   const cards: RecommendationView[] = [
     { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "The review is clean." },
     { id: "r-done", kind: "transition", toStageId: "done", label: "Move the task to Done", detail: "" },
