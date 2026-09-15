@@ -2361,7 +2361,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents; delivery starts withheld until an admin opens it up). Project admin. No removal exists here. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents). Project admin. No removal exists here. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -2384,7 +2384,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const stored = result.applied
           ? ` Runs on ${result.applied.backend === "codex" ? "Codex" : "Claude"} with model ${result.applied.model} at effort ${result.applied.effort}.`
           : "";
-        return `[done] ${result.name} deployed on ${slug}.${stored} Delivery starts withheld; open it up with update_agent_deployment when the profile should write the repo.`;
+        // Ruling 264 (F37-94): this used to promise "Delivery starts withheld"
+        // on every deploy. Ruling 156 made a library deploy COPY the template's
+        // grants, so a repo-write template deploys able to deliver and the
+        // reply said the opposite — to the one reader whose next decision
+        // (engage it as the deliverer, or not) turns on the answer. The fact
+        // now comes from the grants that were written, through the predicate
+        // the RUN is gated on.
+        const delivery =
+          result.delivery === "granted"
+            ? " It carries repo write from the template, so it can deliver as soon as it is engaged. Withhold that with update_agent_deployment if this project should not let it."
+            : " Delivery starts withheld; open it up with update_agent_deployment when the profile should write the repo.";
+        return `[done] ${result.name} deployed on ${slug}.${stored}${delivery}`;
       }),
     ),
     "deploy_agent",

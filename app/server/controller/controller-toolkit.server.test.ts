@@ -3,7 +3,8 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
@@ -1500,6 +1501,53 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(catalog.skill.key).toBe("grant-probe-expertise");
     expect(catalog.skill.key).not.toBe(catalog.skill.id);
     expect(catalog.mcp.key).toBe("grant-probe-server");
+  });
+
+  /**
+   * Ruling 264 (pass 37, F37-94): the deploy reply says which delivery posture
+   * it stored, because since ruling 156 the deploy COPIES the template's own
+   * grants. Live, the shipped `developer` template carries
+   * `execute-code-or-write-repo: direct`, so every deploy of it produced a
+   * profile that can push to the repo under a reply promising the opposite.
+   */
+  it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
+    // A template with repo write. `save_global_agent` has no capability field,
+    // so the grants have to be written the way a shipped template carries them.
+    writeFileSync(
+      path.join(app.dataRoot, "agents", "profiles", "delivery-probe.md"),
+      [
+        "---",
+        "id: delivery-probe",
+        "kind: specialist",
+        "name: Delivery Probe",
+        "role: Implementation",
+        "backends:",
+        "  - claude",
+        "model: sonnet",
+        "stages:",
+        "  - impl",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb: []",
+        "capabilities:",
+        "  - capabilityId: execute-code-or-write-repo",
+        "    mode: direct",
+        "---",
+        "",
+        "A probe.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const deployed = await call(ids.projectAdmin, "deploy_agent", {
+      profileId: "delivery-probe",
+    });
+    // CANARY: restore the unconditional "Delivery starts withheld" tail and
+    // this reads as a profile that cannot touch the repo, on one that can.
+    expect(deployed).toContain("[done] Delivery Probe deployed");
+    expect(deployed).toContain("It carries repo write from the template");
+    expect(deployed).not.toContain("Delivery starts withheld");
   });
 
   it("granting by the id a read tool returned stores the KEY, not the id", async () => {

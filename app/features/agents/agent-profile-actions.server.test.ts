@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
@@ -57,5 +59,69 @@ describe("deployAgentProfileFromLibrary takes the template's effort (ruling 153)
       { dataRoot: store.dataRoot },
     );
     expect(overridden.applied?.effort).toBe("low");
+  });
+});
+
+/**
+ * Ruling 264 (pass 37, F37-94): a deploy reports the delivery posture it
+ * actually stored.
+ *
+ * Ruling 156 made a library deploy COPY the template's grants, and the shipped
+ * `developer` template carries `execute-code-or-write-repo: direct` — so on the
+ * live instance a deploy of it produces a profile that can write the repo,
+ * while `deploy_agent` answered "Delivery starts withheld; open it up with
+ * update_agent_deployment when the profile should write the repo" every single
+ * time. That sentence is read by the one person whose next decision (engage it
+ * as the deliverer, or not) turns on the answer.
+ */
+describe("deployAgentProfileFromLibrary reports the delivery it stored (ruling 264)", () => {
+  /** Write a global template file directly: `saveGlobalAgentProfile` has no
+   *  capability field, and the grants are the whole point here. */
+  function writeTemplate(dataRoot: string, id: string, repoWrite: boolean): void {
+    const caps = repoWrite
+      ? "capabilities:\n  - capabilityId: execute-code-or-write-repo\n    mode: direct\n"
+      : "capabilities:\n  - capabilityId: report-validation-verdict\n    mode: direct\n";
+    writeFileSync(
+      path.join(dataRoot, "agents", "profiles", `${id}.md`),
+      `---\nid: ${id}\nkind: specialist\nname: ${id}\nrole: Implementation\nbackends:\n  - claude\nmodel: sonnet\nstages:\n  - impl\nresources:\n  skills: []\n  mcps: []\n  kb: []\n${caps}---\n\nA probe.\n`,
+      "utf8",
+    );
+  }
+
+  it("says GRANTED for a template that carries repo write, and WITHHELD for one that does not", async () => {
+    const store = setupTestStore(ctx);
+    seedDefaultAgentAssets(store.dataRoot);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const arda = { userId: store.users.arda.id, label: store.users.arda.email };
+    writeTemplate(store.dataRoot, "writer-probe", true);
+    writeTemplate(store.dataRoot, "reader-probe", false);
+
+    // CANARY: return a fixed "withheld" (or drop `result.delivery`) and the
+    // deploy reply goes back to promising delivery is off on a profile that
+    // can push to the repo the moment it is engaged.
+    const writer = await deployAgentProfileFromLibrary(
+      store.db,
+      { projectSlug: store.slug, profileId: "writer-probe" },
+      arda,
+      { dataRoot: store.dataRoot },
+    );
+    expect(writer.delivery).toBe("granted");
+
+    const reader = await deployAgentProfileFromLibrary(
+      store.db,
+      { projectSlug: store.slug, profileId: "reader-probe" },
+      arda,
+      { dataRoot: store.dataRoot },
+    );
+    expect(reader.delivery).toBe("withheld");
+
+    // The answer is read through the predicate the RUN is gated on, so the two
+    // cannot drift: the stored grants agree with the sentence.
+    const { deliveryWithheld } = await import("~/server/tasks/specialist-tool-policy");
+    const agents = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.agents;
+    const stored = (id: string) => agents.find((a) => a.profileId === id)!.capabilities;
+    expect(deliveryWithheld(stored("writer-probe"))).toBe(false);
+    expect(deliveryWithheld(stored("reader-probe"))).toBe(true);
   });
 });

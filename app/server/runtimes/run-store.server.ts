@@ -287,6 +287,30 @@ export function listRunsForTaskRows(
 }
 
 /**
+ * Ruling 265 (pass 37, F37-95): every run that is LIVE right now, across every
+ * project, newest first.
+ *
+ * `read_run_log` takes a run id and its own description could only say "e.g.
+ * from a task's console" — a place a model cannot look. Nothing in either
+ * toolkit enumerated run ids, so the one tool for reading a run's log was
+ * unreachable without a human reading an id off a screen and typing it in.
+ * Live, the controller knew from `instance_health` that five runs were going
+ * and had to read EVERY task on the board and pattern-match `waiting: "agent"`
+ * against timeline events to work out which five.
+ *
+ * Returns rows; the CALLER filters them by what its asker may see.
+ */
+export function listLiveRunRows(db: DatabaseSync): AgentRunRow[] {
+  // SAFETY: same `agent_runs` DDL guarantee as `getRun`.
+  return db
+    .prepare(
+      `SELECT * FROM agent_runs WHERE state IN ('queued', 'running')
+       ORDER BY created_at DESC, rowid DESC`,
+    )
+    .all() as AgentRunRow[];
+}
+
+/**
  * Map of agent profile id → the agent's DISPLAY NAME, drawn from its run rows
  * for a project (most-recent name wins). This is the authoritative source for
  * "what is this agent CALLED" when rendering a timeline/notification actor:

@@ -17,7 +17,9 @@ import type { JsonValue } from "~/features/runtime/runtime-types";
  * `instance_health` answers anyone (the health probe is unauthenticated by
  * design); `read_run_log` applies the run-log route's exact gate and answers
  * ONE not-visible sentence to a missing run, a forbidden project and a
- * forbidden conversation alike; `read_store_doc` is org-admin only.
+ * forbidden conversation alike; `list_runs` (ruling 265) answers the run ids
+ * that gate admits and silently drops the rest; `read_store_doc` is org-admin
+ * only.
  *
  * Fixture roles on viberr-core (demo seed): elif = project admin (org member),
  * arda = project admin + ORG admin, deniz = org member and a member of nothing.
@@ -302,7 +304,7 @@ function parsed<T>(schema: z.ZodType<T>, reply: string): T {
 // ------------------------------------------------------------ tool surface
 
 describe("the diagnostics surface is read-only and named for the mount", () => {
-  it("offers exactly the three read tools, under the viberr_ops tool names", async () => {
+  it("offers exactly the four read tools, under the viberr_ops tool names", async () => {
     const { buildControllerOpsMcp, CONTROLLER_OPS_MCP_NAME } = await import(
       "./controller-ops-mcp.server"
     );
@@ -313,11 +315,13 @@ describe("the diagnostics surface is read-only and named for the mount", () => {
     });
     expect(ops.tools.map((t) => t.name).sort()).toEqual([
       "instance_health",
+      "list_runs",
       "read_run_log",
       "read_store_doc",
     ]);
     expect(ops.allowedTools).toEqual([
       "mcp__viberr_ops__instance_health",
+      "mcp__viberr_ops__list_runs",
       "mcp__viberr_ops__read_run_log",
       "mcp__viberr_ops__read_store_doc",
     ]);
@@ -593,6 +597,120 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
     ).toBe(invisible(CONTROLLER_RUN));
   });
 
+});
+
+/**
+ * Ruling 265 (pass 37, F37-95): `read_run_log` takes a run id, and until this
+ * existed nothing in either toolkit produced one. Its own description could
+ * only point at "a task's console" — a place a model cannot look. Live, the
+ * controller knew from `instance_health` that five runs were going, could not
+ * learn which five, and read every task on the board matching `waiting:
+ * "agent"` against timeline events to reconstruct it.
+ */
+describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
+  const LIVE_RUN = "run_ops_live";
+  const HIDDEN_LIVE = "run_ops_live_hidden";
+
+  const RUNS_REPLY = z.object({
+    scope: z.string(),
+    runs: z.array(
+      z.object({
+        runId: z.string(),
+        projectSlug: z.string(),
+        taskKey: z.string(),
+        state: z.string(),
+        agent: z.string(),
+      }).loose(),
+    ),
+  });
+
+  beforeAll(async () => {
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id: LIVE_RUN,
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      threadId: "thread_ops_live",
+      role: "developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      agentName: "dev",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    // A live run in a project the asker below is not a member of: it must be
+    // ABSENT from the listing, not refused (a refusal would disclose it).
+    upsertRun(app.db, {
+      id: HIDDEN_LIVE,
+      projectSlug: "not-a-project-deniz-can-see",
+      taskKey: "X-1",
+      threadId: "thread_ops_hidden",
+      role: "developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      agentName: "dev",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+  });
+
+  it("lists the LIVE runs, and the id it returns is one read_run_log accepts", async () => {
+    const body = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs"),
+    );
+    expect(body.scope).toBe("live");
+    // CANARY: drop the `state IN ('queued','running')` filter in
+    // `listLiveRunRows` and the finished fixtures come back too, which is the
+    // listing being a history rather than "what is going right now".
+    expect(body.runs.map((r) => r.runId)).toContain(LIVE_RUN);
+    expect(body.runs.map((r) => r.runId)).not.toContain(PROJECT_RUN);
+    expect(body.runs.every((r) => r.state === "running" || r.state === "queued")).toBe(true);
+    // The point of the tool: the id it hands back is usable, in one hop.
+    const log = parsed(
+      RUN_LOG_REPLY,
+      await call(ids.projectAdmin, "read_run_log", { runId: body.runs[0]!.runId }),
+    );
+    expect(log.run.id).toBe(body.runs[0]!.runId);
+  });
+
+  it("a run in a project you cannot see is absent, never refused", async () => {
+    const body = parsed(RUNS_REPLY, await call(ids.nonMember, "list_runs"));
+    // CANARY: let `requireRunVisible` throw inside the listing (or drop the
+    // filter) and a non-member either learns a hidden project's slug or gets a
+    // refusal that proves a run exists there.
+    expect(body.runs.map((r) => r.runId)).not.toContain(HIDDEN_LIVE);
+    expect(JSON.stringify(body)).not.toContain("not-a-project-deniz-can-see");
+  });
+
+  it("a taskKey lists that task's runs, finished included, and needs its project", async () => {
+    const body = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
+    );
+    expect(body.scope).toBe(`${SLUG}/VIB-142`);
+    // This arm is how you reach the log of a run that ALREADY FAILED, so a
+    // terminal run has to be in it. CANARY: reuse the live filter here.
+    expect(body.runs.map((r) => r.runId)).toEqual(
+      expect.arrayContaining([LIVE_RUN, PROJECT_RUN, LONG_RUN]),
+    );
+    // Newest first, so the run a person just watched fail is at the top.
+    expect(body.runs[0]!.runId).toBe(LIVE_RUN);
+    // No binding on this server, so the missing argument is NAMED rather than
+    // answered with an empty list.
+    expect(await call(ids.projectAdmin, "list_runs", { taskKey: "VIB-142" })).toContain(
+      "Name projectSlug alongside taskKey",
+    );
+    // And the project gate answers out loud on this arm, because the listing
+    // was asked FOR a project.
+    expect(
+      await call(ids.nonMember, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
+    ).toContain("[denied]");
+  });
 });
 
 /**

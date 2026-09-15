@@ -5837,6 +5837,40 @@ by rewriting those paragraphs:*
     (`run-service.server.ts`, `specialist-run.server.ts`, `controller-toolkit.server.ts`,
     `operator-actions.server.ts`, `task-actions.server.ts`, `project.task.tsx`.)
 
+264. **A deploy reports the delivery posture it stored, not the one it used to store
+    (2026-09-15, pass 37; F37-94).** `deploy_agent` ended every successful reply with
+    "Delivery starts withheld; open it up with update_agent_deployment when the profile should
+    write the repo", and its own description promised the same. That was true when a library
+    deploy wrote the conservative grant set. Ruling 156 made the deploy COPY the template's own
+    grants, and the shipped `developer` template carries `execute-code-or-write-repo: direct` —
+    so on this instance a deploy of it produced a profile that can push to the repo the moment
+    it is engaged, under a sentence saying the opposite, read by the one person whose next
+    decision (engage it as the deliverer, or not) turns on the answer.
+    The reply is now read off the grants that were actually written, through `deliveryWithheld`
+    — the same predicate `codexRepoWriteAdvisory` and the run's own gate use, so the sentence
+    cannot drift from what the run is held to. One derivation, one answer.
+    (`agent-profile-actions.server.ts`, `specialist-tool-policy.ts`,
+    `controller-toolkit.server.ts`.)
+
+265. **A tool whose only argument nothing can produce is not a tool (2026-09-15, pass 37;
+    F37-95).** `read_run_log` takes a `runId`, and its description could only say where to find
+    one: "e.g. from a task's console" — a screen. Neither the controller's toolkit nor
+    `viberr_ops` enumerated a run id anywhere, so the one tool for reading why a run failed
+    was reachable only by a person reading an id off a page and typing it into a conversation.
+    `instance_health` makes the gap visible without closing it: it reports `runs: {cap, lane,
+    live, queued}` — four integers, correctly carrying no name, because that reading is what
+    the UNAUTHENTICATED health probe already serves. Live, the controller read `live: 5`, could
+    not learn which five, and reconstructed them by reading every task on the board and
+    matching `waiting: "agent"` against timeline events.
+    `list_runs` closes it in `viberr_ops`, beside the tool that needed it. With no arguments it
+    answers every LIVE run (running, or queued behind the cap) the asker can see, newest first;
+    with `projectSlug` + `taskKey` it answers that task's runs with the finished ones included,
+    which is how the log of a run that already failed is reached. The live listing DROPS a row
+    in a project the asker cannot see rather than refusing — a refusal would disclose that the
+    run exists — while the task arm refuses out loud, because that listing was asked for a
+    named project. It stays read-only, and it audits like every other diagnostics read.
+    (`controller-ops-mcp.server.ts`, `run-store.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and

@@ -19,7 +19,12 @@ import {
 } from "~/server/ops/health-snapshot.server";
 import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
-import { getRun, runLineStats } from "~/server/runtimes/run-store.server";
+import {
+  getRun,
+  listLiveRunRows,
+  listRunsForTaskRows,
+  runLineStats,
+} from "~/server/runtimes/run-store.server";
 import type { AgentRunRow } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
@@ -105,6 +110,12 @@ export const CONTROLLER_OPS_INSTRUCTIONS =
  */
 const DEFAULT_LOG_LINES = 200;
 const MAX_LOG_LINES = 500;
+
+/** Ruling 265: page bounds for `list_runs`. A live listing on a busy instance
+ *  is tens of rows, not thousands, and a task's whole run history is the other
+ *  arm — both are summaries, so the default is generous and the max is a stop. */
+const DEFAULT_RUN_ROWS = 50;
+const MAX_RUN_ROWS = 200;
 
 /** Uniform not-visible copy for a run: a run that does not exist and one the
  *  asker may not read answer identically, so a probe cannot walk run ids
@@ -194,16 +205,46 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
    * that matches nothing — answer the same sentence, so the reply never
    * discloses that a run exists or which project it belongs to.
    */
-  function requireRunVisible(row: AgentRunRow): void {
+  function runVisible(row: AgentRunRow): boolean {
     if (row.kind === "controller") {
-      if (canReadControllerRunLog(db, row, { id: user.id })) return;
-      throw new NotVisibleError(notVisibleRun(row.id));
+      return canReadControllerRunLog(db, row, { id: user.id });
     }
     try {
       requireVisible(row.project_slug, "read this run's log");
+      return true;
     } catch {
-      throw new NotVisibleError(notVisibleRun(row.id));
+      return false;
     }
+  }
+
+  function requireRunVisible(row: AgentRunRow): void {
+    if (!runVisible(row)) throw new NotVisibleError(notVisibleRun(row.id));
+  }
+
+  /** Ruling 265: one run, as `list_runs` reports it. Enough to decide which log
+   *  to read and what a run is doing, and nothing a `get_task` read would not
+   *  already tell the same asker. */
+  function runRow(row: AgentRunRow) {
+    return {
+      runId: row.id,
+      projectSlug: row.project_slug,
+      taskKey: row.task_key,
+      kind: row.kind,
+      agent: row.agent_name ?? row.agent_profile_id,
+      agentProfileId: row.agent_profile_id,
+      role: row.role,
+      backend: row.backend,
+      model: row.model,
+      state: row.state,
+      // Ruling 250's pair: the phase is the strip's header and the step is what
+      // the run is doing this second.
+      phase: row.phase,
+      step: row.step,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      turns: row.turns,
+      logLines: runLineStats(db, row.id).count,
+    };
   }
 
   add(
@@ -260,10 +301,66 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
 
   add(
     tool(
+      "list_runs",
+      "Agent runs you can see, as run ids `read_run_log` takes. With no arguments: every run that is LIVE right now across every project visible to you (running, or queued behind the concurrency cap), newest first — the answer to \"which runs are those\" when instance_health reports a live count. With `projectSlug` and `taskKey` together: that task's runs instead, finished ones included, newest first, which is how you reach the log of a run that already failed. Read-only, membership gated; a run in a project you cannot see is simply absent.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z
+          .string()
+          .optional()
+          .describe(
+            "List this task's runs (finished included) instead of the live ones. Needs projectSlug: this server holds no project binding.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .optional()
+          .describe(`Most rows to return, clamped to 1..${MAX_RUN_ROWS} (default ${DEFAULT_RUN_ROWS}).`),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string; limit?: number }) => {
+        const limit = Math.min(
+          Math.max(args.limit ?? DEFAULT_RUN_ROWS, 1),
+          MAX_RUN_ROWS,
+        );
+        if (args.taskKey) {
+          const slug = (args.projectSlug ?? "").trim();
+          if (!slug) {
+            // This server is not bound to a project (its other tools are
+            // instance-wide), so there is no slug to default to. Say which
+            // argument is missing rather than answering an empty list.
+            throw AppError.validation(
+              "Name projectSlug alongside taskKey: list_runs holds no project binding.",
+            );
+          }
+          // The project gate answers first and out loud: a task listing is
+          // asked FOR a project, so "you cannot see this project" is the true
+          // and useful refusal, not an empty list.
+          requireVisible(slug, "read this task's runs");
+          const rows = listRunsForTaskRows(db, slug, args.taskKey)
+            .filter(runVisible)
+            .reverse()
+            .slice(0, limit);
+          auditRead("list_runs", `${slug}/${args.taskKey}`);
+          return json({ scope: `${slug}/${args.taskKey}`, runs: rows.map(runRow) });
+        }
+        // The LIVE listing spans every project, so an invisible row is dropped
+        // rather than refused — the same posture `list_projects` takes.
+        const rows = listLiveRunRows(db).filter(runVisible).slice(0, limit);
+        auditRead("list_runs", "live");
+        return json({ scope: "live", runs: rows.map(runRow) });
+      }),
+    ),
+    "list_runs",
+  );
+
+  add(
+    tool(
       "read_run_log",
       `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
       {
-        runId: z.string().describe("The run id, e.g. from a task's console."),
+        runId: z
+          .string()
+          .describe("The run id, from list_runs (or a task's console)."),
         since: z
           .number()
           .int()

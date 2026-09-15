@@ -12,6 +12,7 @@ import {
   repairDeliveryGrants,
   type GrantCouplingNotice,
 } from "~/shared/capabilities";
+import { deliveryWithheld } from "~/server/tasks/specialist-tool-policy";
 import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -88,6 +89,15 @@ export interface ProfileSaveResult {
   /** Ruling 139: what the write actually stored for the run's backend, model
    *  and effort, so a reply has a source instead of restating the request. */
   applied?: { backend: RealBackend; model: string; modelLabel: string; effort: string };
+  /**
+   * Ruling 264 (pass 37, F37-94): whether the DEPLOYED grants let this profile
+   * write the repo, read back through the same predicate the runtime gates on
+   * (`isWithheld` over the delivery headline). Set by the library deploy,
+   * whose every reply used to promise "delivery starts withheld" — true only
+   * of a template with no grants of its own, since ruling 156 made the deploy
+   * COPY the template's grants.
+   */
+  delivery?: "granted" | "withheld";
 }
 
 export interface ProfileMutationContext {
@@ -702,6 +712,9 @@ export async function deployAgentProfileFromLibrary(
   }
   const result: ProfileSaveResult = { profileId, name: fm.name };
   if (applied) result.applied = applied;
+  // Ruling 264: read the answer off the grants that were actually written,
+  // through the predicate the RUN gates on, so the reply cannot drift from it.
+  result.delivery = deliveryWithheld(deployDelivery.grants) ? "withheld" : "granted";
   carryCouplingNotices(details, result, deployDelivery.notices);
   recordAudit(db, {
     action: "project.agent_profile.deployed",
