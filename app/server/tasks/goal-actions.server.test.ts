@@ -1718,7 +1718,7 @@ describe("ruling 192: getGoalView carries the task's live goal beside the declar
  * catalog moved to its own chain, and the only correction on offer was to
  * cancel the chain and rebuild every link.
  */
-describe("ruling 192: a live chain can be renamed", () => {
+describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", () => {
   it("renames the chain, rewrites the description, and says what a rename does NOT reach", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
@@ -1794,6 +1794,61 @@ describe("ruling 192: a live chain can be renamed", () => {
     );
   });
 
+  /**
+   * Ruling 267 (pass 37, F37-97). Every other `update_goal` op changes what a
+   * chain will DO, and a settled chain will do nothing — the terminal guard is
+   * right for all of them. `rename` changes only what it is CALLED, and a
+   * chain is named before the work is understood. Live: `goal-2` stayed
+   * "Identity and Catalog services" after catalog moved to goal-6 and `goal-4`
+   * stayed "Storefront and Admin surfaces" after admin moved to goal-7; both
+   * completed, so both were permanently wrong on a record people read to learn
+   * what was built, with no door anywhere to fix them.
+   */
+  it("ruling 267: a CANCELLED chain can still be renamed, and nothing else about it moves", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Identity and Catalog services",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const args = { projectSlug: SLUG, goalId: chain.goalId };
+    await updateGoal(app.db, { ...args, action: { op: "cancel" } }, actor, ctx);
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.status).toBe("cancelled");
+
+    // CANARY: restore `if (terminal) throw` on the rename arm and a settled
+    // chain's wrong name is wrong forever.
+    const renamed = await updateGoal(
+      app.db,
+      { ...args, action: { op: "rename", title: "Identity service" } },
+      actor,
+      ctx,
+    );
+    expect(renamed.message).toContain("renamed");
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.title).toBe("Identity service");
+    // The rename is a LABEL: the chain is still cancelled, and the history
+    // records the correction rather than the record changing silently.
+    expect(after.status).toBe("cancelled");
+    expect(after.history.some((h) => h.text.includes("Identity service"))).toBe(true);
+    // …and it says the truth about reach on a settled chain: nothing new will
+    // ever carry the new name.
+    expect(after.history[0]!.text).toContain("this chain is settled");
+
+    // Every OTHER op is still refused: the guard was not loosened generally.
+    for (const op of ["pause", "resume", "cancel"] as const) {
+      await expect(
+        updateGoal(app.db, { ...args, action: { op } }, actor, ctx),
+      ).rejects.toThrow(/cancelled/);
+    }
+  });
+
   it("refuses an empty title and a rename that names nothing, and no-ops a rename that changes nothing", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const actor = actorOf(orgAdminId, "arda@viberr.dev");
@@ -1826,26 +1881,6 @@ describe("ruling 192: a live chain can be renamed", () => {
     expect(getGoalView(SLUG, chain.goalId, ctx)!.history).toHaveLength(before.history.length);
   });
 
-  it("refuses to rename a settled chain", async () => {
-    const { createGoal, updateGoal } = await import("./goal-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
-    const ctx = { dataRoot: app.dataRoot };
-    const chain = await createGoal(
-      app.db,
-      {
-        projectSlug: SLUG,
-        title: "Doomed chain",
-        links: [{ title: "Only link", goal: "One. Done when merged." }],
-      },
-      actor,
-      ctx,
-    );
-    const args = { projectSlug: SLUG, goalId: chain.goalId };
-    await updateGoal(app.db, { ...args, action: { op: "cancel" } }, actor, ctx);
-    await expect(
-      updateGoal(app.db, { ...args, action: { op: "rename", title: "Too late" } }, actor, ctx),
-    ).rejects.toThrow(/cancelled/i);
-  });
 });
 
 /**

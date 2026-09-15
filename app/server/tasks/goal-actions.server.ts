@@ -448,7 +448,19 @@ export async function updateGoal(
       const by = actor.label;
       switch (op.op) {
         case "rename": {
-          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          // Ruling 267 (pass 37, F37-97): the ONE op a settled chain still
+          // takes. Every other op here changes what the chain will DO, and a
+          // completed or cancelled chain will do nothing — so the terminal
+          // guard is right for all of them. `rename` changes only what the
+          // chain is CALLED, and a chain is named before the work is
+          // understood: live, `goal-2` stayed "Identity and Catalog services"
+          // after catalog moved to goal-6, and `goal-4` stayed "Storefront and
+          // Admin surfaces" after admin moved to goal-7. Both completed, so
+          // both are permanently wrong on a record people read to learn what
+          // was built, with no door anywhere to fix them. Refusing an edit that
+          // changes no state and loses no history buys nothing and costs the
+          // truth of the record; the rename lands in the chain's history like
+          // any other, so nothing is rewritten silently.
           const title = op.title?.trim();
           const description = op.description?.trim();
           if (title === undefined && description === undefined) {
@@ -484,7 +496,9 @@ export async function updateGoal(
           return (
             `Goal ${parts.join(" and ")} by ${by}.` +
             (titleMoved
-              ? " Link tasks created before now keep the old name in their chain header."
+              ? terminal
+                ? " Every link task keeps the old name in its chain header; this chain is settled, so nothing new will carry the new one."
+                : " Link tasks created before now keep the old name in their chain header."
               : "")
           );
         }

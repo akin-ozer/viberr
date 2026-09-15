@@ -5895,6 +5895,25 @@ by rewriting those paragraphs:*
     hunks in full, including by its pre-rename name.
     (`pr-diff.server.ts`, `controller-toolkit.server.ts`.)
 
+267. **A settled chain's name can still be corrected (2026-09-15, pass 37; F37-97, amends
+    ruling 192).** Ruling 192 gave `update_goal` a `rename` op "while it is not terminal",
+    matching every other op in that switch. Every other op there changes what the chain will
+    DO, and a completed or cancelled chain will do nothing, so the guard is right for all of
+    them; `rename` changes only what the chain is CALLED. And a chain is named before the work
+    is understood, which is the whole reason ruling 192 added the op.
+    So the guard closed the window on ruling 192's own motivating example. `goal-2` still read
+    "Identity and Catalog services" after catalog moved to goal-6, and `goal-4` read
+    "Storefront and Admin surfaces" after admin moved to goal-7; both completed while the
+    controller believed, wrongly, that goals could not be renamed at all. By the time it tried,
+    the answer was `[error] Goal goal-2 is completed`, and those two titles are now permanently
+    wrong on a record people read to learn what was built. Refusing an edit that changes no
+    state, starts nothing and loses no history bought nothing.
+    `rename` is now the one op a settled chain takes. It lands in the chain's history like any
+    other, so nothing is rewritten silently, and on a settled chain it says the whole truth
+    about its reach: every link task keeps the old name in its header, and nothing new will
+    ever carry the new one.
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
 
 191. **Everyone who plans against the shell is told what the shell contains (owner,
     2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
@@ -5953,6 +5972,10 @@ by rewriting those paragraphs:*
     link. The rename says what it does not reach — link tasks created before it keep the old
     name in their chain header, written at create time and never re-read.
     (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
+    *(Corrected 2026-09-15 by ruling 267: "while it is not terminal" was symmetry with the
+    other ops, not a reason, and it left this ruling's own motivating example unfixable —
+    see 267.)*
 
 193. **A reviewer that cannot pass is a decision, not a defect (owner, 2026-09-13, pass 37;
     F37-14).** The turn doctrine had exactly one answer to a request-changes: "the deliverer
