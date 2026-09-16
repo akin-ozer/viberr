@@ -4857,6 +4857,41 @@ by rewriting those paragraphs:*
 
     (`authority-prompt.server.ts`, `controller-context.server.ts`, `controller-run.server.ts`.)
 
+310. **A run is told WHY its granted server did not arrive, and the reason is the one the
+    server gave (owner, 2026-09-16, pass 37; F37-145).** Both run prompts answered "your
+    profile grants this and it is not here" with a single hardcoded sentence — *"no such
+    server is in the org registry"* — for a condition with many causes. Neither prompt had
+    checked it. The mount verifier had already produced the real one and
+    `UnresolvedMcpGrant.reason` carries it under a comment that says exactly what it is for:
+    *"why it produced no usable tools, in words a human can act on"*. Six call sites then
+    did `.map((u) => u.name)` and dropped it.
+    Found live, and the invented cause was FALSE. On SHOP-55 the Platform Architect reported
+    that the `kb-architecture` MCP server *"is not in the org registry"* — faithfully
+    relaying what viberr had put in its prompt — and the operator checked and corrected the
+    record in its packet: *"That is wrong: it IS registered and IS granted to the Platform
+    Architect profile — it simply was not mounted on that run."* So a reader was sent after
+    a registration bug that did not exist, and whatever actually went wrong went unreported.
+    This is the failure ruling 303 is about, arrived at from the other direction: 303 was an
+    error that said nothing, this is an error that said something specific and untrue. A
+    manufactured diagnosis is worse than none, because it is actionable.
+    `unavailableMcpSection` is one renderer for both surfaces, for the same reason ruling
+    296 and 303 live in `strict-tool.server.ts`: two prompts describing one fact in their
+    own words is how the sentence came to state a cause at all. It lists each grant with the
+    reason its own probe returned, and closes the inference the old sentence invited — do
+    not infer a cause, and do not assume the grant or the registration is missing unless the
+    reason says so.
+    The run RECORD still keeps names; the reasons ride the prompt, where the agent that has
+    to report the gap can read them. (The KB and skill misses have carried name-and-reason
+    on that record since C1, which is the asymmetry that made the MCP path's silence easy
+    to miss.)
+    Canaries: restoring the hardcoded cause, dropping the per-server reason lines, removing
+    the do-not-infer instruction, and having the renderer substitute a sentence of its own
+    all go red. The last of those is the one that matters — it binds the RESOLVER's words to
+    the rendered text, because a test that hands the renderer its own fixture proves only
+    that the renderer can print.
+
+    (`specialist-mcp.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

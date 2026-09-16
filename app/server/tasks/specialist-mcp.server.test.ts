@@ -12,6 +12,7 @@ import {
 import {
   resolveSpecialistMcpServers,
   resolveSpecialistMcpServersDetailed,
+  unavailableMcpSection,
   verifyStdioMcpMountsForRun,
 } from "./specialist-mcp.server";
 
@@ -187,6 +188,46 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     expect(resolved.servers).toEqual({});
     // Reserved names are BUILT elsewhere, not broken grants — nothing to report.
     expect(resolved.unresolved).toEqual([]);
+  });
+
+  /**
+   * Ruling 310. Both run prompts used to answer "why is my granted server not
+   * here?" with one hardcoded sentence — "no such server is in the org
+   * registry" — asserting a cause neither had checked. The resolver had already
+   * produced the real one, and `UnresolvedMcpGrant.reason` documents itself as
+   * "why it produced no usable tools, in words a human can act on".
+   *
+   * Live on SHOP-55 the invented cause was FALSE: a Platform Architect reported
+   * a knowledge-base server as unregistered, and the operator verified it was
+   * both registered and granted. The reader was sent after a registration bug
+   * that did not exist.
+   *
+   * This binds the two ends: the resolver states a reason, and the renderer
+   * prints THAT reason rather than a sentence of its own.
+   */
+  it("ruling 310: an unresolved grant carries a reason, and the prompt prints that reason", () => {
+    const store = setupTestStore(ctx);
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, ["ghost-server"]);
+    expect(resolved.servers).toEqual({});
+    expect(resolved.unresolved).toHaveLength(1);
+    const [grant] = resolved.unresolved;
+    expect(grant!.name).toBe("ghost-server");
+    expect(grant!.reason.length).toBeGreaterThan(0);
+
+    const section = unavailableMcpSection(resolved.unresolved);
+    // CANARY: put the hardcoded cause back in the renderer and this fails,
+    // because the rendered text would no longer be the resolver's own words.
+    expect(section).toContain(`- ghost-server: ${grant!.reason}`);
+    expect(section).toContain("Unavailable MCP servers");
+    // And it must not tell the agent to infer a cause the server never gave.
+    expect(section).toContain("do not infer one");
+    expect(section).toContain(
+      "do not assume the grant or the registration is missing unless the reason says so",
+    );
+  });
+
+  it("ruling 310: an empty list renders nothing at all, not an empty heading", () => {
+    expect(unavailableMcpSection([])).toBe("");
   });
 
   it("R19-19: skips `viberr_browser` — the browser is capability-mounted, never an org row", () => {

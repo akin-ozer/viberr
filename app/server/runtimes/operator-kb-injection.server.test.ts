@@ -442,12 +442,18 @@ describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
       servers: {},
       mounted: [],
-      unresolved: ["ghost-mcp"],
+      unresolved: [{ name: "ghost-mcp", reason: "no server by that name is in the org registry" }],
       unhealthy: [],
       toolDenials: [],
     });
     expect(prompt).not.toContain("Attached MCP servers: ghost-mcp");
     expect(prompt).toContain("No MCP servers are attached to you.");
+    // Ruling 310: the operator reads the SAME sentence the specialist does,
+    // from one renderer, carrying the reason the server gave rather than a
+    // cause the prompt invented. The two saying different things about the
+    // same fact is how the invented cause survived in both for so long.
+    expect(prompt).toContain("no server by that name is in the org registry");
+    expect(prompt).toContain("do not assume the grant or the registration is missing");
     expect(prompt).toContain("Unavailable MCP servers");
     expect(prompt).toContain("Do not claim or attempt tools");
   });

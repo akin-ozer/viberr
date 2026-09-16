@@ -2590,7 +2590,9 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       profileId: "scout",
       skills: [],
       mcps: ["everything-http"],
-      unresolvedMcps: ["vm-memory"],
+      unresolvedMcps: [
+        { name: "vm-memory", reason: "the server exited before it listed any tools" },
+      ],
     });
     // What mounted is offered…
     expect(persona).toContain("everything-http");
@@ -2598,6 +2600,12 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(persona).toContain("Unavailable MCP servers");
     expect(persona).toContain("vm-memory");
     expect(persona).toContain("NOT mounted on this run");
+    // Ruling 310: with the reason the server itself gave. The prompt used to
+    // assert one cause for every miss — "no such server is in the org
+    // registry" — which it had never checked; live on SHOP-55 that sentence
+    // was false and an agent relayed it to a human as fact.
+    expect(persona).toContain("the server exited before it listed any tools");
+    expect(persona).not.toContain("no such server is in the org registry");
   });
 
   it("the workspace contract names the attachments-drop exception when granted", () => {

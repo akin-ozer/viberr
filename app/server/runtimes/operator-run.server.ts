@@ -89,6 +89,8 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
+  unavailableMcpSection,
+  type UnresolvedMcpGrant,
 } from "~/server/tasks/specialist-mcp.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server";
@@ -3308,7 +3310,7 @@ export interface OperatorMcpResolution {
   /** Portable `mcpServers` configs, keyed by server name. */
   servers: Record<string, SpecialistMcpServerConfig>;
   mounted: string[];
-  unresolved: string[];
+  unresolved: UnresolvedMcpGrant[];
   unhealthy: string[];
   /** Ruling 176: the mounted servers' marked write tools. The operator never
    *  writes, so every operator run withholds them. */
@@ -3342,7 +3344,7 @@ async function operatorMcpResolution(
   return {
     servers,
     mounted: Object.keys(servers),
-    unresolved: unresolved.filter((u) => !u.mounted).map((u) => u.name),
+    unresolved: unresolved.filter((u) => !u.mounted),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials,
   };
@@ -3677,16 +3679,10 @@ export function buildOperatorSystemPrompt(
         "they are missing, say so rather than treating it as your own error.",
     );
   }
-  if (mcp.unresolved.length > 0) {
-    const [it, they] =
-      mcp.unresolved.length === 1 ? ["it is", "it"] : ["they are", "them"];
-    parts.push(
-      "\n\n---\n# Unavailable MCP servers\n\n" +
-        `Your profile grants ${mcp.unresolved.join(", ")}, but ${it} NOT mounted on ` +
-        `this run — no such server is in the org registry. Do not claim or ` +
-        `attempt tools from ${they}; report the gap instead.`,
-    );
-  }
+  // Ruling 310: one renderer with the specialist, and the reason the server
+  // itself gave rather than a cause neither prompt ever checked.
+  const unavailable = unavailableMcpSection(mcp.unresolved);
+  if (unavailable) parts.push(unavailable);
   // C1: the surviving half of the silent-resource class, closed for the
   // operator too. An MCP grant that resolved to nothing has reached the prompt
   // as a structured miss since P14-LV-09, but a KB or skill grant that resolved

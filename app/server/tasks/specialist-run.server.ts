@@ -153,6 +153,8 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
+  unavailableMcpSection,
+  type UnresolvedMcpGrant,
 } from "./specialist-mcp.server";
 import {
   BROWSER_MCP_NAME,
@@ -297,8 +299,8 @@ function deploymentGrants(
 interface RunMcpMounts {
   /** The portable configs to mount — ABSENT when nothing resolved. */
   mcpServers?: Record<string, SpecialistMcpServerConfig>;
-  /** Grants that reached NO server. */
-  unresolved: string[];
+  /** Grants that reached NO server, each with the reason IT gave (ruling 310). */
+  unresolved: UnresolvedMcpGrant[];
   /** Grants that mounted but whose last health probe failed. */
   unhealthy: string[];
   /** Ruling 176: the mounted servers' marked write tools this run withholds. */
@@ -333,7 +335,7 @@ async function mcpServersFor(
   const mounts: RunMcpMounts = {
     // Only the grants that reached NO server; a mounted-but-unhealthy one is
     // reported separately so the prompt can say which is which (P14-LV-09b).
-    unresolved: unresolved.filter((u) => !u.mounted).map((u) => u.name),
+    unresolved: unresolved.filter((u) => !u.mounted),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials: resolution.toolDenials,
   };
@@ -2256,7 +2258,9 @@ async function dispatchAgentRun(
         nativeSkills: skillMount.mounted,
         kb,
         mountedMcps: Object.keys(mergedMcpServers),
-        unresolvedMcps: resolvedMcps.unresolved,
+        // The run RECORD keeps names; the reasons ride the prompt (ruling 310)
+        // and the KB/skill misses already have their own name+reason list here.
+        unresolvedMcps: resolvedMcps.unresolved.map((u) => u.name),
         unhealthyMcps: resolvedMcps.unhealthy,
         mcpWriteToolsDenied: resolvedMcps.toolDenials,
         unresolvedResources,
@@ -2747,7 +2751,7 @@ export interface SpecialistPersonaInput {
   /** MCP servers mounted for this run — used for the governance rule below. */
   mcps?: string[];
   /** Declared MCP grants that resolved to NO server (P14-LV-09). */
-  unresolvedMcps?: string[];
+  unresolvedMcps?: readonly UnresolvedMcpGrant[];
   /** Mounted, but the last health check failed (P14-LV-09b). */
   unhealthyMcps?: string[];
   /** Ruling 176: the mounted org servers whose marked write tools this run
@@ -3008,17 +3012,9 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
         `they are missing, say so rather than treating it as your own error.`,
     );
   }
-  const unresolved = input.unresolvedMcps ?? [];
-  if (unresolved.length > 0) {
-    const [it, they] =
-      unresolved.length === 1 ? ["it is", "it"] : ["they are", "them"];
-    parts.push(
-      "\n\n---\n# Unavailable MCP servers\n\n" +
-        `Your profile grants ${unresolved.join(", ")}, but ${it} NOT mounted on ` +
-        `this run — no such server is in the org registry. Do not claim or ` +
-        `attempt tools from ${they}; report the gap in your findings instead.`,
-    );
-  }
+  // Ruling 310: the reason the server itself gave, not a cause we invented.
+  const unavailable = unavailableMcpSection(input.unresolvedMcps ?? []);
+  if (unavailable) parts.push(unavailable);
   // R19-19: the browser guardrails ride the prompt ONLY when the server
   // mounted; a granted-but-refused browser is named with its reason instead.
   // The drop section rides with the EVIDENCE grant, before the browser text:
@@ -3626,7 +3622,7 @@ export async function resolveResumeConfinement(
         ...Object.keys(mcpServers),
         ...(resumeBrowser.server ? [BROWSER_MCP_NAME] : []),
       ],
-      unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
+      unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
       mcpWriteToolsDenied: resumeMcps.toolDenials,
       // Ruling 159: the absolute dir, exactly as the fresh path hands it.
@@ -3729,7 +3725,9 @@ export async function resolveResumeConfinement(
         nativeSkills: skillMount.mounted,
         kb,
         mountedMcps: Object.keys(merged),
-        unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted).map((u) => u.name),
+        unresolvedMcps: resumeMcps.unresolved
+          .filter((u) => !u.mounted)
+          .map((u) => u.name),
         unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
         mcpWriteToolsDenied: resumeMcps.toolDenials,
         unresolvedResources: resumeUnresolved,
