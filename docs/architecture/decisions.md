@@ -4836,7 +4836,24 @@ by rewriting those paragraphs:*
     preamble because *"my preamble asserts your org role as prose fixed at conversation
     start"*. It is not. `buildControllerSystemPrompt` runs every turn and
     `resources.controller.ts` passes `auth.user.role` from `requireUser`, which loads the
-    canonical `users` row per request. A demotion reaches the next turn already.
+    canonical `users` row per request. A demotion reaches the next turn already. Its own
+    reading of the error is the useful part: *"I inferred it from how chat systems are
+    generally built, not from anything I'd observed about viberr, and then asserted it as a
+    property of your pipe. That is the same error as the prose-summary one, one level up."*
+    A LAST LINE, ADDED AFTER SHIPPING, because the fix creates a hazard of its own. Most
+    of the refusals in the hand-written half are not about tier at all — archived, disabled,
+    non-member, name taken — and the block hands the model tier VOCABULARY. The controller
+    saw it first: *"'you need maintainer, ask a project admin' isn't an incomplete
+    explanation, it's a false one, and the table will actively tempt me toward it... the
+    thing to watch for isn't 'I hit a denial I couldn't explain in tier terms', it's 'I
+    explained a denial in tier terms when tier was never the gate'."* So the block ends by
+    saying that a refusal whose own words name no role was not stopped by one, that the
+    model must not supply one from the list, and why: a person sent to fix the wrong gate
+    is worse off than one told nothing.
+    A measurement this leaves available, recorded and not run: the audit log plus the
+    generated list is an offline diff — every permitted action against what the list
+    predicts. It checks the generated half automatically and cannot touch the exceptions,
+    which is exactly where the risk is.
 
     (`authority-prompt.server.ts`, `controller-context.server.ts`, `controller-run.server.ts`.)
 

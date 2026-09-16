@@ -78,6 +78,17 @@ describe("projectAuthorityPrompt", () => {
     expect(text).toMatch(/MAKE THE CALL ANYWAY/);
   });
 
+  it("forbids explaining a non-role refusal in role terms", () => {
+    // The hazard the fix itself creates, which the controller named on the turn
+    // after it shipped: "your exception list tells me what the unexplainable
+    // refusals will be... for those, 'you need maintainer, ask a project admin'
+    // isn't an incomplete explanation — it's a false one, and the table will
+    // actively tempt me toward it, because tier is the vocabulary it hands me."
+    // A person sent to fix the wrong gate is worse off than one told nothing.
+    expect(text).toContain("it was not a role that stopped it");
+    expect(text).toContain("do not supply one from here");
+  });
+
   it("marks the hand-maintained half as hand-maintained", () => {
     // The tiers are generated and cannot drift. The exceptions are prose, and
     // prose next to a generated table inherits its credibility without earning

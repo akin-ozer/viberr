@@ -140,7 +140,15 @@ export function projectAuthorityPrompt(): string {
     "What it is genuinely for: not offering what will be refused, ordering a " +
     "multi-step request so the step most likely to be refused goes first, and " +
     "explaining a denial well enough to act on — which tier is missing, and who " +
-    "could do it instead."
+    "could do it instead.\n\n" +
+    "One way this list can make you WORSE, so watch for it. It hands you tier " +
+    "vocabulary, and most of the refusals above are not about tier: an archived " +
+    "project, a disabled account, a non-member, a name already taken. If a " +
+    "refusal's own words do not name a role, it was not a role that stopped it — " +
+    "do not supply one from here. Report what the server said and name the gate " +
+    "you could not identify. \"You need maintainer, ask an admin\" is not an " +
+    "incomplete explanation of an archived-project refusal, it is a false one, and " +
+    "it sends the person to fix the wrong thing."
   );
 }
 
