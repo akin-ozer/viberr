@@ -257,6 +257,44 @@ describe("controller mounts (ruling 107)", () => {
     expect(prompt).toContain("do not infer a cause the server did not give");
   });
 
+  /**
+   * Ruling 312. The controller's tool descriptions cite "ruling N" forty-one
+   * times, meaning VIBERR's own product decisions — which no run can read. A
+   * project's rulings knowledge base numbers its rules from 1, and operator
+   * directives on a live board cite those as "ruling 1", "ruling 4". Two
+   * namespaces, one word, neither marked; no collision today only because every
+   * viberr ruling happens to be ≥107.
+   *
+   * The controller found it auditing its own prompt for claims that do not say
+   * where they came from: "the product rulings are cited AT me as authority and
+   * I cannot read a single one. A citation that looks like it points somewhere
+   * consultable, and doesn't, is a soft version of the same class."
+   */
+  it("ruling 312: says which ruling namespace a tool description means", async () => {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+    });
+    const prompt = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: resolveControllerConfig(app.dataRoot),
+      mountedMcps: [],
+      unresolvedMcps: [],
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: drop the paragraph and "ruling 4" in a task directive and
+    // "ruling 246" in a tool description read as the same numbering.
+    expect(prompt).toContain("is Viberr's own product decision");
+    expect(prompt).toContain("not readable from here");
+    expect(prompt).toContain("number from 1");
+    // And it must say what to do about it, not merely that the hazard exists.
+    expect(prompt).toContain("name the document and the section rather than a bare number");
+  });
+
   it("tells the model the diagnostics are attached, on every turn", async () => {
     const { buildControllerSystemPrompt } = await import(
       "./controller-run.server"

@@ -4954,6 +4954,34 @@ by rewriting those paragraphs:*
 
     (`specialist-run.server.ts`.)
 
+312. **Two ruling namespaces, one word, and the prompt now says which (owner, 2026-09-16,
+    pass 37; F37-147).** Forty-one of the controller's tool descriptions cite "ruling N"
+    meaning VIBERR's own product decisions — the numbers in this very file — and a run can
+    read none of them. Meanwhile a project's rulings knowledge base numbers its own rules
+    from 1, and operator directives on the live board cite those as "ruling 1", "ruling 4",
+    inside task instructions. Nothing anywhere said which numbering a given citation meant.
+    The controller found it auditing its own prompt for claims that do not say where they
+    came from — the habit ruling 309's provenance seam taught it — and was right about why
+    it is not yet broken: *"There is no collision today only because every product ruling
+    happens to be ≥107. That's luck. The day one is numbered under eleven, 'ruling 4
+    reserves that to a stack-owned task' becomes genuinely ambiguous to every agent reading
+    it."*
+    Its second half is the part that makes this the same family rather than a naming nit:
+    *"the product rulings are cited AT me as authority and I cannot read a single one. A
+    citation that looks like it points somewhere consultable, and doesn't, is a soft version
+    of the same class."* Not false — unfollowable, which is its own dead end.
+    The prompt now says it above the tool manifest: a ruling number in a tool description is
+    Viberr's own decision, not readable from a run and not a project's rule; a project's
+    rules live in its knowledge base and number from 1; and cite a project's rule by
+    document and section rather than a bare number. That last part codifies a practice the
+    board had already invented for itself — the operator wrote "conventions §4" in a quality
+    entry the same hour.
+    Scoped to the controller deliberately: the operator's and the specialist's tool
+    descriptions cite no viberr ruling at all (checked, zero matches), so only this surface
+    has the collision.
+
+    (`controller-run.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
