@@ -233,9 +233,18 @@ export function resolveSpecialistMcpServersDetailed(
   for (const name of mcpNames) {
     // Built in-process, not a grant: the toolkit/browser/controller servers
     // mount by capability, so a grant naming one changes nothing in either
-    // direction and is NOT reported as unresolved — the persona's "unavailable
-    // servers" copy ("no such server in the org registry") would be false for
-    // a server that IS mounted (C02-R5, pass 32: deliberate, pinned in tests).
+    // direction and is NOT reported as unresolved — reporting a server that IS
+    // mounted as unavailable would be false (C02-R5, pass 32: deliberate,
+    // pinned in tests).
+    //
+    // Ruling 310: pass 32 wrote this exclusion because it saw that the
+    // persona's one hardcoded sentence — "no such server is in the org
+    // registry" — would be a lie here, and it fixed the case rather than the
+    // sentence. The sentence was already a lie for two other reasons this same
+    // loop produces (an unreadable credential, a server that fails to start),
+    // and it stayed one until an agent relayed it to a human as fact. The
+    // prompt now carries whatever `drop` was told, so this exclusion stands on
+    // its own merits and no longer props up a false sentence.
     if (RESERVED_MCP_NAMES.has(name)) continue;
     const row = byName.get(name);
     if (!row || !row.target) {

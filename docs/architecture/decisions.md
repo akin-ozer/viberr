@@ -4874,6 +4874,12 @@ by rewriting those paragraphs:*
     This is the failure ruling 303 is about, arrived at from the other direction: 303 was an
     error that said nothing, this is an error that said something specific and untrue. A
     manufactured diagnosis is worse than none, because it is actionable.
+    THE CODE ALREADY KNEW. Pass 32 (C02-R5) wrote an exclusion into the resolver with this
+    comment: the persona's copy *"would be false for a server that IS mounted"*. It saw the
+    sentence lying, and fixed the CASE rather than the sentence — while the same loop was
+    already producing two other reasons the sentence was equally false for (an unreadable
+    credential, a server that fails to start). A known-false sentence with a documented
+    exception is a bug with a note attached, and it survived four passes that way.
     `unavailableMcpSection` is one renderer for both surfaces, for the same reason ruling
     296 and 303 live in `strict-tool.server.ts`: two prompts describing one fact in their
     own words is how the sentence came to state a cause at all. It lists each grant with the
