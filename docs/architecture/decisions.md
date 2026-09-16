@@ -4329,6 +4329,8 @@ by rewriting those paragraphs:*
     once — and the `copied` flag is keyed by WHICH button copied, because one boolean made
     both read "Copied" at once on the one backend that shows both.
 
+    (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
+
 295. **A task's title is a claim, so it can be corrected like one (owner, 2026-09-16,
     pass 37; F37-130).** Viberr wrote a title once, at creation, and then never again by
     anyone: not the controller, not the task page, not an operator. `updateTaskGoal` wrote
@@ -4669,6 +4671,17 @@ by rewriting those paragraphs:*
     not telling them. The pill existed and was rendered one panel up on the same page
     (`task-side-panels.tsx`), so the dialog's `AcceptConfirmTask` simply never carried the
     field.
+    Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
+    requests were accepted and merged carrying three failing checks each, and the ceremony
+    named the PR, the branch, the base, the verdict and the skipped stages without once
+    mentioning them. Ruling 246's rule decides it: name the door AND say whether it is
+    open.
+    The row appears ONLY when the checks are not green, because a row that fires on a pass
+    is noise on the screen that most needs reading, and it carries the sentence that keeps
+    it from reading as a block: checks are not a gate here, so merging anyway is your call.
+    Pending says the merge does not wait. Nothing reported stays silent rather than
+    rendering as green, which is the same rule `wire-format.server` already states for that
+    field.
 
 305. **A whole-document replace names the version it read (owner, 2026-09-16, pass 37;
     F37-140).** Ruling 257's guard asks whether a knowledge-base document EXISTS, and
@@ -4762,19 +4775,70 @@ by rewriting those paragraphs:*
     local. Grouping on `task_key` alone would collapse two projects' `A-1` into one row
     belonging to neither, which is the failure this ruling is about wearing a different
     hat: a number presented as an answer to a question it is not the answer to.
-    Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
-    requests were accepted and merged carrying three failing checks each, and the ceremony
-    named the PR, the branch, the base, the verdict and the skipped stages without once
-    mentioning them. Ruling 246's rule decides it: name the door AND say whether it is
-    open.
-    The row appears ONLY when the checks are not green, because a row that fires on a pass
-    is noise on the screen that most needs reading, and it carries the sentence that keeps
-    it from reading as a block: checks are not a gate here, so merging anyway is your call.
-    Pending says the merge does not wait. Nothing reported stays silent rather than
-    rendering as green, which is the same rule `wire-format.server` already states for that
-    field.
 
-    (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
+309. **The controller is told what the person may do, and what a role means (owner,
+    2026-09-16, pass 37; F37-144).** The controller's prompt says "their LIVE permissions
+    are the ceiling for everything you do here" and then names their ORG role — which
+    decides nothing on a board. The role that decides everything is the PROJECT role, and
+    in the two bound scopes, the ones a person is standing in when they ask for something,
+    the turn context named it nowhere. Ruling 307 had given it per project to the instance
+    scope, where it matters least.
+    The second half is worse and was invisible: viberr's authorization map reached the
+    model NOWHERE. Not the prompt; not `whoami`, which returns a tier NAME; not
+    `list_capabilities`, which is the agent capability catalogue and a different axis
+    entirely. So a round trip bought the word "contributor" and the meaning still came out
+    of the model's prose memory. Asked on a live task what the person in front of it could
+    do, the controller answered correctly and then said how: *"your project role was not in
+    anything I had... I bridged that gap with a rule from my playbook. That rule is real,
+    so my answer lands correctly — but I reached it by policy reasoning, not by reading
+    your role"*, and on the map, *"that is documentation, not the server's live
+    authorization table"*. Its summary of the class: **"the task file is over-supplied and
+    the actor is under-supplied."**
+    The cost is not a wrong sentence. It is an OFFER that cannot be kept, and a fan-out —
+    create, invite, deploy, set policy — that stops at step four leaving a half-built
+    board. The tier list is GENERATED from `RBAC_DEFINITIONS`, for the reason `rbac.ts`
+    already gives for rendering the Policy page from the same object: one source, so
+    display and enforcement cannot drift. A hand-written summary in a prompt is that drift.
+    Three things the controller argued for, against the version first put to it, and was
+    right about each:
+    IT IS ADVISORY, NEVER ENFORCING, and the prompt says so in those words. *"A table in my
+    prompt creates a second authorization evaluator that can disagree with the first... if
+    I start pre-refusing on that basis, I convert a server [denied] — authoritative,
+    audited, correct at the instant of the write — into a controller refusal that is none
+    of those three."* So: predict the refusal, say why, **make the call anyway**, and let
+    the server's answer be the answer.
+    THE FACTORS STAY SEPARATE. The obvious alternative was for the server to compute the
+    asking person's held and not-held sets and hand over only those — shorter, and
+    impossible to mis-apply. It is also the answer with the reasoning deleted: *"when it
+    tells me I don't hold `set_file_leases`, I cannot tell you why: whether it's maintainer
+    or project admin that's missing, whether promoting someone one tier fixes it or only
+    two."* Every question about GRANTING a role is a question about a tier other than the
+    asker's, and a set describing only the asker cannot answer one. The static list says
+    what a role holds, the live read says which role this is, and the model multiplies.
+    THE HAND-WRITTEN HALF SAYS IT IS HAND-WRITTEN. *"Is the exception text also generated,
+    or hand-written prose sitting next to a generated table? If it's hand-written, it is
+    the new prose summary — same failure mode as today, now with a generated table's
+    credibility lending it authority."* The exceptions live in code paths, not in a table,
+    so they cannot be generated; the block therefore marks where generation stops, and
+    `authorityTiers` throws rather than emit a tier list if `RBAC_DEFINITIONS` ever stops
+    being monotonic over the tier — the invariant `rbac.ts` asserts in prose and nothing
+    checked.
+    What it does NOT close, in the controller's accounting: the fan-out has three causes
+    and this addresses one. State-dependent denials (a name already taken, a task key that
+    does not exist) are a different gate, and *derived* authority is a different problem
+    again — `create_project` makes its creator that project's admin, so step one changes
+    the authority steps two through four are judged against, which no turn-start snapshot
+    can model. Its own prescription there is not a feature: *"don't check a chain, don't
+    undo a chain, don't have a chain"* — make genuinely compound operations single calls
+    the server applies as a unit — plus reporting exactly which steps landed when one does
+    not. Recorded, not built.
+    One amendment it asked for was REFUSED on the facts: moving the org role out of the
+    preamble because *"my preamble asserts your org role as prose fixed at conversation
+    start"*. It is not. `buildControllerSystemPrompt` runs every turn and
+    `resources.controller.ts` passes `auth.user.role` from `requireUser`, which loads the
+    canonical `users` row per request. A demotion reaches the next turn already.
+
+    (`authority-prompt.server.ts`, `controller-context.server.ts`, `controller-run.server.ts`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on

@@ -3,6 +3,8 @@ import {
   assertProjectAction,
   isOrgAdmin,
 } from "~/server/auth/project-authority.server";
+import { askerAuthorityLine } from "~/server/auth/authority-prompt.server";
+import type { ProjectRole } from "~/shared/rbac";
 import { listUsers } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, type TaskFileRef } from "~/server/files/task-writer.server";
@@ -241,11 +243,36 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
   return `- ${bits.join(" · ")}`;
 }
 
+/**
+ * Ruling 309: the asking person's live role on the bound project.
+ *
+ * `instanceContext` has named it per project since ruling 307 and the two
+ * bound scopes — the ones a person is actually standing in when they ask for
+ * something — named nothing. The controller is told "their live permissions are
+ * the ceiling for everything you do here" and then given their ORG role, which
+ * decides nothing on a board. Asked on a live task what the person in front of
+ * it could do, it answered correctly and said how: "your project role was not in
+ * anything I had... I bridged that gap with a rule from my playbook", at the
+ * cost of a `whoami` round trip before it could help at all.
+ *
+ * One indexed read on the same projection the membership gate resolves.
+ */
+function askerRole(db: DatabaseSync, slug: string, userId: string): string {
+  // SAFETY: `project_members` declares both columns TEXT NOT NULL with a CHECK
+  // constraint on `role` (0001_baseline); this selects the one row for a
+  // (project, user) pair, which is the table's primary key.
+  const row = db
+    .prepare(`SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`)
+    .get(slug, userId) as { role: ProjectRole } | undefined;
+  return askerAuthorityLine(row?.role ?? null, isOrgAdmin(db, userId));
+}
+
 function taskContext(
   db: DatabaseSync,
   slug: string,
   key: string,
   dataRoot: string | undefined,
+  authority: string,
 ): string {
   const ref: TaskFileRef = { projectSlug: slug, taskKey: key };
   if (dataRoot) ref.dataRoot = dataRoot;
@@ -282,6 +309,7 @@ function taskContext(
     `stage: ${stageNameOf(stages, summary.stage)}${stageIndex >= 0 ? ` (${stageIndex + 1} of ${stages.length})` : ""} · readiness: ${summary.readiness} · waiting: ${summary.waiting} · validation: ${summary.validation}`,
     `owner: ${ownerName(summary)} · priority: ${summary.priority}${summary.dueDate ? ` · due ${summary.dueDate}` : ""}${summary.labels.length ? ` · labels: ${summary.labels.join(", ")}` : ""}${summary.archived ? " · ARCHIVED" : ""}`,
     `next stages: ${next.length ? next.join(", ") : "none from here"}`,
+    authority,
     `engaged agents: ${engaged.length ? engaged.join(", ") : "none"}${summary.operator ? " · operator assigned" : ""}`,
     `branch: ${summary.branch ?? "none"} · ${summary.pr ? `PR #${summary.pr.number} ${summary.pr.state}` : "no PR"}`,
     `open packet: ${summary.packet ? `"${summary.packet.title}"` : "none"}${summary.goalRef ? ` · goal chain ${summary.goalRef.goalId} link ${summary.goalRef.linkIndex}` : ""}`,
@@ -308,6 +336,7 @@ function boardContext(
   db: DatabaseSync,
   slug: string,
   dataRoot: string | undefined,
+  authority: string,
 ): string {
   const project = getProject(db, slug);
   const projectRef: Parameters<typeof readProjectFile>[0] = { projectSlug: slug };
@@ -397,6 +426,7 @@ function boardContext(
         }\n`
       : "") +
     `repo: ${project.repo ?? "none"} · members: ${members || "none"}\n` +
+    `${authority}\n` +
     `stages: ${stages}\n` +
     `boundaries: ${boundaries || "none declared"}\n` +
     `open tasks: ${open.length} (${waitingHuman} waiting on a human${waitingSchedule > 0 ? `, ${waitingSchedule} resuming on a schedule` : ""}${archived ? `, ${archived} archived` : ""})\n` +
@@ -492,9 +522,20 @@ export function gatherControllerContext(
       `state here and every tool call on it will refuse too.`;
   } else if (scope === "task") {
     // SAFETY: `conversationScopeOf` returns "task" only when both are set.
-    body = taskContext(db, input.projectSlug!, input.taskKey!, input.dataRoot);
+    body = taskContext(
+      db,
+      input.projectSlug!,
+      input.taskKey!,
+      input.dataRoot,
+      askerRole(db, input.projectSlug!, input.user.id),
+    );
   } else {
-    body = boardContext(db, input.projectSlug!, input.dataRoot);
+    body = boardContext(
+      db,
+      input.projectSlug!,
+      input.dataRoot,
+      askerRole(db, input.projectSlug!, input.user.id),
+    );
   }
   const surface = input.surface ? `\nThey are looking at: ${input.surface}\n` : "";
   let text =

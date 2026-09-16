@@ -19,6 +19,7 @@ import type { HomeProjectCard } from "~/features/home/home-query.server";
 
 let app: AppTestContext;
 let arda: ControllerToolUser;
+let selin: ControllerToolUser;
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
@@ -28,6 +29,9 @@ beforeAll(async () => {
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   const found = findUserByEmail(app.db, "arda@viberr.dev")!;
   arda = { id: found.id, email: found.email, name: found.name };
+  // A plain member, contributor on this board: the case ruling 309 is about.
+  const s = findUserByEmail(app.db, "selin@viberr.dev")!;
+  selin = { id: s.id, email: s.email, name: s.name };
 });
 afterAll(() => app.cleanup());
 
@@ -417,6 +421,89 @@ describe("gatherControllerContext", () => {
     const rows = read.text.split("\n").filter((l) => /^- [A-Z]+-\d+ · /.test(l));
     expect(rows.length).toBeLessThanOrEqual(BOARD_CONTEXT_TASKS);
     expect(read.text).toMatch(/- \.\.\. \d+ more open tasks; list_tasks reads them/);
+  });
+
+  /**
+   * Ruling 309 (pass 37). The instance scope has named the person's role per
+   * project since ruling 307; the two BOUND scopes — the ones a person is
+   * standing in when they ask for something — named nothing about them at all.
+   * The controller, asked on a live task what the person in front of it could
+   * do, answered right and then said how: "your project role was not in
+   * anything I had... I bridged that gap with a rule from my playbook", having
+   * spent a `whoami` round trip before it could help with anything.
+   */
+  it("ruling 309: task and board scope name the asking person's live authority", async () => {
+    const { gatherControllerContext } = await import("./controller-context.server");
+    // CANARY: drop `authority` from either header and a bound conversation is
+    // back to inferring what the person may do from their ORG role.
+    const task = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(task.text).toContain("your authority: project role contributor");
+    const board = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(board.text).toContain("your authority: project role contributor");
+  });
+
+  it("ruling 309: the role is the ASKER's, not the board's strongest member", async () => {
+    // The board roster was already in the board block ("members: … (admin)"),
+    // which is why this looked covered and was not: the roster says who is on
+    // the project, never which of them is asking. Two people, one board, one
+    // turn-shaped read each.
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const mine = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    const theirs = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(mine.text).toContain("your authority: project role admin");
+    expect(theirs.text).toContain("your authority: project role contributor");
+    expect(theirs.text).not.toContain("project role admin");
+  });
+
+  it("ruling 309: a live demotion reaches the next turn", async () => {
+    // The whole premise of putting this in the context read rather than the
+    // system preamble: it is taken again every turn, so it cannot go stale
+    // inside a long conversation.
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const { setMemberRole } = await import("~/features/policy/policy-actions.server");
+    const before = gatherControllerContext(app.db, {
+      projectSlug: SLUG, taskKey: "VIB-142", user: selin, dataRoot: app.dataRoot,
+    });
+    expect(before.text).toContain("project role contributor");
+    await setMemberRole(
+      app.db,
+      { projectSlug: SLUG, targetUserId: selin.id, role: "viewer" },
+      { userId: arda.id, label: arda.email },
+      { dataRoot: app.dataRoot },
+    );
+    try {
+      const after = gatherControllerContext(app.db, {
+        projectSlug: SLUG, taskKey: "VIB-142", user: selin, dataRoot: app.dataRoot,
+      });
+      expect(after.text).toContain("your authority: project role viewer");
+    } finally {
+      await setMemberRole(
+        app.db,
+        { projectSlug: SLUG, targetUserId: selin.id, role: "contributor" },
+        { userId: arda.id, label: arda.email },
+        { dataRoot: app.dataRoot },
+      );
+    }
   });
 
   it("never exceeds the block budget", async () => {

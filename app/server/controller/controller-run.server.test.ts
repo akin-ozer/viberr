@@ -187,6 +187,46 @@ describe("controller mounts (ruling 107)", () => {
     }
   });
 
+  /**
+   * Ruling 309. The preamble said "their LIVE permissions are the ceiling for
+   * everything you do here" and then named their ORG role, which decides
+   * nothing on a board — and viberr's authorization map reached the model
+   * nowhere at all: not here, not `whoami` (which returns a tier NAME), not
+   * `list_capabilities` (the agent capability catalogue, a different axis).
+   * So the tier-to-action mapping came from the model's own prose memory.
+   */
+  it("ruling 309: the authorization map rides in the per-turn prompt, advisory and generated", async () => {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { RBAC_DEFINITIONS } = await import("~/shared/rbac");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+    });
+    const prompt = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: resolveControllerConfig(app.dataRoot),
+      mountedMcps: [],
+      unresolvedMcps: [],
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: unwire `projectAuthorityPrompt()` and the model is back to
+    // supplying viberr's own role tiers from memory.
+    expect(prompt).toContain("What a project role may do");
+    for (const { label } of RBAC_DEFINITIONS) expect(prompt).toContain(label);
+    // It must land where the ceiling sentence already is: the claim and the
+    // thing that makes the claim usable belong in one place.
+    expect(prompt.indexOf("What a project role may do")).toBeGreaterThan(
+      prompt.indexOf("are the ceiling for everything"),
+    );
+    // And it must arrive ADVISORY. A table in a prompt reads like a rule, and
+    // a model that pre-refuses on it replaces an audited server denial, correct
+    // at the instant of the write, with its own — which is none of those.
+    expect(prompt).toContain("never grounds for refusing");
+  });
+
   it("tells the model the diagnostics are attached, on every turn", async () => {
     const { buildControllerSystemPrompt } = await import(
       "./controller-run.server"
