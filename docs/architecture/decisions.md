@@ -4886,6 +4886,21 @@ by rewriting those paragraphs:*
     reason its own probe returned, and closes the inference the old sentence invited — do
     not infer a cause, and do not assume the grant or the registration is missing unless the
     reason says so.
+    310(b), A FOURTH SITE, found by the controller ninety seconds after 311 deployed and on
+    the same timeline. The restart-recovery note says *"the run `X` (agent) was still
+    running when the server stopped"* — and the sweep finalizes QUEUED runs as well as
+    running ones, so a run that never got a concurrency slot was described as having been
+    running. Live: `run_VlR9mwnxyouc`, `startedAt: null`, zero turns, queued 44 minutes. The
+    controller put the adjacency better than any argument for the class could: *"At 01:24:19
+    the recovery note asserts a run was running that never ran. At 01:25:49 the new 311 line
+    says, correctly, 'Queued a Claude run … Nothing is streaming yet.' One writer fixed, its
+    neighbour still inventing."* `started_at` was on the row and the query did not select
+    it. The note now splits its list: what was running, and what was queued and had not
+    started.
+    It also showed the 282 historical "Started a Claude run" entries are not lost to doubt:
+    `started_at` is kept permanently, so an entry can be classified by joining it to its run
+    — null means the entry was false when written, a later `started_at` means it was false
+    for exactly that interval.
     THREE SURFACES, not two. The controller found the third by reading its own prompt and
     asking which of its claims say how they know — the habit ruling 309's provenance marker
     taught it: *"other environment assertions in my prompt don't: the shell inventory

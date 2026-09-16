@@ -164,11 +164,12 @@ export function finalizeOrphanedRuns(
   // SAFETY: every column named here is declared NOT NULL TEXT on `agent_runs`
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
-  // (`backend` is NOT NULL too; `credential_user_id` is nullable — a row
-  // written before ruling 127 carries none.)
+  // (`backend` is NOT NULL too; `credential_user_id` and `started_at` are
+  // nullable — a row written before ruling 127 carries no credential, and a run
+  // that never got a concurrency slot never got a start.)
   const orphans = db
     .prepare(
-      `SELECT id, project_slug, task_key, kind, backend, credential_user_id
+      `SELECT id, project_slug, task_key, kind, backend, credential_user_id, started_at
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
@@ -179,6 +180,8 @@ export function finalizeOrphanedRuns(
     kind: string;
     backend: string;
     credential_user_id: string | null;
+    /** Ruling 310(b): null for a run that never got a concurrency slot. */
+    started_at: string | null;
   }[];
   if (orphans.length === 0) {
     return {
@@ -204,7 +207,10 @@ export function finalizeOrphanedRuns(
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
-  const runsByTask = new Map<string, { id: string; kind: string }[]>();
+  // Ruling 310(b): `started` too. The sweep finalizes QUEUED runs as well as
+  // running ones, and the note used to call every one of them "still running
+  // when the server stopped" — false for a run that never got a slot.
+  const runsByTask = new Map<string, { id: string; kind: string; started: boolean }[]>();
   for (const run of orphans) {
     // Ruling 181 (pass 36): a Codex run's private CODEX_HOME is finished by the
     // adapter's settle — which a process that died never reached. Live
@@ -233,7 +239,10 @@ export function finalizeOrphanedRuns(
       projectSlug: run.project_slug,
       taskKey: run.task_key,
     });
-    runsByTask.set(taskId, [...(runsByTask.get(taskId) ?? []), { id: run.id, kind: run.kind }]);
+    runsByTask.set(taskId, [
+      ...(runsByTask.get(taskId) ?? []),
+      { id: run.id, kind: run.kind, started: run.started_at !== null },
+    ]);
   }
   // Ruling 198 (F37-19): the cap decision is taken BEFORE the restart note is
   // written, because the note used to promise "the operator is re-invoked to
@@ -315,9 +324,28 @@ export function finalizeOrphanedRuns(
     for (const [taskId, t] of realTasks) {
       const runs = runsByTask.get(taskId) ?? [];
       const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
-      const list = runs
-        .map((r) => `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`)
-        .join(", ");
+      const label = (r: { id: string; kind: string }): string =>
+        `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`;
+      // Ruling 310(b): a run that never got a concurrency slot was not running,
+      // and saying it was is the same defect as ruling 311's "Started". The
+      // controller found this one by joining the timeline against the run
+      // records: `run_VlR9mwnxyouc` carried `startedAt: null, turns: 0` and the
+      // restart note called it still running. `started_at` is the fact, kept on
+      // the row permanently, and this writer had it in hand.
+      const ran = runs.filter((r) => r.started);
+      const never = runs.filter((r) => !r.started);
+      const clause = (rs: typeof runs, tail: string): string =>
+        `${rs.length === 1 ? "the run" : `${rs.length} runs`} ${rs.map(label).join(", ")} ${
+          rs.length === 1 ? "was" : "were"
+        } ${tail}`;
+      const what = [
+        ran.length ? clause(ran, "still running when the server stopped") : "",
+        never.length
+          ? clause(never, "queued behind the concurrent-run cap and had not started")
+          : "",
+      ]
+        .filter(Boolean)
+        .join("; ");
       try {
         await appendTimelineEvent(ref, {
           occurredAt: new Date().toISOString(),
@@ -325,8 +353,7 @@ export function finalizeOrphanedRuns(
           actor: { kind: "system", systemId: "policy-engine" },
           title: "Interrupted by a restart",
           text:
-            `**Restart:** ${runs.length === 1 ? "the run" : `${runs.length} runs`} ${list} ` +
-            `${runs.length === 1 ? "was" : "were"} still running when the server stopped; ` +
+            `**Restart:** ${what}; ` +
             `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart` +
             (reinvoking.has(taskId)
               ? ", and the operator is re-invoked to decide what to do next."

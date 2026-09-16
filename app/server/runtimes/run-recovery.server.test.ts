@@ -167,6 +167,30 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).toMatch(/still running when the server stopped/);
     expect(note!.text).toContain("run_dev_orphan");
     expect(note!.text).toContain("run_op_orphan");
+    /**
+     * Ruling 310(b). This note called EVERY finalized run "still running when
+     * the server stopped", and the sweep finalizes queued runs too — so a run
+     * that never got a concurrency slot was described as having been running.
+     * `run_op_orphan` is seeded `queued` with `startedAt: null` precisely
+     * because that is the case the sentence got wrong.
+     *
+     * Found by the controller joining the timeline against the run records on
+     * the live board: `run_VlR9mwnxyouc` carried `startedAt: null, turns: 0`
+     * and its restart note said it was still running. `started_at` is kept on
+     * the row permanently, and this writer had it in hand.
+     *
+     * CANARY: collapse the two clauses back into one and the queued run is
+     * described as having been running.
+     */
+    expect(note!.text).toContain("queued behind the concurrent-run cap and had not started");
+    // Each run sits under the clause that is true of IT, not of the pair.
+    const [runningClause, queuedClause] = note!.text.split("; ");
+    expect(runningClause).toContain("run_dev_orphan");
+    expect(runningClause).toContain("still running when the server stopped");
+    expect(runningClause).not.toContain("run_op_orphan");
+    expect(queuedClause).toContain("run_op_orphan");
+    expect(queuedClause).toContain("queued behind the concurrent-run cap");
+    expect(queuedClause).not.toContain("run_dev_orphan");
     expect(note!.text).toMatch(/the operator is re-invoked/);
     // One note per task, not one per run.
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
