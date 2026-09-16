@@ -2858,6 +2858,9 @@ dialog[data-closing]::backdrop {
 }
 .rbac-table thead th:first-child, .rbac-table td.act { text-align: left; }
 .rbac-table td.act { color: var(--fg); }
+/* Ruling 309(a): the scope a short grant name cannot carry, on its own line
+   under it — quiet, because it explains the row rather than competing with it. */
+.act-covers { display: block; color: var(--muted); font-size: .69rem; }
 .rbac-yes {
   display: inline-grid; place-items: center;
   width: 20px; height: 20px; border-radius: var(--radius-small);

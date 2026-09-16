@@ -245,6 +245,13 @@ describe("ProfilePage", () => {
     // policy, and force-accept past the review gate) — the total table (R8-2)
     // surfaces every enforced action. edit-task-meta (contributor+) is one of
     // the 14.
+    // Ruling 309(a): the same scope line the Policy table carries. This list is
+    // the one a person reads about THEMSELVES, so a maintainer learning they
+    // hold "Edit task priority, labels & due date" has to also learn that the
+    // grant releases held tasks. CANARY: drop `covers` from RBAC_ROWS.
+    expect(
+      getByText("and what a task waits on, which releases it when cleared"),
+    ).toBeTruthy();
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(14);
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(5);
     // Ruling 148: each cell says the fact. The check is aria-hidden, so a

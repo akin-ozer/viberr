@@ -104,6 +104,18 @@ describe("HumanAccess", () => {
     expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(19);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Edit task priority, labels & due date")).toBeTruthy();
+    // Ruling 309(a): two grants gate more than their name says. The name stays
+    // short because sentences elsewhere on this page read it inline ("needs the
+    // Edit workflow & policy grant"), so the SCOPE lives in the table — which is
+    // the surface a person opens to learn what a role can do. Without it, "who
+    // can unarchive this project?" has no answer anywhere in the product, and a
+    // contributor reads that they may tidy metadata when they may also release
+    // a held task onto the board.
+    // CANARY: stop threading `covers` into RBAC_ROWS and both lines vanish.
+    expect(
+      getByText("and what a task waits on, which releases it when cleared"),
+    ).toBeTruthy();
+    expect(getByText("and archiving or restoring the project itself")).toBeTruthy();
     expect(getByText("Create tasks")).toBeTruthy();
     expect(getByText("Re-scan project files & projections")).toBeTruthy();
     // Newly-surfaced enforced actions (were hidden before the total-table fix).

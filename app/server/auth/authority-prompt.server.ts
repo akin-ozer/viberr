@@ -1,5 +1,6 @@
 import {
   PROJECT_ROLES,
+  ACTION_COVERS,
   RBAC_DEFINITIONS,
   ROLE_RANK,
   type ProjectRole,
@@ -56,16 +57,26 @@ const ASCENDING: readonly ProjectRole[] = [...PROJECT_ROLES].sort(
  * generate a table that quietly under-reports someone's authority.
  */
 export function authorityTiers(): AuthorityTier[] {
-  return tiersFrom(RBAC_DEFINITIONS);
+  return tiersFrom(
+    RBAC_DEFINITIONS.map((d) => {
+      const covers = ACTION_COVERS.get(d.id);
+      return covers === undefined ? d : { ...d, covers };
+    }),
+  );
 }
 
 /** The grouping itself, over any table — so the monotonicity guard can be
  *  driven with a table that breaks it, which the real one never will. */
 export function tiersFrom(
-  definitions: readonly { id: string; label: string; roles: readonly ProjectRole[] }[],
+  definitions: readonly {
+    id: string;
+    label: string;
+    covers?: string;
+    roles: readonly ProjectRole[];
+  }[],
 ): AuthorityTier[] {
   const gains = new Map<ProjectRole, string[]>(ASCENDING.map((role) => [role, []]));
-  for (const { id, label, roles } of definitions) {
+  for (const { id, label, covers, roles } of definitions) {
     const floor = ASCENDING.find((role) => roles.includes(role));
     if (floor === undefined) throw new Error(`RBAC action "${id}" is held by no role`);
     for (const role of ASCENDING) {
@@ -78,7 +89,11 @@ export function tiersFrom(
         );
       }
     }
-    gains.get(floor)?.push(label);
+    // Ruling 309(a): two actions gate more than their grant name says, and the
+    // model reads this list to decide what to offer. A name it can only take
+    // literally would have it predicting that a contributor may retitle a
+    // label and not that the same grant lets them release a held task.
+    gains.get(floor)?.push(covers === undefined ? label : `${label} (${covers})`);
   }
   return ASCENDING.map((role): AuthorityTier => ({ role, gains: gains.get(role) ?? [] }));
 }
@@ -124,11 +139,30 @@ export function projectAuthorityPrompt(): string {
     "accepting is otherwise maintainer and up.\n" +
     "- An ARCHIVED project refuses every action here to everyone, admins included, " +
     "before role is even considered. Reading still works, and so does restoring it.\n" +
-    "- Membership is the outer gate on all of it: to a non-member the project does " +
-    "not exist, and the refusal says so rather than naming a role.\n" +
+    "- Membership is the outer gate for everyone EXCEPT an org admin, whose " +
+    "override is checked first: to a non-member who is not an org admin the " +
+    "project does not exist, and the refusal says so rather than naming a role.\n" +
     "- Role is one gate among several. A call can be refused for reasons this list " +
     "says nothing about: a name that is already taken, a task key that does not " +
-    "exist, a stage that has no such transition.\n\n" +
+    "exist, a stage that has no such transition.\n" +
+    "- RUNNING AN AGENT has a second gate that is not about role at all. A task run " +
+    "bills the TASK OWNER's accounts, never the asker's, so it is refused when the " +
+    "task has no owner, or when the owner has not connected that backend or their " +
+    "sign-in is unhealthy — however senior the person asking is. Expect this one: " +
+    "the list says yes and the server says no, and the useful sentence names the " +
+    "owner's account rather than anybody's role.\n" +
+    "- THE INSTANCE is a separate question with a simpler answer: everything " +
+    "outside a project — users, knowledge bases, skills, MCP connections, global " +
+    "agent templates, the audit log, run analytics — is ORG ADMIN ONLY, reads " +
+    "included. Open to any signed-in person: creating a project, `whoami`, " +
+    "`list_capabilities`, and reading a document out of a knowledge base ALREADY " +
+    "ATTACHED to this conversation (that attachment is the grant; reading any other " +
+    "knowledge base in the store by id is not). Project role has no bearing on any " +
+    "of it.\n" +
+    "- This list is the PERSON's authority, not your toolkit. Some of what it grants " +
+    "them you have no tool for and never will: accepting a completion, forcing past " +
+    "the review gate, resolving a decision, merging. Reading that they hold it is " +
+    "not you offering to do it — say they can, on the task page, themselves.\n\n" +
     "USE IT FOR PLANNING, SEQUENCING AND EXPLANATION. It is never grounds for " +
     "refusing something the person asked you to do. This list is static and the " +
     "role you were given is a read taken when the turn began; the server decides at " +

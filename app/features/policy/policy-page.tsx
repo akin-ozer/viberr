@@ -237,7 +237,14 @@ export function HumanAccess({
                 what holding them is worth to someone who is not a member. */}
             {RBAC_ROWS.map((row) => (
               <tr key={row.action}>
-                <td className="act">{row.action}</td>
+                <td className="act">
+                  {row.action}
+                  {/* Ruling 309(a): two grants gate more than their name says,
+                      and the name stays short because sentences elsewhere on
+                      this page read it inline. This table is where someone
+                      comes to learn what a role can do, so the scope is here. */}
+                  {row.covers ? <span className="act-covers">{row.covers}</span> : null}
+                </td>
                 {ROLE_IDS.map((r) => (
                   <td key={r}>
                     {/* Ruling 148: same words as the profile page's "Your

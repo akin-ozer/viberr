@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { RBAC_DEFINITIONS, ROLE_RANK, roleCan, type ProjectRole } from "~/shared/rbac";
+import {
+  ACTION_COVERS,
+  RBAC_DEFINITIONS,
+  ROLE_RANK,
+  roleCan,
+  type ProjectRole,
+} from "~/shared/rbac";
 import {
   askerAuthorityLine,
   authorityTiers,
@@ -23,7 +29,8 @@ describe("authorityTiers", () => {
     // Not "some tier has it" — THE tier, and the right one: the lowest role
     // that holds it per the enforcement map itself.
     for (const { id, label, roles } of RBAC_DEFINITIONS) {
-      const tier = tiers.find((t) => t.gains.includes(label));
+      // A gain is the label, optionally followed by " (what it also covers)".
+      const tier = tiers.find((t) => t.gains.some((g) => g.startsWith(label)));
       expect(tier, `"${label}" is under no tier`).toBeDefined();
       const floor = tier!.role;
       expect(roleCan(floor, id), `${floor} should hold "${id}"`).toBe(true);
@@ -68,6 +75,21 @@ describe("projectAuthorityPrompt", () => {
     expect(text).toContain("Reconcile GitHub state");
   });
 
+  it("carries what a grant NAME cannot, for the two actions that gate more than they say", () => {
+    // Ruling 309(a), found by the controller reading the generated list and
+    // asking what was not in it. `edit-task-meta` also gates what a task waits
+    // on — clearing it RELEASES a held task — and `edit-policy` also gates
+    // archiving and restoring the project, so "who can unarchive this?" had no
+    // answer anywhere. The names stay short because eight sentences across two
+    // pages read them inline as "the X grant".
+    expect(text).toContain("Edit task priority, labels & due date (and what a task waits on");
+    expect(text).toContain("Edit workflow & policy (and archiving or restoring");
+    for (const [action, covers] of ACTION_COVERS) {
+      const label = RBAC_DEFINITIONS.find((d) => d.id === action)?.label;
+      expect(text, `${action} loses its scope`).toContain(`${label} (${covers})`);
+    }
+  });
+
   it("says the list may never be used to refuse the person", () => {
     // The hazard the controller named when this was put to it: "a table in my
     // prompt creates a second authorization evaluator that can disagree with
@@ -87,6 +109,40 @@ describe("projectAuthorityPrompt", () => {
     // A person sent to fix the wrong gate is worse off than one told nothing.
     expect(text).toContain("it was not a role that stopped it");
     expect(text).toContain("do not supply one from here");
+  });
+
+  /**
+   * The controller audited the hand-written half on the turn after it shipped
+   * and returned seven candidates; these are the four that held up in code.
+   * Each is a predict-and-be-wrong case, not a style note.
+   */
+  it("carries the four gates a tier list would get wrong", () => {
+    // A task run bills the TASK OWNER's accounts (ruling 127), so "Run agents"
+    // can be held and refused anyway. Its words: "the list would tell me yes;
+    // the server would say no. This is the one I'd most expect to hit."
+    expect(text).toContain("bills the TASK OWNER's accounts");
+
+    // Instance scope had no account at all: "half my authority reasoning is
+    // still where it was." Every instance tool but whoami, list_capabilities
+    // and create_project calls requireOrgAdmin — reads included.
+    expect(text).toMatch(/ORG ADMIN ONLY, reads\s+included/);
+    // ...with the one instance read that is NOT, stated rather than glossed:
+    // an attached knowledge base is its own grant, and `read_knowledge_doc`
+    // says so itself ("this reads YOUR OWN grants and needs no admin"). A
+    // blanket "org admin only" here would be the hand half wrong in exactly
+    // the way this ruling warns about.
+    expect(text).toContain("ALREADY ATTACHED to this conversation");
+
+    // The membership line and the org-admin line contradicted each other with
+    // no precedence stated: "applied in the wrong order I'd tell an org admin
+    // they can't see a project they can."
+    expect(text).toContain("outer gate for everyone EXCEPT an org admin");
+
+    // The block grants the PERSON actions the controller has no tool for, and
+    // marked no seam: "a future reader of it — me, on a tired turn — could
+    // plausibly offer to accept a completion because the table says the person
+    // holds it."
+    expect(text).toContain("not your toolkit");
   });
 
   it("marks the hand-maintained half as hand-maintained", () => {
