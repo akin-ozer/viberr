@@ -308,6 +308,47 @@ interface RunMcpMounts {
 }
 
 /**
+ * Ruling 311: the timeline sentence for a dispatch, which says STARTED only
+ * when it started.
+ *
+ * `startRun` answers `outcome: "started" | "queued"` and this sentence used to
+ * discard it, so a run parked behind the instance's concurrent-run cap wrote
+ * "Started a Claude run … streaming to the agent logs" onto the task timeline.
+ * Both halves were false, for as long as the queue held it — live, eleven
+ * minutes on SHOP-55, where the operator then told a person the run "was
+ * already in flight" and the controller relayed it as fact. A `list_runs` read
+ * showed it queued with zero turns.
+ *
+ * The fact was never missing: `operator-actions` has answered "the instance is
+ * at its concurrent-run cap, so the run is queued and starts when a slot frees"
+ * since B10. That is a tool reply, read once by one agent; this is the durable
+ * record every person, operator and later run reads instead.
+ *
+ * Pure, because the branch is the whole point and the dispatch path around it
+ * needs a live cap, two tasks and a runtime that does not finish first.
+ */
+export function runDispatchLine(input: {
+  /** `refused` never reaches here — this line is written only after a dispatch
+   *  that produced a run — but the type is the caller's, so it is accepted and
+   *  treated as the non-queued case rather than requiring a cast. */
+  outcome: RunStartOutcome;
+  backendLabel: string;
+  role: string;
+  /** The backend it switched FROM, or null when it did not switch. */
+  switchedFrom: string | null;
+  /** Model-substitution and pin notes, already formatted with their separators. */
+  notes: string;
+}): string {
+  const queued = input.outcome === "queued";
+  const head = `${queued ? "Queued" : "Started"} a ${input.backendLabel} run for the ${input.role} agent`;
+  const switched = input.switchedFrom ? ` (switched from ${input.switchedFrom})` : "";
+  const tail = queued
+    ? " — the instance is at its concurrent-run cap, so it starts when a slot frees. Nothing is streaming yet."
+    : " — streaming to the agent logs.";
+  return `${head}${switched}${input.notes}${tail}`;
+}
+
+/**
  * Resolve declared MCP names to the portable runtime MCP shape, plus the names
  * that resolved to NOTHING (P14-LV-09). A grant pointing at a server the
  * registry no longer holds used to vanish into a log warn while the run prompt
@@ -2325,10 +2366,17 @@ async function dispatchAgentRun(
       }
       parsed.timeline.unshift(
         agentEvent(
-          (switched
-            ? `Started a ${backendLabel} run for the ${engagement.role} agent (switched from ${engagement.backend === "claude" ? "Claude" : "Codex"})`
-            : `Started a ${backendLabel} run for the ${engagement.role} agent`) +
-            `${substitutedNote}${pinNote} — streaming to the agent logs.`,
+          runDispatchLine({
+            outcome,
+            backendLabel,
+            role: engagement.role,
+            switchedFrom: switched
+              ? engagement.backend === "claude"
+                ? "Claude"
+                : "Codex"
+              : null,
+            notes: `${substitutedNote}${pinNote}`,
+          }),
         ),
       );
       if (directiveOverrode) {

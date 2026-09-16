@@ -4898,6 +4898,40 @@ by rewriting those paragraphs:*
 
     (`specialist-mcp.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
 
+311. **"Started" only when it started (owner, 2026-09-16, pass 37; F37-146).** `startRun`
+    answers `outcome: "started" | "queued"`, and the task timeline's dispatch sentence threw
+    it away. A run parked behind the instance's concurrent-run cap wrote *"Started a Claude
+    run for the X agent — streaming to the agent logs"* onto the timeline. Both halves were
+    false, for as long as the queue held it.
+    Live, eleven minutes on SHOP-55, and it propagated exactly as far as a false record
+    does: the operator read the timeline and told a person the Backend Engineer's run *"was
+    already in flight"*; the controller relayed that to me as fact; I was about to decide a
+    dispatch on it. The controller then spent one `list_runs` and found the truth —
+    `state: queued, startedAt: null, 0 turns, 1 log line`, with three runs ahead of it — and
+    corrected itself unprompted: *"Symptom right, cause wrong, and I carried it. That is
+    ruling 310's shape, committed by me, in the turn before you described it."*
+    The fact was never missing, and one surface already said it properly: `operator-actions`
+    has answered *"the instance is at its concurrent-run cap, so the run is queued and
+    starts when a slot frees"* since B10. That is a tool reply — read once, by one agent.
+    The timeline is the durable record every person, every later run and the controller read
+    instead, and it said the opposite.
+    THE CLASS, in the controller's words, which is the most useful sentence of the pass:
+    *"a fact the system genuinely had was displaced by a confident hand-written sentence …
+    authoritative-sounding text standing in front of available ground truth."* Rulings 309,
+    310 and 311 are three instances inside two hours — `RBAC_DEFINITIONS` displaced by
+    prose, a stored mount-failure reason displaced by an invented cause, and a live `outcome`
+    displaced by the word "Started". Its own prescription is the sweep: **anywhere a string
+    literal explains a condition that has a stored reason.** That sweep over the timeline
+    writers found no fourth instance — `Pushed`, `Opened PR #n`, `Merged` are all written
+    after the call that did the thing, and the operator's `Started` reply sits below an
+    explicit `queued` branch.
+    `runDispatchLine` is pure and exported, for the reason ruling 307 extracted
+    `projectStateLines`: the branch IS the ruling, and testing it through the dispatch path
+    needs a live cap, two tasks and a fake runtime that does not finish before the second
+    dispatch arrives — which is how the first attempt at this test came out green.
+
+    (`specialist-run.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

@@ -74,6 +74,7 @@ import {
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
+  runDispatchLine,
   startAgentRun,
   buildSpecialistPersona,
   githubReadForRun,
@@ -809,6 +810,63 @@ describe("startSpecialistRun", () => {
     expect(fm().frontmatter.readiness).toBe("blocked");
     // Nothing ran, so nothing lifted: still the one row from the first arm.
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
+  });
+
+  /**
+   * Ruling 311. `startRun` answers `outcome: "started" | "queued"` and the
+   * timeline sentence discarded it, so a run parked behind the concurrent-run
+   * cap wrote "Started a Claude run … streaming to the agent logs" — both
+   * halves false for as long as the queue held it.
+   *
+   * Live on SHOP-55 the operator read that entry, told a person the run "was
+   * already in flight", and the controller relayed it as fact; a `list_runs`
+   * read then showed it queued with zero turns, eleven minutes after the
+   * timeline said it had started. The operator's own tool reply has said
+   * "queued … starts when a slot frees" since B10 — the durable record that
+   * everybody else reads said the opposite.
+   */
+  describe("ruling 311: the dispatch line says which of the two things happened", () => {
+    const base = {
+      backendLabel: "Claude",
+      role: "developer",
+      switchedFrom: null,
+      notes: "",
+    } as const;
+
+    it("a queued run is not described as started, or as streaming", () => {
+      const line = runDispatchLine({ ...base, outcome: "queued" });
+      // CANARY: drop the `outcome` branch and every one of these flips.
+      expect(line).toContain("Queued a Claude run for the developer agent");
+      expect(line).not.toContain("Started");
+      expect(line).toContain("concurrent-run cap");
+      expect(line).toContain("starts when a slot frees");
+      expect(line).toContain("Nothing is streaming yet");
+      expect(line).not.toContain("streaming to the agent logs");
+    });
+
+    it("a started run keeps the sentence it always had", () => {
+      const line = runDispatchLine({ ...base, outcome: "started" });
+      expect(line).toBe(
+        "Started a Claude run for the developer agent — streaming to the agent logs.",
+      );
+    });
+
+    it("the switch note and the substitution notes survive both branches", () => {
+      for (const outcome of ["started", "queued"] as const) {
+        const line = runDispatchLine({
+          ...base,
+          outcome,
+          switchedFrom: "Codex",
+          notes: " (pinned)",
+        });
+        expect(line).toContain("(switched from Codex)");
+        expect(line).toContain("(pinned)");
+        // The notes sit between the switch note and the tail, as before.
+        expect(line.indexOf("(switched from Codex)")).toBeLessThan(
+          line.indexOf("(pinned)"),
+        );
+      }
+    });
   });
 
   it("creates a run row with the specialist backend and streams output", async () => {
