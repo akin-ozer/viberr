@@ -18,6 +18,7 @@ import { readSkillBodies } from "~/server/files/skill-body.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { projectAuthorityPrompt } from "~/server/auth/authority-prompt.server";
+import type { UnresolvedMcpGrant } from "~/server/tasks/specialist-mcp.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   fullReplyTextForRun,
@@ -443,7 +444,9 @@ async function startTurnRun(
     config,
     toolManifest: manifest,
     mountedMcps: Object.keys(orgServers),
-    unresolvedMcps: unresolved.filter((u) => !u.mounted).map((u) => u.name),
+    // Ruling 310: with the reason each server gave, not just its name —
+    // this is the surface a person asks "why?" on.
+    unresolvedMcps: unresolved.filter((u) => !u.mounted),
     dataRoot,
   });
 
@@ -924,7 +927,7 @@ interface SystemPromptInput {
   user: ControllerTurnInput["user"];
   config: ReturnType<typeof resolveControllerConfig>;
   mountedMcps: string[];
-  unresolvedMcps: string[];
+  unresolvedMcps: readonly UnresolvedMcpGrant[];
   /** Ruling 297: the list of every tool this turn mounts, from
    *  `buildControllerMounts`. Rebuilt per turn, so a conversation that was
    *  already running when a tool shipped is told about it. */
@@ -1005,8 +1008,15 @@ export function buildControllerSystemPrompt(
       (input.mountedMcps.length
         ? `Attached org MCP servers: ${input.mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
         : "No org MCP servers are attached to you.\n") +
+      // Ruling 310, third surface. This one never asserted a false cause — it
+      // named the servers and stopped — but it could not say WHY either, and it
+      // is the surface a person asks "why?" on. The reason each server gave was
+      // one `.map((u) => u.name)` away.
       (input.unresolvedMcps.length
-        ? `These granted MCP servers did NOT mount this turn and their tools will not appear: ${input.unresolvedMcps.join(", ")}. Say so if asked.\n`
+        ? `These granted MCP servers did NOT mount this turn and their tools will not appear — ` +
+          `each with the reason it gave: ` +
+          `${input.unresolvedMcps.map((u) => `${u.name} (${u.reason})`).join("; ")}. ` +
+          `Say so if asked, in those terms; do not infer a cause the server did not give.\n`
         : "") +
       // Ruling 107: this line is true on every turn by construction — the mount
       // reads no config, so the model is never told about tools it does not have.

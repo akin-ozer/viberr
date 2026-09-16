@@ -4886,6 +4886,13 @@ by rewriting those paragraphs:*
     reason its own probe returned, and closes the inference the old sentence invited — do
     not infer a cause, and do not assume the grant or the registration is missing unless the
     reason says so.
+    THREE SURFACES, not two. The controller found the third by reading its own prompt and
+    asking which of its claims say how they know — the habit ruling 309's provenance marker
+    taught it: *"other environment assertions in my prompt don't: the shell inventory
+    declares itself measured, but the line telling me no org MCP servers are attached to me
+    doesn't say how it knows."* Its prompt was the best of the three and still not enough —
+    it asserted no cause at all, naming the servers and stopping — but it is the surface a
+    person asks WHY on, and the reason was one `.map((u) => u.name)` away there too.
     The run RECORD still keeps names; the reasons ride the prompt, where the agent that has
     to report the gap can read them. (The KB and skill misses have carried name-and-reason
     on that record since C1, which is the asymmetry that made the MCP path's silence easy

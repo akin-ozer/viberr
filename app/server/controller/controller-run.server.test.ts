@@ -227,6 +227,36 @@ describe("controller mounts (ruling 107)", () => {
     expect(prompt).toContain("never grounds for refusing");
   });
 
+  /**
+   * Ruling 310, third surface. The specialist and operator prompts asserted an
+   * invented cause for a failed mount; this one asserted none — it named the
+   * servers and stopped. That is better and still not enough: the controller is
+   * the surface a person asks "why is my server not there?" on, and the reason
+   * each server gave was one `.map((u) => u.name)` from reaching it.
+   */
+  it("ruling 310: an unmounted grant reaches the controller with the reason it gave", async () => {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+    });
+    const prompt = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: resolveControllerConfig(app.dataRoot),
+      mountedMcps: [],
+      unresolvedMcps: [
+        { name: "kb-architecture", reason: "its stored credential could not be opened" },
+      ],
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: map the grants back to names and the reason disappears.
+    expect(prompt).toContain("kb-architecture (its stored credential could not be opened)");
+    expect(prompt).toContain("do not infer a cause the server did not give");
+  });
+
   it("tells the model the diagnostics are attached, on every turn", async () => {
     const { buildControllerSystemPrompt } = await import(
       "./controller-run.server"
