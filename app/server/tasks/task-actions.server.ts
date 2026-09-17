@@ -45,6 +45,7 @@ import {
   PRIORITY_VALUES,
   isValidDueDate,
   normalizeTaskLabels,
+  PACKET_NOTE_MAX,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
@@ -2795,6 +2796,9 @@ async function openStuckLoopPacket(
      *  "Provider said" observation beside the Signal so the human reads the
      *  actual cause on the packet, not only in the timeline. */
     providerText?: string;
+    /** Ruling 315: the account-level cause, when this failure is one. Packets
+     *  sharing it are resolved together — see `taskPacketSchema.cause`. */
+    cause?: string;
   },
 ): Promise<StuckLoopEscalation> {
   try {
@@ -2835,22 +2839,22 @@ async function openStuckLoopPacket(
     if (input.providerText) {
       observations.push({ k: "Provider said", v: input.providerText, code: true });
     }
-    const result = await operatorOpenPacket(
-      db,
-      ctx,
-      {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        packetType: "blocked",
-        title: `Work stalled: pick a recovery path`,
-        body:
-          `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
-          "Coordination is paused until a human chooses how to proceed.",
-        observations,
-        options,
-      },
-      authority,
-    );
+    const open: OperatorOpenPacketInput = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      packetType: "blocked",
+      title: `Work stalled: pick a recovery path`,
+      body:
+        `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
+        "Coordination is paused until a human chooses how to proceed.",
+      observations,
+      options,
+    };
+    // Ruling 315: when the failure belongs to an ACCOUNT rather than this task,
+    // the packet carries that, so the N identical siblings one quota or
+    // credential failure raises can be answered once.
+    if (input.cause) open.cause = input.cause;
+    const result = await operatorOpenPacket(db, ctx, open, authority);
     if (result.outcome !== "done") {
       logger.info("stuck-loop packet not opened", {
         taskKey: input.taskKey,
@@ -4801,6 +4805,23 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "auth" ||
       failure?.kind === "unavailable" ||
       failure?.kind === "overloaded";
+    /**
+     * Ruling 315: a backend failure is an ACCOUNT's failure, not this task's.
+     * Quota, auth and a missing credential take out every task running on the
+     * same account at the same instant, and each one used to raise its own
+     * identical packet. The key is what actually failed — the backend, the kind
+     * of failure, and whose account paid for the run (ruling 127's principal) —
+     * so two tasks that failed for one reason agree on it with nothing
+     * coordinating them.
+     *
+     * `overloaded` is deliberately NOT grouped: it is the provider being busy
+     * for a moment, not a state of the account, and two tasks hitting it are
+     * two separate transients that can want different answers.
+     */
+    const accountCause =
+      failure?.kind === "quota" || failure?.kind === "auth" || failure?.kind === "unavailable"
+        ? `backend:${input.backend}:${failure.kind}:${getRun(db, finished.id)?.credential_user_id ?? "none"}`
+        : null;
     const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
@@ -4811,6 +4832,7 @@ export async function applyAgentCompletionEffects(
     };
     if (classified) stuck.remedy = described.remedy;
     if (backendFailure) stuck.options = described.options;
+    if (accountCause) stuck.cause = accountCause;
     if (providerText) stuck.providerText = providerText;
     const escalation = await openStuckLoopPacket(
       db,
@@ -8344,8 +8366,38 @@ export async function resolvePacket(
   if (!packet) {
     throw AppError.conflict("This packet was already resolved.");
   }
+  /**
+   * Ruling 315: the note REFUSES like its neighbour instead of being cut.
+   *
+   * `project.task.tsx` used to slice it to 2,000 characters in the route,
+   * before this function ever saw it — no `maxLength` on the textarea, no
+   * counter, no marker on the record and no error, and nothing anywhere holds
+   * the discarded tail. Ruling 292 allowed a cut on a VERDICT because "the full
+   * text is never lost — the agent's own report is on the same timeline,
+   * untruncated". A person's typed note has no second copy, so the same cut is
+   * actual loss.
+   *
+   * Live on SHOP-76: a 4,454-character decision was stored at exactly 2,000,
+   * ending mid-word, and a rework round ran on the operator's reconstruction of
+   * the sentence viberr had deleted. The card had promised the opposite —
+   * "anything you type below is recorded on the task's contract and every later
+   * run reads it".
+   *
+   * The limit is the same 4,000 the directive field beside it already refuses
+   * at, because two fields on one card differing by a factor of two, and by
+   * refuse-versus-truncate, is the thing that made this survivable to write.
+   */
+  const noteText = input.note ?? "";
+  if (noteText.length > PACKET_NOTE_MAX) {
+    throw AppError.validation(
+      `That note is too long: ${PACKET_NOTE_MAX.toLocaleString("en-US")} characters max, ` +
+        `and you wrote ${noteText.length.toLocaleString("en-US")}. ` +
+        "Nothing was recorded — shorten it and confirm again, or put the long version " +
+        "in a comment on the task and refer to it here.",
+    );
+  }
   const customDirective = input.custom?.trim() ?? "";
-  if (customDirective.length > 4000) {
+  if (customDirective.length > PACKET_NOTE_MAX) {
     throw AppError.validation(
       "Custom directive is too long: 4,000 characters max.",
     );

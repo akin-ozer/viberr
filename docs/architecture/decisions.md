@@ -5083,6 +5083,45 @@ by rewriting those paragraphs:*
 
     (`controller-dock.tsx`, `app.css`.)
 
+315. **Viberr deleted the owner's own words on the highest-stakes card in the product (owner,
+    2026-09-17, pass 37; F37-150).** The note on a decision packet was cut to 2,000 characters by
+    `const note = String(formData.get("note") ?? "").slice(0, 2000)` in `project.task.tsx` — in the
+    ROUTE, before the request reached the server. No `maxLength` on the textarea, no counter, no
+    marker on the record, no error, and nothing anywhere holding the tail.
+    It happened to this pass. A 4,454-character decision on SHOP-76 was stored at exactly 2,000,
+    ending mid-word at *"`docs/adr/README.md` is this branch's own rule and it says the record t"*,
+    and everything after it — including "do NOT fix this by editing the six files outside `docs/`"
+    — was gone. Rework round 4 ran on the operator's reconstruction of the deleted sentence. The
+    operator's conduct is the only reason that was survivable: it noticed the cut, named it, said
+    plainly *"that reading is mine, reconstructed"*, told the deliverer to verify against the tree
+    and stop if it contradicted, and offered to re-prompt. Its reconstruction was correct.
+    The card had promised the opposite. The option chosen was authored in `review-deadlock.server.ts`
+    with the description *"Anything you type below is recorded on the task's contract and every
+    later run reads it (ruling 189), so say why rather than just yes."* Viberr invited the long
+    "why" on that exact field and deleted the end of it.
+    RULING 292 IS THE PRECEDENT AND THE DISTINCTION. It permitted a cut on a reviewer's verdict for
+    a stated reason: *"The full text is never lost — the agent's own report is on the same
+    timeline, untruncated."* A person's typed note has no second copy. The same cut is a pointer
+    there and actual loss here, and 292's own comment names the defect it fixed — *"What was wrong
+    was the silence: a bare `.slice`"* — which is exactly what stood here.
+    Ruling 288 had already settled the shape one field over: an over-long goal and an over-long
+    title are REFUSED, *"a contract Viberr will not write half of"*. And the field beside this one
+    on the same card refused at 4,000 characters. Which of the two a person got was decided by
+    whether the selected option happened to be the synthetic "write your own directive" INDEX —
+    not by anything visible — so two fields on one card differed by a factor of two and by
+    refuse-versus-truncate.
+    One number now, `PACKET_NOTE_MAX`, in the shared schema because the box that must show it is a
+    client component and the guard that must enforce it is server-only: stated on the label,
+    enforced by `maxLength` so the browser stops the paste, refused by the server naming both the
+    limit and what was written, and the refusal says "Nothing was recorded" because refusing and
+    then writing half of it would be the same defect wearing a message.
+    THE TEST HAD TO MOVE TO THE ROUTE. The first version called `resolvePacket` directly and its
+    canary came out GREEN with the slice restored — the server function never saw the cut, because
+    the cut was upstream of it. A test one layer away from the defect proves nothing about the
+    defect.
+
+    (`project.task.tsx`, `task-actions.server.ts`, `task-file.schema.ts`, `decision-packet.tsx`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

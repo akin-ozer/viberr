@@ -582,11 +582,21 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
-        const note = String(formData.get("note") ?? "").slice(0, 2000);
+        // Ruling 315: NOT a slice. This field holds a person's own words on the
+        // highest-stakes card in the product, and the route used to cut it to
+        // 2,000 characters before the request reached the server — no
+        // `maxLength`, no counter, no marker, no error, and the tail exists nowhere
+        // afterwards. The server refuses over-long input instead, exactly as
+        // the `custom` field beside it already does, and as ruling 288 does for
+        // a goal and a title ("a contract Viberr will not write half of").
+        const note = String(formData.get("note") ?? "");
         // Questionnaire packets (owner request 2026-08-20): the human's own
         // directive instead of a canned option. Non-empty ⇒ the server ignores
         // the option index and resolves through the synthetic `custom` kind.
-        const custom = String(formData.get("custom") ?? "").slice(0, 4000);
+        // Ruling 315: same reason — the server refuses this one already, so the
+        // route must stop quietly cutting it to the exact length that would slip
+        // past the refusal.
+        const custom = String(formData.get("custom") ?? "");
         // UI-43: the "Retrying on X · streaming to agent logs" toast was
         // computed from the option KIND alone. `resolvePacket` catches a failed
         // `startAgentRun` and merely appends a timeline note ("The retry could

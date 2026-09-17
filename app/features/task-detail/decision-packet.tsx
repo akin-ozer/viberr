@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import type { PacketOptionKind } from "~/schemas/task-file.schema";
+import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -1349,7 +1349,15 @@ export function DecisionPacket({
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
               Note for the operator
-              <span className="fhint">optional · recorded on the decision</span>
+              <span className="fhint">
+                {/* Ruling 315: the length is stated BEFORE it matters. The route
+                    used to cut this to 2,000 characters with nothing on the box
+                    saying so, and the server now refuses instead — a refusal a
+                    person could not see coming is a worse trade than the cut it
+                    replaced unless the box says the number. */}
+                optional · recorded on the decision · {PACKET_NOTE_MAX.toLocaleString("en-US")}{" "}
+                characters max
+              </span>
             </label>
             <textarea
               id="pkt-note"
@@ -1358,7 +1366,16 @@ export function DecisionPacket({
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. what to change before reopening"
               rows={1}
+              // The browser stops the paste at the cap rather than letting the
+              // server refuse a confirm the person has already committed to.
+              maxLength={PACKET_NOTE_MAX}
             />
+            {note.length > PACKET_NOTE_MAX - 200 && (
+              <p className="fine xs dim">
+                {note.length.toLocaleString("en-US")} of{" "}
+                {PACKET_NOTE_MAX.toLocaleString("en-US")} characters.
+              </p>
+            )}
           </div>
         )}
 

@@ -1083,6 +1083,9 @@ export interface OperatorOpenPacketInput {
   body?: string;
   observations?: { k: string; v: string; code?: boolean }[];
   options: OperatorPacketOptionInput[];
+  /** Ruling 315: the account-level cause that raised this, when the cause is
+   *  bigger than the task. Packets sharing it are resolved together. */
+  cause?: string;
 }
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
@@ -1739,6 +1742,9 @@ export async function operatorOpenPacket(
     })),
     options,
   };
+  // Ruling 315: an account-level cause travels onto the packet, so a sibling
+  // raised by the same failure can be found when this one is answered.
+  if (input.cause) packet.cause = input.cause;
 
   let opened = false;
   // Ruling 137: a packet pauses coordination, so the standing acceptance

@@ -1586,6 +1586,74 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
+     * Ruling 315. The note on a decision packet was sliced to 2,000 characters
+     * in `project.task.tsx` before the request reached the server — no
+     * `maxLength` on the box, no counter, no marker on the record, no error,
+     * and nothing anywhere holding the tail.
+     *
+     * Live on SHOP-76 a 4,454-character decision was stored at exactly 2,000,
+     * ending mid-word at "`docs/adr/README.md` is this branch's own rule and it
+     * says the record t", and a rework round ran on the operator's
+     * reconstruction of the deleted sentence. The card had promised the
+     * opposite: "anything you type below is recorded on the task's contract and
+     * every later run reads it".
+     *
+     * Ruling 292 permitted a cut on a VERDICT because "the full text is never
+     * lost — the agent's own report is on the same timeline, untruncated". A
+     * person's typed note has no second copy, so the identical cut is loss.
+     */
+    it("ruling 315: a long note is recorded WHOLE, not cut at 2,000", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const { resolvePacket } = await import("./task-actions.server");
+      // Longer than the old silent cap, shorter than the refusal — the exact
+      // band SHOP-76's decision fell into.
+      const long = `HEAD ${"x".repeat(2600)} TAIL`;
+      expect(long.length).toBeGreaterThan(2000);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1, note: long },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const recorded = taskFile()
+        .parsed.timeline.map((e) => e.text)
+        .join("\n");
+      // CANARY: restore the route's `.slice(0, 2000)` and TAIL is gone while
+      // HEAD stays — the shape that makes this invisible to the person who
+      // wrote it.
+      expect(recorded).toContain("TAIL");
+      expect(recorded).toContain("HEAD");
+    });
+
+    it("ruling 315: a note past the shared cap is REFUSED, and nothing is written", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const { resolvePacket } = await import("./task-actions.server");
+      const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
+      const before = taskFile().parsed.timeline.length;
+      await expect(
+        resolvePacket(
+          store.db,
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            optionIndex: 1,
+            note: "y".repeat(PACKET_NOTE_MAX + 1),
+          },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/too long/);
+      // Refusing and then writing half of it would be the same defect wearing a
+      // message. The packet is still open and the timeline did not move.
+      expect(taskFile().parsed.packet).not.toBeNull();
+      expect(taskFile().parsed.timeline.length).toBe(before);
+    });
+
+    /**
      * Ruling 241 (F37-68). Live on SHOP-5 this exact resolution ran on a HELD
      * task: ruling 186 refuses every agent dispatch while a task waits, and
      * this arm found that out only after writing the decision onto the task

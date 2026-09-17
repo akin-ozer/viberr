@@ -487,6 +487,80 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   });
 
+  /**
+   * Ruling 315. The note is the one field on this card that holds a person's
+   * own words, and the ROUTE cut it to 2,000 characters with `.slice(0, 2000)`
+   * before the request reached the server — no `maxLength` on the box, no
+   * counter, no marker on the record, no error, and nothing anywhere holding
+   * the tail.
+   *
+   * Live on SHOP-76 a 4,454-character decision was stored at exactly 2,000,
+   * ending mid-word, and a rework round ran on the operator's reconstruction of
+   * the deleted sentence. Ruling 292 permits a cut on a VERDICT because "the
+   * full text is never lost — the agent's own report is on the same timeline,
+   * untruncated"; a typed note has no second copy.
+   *
+   * This test lives at the ROUTE because that is where the slice was. A test
+   * that called `resolvePacket` directly passed with the slice restored — the
+   * first version of this test did exactly that, and its canary came out green.
+   */
+  it("ruling 315: the route records a long note WHOLE", async () => {
+    const long = `HEAD ${"x".repeat(2600)} TAIL`;
+    expect(long.length).toBeGreaterThan(2000);
+    // Option 1 is `request_edit` — it resolves and records the decision. Option
+    // 0 would merge a pull request, which is not what this test is about.
+    // SAFETY: `postIntent` returns the action's union; the success arm of
+    // `resolve-packet` is an object with no `error` key, and this asserts the
+    // narrower read of it rather than the refusal arm.
+    const posted = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet",
+      option: "1",
+      note: long,
+    })) as { ok?: boolean; error?: string };
+    expect(posted.error).toBeUndefined();
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const parsed = readTaskFile({
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed;
+    const recorded = parsed.timeline.map((e) => e.text).join("\n");
+    // CANARY: restore `.slice(0, 2000)` in the route and TAIL disappears while
+    // HEAD stays — silently, which is the whole defect.
+    expect(recorded).toContain("HEAD");
+    expect(recorded).toContain("TAIL");
+  });
+
+  it("ruling 315: a note past the shared cap is refused, and the packet stays open", async () => {
+    const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const read = () =>
+      readTaskFile({
+        projectSlug: "viberr-core",
+        taskKey: "VIB-142",
+        dataRoot: app.dataRoot,
+      })!.parsed;
+    const before = read().timeline.length;
+    // SAFETY: an over-long note raises `AppError.validation`, which the
+    // action's single catch turns into `data({ ok: false, error }, { status })`
+    // — the `ActionRefusal` arm this file documents above.
+    const result = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet",
+      option: "1",
+      note: "y".repeat(PACKET_NOTE_MAX + 1),
+    })) as ActionRefusal;
+    // Refusing and then writing half of it would be the same defect wearing a
+    // message, so the packet must still be open and the timeline unmoved.
+    expect(result.data.ok).toBe(false);
+    expect(result.data.error).toMatch(/too long/);
+    // It says the number AND what they wrote, so the person can tell how much
+    // to cut rather than guessing at a limit they were never shown.
+    expect(result.data.error).toContain("4,000");
+    expect(result.data.error).toContain("Nothing was recorded");
+    expect(read().packet).not.toBeNull();
+    expect(read().timeline.length).toBe(before);
+  });
+
   it("ruling 138: the resolve response prefers the option's goalDraft, and a reload rebuilds the SAME draft from the decided packet", async () => {
     // Canary: compose title + detail inline again in the route (drop
     // `goalDraftForOption`) — the response stops matching the option's draft.

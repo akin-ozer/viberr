@@ -937,6 +937,22 @@ export const packetOptionSchema = z
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;
 
+/**
+ * Ruling 315: the cap BOTH free-text fields on a decision packet share.
+ *
+ * They used to be 2,000 (silently sliced in the route, with nothing on the box
+ * saying so) and 4,000 (refused by the server), and which one a person got was
+ * decided by whether the selected option happened to be the synthetic "Write
+ * your own directive" index — not by anything they could see. One number now,
+ * refused at both, stated on the label, and enforced by the textarea so the
+ * browser stops the paste rather than the server refusing a confirm the person
+ * has already committed to.
+ *
+ * Lives here because the box that must show it is a client component and the
+ * guard that must enforce it is server-only.
+ */
+export const PACKET_NOTE_MAX = 4000;
+
 export const taskPacketSchema = z
   .object({
     /** F10-09: a stable per-packet id, stamped when a NEW packet is opened. A
@@ -967,6 +983,22 @@ export const taskPacketSchema = z
         byUserId: z.string().min(1),
       })
       .optional(),
+    /**
+     * Ruling 315: the CAUSE that raised this packet, when the cause is bigger
+     * than the task.
+     *
+     * A backend account losing its quota or its credential takes out every task
+     * running on it at once, and each one raised its own identical packet —
+     * same reason, same remedy, same options, N times. The person is answering
+     * the CAUSE, not the task, so packets that share a cause resolve together:
+     * answering one applies the same option to every sibling still carrying it.
+     *
+     * Absent on every packet whose cause is the task itself, which is almost
+     * all of them. A stable string, not an id: it is built from what actually
+     * failed (backend, failure kind, whose account), so two tasks that failed
+     * for the same reason agree on it without anything coordinating them.
+     */
+    cause: z.string().optional(),
     /** R15-14: profileId of the AGENT that raised this question, when one did.
      *  Resolving such a packet resumes that agent's own session with the answer
      *  rather than handing it to the operator to re-engage a cold run. Absent on
