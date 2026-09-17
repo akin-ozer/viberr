@@ -653,7 +653,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                       .array(z.string())
                       .optional()
                       .describe(
-                        "Ruling 287: the EXISTING tasks that must WAIT ON the new one — the reverse direction of `blockedBy`, and usually the one that matters, because a task is normally created to unblock something. Each key listed here gets the new task added to its own `blockedBy` when the person confirms, with a note on that task saying which decision did it. Use it whenever other work must not start until the new task lands; read_board first, since every key is checked and a bad one is refused by name.",
+                        "Ruling 287: the EXISTING tasks that must WAIT ON the new one — the reverse direction of `blockedBy`, and usually the one that matters, because a task is normally created to unblock something. Each key listed here gets the new task added to its own `blockedBy` when the person confirms, with a note on that task saying which decision did it. Use it whenever other work must not start until the new task lands; read_board first, since every key is checked and a bad one is refused by name. Ruling 322: THIS task's own key belongs here whenever it is the work that must wait, and is often the right entry — the decision then tells the person this task will wait on what it creates, instead of the sentence it used to print unconditionally, that this task is unchanged.",
                       ),
                     labels: z.array(z.string()).optional().describe("Labels for the new task."),
                   })

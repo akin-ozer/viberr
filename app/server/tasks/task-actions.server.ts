@@ -8435,6 +8435,34 @@ export async function setTaskArchived(
   };
 }
 
+/**
+ * Ruling 322 — does this `create_task` option also make the DECIDING task wait
+ * on what it creates?
+ *
+ * Ruling 269 built the option and wrote, in the resolver and again in the note
+ * it leaves, that *"`<KEY>` is unchanged; the new task carries the work"* — with
+ * a comment beside it calling the mutation "a deliberate NO-OP… this option
+ * says something about work that is NOT this task". Both were true when they
+ * were written.
+ *
+ * Ruling 287 then added `newTask.blocks`, the reverse edge: the EXISTING tasks
+ * that must wait on the new one. Nothing excludes the deciding task from that
+ * list, and it is the most natural entry on it — a task is usually created
+ * because the work in front of you cannot proceed without it. When it is
+ * there, the resolution writes the new key into this task's own `blockedBy`
+ * seconds after telling the person this task was untouched, and the board flips
+ * it to blocked.
+ *
+ * Neither sentence was updated. This is the reader that keeps them honest.
+ */
+export function createTaskHoldsDecider(
+  spec: PacketOption["newTask"] | undefined,
+  taskKey: string,
+): boolean {
+  const key = taskKey.trim().toUpperCase();
+  return (spec?.blocks ?? []).some((b) => b.trim().toUpperCase() === key);
+}
+
 // ------------------------------------------------------------ resolvePacket
 
 /** Resolve the active packet by stable option kind and mark its notifications read. */
@@ -9234,18 +9262,27 @@ export async function resolvePacket(
         type: "note",
         actor: human,
         title: null,
+        // Ruling 322: the second sentence used to say `${key} is unchanged`
+        // unconditionally, and `newTask.blocks` may name this very task.
         text:
           option.ev ??
           `**Decision:** ${option.t}. A new task is being created for it: "${spec.title}". ` +
-            `${key} is unchanged; the new task carries the work.`,
+            (createTaskHoldsDecider(spec, key)
+              ? `${key} will wait on it, and is released when it is done.`
+              : `${key} is unchanged; the new task carries the work.`),
         toAgent: false,
         evidence: null,
       };
-      // A deliberate NO-OP mutation: this option says something about work
-      // that is NOT this task. Every sibling flips a field here — `waiting`,
-      // a stage, a disposition — and flipping any of them would be the
-      // decision claiming a reach it does not have. The packet closing and
-      // the two timeline lines are the whole of its effect on this task.
+      // A deliberate NO-OP mutation HERE. Every sibling flips a field — the
+      // `waiting` stamp, a stage, a disposition — and flipping one would be
+      // this write claiming a reach it does not have.
+      //
+      // Ruling 322: that is not the same as "this task is unchanged". When
+      // `newTask.blocks` names this task (ruling 287's reverse edge), the
+      // resolution below writes the new key into its `blockedBy` through
+      // `setTaskDependencies` — the task's own editor — which is where a wait
+      // belongs. What this arm must not do is pretend the wait is not coming;
+      // the sentence above says which of the two happened.
       mutate = () => {};
       clearPacket = true;
       break;
@@ -10369,9 +10406,14 @@ export async function resolvePacket(
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: "Task created from a decision",
+          // Ruling 322: same correction as the decision event's own sentence.
+          // The wait itself is written by the `blocks` loop below, through the
+          // task's own dependency editor; this note is what a person reads.
           text:
             `**${made.key}** — ${spec.title} — was created by this decision. ` +
-            `It carries the work; ${input.taskKey} is unchanged.`,
+            (createTaskHoldsDecider(spec, input.taskKey)
+              ? `${input.taskKey} now waits on it and is released when it is done.`
+              : `It carries the work; ${input.taskKey} is unchanged.`),
           toAgent: false,
           evidence: null,
         });
@@ -10420,6 +10462,16 @@ export async function resolvePacket(
           // The provenance note lands on the task whose wait GREW. A wait that
           // appears with no reason on a task nobody was looking at reads as
           // Viberr deciding something on its own.
+          //
+          // Ruling 322: except when that task is the one being decided on —
+          // the note directly above already told this reader, in this task's
+          // own voice, that it now waits on what the decision created. A
+          // second card saying it again in the third person is noise on the
+          // one timeline where the fact is least surprising.
+          if (other.trim().toUpperCase() === input.taskKey.trim().toUpperCase()) {
+            reprojectTask(db, ctx, input.projectSlug, other);
+            continue;
+          }
           await updateTaskFile(taskRef(ctx, input.projectSlug, other), (parsed) => {
             parsed.timeline.unshift({
               occurredAt: new Date().toISOString(),

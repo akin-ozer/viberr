@@ -4088,6 +4088,110 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     );
   });
 
+  it("ruling 322: when the new task holds the DECIDING task, neither sentence says 'unchanged'", async () => {
+    /**
+     * Ruling 269 wrote two sentences saying this task is untouched — the
+     * decision event's own fallback and the note left after the create — and a
+     * comment beside them calling the mutation "a deliberate NO-OP… this option
+     * says something about work that is NOT this task". All true at the time.
+     *
+     * Ruling 287 then added `newTask.blocks`, and nothing keeps the deciding
+     * task off that list — it is the most natural entry on it, because a task
+     * is usually created when the work in front of you cannot proceed without
+     * it. The resolution then writes the new key into this task's own
+     * `blockedBy` seconds after telling the person it was unchanged, and the
+     * board flips it to blocked with two contradicting cards above it.
+     *
+     * CANARY: make either sentence unconditional again.
+     */
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "This needs a contract nobody publishes",
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the contracts amendment",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              blocks: ["VIB-1"],
+            },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Contracts amendment: publish the webhook shapes",
+    )!;
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    // The wait is real: this is the fact both sentences used to deny.
+    expect(here.parsed.frontmatter.blockedBy).toContain(made.key);
+
+    const texts = here.parsed.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("VIB-1 is unchanged"))).toBe(false);
+    // The decision event, in the person's own record.
+    expect(texts.some((t) => t.includes("VIB-1 will wait on it"))).toBe(true);
+    // ...and the note left after the task actually existed.
+    expect(texts.some((t) => t.includes(`${made.key}`) && t.includes("VIB-1 now waits on it"))).toBe(
+      true,
+    );
+    // One card about the wait, not two: the reverse-edge loop's third-person
+    // note is the deciding task's own fact said again.
+    expect(texts.filter((t) => t.includes("to unblock this task"))).toHaveLength(0);
+  });
+
+  it("ruling 322: a create_task that holds nothing here still reads as unchanged", async () => {
+    // The counterweight — ruling 269's sentence was right for its own case and
+    // stays. A fix that hedged every create_task would lose the one fact the
+    // option exists to convey: the work went somewhere else.
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the follow-up",
+            d: "",
+            rec: true,
+            newTask: { title: "Follow-up: retire the shim", goal: "Delete it once callers move." },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(here.parsed.frontmatter.blockedBy).toEqual([]);
+    expect(here.parsed.timeline.some((e) => e.text.includes("VIB-1 is unchanged"))).toBe(true);
+  });
+
   it("ruling 287: a reverse wait that CANNOT be written says so, and never undoes the task", async () => {
     const store = prepared();
     withTask(

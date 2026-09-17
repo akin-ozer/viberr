@@ -5309,6 +5309,28 @@ by rewriting those paragraphs:*
     (`task-file.schema.ts`, `task-actions.server.ts`, `workspace-delivery.server.ts`,
     `update-branch-operator.server.ts`, `packet-server-outcome.ts`.)
 
+322. **A later ruling retired the premise of an earlier ruling's sentence (owner, 2026-09-17,
+    pass 37; F37-158).** Ruling 269's `create_task` option wrote two sentences saying the deciding
+    task is untouched — the decision event's own fallback (*"`VIB-1` is unchanged; the new task
+    carries the work"*) and the note left after the create — with a comment beside them calling the
+    mutation *"a deliberate NO-OP… this option says something about work that is NOT this task"*.
+    All three were true when they were written.
+    Ruling 287 then added `newTask.blocks`, the reverse edge: the EXISTING tasks that must wait on
+    the new one. Nothing keeps the deciding task off that list, and it is the most natural entry on
+    it — a task is normally created because the work in front of you cannot proceed without it, and
+    the operator's own field description says to use it "whenever other work must not start until
+    the new task lands". When it is there the resolution writes the new key into this task's own
+    `blockedBy`, seconds after telling the person this task was unchanged, and the board flips it to
+    blocked with two contradicting cards above it.
+    Neither sentence was revisited. Both now read `createTaskHoldsDecider`, and the reverse-edge
+    loop skips its third-person provenance note on the deciding task, which already said it in the
+    first person one card up. The counterweight has its own test: a `create_task` that holds nothing
+    here still reads as unchanged, because for ruling 269's own case ruling 269 was right.
+    The shape is worth naming on its own. This is not a sentence that was wrong when written — it is
+    a sentence that a LATER ruling made wrong, in a file where both rulings are cited three hundred
+    lines apart. The prose that survives a feature is the prose nobody re-read.
+    (`task-actions.server.ts`, `operator-toolkit.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
