@@ -8642,7 +8642,28 @@ export async function resolvePacket(
       const reallyMerged = merge.kind === "merged";
       const hasPr = !!existing.parsed.frontmatter.pr;
       // R17-1: name any reviewed-revision drift on the completion record.
-      const driftNote = revisionDriftNote(existing.parsed.frontmatter);
+  /**
+   * Ruling 318: computed AFTER the merge, because the merge is what moves the
+   * branch. `existing` was read before `attemptAcceptanceMerge`, which runs
+   * `refreshBranchForAcceptance` → `recordBranchRefresh`: it brings the branch
+   * up to date with the base, pushes that merge commit, re-measures the drift
+   * and REWRITES the file. So on every task whose ceremony refreshed the base,
+   * the permanent Done record either named a head that was never merged or
+   * omitted the refresh the acceptance itself created.
+   *
+   * Live on SHOP-81, three consecutive entries: the github note says "base
+   * refreshed · 2 merge commits · 9 base commits", the branch-deletion note
+   * says the head was `75786d012de9`, and the completion record — the permanent
+   * one — names the pre-refresh head instead.
+   *
+   * R17-1's whole purpose is that the permanent record names the commits that
+   * shipped outside the reviewed revision, and the acceptance is the thing that
+   * ships them.
+   */
+      const driftNote = revisionDriftNote(
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ??
+          existing.parsed.frontmatter,
+      );
       // R19-8: the ONE shared no-change completion event, same as the other two
       // writers to Done.
       event = noChange.applies
@@ -12341,7 +12362,28 @@ async function acceptCompletion(
   const hasPr = !!existing.parsed.frontmatter.pr;
 
   // R17-1: name any reviewed-revision drift on the completion record.
-  const driftNote = revisionDriftNote(existing.parsed.frontmatter);
+  /**
+   * Ruling 318: computed AFTER the merge, because the merge is what moves the
+   * branch. `existing` was read before `attemptAcceptanceMerge`, which runs
+   * `refreshBranchForAcceptance` → `recordBranchRefresh`: it brings the branch
+   * up to date with the base, pushes that merge commit, re-measures the drift
+   * and REWRITES the file. So on every task whose ceremony refreshed the base,
+   * the permanent Done record either named a head that was never merged or
+   * omitted the refresh the acceptance itself created.
+   *
+   * Live on SHOP-81, three consecutive entries: the github note says "base
+   * refreshed · 2 merge commits · 9 base commits", the branch-deletion note
+   * says the head was `75786d012de9`, and the completion record — the permanent
+   * one — names the pre-refresh head instead.
+   *
+   * R17-1's whole purpose is that the permanent record names the commits that
+   * shipped outside the reviewed revision, and the acceptance is the thing that
+   * ships them.
+   */
+  const driftNote = revisionDriftNote(
+    readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ??
+      existing.parsed.frontmatter,
+  );
   // OBS-11 / OBS-13: decided BEFORE the write (it reads the pre-acceptance
   // frontmatter and the project policy) so the completion event can state the
   // branch's fate; the deletion itself runs after the task is really Done.

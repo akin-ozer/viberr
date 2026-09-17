@@ -5203,6 +5203,27 @@ by rewriting those paragraphs:*
     (`timeline-compaction.server.ts`, `task-actions.server.ts`, `task-file.schema.ts`,
     `run-recovery.server.ts`.)
 
+318. **The Done record names the head that actually merged (owner, 2026-09-17, pass 37;
+    F37-153).** R17-1's whole purpose, stated in `revision-drift.ts`, is that *"a Done task's own
+    timeline says... the head it was accepted with"* and that the permanent record names the
+    commits which shipped outside the reviewed revision. It was computed from `existing` — the
+    frontmatter read BEFORE `attemptAcceptanceMerge`.
+    That call is the thing that moves the branch. `refreshBranchForAcceptance` →
+    `recordBranchRefresh` pushes the base merge, calls `reconcileTask`, and rewrites
+    `pr.revisionDrift` from the head that resulted. So on every acceptance whose own ceremony
+    refreshed the base, the permanent record either named a head that was never merged or omitted
+    the refresh the acceptance itself created — and the acceptance is precisely what ships the
+    commits R17-1 exists to disclose.
+    Live on SHOP-81, three consecutive entries seconds apart: the github note says *"Drift
+    re-measured: base refreshed · 2 merge commits · 9 base commits"*, the branch-deletion note says
+    *"Its head was `75786d012de9`"*, and the completion record — the one that is permanent and that
+    nobody goes back to correct — names neither.
+    Both acceptance paths now read the file after the merge. The test drives the mechanism rather
+    than the reconciler: a merge mock that rewrites `pr.revisionDrift` mid-ceremony, which is
+    exactly what `reconcileTask` does, and the assertion is that the completion record sees it.
+
+    (`task-actions.server.ts`, both the direct and the packet acceptance paths.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

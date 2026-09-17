@@ -5372,6 +5372,83 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(parsed.frontmatter.baseRefreshes[0]).toMatchObject({ mergeSha: "m".repeat(40), base: "main", commits: 2 });
     expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought `vib-1-work` up to date with `main`"))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.details).toMatchObject({ status: "updated", commits: 2 });
+
+  });
+
+  /**
+   * Ruling 318. The permanent Done record's drift note was computed from
+   * `existing` — the frontmatter read BEFORE `attemptAcceptanceMerge`. That
+   * call is the thing that refreshes the branch: `refreshBranchForAcceptance` →
+   * `recordBranchRefresh` pushes the merge commit, calls `reconcileTask`, and
+   * REWRITES `pr.revisionDrift` from the moved head. So on every acceptance
+   * whose own ceremony moved the base, the record either named a head that was
+   * never merged or omitted the refresh the acceptance itself created.
+   *
+   * Live on SHOP-81, three consecutive entries: the github note says "base
+   * refreshed · 2 merge commits · 9 base commits", the branch-deletion note
+   * names head `75786d012de9`, and the completion record names neither.
+   *
+   * R17-1's whole purpose (`revision-drift.ts`) is that the permanent record
+   * names the commits that shipped outside the reviewed revision — and the
+   * acceptance is what ships them.
+   *
+   * The merge mock below stands in for the reconciler: what matters is that the
+   * FILE CHANGES DURING THE MERGE, which is the mechanism, and whether the note
+   * is read before or after it.
+   */
+  it("ruling 318: the Done record names the drift the acceptance itself created", async () => {
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const drifted = {
+      headSha: "d".repeat(40),
+      reviewedSha: "a".repeat(40),
+      authored: 0,
+      baseRefresh: { merges: 1, commits: 4 },
+    };
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      // Exactly what `recordBranchRefresh` → `reconcileTask` does inside the
+      // merge: re-measure the drift onto the file the ceremony is mid-way
+      // through, AFTER `existing` was read.
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          if (parsed.frontmatter.pr) parsed.frontmatter.pr.revisionDrift = drifted;
+        },
+      );
+      return { status: "merged", prNumber: 7, sha: "d".repeat(40) };
+    });
+    await transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        manual: true,
+        ack: acceptanceDisclosureOf(taskFile(store).frontmatter),
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
+    );
+    const parsed = taskFile(store);
+    const completion = parsed.timeline.find((e) => e.type === "completion");
+    expect(completion, "an acceptance writes a completion record").toBeTruthy();
+    // CANARY: compute `driftNote` from `existing.parsed.frontmatter` again and
+    // this is empty — the record stops naming the refresh it exists to
+    // disclose, on the one write nobody can go back and correct.
+    expect(completion!.text).toContain("base refreshed");
+    expect(completion!.text).toContain("4 base commits");
+    // And it agrees with what the acceptance actually left on the task.
+    expect(revisionDriftNote(parsed.frontmatter)).not.toBe("");
+    expect(completion!.text).toContain(revisionDriftNote(parsed.frontmatter).trim());
   });
 
   it("G35-5 (d): a refresh that CONFLICTS refuses the acceptance with the gate's sentence and records the conflict", async () => {
