@@ -862,7 +862,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. Org admins only. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -1206,7 +1206,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_audit_log",
-      "Read the audit trail with filters (project, action, actor, time range). Org admins only. `action` is a PREFIX: \"task.\" reads every task action, \"task.transition\" narrows, a whole id matches exactly that one. A filter that matches nothing says so and lists the action ids the window DOES contain, because a wrong spelling and a quiet period used to look identical (ruling 279). `actions` on every reply is the vocabulary with a count each, so you never have to know an id before you can ask for it. Org admins only. Rows are retained 90 days.",
+      "Read the audit trail with filters (project, action, actor, time range). Org admins only. `action` is a PREFIX: \"task.\" reads every task action, \"task.transition\" narrows, a whole id matches exactly that one. A filter that matches nothing says so and lists the action ids the window DOES contain, because a wrong spelling and a quiet period used to look identical (ruling 279). `actions` on every reply is the vocabulary with a count each, so you never have to know an id before you can ask for it. Rows are retained 90 days.",
       {
         projectSlug: z.string().optional(),
         action: z

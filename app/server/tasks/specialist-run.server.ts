@@ -328,10 +328,13 @@ interface RunMcpMounts {
  * needs a live cap, two tasks and a runtime that does not finish first.
  */
 export function runDispatchLine(input: {
-  /** `refused` never reaches here — this line is written only after a dispatch
-   *  that produced a run — but the type is the caller's, so it is accepted and
-   *  treated as the non-queued case rather than requiring a cast. */
+  /** All three reach here. A refused dispatch still becomes a run row —
+   *  `startRun` records the refusal as an honest terminal error — and the
+   *  dispatch path does not return between `startRun` and this line, so
+   *  "Started" for a `refused` outcome was the same defect for the third case. */
   outcome: RunStartOutcome;
+  /** The server's own refusal sentence when `outcome` is `refused`; null otherwise. */
+  refusal: string | null;
   backendLabel: string;
   role: string;
   /** The backend it switched FROM, or null when it did not switch. */
@@ -339,12 +342,15 @@ export function runDispatchLine(input: {
   /** Model-substitution and pin notes, already formatted with their separators. */
   notes: string;
 }): string {
-  const queued = input.outcome === "queued";
-  const head = `${queued ? "Queued" : "Started"} a ${input.backendLabel} run for the ${input.role} agent`;
+  const verb = { started: "Started", queued: "Queued", refused: "Refused" }[input.outcome];
+  const head = `${verb} a ${input.backendLabel} run for the ${input.role} agent`;
   const switched = input.switchedFrom ? ` (switched from ${input.switchedFrom})` : "";
-  const tail = queued
-    ? " — the instance is at its concurrent-run cap, so it starts when a slot frees. Nothing is streaming yet."
-    : " — streaming to the agent logs.";
+  const tail =
+    input.outcome === "queued"
+      ? " — the instance is at its concurrent-run cap, so it starts when a slot frees. Nothing is streaming yet."
+      : input.outcome === "refused"
+        ? ` — ${input.refusal ?? "the run was refused before any process started."}`
+        : " — streaming to the agent logs.";
   return `${head}${switched}${input.notes}${tail}`;
 }
 
@@ -2368,6 +2374,7 @@ async function dispatchAgentRun(
         agentEvent(
           runDispatchLine({
             outcome,
+            refusal,
             backendLabel,
             role: engagement.role,
             switchedFrom: switched

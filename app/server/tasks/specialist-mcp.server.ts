@@ -142,7 +142,7 @@ export function unavailableMcpSection(grants: readonly UnresolvedMcpGrant[]): st
     `Your profile grants ${grants.map((g) => g.name).join(", ")}, but ${it} NOT ` +
     `mounted on this run. Why, per server, as the server reported it:\n\n` +
     `${lines}\n\n` +
-    `Do not claim or attempt tools from ${they}. If you report the gap, report ` +
+    `Do not claim or attempt tools from ${they}; report the gap, and report ` +
     `THAT reason — do not infer one, and do not assume the grant or the ` +
     `registration is missing unless the reason says so.`
   );
@@ -384,7 +384,7 @@ export async function verifyStdioMcpMountsForRun(
       if (credProbe.kind === "up") {
         corruptsSharedHealth = false;
         disclosedReason =
-          "it needs a credential to start, which Codex runs do not receive — Codex mounts it unauthenticated; it is healthy for Claude runs";
+          "it needs its stored credential just to start, and a Codex run is pre-flighted without one, so it is not mounted for this run; it is healthy for Claude runs, which receive the credential";
       }
     }
     if (corruptsSharedHealth) {

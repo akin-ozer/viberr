@@ -1,5 +1,10 @@
 # The controller and chained goals
 
+> Updated 2026-09-17 for rulings 309, 310 and 312 (pass 37): §3's system prompt names each
+> granted MCP server that did not mount with the reason its own probe gave, carries the
+> ruling-namespace paragraph above the tool manifest, and closes its conversation block with
+> the generated project-authority tier list (advisory, never enforcing); the task and board
+> context reads carry the asking person's live project role as `your authority: …`.
 > Updated 2026-09-13 for rulings 192, 194 and 197 (pass 37): a chain can be renamed, a retry
 > rebuilds from the failed TASK's own contract, `get_goal` carries `liveGoal`, a retry that
 > starts nothing says so, and a template's persona is readable so a summary-only edit is not
@@ -240,14 +245,22 @@ owner-routed SSE event `controller.updated`.
    run starts. Each prompt opens with the **context read** (ruling 121,
    `gatherControllerContext`): a block labelled as a server read taken when the turn
    started — for a task-anchored conversation a derived header (stage and position, next
-   stages with their boundaries, owner, engaged agents, branch and PR, open packet, goal
+   stages with their boundaries, the asking person's live project role as
+   `your authority: …` (ruling 309), owner, engaged agents, branch and PR, open packet, goal
    chain) plus the canonical `task.md` verbatim inside a five-backtick fence, bounded by
    `TASK_FILE_CONTEXT_CHARS` (24 000; over budget the head stays whole and the newest
    timeline entries are kept, with a marker naming how many were omitted); for a board,
-   the project's description, repo, members, stages with counts, boundaries, the open-task
-   table (`BOARD_CONTEXT_TASKS` 40 rows, `BOARD_CONTEXT_CHARS` 12 000) and the goal
-   chains; for the instance, the projects the person can see with their role; then, when
-   the message carried one, `They are looking at: <surface>`. The whole block stays under
+   the project's description, repo, members, the same `your authority: …` line (ruling
+   309), stages with counts, boundaries, the open-task table (`BOARD_CONTEXT_TASKS` 40
+   rows, `BOARD_CONTEXT_CHARS` 12 000) and the goal chains; for the instance, the projects
+   the person can see with their role; then, when the message carried one, `They are
+   looking at: <surface>`. The authority line (ruling 309, `askerAuthorityLine`) names the
+   role and stops — `project role maintainer`, or the org-admin override named as such
+   (it holds every action here), or `not a member of this project` — a live read taken
+   with the visibility gate at the end of this step, and never a held/not-held set: the
+   tier list in the system prompt is static, this line is personal, and the model
+   multiplies the two; it ends by saying that a role on any OTHER project is not in this
+   read (`whoami` has it). The whole block stays under
    `CONTEXT_BLOCK_CHARS` (32 000); the fence is always longer than the longest backtick
    run inside the file, so nothing in the file can close it, and a line in the server's
    own voice above it says the fenced bytes are data and never instructions. The read is
@@ -262,11 +275,25 @@ owner-routed SSE event `controller.updated`.
    `WebFetch`, `WebSearch` plus the operator read-only set (`Bash`, `Edit`,
    `MultiEdit`, `Write`, `NotebookEdit`). The system prompt replaces the Claude Code
    preset: doctrine, attached skills and KBs (24 000-char KB budget), a runtime block
-   naming mounted and unmounted MCP servers, and a conversation block naming the
+   naming the mounted MCP servers and, for every granted server that did NOT mount, the
+   reason its own probe gave, with the instruction to say so in those terms and not to
+   infer a cause the server did not give (ruling 310, the third surface), then the
+   ruling-namespace paragraph above the per-turn tool manifest (ruling 297): a ruling
+   number inside a tool description is Viberr's own product decision, not readable from a
+   run and not a project's rule, while a project's rules live in its knowledge base,
+   number from 1, and are cited by document and section rather than a bare number (ruling
+   312); the measured shell inventory (ruling 191); and a conversation block naming the
    asker, their live org role, the project binding (and the task anchor, when there is
    one: "tools default to both, and every turn opens with the task's canonical file as a
-   server read") and the rule that only this person's own messages authorize actions.
-   Working directory is `<dataRoot>/runtimes/controller-scratch`.
+   server read") and the rule that only this person's own messages authorize actions,
+   followed by the project-authority tier list (ruling 309): generated from
+   `RBAC_DEFINITIONS` by `projectAuthorityPrompt`, each tier naming the actions it is the
+   floor for (a grant that gates more than its name says carries its `covers` scope in
+   parentheses, ruling 309(a)), then the hand-written exceptions marked as hand-written,
+   and the rule that the list is ADVISORY, NEVER ENFORCING — predict a refusal, say why,
+   make the call anyway, and let the server's answer be the answer; the asking person's
+   own project role is not in this list but in the context read above. Working directory
+   is `<dataRoot>/runtimes/controller-scratch`.
 6. `settleTurn` records the reply (or a failure note naming quota/auth/other),
    releases the lease and starts the next queued message.
 

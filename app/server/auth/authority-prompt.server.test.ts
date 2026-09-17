@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACTION_COVERS,
   RBAC_DEFINITIONS,
   ROLE_RANK,
   roleCan,
@@ -84,9 +83,8 @@ describe("projectAuthorityPrompt", () => {
     // pages read them inline as "the X grant".
     expect(text).toContain("Edit task priority, labels & due date (and what a task waits on");
     expect(text).toContain("Edit workflow & policy (and archiving or restoring");
-    for (const [action, covers] of ACTION_COVERS) {
-      const label = RBAC_DEFINITIONS.find((d) => d.id === action)?.label;
-      expect(text, `${action} loses its scope`).toContain(`${label} (${covers})`);
+    for (const d of RBAC_DEFINITIONS.filter((def) => "covers" in def)) {
+      expect(text, `${d.id} loses its scope`).toContain(`${d.label} (${d.covers})`);
     }
   });
 
@@ -143,6 +141,16 @@ describe("projectAuthorityPrompt", () => {
     // plausibly offer to accept a completion because the table says the person
     // holds it."
     expect(text).toContain("not your toolkit");
+  });
+
+  it("names BOTH gates the owner exception short-circuits", () => {
+    // `requireAcceptCompletion` and `requireDecisionAuthority` return on the
+    // same `ownerException` before their role gate (task-actions.server.ts,
+    // R14-2). A line naming only acceptance would have the controller tell a
+    // contributor owner "maintainer or admin; ask one" about a packet the task
+    // page is showing them live — the false tier explanation this block's
+    // last paragraph forbids.
+    expect(text).toContain("resolve its decision packets");
   });
 
   it("marks the hand-maintained half as hand-maintained", () => {

@@ -551,3 +551,20 @@ export const KB_RULINGS_NOTE =
   "In your final report, state which rulings sections you relied on, and say so " +
   "plainly if you did not open them. A delivery that contradicts a rule its author " +
   "never read is a thing a reviewer should be able to SEE, rather than rediscover.";
+
+/**
+ * Ruling 312: two ruling namespaces, one word. Tool descriptions cite "ruling N"
+ * meaning VIBERR's own product decisions — which no run can read — while a
+ * project's rulings knowledge base numbers its own rules from 1, and directives
+ * on a live board cite those as "ruling 4". One constant, because the operator
+ * reads both namespaces at once (its own `get_task` description cites five
+ * viberr rulings, and its grants carry the project's rulings KB) and the
+ * controller's tool descriptions carry forty-one of the former.
+ */
+export const RULING_NAMESPACE_NOTE =
+  "A ruling number inside a TOOL DESCRIPTION is Viberr's own product decision. Those are " +
+  "not readable from here and are not a project's rules: they explain why a tool behaves " +
+  "as it does, and nothing more. A project's own rules live in its knowledge base, number " +
+  "from 1, and are what a task or an operator directive means by \"ruling\". When you cite " +
+  "a project's rule, name the document and the section rather than a bare number, so the " +
+  "two can never be read as one.";

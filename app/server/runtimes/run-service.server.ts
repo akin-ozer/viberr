@@ -160,6 +160,10 @@ interface LiveSlot {
 interface PendingRun {
   runId: string;
   launch: () => void;
+  /** The data root `startRun` was given, for the note the promotion writes on
+   *  the task (ruling 311): the drain runs from another run's onExit or the
+   *  org-settings action, neither of which knows it. */
+  dataRoot?: string;
 }
 
 /** The two admission lanes of ruling 152(b). */
@@ -1073,7 +1077,7 @@ export async function startRun(
     launchThunk();
     return { runId, outcome: "started", refusal: null };
   }
-  const admitted = admitRun(db, runId, launchThunk, input.kind);
+  const admitted = admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
   return { runId, outcome: admitted ? "started" : "queued", refusal: null };
 }
 
@@ -1755,6 +1759,7 @@ function admitRun(
   runId: string,
   launchThunk: () => void,
   kind: RunKind,
+  dataRoot?: string,
 ): boolean {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
@@ -1764,7 +1769,7 @@ function admitRun(
     return true;
   }
   const queue = state.pending[lane];
-  queue.push({ runId, launch: launchThunk });
+  queue.push({ runId, launch: launchThunk, dataRoot });
   logger.info("run queued behind the concurrency cap", {
     runId,
     lane,
@@ -1805,6 +1810,9 @@ export function drainRunQueue(db: DatabaseSync): void {
       const row = getRun(db, next.runId);
       if (!row || row.state !== "queued") continue; // stopped while waiting
       next.launch();
+      // Ruling 311, the other half: the timeline said "Queued … Nothing is
+      // streaming yet", and this is the one place that stops being true.
+      void noteRunStarted(db, row, next.dataRoot);
     }
   } finally {
     state.draining = false;
@@ -2224,6 +2232,52 @@ async function noteInterrupt(
     rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
   } catch (error) {
     logger.error("interrupt timeline note failed", {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Ruling 311, the other half. `runDispatchLine` now records a run parked
+ * behind the concurrent-run cap as "Queued … starts when a slot frees. Nothing
+ * is streaming yet" — and a parked run is promoted in exactly one place,
+ * `drainRunQueue`, whose `launch()` patches the run row and publishes SSE and
+ * writes nothing on the task. So the durable record every person, operator and
+ * later run reads said "Nothing is streaming yet" for the run's whole life
+ * after admission: the mirror image of the sentence 311 fixed, and the same
+ * shape (a transition the row knew, absent from the timeline). One note at the
+ * transition, naming the run. Only the promotion path writes it — a run
+ * admitted at once was never "queued" on the timeline, and its dispatch line
+ * already said "Started". Best-effort like `noteInterrupt`: a task file we
+ * cannot write never blocks the launch. Controller turns have no task file
+ * (ruling 99).
+ */
+async function noteRunStarted(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  dataRoot?: string,
+): Promise<void> {
+  if (run.kind === "controller") return;
+  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
+  if (dataRoot) ref.dataRoot = dataRoot;
+  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "run-queue" },
+        title: "Run started",
+        text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started — streaming to the agent logs.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error("run-started timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
       err: error instanceof Error ? error : new Error(String(error)),

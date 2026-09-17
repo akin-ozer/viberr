@@ -50,6 +50,11 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     expect(prompt).not.toContain("KB-MARKER-ARCH-42");
     // …and the prompt says how to turn a name into the text.
     expect(prompt).toContain("read_knowledge_doc");
+    // Ruling 312: the operator reads both ruling namespaces at once, so it is
+    // told which is which. CANARY: drop the shared note from the operator
+    // prompt and "ruling 4" in a directive reads as a viberr ruling.
+    expect(prompt).toContain("is Viberr's own product decision");
+    expect(prompt).toContain("name the document and the section rather than a bare number");
   });
 
   it("injects nothing for a KB name with no store folder (no throw)", () => {

@@ -234,7 +234,7 @@ export function runInputRows(
         ? `mounted: ${inputs.mcp.mounted.join(", ")}`
         : "mounted: none",
       inputs.mcp.unresolved.length
-        ? `granted but NOT mounted (no such server): ${inputs.mcp.unresolved.join(", ")}`
+        ? `granted but NOT mounted: ${inputs.mcp.unresolved.join(", ")}`
         : null,
       inputs.mcp.unhealthy.length
         ? `mounted but its last connection check failed: ${inputs.mcp.unhealthy.join(", ")}`

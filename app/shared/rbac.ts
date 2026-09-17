@@ -65,8 +65,8 @@ export const RBAC_DEFINITIONS = [
   { id: "own-task", label: "Take / release own task ownership", roles: [A, M, C] },
   // Lightweight planning attributes (priority, labels, due date) — a contributor
   // who can create and own a task also grooms its metadata. Distinct from
-  // `update-goal` ([A,M]): the goal is the reviewable acceptance contract, this
-  // is scheduling metadata that changes no gate.
+  // `update-goal` ([A,M]): the goal is the reviewable acceptance contract, and
+  // three of the four things here are scheduling metadata that changes no gate.
   // Ruling 309(a): the label named three of the four things this gates, and the
   // fourth is not like the others — `setTaskDependencies` runs on this action
   // too (dependencies.server.ts), and clearing what a task waits on RELEASES a
@@ -129,20 +129,6 @@ export function roleCan(role: ProjectRole | null | undefined, action: RbacAction
   if (!role) return false;
   return rolesForAction(action).includes(role);
 }
-
-/**
- * What an action gates BEYOND what its grant name says, or null.
- *
- * Ruling 309(a). The name is read inline on two pages ("changing a guardrail
- * needs the *Edit workflow & policy* grant"), so it has to stay short; the
- * scope it cannot carry still has to be legible somewhere, and this is where
- * the table and the controller's prompt both read it.
- */
-export const ACTION_COVERS = new Map<RbacAction, string>(
-  RBAC_DEFINITIONS.flatMap((d): [RbacAction, string][] =>
-    "covers" in d ? [[d.id, d.covers]] : [],
-  ),
-);
 
 /** The roles that hold an action (for rendering + for building guard allow-lists). */
 export function rolesForAction(action: RbacAction): readonly ProjectRole[] {

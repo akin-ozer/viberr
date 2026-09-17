@@ -4854,8 +4854,25 @@ by rewriting those paragraphs:*
     generated list is an offline diff — every permitted action against what the list
     predicts. It checks the generated half automatically and cannot touch the exceptions,
     which is exactly where the risk is.
+    309(a), TWO GRANTS THAT GATE MORE THAN THEIR NAME SAYS, found by the controller on the
+    turn after the generated list shipped, by reading it and asking what was NOT in it. Two
+    answers held up in code, and both are defects in the permission table itself, not in
+    the prompt — the Policy page and the profile's "Your access" list render the same
+    labels. `edit-task-meta` reads "Edit task priority, labels & due date", and
+    `setTaskDependencies` runs on it too: clearing what a task waits on RELEASES a held task
+    onto the board, so the table told a contributor they may tidy when they may also
+    unblock. `edit-policy` reads "Edit workflow & policy", and `setProjectArchived` runs on
+    it, so "who can unarchive this project?" had no answer anywhere in the product. The
+    labels stay SHORT, because eight sentences across two pages read them inline as "the X
+    grant" and a lengthened label reads badly there; the scope goes in a `covers` field on
+    the definition — the one object the table and the prompt are both generated from —
+    rendered as a quiet second line under the label in the Policy table and on the profile
+    page, and appended in parentheses to the controller's generated tier list, so a name
+    the model can only take literally no longer has it predicting that a contributor may
+    retitle a label and not that the same grant lets them release a held task.
 
-    (`authority-prompt.server.ts`, `controller-context.server.ts`, `controller-run.server.ts`.)
+    (`authority-prompt.server.ts`, `controller-context.server.ts`, `controller-run.server.ts`,
+    `rbac.ts`, `policy-data.ts`, `policy-page.tsx`, `profile-page.tsx`.)
 
 310. **A run is told WHY its granted server did not arrive, and the reason is the one the
     server gave (owner, 2026-09-16, pass 37; F37-145).** Both run prompts answered "your
@@ -4976,11 +4993,35 @@ by rewriting those paragraphs:*
     document and section rather than a bare number. That last part codifies a practice the
     board had already invented for itself — the operator wrote "conventions §4" in a quality
     entry the same hour.
-    Scoped to the controller deliberately: the operator's and the specialist's tool
-    descriptions cite no viberr ruling at all (checked, zero matches), so only this surface
-    has the collision.
+    Scoped to the controller, and the reason first given for that was wrong. *(Corrected
+    2026-09-17 — this used to say the operator's and the specialist's tool descriptions
+    cite no viberr ruling at all, "checked, zero matches", so only this surface had the
+    collision. The specialist's own tool descriptions do cite none: every match in
+    `agent-toolkit.server.ts` is a code comment. The operator's do — `get_task` cites
+    rulings 133, 178, 204, 237 and 238, `open_decision_packet` 85 and 164, `run_agent` 133
+    and 207(c), `deliver_for_review` 160 and 161, `transition_stage` 133 — and so do its
+    packet-option PARAMETER descriptions ("block_on_dependencies only (ruling 230)",
+    "wait_for_window only (ruling 224)", "create_task only (ruling 269)"), and so do the
+    prompt bodies every agent re-reads: the specialist's delivery contract says "(ruling
+    207(f))" and "(ruling 211(f) …)", and the task anchor's lease block is headed "### Files
+    another task owns right now (ruling 245)". So the collision exists on those surfaces
+    too, and the note above had reached only the controller's prompt when this was
+    written.)* The residual is open: a namespace cited AT THE SOURCE — "viberr ruling N"
+    wherever a description or a prompt means a number in this file — would cover every
+    reader without a rule any of them has to remember. Recorded, not built.
+    *(Amended 2026-09-17 — the note now reaches the operator too, and from one constant:
+    `RULING_NAMESPACE_NOTE` in `kb-injection.server.ts`, beside `KB_RULINGS_NOTE`, read by
+    `buildControllerSystemPrompt` and pushed by `buildOperatorSystemPrompt` under the heading
+    `# Two kinds of "ruling"` (asserted in `operator-kb-injection.server.test.ts`), because
+    the operator is the surface where the two namespaces actually meet: its own tool
+    descriptions cite viberr rulings and the directives it writes cite the project's. The
+    specialist persona still does not carry it — its tool descriptions cite no viberr
+    ruling, but its prompt bodies do, at `specialist-run.server.ts` ~3309 and ~3315 (the
+    delivery contract) and `task-actions.server.ts` ~1518 (the lease block) — so that
+    surface, and the at-source "viberr ruling N" namespace that would make every citation
+    say which file it means, remain the open residual.)*
 
-    (`controller-run.server.ts`.)
+    (`controller-run.server.ts`, `operator-run.server.ts`, `kb-injection.server.ts`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on

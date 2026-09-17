@@ -3021,6 +3021,15 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     await waitFor(() =>
       expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
     );
+    // `waitFor` does NOT mean the mount settled: RTL turns the act environment
+    // OFF while it polls, so the page's own opening navigation could still be
+    // in flight when the two clicks below fire — and then the HELD navigation
+    // is that one rather than the Developer click's, and `url-profile` is not
+    // "" for the reason this test means. It passed alone and failed about one
+    // full-suite run in twenty, under load. Settling here fixes the PRECONDITION
+    // and changes nothing about what is under test: the two clicks still fire
+    // in the same beat, with no wait between them.
+    await act(async () => {});
 
     // No wait between the two clicks — the live sequence that misfired. The
     // navigation the first click started is still in flight…

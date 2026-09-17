@@ -1,6 +1,5 @@
 import {
   PROJECT_ROLES,
-  ACTION_COVERS,
   RBAC_DEFINITIONS,
   ROLE_RANK,
   type ProjectRole,
@@ -57,12 +56,7 @@ const ASCENDING: readonly ProjectRole[] = [...PROJECT_ROLES].sort(
  * generate a table that quietly under-reports someone's authority.
  */
 export function authorityTiers(): AuthorityTier[] {
-  return tiersFrom(
-    RBAC_DEFINITIONS.map((d) => {
-      const covers = ACTION_COVERS.get(d.id);
-      return covers === undefined ? d : { ...d, covers };
-    }),
-  );
+  return tiersFrom(RBAC_DEFINITIONS);
 }
 
 /** The grouping itself, over any table — so the monotonicity guard can be
@@ -79,15 +73,13 @@ export function tiersFrom(
   for (const { id, label, covers, roles } of definitions) {
     const floor = ASCENDING.find((role) => roles.includes(role));
     if (floor === undefined) throw new Error(`RBAC action "${id}" is held by no role`);
-    for (const role of ASCENDING) {
-      const above = ROLE_RANK[role] >= ROLE_RANK[floor];
-      if (above !== roles.includes(role)) {
-        throw new Error(
-          `RBAC action "${id}" is not monotonic over the role tier: ` +
-            `its floor is ${floor}, so ${role} should ${above ? "hold" : "not hold"} it and does not. ` +
-            `Grouping by floor cannot describe it; the prompt table would lie.`,
-        );
-      }
+    const gap = ASCENDING.slice(ASCENDING.indexOf(floor)).find((r) => !roles.includes(r));
+    if (gap) {
+      throw new Error(
+        `RBAC action "${id}" is not monotonic over the role tier: ` +
+          `its floor is ${floor}, so ${gap} should hold it and does not. ` +
+          `Grouping by floor cannot describe it; the prompt table would lie.`,
+      );
     }
     // Ruling 309(a): two actions gate more than their grant name says, and the
     // model reads this list to decide what to offer. A name it can only take
@@ -98,11 +90,14 @@ export function tiersFrom(
   return ASCENDING.map((role): AuthorityTier => ({ role, gains: gains.get(role) ?? [] }));
 }
 
-function tierLine(tier: AuthorityTier, index: number, total: number): string {
+function tierLine(tier: AuthorityTier): string {
+  // Bound to the ROLE, not to the position in a list that drops empty tiers:
+  // if viewer ever held nothing, position 0 would call contributor "every
+  // member", and nothing else would notice.
   const who =
-    index === 0
+    tier.role === ASCENDING[0]
       ? `${tier.role}, and so every member:`
-      : index === total - 1
+      : tier.role === ASCENDING[ASCENDING.length - 1]
         ? `${tier.role} alone, on top of all of that:`
         : `${tier.role} and up, on top of that:`;
   // The labels are the Policy page's own words, unaltered. Lower-casing them to
@@ -127,7 +122,7 @@ export function projectAuthorityPrompt(): string {
     "it, so a role holds everything at or below its own tier. This list is generated from the " +
     "server's authorization map, so it is what will actually be enforced on your " +
     "call, not a summary of it.\n\n" +
-    tiers.map((t, i) => tierLine(t, i, tiers.length)).join("\n") +
+    tiers.map(tierLine).join("\n") +
     "\n\nThe tiers above are generated. What follows is NOT: it is maintained by " +
     "hand, because these live in code paths rather than in a table, and it is the " +
     "part most likely to be incomplete. Treat it as the best current account, not " +
@@ -135,8 +130,9 @@ export function projectAuthorityPrompt(): string {
     "- An ORG admin holds all of it on every project, as an audited override, " +
     "whatever their project role is and even with no membership at all.\n" +
     "- A DISABLED account holds none of it, at any tier, including org admin.\n" +
-    "- A task's OWNER may accept their own task at contributor or higher, though " +
-    "accepting is otherwise maintainer and up.\n" +
+    "- A task's OWNER may accept their own task, and resolve its decision packets and " +
+    "recommendations, at contributor or higher, though both gates are otherwise " +
+    "maintainer and up.\n" +
     "- An ARCHIVED project refuses every action here to everyone, admins included, " +
     "before role is even considered. Reading still works, and so does restoring it.\n" +
     "- Membership is the outer gate for everyone EXCEPT an org admin, whose " +

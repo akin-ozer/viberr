@@ -151,13 +151,21 @@ describe("run concurrency cap", () => {
     expect(note!.text).not.toContain("stays resumable");
   });
 
-  it("drains the oldest queued run when a live run finishes", async () => {
+  /** The timeline note saying `runId` got its slot (ruling 311, the other half). */
+  function startedNote(runId: string) {
+    return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline.find((e) => e.text.includes(runId) && e.text.includes("got a slot and started"));
+  }
+
+  it("drains the oldest queued run when a live run finishes — and the timeline says so", async () => {
     setMaxConcurrentRuns(store.db, 1);
     const a = await startHeldRun("r0");
     const b = await startHeldRun("r1");
     await settle();
     expect(getRun(store.db, a)?.state).toBe("running");
     expect(getRun(store.db, b)?.state).toBe("queued");
+    // Ruling 311, the other half: while b waits, nothing on the record says it started.
+    expect(startedNote(b)).toBeUndefined();
 
     // Interrupt a → its slot frees → b promotes and launches.
     await interruptRun(
@@ -169,6 +177,12 @@ describe("run concurrency cap", () => {
     expect(getRun(store.db, a)?.state).toBe("interrupted");
     expect(getRun(store.db, b)?.state).toBe("running");
     expect(runConcurrencySnapshot(store.db)).toMatchObject({ live: 1, queued: 0 });
+    // Canary: drop the note from `drainRunQueue` and the timeline reads "Nothing
+    // is streaming yet" for the whole run — the dispatch line's "Queued" with no
+    // transition after it. The note names the run and says it is streaming.
+    expect(startedNote(b)?.text).toContain(`\`${b}\``);
+    // Only the promotion writes it: a was admitted at once and was never "queued".
+    expect(startedNote(a)).toBeUndefined();
   });
 
   it("drops a run interrupted WHILE queued — it never springs to life", async () => {

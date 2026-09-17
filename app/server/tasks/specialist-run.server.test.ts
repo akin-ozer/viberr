@@ -825,8 +825,9 @@ describe("startSpecialistRun", () => {
    * "queued … starts when a slot frees" since B10 — the durable record that
    * everybody else reads said the opposite.
    */
-  describe("ruling 311: the dispatch line says which of the two things happened", () => {
+  describe("ruling 311: the dispatch line says which of the three things happened", () => {
     const base = {
+      refusal: null,
       backendLabel: "Claude",
       role: "developer",
       switchedFrom: null,
@@ -851,8 +852,26 @@ describe("startSpecialistRun", () => {
       );
     });
 
-    it("the switch note and the substitution notes survive both branches", () => {
-      for (const outcome of ["started", "queued"] as const) {
+    it("a refused run is not described as started either — the third outcome", () => {
+      // A refused dispatch still becomes a run row (`startRun` records it as an
+      // honest terminal error) and `dispatchAgentRun` does not return between
+      // `startRun` and this line, so the ruling-311 defect had a third case.
+      // CANARY: fold `refused` back into the non-queued branch and this reads
+      // "Started … streaming".
+      const line = runDispatchLine({
+        ...base,
+        outcome: "refused",
+        refusal: "Arda has not connected Claude. No agent process was started.",
+      });
+      expect(line).toBe(
+        "Refused a Claude run for the developer agent — Arda has not connected Claude. No agent process was started.",
+      );
+      expect(line).not.toContain("Started");
+      expect(line).not.toContain("streaming");
+    });
+
+    it("the switch note and the substitution notes survive every branch", () => {
+      for (const outcome of ["started", "queued", "refused"] as const) {
         const line = runDispatchLine({
           ...base,
           outcome,

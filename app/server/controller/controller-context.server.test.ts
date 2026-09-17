@@ -506,6 +506,32 @@ describe("gatherControllerContext", () => {
     }
   });
 
+  it("task scope says when the PROJECT is archived, not only the task", async () => {
+    // The authority line promises "every action"; the prompt's own exceptions
+    // say an archived project refuses every action first. `taskContext` had
+    // `project.archived` in hand and printed only the task's own flag, so a
+    // task-scoped turn on a project archived mid-conversation had no fact for
+    // that clause to bind to. CANARY: drop the project marker and this fails.
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const { setProjectArchived } = await import(
+      "~/features/project-settings/settings-actions.server"
+    );
+    const actor = { userId: arda.id, label: arda.email };
+    await setProjectArchived(app.db, { projectSlug: SLUG, archived: true }, actor, {
+      dataRoot: app.dataRoot,
+    });
+    try {
+      const read = gatherControllerContext(app.db, {
+        projectSlug: SLUG, taskKey: "VIB-142", user: arda, dataRoot: app.dataRoot,
+      });
+      expect(read.text).toContain("project ARCHIVED (read-only)");
+    } finally {
+      await setProjectArchived(app.db, { projectSlug: SLUG, archived: false }, actor, {
+        dataRoot: app.dataRoot,
+      });
+    }
+  });
+
   it("never exceeds the block budget", async () => {
     const { gatherControllerContext, CONTEXT_BLOCK_CHARS } = await import(
       "./controller-context.server"

@@ -264,7 +264,10 @@ describe("runInputRows (P19-G11)", () => {
       unresolvedResources: [{ name: "house-style", reason: "no such knowledge base" }],
     });
     const byTag = Object.fromEntries(rows.map((r) => [r.tag, r.text]));
-    expect(byTag.mcp).toContain("granted but NOT mounted (no such server): vm-memory");
+    // Ruling 310: the strip names the miss and asserts no cause — the record keeps
+    // names only, and "(no such server)" was the invented cause the prompts lost.
+    expect(byTag.mcp).toContain("granted but NOT mounted: vm-memory");
+    expect(byTag.mcp).not.toContain("no such server");
     expect(byTag.mcp).toContain("last connection check failed: broken-mcp");
     expect(byTag.missing).toContain("house-style (no such knowledge base)");
   });

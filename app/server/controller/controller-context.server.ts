@@ -2,9 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   assertProjectAction,
   isOrgAdmin,
+  type ProjectActionGrant,
 } from "~/server/auth/project-authority.server";
 import { askerAuthorityLine } from "~/server/auth/authority-prompt.server";
-import type { ProjectRole } from "~/shared/rbac";
 import { listUsers } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, type TaskFileRef } from "~/server/files/task-writer.server";
@@ -159,18 +159,19 @@ export function clipTaskFile(content: string, budget: number): ClippedTaskFile {
  * Can this person still see the bound project, right now? The same call
  * `requireVisible` makes for every board tool: missing and forbidden are one
  * answer, archived projects stay readable, org admins pass by the audited
- * override, and the refusal is audited.
+ * override, and the refusal is audited. A pass returns what the gate resolved
+ * (ruling 309): the asker's role, from the project file the gate itself read.
  */
 function projectVisibleTo(
   db: DatabaseSync,
   slug: string,
   user: ControllerContextInput["user"],
   dataRoot: string | undefined,
-): boolean {
+): ProjectActionGrant | null {
   const opts: Parameters<typeof assertProjectAction>[5] = { allowArchived: true };
   if (dataRoot) opts.dataRoot = dataRoot;
   try {
-    assertProjectAction(
+    return assertProjectAction(
       db,
       "any-member",
       slug,
@@ -178,9 +179,8 @@ function projectVisibleTo(
       "read this conversation's context",
       opts,
     );
-    return true;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -255,16 +255,21 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
  * anything I had... I bridged that gap with a rule from my playbook", at the
  * cost of a `whoami` round trip before it could help at all.
  *
- * One indexed read on the same projection the membership gate resolves.
+ * Built from the membership gate's own grant, not from a second read. The gate
+ * (`projectVisibleTo`, above) resolves the role from the project FILE; a
+ * separate `project_members` SELECT here read the projection, which is a
+ * rebuild of that file and can lag it — so the line could name a role the
+ * enforcement it predicts would not honour. One gate, one read, one fact.
+ * Under the org-admin override the grant's `role` is the EFFECTIVE "admin",
+ * not a membership, and the line says so instead.
  */
-function askerRole(db: DatabaseSync, slug: string, userId: string): string {
-  // SAFETY: `project_members` declares both columns TEXT NOT NULL with a CHECK
-  // constraint on `role` (0001_baseline); this selects the one row for a
-  // (project, user) pair, which is the table's primary key.
-  const row = db
-    .prepare(`SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`)
-    .get(slug, userId) as { role: ProjectRole } | undefined;
-  return askerAuthorityLine(row?.role ?? null, isOrgAdmin(db, userId));
+function askerRole(db: DatabaseSync, grant: ProjectActionGrant, userId: string): string {
+  // An override grant is proof of org admin (the gate just checked it); a
+  // membership grant says nothing about it, so that case reads the users row.
+  return askerAuthorityLine(
+    grant.isOrgAdminOverride ? null : grant.role,
+    grant.isOrgAdminOverride || isOrgAdmin(db, userId),
+  );
 }
 
 function taskContext(
@@ -307,7 +312,7 @@ function taskContext(
   const stageIndex = stages.findIndex((s) => s.id === summary.stage);
   const header = [
     `stage: ${stageNameOf(stages, summary.stage)}${stageIndex >= 0 ? ` (${stageIndex + 1} of ${stages.length})` : ""} · readiness: ${summary.readiness} · waiting: ${summary.waiting} · validation: ${summary.validation}`,
-    `owner: ${ownerName(summary)} · priority: ${summary.priority}${summary.dueDate ? ` · due ${summary.dueDate}` : ""}${summary.labels.length ? ` · labels: ${summary.labels.join(", ")}` : ""}${summary.archived ? " · ARCHIVED" : ""}`,
+    `owner: ${ownerName(summary)} · priority: ${summary.priority}${summary.dueDate ? ` · due ${summary.dueDate}` : ""}${summary.labels.length ? ` · labels: ${summary.labels.join(", ")}` : ""}${summary.archived ? " · ARCHIVED" : ""}${project.archived ? " · project ARCHIVED (read-only)" : ""}`,
     `next stages: ${next.length ? next.join(", ") : "none from here"}`,
     authority,
     `engaged agents: ${engaged.length ? engaged.join(", ") : "none"}${summary.operator ? " · operator assigned" : ""}`,
@@ -510,10 +515,15 @@ export function gatherControllerContext(
 ): ControllerContextRead {
   const scope = conversationScopeOf(input);
   const at = (input.now ?? new Date()).toISOString();
+  // SAFETY: `conversationScopeOf` returns a bound scope only with a slug set.
+  const grant =
+    scope === "instance"
+      ? null
+      : projectVisibleTo(db, input.projectSlug!, input.user, input.dataRoot);
   let body: string;
   if (scope === "instance") {
     body = instanceContext(db, input.user);
-  } else if (!projectVisibleTo(db, input.projectSlug!, input.user, input.dataRoot)) {
+  } else if (!grant) {
     // The bound project is no longer theirs to read (membership removed, or an
     // org-admin override lost). Say exactly what the tools will say.
     body =
@@ -527,14 +537,14 @@ export function gatherControllerContext(
       input.projectSlug!,
       input.taskKey!,
       input.dataRoot,
-      askerRole(db, input.projectSlug!, input.user.id),
+      askerRole(db, grant, input.user.id),
     );
   } else {
     body = boardContext(
       db,
       input.projectSlug!,
       input.dataRoot,
-      askerRole(db, input.projectSlug!, input.user.id),
+      askerRole(db, grant, input.user.id),
     );
   }
   const surface = input.surface ? `\nThey are looking at: ${input.surface}\n` : "";

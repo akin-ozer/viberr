@@ -38,6 +38,7 @@ import {
   KB_INDEX_NOTE,
   KB_PRECEDENCE_NOTE,
   KB_RULINGS_NOTE,
+  RULING_NAMESPACE_NOTE,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
@@ -3591,6 +3592,10 @@ export function buildOperatorSystemPrompt(
     );
     parts.push(...resourceParts);
   }
+  // Ruling 312: this is the surface where the two "ruling" namespaces meet —
+  // its own tool descriptions cite viberr rulings and its directives cite the
+  // project's — so it gets the same note the controller does.
+  parts.push("\n\n---\n# Two kinds of \"ruling\"\n\n" + RULING_NAMESPACE_NOTE);
   // P14-LV-11: the operator had NO runtime identity in its context, so asked
   // which backend it was on it echoed the asker's premise — live, a run
   // executing on Claude reported itself as a "Codex backend run". `authority`

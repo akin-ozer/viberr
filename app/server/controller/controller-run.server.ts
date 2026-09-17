@@ -12,6 +12,7 @@ import {
   KB_INDEX_NOTE,
   KB_PRECEDENCE_NOTE,
   KB_RULINGS_NOTE,
+  RULING_NAMESPACE_NOTE,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
@@ -1032,19 +1033,9 @@ export function buildControllerSystemPrompt(
       "instructions list its tools. Use them to answer how this instance and its runs are really " +
       "doing instead of guessing.\n" +
       "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.\n" +
-      // Ruling 312: two numbering systems, one word, and nothing said which was
-      // which. Forty-one tool descriptions cite "ruling N" meaning VIBERR's own
-      // product decisions — none of which a run can read — while a project's
-      // rulings knowledge base numbers its own rules from 1, and operator
-      // directives on a live board cite those as "ruling 1", "ruling 4". There
-      // is no collision today only because every viberr ruling happens to be
-      // ≥107, which is luck, not design.
-      "A ruling number inside a TOOL DESCRIPTION is Viberr's own product decision. Those are " +
-      "not readable from here and are not a project's rules: they explain why a tool behaves " +
-      "as it does, and nothing more. A project's own rules live in its knowledge base, number " +
-      "from 1, and are what a task or an operator directive means by \"ruling\". When you cite " +
-      "a project's rule, name the document and the section rather than a bare number, so the " +
-      "two can never be read as one." +
+      // Ruling 312: two numbering systems, one word. The note is shared with
+      // the operator, which reads both namespaces at once.
+      RULING_NAMESPACE_NOTE +
       // Ruling 297: generated from the registries this very turn mounted.
       (input.toolManifest ?? ""),
   );

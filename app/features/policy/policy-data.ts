@@ -1,7 +1,6 @@
 import { ALWAYS_HUMAN_CAPABILITY_IDS, capabilityById } from "~/shared/capabilities";
 import {
   PROJECT_ROLES,
-  ACTION_COVERS,
   RBAC_DEFINITIONS,
   type ProjectRole,
 } from "~/shared/rbac";
@@ -43,12 +42,9 @@ function grantByRole(roles: readonly ProjectRole[]) {
 
 export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => {
   const row: RbacRow = { action: cap.label, grant: grantByRole(cap.roles) };
-  // Ruling 309(a): two rows gate more than their grant name says, and the name
-  // has to stay short because sentences on this page and on Settings read it
-  // inline. The table is where a person comes to learn the scope, so the table
-  // carries it.
-  const covers = ACTION_COVERS.get(cap.id);
-  if (covers !== undefined) row.covers = covers;
+  // Ruling 309(a): the grant name stays short (sentences read it inline); the
+  // table is where a person comes to learn the scope, so the table carries it.
+  if ("covers" in cap) row.covers = cap.covers;
   return row;
 });
 

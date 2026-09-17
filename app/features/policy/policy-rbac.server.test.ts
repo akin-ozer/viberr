@@ -34,7 +34,11 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { updateProjectIdentity, inviteMember } from "~/features/project-settings/settings-actions.server";
+import {
+  updateProjectIdentity,
+  inviteMember,
+  setProjectArchived,
+} from "~/features/project-settings/settings-actions.server";
 import { createAgentProfile } from "~/features/agents/agent-profile-actions.server";
 import {
   setMemberRole,
@@ -596,6 +600,22 @@ function matrixDrivers() {
             actor,
             { dataRoot: store.dataRoot },
           );
+        },
+      },
+      {
+        // The ARCHIVE half of edit-policy. Restore is the ONE mutation exempt
+        // from the archived read-only gate (allowArchived), so on an archived
+        // project the role tier is all that locks it — nothing drove that.
+        label: "setProjectArchived (restore this project)",
+        reset: () => {
+          const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+          writeProject(store.dataRoot, { ...file.parsed.frontmatter, archived: true });
+          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+        },
+        run: async (actor) => {
+          await setProjectArchived(store.db, { projectSlug: store.slug, archived: false }, actor, {
+            dataRoot: store.dataRoot,
+          });
         },
       },
     ],
