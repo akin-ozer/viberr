@@ -5883,6 +5883,37 @@ by rewriting those paragraphs:*
     (`run-inputs.server.ts`, `operator-run.server.ts`, `controller-run.server.ts`,
     `specialist-run.server.ts`.)
 
+345. **The build stamp is part of the deploy, not a thing to remember (2026-09-17, pass 37;
+    F37-181).** `build-info.server.ts` exists because *"every upgrade/rollback instruction in
+    docs/operations/deployment.md ('redeploy the previous image') assumes the operator can tell
+    two builds apart at runtime; none of them was verifiable"*. It resolves identity from env
+    first and says why: `.dockerignore` excludes `.git`, so its file-reading fallback cannot fire
+    inside an image and **env is the only source a container can have**.
+    The Dockerfile declared all three ARGs and promoted each to ENV. The runbook documented a
+    four-line `--build-arg` incantation. `compose.yml` said `build: .` and passed none of them —
+    so the DEFAULT deploy could not stamp, and stamping was a thing to remember. Nobody
+    remembered: every container on this instance has reported `revision: null`,
+    `revisionSource: null`, `builtAt: null` and a `version` identical for every build of a
+    release. Eleven deploys on 2026-09-17 alone, none stamped.
+    It cost the pass directly, and that is why it is a ruling rather than a chore. A killed build
+    left me unable to say whether the running container held the new image or the 17:30 one; I
+    inferred it from `docker compose ps` uptime and a `ps` on the build process, because the
+    surface built to answer exactly that question returned `0.19.0` and three nulls.
+    `compose.yml` now passes the three args interpolated with empty defaults, so a bare
+    `docker compose build` still works and is still honestly unstamped. `npm run deploy` fills
+    them from git and then **reads `/resources/health` back**, refusing to report success unless
+    the running instance names the sha just built — the half that makes a stamp worth having,
+    since the failure was never "which sha did I build" but "is the thing answering the port the
+    thing I built". A dirty tree is named, not refused: deploying one is the normal preprod move,
+    but the stamped sha then describes HEAD and not the tree.
+    Verified live: `serving 0.19.0 @ c89ba82720a0 (env)`, matching HEAD.
+    Three ends have to agree — the module READS a name, the Dockerfile DECLARES it, the compose
+    build PASSES it — and only the middle one was ever checked. `build-stamp-wiring.test.ts`
+    asserts all three against each other, from the module's own `env.VIBERR_BUILD_*` reads, so a
+    fourth stamp cannot land half-wired.
+    (`compose.yml`, `scripts/deploy.ts`, `docs/operations/deployment.md`,
+    `app/server/ops/build-stamp-wiring.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

@@ -20,7 +20,8 @@
     "store:check": "tsx scripts/store-check.ts",
     "backup": "tsx scripts/backup.ts",
     "restore": "tsx scripts/restore.ts",
-    "keys": "tsx scripts/secret-keys.ts"
+    "keys": "tsx scripts/secret-keys.ts",
+    "deploy": "tsx scripts/deploy.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.261",

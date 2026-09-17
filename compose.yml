@@ -1,6 +1,24 @@
 services:
   app:
-    build: .
+    # Ruling 345: the build stamp the image declares is actually SUPPLIED here.
+    # `build-info.server.ts` resolves identity from env first and says that env
+    # "is the only source a container can have" — `.dockerignore` excludes
+    # `.git`, so its file-reading fallback cannot fire in an image. The
+    # Dockerfile has declared these three ARGs since gap 18 and the runbook
+    # documented a `--build-arg` incantation, but nothing here passed them — so
+    # the default `docker compose build` could not stamp, and every container on
+    # this instance reported `revision: null, revisionSource: null,
+    # builtAt: null` and a `version` identical for every build of a release.
+    #
+    # Interpolated with empty defaults, which keeps a bare `docker compose
+    # build` working and honestly unstamped. `npm run deploy` is the path that
+    # fills them from git and then reads the running instance back.
+    build:
+      context: .
+      args:
+        VIBERR_BUILD_VERSION: "${VIBERR_BUILD_VERSION:-}"
+        VIBERR_BUILD_SHA: "${VIBERR_BUILD_SHA:-}"
+        VIBERR_BUILD_TIME: "${VIBERR_BUILD_TIME:-}"
     # STABLE identity across container recreation (B-FD1): the data-root writer
     # lock records its holder's hostname, and a lock from a DIFFERENT host is
     # refused — the one host it cannot probe for liveness. Compose's default

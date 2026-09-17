@@ -462,10 +462,26 @@ is a safety net for the data, not a way to undo the re-baseline.
 New app version → rebuild the image and `docker compose up -d`. Migrations apply at boot;
 the data-root volume carries state across deploys. Roll back by redeploying the previous
 image against the same volume (migrations are additive and forward-only — take a data-root
-backup before a major upgrade). Verify what is running from `/resources/health` → `build`:
-`version` comes from `VIBERR_BUILD_VERSION` or `package.json`; `revision` from
-`VIBERR_BUILD_SHA`, or from the checkout's `.git` when there is one (there is not, in
-the image). Stamp the build so every deploy is identifiable from the probe:
+backup before a major upgrade).
+
+**Use `npm run deploy`.** It stamps the build from git, builds, restarts, and then reads
+`/resources/health` back and refuses to report success unless the running instance names
+the sha it just built:
+
+```bash
+npm run deploy              # stamp from git, build, up -d, verify
+npm run deploy -- --no-up   # stamp and build only, nothing restarted
+```
+
+Note that `up -d` kills every run in flight, so check the board before deploying.
+
+Verify what is running from `/resources/health` → `build`: `version` comes from
+`VIBERR_BUILD_VERSION` or `package.json`; `revision` from `VIBERR_BUILD_SHA`, or from the
+checkout's `.git` when there is one (there is not, in the image — `.dockerignore` excludes
+it, so **env is the only source a container can have**). `compose.yml` passes all three
+build args through from the environment, which is what `npm run deploy` fills; a bare
+`docker compose build` leaves them empty and the image honestly reports a `null` revision.
+The manual equivalent, if you are not using the script:
 
 ```bash
 docker compose build \
@@ -476,10 +492,12 @@ docker compose up -d
 
 The `Dockerfile` declares `VIBERR_BUILD_VERSION`, `VIBERR_BUILD_SHA` and
 `VIBERR_BUILD_TIME` as `ARG` and re-exports each as `ENV`; setting them in the container
-environment works too. Left unstamped the image reports a `null` revision, which the
-probe says plainly rather than guessing. *(Noted 2026-09-01; corrected 2026-09-02, pass
-32 — V11-9: the Dockerfile declared no ARG at all, so `revision` could not be anything
-but `null` in the image.)*
+environment works too. *(Noted 2026-09-01; corrected 2026-09-02, pass 32 — V11-9: the
+Dockerfile declared no ARG at all, so `revision` could not be anything but `null` in the
+image. Corrected again 2026-09-17, ruling 345 — the ARGs existed and `compose.yml` passed
+none of them, so the DEFAULT deploy could not stamp and the incantation above was a thing
+to remember. Eleven deploys in one day, none stamped, and forty minutes lost to "is this
+the new image?".)*
 
 ## Scaling note
 
