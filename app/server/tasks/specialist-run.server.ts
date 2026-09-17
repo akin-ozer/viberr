@@ -1261,6 +1261,16 @@ export interface StartAgentRunInput {
   /** The dispatcher's user id — the completion contract's cc-append verifies
    *  "already tagged?" against the mention resolution ladder with it. */
   triggeredByUserId?: string;
+  /**
+   * Ruling 313: run this reviewer with its VERDICT channel withheld, for the
+   * one dispatch whose whole point is that it must not produce another verdict
+   * — `question_reviewer` (ruling 237).
+   *
+   * The engagement is untouched: the reviewer stays verdict-capable and stays a
+   * required reviewer, so acceptance still waits for its approve. Only THIS run
+   * cannot file one.
+   */
+  withholdVerdict?: boolean;
 }
 
 export async function startAgentRun(
@@ -1736,9 +1746,31 @@ async function dispatchAgentRun(
   // question packet in a vanished profile's name, and could assert evidence,
   // while everything the tool layer governs was denied. `withheldAgentGrants()`
   // states the withholding explicitly rather than relying on an absent grant.
-  const collab = resolveAgentCollab(
+  const granted = resolveAgentCollab(
     resolved ? resolved.capabilities : withheldAgentGrants(),
   );
+  /**
+   * Ruling 313. `question_reviewer` (ruling 237) re-runs a deadlocked reviewer
+   * "exactly as it stands" and asks it, in the directive, to answer in a comment
+   * and NOT return a verdict — because "a verdict here would bind to the same
+   * revision and count as another objection, which is the loop"
+   * (`review-deadlock.server.ts`). Nothing enforced it. The verdict field is
+   * gated on the PROFILE's grant, so the tool stayed mounted and the sentence
+   * was the only thing in its way.
+   *
+   * Live on SHOP-76 the reviewer returned a verdict on exactly that run
+   * (04:34:35Z), it counted, and the packet re-raised at the SAME round count —
+   * so the person answered the identical question twice and the option they
+   * were shown as recommended fed the loop it was offered to end.
+   *
+   * `review-deadlock.server.ts`'s own header names this construction as the one
+   * ruling 186 refused: "a request in a prompt, with nothing that notices when
+   * the model does something else". One variable feeds both backends here — the
+   * Claude toolkit's `report_outcome` field, the Codex envelope's schema, and
+   * the persona's collaboration notes — so withholding it once withholds it
+   * everywhere, and the prompt stops promising what the tools contradict.
+   */
+  const collab = input.withholdVerdict ? { ...granted, verdict: false } : granted;
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
     kind: "agent",

@@ -10407,6 +10407,13 @@ export async function resolvePacket(
           profileId: option.profileId,
           directive: REVIEW_DEADLOCK_QUESTION,
           directiveFrom: actor.label,
+          // Ruling 313: the directive above says "do NOT return a verdict"
+          // because one here binds to the same revision and counts as another
+          // objection — the loop this option exists to end. Withhold the channel
+          // so the sentence is enforced rather than requested. The engagement
+          // keeps its verdict grant: the reviewer is still a required reviewer
+          // and acceptance still waits for its approve.
+          withholdVerdict: true,
         },
         OPERATOR_TASK_ACTOR,
         opCtx,

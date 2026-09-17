@@ -5023,6 +5023,41 @@ by rewriting those paragraphs:*
 
     (`controller-run.server.ts`, `operator-run.server.ts`, `kb-injection.server.ts`.)
 
+313. **The way out of the review deadlock was a step in the deadlock (owner, 2026-09-17, pass 37;
+    F37-148).** Ruling 237 raises a packet when one reviewer requests changes twice running, and
+    its recommended option, `question_reviewer`, re-runs that reviewer with a standing question:
+    answer in a comment, *"Do NOT review again and do NOT return a verdict"*. Ruling 237 wrote
+    down exactly why, in `review-deadlock.server.ts`: *"a verdict here would bind to the same
+    revision and count as another objection, which is the loop."*
+    Nothing enforced it. The dispatch re-runs the reviewer "exactly as it stands", and the verdict
+    channel is gated on the PROFILE's grant, so `report_outcome` kept its verdict field — and the
+    SAME prompt carried the collaboration note *"`report_outcome` — REQUIRED at the end of your
+    review: report `approve` or `request_changes`"*. One prompt, two instructions, one of them
+    backed by a tool. The model followed the tool.
+    THE OWNER FOUND IT FROM THE OUTSIDE, without reading any code: *"that shop-76 constantly
+    bringing up ask what else would block on packet, check the comments for it. I think there is a
+    bug with it."* SHOP-76's timeline is the proof, read chronologically: packet raised at 21:53
+    saying "2 times running" → answered "Ask Code Reviewer what else it would block on" at 04:28 →
+    the reviewer returned a VERDICT at 04:34:35 → the packet re-raised at 04:34:35, still **"2
+    times running"** → answered identically at 04:36. The same question, at the same round count,
+    answered twice, by a person taking the option the card recommended both times.
+    `review-deadlock.server.ts`'s own header names the construction: *"The same construction ruling
+    186 refused: a request in a prompt, with nothing that notices when the model does something
+    else."* Ruling 237 was written to replace that shape and its own remedy was built in it.
+    The fix is one variable. `collab` feeds all three consumers — the Claude toolkit's
+    `report_outcome` field, the Codex envelope schema, and the persona's collaboration notes — so
+    `withholdVerdict` on the run suppresses the channel on both backends and stops the prompt
+    contradicting itself, in one place.
+    PER RUN, NEVER THE ENGAGEMENT. The reviewer stays `verdictCapable` and stays a required
+    reviewer, so acceptance still waits for its approve. A fix that demoted the reviewer would
+    unblock the task by removing the gate, which is not what the person choosing that option asked
+    for — and `deriveValidation` reads the engagement, so it would have gone healthy on a task
+    nobody had approved.
+    Canaries at both ends: dropping `withholdVerdict: true` from the dispatch, and accepting the
+    flag but ignoring it at the collab, each turn the test red.
+
+    (`specialist-run.server.ts`, `task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

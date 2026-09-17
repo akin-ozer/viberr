@@ -1545,6 +1545,42 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(started.pid).toBe("reviewer");
       expect(directive).toContain("name EVERYTHING you would still block on");
       expect(directive).toContain("do NOT return a verdict");
+
+      /**
+       * Ruling 313. That sentence used to be the ONLY thing standing between
+       * this run and another verdict, and the same prompt contradicted it:
+       * `collab.verdict` comes from the PROFILE's grant, so the collaboration
+       * notes also told the reviewer "`report_outcome` — REQUIRED at the end of
+       * your review: report `approve` or `request_changes`". One prompt, both
+       * instructions, and only one of them backed by a tool.
+       *
+       * Live on SHOP-76 the reviewer did exactly what the tool-backed half said.
+       * The verdict bound to the same revision, counted as the next consecutive
+       * objection, and the deadlock packet re-raised at the SAME round count —
+       * so the person answered the identical question twice, having taken the
+       * option the card recommended both times. `review-deadlock.server.ts`
+       * predicted it in its own words ("a verdict here would bind to the same
+       * revision and count as another objection, which is the loop") and its
+       * header names the construction as the one ruling 186 refused: a request
+       * in a prompt, with nothing that notices when the model does something
+       * else.
+       *
+       * CANARY: drop `withholdVerdict: true` from the question_reviewer
+       * dispatch and the REQUIRED line comes back, in the same prompt as the
+       * sentence forbidding it.
+       */
+      expect(directive).not.toContain("REQUIRED at the end of your review");
+      expect(directive).not.toContain("report `approve` or `request_changes`");
+
+      // The ENGAGEMENT is untouched: withholding is per-run, so the reviewer is
+      // still verdict-capable and acceptance still waits for its approve. A fix
+      // that quietly demoted the reviewer would unblock the task by removing the
+      // gate, which is not what the person asked for.
+      const engaged = taskFile().parsed.frontmatter.engagements.find(
+        (e) => e.profileId === "reviewer",
+      );
+      expect(engaged?.verdictCapable).toBe(true);
+
       expect(taskFile().parsed.packet).toBeNull();
       expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
     });
