@@ -153,6 +153,70 @@ describe("the controller dock (ruling 121)", () => {
     expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1");
   });
 
+  /**
+   * Ruling 314. The empty dock said what the controller KNOWS and nothing about
+   * what it can DO, so a person who had never used it faced a text box and a
+   * claim. The owner chose examples over a capability list: a list tells and
+   * goes stale, an example teaches by being clicked.
+   */
+  it("ruling 314: the empty state offers scoped examples, and clicking one SENDS it", async () => {
+    const { sends } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+    });
+    await restored();
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText(/Ask about VIB-1 or say what to do with it/);
+
+    // Scoped to the task, and naming it — a generic example would not show that
+    // the controller already knows where it is standing.
+    const first = await screen.findByRole("button", { name: "What is blocking VIB-1?" });
+    expect(
+      screen.getByRole("button", {
+        name: "Draft a directive for the agent on this task, but do not send it.",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.click(first);
+
+    /**
+     * CANARY: have the example call `setText` and then `submit()` and this stays
+     * empty — React has not re-rendered inside the click, so the submit reads
+     * the EMPTY box. That is the same class of loss `pending.current` exists to
+     * prevent for typed messages, which is why the value is a parameter.
+     */
+    await waitFor(() => expect(sends.length).toBe(1));
+    expect(sends[0]!.get("text")).toBe("What is blocking VIB-1?");
+    expect(sends[0]!.get("intent")).toBe("send");
+    expect(sends[0]!.get("task")).toBe("VIB-1");
+  });
+
+  it("ruling 314: the examples follow the scope", async () => {
+    // A board dock must not offer a task's questions. CANARY: collapse
+    // `emptyExamples` to one list and this finds a task example on a board.
+    mount({
+      path: "/projects/viberr/board",
+      view: () =>
+        taskView({
+          scope: {
+            kind: "board",
+            projectSlug: "viberr",
+            taskKey: null,
+            projectName: "Viberr",
+            label: "Viberr",
+            contextLine: "Knows the Viberr board · acts with your permissions",
+            pageHref: "/projects/viberr/controller",
+          },
+        }),
+    });
+    await restored();
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · viberr" }));
+    await screen.findByRole("button", {
+      name: "What is waiting on me right now, and what is waiting on an agent?",
+    });
+    expect(screen.queryByRole("button", { name: /What is blocking VIB-1/ })).toBeNull();
+  });
+
   it("keeps an open the person clicked before the restore had read storage", async () => {
     // The flake this closed. React flushes passive effects AFTER the commit
     // that paints the trigger, so the button is on screen and clickable while

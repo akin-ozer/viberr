@@ -104,6 +104,41 @@ function localScopeLabel(context: DockContext): string {
   return "Instance";
 }
 
+/**
+ * Ruling 314: three things to ask, scoped to where the person is standing.
+ *
+ * The empty dock said what the controller KNOWS ("the controller already has
+ * its task file") and nothing about what it can DO, so a person who had never
+ * used it was looking at a text box and a claim. The owner's call was examples
+ * over a capability list: a list tells, and goes stale as the toolkit changes,
+ * while an example teaches the surface by being clicked.
+ *
+ * Each one is a real sentence the controller can act on at that scope, and the
+ * third is deliberately a DO rather than an ask — the dock's own composer says
+ * "or tell it what to do here", and nothing demonstrated that half.
+ */
+function emptyExamples(view: ControllerDockView): string[] {
+  if (view.scope.kind === "task") {
+    return [
+      `What is blocking ${view.scope.taskKey}?`,
+      "Summarise where this task stands and who is waiting on whom.",
+      "Draft a directive for the agent on this task, but do not send it.",
+    ];
+  }
+  if (view.scope.kind === "board") {
+    return [
+      "What is waiting on me right now, and what is waiting on an agent?",
+      "Which tasks have been open longest, and why?",
+      "Draft a task for work this board is missing, but do not create it.",
+    ];
+  }
+  return [
+    "What is blocked across every project I can see?",
+    "What did agent runs cost this week, by project?",
+    "Show me the agent profiles on this instance and what each one can do.",
+  ];
+}
+
 function emptyCopy(view: ControllerDockView): string {
   if (view.scope.kind === "task") {
     return `Ask about ${view.scope.taskKey} or say what to do with it. The controller already has its task file.`;
@@ -397,8 +432,14 @@ function DockShell({ context }: { context: DockContext }) {
     if (document.activeElement === panelRef.current) focusInside();
   }, [open, disabled, threadsOpen, focusInside]);
 
-  const submit = () => {
-    const value = text.trim();
+  /**
+   * Ruling 314: `override` is the example the person clicked. It is a parameter
+   * rather than `setText` + `submit()` because React has not re-rendered inside
+   * the click — reading `text` there would post the EMPTY box, which is exactly
+   * the failure `pending.current` exists to make impossible for typed messages.
+   */
+  const submit = (override?: string) => {
+    const value = (override ?? text).trim();
     if (!value || busy || disabled || !current) return;
     const body = new FormData();
     body.set("_csrf", csrf);
@@ -561,7 +602,27 @@ function DockShell({ context }: { context: DockContext }) {
               {!current ? (
                 <p className="empty sm">Loading…</p>
               ) : !current.conversation ? (
-                <p className="empty sm">{emptyCopy(current)}</p>
+                <div className="ctl-empty">
+                  <p className="empty sm">{emptyCopy(current)}</p>
+                  {/* Ruling 314: clicking one SENDS it. An example that only
+                      fills the box would teach the same lesson and then ask the
+                      person to find the button, which is the thing they were
+                      already unsure about. */}
+                  <ul className="ctl-examples">
+                    {emptyExamples(current).map((example) => (
+                      <li key={example}>
+                        <button
+                          type="button"
+                          className="ctl-example"
+                          onClick={() => submit(example)}
+                          disabled={busy || disabled}
+                        >
+                          {example}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : (
                 <div className="ctl-msgs dock-msgs">
                   {messages.map((m) => (
@@ -633,7 +694,7 @@ function DockShell({ context }: { context: DockContext }) {
                 <button
                   type="button"
                   className="btn primary sm"
-                  onClick={submit}
+                  onClick={() => submit()}
                   disabled={busy || disabled || !text.trim()}
                 >
                   {busy ? "Sending…" : "Send"}

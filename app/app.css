@@ -5078,6 +5078,25 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* Ruling 309(a): the scope a short grant name cannot carry, on its own line
    under it — quiet, because it explains the row rather than competing with it. */
 .act-covers { display: block; color: var(--muted); font-size: .69rem; }
+/* Ruling 314: the dock's empty state — the scope line, then three things to
+   ask, each one a button that sends it. Quiet enough to read as suggestions
+   rather than controls, and left-aligned with the transcript they replace. */
+.ctl-empty { display: grid; gap: .5rem; }
+/* `.empty` is centred with a 60ch measure; the examples sit under it on the
+   same measure so the block reads as one thing rather than a caption over a
+   full-width list. */
+.ctl-examples {
+  list-style: none; margin: 0 auto; padding: 0 .5rem;
+  display: grid; gap: .25rem; max-width: 60ch; width: 100%;
+}
+.ctl-example {
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--surface); color: var(--fg);
+  border: 1px solid var(--border-control); border-radius: var(--radius-button);
+  padding: .35rem .5rem; font: inherit; font-size: .75rem;
+}
+.ctl-example:hover:not(:disabled) { border-color: var(--blue); }
+.ctl-example:disabled { opacity: .5; cursor: default; }
 .pol-note.after { margin-top: .75rem; }
 .pol-note.before { margin-bottom: .75rem; }
 .pol-note.last { margin-bottom: 0; }

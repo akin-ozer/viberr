@@ -5058,6 +5058,31 @@ by rewriting those paragraphs:*
 
     (`specialist-run.server.ts`, `task-actions.server.ts`.)
 
+314. **The empty dock says what you can ASK it, not only what it knows (owner, 2026-09-17, pass
+    37; F37-149).** Opening the controller on a task showed one sentence — *"Ask about SHOP-54 or
+    say what to do with it. The controller already has its task file."* — which states what the
+    controller KNOWS and nothing about what it can DO. A person who had never used it faced a text
+    box and a claim.
+    The owner's call was examples over a capability summary: a list tells, and goes stale as the
+    toolkit changes; an example teaches the surface by being clicked. Three per scope, each a real
+    sentence the controller can act on there, and the third deliberately a DO rather than an ask,
+    because the composer's own placeholder says "or tell it what to do here" and nothing
+    demonstrated that half.
+    CLICKING ONE SENDS IT. An example that only filled the box would teach the lesson and then
+    leave the person looking for the button, which is the thing they were unsure about. The value
+    is a PARAMETER on `submit`, not `setText` then `submit()`: React has not re-rendered inside the
+    click, so reading the state there posts the EMPTY box — the same loss ruling 259's
+    `pending.current` exists to make impossible for typed messages. The canary is that exact
+    mistake, and it goes red.
+    Two things this cost on the way, both caught by viberr's own gates rather than by review.
+    `onClick={submit}` on the Send button had been harmless while `submit` took no arguments;
+    giving it one made React hand it the MouseEvent as the message. Typescript refused it. And the
+    first stylesheet used `6px` and `--bg-2`/`--line`, which the pass-30 radius-scale and
+    token-resolution tests rejected — a bare radius and two tokens that do not exist. The design
+    system is enforced, which is the point of having written it down.
+
+    (`controller-dock.tsx`, `app.css`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
