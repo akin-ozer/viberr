@@ -5493,6 +5493,32 @@ by rewriting those paragraphs:*
     still owed, and that an absent packet is not evidence the objection was judged and dismissed.
     (`task-actions.server.ts`, `operator-toolkit.server.ts`.)
 
+329. **An option's description BECOMES the contract, so it may only contain what binds (owner,
+    2026-09-17, pass 37; F37-165).** `resolvePacket` appends `${option.t} — ${option.d}` to the
+    task's goal for every option kind outside `PROCESS_ONLY_OPTION_KINDS`. The deadlock card's "Let
+    the rework continue" is one of the very few SERVER-AUTHORED options on that side of the line,
+    and its description ended: *"Anything you type below is recorded on the task's contract and
+    every later run reads it (ruling 189), so say why rather than just yes."*
+    That is the sentence that landed in the goal — five times, across SHOP-5, SHOP-25 and SHOP-76
+    (twice) — while the reasoning the person typed went to the timeline. The permanent contract of
+    three tasks now instructs every later run to type in a textarea it will never see, and cites a
+    ruling number at it.
+    It was false in both directions at once. The note box under a listed option posts `note`, which
+    `resolvePacket` sends to the timeline and the operator's summon note and never to a goal — it
+    has never amended the contract, before ruling 284 or after it; 284 only closed the last route by
+    which any typed words reached a goal. So the card asked a person for their reasoning on the
+    highest-stakes decision it raises, promised that reasoning would bind, filed it elsewhere, and
+    wrote its own dialog copy into the record instead. Whether typed reasoning SHOULD bind is
+    ruling 284's question and stays answered as 284 answered it.
+    A TEST DEFENDED THE LIE, which is why it survived: `agent-completion.server.test.ts` asserted
+    the description CONTAINS "recorded on the task's contract", with a comment naming the wrong
+    mechanism (it conflated the `note` box with the synthetic `custom` CHOICE). The assertion is
+    now its inverse, and the whole amendment is pinned as an exact string.
+    `PROCESS_ONLY_OPTION_KINDS` is exported for the guard, which reads it to know which authored
+    options it must hold to contract language — so the rule is checkable rather than remembered.
+    The ask itself moved to the packet BODY, which is read on the card and appended to nothing.
+    (`review-deadlock.server.ts`, `task-actions.server.ts`, `review-deadlock.server.test.ts` (new).)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

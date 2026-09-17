@@ -8714,6 +8714,54 @@ export async function retryReviewDeadlockEscalation(
   }
 }
 
+/**
+ * Ruling 329: EXPORTED, because it is the line between a sentence a person
+ * reads once on a card and a sentence that becomes permanent contract.
+ *
+ * `resolvePacket` appends `${option.t} \u2014 ${option.d}` to the task's goal for
+ * every option kind NOT in here (and not ending the task). A server-authored
+ * option on the wrong side of that line writes its own UI copy into the record
+ * \u2014 which is how an instruction to type in a textarea ended up in three tasks'
+ * goals, addressed to agents that have no textarea. The guard test reads this
+ * set to know which authored options it must hold to that bar.
+ */
+export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
+  "request_edit",
+  "hold_runtime_debug",
+  "redirect",
+  "retry_other_backend",
+  "archive_task",
+  "discard_branch",
+  "resolve_remote_collision",
+  "move_stage",
+  // Ruling 200(h): "the label promises an UNBLOCK, so this records one … 'I
+  // fixed the credential, carry on' is the recovery the human means". That is
+  // what happens NEXT, not what the work IS — the same reason `redirect` and
+  // `hold_runtime_debug` are here, and it was missed when the list was first
+  // written.
+  "block_on_policy",
+  // F37-60: both of these POSTDATE ruling 189, so neither was ever added, and
+  // the defect the ruling exists to stop came straight back through them.
+  // Ruling 224's own words are "the decision IS the wait" and ruling 230's are
+  // "hold this until those land" — pure recovery, deciding what happens NEXT
+  // rather than what the work IS. Live on SHOP-18: its goal carried FIVE
+  // decision blocks, three of them "pick a recovery path → Wait for the window
+  // and pick the task back up automatically", which is the same sentence
+  // ruling 189 quotes from SHOP-7 as the thing that must not be there.
+  "wait_for_window",
+  "block_on_dependencies",
+  // Ruling 237: "ask the reviewer what else it would block on" decides who
+  // runs next, and the answer that comes back is the reviewer's, not the
+  // person's. Nothing about the deliverable changed.
+  "question_reviewer",
+  // Ruling 269: the decision is about work that is NOT this task — it names
+  // a gap and puts it on the board somewhere else. Amending THIS contract
+  // with it would bind every future run here to a paragraph about another
+  // task's job, which is exactly the accumulation ruling 189 exists to stop.
+  // The two timeline lines name the new key; that is the join.
+  "create_task",
+]);
+
 // ------------------------------------------------------------ resolvePacket
 
 /** Resolve the active packet by stable option kind and mark its notifications read. */
@@ -9816,42 +9864,8 @@ export async function resolvePacket(
   // another actor's tools. Nothing is lost by leaving it out: the directive is
   // written verbatim to the timeline, and it reaches the operator in its own
   // `note` field on the re-queue, which is the channel it was actually for.
-  const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
-    "request_edit",
-    "hold_runtime_debug",
-    "redirect",
-    "retry_other_backend",
-    "archive_task",
-    "discard_branch",
-    "resolve_remote_collision",
-    "move_stage",
-    // Ruling 200(h): "the label promises an UNBLOCK, so this records one … 'I
-    // fixed the credential, carry on' is the recovery the human means". That is
-    // what happens NEXT, not what the work IS — the same reason `redirect` and
-    // `hold_runtime_debug` are here, and it was missed when the list was first
-    // written.
-    "block_on_policy",
-    // F37-60: both of these POSTDATE ruling 189, so neither was ever added, and
-    // the defect the ruling exists to stop came straight back through them.
-    // Ruling 224's own words are "the decision IS the wait" and ruling 230's are
-    // "hold this until those land" — pure recovery, deciding what happens NEXT
-    // rather than what the work IS. Live on SHOP-18: its goal carried FIVE
-    // decision blocks, three of them "pick a recovery path → Wait for the window
-    // and pick the task back up automatically", which is the same sentence
-    // ruling 189 quotes from SHOP-7 as the thing that must not be there.
-    "wait_for_window",
-    "block_on_dependencies",
-    // Ruling 237: "ask the reviewer what else it would block on" decides who
-    // runs next, and the answer that comes back is the reviewer's, not the
-    // person's. Nothing about the deliverable changed.
-    "question_reviewer",
-    // Ruling 269: the decision is about work that is NOT this task — it names
-    // a gap and puts it on the board somewhere else. Amending THIS contract
-    // with it would bind every future run here to a paragraph about another
-    // task's job, which is exactly the accumulation ruling 189 exists to stop.
-    // The two timeline lines name the new key; that is the join.
-    "create_task",
-  ]);
+  // Ruling 189 / 284: the list is module-scope and exported now (ruling 329).
+
   // Ruling 189 excludes "a resolution that ENDS the task", and `acceptsInto`
   // catches only ONE of the two doors that do: `force_accept` closes the task
   // through `forceAcceptCompletion` and never assigns it (ruling 200(h)). A

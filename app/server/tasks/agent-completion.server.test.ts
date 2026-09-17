@@ -2159,12 +2159,34 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(opt("force_accept").d).toContain("Admin only");
       expect(opt("force_accept").d).not.toMatch(/Admin or maintainer/);
 
-      // 2. `custom` is NOT in PROCESS_ONLY_OPTION_KINDS, so a typed note is
-      // appended to the task's goal as binding contract (ruling 189). The
-      // option used to promise "nothing changed".
+      // 2. `custom` is NOT in PROCESS_ONLY_OPTION_KINDS, so this option's own
+      // `t — d` is appended to the task's GOAL as binding contract.
       // CANARY: restore "with nothing changed".
       expect(opt("custom").d).not.toMatch(/nothing changed/);
-      expect(opt("custom").d).toContain("recorded on the task's contract");
+      /**
+       * Ruling 329: and therefore `d` must contain only what BINDS.
+       *
+       * This assertion used to require the opposite — that `d` contain
+       * "recorded on the task's contract" — and the comment above it named the
+       * wrong mechanism, conflating the `note` box with the synthetic `custom`
+       * CHOICE. `note` posts to the timeline and the operator's summon note and
+       * has never reached a goal. So the sentence this test defended was false
+       * when it was written, and it is the sentence that landed in three tasks'
+       * permanent contracts, twice on SHOP-76: an instruction to type in a
+       * textarea, addressed to every later run, which has no textarea.
+       *
+       * The ask now lives in the packet BODY, which is read on the card and
+       * appended to nothing.
+       */
+      expect(opt("custom").d).not.toMatch(/recorded on the task's contract/);
+      expect(opt("custom").d).not.toMatch(/type below|ruling 189/i);
+      expect(packet.body).toContain("say why in the note box");
+      // The whole of what this option writes into the goal, and every word of
+      // it is about the decision.
+      expect(`${opt("custom").t} — ${opt("custom").d}`).toBe(
+        "Let the rework continue — Each round has found something real and the work is " +
+          "converging on it. Hands the task back to the operator to carry on.",
+      );
 
       // 3. `deriveValidation` derives from the task's verdict-capable
       // ENGAGEMENTS, not from the project's required-reviewer rules — so the

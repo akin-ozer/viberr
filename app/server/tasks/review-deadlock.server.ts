@@ -203,6 +203,13 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       "Two rounds is where another rework stops being the obvious move: either the reviewer is " +
       "paying out its findings one at a time, or it is asking for something this deliverable " +
       "cannot give it. Nothing was dispatched on this objection: the task is on you.\n\n" +
+      // Ruling 329: this ask lives in the BODY, which is read on the card and
+      // nowhere else. It used to sit on an option's `d`, which `resolvePacket`
+      // appends to the GOAL verbatim — so a sentence about a textarea became
+      // permanent contract, addressed to agents who have no textarea.
+      "Whichever you pick, say why in the note box: it reaches the operator with your decision " +
+      "and stays on this task's timeline. A reason here is worth more than the choice itself, " +
+      "because the next round is judged against it.\n\n" +
       "If this reviewer can never pass the work at all, the door is on THIS task, not in project " +
       "settings: `validation` is derived from the verdict-capable ENGAGEMENTS the task carries " +
       "(`deriveValidation`), so dropping the project's required-reviewer rule would leave this " +
@@ -228,10 +235,35 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       {
         kind: "custom",
         t: "Let the rework continue",
+        /**
+         * Ruling 329: an option's `d` BECOMES the contract.
+         *
+         * `resolvePacket` appends `${option.t} — ${option.d}` to the task's
+         * goal, so every word here is permanent text that every later run
+         * reads. This one ended with "Anything you type below is recorded on
+         * the task's contract and every later run reads it (ruling 189), so say
+         * why rather than just yes" — and that is the sentence that landed in
+         * the goal, five times across three tasks, twice on SHOP-76.
+         *
+         * It was false in both directions at once. The note box under a listed
+         * option posts `note`, which `resolvePacket` sends to the timeline and
+         * to the operator's summon note and never to the goal — it has never
+         * amended the contract, before ruling 284 or after it; 284 only closed
+         * the last route by which any typed words reached a goal. So the card
+         * asked a person for their reasoning on the highest-stakes decision it
+         * raises, promised that reasoning would bind, filed the reasoning in
+         * the timeline, and wrote its own UI instruction into the contract
+         * instead — complete with a bare "(ruling 189)" citation and an
+         * instruction to type in a box no agent reading the goal will ever see.
+         *
+         * Whether a person's typed reasoning SHOULD bind the goal is ruling
+         * 284's question and stays answered as 284 answered it. What this fixes
+         * is a promise the product never kept and a decision record that
+         * describes a dialog.
+         */
         d:
           "Each round has found something real and the work is converging on it. Hands the task " +
-          "back to the operator to carry on. Anything you type below is recorded on the task's " +
-          "contract and every later run reads it (ruling 189), so say why rather than just yes.",
+          "back to the operator to carry on.",
         rec: false,
       },
       {
