@@ -5621,6 +5621,28 @@ by rewriting those paragraphs:*
     nothing and opens no PR — and the false half is replaced by what the owner had to write by hand.
     (`task-actions.server.ts`.)
 
+334. **An unreachable GitHub is not a broken credential (owner, 2026-09-17, pass 37; F37-170).**
+    Four `openTaskPr` statuses shared one remedy — *"Fix the repository/credential settings, then
+    deliver again."* For the transport one that accuses a configuration the record proves is fine,
+    and every one of the four dropped `result.message`, the reason GitHub's client handed back.
+    Ruling 128's own comment twelve lines above this arm states the rule: a GitHub outcome must be
+    "named as what they are, never as 'unreachable' and never with 'fix the credential settings'
+    (nothing is wrong with them)". It fixed the `base_branch_missing` arm and left the arm that
+    really IS a network failure sharing the credential sentence.
+    Live on SHOP-48, and the product disproves itself 58 seconds later: at 23:45:36 *"GitHub was
+    unreachable (network error). Fix the repository/credential settings, then deliver again"*, at
+    23:46:34 *"Opened PR #52 for review"* — same credential, same repo, nothing touched, and the
+    retry was the operator's own. A successful push to that same origin is recorded two minutes
+    BEFORE the refusal.
+    The network arm now quotes the transport reason, says plainly that nothing about the repository
+    or credential is wrong, and — the fact that makes the retry safe — that the branch is already
+    pushed. Viberr already had the right words in `codex-runtime.server.ts`; this arm just never
+    read them. The two `no_*_configured` arms keep the settings remedy, pinned by a counterweight
+    test, because for them it is the true one.
+    The refuter scoped this correctly and its correction is kept: only ONE of the four has ever
+    fired on this board, so "all four are wrong" was not evidenced and is not claimed.
+    (`task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

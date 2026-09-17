@@ -2099,3 +2099,69 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
     expect(fm().frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
   });
 });
+
+/**
+ * Ruling 334 — a transient GitHub blip recorded as broken settings.
+ *
+ * Four `openTaskPr` statuses shared one remedy: "Fix the repository/credential
+ * settings, then deliver again." For the transport one, that accuses a
+ * configuration the record proves is fine.
+ *
+ * Live on SHOP-48, disproved 58 seconds later by the product itself: at
+ * 23:45:36 "GitHub was unreachable (network error). Fix the repository/credential
+ * settings, then deliver again", and at 23:46:34 "Opened PR #52 for review" —
+ * same credential, same repo, nothing touched, and the retry was the operator's
+ * own. A successful push to that same origin is recorded two minutes earlier.
+ *
+ * Ruling 128's comment twelve lines above this arm already states the rule —
+ * never "unreachable" paired with "fix the credential settings (nothing is wrong
+ * with them)" — and fixed only the `base_branch_missing` arm.
+ */
+describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
+  it("names the transport reason and does not accuse the settings", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: [],
+    });
+    openPrMock.mockResolvedValue({
+      status: "network_unavailable",
+      message: "fetch failed: ECONNRESET api.github.com",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
+    expect(event, "the failure was not surfaced").toBeTruthy();
+    // CANARY: fold `network_unavailable` back into the shared remedy.
+    expect(event.text).not.toContain("Fix the repository/credential settings");
+    expect(event.text).toContain("Nothing about this project's repository or credential is wrong");
+    // The reason GitHub's client handed back, which every arm used to drop.
+    expect(event.text).toContain("ECONNRESET");
+    // And the fact that makes the retry safe.
+    expect(event.text).toContain("the branch is pushed and the work is safe");
+  });
+
+  it("keeps the settings remedy where it is TRUE", async () => {
+    // The counterweight: `no_pat_configured` really is a settings problem, and
+    // a fix that hedged every arm would lose the one sentence that helps.
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: [],
+    });
+    openPrMock.mockResolvedValue({ status: "no_pat_configured", repo: null });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
+    expect(event.text).toContain("no GitHub credential is configured for this project");
+    expect(event.text).toContain("Fix the repository/credential settings");
+  });
+});

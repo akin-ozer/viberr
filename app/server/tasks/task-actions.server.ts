@@ -1241,6 +1241,23 @@ export function runOutcomeClause(input: {
   );
 }
 
+/**
+ * Ruling 334: a transport reason flattened to fit inside a prose sentence.
+ *
+ * The same shape as `push-workspace.server.ts`'s `oneLine`, kept local rather
+ * than exported across the module boundary: a `fetch` failure's message is one
+ * line already in the common case, and the cap exists so a stack-shaped one
+ * cannot shred the sentence it is quoted inside.
+ */
+function oneLineDetail(excerpt: string): string {
+  const flat = excerpt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" · ");
+  return flat.length > 200 ? `${flat.slice(0, 199)}…` : flat;
+}
+
 export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -7631,22 +7648,63 @@ export async function performDelivery(
       result.status === "no_pat_configured" ||
       result.status === "no_repo_configured"
     ) {
+      /**
+       * Ruling 334: four statuses shared one remedy, and for the transport one
+       * that remedy accuses a configuration that is provably fine.
+       *
+       * Ruling 128's own comment twelve lines above states the rule — a GitHub
+       * outcome must be "named as what they are, never as 'unreachable' and
+       * never with 'fix the credential settings' (nothing is wrong with them)"
+       * — and it fixed the `base_branch_missing` arm while leaving the arm that
+       * really IS a network failure sharing the credential sentence.
+       *
+       * Live on SHOP-48, and the record disproves it 58 seconds later: at
+       * 23:45:36 "GitHub was unreachable (network error). Fix the
+       * repository/credential settings, then deliver again", and at 23:46:34
+       * "Opened PR #52 for review" — same credential, same repo, nothing
+       * touched, and the retry was the operator's own. A successful push to the
+       * same origin is recorded two minutes BEFORE the refusal.
+       *
+       * `result.message` — the transport reason GitHub's client handed back —
+       * was dropped on the floor by every one of the four arms. Viberr already
+       * has the right words for this case in `codex-runtime.server.ts`:
+       * "Nothing about the account or the task is wrong; check this
+       * deployment's network path (TLS, DNS, proxy) and retry in a few
+       * minutes."
+       *
+       * The two `no_*_configured` arms keep the settings remedy, because for
+       * them it is the true one.
+       */
+      // Only the two transport/credential arms carry a message; the two
+      // "nothing is configured" arms have nothing to quote and need nothing.
+      const said =
+        (result.status === "auth_failed" || result.status === "network_unavailable") &&
+        result.message.trim()
+          ? ` (${oneLineDetail(result.message)})`
+          : "";
       const why =
         result.status === "auth_failed"
-          ? "GitHub rejected the credential (authentication failed)"
+          ? `GitHub rejected the credential (authentication failed)${said}`
           : result.status === "network_unavailable"
-            ? "GitHub was unreachable (network error)"
+            ? `GitHub was unreachable${said}`
             : result.status === "no_pat_configured"
               ? "no GitHub credential is configured for this project"
               : "no GitHub repository is configured for this task";
+      const remedy =
+        result.status === "network_unavailable"
+          ? "Nothing about this project's repository or credential is wrong — the branch is " +
+            "pushed and the work is safe. Deliver again in a few minutes, or check this " +
+            "deployment's network path (TLS, DNS, a proxy) if it keeps failing."
+          : result.status === "auth_failed"
+            ? "Fix the credential on the project's GitHub settings, then deliver again."
+            : "Fix the repository/credential settings, then deliver again.";
       await surfaceDeliveryEvent(
         db,
         ctx,
         projectSlug,
         taskKey,
         "Review PR could not be opened",
-        `No pull request could be opened for ${taskKey}: ${why}. ` +
-          "Fix the repository/credential settings, then deliver again.",
+        `No pull request could be opened for ${taskKey}: ${why}. ${remedy}`,
       );
       return { status: "failed", message: why };
     }
