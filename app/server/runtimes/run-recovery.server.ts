@@ -463,6 +463,67 @@ export function finalizeOrphanedRuns(
  *    of re-firing. A restart after the window elapses sees a clean count.
  */
 /**
+ * Ruling 317(b): what the restart can actually SAY about a task left waiting.
+ *
+ * The sweep's own SELECT proves one thing — `waiting = 'agent'` and no run in
+ * `running` or `queued`. The note asserted three more: that a run existed, that
+ * it "finished just before the stop", and that "nothing was lost from the
+ * record". None was checked, and the first is often false: a dispatch HELD on
+ * quota records the wait without ever starting a run.
+ *
+ * Live on SHOP-37 the two entries sit fifteen minutes apart. 09:15:13 —
+ * "**Held:** Codex is out of quota... **nothing was dispatched** and no
+ * decision is needed." 09:30:29 — "the run finished just before the stop". The
+ * first says no run was dispatched; the second says a run finished.
+ *
+ * This is the class ruling 310(b) named, in the neighbouring sweep of the same
+ * file, which its own commit message quoted the controller on: "One writer
+ * fixed, its neighbour still inventing." This is the neighbour.
+ */
+export function abandonedWaitNote(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): string {
+  const head =
+    "**Restart:** this task was waiting on an agent, and no run was live when the server came back. ";
+  const tail =
+    " The board has stopped claiming an agent, and the operator is re-invoked to decide what happens next.";
+  // SAFETY: `agent_runs` declares `id`, `state` and `kind` TEXT NOT NULL
+  // (0001_baseline); `finished_at` and `started_at` are nullable.
+  const last = db
+    .prepare(
+      `SELECT id, state, started_at, finished_at
+         FROM agent_runs
+        WHERE project_slug = ? AND task_key = ? AND kind <> 'operator'
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1`,
+    )
+    .get(projectSlug, taskKey) as
+    | { id: string; state: string; started_at: string | null; finished_at: string | null }
+    | undefined;
+
+  if (!last) {
+    return (
+      `${head}No agent run has ever been started on it, so nothing was interrupted and nothing ` +
+      `was lost — the wait was recorded without a dispatch ever reaching a process.${tail}`
+    );
+  }
+  if (last.started_at === null) {
+    return (
+      `${head}Its most recent run \`${last.id}\` never started — it was ${last.state} and had ` +
+      `no process, so there is no work to have lost.${tail}`
+    );
+  }
+  const when = last.finished_at ? ` at ${last.finished_at}` : "";
+  return (
+    `${head}The run it was waiting for, \`${last.id}\`, ended${when} (${last.state}), and the ` +
+    `follow-up that would have moved the task did not run — which is why the wait outlived it. ` +
+    `The run's own record is intact; what is missing is the step after it.${tail}`
+  );
+}
+
+/**
  * Ruling 213: settle a task the restart left waiting on an agent that is not
  * there.
  *
@@ -538,11 +599,7 @@ export async function settleAbandonedWaits(
         type: "note",
         actor: { kind: "system", systemId: "policy-engine" },
         title: "Left waiting on an absent agent",
-        text:
-          "**Restart:** this task was waiting on an agent, and no run was live when the server " +
-          "came back — the run finished just before the stop and the follow-up that would have " +
-          "moved the task went with the process. Nothing was lost from the record. The operator " +
-          "is re-invoked to decide what happens next.",
+        text: abandonedWaitNote(db, row.slug, row.key),
         toAgent: false,
         evidence: null,
       });

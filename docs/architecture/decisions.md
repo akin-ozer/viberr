@@ -5187,7 +5187,21 @@ by rewriting those paragraphs:*
     rather than removed. If compaction ever gains another way to drop a titled comment, this ruling
     is the one it breaks.
 
-    (`timeline-compaction.server.ts`, `task-actions.server.ts`, `task-file.schema.ts`.)
+    317(b), THE NEIGHBOUR RULING 310(b) NAMED AND DID NOT FIX. `settleAbandonedWaits` sits in the
+    same file as the orphan sweep 310(b) corrected, and 310(b)'s own commit quoted the controller
+    on it: *"One writer fixed, its neighbour still inventing."* Its SELECT proves exactly one
+    thing — `waiting = 'agent'` and no run in `running` or `queued` — and its note asserted three
+    more: that a run existed, that it *"finished just before the stop"*, and that *"nothing was
+    lost from the record"*. None was checked.
+    The first is often false. A dispatch HELD on quota records the wait and starts nothing, and on
+    SHOP-37 the contradiction sits fifteen minutes apart in one file: 09:15:13 *"**Held:** Codex is
+    out of quota... **nothing was dispatched** and no decision is needed"*, then 09:30:29 *"the run
+    finished just before the stop"*. The note now reads the task's own last run and says what is
+    true of it — no run ever started, a run that never got a process, or a run that ended and whose
+    follow-up did not, which is the only case the old sentence described.
+
+    (`timeline-compaction.server.ts`, `task-actions.server.ts`, `task-file.schema.ts`,
+    `run-recovery.server.ts`.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on

@@ -439,12 +439,58 @@ describe("settleAbandonedWaits (ruling 213)", () => {
     const note = parsed.timeline.find((e) => e.title === "Left waiting on an absent agent");
     expect(note, "the record must say why a run started").toBeTruthy();
     expect(note!.text).toContain("no run was live when the server came back");
+    /**
+     * Ruling 317(b). This task DOES have a finished run, so the note may say
+     * the follow-up is what did not happen. CANARY: go back to the fixed
+     * sentence and the no-run case below starts asserting a run that never
+     * existed.
+     */
+    expect(note!.text).toContain("run_settled");
+    expect(note!.text).toContain("the follow-up that would have moved the task did not run");
     // …and the operator was actually re-invoked, which is the remedy: it
     // re-reads the task and decides, exactly as it does for an orphaned run.
     const operatorRuns = store.db
       .prepare(`SELECT id FROM agent_runs WHERE task_key = ? AND kind = 'operator'`)
       .all("VIB-1");
     expect(operatorRuns.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Ruling 317(b). The sweep's SELECT proves ONE thing: `waiting = 'agent'` and
+   * no run in `running` or `queued`. The note asserted three more — that a run
+   * existed, that it "finished just before the stop", and that "nothing was
+   * lost from the record".
+   *
+   * Live on SHOP-37 the contradiction sits fifteen minutes apart in one file.
+   * 09:15:13 — "**Held:** Codex is out of quota... **nothing was dispatched**
+   * and no decision is needed." 09:30:29 — "the run finished just before the
+   * stop". A dispatch held on quota records the wait and starts nothing.
+   *
+   * This is the class ruling 310(b) named in the neighbouring sweep of this
+   * same file, whose commit quoted the controller: "One writer fixed, its
+   * neighbour still inventing."
+   */
+  it("ruling 317(b): a task that never had a run is not told one finished", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // No run at all — the SHOP-37 shape: the dispatch was held before it
+    // reached a process, and the wait was recorded anyway.
+
+    const settled = await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot });
+    expect(settled).toBe(1);
+
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.title === "Left waiting on an absent agent");
+    // CANARY: restore the fixed sentence and viberr tells the person a run
+    // finished on a task where none was ever started.
+    expect(note!.text).toContain("No agent run has ever been started on it");
+    expect(note!.text).not.toContain("the run finished just before the stop");
+    expect(note!.text).not.toMatch(/follow-up that would have moved the task did not run/);
   });
 
   /**
