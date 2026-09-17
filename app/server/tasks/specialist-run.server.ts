@@ -3497,11 +3497,12 @@ function withoutEmphasis(text: string): string {
  * specialist to push or open/merge a pull request", plus an audit flag. The two
  * costs are not remotely symmetric, and the detector is now built that way.
  *
- * Ruling 323, measured: across 81 tasks of a real board this fired FOURTEEN
- * times and was wrong every time. Thirteen were the adjective — "this branch
- * has an open PR", the operator's own preamble to "merge, never rebase", which
- * is the opposite instruction — and one was a prohibition whose `not` was
- * wearing bold. Ten of the fourteen accused the operator of demanding the exact
+ * Ruling 323, measured: across a real board this fired FIFTEEN times and was
+ * wrong every time. Thirteen of the first fourteen were the adjective — "this
+ * branch has an open PR", the operator's own preamble to "merge, never rebase",
+ * which is the opposite instruction — and one was a prohibition whose `not` was
+ * wearing bold. The fifteenth arrived while this fix sat undeployed, on "if it
+ * ever carries an open PR, merge, never rebase". Ten of the fourteen accused the operator of demanding the exact
  * thing that sentence forbade, which is the harm P14-LV-10 named and fixed
  * through one hole while two others stood open.
  */

@@ -5339,7 +5339,10 @@ by rewriting those paragraphs:*
     the task saying the directive *"asked the specialist to push or open/merge a pull request"*,
     plus an audit flag. The two costs are not remotely symmetric, and the detector was built the
     other way round: broad, with narrow carve-outs.
-    Measured across 81 tasks of the shopify-clone board: **fourteen firings, fourteen wrong.**
+    Measured across the shopify-clone board: **fifteen firings, fifteen wrong.** (Fourteen when
+    the fix was written; a fifteenth landed on SHOP-83 forty minutes later, while the fix sat
+    undeployed, on the phrase *"if it ever carries an open PR, merge, never rebase"* — the rule
+    against rewriting published history, recorded as a demand to push and merge.)
     - THIRTEEN were the adjective. `open` sits in an alternation of verbs (`open|create|raise|
       submit|file`), so *"this branch has an open PR"* matched as an instruction to open one. In
       every one of the thirteen, that clause was the operator's own preamble to **"merge, never

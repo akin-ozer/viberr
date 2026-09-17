@@ -2899,6 +2899,10 @@ describe("directiveRequestsDelivery (F10-31)", () => {
       "§2 governs: `shop-54` has an open PR. **Merge, never rebase.**", // SHOP-54
       "this branch is published history behind an open PR", // SHOP-54
       "§2 (this branch has an open PR)", // SHOP-75
+      // SHOP-83, forty minutes after the fix was written and while it sat
+      // undeployed: the rule against rewriting published history, recorded as
+      // a demand to push and merge.
+      "if it ever carries an open PR, merge, never rebase", // SHOP-83
     ]) {
       expect(directiveRequestsDelivery(directive), directive).toBeNull();
     }
