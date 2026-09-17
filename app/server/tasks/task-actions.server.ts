@@ -80,6 +80,7 @@ import {
   describeRunFailure,
   type DescribeRunFailureInput,
 } from "./run-failure-remedy.server";
+import type { FanOutOutcome } from "./packet-fanout.server";
 import {
   maybeReleaseDependents,
   noteDeadDependency,
@@ -8389,6 +8390,11 @@ export async function resolvePacket(
      *  NOT a substitute: it proves the decision is the one that was opened, not
      *  that the human saw what merges. */
     ack?: AcceptanceDisclosure | null;
+    /** Ruling 319: INTERNAL. Set when this resolution is itself the fan-out of
+     *  a decision a person made on another task, naming that task. It stops the
+     *  fan-out below recursing — a sibling answers for itself and for nobody
+     *  else — and no door sets it; only the loop at the end of this function. */
+    fanOutOrigin?: string;
   },
   actor: TaskActor,
   ctx: TaskActionContext = {},
@@ -10590,10 +10596,174 @@ export async function resolvePacket(
     }
   }
 
+  // ------------------------------------------------- ruling 319: the fan-out
+  //
+  // `packet.cause` (ruling 315) names what actually failed when the failure
+  // belongs to an ACCOUNT rather than to this task: a quota that runs out, a
+  // credential that is revoked, a backend that goes away. It takes out every
+  // task that account is paying for at the same instant, and each one raised
+  // its own identical packet — same reason, same remedy, same options, N times
+  // in one person's queue.
+  //
+  // Ruling 315 wrote the stamp and stopped there, and the field's own comment
+  // went on promising that "packets that share a cause resolve together". They
+  // did not. This is that loop.
+  //
+  // Best-effort, and LOUD about what it missed: every sibling it could not
+  // answer is named on this task's timeline with the reason, because the person
+  // who just cleared four packets with one click is the one who has to know
+  // that the fifth is still open.
+  await fanOutByCause(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    cause: packet.cause,
+    suppressed: input.fanOutOrigin !== undefined,
+    option,
+    note: noteText,
+  }, actor, ctx);
+
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     option,
   };
+}
+
+/**
+ * Ruling 319 — apply a resolution to every packet raised by the SAME cause.
+ *
+ * Each sibling goes through the real `resolvePacket`, not a cheaper write: a
+ * decision that reaches another task has to pass that task's authority check,
+ * write that task's decision event, notify that task's watchers and run that
+ * task's dispatch arm. Anything less would be a second, quieter resolution path
+ * that can disagree with the first.
+ *
+ * Separated from `resolvePacket` only so the recursion is visible; the guard is
+ * `suppressed`, set from `fanOutOrigin` by the sibling call below.
+ */
+async function fanOutByCause(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    cause: string | undefined;
+    suppressed: boolean;
+    option: PacketOption;
+    note: string;
+  },
+  actor: TaskActor,
+  ctx: TaskActionContext,
+): Promise<void> {
+  if (!input.cause || input.suppressed) return;
+  const {
+    FANNED_OUT_OPTION_KINDS,
+    siblingPacketsSharingCause,
+    siblingOptionIndex,
+    fanOutArrivalText,
+    fanOutOutcomeText,
+  } = await import("./packet-fanout.server");
+  const outcomes: FanOutOutcome[] = [];
+  // A person's own directive answers the task they wrote it on. Every other
+  // non-fannable kind says the same thing for the same reason.
+  const fannable = FANNED_OUT_OPTION_KINDS.has(input.option.kind);
+  let siblings: ReturnType<typeof siblingPacketsSharingCause>;
+  try {
+    siblings = siblingPacketsSharingCause(db, input.cause, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+    });
+  } catch (error) {
+    logger.warn("packet cause fan-out could not be searched", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return;
+  }
+
+  for (const sibling of siblings) {
+    // The projection is an index, not the record. A sibling answered between
+    // that read and this write is not a miss and is not reported as one.
+    const live = readTaskFile(taskRef(ctx, sibling.projectSlug, sibling.taskKey));
+    const livePacket = live?.parsed.packet;
+    if (
+      !livePacket ||
+      livePacket.cause !== input.cause ||
+      livePacket.awaiting ||
+      livePacket.decided
+    ) {
+      continue;
+    }
+    const at = fannable ? siblingOptionIndex(livePacket, input.option) : null;
+    if (at === null) {
+      outcomes.push({
+        taskKey: sibling.taskKey,
+        applied: false,
+        why: fannable
+          ? `its packet does not offer "${input.option.t}".`
+          : `"${input.option.t}" answers only the task it was chosen on.`,
+      });
+      continue;
+    }
+    try {
+      await resolvePacket(
+        db,
+        {
+          projectSlug: sibling.projectSlug,
+          taskKey: sibling.taskKey,
+          optionIndex: at,
+          note: input.note,
+          fanOutOrigin: input.taskKey,
+        },
+        actor,
+        ctx,
+      );
+      await updateTaskFile(taskRef(ctx, sibling.projectSlug, sibling.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text: fanOutArrivalText({
+            fromTaskKey: input.taskKey,
+            byName: actor.label,
+            optionTitle: input.option.t,
+          }),
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, sibling.projectSlug, sibling.taskKey);
+      outcomes.push({ taskKey: sibling.taskKey, applied: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("packet cause fan-out could not answer a sibling", {
+        taskKey: sibling.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      outcomes.push({ taskKey: sibling.taskKey, applied: false, why: endSentence(message) });
+    }
+  }
+
+  const text = fanOutOutcomeText(outcomes);
+  if (!text) return;
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.warn("packet cause fan-out outcome could not be recorded", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 /**

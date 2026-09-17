@@ -128,6 +128,7 @@ export function TaskDetailPage({
   recommendations,
   schedules,
   queuedQuestions = [],
+  packetAlsoAnswers = null,
   archived = false,
   acceptance,
   githubHost,
@@ -196,6 +197,8 @@ export function TaskDetailPage({
    *  an empty default, like `labelSuggestions`: all but a handful of tasks have
    *  none, and a render built by hand should not have to say so. */
   queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
+  /** Ruling 319: what else the open packet's confirm answers, or null. */
+  packetAlsoAnswers?: string | null;
   /** R14-3: the task's archive disposition (loader — from the task file, which
    *  is where it lives; the projection has no column for it). */
   archived?: boolean;
@@ -706,6 +709,9 @@ export function TaskDetailPage({
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
+            // Ruling 319: a packet keyed to an account failure answers its
+            // siblings too — the card says so before the confirm, not after.
+            alsoAnswers={packetAlsoAnswers}
             canResolve={canResolvePacket}
             canResolveCompletion={canDecideOwned}
             // UI-42: an owner-only resolver must not be offered a decision they

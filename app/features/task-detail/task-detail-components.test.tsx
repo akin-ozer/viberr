@@ -113,6 +113,54 @@ describe("DecisionPacket", () => {
     );
   });
 
+  it("ruling 319: states what else the confirm answers, above the options", () => {
+    /**
+     * The reach has to be visible while the person is CHOOSING, not reported
+     * after the click — a confirm that quietly answers four other tasks is the
+     * undisclosed one-way write ruling 20 exists to stop, and this card is the
+     * only place it can be said first.
+     *
+     * CANARY: drop the `alsoAnswers` prop from the card, or move the paragraph
+     * below the radiogroup.
+     */
+    const line = "The same failure stopped 2 other tasks: SHOP-12 and SHOP-19.";
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        alsoAnswers={line}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const note = container.querySelector("[data-also-answers]")!;
+    expect(note.textContent).toContain(line);
+    // Above the options, in document order.
+    const options = container.querySelector(".options")!;
+    expect(note.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).
+      toBeTruthy();
+    // ...and absent entirely when the decision answers only this task.
+    const plain = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(plain.container.querySelector("[data-also-answers]")).toBeNull();
+  });
+
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(

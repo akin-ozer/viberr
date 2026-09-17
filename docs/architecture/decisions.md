@@ -5224,6 +5224,58 @@ by rewriting those paragraphs:*
 
     (`task-actions.server.ts`, both the direct and the packet acceptance paths.)
 
+319. **One account failure, one decision (owner, 2026-09-17, pass 37; F37-155).** Ruling 315
+    stamped `packet.cause` — `backend:<backend>:<kind>:<credentialUserId>`, the thing that
+    actually failed — onto every packet a quota, auth or unavailable failure raises, because such
+    a failure takes out every task that account is paying for at the same instant and each one
+    raised its own identical packet. The field's own comment in `task-file.schema.ts` then
+    described what the stamp was for: *"packets that share a cause resolve together: answering one
+    applies the same option to every sibling still carrying it."* Nothing read the field. The
+    sentence was true about the intent and false about the product, which is the shape this pass
+    has been chasing since 309 — a confident line standing in front of behaviour that does not
+    exist — and 315 wrote it into the schema itself.
+    `resolvePacket` now fans out. The siblings are found in the projection by
+    `json_extract(packet_json, '$.cause')`, across projects, because the cause names a credential
+    and a credential does not stop at a project boundary. Each sibling is resolved through the
+    REAL `resolvePacket`, not a cheaper write: a decision that reaches another task passes that
+    task's authority check, writes that task's decision event, notifies that task's watchers and
+    runs that task's dispatch arm, or it is a second quieter resolution path that can disagree
+    with the first.
+    Three things the loop refuses to guess. It matches the option by KIND, never by index —
+    `describeRunFailure` composes each option set from the failure AND from what that task's own
+    owner has connected (ruling 127), so "retry on the other backend" is present on one task and
+    absent on the next and every index behind it shifts; resolving a sibling at the origin's index
+    is how "wait for the window to reopen" becomes "send the agent back" on the task nobody was
+    looking at. It fans out only an ALLOW-list of coordination kinds, so a one-way write can never
+    reach a task whose human never saw it, and `custom` is deliberately outside it — a directive a
+    person types is about the task in front of them. And it does not recurse: a sibling's own
+    resolution carries `fanOutOrigin`, so every record names the one task a human actually decided
+    on.
+    The misses are the point of the record. A sibling that offers no such option, or sits in a
+    project where the decider holds nothing, is named on the deciding task's timeline with the
+    reason and "Its packet is still open" — because the person who just cleared four packets with
+    one click is the one who has to know about the fifth. And the card discloses the reach BEFORE
+    the confirm, above the options, since a confirm that quietly answers four other tasks is the
+    undisclosed write ruling 20 exists to stop.
+    (`packet-fanout.server.ts` (new), `task-actions.server.ts`, `project.task.tsx`,
+    `decision-packet.tsx`.)
+
+320. **A field the loader computes for the page has to reach the page (owner, 2026-09-17, pass 37;
+    F37-156).** Ruling 241 built a row on the Details panel that says *"Viberr puts Arda's question
+    to @reviewer when the wait clears"* — the standing surface for a promise whose only other
+    trace is one timeline note that scrolls away. The loader read `queuedQuestions` from the task
+    file and returned it; `TaskDetailPage` declared the prop; `TaskDetailsPanel` rendered the row.
+    The route never passed it. Both ends default to `[]`, so nothing failed, nothing logged, and
+    the row never appeared on any task from the day it shipped.
+    A default value is what makes this class of break silent, so the test is aimed exactly there:
+    every field the REAL loader returns whose name `TaskDetailPage` declares as a prop must appear
+    in the route's own `<TaskDetailPage …/>`. It reads source text rather than rendering, because
+    the defect is not in any render — it is in the join, and a render test that supplies the prop
+    by hand proves the opposite of what is needed. It failed on two fields the moment it was
+    written: ruling 241's, and ruling 319's own disclosure, which had just been wired at both ends
+    and not in the middle.
+    (`project.task.tsx`; the wire test in `task-detail-route.server.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

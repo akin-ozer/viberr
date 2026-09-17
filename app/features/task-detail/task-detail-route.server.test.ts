@@ -1673,3 +1673,76 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
     expect(cleared.task.reviewers.map((r) => r.profileId)).not.toContain("reviewer");
   });
 });
+
+/**
+ * Ruling 320 — a field the loader computes for the page has to reach the page.
+ *
+ * `queuedQuestions` was read from the task file by this loader, returned by it,
+ * accepted by `TaskDetailPage` and rendered by `TaskDetailsPanel` — and the
+ * route never passed it. Both ends default to `[]`, so nothing failed, nothing
+ * logged, and the row ruling 241 built ("Viberr puts Arda's question to
+ * @reviewer when the wait clears") simply never appeared on any task. The
+ * promise stayed in the timeline note; the surface that was supposed to carry
+ * it standing was dead from the day it shipped.
+ *
+ * A default value is what makes this class of break silent, so the test is
+ * aimed exactly there: every loader field whose name `TaskDetailPage` declares
+ * as a prop must be passed in the route's own JSX. It reads source text rather
+ * than rendering, because the defect is not in any render — it is in the join,
+ * and a render test with the prop supplied by hand proves the opposite of what
+ * is needed.
+ *
+ * A loader field that is deliberately not a page prop (`timelineTotal`) is out
+ * of scope by construction: the rule is about props that EXIST and go unfed.
+ */
+describe("ruling 320 — the loader-to-page wire", () => {
+  it("passes every loader field the page declares as a prop", async () => {
+    const { readFileSync } = await import("node:fs");
+    const routeSrc = readFileSync("app/routes/project.task.tsx", "utf8");
+    const pageSrc = readFileSync(
+      "app/features/task-detail/task-detail-page.tsx",
+      "utf8",
+    );
+
+    // The loader's REAL keys, from a real request — not a re-parse of the
+    // return statement, which is the sort of second description this codebase
+    // keeps finding drifted.
+    const loaderKeys = Object.keys(await runLoader("VIB-142", ids.arda));
+    expect(loaderKeys.length).toBeGreaterThan(20);
+
+    // The page's declared props: the `}: {` … `}) {` block of its signature.
+    const propsBlock = pageSrc.slice(
+      pageSrc.indexOf("}: {"),
+      pageSrc.indexOf("\n}) {"),
+    );
+    const props = new Set(
+      [...propsBlock.matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9]*)\??:/gm)].map((m) => m[1]!),
+    );
+    expect(props.size).toBeGreaterThan(20);
+
+    // The route's own `<TaskDetailPage … />`.
+    const jsxAt = routeSrc.indexOf("<TaskDetailPage");
+    const jsx = routeSrc.slice(jsxAt, routeSrc.indexOf("/>", jsxAt));
+    expect(jsxAt).toBeGreaterThan(-1);
+
+    const unfed = loaderKeys.filter(
+      (key) => props.has(key) && !jsx.includes(`loaderData.${key}`),
+    );
+    expect(
+      unfed,
+      `the loader computes these and the page declares them, but the route never hands them over: ${unfed.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("the queued-question row ruling 241 built now has its data", async () => {
+    // The specific field, named, so a future prop-shape change that breaks the
+    // generic check above still fails on the one this ruling was found through.
+    const result = await runLoader("VIB-142", ids.arda);
+    expect(result).toHaveProperty("queuedQuestions");
+    const jsx = (await import("node:fs")).readFileSync(
+      "app/routes/project.task.tsx",
+      "utf8",
+    );
+    expect(jsx).toContain("queuedQuestions={loaderData.queuedQuestions}");
+  });
+});

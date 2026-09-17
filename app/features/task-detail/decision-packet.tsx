@@ -786,6 +786,7 @@ export function DecisionPacket({
   canForceAccept = false,
   canMoveStage = false,
   archiveDisclosure,
+  alsoAnswers = null,
   onResolve,
   onResolveCustom,
   onRequestMaintainer,
@@ -828,6 +829,18 @@ export function DecisionPacket({
   canMoveStage?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
+  /**
+   * Ruling 319: the other tasks this confirm also answers, in one sentence, or
+   * null when it answers only this one.
+   *
+   * A packet raised by a backend failure carries a `cause` naming the ACCOUNT
+   * that failed, and resolving it applies the same option to every sibling
+   * packet that cause raised. That is what the person wants — one quota outage
+   * should not be five identical decisions — but a confirm whose reach is wider
+   * than its card is an undisclosed write, and this card is the only place the
+   * reach can be stated before the click rather than reported after it.
+   */
+  alsoAnswers?: string | null;
   onResolve: (optionIndex: number, note: string) => void;
   /** Ruling 138: a DECIDED `edit_goal` packet has one way out — the goal
    *  editor, opened prefilled with the chosen option's draft. */
@@ -1131,6 +1144,15 @@ export function DecisionPacket({
               );
             })}
         </div>
+
+        {/* Ruling 319: stated ABOVE the options, because it changes what
+            picking one of them means. */}
+        {alsoAnswers && (
+          <p className="deny-note spaced" data-also-answers="">
+            <Icon name="alert" />
+            {alsoAnswers}
+          </p>
+        )}
 
         <div
           className="options"

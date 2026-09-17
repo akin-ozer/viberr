@@ -1,6 +1,10 @@
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
+  causeFanOutDisclosure,
+  siblingPacketsSharingCause,
+} from "~/server/tasks/packet-fanout.server";
+import {
   data,
   isRouteErrorResponse,
   Link,
@@ -305,6 +309,35 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     decidedByLabel: q.decidedByLabel,
   }));
 
+  /**
+   * Ruling 319: this packet's `cause` says the failure that raised it belongs
+   * to an ACCOUNT, not to this task — so confirming here also answers every
+   * sibling packet the same failure raised. A decision that reaches four other
+   * tasks and says nothing about it on the card is precisely the un-disclosed
+   * one-way write ruling 20 exists to stop; the disclosure is computed here,
+   * beside the acceptance disclosure, and rendered above the options.
+   *
+   * Guarded: a search that fails must not 500 the task page over a sentence.
+   */
+  const packetCause = taskFile?.parsed.packet?.cause;
+  let packetAlsoAnswers: string | null = null;
+  if (packetCause) {
+    try {
+      packetAlsoAnswers = causeFanOutDisclosure(
+        siblingPacketsSharingCause(db, packetCause, {
+          projectSlug: params.slug,
+          taskKey: params.key,
+        }),
+      );
+    } catch (error) {
+      logger.warn("ruling 319 fan-out disclosure failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   // R15-1: the accept confirm names exactly what merges — the delivered
   // revision (task file) and the merge target (project default branch).
   const workRevisionSha =
@@ -352,6 +385,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     recommendations,
     schedules,
     queuedQuestions,
+    /** Ruling 319: what else this packet's confirm answers, or null. */
+    packetAlsoAnswers,
     archived,
     // P14-LV-06: the review queue counted this viewer under "Waiting on your
     // acceptance" while the page rendered acceptance ONLY as an operator
@@ -1277,6 +1312,13 @@ export default function TaskDetailRoute({
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
+      // Ruling 320: the loader has read these since ruling 241 and the panel
+      // has rendered them since ruling 241, and the two were never joined —
+      // the prop defaults to `[]` at both ends, so the row simply never
+      // appeared. See the wire test in task-detail-route.server.test.ts.
+      queuedQuestions={loaderData.queuedQuestions}
+      // Ruling 319: what else this packet's confirm answers.
+      packetAlsoAnswers={loaderData.packetAlsoAnswers}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
