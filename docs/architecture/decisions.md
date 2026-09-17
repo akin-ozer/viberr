@@ -5666,6 +5666,30 @@ by rewriting those paragraphs:*
     reader reaches for first.
     (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
 
+336. **One number that mixed "frees now" with "frees after another decision" (controller,
+    2026-09-17, pass 37; F37-172).** `list_decisions` gives every entry a `releases` array — the
+    tasks that come unblocked once this one completes — and it is the number a person sorts a
+    decision queue by. It was the full transitive closure in one flat list.
+    The controller raised it as a SUSPICION it could not prove, said exactly what it would need, and
+    named the check: *"SHOP-28's acceptance card carried releases: [SHOP-41, SHOP-29, SHOP-49]. But
+    at that moment SHOP-49 waited on SHOP-29, not on SHOP-28… The cheapest check is the SHOP-28 case
+    in the audit log: task.dependencies.released rows in the window after SHOP-28 merged."* It also
+    cited my own earlier report back at me as half the evidence — I had written that SHOP-28
+    released two tasks, and named only two.
+    The record settles it. SHOP-28 merged at 21:40:32. SHOP-41 released at 21:40:34.502 and SHOP-29
+    at 21:40:34.685 — **two seconds**. SHOP-49 released at 22:33:53.901: **fifty-three minutes
+    later, two and a half seconds after SHOP-29's own merge**. One click freed two tasks, not three.
+    `releases` is now `{ direct, downstream }`. `direct` is the tasks whose LAST wait is this one;
+    `downstream` needs one of those to be built, reviewed and accepted first. The old field was not
+    lying — the description said "down the chain" — but its own text had to warn *"do not sort by it
+    alone"*, which is what a sort key says when it knows it is wrong. A number that conflates one
+    click with two more cycles is wrong for the single job it has.
+    THE METHOD IS THE POINT. Asked what viberr had repeatedly told it wrong, the controller returned
+    three findings with counts, refused to inflate a fourth it had seen only once (*"I will not
+    inflate one observation into a pattern"*), and filed this one as an unproven suspicion with the
+    exact query that would settle it. That is a better bug report than most of mine.
+    (`dependencies.server.ts`, `controller-toolkit.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

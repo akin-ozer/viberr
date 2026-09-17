@@ -288,7 +288,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     expect(wide.timelineOlder).toBeUndefined();
   });
 
-  it("ruling 300: every decision says what answering it releases, down the chain", async () => {
+  it("ruling 300 (+336): every decision says what answering it releases, and when", async () => {
     await openPacketOn(PACKET_TASK);
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
@@ -308,7 +308,16 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
         (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
       );
       // CANARY: drop `releases` and the queue has no number to order by.
-      expect(row.releases.sort()).toEqual(["VIB-148", "VIB-151"]);
+      //
+      // Ruling 336: still the whole chain, but split by WHEN. VIB-148's last
+      // wait is this packet's task, so it moves when that completes; VIB-151
+      // waits on VIB-148, which must then be built, reviewed and accepted. The
+      // controller predicted this over-count and named the check that settled
+      // it: SHOP-28 merged at 21:40:32, its two direct dependents released two
+      // seconds later, and the downstream one at 22:33:53 — fifty-three minutes
+      // on, after SHOP-29's own merge. One click freed two, not three.
+      // CANARY: flatten them back into one array.
+      expect(row.releases).toEqual({ direct: ["VIB-148"], downstream: ["VIB-151"] });
     } finally {
       for (const [key] of waiters) {
         await updateTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot }, (p) => {

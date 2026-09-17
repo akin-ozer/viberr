@@ -214,11 +214,39 @@ export function listHeldTasks(
  * to order their queue by. The same goes for an open goal link with no task
  * yet: it is a real wait, and no task key completing satisfies it.
  */
+/**
+ * Ruling 336: what comes unblocked, split by WHEN.
+ *
+ * `direct` are the tasks whose last wait is this task — they move the moment it
+ * completes. `downstream` are the rest of the transitive closure: each needs
+ * one of the `direct` ones to complete FIRST, which is its own review, its own
+ * verify and its own acceptance.
+ *
+ * They were one flat array, and the controller caught the cost by predicting it
+ * and naming the check: SHOP-28's acceptance card claimed it released SHOP-41,
+ * SHOP-29 and SHOP-49, "but at that moment SHOP-49 waited on SHOP-29, not on
+ * SHOP-28." The release rows settle it — SHOP-28 merged at 21:40:32, SHOP-29
+ * released at 21:40:34.685 and SHOP-41 at 21:40:34.502 (two seconds), and
+ * SHOP-49 at 22:33:53.901, **fifty-three minutes later and two and a half
+ * seconds after SHOP-29's own merge**. One click freed two tasks, not three.
+ *
+ * The old field was not lying — `list_decisions` said "down the chain" — but it
+ * is a SORT KEY for a person's decision queue, and its own description had to
+ * warn "do not sort by it alone". A number that mixes "frees now" with "frees
+ * after another human decision" is wrong for the one job it has.
+ */
+export interface ReleasedTasks {
+  /** Unblocked by this task completing, full stop. */
+  direct: string[];
+  /** Unblocked only once one of `direct` also completes. */
+  downstream: string[];
+}
+
 export function tasksReleasedBy(
   db: DatabaseSync,
   slug: string,
   taskKey: string,
-): string[] {
+): ReleasedTasks {
   const waiting = new Map<string, Set<string>>();
   for (const held of listHeldTasks(db, slug)) {
     const entries = resolveDependencies(db, slug, held.blockedBy);
@@ -231,17 +259,26 @@ export function tasksReleasedBy(
     if (unmet.length > 0) waiting.set(held.taskKey, new Set(unmet));
   }
 
-  const released: string[] = [];
-  const completed = [taskKey];
-  while (completed.length > 0) {
-    const done = completed.shift()!;
-    for (const [key, blockers] of waiting) {
-      if (!blockers.delete(done)) continue;
-      if (blockers.size > 0) continue;
-      waiting.delete(key);
-      released.push(key);
-      completed.push(key);
+  const direct: string[] = [];
+  const downstream: string[] = [];
+  // Breadth-first, so "how many hops from the decision" is the queue's own
+  // shape: everything freed by the first pass is direct, everything after it
+  // needed one of those to complete too.
+  let frontier = [taskKey];
+  let hop = 0;
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const done of frontier) {
+      for (const [key, blockers] of waiting) {
+        if (!blockers.delete(done)) continue;
+        if (blockers.size > 0) continue;
+        waiting.delete(key);
+        (hop === 0 ? direct : downstream).push(key);
+        next.push(key);
+      }
     }
+    frontier = next;
+    hop += 1;
   }
-  return released;
+  return { direct, downstream };
 }

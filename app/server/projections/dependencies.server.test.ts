@@ -157,13 +157,31 @@ describe("tasksReleasedBy (ruling 300)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
 
-  it("counts the whole chain, not just what waits on it directly", () => {
+  it("counts the whole chain, but says which hop each task is on", () => {
     const store = setupTestStore(ctx);
     chain(store);
-    // CANARY: stop after the direct dependents and VIB-3 disappears, which is
-    // exactly the number the controller had to compute by hand.
-    expect(tasksReleasedBy(store.db, store.slug, "VIB-1").sort()).toEqual(["VIB-2", "VIB-3"]);
-    expect(tasksReleasedBy(store.db, store.slug, "VIB-2").sort()).toEqual(["VIB-3"]);
+    /**
+     * Ruling 336: still the whole chain — CANARY: stop after the direct
+     * dependents and VIB-3 disappears, which is the number the controller had
+     * to compute by hand — but split by WHEN, because the two are not the same
+     * event.
+     *
+     * VIB-2's last wait is VIB-1, so it moves when VIB-1 completes. VIB-3 waits
+     * on VIB-2, which must then be built, reviewed, verified and accepted. Live:
+     * SHOP-28 merged at 21:40:32; SHOP-29 and SHOP-41 released two seconds
+     * later, and SHOP-49 at 22:33:53 — fifty-three minutes on, two and a half
+     * seconds after SHOP-29's own merge. One click freed two, not three.
+     *
+     * CANARY: put them back in one array (or push everything to `direct`).
+     */
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-1")).toEqual({
+      direct: ["VIB-2"],
+      downstream: ["VIB-3"],
+    });
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-2")).toEqual({
+      direct: ["VIB-3"],
+      downstream: [],
+    });
   });
 
   it("never counts a task whose OTHER wait can never clear", () => {
@@ -172,7 +190,8 @@ describe("tasksReleasedBy (ruling 300)", () => {
     // VIB-4 also waits on an ARCHIVED task. Finishing VIB-1 frees nothing for
     // it, and counting it would inflate the one number a person orders their
     // queue by. CANARY: drop the dead-wait filter.
-    expect(tasksReleasedBy(store.db, store.slug, "VIB-1")).not.toContain("VIB-4");
+    const freed = tasksReleasedBy(store.db, store.slug, "VIB-1");
+    expect([...freed.direct, ...freed.downstream]).not.toContain("VIB-4");
   });
 
   it("never counts a task still waiting on a goal link that has no task yet", async () => {
@@ -210,7 +229,8 @@ describe("tasksReleasedBy (ruling 300)", () => {
   it("a task nothing waits on releases nothing, and says so as an empty list", () => {
     const store = setupTestStore(ctx);
     chain(store);
-    expect(tasksReleasedBy(store.db, store.slug, "VIB-3")).toEqual([]);
-    expect(tasksReleasedBy(store.db, store.slug, "VIB-404")).toEqual([]);
+    const none = { direct: [], downstream: [] };
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-3")).toEqual(none);
+    expect(tasksReleasedBy(store.db, store.slug, "VIB-404")).toEqual(none);
   });
 });
