@@ -5276,6 +5276,39 @@ by rewriting those paragraphs:*
     and not in the middle.
     (`project.task.tsx`; the wire test in `task-detail-route.server.test.ts`.)
 
+321. **A push conflict names what is on the branch before it says what to do to it (owner,
+    2026-09-17, pass 37; F37-157).** A non-fast-forward push ended in one fixed sentence:
+    *"Resolve the remote branch `X` (delete or rename it, or force-push deliberately), then deliver
+    again."* The same advice whether the branch is an abandoned ref, a stranger's pull request, or
+    the head of THIS task's own open review PR — and in that last case both named acts are
+    destructive: deleting the branch closes the pull request under review, force-pushing rewrites
+    the commits the reviewers judged.
+    Live on SHOP-11, twice. A backend engineer rebased a branch with an open pull request; the
+    push was refused; this sentence told the owner to delete `shop-11` — and **forty-seven
+    milliseconds later** Viberr's own collision ceremony wrote *"No collision to clear: PR #15 on
+    `shop-11` is SHOP-11's own review PR."* The product had the fact in the same second and the
+    remedy did not use it. The owner then priced the loss by hand in a decision note (*"closing PR
+    #15 loses a thread whose conclusion we already have"*).
+    The remedy now reads `revisionLeftWorkspace` — the shared answer to "has this revision left
+    the workspace, and by what" — and has four arms: this task's own PR (named, with what deleting
+    costs), a stranger's PR (named, pointed at the ceremony built for it, which states what it
+    destroys before the confirm), a head this task published with no PR, and a genuinely anonymous
+    ref, which still gets the old blunt advice because for it the old advice was right.
+    321(b), THE SENTENCE FIVE FILES INVENTED SEPARATELY. "Resolve the branch history" appeared in
+    five places — `unpushedRevisionBlockedReason`, the workspace-delivery timeline line, the
+    operator's `update_branch_from_base` remote sentence, the collision ceremony's own-PR-diverged
+    note, and the packet outcome summary — and not one of them named an act. The header of
+    `unpushedRevisionBlockedReason` claimed the opposite in the same file: *"a diverged remote
+    needs the history resolved first, and the sentence says which."* It did not.
+    The missing half is a fact about Viberr that the owner had to learn from Viberr and write into
+    the project's KB by hand: `update_branch_from_base` MERGES the base in, it does not rewrite
+    history, and that is the correct shape once a pull request tracks the branch. It is now
+    `DIVERGED_BRANCH_REMEDY`, one exported constant, printed by all five. The test that pins it
+    scans those five files with comments stripped — the regression it guards is not a reworded
+    string, it is a sixth site inventing a sixth sentence, which is how the first five happened.
+    (`task-file.schema.ts`, `task-actions.server.ts`, `workspace-delivery.server.ts`,
+    `update-branch-operator.server.ts`, `packet-server-outcome.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

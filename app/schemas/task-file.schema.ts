@@ -725,8 +725,32 @@ export function unpushedRevisionOf(
  * that the delivered revision is not on the pull request. The remedy is to
  * deliver ("push"), never to rebase: a behind or absent remote reaches the PR
  * by a plain push; a diverged remote needs the history resolved first, and the
- * sentence says which.
+ * sentence names the act that resolves it (ruling 321) rather than asserting
+ * that one exists.
  */
+/**
+ * Ruling 321 — the one act that resolves a diverged branch, said once.
+ *
+ * Five separate sentences told a person to "resolve the branch history" and
+ * none of them named an act: this reader, the workspace-delivery timeline line,
+ * the operator's `update_branch_from_base` remote sentence, the collision
+ * ceremony's own-PR-diverged note, and the packet outcome summary. The header
+ * of this very function claimed the opposite — *"a diverged remote needs the
+ * history resolved first, and the sentence says which"* — while the sentence
+ * said only that someone should.
+ *
+ * Live on SHOP-11 the owner supplied the missing half by hand, in a decision
+ * note, and then had the controller write it into the project's rulings KB so
+ * no agent would need telling again: *"Viberr's own update_branch_from_base
+ * merges main into the branch; it does not rewrite history, and that is the
+ * correct shape whenever a PR is already tracking the branch."* That is a fact
+ * about Viberr, learned from Viberr, that Viberr could have said itself.
+ */
+export const DIVERGED_BRANCH_REMEDY =
+  "The way out is a MERGE of the remote branch into the workspace branch, never a rebase or an " +
+  "amend: a branch a pull request tracks has published commits, and rewriting them is what " +
+  "diverges it.";
+
 export function unpushedRevisionBlockedReason(
   pr: PrRef | null | undefined,
   currentRevisionSha: string | null,
@@ -737,7 +761,7 @@ export function unpushedRevisionBlockedReason(
   const rev = record.revisionSha.slice(0, 7);
   const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "an older head";
   if (record.relation === "diverged") {
-    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number}, whose head ${head} holds commits this workspace does not. Resolve the branch history, then deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
+    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number}, whose head ${head} holds commits this workspace does not. ${DIVERGED_BRANCH_REMEDY} Then deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
   }
   // Ruling 207(k): `unknown` is not `behind`. It is written when the compare
   // could not be READ at all (the reconciler's `compare()` failing, a mirror

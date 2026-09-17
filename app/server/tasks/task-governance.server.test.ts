@@ -14,6 +14,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import {
+  DIVERGED_BRANCH_REMEDY,
   deliveringEngagement,
   type Engagement,
   type TaskPacket,
@@ -1934,7 +1935,8 @@ describe("resolvePacket kind matrix", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.readiness).toBe("blocked");
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
-    expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("holds commits this workspace does not") && t.includes("A person resolves the branch history"))).toBe(true);
+    // Ruling 321: the note names the act, not merely that an act is owed.
+    expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("holds commits this workspace does not") && t.includes(DIVERGED_BRANCH_REMEDY))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({ outcome: "own_pr_diverged", blockLifted: false });
   });
 

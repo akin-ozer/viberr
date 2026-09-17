@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -531,7 +532,9 @@ describe("ruling 134(c): the remote report", () => {
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline).toHaveLength(0);
     const diverged = await act(fakeGit({ behind: 0, remote: "diverged" }).exec);
     expect(diverged.message).toContain("holds commits this workspace does not");
-    expect(diverged.message).toContain("A person resolves the branch history");
+    // Ruling 321: one sentence for a diverged branch, wherever it is said.
+    expect(diverged.message).toContain(DIVERGED_BRANCH_REMEDY);
+    expect(diverged.message).toContain("never a force-push");
     expect(diverged.message).not.toContain("deliver_for_review");
     const absent = await act(fakeGit({ behind: 0, remote: "absent" }).exec);
     expect(absent.message).toContain("does not exist on origin yet: call `deliver_for_review`");

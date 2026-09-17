@@ -17,6 +17,7 @@ import {
   isMissingRefAnswer,
 } from "~/server/github/github-client.server";
 import {
+  DIVERGED_BRANCH_REMEDY,
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
   archivedTaskMoveBlockedReason,
@@ -24,6 +25,8 @@ import {
   conflictingPrBlockedReason,
   unpushedRevisionBlockedReason,
   unpushedRevisionOf,
+  revisionLeftWorkspace,
+  type RevisionDeparture,
   activeWorkRevision,
   consecutiveRequestChanges,
   deliveringEngagement,
@@ -6627,6 +6630,90 @@ export function closedByHumanDeliveryText(
   );
 }
 
+/** Ruling 321: what the branch is, read at the moment the push was refused.
+ *  Guarded — a remedy sentence must never be the thing that throws a delivery. */
+function conflictDeparture(
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): RevisionDeparture | null {
+  try {
+    const fm = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter;
+    return fm ? revisionLeftWorkspace(fm) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ruling 321 — what a push conflict costs, by what is actually on the branch.
+ *
+ * A non-fast-forward push used to end in one fixed sentence: *"Resolve the
+ * remote branch `X` (delete or rename it, or force-push deliberately), then
+ * deliver again."* It is the same advice whether the branch is an abandoned
+ * ref, a stranger's pull request, or the head of THIS task's own open review
+ * PR — and in that last case both of the acts it names are destructive:
+ * deleting the branch closes the pull request under review, and force-pushing
+ * rewrites the commits the reviewers already judged.
+ *
+ * Live on SHOP-11, twice. A backend engineer rebased a branch that had an open
+ * pull request; the delivery push was refused; this sentence told the owner to
+ * delete `shop-11` — and forty-seven milliseconds later Viberr's own collision
+ * ceremony wrote *"No collision to clear: PR #15 on `shop-11` is SHOP-11's own
+ * review PR."* The product had the fact in the same second and the remedy did
+ * not use it. The owner then spent a long decision note pricing the loss by
+ * hand ("closing PR #15 loses a thread whose conclusion we already have") and
+ * wrote the rule that would have prevented it into the project's KB — a merge,
+ * never a rebase, once a pull request tracks the branch.
+ *
+ * So the remedy reads `revisionLeftWorkspace` — the shared answer to "has this
+ * revision left the workspace, and by what" — and says what the branch IS
+ * before it says what to do to it.
+ */
+export function pushConflictRemedy(input: {
+  taskKey: string;
+  branch: string;
+  reason: string;
+  departure: RevisionDeparture | null;
+}): string {
+  const branch = `\`${input.branch}\``;
+  const lede =
+    `${input.taskKey}'s delivery was not pushed: ${input.reason}. This is a branch-history ` +
+    `conflict, not a credential problem. No review PR was opened; it would review the stale ` +
+    `remote content instead of the delivery.`;
+  const departure = input.departure;
+  if (departure?.kind === "pr") {
+    return (
+      `${lede} ${branch} is the head of ${input.taskKey}'s OWN review PR #${departure.number}: ` +
+      `deleting that branch closes the pull request, and force-pushing it rewrites the commits ` +
+      `the reviewers judged. Neither is the move. ${DIVERGED_BRANCH_REMEDY} If those commits are ` +
+      `genuinely unwanted, discarding them is a deliberate force-push by a person, and it ` +
+      `destroys them.`
+    );
+  }
+  if (departure?.kind === "unowned_pr") {
+    return (
+      `${lede} ${branch} carries PR #${departure.number}, which ${input.taskKey} did not open. ` +
+      `Viberr clears that itself: the recovery packet's "clear the branch collision" option ` +
+      `closes that pull request, deletes the stale remote branch and re-delivers this task's ` +
+      `work on one confirm. Do it there rather than by hand, so what it destroys is stated first.`
+    );
+  }
+  if (departure?.kind === "pushed") {
+    return (
+      `${lede} No pull request tracks ${branch}, but ${input.taskKey} published ` +
+      `\`${departure.headSha.slice(0, 7)}\` to it, so its commits are this task's own earlier ` +
+      `delivery. Merge them into the branch and deliver again, or delete the branch on GitHub ` +
+      `if that work is superseded — which loses it.`
+    );
+  }
+  return (
+    `${lede} No pull request tracks ${branch} and no delivery of ${input.taskKey} published to ` +
+    `it, so what is on it is whatever pushed it last. Delete or rename it on GitHub and deliver ` +
+    `again; merge its commits into the branch first if they are wanted.`
+  );
+}
+
 /**
  * Perform delivery: push the deliverer's workspace branch, re-reconcile the
  * work revision, and open (or reuse) the review PR (R15-2 — the shared core
@@ -6771,10 +6858,14 @@ export async function performDelivery(
         projectSlug,
         taskKey,
         "Delivery push conflicted",
-        `${taskKey}'s delivery was not pushed: ${push.reason}. This is a branch-history ` +
-          `conflict, not a credential problem. No review PR was opened; it would review ` +
-          `the stale remote content instead of the delivery. Resolve the remote branch ` +
-          `\`${push.branch}\` (delete or rename it, or force-push deliberately), then deliver again.`,
+        // Ruling 321: the branch is not an anonymous ref. Read what is on it
+        // before telling a person to destroy it.
+        pushConflictRemedy({
+          taskKey,
+          branch: push.branch,
+          reason: push.reason,
+          departure: conflictDeparture(ctx, projectSlug, taskKey),
+        }),
       );
       return { status: "push_conflict", branch: push.branch, message: push.reason };
     }
@@ -10066,7 +10157,11 @@ export async function resolvePacket(
         : null;
       if (record?.relation === "diverged") {
         const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "its head";
-        noteText = `${premise} Its remote copy (${head}) holds commits this workspace does not, so the delivered revision \`${record.revisionSha.slice(0, 7)}\` cannot be pushed as it stands. A person resolves the branch history, or archives the task; the block stays until then.`;
+        // Ruling 321: "a person resolves the branch history" names no act. The
+        // one that works is the one the owner had to write into the project's
+        // KB by hand after SHOP-11 — merge, never rewrite, once a pull request
+        // tracks the branch.
+        noteText = `${premise} Its remote copy (${head}) holds commits this workspace does not, so the delivered revision \`${record.revisionSha.slice(0, 7)}\` cannot be pushed as it stands. ${DIVERGED_BRANCH_REMEDY} Archiving the task is the other way out; the block stays until one of them happens.`;
         serverOutcome = outcomeOf("own_pr_diverged", {
           prNumber: ownPr,
           reason: "the remote branch holds commits this workspace does not",

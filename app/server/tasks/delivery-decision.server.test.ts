@@ -16,6 +16,7 @@ import type {
   TaskFrontmatter,
   WorkRevision,
 } from "~/schemas/task-file.schema";
+import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -303,6 +304,84 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(event!.text).toContain("not a credential problem");
     expect(event!.text).toContain("No review PR was opened");
     expect(event!.text).toContain("`vib-1`");
+  });
+
+  it("ruling 321: a conflict on the task's OWN open PR does not tell a person to delete it", async () => {
+    /**
+     * Live on SHOP-11, twice. A backend engineer rebased a branch that had an
+     * open pull request, the delivery push was refused, and this event told
+     * the owner to *"delete or rename it, or force-push deliberately"* — while
+     * Viberr's own collision ceremony wrote, forty-seven milliseconds later,
+     * "No collision to clear: PR #15 on `shop-11` is SHOP-11's own review PR."
+     * Deleting that branch closes the pull request under review; force-pushing
+     * rewrites the commits the reviewers already judged.
+     *
+     * CANARY: pass `departure: null` at the call site in performDelivery.
+     */
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      pr: {
+        number: 15,
+        state: "review",
+        title: "[VIB-1] Cart service",
+        url: "https://github.com/akin-ozer/viberr/pull/15",
+      },
+    });
+    pushMock.mockResolvedValue({
+      status: "push_conflict",
+      branch: "vib-1",
+      reason:
+        "the remote branch `vib-1` holds commits that are not in the local delivery (non-fast-forward)",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const text = fm().timeline.find((e) => e.type === "github")!.text;
+    // The fact the server had and the sentence did not use.
+    expect(text).toContain("OWN review PR #15");
+    expect(text).toContain("deleting that branch closes the pull request");
+    // The act it used to recommend, and what actually works instead.
+    expect(text).not.toContain("delete or rename it");
+    expect(text).toContain(DIVERGED_BRANCH_REMEDY);
+  });
+
+  it("ruling 321: with no PR and no published head, the branch is an anonymous ref and says so", async () => {
+    // The counterweight — the case the old fixed sentence was written for is
+    // still allowed to say "delete or rename it", because there is nothing on
+    // the branch the product knows this task to have put there. A fix that
+    // hedged every push conflict would be its own kind of unhelpful.
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "push_conflict",
+      branch: "vib-1",
+      reason: "the remote branch `vib-1` holds commits that are not in the local delivery",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const text = fm().timeline.find((e) => e.type === "github")!.text;
+    expect(text).toContain("No pull request tracks `vib-1`");
+    expect(text).toContain("Delete or rename it on GitHub");
+    expect(text).not.toContain("OWN review PR");
+  });
+
+  it("ruling 321: a STRANGER's PR on the branch names the ceremony built for it", async () => {
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      github: { commits: [], changed: null, unownedPr: 22 },
+    });
+    pushMock.mockResolvedValue({
+      status: "push_conflict",
+      branch: "vib-1",
+      reason: "the remote branch `vib-1` holds commits that are not in the local delivery",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const text = fm().timeline.find((e) => e.type === "github")!.text;
+    expect(text).toContain("PR #22, which VIB-1 did not open");
+    expect(text).toContain("clear the branch collision");
+    // Never by hand when the product has a ceremony that states what it destroys.
+    expect(text).not.toContain("Delete or rename it on GitHub");
   });
 
   /**

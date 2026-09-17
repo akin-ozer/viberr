@@ -27,6 +27,7 @@ import {
 } from "./update-branch.server";
 import type { Exec } from "./push-workspace.server";
 import {
+  DIVERGED_BRANCH_REMEDY,
   deliveringEngagement,
   type Engagement,
   type FileActorRef,
@@ -121,8 +122,8 @@ function remoteSentence(branch: string, remote: RemoteBranchState): string {
     case "diverged":
       return (
         `Origin's copy of \`${branch}\` (\`${remote.headSha.slice(0, 7)}\`) holds commits this workspace ` +
-        `does not, so a plain push would be refused as non-fast-forward. A person resolves the ` +
-        `branch history; do not force it.`
+        `does not, so a plain push would be refused as non-fast-forward. ${DIVERGED_BRANCH_REMEDY} ` +
+        `That is a person's act, not yours, and never a force-push.`
       );
     case "absent":
       return `\`${branch}\` does not exist on origin yet: call \`deliver_for_review\` to push it. Do not ask a person to push.`;

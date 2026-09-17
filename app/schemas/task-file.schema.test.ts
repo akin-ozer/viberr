@@ -17,6 +17,7 @@ import {
   type Engagement,
   type ReviewVerdict,
   type WorkRevision,
+  DIVERGED_BRANCH_REMEDY,
 } from "./task-file.schema";
 
 describe("revision-bound review helpers (F10-15/F10-32)", () => {
@@ -1112,8 +1113,15 @@ describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () =
     expect(unknown).not.toMatch(/rebase/i);
     const diverged = unpushedRevisionBlockedReason(pr("diverged"), rev, "JC-3")!;
     expect(diverged).toContain("holds commits this workspace does not");
-    expect(diverged).toContain("Resolve the branch history, then deliver the branch");
-    expect(diverged).not.toMatch(/rebase/i);
+    // Ruling 321: this used to say "Resolve the branch history" and stop —
+    // an obligation with no act in it, in a sentence whose own header claimed
+    // it "says which". It now carries the shared remedy.
+    expect(diverged).toContain(DIVERGED_BRANCH_REMEDY);
+    // Ruling 135's guard survives inverted: the word may appear ONLY as the
+    // thing not to do. Anything that reads as an instruction to rebase is what
+    // this line has always been here to catch.
+    expect(diverged).toContain("never a rebase");
+    expect(diverged).not.toMatch(/\brebase (the|it|onto|your)\b/i);
     expect(unpushedRevisionBlockedReason(pr("behind", "x".repeat(40)), rev, "JC-3")).toBeNull();
   });
 });
@@ -1230,5 +1238,54 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
     expect(
       acceptanceBlockedReason({ ...fm, workRevision: delivered }),
     ).toBeNull();
+  });
+});
+
+/**
+ * Ruling 321 — a diverged branch has ONE remedy sentence.
+ *
+ * The phrase was invented five times, in five files, and every one of them
+ * said that a person should resolve the history without naming the act that
+ * does. The regression this guards is not a wording change: it is a sixth
+ * site inventing a sixth sentence, which is how the first five happened.
+ */
+describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
+  it("names the act and the thing that causes the divergence", async () => {
+    const { DIVERGED_BRANCH_REMEDY } = await import("./task-file.schema");
+    expect(DIVERGED_BRANCH_REMEDY).toContain("MERGE");
+    expect(DIVERGED_BRANCH_REMEDY).toContain("never a rebase or an amend");
+    // Why, not just what: the owner had to supply this half by hand on SHOP-11.
+    expect(DIVERGED_BRANCH_REMEDY).toContain("published commits");
+  });
+
+  it("is the sentence every door actually prints", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { DIVERGED_BRANCH_REMEDY } = await import("./task-file.schema");
+    const doors = [
+      "app/schemas/task-file.schema.ts",
+      "app/server/github/workspace-delivery.server.ts",
+      "app/server/github/update-branch-operator.server.ts",
+      "app/shared/packet-server-outcome.ts",
+      "app/server/tasks/task-actions.server.ts",
+    ];
+    for (const door of doors) {
+      const src = readFileSync(door, "utf8");
+      expect(src, `${door} lost the shared remedy`).toContain("DIVERGED_BRANCH_REMEDY");
+      // ...and did not quietly re-hand-write it beside the constant. Comments
+      // are stripped first: this is about what the product PRINTS, and the
+      // rulings that record the old phrasing quote it on purpose.
+      const code = src
+        .split("\n")
+        .filter((l) => {
+          const t = l.trim();
+          return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+        })
+        .join("\n");
+      expect(
+        /[Rr]esolves? the branch history/.test(code),
+        `${door} still tells a person to "resolve the branch history" without naming the act`,
+      ).toBe(false);
+    }
+    expect(DIVERGED_BRANCH_REMEDY.length).toBeGreaterThan(80);
   });
 });
