@@ -5600,6 +5600,27 @@ by rewriting those paragraphs:*
     load in a test run outlasts any sleep worth writing. It waits for the effect instead.
     (`task-actions.server.ts`, `operator-run.server.ts`.)
 
+333. **"No changes were delivered." was a literal, over runs that had been working for two hours
+    (owner, 2026-09-17, pass 37; F37-169).** Every classified provider refusal appended it, and so
+    did every unclassified failure except the two cut-off kinds. Nothing was consulted before the
+    assertion. `max_turns` and `max_budget` were exempted precisely BECAUSE a cut run can leave work
+    in the tree — its own canary comment says so — and a provider refusal on turn 48 is the same
+    cut-off and was not exempt.
+    Measured on the shopify-clone board: written **34 times across 27 tasks**. 28 of them followed
+    the run's own start by more than two minutes, the longest by 145. **Four were stamped onto the
+    very event that attaches the files that run produced** (SHOP-16, SHOP-18, SHOP-2, SHOP-41),
+    because `runAttachments` is written onto the same event eleven lines below, under a comment
+    reading "Files the run saved before it died still get their producer named".
+    The cost is not cosmetic, because the sentence is FED FORWARD: `canonicalTaskAnchor` puts recent
+    timeline events into the next run's prompt, and 124 run logs under the data root carry the
+    phrase. Live on SHOP-28 the owner hand-wrote the correction eighteen minutes later: *"Your
+    previous run did not fail on the work — it ran 48 turns … That file is on disk and uncommitted.
+    … Do not regenerate work that is already in the tree."*
+    Gated on EVIDENCE now, not on kind: the turn count is on the run row the function already read,
+    and the attachment list is a local it already built. The true half is kept — a failed run pushes
+    nothing and opens no PR — and the false half is replaced by what the owner had to write by hand.
+    (`task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

@@ -1190,6 +1190,57 @@ export async function noteStranded(
   reprojectTask(db, ctx, task.projectSlug, task.taskKey);
 }
 
+/**
+ * Ruling 333 — "No changes were delivered" was a literal, over runs that had
+ * been working for up to two and a half hours.
+ *
+ * Every classified provider refusal appended it, and so did every unclassified
+ * failure except the two cut-off kinds. Nothing was consulted before the
+ * assertion. `max_turns` and `max_budget` were exempted precisely BECAUSE a cut
+ * run can leave work in the tree — the canary comment on that exemption says so
+ * outright — and a provider refusal on turn 48 is the same cut-off and was not
+ * exempt.
+ *
+ * Measured on the shopify-clone board: the clause was written 34 times across
+ * 27 tasks. 28 of them followed the run's own start by more than two minutes,
+ * the longest by 145 minutes. FOUR were written onto the very event that
+ * attaches the files that run produced — SHOP-16, SHOP-18, SHOP-2 and SHOP-41 —
+ * because `runAttachments` is stamped onto the same event eleven lines below,
+ * under a comment reading "Files the run saved before it died still get their
+ * producer named".
+ *
+ * The cost is not cosmetic, because the sentence is fed forward:
+ * `canonicalTaskAnchor` puts recent timeline events into the NEXT run's prompt,
+ * and 124 run logs under the data root contain the phrase. Live on SHOP-28 the
+ * owner had to hand-write the correction eighteen minutes later: *"Your previous
+ * run did not fail on the work — it ran 48 turns … That file is on disk and
+ * uncommitted. … Do not regenerate work that is already in the tree."*
+ *
+ * The delivery half of the old sentence was true and is kept: a failed run
+ * pushes nothing and opens no PR. What it may no longer claim is that nothing
+ * survived.
+ */
+export function runOutcomeClause(input: {
+  /** Turns the run had taken when it stopped; 0 when it never got going. */
+  turns: number;
+  /** Files it saved into the task's attachments before it stopped. */
+  attachments: number;
+}): string {
+  if (input.turns <= 0 && input.attachments <= 0) return " No changes were delivered.";
+  const turnPart =
+    input.turns > 0 ? `${input.turns} turn${input.turns === 1 ? "" : "s"}` : "";
+  const filePart =
+    input.attachments > 0
+      ? `${input.attachments} file${input.attachments === 1 ? "" : "s"} saved to this task`
+      : "";
+  const did = [turnPart, filePart].filter(Boolean).join(" and ");
+  return (
+    ` Nothing was delivered to a pull request, but the run had ${did} behind it when it ` +
+    `stopped — read the workspace before starting anything over, because work that is already ` +
+    `in the tree is easy to regenerate and hard to notice.`
+  );
+}
+
 export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -4945,11 +4996,19 @@ export async function applyAgentCompletionEffects(
       // supported when using Codex with a ChatGPT account" instead of only
       // the generic runtime advice above.
       providerText ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\`` : "";
+    // Ruling 333: EVIDENCE, not kind. The two cut-off kinds were exempted
+    // because a cut run leaves work behind; a provider refusal on turn 48 is
+    // the same cut-off, and the facts that prove it are already in scope.
+    const outcomeClause =
+      failure?.kind === "max_turns" || failure?.kind === "max_budget"
+        ? ""
+        : runOutcomeClause({
+            turns: thisRunRow?.turns ?? 0,
+            attachments: runAttachments.length,
+          });
     const failureText = classified
-      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason} No changes were delivered. ${described.remedy}${providerBlock}`
-      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${
-          failure?.kind === "max_turns" || failure?.kind === "max_budget" ? "" : " No changes were delivered."
-        }${
+      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason}${outcomeClause} ${described.remedy}${providerBlock}`
+      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${outcomeClause}${
           failure?.kind === "max_turns"
             ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
             : failure?.kind === "max_budget"

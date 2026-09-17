@@ -36,6 +36,7 @@ import {
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
+  runOutcomeClause,
   appendComment,
   classifyReviewerVerdict,
   createTask,
@@ -5910,5 +5911,51 @@ describe("ruling 245: the canonical anchor names the files another task owns", (
       { paths: ["Makefile"], taskKey: "VIB-9", reason: "splitting it" },
     ])).not.toContain("Files another task owns");
     expect(anchorFor("VIB-1", [])).not.toContain("Files another task owns");
+  });
+});
+
+/**
+ * Ruling 333 — the clause that told the next agent the tree was clean.
+ *
+ * "No changes were delivered." was a literal appended to every classified
+ * provider refusal and to every unclassified failure except the two cut-off
+ * kinds. `max_turns` and `max_budget` were exempted precisely BECAUSE a cut run
+ * leaves work in the tree — and a provider refusal on turn 48 is the same
+ * cut-off, and was not exempt.
+ *
+ * Measured: written 34 times across 27 tasks of the shopify-clone board. 28
+ * followed the run's own start by more than two minutes, the longest by 145.
+ * FOUR were stamped onto the very event carrying the files that run produced.
+ * Live on SHOP-28 the owner hand-wrote the correction eighteen minutes later:
+ * "it ran 48 turns … That file is on disk and uncommitted. … Do not regenerate
+ * work that is already in the tree."
+ */
+describe("runOutcomeClause (ruling 333)", () => {
+  it("says nothing survived only when nothing did", () => {
+    expect(runOutcomeClause({ turns: 0, attachments: 0 })).toBe(" No changes were delivered.");
+  });
+
+  it("a run that had been working says so, and says where the work is", () => {
+    // SHOP-28's shape: a credential refused on turn 48, one file written a third
+    // of a second earlier and still uncommitted.
+    // CANARY: make the clause unconditional again.
+    const cut = runOutcomeClause({ turns: 48, attachments: 1 });
+    expect(cut).not.toContain("No changes were delivered");
+    expect(cut).toContain("48 turns");
+    expect(cut).toContain("1 file saved to this task");
+    expect(cut).toContain("read the workspace before starting anything over");
+    // The half that WAS true is kept: a failed run pushes nothing.
+    expect(cut).toContain("Nothing was delivered to a pull request");
+  });
+
+  it("counts turns and files independently, and reads as English for one of each", () => {
+    expect(runOutcomeClause({ turns: 1, attachments: 0 })).toContain("1 turn behind it");
+    expect(runOutcomeClause({ turns: 2, attachments: 0 })).toContain("2 turns behind it");
+    // Attachments alone are enough: a run can save evidence before its first
+    // turn is counted, and four of the board's four attachment cases are the
+    // whole reason this clause was wrong.
+    const filesOnly = runOutcomeClause({ turns: 0, attachments: 3 });
+    expect(filesOnly).toContain("3 files saved to this task");
+    expect(filesOnly).not.toContain("turn");
   });
 });

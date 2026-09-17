@@ -2756,6 +2756,78 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(ardas[0]!.kind).toBe("packet");
   });
 
+  it("ruling 333: a refusal on a run that HAD been working does not tell the next agent the tree is clean", async () => {
+    /**
+     * The same shape as the quota test below, on a run that had taken 48 turns
+     * — SHOP-28's live case, where the provider rejected the credential one
+     * third of a second after the run created a file that is still on disk and
+     * uncommitted.
+     *
+     * The clause was a literal. `max_turns` and `max_budget` were exempted from
+     * it precisely because a cut run leaves work in the tree; a provider refusal
+     * on turn 48 is the same cut-off and was not exempt. It matters because the
+     * sentence is fed forward — `canonicalTaskAnchor` puts recent timeline
+     * events into the NEXT run's prompt — so eighteen minutes later the owner
+     * had to hand-write "it ran 48 turns … Do not regenerate work that is
+     * already in the tree."
+     *
+     * CANARY: make the clause unconditional in `applyAgentCompletionEffects`.
+     */
+    writeReviewTask({ validation: "changed" });
+    const runId = "run_333_cut";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-333",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "claude",
+      model: "opus",
+      sdk: "claude",
+      state: "error",
+      // The one fact the sentence contradicted, already on the row.
+      turns: 48,
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-09-07T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "run·error·auth" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "run·error·auth",
+        text: "Claude refused the run: the provider rejected the credential.",
+        failure: { ...emptyRunFailureFacts("auth"), apiErrorStatus: 401 },
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    const event = taskFile().parsed.timeline.find(
+      (e) => e.type === "blocked" && /did not complete/.test(e.text),
+    )!;
+    expect(event, "the failure was not recorded at all").toBeTruthy();
+    expect(event.text).not.toContain("No changes were delivered");
+    expect(event.text).toContain("48 turns");
+    expect(event.text).toContain("read the workspace before starting anything over");
+  });
+
   it("ruling 130(b): a specialist quota failure names the reset instant and the owner's remedy; the options come from the remedy leaf; never `..`", async () => {
     // Canaries: restore the fixed "Retry on the other backend, or fix the
     // credential and re-run." sentence in the error arm (the event text
