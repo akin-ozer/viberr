@@ -2777,6 +2777,10 @@ function endSentence(text: string): string {
 }
 
 /** Open one recovery packet when the bounded operator loop stalls. */
+/** Ruling 326: the same function, exported under a test-only name so the
+ *  fallback can be driven directly. Production callers use the private one. */
+export { openStuckLoopPacket as openStuckLoopPacketForTest };
+
 async function openStuckLoopPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2859,7 +2863,59 @@ async function openStuckLoopPacket(
     // the packet carries that, so the N identical siblings one quota or
     // credential failure raises can be answered once.
     if (input.cause) open.cause = input.cause;
-    const result = await operatorOpenPacket(db, ctx, open, authority);
+    let result = await operatorOpenPacket(db, ctx, open, authority);
+    /**
+     * Ruling 326: an escalation the server composed for ITSELF must not be
+     * abandoned because a guard written to coach a model rejected one option.
+     *
+     * `operatorOpenPacket`'s authoring guards exist for the operator, which
+     * reads the refusal, revises its options and tries again — their messages
+     * are written that way ("Offer the OTHER backend, or offer wait_for_window
+     * with dueAt set to the reopen instant"). This function has no such loop:
+     * it built the options itself from `describeRunFailure`, so a refusal ends
+     * with a stalled task and NO packet, which is strictly worse than a packet
+     * with one fewer option.
+     *
+     * So it falls back to the stock set — redirect, send back, hold — whose
+     * kinds carry no conditional guard at all, and says on the packet what was
+     * dropped and why. Only when the failure supplied its own options: the
+     * stock set IS the other callers' set, and retrying it unchanged would be
+     * a loop.
+     */
+    if (result.outcome !== "done" && input.options) {
+      logger.info("stuck-loop packet refused its composed options; retrying with the stock set", {
+        taskKey: input.taskKey,
+        reason: result.message,
+      });
+      const fallback: OperatorOpenPacketInput = {
+        ...open,
+        observations: [
+          ...observations,
+          {
+            k: "Tailored options withheld",
+            v:
+              `Viberr composed options for this failure and refused its own packet: ` +
+              `${endSentence(result.message)} The general recovery options are offered instead.`,
+          },
+        ],
+        options: [
+          {
+            kind: "redirect",
+            title: "Redirect with sharper guidance",
+            detail:
+              "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+            recommended: true,
+          },
+          {
+            kind: "request_edit",
+            title: "Send back for another attempt",
+            detail: "Ask the same specialist to try again from its last report.",
+          },
+          hold,
+        ],
+      };
+      result = await operatorOpenPacket(db, ctx, fallback, authority);
+    }
     if (result.outcome !== "done") {
       logger.info("stuck-loop packet not opened", {
         taskKey: input.taskKey,

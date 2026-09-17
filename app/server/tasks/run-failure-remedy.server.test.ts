@@ -59,6 +59,68 @@ describe("describeRunFailure", () => {
     expect(spec.options.some((o) => o.kind === "retry_other_backend")).toBe(false);
   });
 
+  /**
+   * Ruling 326 — CONNECTED is not RUNNABLE NOW, and for four days that cost
+   * this board every escalation it tried to raise.
+   *
+   * `ownerHasOther` asked only whether the owner has the other backend
+   * connected, and every option built on it promises a retry that happens NOW
+   * ("Retry @developer on Codex now"). When that backend is itself out of
+   * quota the promise is false — and `operatorOpenPacket` says exactly that and
+   * REFUSES THE WHOLE PACKET: "the dispatch would be HELD and re-scheduled
+   * rather than run, so the person would spend a decision on a wait."
+   *
+   * Two parts of the same server disagreed. Measured on the shopify-clone
+   * board: Codex was recorded out of quota from 2026-09-15 03:26 until
+   * 2026-09-19, and every Claude failure in that window composed a packet the
+   * guard then refused — eleven times, in three bursts, each burst one account
+   * failure taking several tasks out at once. Not one of them produced a
+   * packet.
+   */
+  it("ruling 326: the other backend being OUT OF QUOTA is not an alternative", async () => {
+    const store = setupTestStore(ctx);
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    await connectFakeBackend(store.db, store.users.arda.id, "claude");
+    const spec = {
+      role: "specialist" as const,
+      agentHandle: "developer",
+      profileId: "developer",
+      // A reset the provider DATED in the future, so the wait is on the table —
+      // which is the case that matters: the real remedy for a dated window was
+      // never the other account.
+      failure: failure("quota", {
+        resetsAt: new Date(Date.now() + 3 * 3600_000).toISOString(),
+      }),
+    };
+
+    // Connected and free: the retry is offered, as it always was.
+    const free = describe_(store, spec);
+    expect(free.options.some((o) => o.kind === "retry_other_backend")).toBe(true);
+
+    // The same board, with Codex recorded out of quota for this owner.
+    // CANARY: drop the `otherHold === null` term from `ownerHasOther`.
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      resetsAtPrecision: "exact",
+      providerText: "You've hit your usage limit",
+      runId: "run_x",
+      observedAt: new Date().toISOString(),
+    });
+    const held = describe_(store, spec);
+    expect(held.options.some((o) => o.kind === "retry_other_backend")).toBe(false);
+    // ...and the prose stops promising it too: the sentence and the option are
+    // built from the same flag, which is why one fix covers both.
+    expect(held.remedy).not.toContain("retried on Codex");
+    // The wait is still there and still recommended — the real remedy for a
+    // dated window was never the other account.
+    expect(held.options.find((o) => o.recommended)?.kind).toBe("wait_for_window");
+  });
+
   it("formats the reset instant absolutely, in UTC", () => {
     expect(formatResetLabel(RESET)).toMatch(/Sep 3, 2026 · 11:50 UTC$/);
     expect(formatResetLabel(null)).toBeNull();

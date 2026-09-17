@@ -1054,6 +1054,87 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * remaining doors were to redo finished work, or to force-accept past a
    * review gate that had PASSED and record a bypass that never happened.
    */
+  it("ruling 326: a refused option set falls back to the stock one — a stalled task always gets a packet", async () => {
+    /**
+     * `operatorOpenPacket`'s authoring guards exist to COACH the operator: it
+     * reads the refusal, revises its options and tries again, and the messages
+     * are written that way — "Offer the OTHER backend, or offer wait_for_window
+     * with dueAt set to the reopen instant". `openStuckLoopPacket` has no such
+     * loop. It composed the options itself, so a refusal there ended with a
+     * stalled task and NO packet at all, which is strictly worse than a packet
+     * with one fewer option.
+     *
+     * Live: eleven times in four days on the shopify-clone board, in three
+     * bursts, every one inside the window where Codex was out of quota.
+     *
+     * CANARY: delete the fallback retry in `openStuckLoopPacket`.
+     */
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    // The owner has BOTH backends, and the other one is out of quota — the
+    // exact live shape. `describeRunFailure` no longer composes the retry
+    // (ruling 326's first half), so force the refusal directly: an option set
+    // whose `resolve_remote_collision` has no collision to clear is refused by
+    // an authoring guard the same way.
+    writeReviewTask({ validation: "changed" });
+    const runId = await finishedRunWith("The credential was rejected again.");
+    const { openStuckLoopPacketForTest } = await import("./task-actions.server");
+    await openStuckLoopPacketForTest(
+      store.db,
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        agentHandle: "reviewer",
+        reason: "Claude refused the agent run: the provider rejected the credential.",
+        options: [
+          {
+            kind: "resolve_remote_collision",
+            title: "Clear the branch collision",
+            detail: "There is no collision on this task, so authoring refuses this whole packet.",
+            recommended: true,
+          },
+        ],
+      },
+    );
+    void runId;
+
+    const packet = taskFile().parsed.packet;
+    expect(packet, "a stalled task got no packet at all").not.toBeNull();
+    // The stock set, which carries no conditional kinds.
+    expect(packet!.options.map((o) => o.kind)).toEqual([
+      "redirect",
+      "request_edit",
+      "hold_runtime_debug",
+    ]);
+    // ...and it says what it could not offer, and why, rather than presenting
+    // the general options as if they were the considered ones.
+    const withheld = packet!.observations.find((o) => o.k === "Tailored options withheld");
+    expect(withheld, "the packet hides that a better option set was refused").toBeTruthy();
+    expect(withheld!.v).toContain("refused its own packet");
+  });
+
   it("ruling 325: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
     /**
      * C10.4 added this card so a task that stopped making progress never sits

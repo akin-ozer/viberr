@@ -2,7 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { findUserById } from "~/server/auth/user-store.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { substituteRunModel } from "~/server/runtimes/model-catalog.server";
-import { latestBackendRateLimits } from "~/server/runtimes/backend-quota.server";
+import {
+  backendDispatchHold,
+  latestBackendRateLimits,
+} from "~/server/runtimes/backend-quota.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
@@ -145,8 +148,35 @@ export function describeRunFailure(
   const resetLabel = formatResetLabel(resetsAt);
   const ownerRecord = input.ownerUserId ? findUserById(db, input.ownerUserId) : null;
   const owner = ownerRecord ? { userId: ownerRecord.id, name: ownerRecord.name } : null;
+  /**
+   * Ruling 326: CONNECTED is not the question. RUNNABLE NOW is.
+   *
+   * This used to ask only whether the owner has the other backend connected,
+   * and every option and sentence built on it promises a retry that happens
+   * NOW — "Retry @agent on Codex now", "or the run is retried on Codex". When
+   * that backend is itself out of quota, the promise is false, and
+   * `operatorOpenPacket` says so in its own words and REFUSES THE WHOLE PACKET:
+   * "the dispatch would be HELD and re-scheduled rather than run, so the person
+   * would spend a decision on a wait."
+   *
+   * Two parts of the same server disagreed, and the composer was the wrong one.
+   * Measured on the shopify-clone board: Arda's Codex was recorded out of quota
+   * from 2026-09-15 03:26 until 2026-09-19, and EVERY Claude failure inside
+   * that window composed a packet the authoring guard then refused — eleven
+   * times, in three bursts, each burst one account failure taking out several
+   * tasks at once. Each of the eleven left a note saying only that "the
+   * recovery packet could not be opened" (ruling 325) and no packet at all. For
+   * four days this board could not escalate a stalled task.
+   *
+   * A held backend is a backend the owner has; it is not one the retry can use.
+   */
+  const otherHold =
+    input.ownerUserId !== null
+      ? backendDispatchHold(db, other, { credentialUserId: input.ownerUserId })
+      : null;
   const ownerHasOther =
     input.ownerUserId !== null &&
+    otherHold === null &&
     isBackendAvailableFor(db, input.ownerUserId, other, input.dataRoot ? { dataRoot: input.dataRoot } : {});
   const whose = owner ? `${owner.name}'s` : "the task owner's";
   const profile = "Profile → Agent accounts";

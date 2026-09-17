@@ -5408,6 +5408,35 @@ by rewriting those paragraphs:*
     asserted on anywhere, which is how a fallback nobody sees until the bad day stays wrong.
     (`task-actions.server.ts`; tested through the depth cap in `agent-completion.server.test.ts`.)
 
+326. **For four days this board could not escalate a stalled task (owner, 2026-09-17, pass 37;
+    F37-162).** Found by asking ruling 325's question backwards: its note had fired ELEVEN times
+    live, so what had it been hiding?
+    `describeRunFailure` composes a backend failure's options, and offers `retry_other_backend`
+    whenever `ownerHasOther` — which asked only whether the owner has the other backend CONNECTED.
+    Every option and sentence built on that flag promises a retry that happens NOW ("Retry
+    @developer on Codex now", "or the run is retried on Codex"). When that backend is itself out of
+    quota, the promise is false — and `operatorOpenPacket` says so in its own words and refuses the
+    WHOLE packet: *"the dispatch would be HELD and re-scheduled rather than run, so the person would
+    spend a decision on a wait."*
+    Two parts of the same server disagreed, and the composer was the wrong one. Measured: Arda's
+    Codex was recorded out of quota from 2026-09-15 03:26 until 2026-09-19, and every Claude
+    failure inside that window composed a packet the guard then refused — **eleven times, in three
+    bursts** (17:18:0x ×3, 18:50:3x ×5, 10:05:3x ×3), each burst one account failure taking several
+    tasks out at once. Not one produced a packet. `ownerHasOther` now means runnable NOW, which
+    fixes the option and the prose together because both are built from it.
+    326(b), THE STRUCTURAL HALF. `operatorOpenPacket`'s authoring guards exist to COACH the
+    operator: it reads the refusal, revises and tries again, and the messages are written that way
+    ("Offer the OTHER backend, or offer wait_for_window with dueAt set to the reopen instant").
+    `openStuckLoopPacket` has no such loop — it composed the options itself, so a refusal ended with
+    a stalled task and NO packet, which is strictly worse than a packet with one fewer option. It
+    now falls back to the stock set (redirect / send back / hold), whose kinds carry no conditional
+    guard, and says on the packet what was withheld and why. Only when the failure supplied its own
+    options: the stock set IS the other callers' set, and retrying it unchanged would be a loop.
+    The general rule: a guard whose remedy is addressed to a reader that is not in the loop is not a
+    guard, it is a dead end. When the server is both author and audience, a refusal has to leave it
+    somewhere better than where it started.
+    (`run-failure-remedy.server.ts`, `task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
