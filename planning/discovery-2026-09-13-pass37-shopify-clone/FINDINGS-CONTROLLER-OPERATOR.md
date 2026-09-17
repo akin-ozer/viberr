@@ -11,14 +11,14 @@ the 8,400-line rulings document.
 
 Method, unchanged from the three earlier sweeps: measure how often a sentence or a mechanism has
 ALREADY been wrong on the live board, then try to refute every candidate before believing it.
-**Six confirmed, rulings 339–344. Eleven refuted**, listed at the bottom with what killed them,
+**Eight confirmed, rulings 339–346. Twelve refuted**, listed at the bottom with what killed them,
 because a refuted candidate is worth as much to the next reader.
 
 ---
 
 ## The seam this sweep opened: the record of what a run was given
 
-Five of the six findings come from one place, and it is not a place I had looked before:
+Six of the eight findings come from one place, and it is not a place I had looked before:
 `run_inputs`, Viberr's own disclosure of what it handed a run. It is the header the Agent-logs
 console expands, and P19-G8/G11 built it for one reason — *"nobody could check the claims the
 product makes about a run"*.
@@ -208,6 +208,71 @@ nothing"*. They now number lines the way the thing they imitate does.
 
 ---
 
+## F37-181 · Eleven deploys, none of them identifiable — MEDIUM
+
+**Ruling 345.** `build-info.server.ts` exists because *"every upgrade/rollback instruction in
+docs/operations/deployment.md ('redeploy the previous image') assumes the operator can tell two
+builds apart at runtime; none of them was verifiable"*. It resolves identity from env first and
+says why: `.dockerignore` excludes `.git`, so its file-reading fallback cannot fire in an image
+and **env is the only source a container can have.**
+
+The Dockerfile declared all three ARGs and promoted each to ENV. The runbook documented a
+four-line `--build-arg` incantation. `compose.yml` said `build: .` and passed none of them — so
+the DEFAULT deploy could not stamp, and stamping was a thing to remember.
+
+Nobody remembered. Every container on this instance has reported:
+
+```json
+"build": { "version": "0.19.0", "revision": null, "revisionSource": null, "builtAt": null }
+```
+
+`0.19.0` is identical for every build of the release, so the probe could not distinguish two
+images. Eleven deploys on 2026-09-17 alone, none stamped.
+
+It cost the pass directly, which is why it is a ruling rather than a chore. A killed build left
+me unable to say whether the running container held the new image or the 17:30 one; I inferred it
+from `docker compose ps` uptime and a `ps` on the build process, because the surface built to
+answer exactly that returned a constant and three nulls.
+
+`compose.yml` now passes the three args interpolated with empty defaults, so a bare
+`docker compose build` still works and is still honestly unstamped. `npm run deploy` fills them
+from git and **reads `/resources/health` back**, refusing to report success unless the running
+instance names the sha just built — the failure was never "which sha did I build" but "is the
+thing answering the port the thing I built". Verified live:
+
+```
+deploying 0.19.0 @ c89ba82720a0 built 2026-09-17T19:28:56.520Z
+serving   0.19.0 @ c89ba82720a0 (env) built 2026-09-17T19:28:56.520Z
+ok — the running instance reports the build that was just made.
+```
+
+Three ends have to agree — the module READS a name, the Dockerfile DECLARES it, the compose build
+PASSES it — and only the middle one was ever checked. The new test asserts all three against each
+other, derived from the module's own `env.VIBERR_BUILD_*` reads.
+
+---
+
+## F37-182 · Ruling 344 put two false sentences into the surface it exists to make trustworthy — MEDIUM, and mine
+
+**Ruling 346, corrects 344.** Found by checking my own work against pass 24's failure mode —
+a fix wired into a seam whose prose assumed the old callers.
+
+Two rows of the disclosure describe an absence, and 344 gave that absence two new meanings within
+the hour. A coordinator legitimately records `cwd: null` and `anchor: null`. So on the first
+coordinator run to reach the console, it would have printed:
+
+| row | what it would have said | why it is false |
+|---|---|---|
+| `workspace` | "no repository attached to this project" | the project has one; the operator has no *checkout* of it |
+| `anchor` | "It saw the goal and its directive only" | a Claude drive's first act is `get_task`; a controller turn is bound to no task |
+
+`runInputRows` now takes the run's `kind`, which the panel already had and already used elsewhere.
+A stored line from before this carries no kind and keeps the specialist reading, which is what
+those lines were. A real anchor still prints verbatim whatever the kind — the absence is the only
+thing this touches.
+
+---
+
 ## Refuted
 
 Eleven candidates died. Each is here with what killed it, because the answer to "has anyone
@@ -215,6 +280,7 @@ checked this?" is worth as much as a fix.
 
 | candidate | what refuted it |
 |---|---|
+| A task's completion event is stamped before events it is displayed above — 9 inversions in 5,525 events, one by 8.7 seconds | **Ruling 327, mine, earlier the same day**, and its docstring cites the very task I re-found (SHOP-77). Every inversion predates it; zero after. |
 | Ruling 286's report obligation is a prompt paragraph the model walks past — "93% never stated which rulings sections they relied on" | **My regex.** It read `report_outcome` only. Including the final report, which is recorded beside it, the real figure is **238 of 303 stated them — 21% silent**. Ruling 286 holds. |
 | `list_runs` refused the controller's `status` argument | Ruling 296 working exactly as designed — it is the refusal, not a gap. |
 | The operator planned `update_branch_from_base` on already-current branches — 37 times | All 37 fall on 09-13/09-14; the last is 09-14T03:59Z. F37-11's `baseBehindBy` fix ended them. |
@@ -241,7 +307,7 @@ six are unexercised rather than unusable: 46 of the controller's 51 tools and 16
 | 1 | 16 / 26 (62%) |
 | 2 | 5 / 21 (24%) |
 | 3 | 2 / 14 (14%) |
-| **4 (this one)** | **6 / 17 (35%)** |
+| **4 (this one)** | **8 / 20 (40%)** |
 
 The rate went back UP, and the reason is worth recording: sweeps 2 and 3 kept working the same
 seam — sentences shown to a person, checked against the code behind them — and that seam is
