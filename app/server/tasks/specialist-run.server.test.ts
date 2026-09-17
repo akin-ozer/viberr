@@ -2832,50 +2832,105 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
 });
 
 describe("directiveRequestsDelivery (F10-31)", () => {
+  /** The detector returns the matched phrase now (ruling 323); these read it as
+   *  the yes/no the older assertions were written against. */
+  const asks = (d: string) => directiveRequestsDelivery(d) !== null;
+
   it("detects push / open-PR / merge imperatives in operator directives", () => {
-    expect(directiveRequestsDelivery("push the branch when done")).toBe(true);
-    expect(directiveRequestsDelivery("run git push origin HEAD")).toBe(true);
-    expect(directiveRequestsDelivery("open a PR for review")).toBe(true);
-    expect(directiveRequestsDelivery("please open a pull request")).toBe(true);
-    expect(directiveRequestsDelivery("gh pr create --fill")).toBe(true);
-    expect(directiveRequestsDelivery("merge the pull request")).toBe(true);
+    expect(asks("push the branch when done")).toBe(true);
+    expect(asks("run git push origin HEAD")).toBe(true);
+    expect(asks("open a PR for review")).toBe(true);
+    expect(asks("please open a pull request")).toBe(true);
+    expect(asks("gh pr create --fill")).toBe(true);
+    expect(asks("merge the pull request")).toBe(true);
+    // ...and it names what it matched, because the event it drives is a
+    // permanent accusation and a heuristic has to show its evidence.
+    expect(directiveRequestsDelivery("push the branch when done")).toBe("push the branch");
   });
 
   it("does not flag ordinary work directives", () => {
-    expect(directiveRequestsDelivery("add a glossary section to the docs")).toBe(false);
-    expect(directiveRequestsDelivery("refactor the parser and add tests")).toBe(false);
-    expect(directiveRequestsDelivery("investigate the failing build")).toBe(false);
+    expect(asks("add a glossary section to the docs")).toBe(false);
+    expect(asks("refactor the parser and add tests")).toBe(false);
+    expect(asks("investigate the failing build")).toBe(false);
   });
 
-  // P14-LV-10: the event this drives says "the operator directive ASKED the
-  // specialist to push or open/merge a pull request", and it is permanent
-  // timeline. A prohibition is the opposite of a request — live, the operator's
-  // own ANTI-injection directive ("Do not push the branch, open a PR, approve,
-  // or merge") produced an event accusing it of demanding exactly that.
+  // P14-LV-10: the event this drives says the directive ASKED the specialist to
+  // push or open/merge a pull request, and it is permanent timeline. A
+  // prohibition is the opposite of a request — live, the operator's own
+  // ANTI-injection directive ("Do not push the branch, open a PR, approve, or
+  // merge") produced an event accusing it of demanding exactly that.
   it("P14-LV-10: does not flag a PROHIBITION against delivering", () => {
     expect(
-      directiveRequestsDelivery(
-        "Do not push the branch, open a PR, approve, or merge — Viberr handles delivery.",
-      ),
+      asks("Do not push the branch, open a PR, approve, or merge — Viberr handles delivery."),
     ).toBe(false);
-    expect(directiveRequestsDelivery("don't open a pull request yourself")).toBe(false);
-    expect(directiveRequestsDelivery("never merge the pull request")).toBe(false);
-    expect(
-      directiveRequestsDelivery("commit locally, without pushing the branch"),
-    ).toBe(false);
+    expect(asks("don't open a pull request yourself")).toBe(false);
+    expect(asks("never merge the pull request")).toBe(false);
+    expect(asks("commit locally, without pushing the branch")).toBe(false);
   });
 
   it("P14-LV-10: does not flag a QUESTION about delivery", () => {
-    expect(
-      directiveRequestsDelivery("Does your prompt tell you to open a pull request?"),
-    ).toBe(false);
+    expect(asks("Does your prompt tell you to open a pull request?")).toBe(false);
   });
 
   it("P14-LV-10: a real request after a prohibited clause still flags", () => {
     // A clause boundary ends the negation's scope — this one genuinely asks.
+    expect(asks("Do not touch the tests. Then push the branch.")).toBe(true);
+  });
+
+  /**
+   * Ruling 323 — the fourteen live firings, all wrong.
+   *
+   * Across 81 tasks of a real board this detector fired fourteen times and was
+   * wrong every one. Thirteen were the ADJECTIVE: "this branch has an open PR",
+   * which in every case was the operator's own preamble to "merge, never
+   * rebase" — the opposite instruction. The fourteenth was a prohibition whose
+   * `not` was wearing bold.
+   *
+   * These are the real sentences, from the real tasks.
+   */
+  it("ruling 323: an OPEN pull request is a fact about the branch, not an instruction", () => {
+    // CANARY: drop the ADJECTIVE_LEAD_RE check.
+    for (const directive of [
+      "Code Reviewer's request-changes finding on the open PR", // SHOP-12
+      "**This branch has an open pull request**, so merge never rebase.", // SHOP-14
+      "Rules for this round: `shop-34` has an open PR.", // SHOP-34
+      "The no-history rule (ruling 2): this branch has an open PR.", // SHOP-36
+      "Working on published history, this branch has an open PR.", // SHOP-49
+      "§2 governs: `shop-54` has an open PR. **Merge, never rebase.**", // SHOP-54
+      "this branch is published history behind an open PR", // SHOP-54
+      "§2 (this branch has an open PR)", // SHOP-75
+    ]) {
+      expect(directiveRequestsDelivery(directive), directive).toBeNull();
+    }
+    // The verb, in the same shape, still flags: the guard keys on the word
+    // before `open`, and an imperative has no determiner in front of it.
+    expect(asks("When the gate is green, open a PR against main.")).toBe(true);
+  });
+
+  it("ruling 323: markdown emphasis is not part of the sentence, in either direction", () => {
+    // Live on SHOP-35, the negation guard P14-LV-10 added was defeated by the
+    // operator's own bold: `do **not** open a PR` is `do ` + `**not**`, which
+    // `\bdo\s+not\b` cannot match across.
+    // CANARY: drop `withoutEmphasis`.
     expect(
-      directiveRequestsDelivery("Do not touch the tests. Then push the branch."),
-    ).toBe(true);
+      directiveRequestsDelivery("Report your findings. Do **not** push and do **not** open a PR."),
+    ).toBeNull();
+    // ...and the same strip fixes the miss the other way: a bolded imperative
+    // was never detected at all, which is the half nobody would have noticed.
+    expect(asks("**Push the branch** when you are done.")).toBe(true);
+    expect(asks("`git push` origin HEAD")).toBe(true);
+  });
+
+  it("ruling 323: the operator saying delivery is ITS job is not a demand on the agent", () => {
+    // SHOP-47, verbatim in shape: the operator telling the specialist to write
+    // the body into its report BECAUSE the operator is the one who opens the PR.
+    // CANARY: drop the OTHER_SUBJECT_RE check.
+    expect(
+      directiveRequestsDelivery(
+        "Do not write body content (write it into your report; I open the PR).",
+      ),
+    ).toBeNull();
+    expect(directiveRequestsDelivery("Your work lands on the open PR; the server pushes it.")).toBeNull();
   });
 });
 

@@ -5331,6 +5331,38 @@ by rewriting those paragraphs:*
     lines apart. The prose that survives a feature is the prose nobody re-read.
     (`task-actions.server.ts`, `operator-toolkit.server.ts`.)
 
+323. **A heuristic that writes a permanent accusation was wrong fourteen times out of fourteen
+    (owner, 2026-09-17, pass 37; F37-159).** `directiveRequestsDelivery` flags a directive that
+    asks a specialist to perform a server-owned delivery action. It is a SECONDARY reminder — the
+    base prompt forbids pushing unconditionally and the clone holds no push credential — so a miss
+    costs an extra nudge and nothing else. A false positive writes a permanent `policy` event on
+    the task saying the directive *"asked the specialist to push or open/merge a pull request"*,
+    plus an audit flag. The two costs are not remotely symmetric, and the detector was built the
+    other way round: broad, with narrow carve-outs.
+    Measured across 81 tasks of the shopify-clone board: **fourteen firings, fourteen wrong.**
+    - THIRTEEN were the adjective. `open` sits in an alternation of verbs (`open|create|raise|
+      submit|file`), so *"this branch has an open PR"* matched as an instruction to open one. In
+      every one of the thirteen, that clause was the operator's own preamble to **"merge, never
+      rebase"** — the opposite instruction. SHOP-54 carried five, one of them a citation of the
+      project's own conventions file: *"§2 (open PR ⇒ merge, never rebase — governs this whole
+      run)"*. A determiner, possessive or quantifier before `open` means the word describes the
+      pull request; that is now the guard.
+    - The FOURTEENTH was a prohibition wearing bold. P14-LV-10 added the negation guard precisely
+      so *"Do not push the branch, open a PR"* would stop firing — and the operator writes it as
+      `Do **not** push and do **not** open a PR`, which `\bdo\s+not\b` cannot match across the
+      asterisks. Emphasis is now stripped before anything else, which also fixes the miss in the
+      other direction: a bolded `**Push the branch**` was never detected at all.
+    - A third hole, found while fixing these: SHOP-47's *"write it into your report; I open the
+      PR"* — the operator stating that delivery is ITS OWN job, recorded as the operator demanding
+      the specialist do it.
+    The detector now returns the matched PHRASE rather than a boolean, and the event quotes it and
+    says plainly that nothing was withheld. A heuristic that writes an accusation has to show its
+    evidence: a reader who disagrees can see what it matched on, and so can whoever finds the next
+    hole. The tests are the fourteen real sentences, from the real tasks.
+    P14-LV-10 found this harm and fixed it through one hole while two others stood open. That is
+    the lesson worth keeping: a carve-out fixes a case; only a corpus tells you the rate.
+    (`specialist-run.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

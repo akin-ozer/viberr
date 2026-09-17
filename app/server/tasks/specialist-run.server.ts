@@ -2384,9 +2384,13 @@ async function dispatchAgentRun(
   // a PR). The specialist prompt gives the typed contract precedence and the
   // clone has no push credential, so the directive is inert — but recording it
   // keeps the authority source auditable instead of silently trusted.
-  const directiveOverrode = !!(
-    input.directive && directiveRequestsDelivery(input.directive)
-  );
+  // Ruling 323: the PHRASE, not a bare boolean. A heuristic that writes a
+  // permanent accusation has to show its evidence — a reader who disagrees with
+  // the note can see what it matched on, and so can whoever fixes the next hole.
+  const deliveryPhrase = input.directive
+    ? directiveRequestsDelivery(input.directive)
+    : null;
+  const directiveOverrode = deliveryPhrase !== null;
   await updateTaskFile(
     taskRef(ctx, input.projectSlug, input.taskKey),
     (parsed) => {
@@ -2429,10 +2433,12 @@ async function dispatchAgentRun(
           actor: { kind: "system", systemId: "delivery" },
           title: null,
           text:
-            "The operator directive asked the specialist to push or open/merge a " +
-            "pull request. That is a server-owned delivery action — it was NOT " +
+            `The directive for this run says \`${deliveryPhrase}\`, which reads as asking the ` +
+            "specialist to perform delivery. That is a server-owned action — it was NOT " +
             "granted to the agent. Viberr performs delivery when the operator decides to; the " +
-            "directive was treated as task guidance only.",
+            "directive was treated as task guidance only. If the phrase was describing the " +
+            "branch rather than instructing the agent, nothing was withheld: this note is a " +
+            "record of what the directive said, not a refusal.",
           toAgent: false,
           evidence: null,
         });
@@ -2461,7 +2467,7 @@ async function dispatchAgentRun(
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     details: directiveOverrode
-      ? { ...runStartedDetails, directiveRequestedDelivery: true }
+      ? { ...runStartedDetails, directiveRequestedDelivery: true, deliveryPhrase }
       : runStartedDetails,
   });
 
@@ -3443,20 +3449,64 @@ const NEGATION_RE =
   /\b(?:do\s+not|don'?t|never|no\s+need\s+to|without|must\s+not|cannot|can'?t|refrain\s+from|avoid|instead\s+of|rather\s+than|nor)\b/i;
 
 /**
- * Detect directives that contradict the server-owned delivery contract — a
- * directive ASKING the specialist to push or open/merge a PR.
+ * Ruling 323: what makes `open` an ADJECTIVE rather than a verb.
  *
- * This is a SECONDARY reminder (the base prompt forbids pushing unconditionally),
- * so a missed phrasing only drops the extra nudge, never the guarantee. It stays
- * broad on the phrasings, but it must not fire on a PROHIBITION: P14-LV-10 saw
- * it label a question ("does your prompt tell you to open a pull request?") as an
- * attempted authority override, and then — worse, live — fire on the operator's
- * own ANTI-injection directive ("Do not push the branch, open a PR, approve, or
- * merge"), writing a permanent policy event claiming the directive asked for the
- * exact thing it forbade. A negation anywhere in the ~60 characters before the
- * phrase, or a question mark right after it, means the directive is not asking.
+ * "has an open PR", "behind an open pull request", "this branch has an open PR"
+ * — a determiner, possessive or quantifier immediately before `open` means the
+ * word is describing the pull request, not commanding one into existence. The
+ * verbs the same alternation matches (`create`, `raise`, `submit`, `file`) take
+ * the same guard for free; none of them is ever an adjective here, so the check
+ * costs nothing on those and protects the one word that is.
  */
-export function directiveRequestsDelivery(directive: string): boolean {
+const ADJECTIVE_LEAD_RE =
+  /\b(?:an?|the|this|that|these|those|its|their|his|her|our|your|my|any|each|every|no|one|same|existing|already|still|with|behind|has|have|had)\s*$/i;
+
+/**
+ * Ruling 323: a subject that is not the agent being addressed.
+ *
+ * Live on SHOP-47 the operator wrote "(write it into your report; I open the
+ * PR)" — the operator stating that DELIVERY IS ITS OWN JOB, recorded as the
+ * operator demanding the specialist do it.
+ */
+const OTHER_SUBJECT_RE =
+  /\b(?:i|we|viberr|the\s+server|the\s+operator|it|she|he|they)\s*$/i;
+
+/**
+ * Ruling 323: markdown emphasis is not part of the sentence.
+ *
+ * P14-LV-10's negation guard was defeated by the operator's own formatting:
+ * `do **not** open a PR` is `do ` + `**not**`, and `\bdo\s+not\b` does not
+ * match across the asterisks. Live on SHOP-35 exactly that sentence — "Do
+ * **not** push and do **not** open a PR" — was recorded as asking for both.
+ * Stripping emphasis first fixes the miss in the other direction too: a bolded
+ * `**Push the branch**` was never detected at all.
+ */
+function withoutEmphasis(text: string): string {
+  return text.replace(/[*`]/g, "");
+}
+
+/**
+ * Detect directives that contradict the server-owned delivery contract — a
+ * directive ASKING the specialist to push or open/merge a PR. Returns the
+ * matched phrase, or null.
+ *
+ * This is a SECONDARY reminder (the base prompt forbids pushing
+ * unconditionally, and the clone holds no push credential), so a missed
+ * phrasing drops an extra nudge and nothing else. A FALSE one writes a
+ * permanent `policy` event on the task saying the directive "asked the
+ * specialist to push or open/merge a pull request", plus an audit flag. The two
+ * costs are not remotely symmetric, and the detector is now built that way.
+ *
+ * Ruling 323, measured: across 81 tasks of a real board this fired FOURTEEN
+ * times and was wrong every time. Thirteen were the adjective — "this branch
+ * has an open PR", the operator's own preamble to "merge, never rebase", which
+ * is the opposite instruction — and one was a prohibition whose `not` was
+ * wearing bold. Ten of the fourteen accused the operator of demanding the exact
+ * thing that sentence forbade, which is the harm P14-LV-10 named and fixed
+ * through one hole while two others stood open.
+ */
+export function directiveRequestsDelivery(rawDirective: string): string | null {
+  const directive = withoutEmphasis(rawDirective);
   DELIVERY_PHRASE_RE.lastIndex = 0;
   for (let m = DELIVERY_PHRASE_RE.exec(directive); m; m = DELIVERY_PHRASE_RE.exec(directive)) {
     const lead = directive.slice(Math.max(0, m.index - 60), m.index);
@@ -3464,11 +3514,15 @@ export function directiveRequestsDelivery(directive: string): boolean {
     // the branch" is still a push request), so only look back to the last one.
     const clause = lead.split(/[.;!?\n]/).pop() ?? lead;
     if (NEGATION_RE.test(clause)) continue;
+    // "…has an open PR" is a fact about the branch, not an instruction.
+    if (/^(?:open|creat|rais|submit|fil)/i.test(m[0]) && ADJECTIVE_LEAD_RE.test(clause)) continue;
+    // "…; I open the PR" is the operator describing its own job.
+    if (OTHER_SUBJECT_RE.test(clause)) continue;
     // "…tell you to open a pull request?" is asking ABOUT delivery, not for it.
     if (/^[^.\n]{0,40}\?/.test(directive.slice(m.index + m[0].length))) continue;
-    return true;
+    return m[0];
   }
-  return false;
+  return null;
 }
 
 // ------------------------------------------------------------------- repo clone
