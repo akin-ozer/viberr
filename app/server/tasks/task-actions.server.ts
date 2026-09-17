@@ -2869,7 +2869,10 @@ async function openStuckLoopPacket(
       // past the already-escalated early-return when it is), but the escalation
       // packet was refused — so without a note the task sits waiting on a human
       // with no card saying why. Leave one.
-      await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+      await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey, {
+        kind: "refused",
+        reason: result.message,
+      });
       return { status: "failed" };
     }
     return { status: "opened", notifiedUserIds: result.notifiedUserIds ?? [] };
@@ -2878,21 +2881,53 @@ async function openStuckLoopPacket(
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+    await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey, {
+      kind: "failed",
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return { status: "failed" };
   }
 }
 
-/** C10.4 (pass 25): a visible fallback when a stuck-loop escalation can't open
- *  its packet — so a task that has stopped making progress never sits waiting on
- *  a human with nothing on the timeline explaining why. Guarded: never throws. */
+/**
+ * C10.4 (pass 25): a visible fallback when a stuck-loop escalation can't open
+ * its packet — so a task that has stopped making progress never sits waiting on
+ * a human with nothing on the timeline explaining why. Guarded: never throws.
+ *
+ * Ruling 325 — and it has to say WHY, because that was the whole point.
+ *
+ * Both callers hold the reason. One has `operatorOpenPacket`'s own refusal
+ * message, the other has a thrown `Error`. Both LOG it and neither passed it,
+ * so the card C10.4 added to explain a stuck task explained nothing: "the
+ * recovery packet could not be opened" is the observation a person has already
+ * made by the time they are reading it.
+ *
+ * It also told them to "resolve it". There is no packet — that is the entire
+ * subject of the note — so a person following that sentence goes looking for a
+ * card that does not exist. The two arms differ too: a REFUSAL is a governance
+ * answer with a remedy in it (an authority, an archived project, a packet
+ * already open), and a THROW is a fault. Telling them apart is most of the
+ * help.
+ *
+ * Same shape as ruling 317(b), one file over: a fixed sentence standing where
+ * the system had the specific fact.
+ */
 async function noteStuckLoopEscalationFailed(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
+  why: { kind: "refused" | "failed"; reason: string },
 ): Promise<void> {
   try {
+    const reason = why.reason.trim();
+    const said = reason
+      ? why.kind === "refused"
+        ? `Viberr refused it: ${endSentence(reason)}`
+        : `Writing it failed: ${endSentence(reason)}`
+      : why.kind === "refused"
+        ? "Viberr refused it and gave no reason."
+        : "Writing it failed and the error carried no message.";
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -2900,9 +2935,14 @@ async function noteStuckLoopEscalationFailed(
         actor: { kind: "system", systemId: "policy-engine" },
         title: null,
         text:
-          "This task's operator turns stopped making progress, but the recovery " +
-          "packet could not be opened. It is waiting on a human: run the operator " +
-          "manually or intervene, then resolve it.",
+          "This task's operator turns stopped making progress, and the recovery packet that " +
+          `would have asked you how to proceed was not opened. ${said} ` +
+          "There is no packet on this task to resolve — it is waiting on a person. " +
+          (why.kind === "refused"
+            ? "Clear what the refusal names and the next operator turn escalates on its own, " +
+              "or run the operator yourself and decide from there."
+            : "Run the operator yourself and decide from there; the next turn will try the " +
+              "escalation again."),
         toAgent: false,
         evidence: null,
       });

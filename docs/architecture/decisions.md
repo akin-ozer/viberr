@@ -5391,6 +5391,23 @@ by rewriting those paragraphs:*
     a person means, and the one who knows is the one confirming.
     (`similar-tasks.server.ts` (new), `project.task.tsx`, `decision-packet.tsx`.)
 
+325. **The card that exists to explain a stuck task explained nothing (owner, 2026-09-17, pass 37;
+    F37-161).** C10.4 added a fallback note so a task whose operator turns stopped making progress
+    never sits waiting on a human with nothing on the timeline saying why. It read: *"This task's
+    operator turns stopped making progress, but the recovery packet could not be opened. It is
+    waiting on a human: run the operator manually or intervene, then resolve it."*
+    Both callers hold the reason. One has `operatorOpenPacket`'s own refusal message, the other a
+    thrown `Error`; both LOG it, and neither passed it. So the card built to explain a stuck task
+    handed the reader back the observation they had already made by the time they were reading it.
+    And it sent them to *"resolve it"* — there is no packet, which is the entire subject of the
+    note, so a person following that sentence goes looking for a card that does not exist. The two
+    arms are different situations too: a REFUSAL is a governance answer with a remedy inside it (an
+    authority, a closed task, a packet already open), a THROW is a fault. Telling them apart is most
+    of the help.
+    Same shape as ruling 317(b), one file over. Neither had a test: this note had never been
+    asserted on anywhere, which is how a fallback nobody sees until the bad day stays wrong.
+    (`task-actions.server.ts`; tested through the depth cap in `agent-completion.server.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

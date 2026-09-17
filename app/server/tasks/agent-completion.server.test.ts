@@ -1054,6 +1054,63 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * remaining doors were to redo finished work, or to force-accept past a
    * review gate that had PASSED and record a bypass that never happened.
    */
+  it("ruling 325: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
+    /**
+     * C10.4 added this card so a task that stopped making progress never sits
+     * waiting on a human with nothing explaining why. It said: "This task's
+     * operator turns stopped making progress, but the recovery packet could not
+     * be opened. It is waiting on a human: run the operator manually or
+     * intervene, then resolve it."
+     *
+     * Both callers hold the reason — one has `operatorOpenPacket`'s own refusal
+     * message, the other a thrown Error — and both LOG it. Neither passed it.
+     * So the card that exists to explain a stuck task gave the reader back the
+     * observation they had already made, and then sent them to "resolve it":
+     * there is no packet, which is the entire subject of the note.
+     *
+     * CANARY: stop threading `why` and print the old fixed sentence.
+     */
+    // No operator agent is deployed on this project at all (the store's
+    // default), so the packet the depth cap wants is refused for a REAL reason
+    // the server can state — which is the whole point.
+    writeReviewTask({ validation: "changed" });
+    const runId = await finishedRunWith("Still not right; the same three files.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await waitFor(() =>
+      taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
+    );
+
+    const note = taskFile().parsed.timeline.find((e) =>
+      e.text.includes("stopped making progress"),
+    );
+    expect(note, "no card explains the stuck task").toBeTruthy();
+    // No packet was opened — that is what the note is about.
+    expect(taskFile().parsed.packet).toBeNull();
+    // It says so, instead of sending the reader to resolve a card that is not there.
+    expect(note!.text).toContain("There is no packet on this task to resolve");
+    expect(note!.text).not.toContain("then resolve it");
+    // And it carries the server's own reason rather than restating the symptom.
+    expect(note!.text).toContain("Viberr refused it:");
+    expect(note!.text.length).toBeGreaterThan(200);
+    // The refusal arm's remedy is the refusal's own, not "run it again".
+    expect(note!.text).toContain("Clear what the refusal names");
+  });
+
   it("ruling 258: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
     // An operator that CAN open packets, so the absence below is a decision
     // rather than a missing grant.
