@@ -3067,6 +3067,12 @@ async function withdrawSupersededStuckPacket(
     if (!withdrawn) return;
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    // Ruling 328: this is the clear that needs the retry MOST, because no
+    // person is involved in it. The verdict that just landed was written while
+    // this packet stood, so ruling 237's escalation was skipped; seconds later
+    // the same run's success withdrew the packet, and the escalation was gone
+    // with nothing having decided it should be.
+    await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
     recordAudit(db, {
       action: "task.packet.withdrawn_superseded",
       actor: OPERATOR_AUDIT_ACTOR,
@@ -8559,6 +8565,117 @@ export function createTaskHoldsDecider(
   return (spec?.blocks ?? []).some((b) => b.trim().toUpperCase() === key);
 }
 
+/**
+ * Ruling 328 — the deadlock escalation is retried when the packet that blocked
+ * it clears.
+ *
+ * Ruling 237 raises the "N times running" packet from inside the locked write
+ * that records the verdict, and skips it when a packet is already open — which
+ * it must, since a task holds one packet. What nothing did was come back.
+ *
+ * The escalation was attempted EXACTLY ONCE, at the instant the objection was
+ * written, and any unrelated packet standing at that instant killed it for good.
+ * Ruling 326 established what those packets usually are: a quota or credential
+ * failure, raised in bursts across several tasks at once and nothing to do with
+ * the review.
+ *
+ * Measured on the shopify-clone board: five tasks reached a second consecutive
+ * `request_changes`; **two never got the packet**. SHOP-18's second objection
+ * landed at 03:44:44 with a backend-failure packet open (resolved at 04:38:38);
+ * the task then ran another eight hours and ended in a force-accept over a
+ * wedged Verify gate, with the person writing the routing by hand. SHOP-10
+ * reached three rounds the same way.
+ *
+ * And the operator's own turn instruction told it the opposite: "a task you are
+ * reading with such a reviewer and no packet is one where the escalation COULD
+ * NOT BE WRITTEN" — a write failure, when in fact it was skipped by design and
+ * would never be attempted again.
+ *
+ * Called after a resolution clears a packet. Best-effort and silent when there
+ * is no deadlock: this runs on every packet resolution, and most of them have
+ * nothing to do with a review.
+ */
+export async function retryReviewDeadlockEscalation(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing || existing.parsed.packet) return;
+    const fm = existing.parsed.frontmatter;
+    if (taskClosure(fm, loadProjectContext(ctx, projectSlug).stages).closed) return;
+    // Only an engagement that can actually record a verdict can deadlock a
+    // review; a stale verdict from a profile nobody has engaged is history.
+    const candidates = fm.engagements.filter((e) => e.verdictCapable);
+    let found: { deadlock: ReturnType<typeof reviewDeadlockOf>; profileId: string } | null = null;
+    for (const e of candidates) {
+      const deadlock = reviewDeadlockOf(fm, e.profileId, consecutiveRequestChanges(fm, e.profileId));
+      if (deadlock) {
+        found = { deadlock, profileId: e.profileId };
+        break;
+      }
+    }
+    if (!found || !found.deadlock) return;
+    const deadlock = found.deadlock;
+    const names = deadlockAgentNames(ctx, projectSlug);
+    /**
+     * The retry is for an escalation that was NEVER MADE — not for one a person
+     * has just answered.
+     *
+     * Without this, resolving the deadlock packet itself re-raises it on the
+     * spot: the reviewer is still at N consecutive objections the instant the
+     * card closes. That is the loop the owner called out on SHOP-76 — "that
+     * shop-76 constantly bringing up ask what else would block on packet" —
+     * and ruling 313 is the whole file about not rebuilding it.
+     *
+     * The packet's own title carries the round count, and raising it writes
+     * that title onto the timeline ("**Decision packet:** …"). So a timeline
+     * that already names this reviewer at this count has had its escalation;
+     * silence there is what makes one owed. A LATER objection raises the count
+     * and is a new escalation, which is ruling 237's own rule.
+     */
+    const alreadyEscalated = existing.parsed.timeline.some((e) =>
+      (e.text ?? "").includes(`requested changes ${deadlock.rounds} times running`),
+    );
+    if (alreadyEscalated) return;
+    const packet = buildReviewDeadlockPacket({
+      taskKey,
+      packetId: newId("pkt"),
+      deadlock,
+      reviewerName: names.get(found.profileId) ?? found.profileId,
+      delivererName: delivererNameOf(fm, names),
+      heldBy: fm.blockedBy,
+    });
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked inside the lock: the read above is outside it, and the
+      // resolution that just ran may have opened one of its own.
+      if (parsed.packet) return;
+      parsed.packet = packet;
+      parsed.frontmatter.waiting = "human";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          `${packet.title}. This escalation was due when that verdict landed and could not be ` +
+          "raised then, because another decision was already open on this task. It is raised now " +
+          "that the other one is answered.",
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+  } catch (error) {
+    logger.warn("review-deadlock escalation retry failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 // ------------------------------------------------------------ resolvePacket
 
 /** Resolve the active packet by stable option kind and mark its notifications read. */
@@ -8885,19 +9002,41 @@ export async function resolvePacket(
         readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ??
           existing.parsed.frontmatter,
       );
+      /**
+       * Ruling 327: stamped when it is WRITTEN, not when the ceremony began.
+       *
+       * `now` is captured at the top of `resolvePacket`, 114 lines and one
+       * GitHub round-trip above this — and `attemptAcceptanceMerge` can refresh
+       * the base, push, merge and reconcile before it returns. So the permanent
+       * Done record was dated BEFORE the merge it describes.
+       *
+       * Live on SHOP-77: the completion reads 05:33:35.903Z, the merge it
+       * announces is 05:33:43.377Z and the branch deletion 05:33:44.631Z. The
+       * timeline is newest-first, so the file puts the completion at the top
+       * while its own timestamp is the oldest of the three — whichever a reader
+       * trusts, the other is wrong. And its text is ruling 318's drift note,
+       * correctly measured after the refresh, describing a state that did not
+       * exist at the instant the record claims.
+       *
+       * The direct acceptance path (`acceptCompletion`) already stamps at write
+       * time; this is the packet door catching up, so one ceremony does not date
+       * itself two ways depending on which control a person used. The rest of
+       * this switch keeps `now`: every other arm writes before any remote call.
+       */
+      const acceptedAt = new Date().toISOString();
       // R19-8: the ONE shared no-change completion event, same as the other two
       // writers to Done.
       event = noChange.applies
         ? noChangeCompletionEvent({
             taskKey: input.taskKey,
             actor: human,
-            occurredAt: now,
+            occurredAt: acceptedAt,
             by: "human",
             verification: noChange.verification,
             autoDetected: noChange.autoDetected,
           })
         : {
-            occurredAt: now,
+            occurredAt: acceptedAt,
             type: "completion",
             actor: human,
             title: "Completion accepted",
@@ -10856,6 +10995,13 @@ export async function resolvePacket(
   // answer is named on this task's timeline with the reason, because the person
   // who just cleared four packets with one click is the one who has to know
   // that the fifth is still open.
+  // Ruling 328: an escalation ruling 237 had to skip — because THIS packet was
+  // the one already open — is raised now that it is answered. Before the
+  // fan-out, so a sibling resolution meets the same state this one leaves.
+  if (clearPacket) {
+    await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
+  }
+
   await fanOutByCause(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,

@@ -1548,6 +1548,113 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const blocks = (n: number) =>
       `Verdict: request_changes\n\n@operator objection number ${n}.`;
 
+    it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
+      /**
+       * Ruling 237 raises the "N times running" packet from inside the locked
+       * write that records the verdict, and skips it when a packet is already
+       * open — which it must, since a task holds one packet. Nothing came back.
+       *
+       * So the escalation was attempted EXACTLY ONCE, and any unrelated packet
+       * standing at that instant killed it for good. Ruling 326 established
+       * what those packets usually are: a quota or credential failure, raised
+       * in bursts across several tasks at once and nothing to do with the
+       * review.
+       *
+       * Measured: five tasks on the shopify-clone board reached a second
+       * consecutive request_changes and TWO never got the packet. SHOP-18's
+       * second objection landed at 03:44:44 with a backend-failure packet open
+       * (answered at 04:38:38); the task then ran another eight hours and ended
+       * in a force-accept over a wedged Verify gate. SHOP-10 reached three
+       * rounds the same way.
+       *
+       * CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
+       */
+      writeReviewTask();
+      await review(blocks(1));
+
+      // An unrelated decision — a backend failure, the live shape — is open
+      // when the second objection lands.
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.packet = {
+            type: "blocked",
+            kind: "Blocked decision",
+            from: "operator",
+            title: "Work stalled: pick a recovery path",
+            body: "Claude refused the agent run: the usage window is spent.",
+            observations: [],
+            options: [
+              { kind: "request_edit", t: "Send the agent back to continue", d: "", rec: true },
+            ],
+          };
+        },
+      );
+
+      await review(blocks(2));
+
+      // The live shape, and the worse one: no person is involved at all. The
+      // verdict was written while the stalled packet stood, so ruling 237
+      // skipped the escalation — and seconds later the SAME run's success
+      // auto-withdrew that packet (withdrawSupersededStuckPacket), taking the
+      // escalation with it.
+      const raised = taskFile().parsed.packet;
+      expect(raised, "the escalation was dropped for good").not.toBeNull();
+      expect(raised!.title).toContain("requested changes 2 times running");
+      // ...and it says why it is arriving late, rather than appearing from
+      // nowhere on a task whose last visible event was a packet withdrawal.
+      const note = taskFile().parsed.timeline.find((e) =>
+        e.text.includes("could not be raised then"),
+      );
+      expect(note, "a packet that arrives late says why").toBeTruthy();
+      expect(note!.text).toContain("another decision was already open");
+    });
+
+    it("ruling 328: the same retry runs when a PERSON clears the packet that blocked it", async () => {
+      // The other clear site. An `input` packet is never auto-withdrawn
+      // (`withdrawSupersededStuckPacket` returns on anything but `blocked`), so
+      // this one survives the run and a person answers it — and the escalation
+      // ruling 237 skipped is owed just the same.
+      // CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
+      writeReviewTask();
+      await review(blocks(1));
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.packet = {
+            type: "input",
+            kind: "Decision required",
+            from: "operator",
+            title: "Which of the two contracts wins?",
+            body: "They disagree on the availability field.",
+            observations: [],
+            options: [{ kind: "custom", t: "Answer in your own words", d: "", rec: true }],
+          };
+        },
+      );
+      await review(blocks(2));
+      expect(taskFile().parsed.packet?.title).toBe("Which of the two contracts wins?");
+
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          optionIndex: 0,
+          custom: "The published read wins; narrow the producer.",
+        },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        { dataRoot: store.dataRoot },
+      );
+
+      const raised = taskFile().parsed.packet;
+      expect(raised, "the escalation was dropped when the person answered").not.toBeNull();
+      expect(raised!.title).toContain("requested changes 2 times running");
+    });
+
     it("opens the packet on the second, not the first", async () => {
       writeReviewTask();
 

@@ -5437,6 +5437,51 @@ by rewriting those paragraphs:*
     somewhere better than where it started.
     (`run-failure-remedy.server.ts`, `task-actions.server.ts`.)
 
+327. **The packet door dated the Done record before the merge it announces (owner, 2026-09-17,
+    pass 37; F37-163).** `resolvePacket` captures `now` at the top, and the `accept_completion` arm
+    used it 114 lines and one GitHub round-trip later — `attemptAcceptanceMerge` can refresh the
+    base, push, merge and reconcile before it returns.
+    Live on SHOP-77: the completion reads `05:33:35.903Z`, the merge it announces `05:33:43.377Z`,
+    the branch deletion `05:33:44.631Z`. The timeline is newest-first, so the file puts the
+    completion at the top while its own timestamp is the oldest of the three — whichever a reader
+    trusts, the other is wrong. Its text is ruling 318's drift note, correctly measured after the
+    refresh, describing a state that did not exist at the instant the record claims.
+    78 of the board's other 79 accepted tasks went through the DIRECT door, which has always
+    stamped at write time. This is one ceremony dating itself two ways depending on which control
+    a person used; the packet door now stamps when it writes, like its sibling. Every other arm of
+    that switch keeps `now` — they write before any remote call.
+    (`task-actions.server.ts`.)
+
+328. **An escalation skipped because another packet was open was skipped forever (owner,
+    2026-09-17, pass 37; F37-164).** Ruling 237 raises the "N times running" packet from inside the
+    locked write that records the verdict, and skips it when a packet is already open — which it
+    must, since a task holds one packet. Nothing ever came back.
+    So the escalation was attempted EXACTLY ONCE, and any unrelated packet standing at that instant
+    killed it for good. Ruling 326 established what those packets usually are: a quota or
+    credential failure, raised in bursts across several tasks and nothing to do with the review.
+    Measured: five tasks on the shopify-clone board reached a second consecutive
+    `request_changes`; **two never got the packet**. SHOP-18's second objection landed at 03:44:44
+    with a backend-failure packet open (answered at 04:38:38); it ran another eight hours and ended
+    in a force-accept over a wedged Verify gate, with the person writing the routing by hand.
+    SHOP-10 reached three rounds the same way.
+    TWO clear sites, and the automatic one is worse. A person answering a packet is one; the other
+    is `withdrawSupersededStuckPacket`, which retires a stalled packet when the run it was about
+    finally succeeds — so the SAME reviewer run that wrote the objection withdrew the packet that
+    had suppressed its escalation, seconds apart, with nobody involved. That is the path the test
+    drives.
+    THE GUARD THAT MAKES IT SAFE: the retry is for an escalation that was NEVER MADE. Without it,
+    resolving the deadlock packet re-raises it on the spot — the reviewer is still at N objections
+    the instant the card closes — which is the loop the owner called out on SHOP-76 and the whole
+    subject of ruling 313. Raising the packet writes its title, which carries the round count, onto
+    the timeline; a timeline that already names this reviewer at this count has had its escalation.
+    A later objection raises the count and is a new one, which is ruling 237's own rule. Ruling
+    313's tests are what caught the first version of this fix rebuilding the loop.
+    The operator's turn instruction also asserted the wrong inference — "a task you are reading with
+    such a reviewer and no packet is one where the escalation COULD NOT BE WRITTEN", a write
+    failure, when it was skipped by design and would never be retried. It now says the escalation is
+    still owed, and that an absent packet is not evidence the objection was judged and dismissed.
+    (`task-actions.server.ts`, `operator-toolkit.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

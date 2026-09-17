@@ -3397,6 +3397,57 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(task(store).frontmatter.stage).toBe("impl");
   });
 
+  it("ruling 327: the packet door dates the Done record when it WRITES it, not when the ceremony began", async () => {
+    /**
+     * `resolvePacket` captures `now` at the top and the accept_completion arm
+     * used it 114 lines and one GitHub round-trip later — and
+     * `attemptAcceptanceMerge` can refresh the base, push, merge and reconcile
+     * before it returns. So the permanent Done record was dated BEFORE the
+     * merge it announces.
+     *
+     * Live on SHOP-77: completion 05:33:35.903Z, the merge it announces
+     * 05:33:43.377Z, the branch deletion 05:33:44.631Z. The timeline is
+     * newest-first, so the file puts the completion at the top while its own
+     * timestamp is the oldest of the three — whichever a reader trusts, the
+     * other is wrong. Its text is ruling 318's drift note, correctly measured
+     * after the refresh, describing a state that did not exist at the instant
+     * the record claims. 78 of the board's other 79 accepted tasks went through
+     * the DIRECT door, which has always stamped at write time; this is the two
+     * doors disagreeing about one ceremony.
+     *
+     * CANARY: put `now` back on either arm of the completion event.
+     */
+    const store = prepared();
+    seedReviewed(store, {}, ACCEPT_PACKET);
+    let mergedAt = "";
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      // A merge takes time: a base refresh, a push, a remote merge, a
+      // reconcile. 7.5 seconds of it, live.
+      await new Promise((r) => setTimeout(r, 25));
+      mergedAt = new Date().toISOString();
+      return { status: "merged", prNumber: 7, sha: "d".repeat(40) };
+    });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: live(store) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
+    );
+
+    expect(mergeMock).toHaveBeenCalled();
+    const completion = task(store).timeline.find((e) => e.type === "completion");
+    expect(completion, "an acceptance writes a completion record").toBeTruthy();
+    expect(mergedAt).not.toBe("");
+    // The record cannot predate the merge it announces.
+    expect(
+      completion!.occurredAt >= mergedAt,
+      `completion ${completion!.occurredAt} predates its own merge ${mergedAt}`,
+    ).toBe(true);
+    // ...and it is genuinely the record that names the merge, not some other event.
+    expect(completion!.text).toContain("the review PR was merged");
+  });
+
   it("resolving an accept_completion packet option is refused bare, refused stale, and accepted with the echo", async () => {
     // F19-7: the option that merges to main is confirmed by a button labelled
     // "Confirm decision", whose only disclosure was the operator's freeform
