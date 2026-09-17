@@ -18,6 +18,7 @@ import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
+  abandonedWaitNote,
   settleAbandonedWaits,
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
@@ -502,6 +503,93 @@ describe("settleAbandonedWaits (ruling 213)", () => {
    * asks its question the evidence is already gone — and its re-invoke raced the
    * orphan sweep's own, two coordination drives for one restart.
    */
+  it("ruling 337: reads the RECORD, not just the index — a parked dispatch is not an abandoned wait", async () => {
+    /**
+     * This sweep selected entirely on `t.waiting = 'agent'` with no live run and
+     * never opened the task file. So a dispatch viberr ITSELF had parked was
+     * swept as an abandoned wait — and unlike the read-only checks around it,
+     * this one writes a note and spends a paid operator turn.
+     *
+     * Live on SHOP-37, 2026-09-15, and it overrode a person:
+     *   09:15:13.200  Arda: "Decision: Re-run the Integration Verifier on the
+     *                 Codex backend."
+     *   09:15:13.298  policy-engine, "Dispatch held": Codex is out of quota
+     *                 until Sep 19, the run is scheduled for then, "nothing was
+     *                 dispatched and no decision is needed."
+     *   09:30:29.868  THIS SWEEP: "Left waiting on an absent agent… the run
+     *                 finished just before the stop and the follow-up that
+     *                 would have moved the task went with the process."
+     *   09:32:25.171  the drive it forced: "a fresh-context re-run of your
+     *                 pass, on the CLAUDE backend."
+     *   09:39:19.846  Arda cancels, by hand, the schedule viberr promised.
+     *
+     * Every clause of that note was false on the task's own record, and it
+     * reversed the owner's explicit backend decision fifteen minutes after they
+     * made it. The guard is borrowed from `findStrandedTasks` (ruling 330,
+     * shipped hours earlier), which re-reads the file for exactly these cases:
+     * the older sweep does MORE and checked LESS.
+     *
+     * CANARY: drop any one of the file-side `continue`s.
+     */
+    const parked: [string, Partial<Parameters<typeof baseTaskFrontmatter>[1]>][] = [
+      // SHOP-37's own shape: a held dispatch parked on a pending schedule.
+      ["VIB-1", {
+        schedules: [{
+          id: "sch_1", action: "run-agent", dueAt: "2026-09-19T09:37:00.000Z",
+          profileId: "integration-verifier", prompt: "", createdBy: "u_1",
+          createdByLabel: "Arda", createdAt: "2026-09-15T09:15:13.275Z",
+          status: "pending", firedAt: null, claimedAt: null, retries: 0,
+        }],
+      }],
+      // The other reasons the file already explains.
+      ["VIB-2", { blockedBy: ["VIB-9"] }],
+      ["VIB-3", {
+        queuedQuestions: [{
+          id: "q1", profileId: "reviewer", directive: "What else blocks?",
+          decidedBy: "u_1", decidedByLabel: "Arda",
+          decidedAt: "2026-09-15T09:00:00.000Z", heldBy: ["VIB-9"],
+        }],
+      }],
+    ];
+    for (const [key, patch] of parked) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl", waiting: "agent", ...patch }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const settled = await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot });
+    expect(settled, "a parked dispatch was swept as an abandoned wait").toBe(0);
+    for (const [key] of parked) {
+      const parsedTask = readTaskFile({
+        projectSlug: store.slug,
+        taskKey: key,
+        dataRoot: store.dataRoot,
+      })!.parsed;
+      expect(
+        parsedTask.timeline.find((e) => e.title === "Left waiting on an absent agent"),
+        `${key} had a reason for the quiet and was swept anyway`,
+      ).toBeUndefined();
+    }
+  });
+
+  it("ruling 337(b): the note states the board fact and does not claim a turn that may not run", async () => {
+    // It asserted "the operator IS re-invoked" and is written BEFORE
+    // `runOperator` is called, so a refusal left a note claiming a turn that
+    // never happened — the unconditional promise ruling 198 removed from the
+    // sibling orphan sweep.
+    // CANARY: restore "the operator is re-invoked to decide what happens next".
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const note = abandonedWaitNote(store.db, store.slug, "VIB-1");
+    expect(note).toContain("The board has stopped claiming an agent");
+    expect(note).toContain("Viberr is invoking the operator");
+    expect(note).toContain("if no operator can run, this task is waiting on a person");
+    expect(note).not.toMatch(/the operator is re-invoked/);
+  });
+
   it("does not re-claim a task the orphan sweep already took (ruling 215)", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),

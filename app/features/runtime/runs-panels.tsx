@@ -660,7 +660,31 @@ export function AgentLogsPanel({
             : cur!.interruptedReason === "restart"
               ? cur!.kind === "controller"
                 ? "interrupted by a restart; the conversation carries a note"
-                : "interrupted by a restart; the operator was re-invoked"
+                : // Ruling 338: this said "the operator was re-invoked", and the
+                  // panel holds no fact about whether one was. Recovery stamps
+                  // the identical row state on a re-invoked orphan and on one
+                  // its crash-loop guard REFUSED to re-invoke
+                  // (`RECOVERY_REINVOKE_CAP`, 3 in 30 minutes), and records the
+                  // refusal only as an audit row and a note on the task.
+                  //
+                  // Live: 250 restart renderings on this board, 6 of them on
+                  // capped runs — SHOP-27, SHOP-34 (twice, two boots), SHOP-35,
+                  // SHOP-36, SHOP-38 — and on every one the task's own timeline
+                  // says the opposite, one panel away: "Viberr did NOT re-invoke
+                  // the operator for it… Run the operator from this page when
+                  // you are ready." A person who believes the footer does not
+                  // do the one thing the note asks. At the 13:01:50Z boot,
+                  // SHOP-34/35/38 sat two and a half hours until a human
+                  // commented by hand.
+                  //
+                  // This is ruling 198's defect surviving in the second surface
+                  // a person opens when a run stops. The panel knows the run was
+                  // cut by a restart and nothing more, so that is all it says —
+                  // and it points at the record that does know. A stronger
+                  // sentence would need a real `recoveryReinvoked` field
+                  // written on both branches, which is more than the lie is
+                  // worth.
+                  "interrupted by a restart; the task record says what recovery did"
               : "interrupted; the thread stays resumable"
           : cur!.state === "done"
             ? // Ruling 148: a missing timestamp is said by leaving the clause

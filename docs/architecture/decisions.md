@@ -5690,6 +5690,56 @@ by rewriting those paragraphs:*
     exact query that would settle it. That is a better bug report than most of mine.
     (`dependencies.server.ts`, `controller-toolkit.server.ts`.)
 
+337. **The projection is the index; the FILE is where the reason for the quiet lives (owner,
+    2026-09-17, pass 37; F37-173).** `settleAbandonedWaits` selected entirely on
+    `t.waiting = 'agent'` with no live run, and never opened the task. Unlike the read-only checks
+    around it, this one writes a note and spends a paid operator turn.
+    Live on SHOP-37, 2026-09-15, and it overrode a person. 09:15:13.200 — Arda: *"Decision: Re-run
+    the Integration Verifier on the Codex backend."* 09:15:13.298 — policy-engine, "Dispatch held":
+    Codex is out of quota until Sep 19, the run is scheduled for then, *"nothing was dispatched and
+    no decision is needed."* 09:30:29.868 — THIS SWEEP: *"Left waiting on an absent agent… the run
+    finished just before the stop and the follow-up that would have moved the task went with the
+    process."* 09:32:25.171 — the drive it forced: *"a fresh-context re-run of your pass, on the
+    CLAUDE backend."* 09:39:19.846 — Arda cancels, by hand, the schedule viberr had promised.
+    Every clause of that note was false on the task's own record: no run had finished just before
+    the stop (the last was interrupted 39 minutes earlier), nothing went with the process, and the
+    silence was a dispatch viberr itself had parked. It reversed the owner's explicit backend
+    decision fifteen minutes after they made it.
+    The guard is borrowed verbatim from `findStrandedTasks` (ruling 330, shipped hours earlier),
+    which re-reads the file for exactly these cases. **The older sweep does MORE and checked LESS.**
+    337(b): the note asserted *"the operator is re-invoked"* and is written BEFORE `runOperator` is
+    called, so a refusal left a claim about a turn that never happened — the unconditional promise
+    ruling 198 removed from the sibling orphan sweep. It now states the board fact, which is
+    certain, and the invocation as an intention with its failure case named.
+    337(c): it returned `rows.length`, the raw projection result, so it over-reported whenever the
+    orphan-sweep filter took some but not all. It counts what it settled.
+    The refuter corrected the claim DOWN — from "at least 3 of 6" to 1 of 6, the other five being
+    two that ruling 215 already retired, one correct firing, and two it could not falsify — and
+    dropped a throwing-re-invoke variant with no live instance. The count stands as one.
+    (`run-recovery.server.ts`.)
+
+338. **A panel claimed a system act it holds no fact about, and a test required it (owner,
+    2026-09-17, pass 37; F37-174).** The Agent-logs footer printed *"interrupted by a restart; the
+    operator was re-invoked"* for every non-controller run interrupted by a restart. The panel has
+    no such fact: recovery stamps the identical row state on a re-invoked orphan and on one its
+    crash-loop guard REFUSED to re-invoke (`RECOVERY_REINVOKE_CAP`, three in thirty minutes), and
+    records the refusal only as an audit row and a note on the task.
+    Live: 250 restart renderings on this board, **6 of them capped** — SHOP-27, SHOP-34 (twice, two
+    separate boots), SHOP-35, SHOP-36, SHOP-38 — and on every one the task's own timeline says the
+    opposite one panel away: *"Viberr did NOT re-invoke the operator for it: it had already done so
+    3 times for this task within the last 30 minutes… Run the operator from this page when you are
+    ready."* A person who believes the footer does not do the one thing the note asks. At the
+    13:01:50Z boot, SHOP-34/35/38 sat two and a half hours until a human commented by hand.
+    This is ruling 198's defect surviving in the second surface a person opens when a run stops —
+    198 fixed the timeline note for precisely this reason and the console was not looked at.
+    AND A TEST REQUIRED THE LIE, which is why it lasted: the assertion's fixture is a bare
+    `interrupted` + `restart` run — the case where the outcome is unknown to the panel — and it
+    asserted the claim anyway. Second instance of ruling 329's shape in one day.
+    The panel now says only what it knows and points at the record that knows the rest. A stronger
+    sentence would need a real `recoveryReinvoked` field written on both recovery branches, which
+    the refuter and I agree is more than the lie is worth.
+    (`runs-panels.tsx`, `runs-panels.test.tsx`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

@@ -487,8 +487,18 @@ export function abandonedWaitNote(
 ): string {
   const head =
     "**Restart:** this task was waiting on an agent, and no run was live when the server came back. ";
+  /**
+   * Ruling 337(b): the board fact is certain; the re-invoke is an intention.
+   *
+   * This asserted the re-invoke as done, and it is written BEFORE `runOperator`
+   * is called — so a refusal (no operator deployed, a closed task, an open
+   * packet) leaves a note claiming a turn that never happened, which is the
+   * unconditional promise ruling 198 removed from the sibling orphan sweep. The
+   * `!result.runId` branch clears `waiting` but does not correct the sentence.
+   */
   const tail =
-    " The board has stopped claiming an agent, and the operator is re-invoked to decide what happens next.";
+    " The board has stopped claiming an agent, and Viberr is invoking the operator to decide " +
+    "what happens next; if no operator can run, this task is waiting on a person.";
   // SAFETY: `agent_runs` declares `id`, `state` and `kind` TEXT NOT NULL
   // (0001_baseline); `finished_at` and `started_at` are nullable.
   const last = db
@@ -590,9 +600,61 @@ export async function settleAbandonedWaits(
       import("./operator-run.server"),
       import("~/server/tasks/task-actions.server"),
     ]);
+  const { readTaskFile } = await import("~/server/files/task-writer.server");
+  /**
+   * Ruling 337(c): the count it SETTLED, not the count it looked at.
+   *
+   * This returned `rows.length` — the raw projection result — so it already
+   * over-reported whenever `claimedByOrphanSweep` filtered some but not all
+   * (the ruling-215 test passes only because that case filters ALL of them and
+   * takes the early return). With the file re-read above, the gap is the normal
+   * case: the number a boot log or a test reads has to be the number of tasks
+   * this sweep actually spoke on.
+   */
+  let settled = 0;
   for (const row of abandoned) {
     const ref: TaskFileRef = { projectSlug: row.slug, taskKey: row.key };
     if (ctx.dataRoot) ref.dataRoot = ctx.dataRoot;
+    /**
+     * Ruling 337: the projection is the index; the FILE is the record, and the
+     * file is where the reason for the quiet lives.
+     *
+     * This sweep selected entirely on `t.waiting = 'agent'` with no live run
+     * and never opened the task. So a dispatch viberr ITSELF had parked was
+     * swept as an abandoned wait — and unlike the read-only checks above, this
+     * one writes a note and spends a paid operator turn.
+     *
+     * Live on SHOP-37, 2026-09-15, and it overrode a person:
+     *   09:15:13.200  Arda: "Decision: Re-run the Integration Verifier on the
+     *                 Codex backend."
+     *   09:15:13.298  policy-engine, "Dispatch held": Codex is out of quota
+     *                 until Sep 19; the run is scheduled for then; "nothing was
+     *                 dispatched and no decision is needed."
+     *   09:30:29.868  THIS SWEEP: "Left waiting on an absent agent… the run
+     *                 finished just before the stop and the follow-up that
+     *                 would have moved the task went with the process."
+     *   09:32:25.171  the drive it forced: "a fresh-context re-run of your
+     *                 pass, on the CLAUDE backend."
+     *   09:39:19.846  Arda cancels, by hand, the schedule viberr had promised.
+     * Every clause of that note was false on the task's own record, and the
+     * consequence was not cosmetic: it reversed the owner's explicit backend
+     * decision fifteen minutes after they made it.
+     *
+     * The guard is borrowed verbatim from `findStrandedTasks` (ruling 330,
+     * shipped hours earlier), which re-reads the file for exactly these cases.
+     * The older sweep does MORE and checked LESS.
+     */
+    const file = readTaskFile(ref);
+    if (!file) continue;
+    const fm = file.parsed.frontmatter;
+    // The projection can lag the write that ended the wait.
+    if (fm.archived || fm.waiting !== "agent") continue;
+    // Each of these is silence the product already explains, and the release
+    // engine, the schedule runner or a person owns it.
+    if (file.parsed.packet) continue;
+    if ((fm.blockedBy ?? []).length > 0) continue;
+    if ((fm.queuedQuestions ?? []).length > 0) continue;
+    if ((fm.schedules ?? []).some((sc) => sc.status === "pending")) continue;
     try {
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
@@ -617,6 +679,7 @@ export async function settleAbandonedWaits(
       if (!result.runId) {
         await clearWaitingToHuman(db, ctx, row.slug, row.key);
       }
+      settled += 1;
     } catch (error) {
       logger.warn("abandoned-wait settle failed", {
         taskKey: row.key,
@@ -627,7 +690,7 @@ export async function settleAbandonedWaits(
       await clearWaitingToHuman(db, ctx, row.slug, row.key).catch(() => {});
     }
   }
-  return rows.length;
+  return settled;
 }
 
 /**
