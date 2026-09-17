@@ -1611,6 +1611,28 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      * markdown files fail identically on the base commit" — a sentence whose
      * whole point is that the failure is NOT a finding.
      */
+    /**
+     * Ruling 317. The stored `verdicts[].reason` is a 2,000-character clip whose
+     * own marker says "Its full report is on this task's timeline, whole"
+     * (ruling 292) — and compaction folded that comment away, because the two
+     * fields protecting a comment (`evidence`, `attachments`) are moved OFF the
+     * reply precisely when it carries a verdict. The title is what compaction
+     * reads instead.
+     */
+    it("ruling 317: the verdict's reply comment is TITLED, so compaction can spare it", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      const { VERDICT_REPORT_TITLE } = await import("~/schemas/task-file.schema");
+      const reply = taskFile()
+        .parsed.timeline.find((e) => e.type === "comment" && e.actor.kind === "agent");
+      // CANARY: stop setting the title on the verdict path and the comment the
+      // stored record points at becomes indistinguishable from chatter.
+      expect(reply?.title).toBe(VERDICT_REPORT_TITLE);
+      // The inversion this replaces: evidence was moved off it, so the clauses
+      // that protect every other agent comment do not apply here.
+      expect(reply?.evidence ?? null).toBeNull();
+    });
+
     it("ruling 316: a run whose verdict channel was withheld gets no prose verdict", async () => {
       writeReviewTask();
       await review(blocks(1));

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { TaskFileEvent } from "~/schemas/task-file.schema";
+import {
+  VERDICT_REPORT_TITLE,
+  type TaskFileEvent,
+} from "~/schemas/task-file.schema";
 import {
   COMPACTION_TITLE,
   compactTimelineEvents,
@@ -279,5 +282,52 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     const once = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
     const twice = compactTimelineEvents(once, { threshold: 12, keepRecent: 10 });
     expect(twice).toEqual(once);
+  });
+
+  /**
+   * Ruling 317. `clipVerdictReason` (ruling 292) stores 2,000 characters of a
+   * reviewer's justification and appends "Its full report is on this task's
+   * timeline, whole." Compaction then folded exactly that comment away.
+   *
+   * It was not covered by the evidence or attachment clauses, because those two
+   * fields are moved OFF the reply precisely when it carries a verdict
+   * (P13-D-26 puts them on the `quality` event) — so the protection was
+   * inverted: a deliverer's report carried evidence and was immune, and the
+   * record a stored pointer depends on was first to go.
+   *
+   * Live on SHOP-76, measured: three of four rounds of review reasoning gone
+   * from canonical `task.md` while every `verdicts[].reason` still named the
+   * timeline as the complete copy.
+   */
+  it("ruling 317: a verdict's justification is never folded", () => {
+    const agent = {
+      kind: "agent" as const,
+      backend: "claude" as const,
+      profileId: "rev",
+      roleHint: null,
+    };
+    const at = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString();
+    const routine = (n: number, title: string | null = null): TaskFileEvent => ({
+      occurredAt: at(n),
+      type: "comment",
+      actor: agent,
+      title,
+      text: `comment ${n}`,
+      toAgent: false,
+      // The inversion: a verdict report has NEITHER, by the writer's own rule.
+      evidence: null,
+    });
+    // Newest first. Enough routine comments past the window to force a fold.
+    const events: TaskFileEvent[] = [];
+    for (let n = 40; n > 20; n -= 1) events.push(routine(n));
+    events.push(routine(20, VERDICT_REPORT_TITLE));
+    for (let n = 19; n > 0; n -= 1) events.push(routine(n));
+
+    const out = compactTimelineEvents(events, { threshold: 10, keepRecent: 5 });
+    // CANARY: drop the `e.title !== VERDICT_REPORT_TITLE` clause and this
+    // disappears, leaving every `verdicts[].reason` pointing at nothing.
+    expect(out.some((e) => e.title === VERDICT_REPORT_TITLE)).toBe(true);
+    // And the pass still did its job on the rest.
+    expect(out.length).toBeLessThan(events.length);
   });
 });

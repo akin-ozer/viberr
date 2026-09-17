@@ -5161,6 +5161,34 @@ by rewriting those paragraphs:*
     (`task-actions.server.ts`, `specialist-run.server.ts`, `dependencies.server.ts`,
     `run-service.server.ts`, `run-store.server.ts`, `sqlite.server.ts`, `0001_baseline.sql`.)
 
+317. **The record pointed at a copy the product then deleted (owner, 2026-09-17, pass 37;
+    F37-152).** Ruling 292 clips a reviewer's justification into `verdicts[].reason` at 2,000
+    characters and appends *"Its full report is on this task's timeline, whole."* That sentence was
+    292's whole justification for cutting at all. Compaction then folds the comment it names.
+    THE PROTECTION WAS EXACTLY INVERTED. A comment survives compaction only if it carries
+    `evidence` or `attachments` (rulings 209 and 211(e)) — and `prepareAgentReplyEvent`'s caller
+    moves both OFF the reply precisely WHEN it carries a verdict, because P13-D-26 puts them on the
+    `quality` event so the chips render with the outcome. So a deliverer's report was immune and
+    the one record a stored pointer depends on was first to go.
+    Measured live on SHOP-76, mid-session, while the task was being worked: the round-1 verdict
+    report (7,211 characters), the round-2 report, and the reviewer's "complete list" answer — the
+    one a person had spent a decision and a run to obtain — all gone from canonical `task.md`,
+    replaced by *"6 earlier routine comments compacted"*, while `verdicts[0].reason` still ended
+    *"...this is its first 2,000. Its full report is on this task's timeline, whole."* Three of four
+    rounds of review reasoning, unrecoverable from the file agents re-anchor on.
+    The fix is a TITLE, not a new field. `title` already round-trips through the task-file format
+    and was `null` on these comments; the verdict path now sets `VERDICT_REPORT_TITLE` and
+    compaction never folds it. No format change, no cross-referencing of frontmatter from a pure
+    function, and the comment gains a heading that says what it is — which the UI wanted anyway.
+    The constant lives in the schema module because the writer is a server action and the reader is
+    the compaction pass, and neither should import the other.
+    Note what this does NOT do: the clip stays. A justification over 2,000 characters is still
+    stored partial, and the promise that the whole of it is on the timeline is now true again
+    rather than removed. If compaction ever gains another way to drop a titled comment, this ruling
+    is the one it breaks.
+
+    (`timeline-compaction.server.ts`, `task-actions.server.ts`, `task-file.schema.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

@@ -46,6 +46,7 @@ import {
   isValidDueDate,
   normalizeTaskLabels,
   PACKET_NOTE_MAX,
+  VERDICT_REPORT_TITLE,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
@@ -3587,6 +3588,20 @@ export async function recordAgentCompletion(
         let replyEvent = prepared.event;
         if (evidence && !verdict) replyEvent = { ...replyEvent, evidence };
         if (attachments && !verdict) replyEvent = { ...replyEvent, attachments };
+        /**
+         * Ruling 317: TITLE it, because this comment is the only complete copy
+         * of a justification the stored record is a clip of — and the two
+         * fields that protect a comment from compaction were just moved OFF it,
+         * three lines up, precisely BECAUSE there is a verdict.
+         *
+         * So the protection was exactly inverted: a deliverer's report carries
+         * evidence and is immune, while the verdict report — which ruling 292's
+         * own marker calls "on this task's timeline, whole" — was the first
+         * thing folded away. Live on SHOP-76 three of four rounds of review
+         * reasoning were unrecoverable from canonical `task.md` while every
+         * `verdicts[].reason` still pointed at them.
+         */
+        if (verdict) replyEvent = { ...replyEvent, title: VERDICT_REPORT_TITLE };
         parsed.timeline.unshift(replyEvent);
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of

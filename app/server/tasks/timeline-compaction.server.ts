@@ -1,4 +1,7 @@
-import type { TaskFileEvent } from "~/schemas/task-file.schema";
+import {
+  VERDICT_REPORT_TITLE,
+  type TaskFileEvent,
+} from "~/schemas/task-file.schema";
 
 /**
  * Anti-noise timeline compaction (F5 companion, FR17: "compressed historical
@@ -93,6 +96,19 @@ export function compactTimelineEvents(
     e.type === "comment" &&
     // never fold an existing marker into another marker (idempotent)
     e.title !== COMPACTION_TITLE &&
+    // Ruling 317: a verdict's justification is the one comment a STORED record
+    // points at. `clipVerdictReason` keeps 2,000 characters of it and appends
+    // "Its full report is on this task's timeline, whole" — so folding it turns
+    // a live pointer into a dangling one and the reviewer's reasoning is
+    // unrecoverable from canonical `task.md`.
+    //
+    // It is not covered by the evidence and attachment clauses below: those two
+    // fields are moved OFF the reply exactly when it carries a verdict
+    // (P13-D-26 puts them on the `quality` event), so the protection was
+    // inverted — a deliverer's report was immune and this was first to go.
+    // Measured on SHOP-76: three of four rounds of review reasoning gone, with
+    // every `verdicts[].reason` still naming the timeline as the whole copy.
+    e.title !== VERDICT_REPORT_TITLE &&
     // a to-agent prompt is a governance hand-off, not routine chatter
     !e.toAgent &&
     // B-FD9: a person's prose is never deleted from canonical task.md.

@@ -2303,6 +2303,19 @@ export function sanitizeEventAttachmentNames(
   return out.length > 0 ? out : null;
 }
 
+/**
+ * Ruling 317: the title on a comment that is a verdict's full justification.
+ *
+ * `clipVerdictReason` stores 2,000 characters of it and appends "Its full
+ * report is on this task's timeline, whole." That promise holds only while the
+ * timeline keeps the comment, and compaction folds comments — so the comment
+ * says what it is, and compaction reads the title.
+ *
+ * Lives here because the writer is a server action and the reader is the
+ * compaction pass, and neither should import the other.
+ */
+export const VERDICT_REPORT_TITLE = "Review verdict";
+
 /** One parsed `###` timeline entry. Newest-first in the file and here. */
 export interface TaskFileEvent {
   /** UTC ISO 8601. */
@@ -2322,6 +2335,23 @@ export interface TaskFileEvent {
    *  captures). Optional: most writers never produce files, and an absent field
    *  serializes to nothing. Names only — the directory stays the truth. */
   attachments?: string[];
+  /**
+   * Ruling 317: this comment is the FULL text a stored verdict's `reason` is a
+   * clip of, and whose marker names this timeline as the complete copy.
+   *
+   * Ruling 292 clips a justification at 2,000 characters and appends "Its full
+   * report is on this task's timeline, whole." Compaction then folded exactly
+   * this comment away, because the two fields that protect a comment from
+   * folding — `evidence` and `attachments` — are moved OFF it by
+   * `prepareAgentReplyEvent` precisely when there IS a verdict (P13-D-26 puts
+   * them on the `quality` event instead). So the protection was inverted: a
+   * deliverer's report was immune and the record a stored pointer depends on
+   * was first to go.
+   *
+   * Optional and absent almost everywhere; an absent field serializes to
+   * nothing, so no existing task file changes.
+   */
+  verdictReport?: boolean;
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */
