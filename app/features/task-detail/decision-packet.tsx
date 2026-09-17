@@ -787,6 +787,7 @@ export function DecisionPacket({
   canMoveStage = false,
   archiveDisclosure,
   alsoAnswers = null,
+  createTaskEchoes = {},
   onResolve,
   onResolveCustom,
   onRequestMaintainer,
@@ -841,6 +842,20 @@ export function DecisionPacket({
    * reach can be stated before the click rather than reported after it.
    */
   alsoAnswers?: string | null;
+  /**
+   * Ruling 324: per `create_task` option index, the tasks on this project whose
+   * title already looks like the one that option would create.
+   *
+   * A confirm here makes a real task under the person's own authority, and the
+   * card discloses what it will create while saying nothing about what already
+   * exists. Twice on one board that confirm was a click away from standing up a
+   * second owner for work a live task already held — caught both times only
+   * because a person read the packet and recognised it.
+   *
+   * Shown under the option it belongs to and only while that option is
+   * selected: it is information about THAT choice, not about the packet.
+   */
+  createTaskEchoes?: Record<number, { key: string; title: string; stage: string }[]>;
   onResolve: (optionIndex: number, note: string) => void;
   /** Ruling 138: a DECIDED `edit_goal` packet has one way out — the goal
    *  editor, opened prefilled with the chosen option's draft. */
@@ -1398,6 +1413,29 @@ export function DecisionPacket({
                 {PACKET_NOTE_MAX.toLocaleString("en-US")} characters.
               </p>
             )}
+          </div>
+        )}
+
+        {/* Ruling 324: the echoes of the SELECTED option, under the choice they
+            are about. Silent when the selection creates nothing, and silent
+            when nothing on the board resembles it — a disclosure a person
+            learns to skip is worse than no disclosure. */}
+        {(createTaskEchoes[sel] ?? []).length > 0 && (
+          <div className="deny-note spaced" data-create-task-echoes={sel}>
+            <Icon name="board" />
+            <span>
+              This project already has{" "}
+              {(createTaskEchoes[sel] ?? []).length === 1 ? "a task" : "tasks"} that look like
+              this:{" "}
+              {(createTaskEchoes[sel] ?? []).map((t, i, all) => (
+                <span key={t.key}>
+                  <strong>{t.key}</strong> &ldquo;{t.title}&rdquo; ({t.stage})
+                  {i < all.length - 1 ? ", " : ""}
+                </span>
+              ))}
+              . Confirming still creates a new one &mdash; check it is not a second owner for
+              work one of these already holds.
+            </span>
           </div>
         )}
 

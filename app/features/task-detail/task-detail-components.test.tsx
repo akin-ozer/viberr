@@ -161,6 +161,65 @@ describe("DecisionPacket", () => {
     expect(plain.container.querySelector("[data-also-answers]")).toBeNull();
   });
 
+  it("ruling 324: a create_task option names what already looks like it", () => {
+    /**
+     * The controller, unprompted, on what a reader of the final board would not
+     * learn: "SHOP-27's decision packet was one confirmation away from creating
+     * a duplicate of SHOP-29 — same three route modules, same pattern, already
+     * written and sitting at Triage." Both near-misses were caught by a person
+     * recognising the work, and a task that was never created leaves no trace.
+     *
+     * CANARY: render the echoes unconditionally (not keyed on the selection),
+     * or drop the block entirely.
+     */
+    const packet: PacketRender = {
+      ...packet142,
+      options: [
+        { kind: "custom", t: "Answer in your own words", d: "", rec: false },
+        {
+          kind: "create_task",
+          t: "Create the gateway routes task",
+          d: "",
+          rec: false,
+          newTask: {
+            title: "Gateway routes for orders, cart and inventory",
+            goal: "Expose the write side through the public edge.",
+          },
+        },
+      ],
+    };
+    const echoes = {
+      1: [{ key: "SHOP-29", title: "Gateway routes for inventory, cart and checkout", stage: "Triage" }],
+    };
+    const { container } = render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        createTaskEchoes={echoes}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    // Silent while a different option is selected: this is information about
+    // THAT choice, not about the packet.
+    expect(container.querySelector("[data-create-task-echoes]")).toBeNull();
+
+    const radios = container.querySelectorAll('.options [role="radio"]');
+    fireEvent.click(radios[1]!);
+    const note = container.querySelector("[data-create-task-echoes]")!;
+    expect(note).toBeTruthy();
+    expect(note.textContent).toContain("SHOP-29");
+    expect(note.textContent).toContain("Gateway routes for inventory, cart and checkout");
+    expect(note.textContent).toContain("Triage");
+    // It discloses, it does not refuse: the confirm still stands.
+    expect(note.textContent).toContain("Confirming still creates a new one");
+  });
+
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(

@@ -5363,6 +5363,34 @@ by rewriting those paragraphs:*
     the lesson worth keeping: a carve-out fixes a case; only a corpus tells you the rate.
     (`specialist-run.server.ts`.)
 
+324. **The `create_task` confirm names what already looks like it (owner, 2026-09-17, pass 37;
+    F37-160).** Ruling 269's option creates a real task on a person's confirm, and the card
+    discloses what it WILL create. It said nothing about what already exists, and the operator
+    authoring it reasons about a board it cannot see all of.
+    Found by ASKING. The controller, at the end of the run, was asked what a reader of the final
+    board would not learn from the board itself, and volunteered this without being pointed at it:
+    *"the near-misses were about as frequent as the catches, and they leave no trace… SHOP-27's
+    decision packet was one confirmation away from creating a duplicate of SHOP-29 — same three
+    route modules, same pattern, already written and sitting at Triage… SHOP-26's packet, before
+    you re-raised it, was one confirmation from creating a second SHOP-39 with the title word for
+    word."* Both were caught by a person reading the packet and recognising the work. A task that
+    was never created leaves nothing behind, so the RATE of this is invisible in any record — the
+    only way to learn it was to ask something that was there.
+    Ruling 273's `read_board` gave the OPERATOR a way to check before it offers. This is the other
+    half: the person confirming gets the same fact, under the option it is about, at the moment the
+    confirm is in front of them, without having to recognise it themselves.
+    THE THRESHOLD IS MEASURED, NOT CHOSEN. Jaccard overlap of the titles' significant words, at
+    0.6. Against the 83 real titles of this board — 3,403 pairs — it flags **none**, while the two
+    real near-misses clear it comfortably: *"Gateway routes for orders, cart and inventory"* scores
+    0.67 against SHOP-29's *"Gateway routes for inventory, cart and checkout"*, and the SHOP-26 case
+    was a title repeated word for word. 0.5 would have flagged three pairs, all of them the
+    genuinely distinct `Admin product / inventory / order management` trio. A disclosure a person
+    learns to skip is worse than no disclosure, and the tests pin both ends: the near-misses clear
+    the bar and the adjacent trio does not.
+    It discloses, it never refuses. A second task that looks like a first is sometimes exactly what
+    a person means, and the one who knows is the one confirming.
+    (`similar-tasks.server.ts` (new), `project.task.tsx`, `decision-packet.tsx`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

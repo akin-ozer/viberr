@@ -4,6 +4,7 @@ import {
   causeFanOutDisclosure,
   siblingPacketsSharingCause,
 } from "~/server/tasks/packet-fanout.server";
+import { similarOpenTasks } from "~/server/tasks/similar-tasks.server";
 import {
   data,
   isRouteErrorResponse,
@@ -347,6 +348,40 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
   const project = getProject(db, params.slug);
   const defaultBranch = project?.defaultBranch || "main";
+
+  /**
+   * Ruling 324: a `create_task` option creates a real task on the person's
+   * confirm, and the card says what it will create without saying what already
+   * looks like it. Twice on the shopify-clone board a confirm was one click
+   * from a second owner for work a live task already held.
+   *
+   * Per option index, because a packet can carry more than one, and the person
+   * is choosing between them. Guarded for the same reason the fan-out
+   * disclosure is: a search must not 500 the task page.
+   */
+  const packetCreateTaskEchoes: Record<number, { key: string; title: string; stage: string }[]> =
+    {};
+  for (const [i, opt] of (taskFile?.parsed.packet?.options ?? []).entries()) {
+    if (opt.kind !== "create_task" || !opt.newTask) continue;
+    try {
+      const echoes = similarOpenTasks(db, params.slug, opt.newTask.title, [params.key]);
+      if (echoes.length > 0) {
+        packetCreateTaskEchoes[i] = echoes.map((e) => ({
+          key: e.key,
+          title: e.title,
+          stage:
+            project?.stages.find((st) => st.id === e.stageId)?.name ?? e.stageId,
+        }));
+      }
+    } catch (error) {
+      logger.warn("ruling 324 similar-task disclosure failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
   const myProjectRole =
@@ -387,6 +422,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     queuedQuestions,
     /** Ruling 319: what else this packet's confirm answers, or null. */
     packetAlsoAnswers,
+    /** Ruling 324: per create_task option, the tasks that already look like it. */
+    packetCreateTaskEchoes,
     archived,
     // P14-LV-06: the review queue counted this viewer under "Waiting on your
     // acceptance" while the page rendered acceptance ONLY as an operator
@@ -1319,6 +1356,8 @@ export default function TaskDetailRoute({
       queuedQuestions={loaderData.queuedQuestions}
       // Ruling 319: what else this packet's confirm answers.
       packetAlsoAnswers={loaderData.packetAlsoAnswers}
+      // Ruling 324: what already looks like what a create_task option would make.
+      packetCreateTaskEchoes={loaderData.packetCreateTaskEchoes}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}

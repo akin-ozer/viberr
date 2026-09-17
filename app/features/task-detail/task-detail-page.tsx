@@ -129,6 +129,7 @@ export function TaskDetailPage({
   schedules,
   queuedQuestions = [],
   packetAlsoAnswers = null,
+  packetCreateTaskEchoes = {},
   archived = false,
   acceptance,
   githubHost,
@@ -199,6 +200,9 @@ export function TaskDetailPage({
   queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
   /** Ruling 319: what else the open packet's confirm answers, or null. */
   packetAlsoAnswers?: string | null;
+  /** Ruling 324: per create_task option index, the tasks that already look
+   *  like the one it would create. */
+  packetCreateTaskEchoes?: Record<number, { key: string; title: string; stage: string }[]>;
   /** R14-3: the task's archive disposition (loader — from the task file, which
    *  is where it lives; the projection has no column for it). */
   archived?: boolean;
@@ -712,6 +716,8 @@ export function TaskDetailPage({
             // Ruling 319: a packet keyed to an account failure answers its
             // siblings too — the card says so before the confirm, not after.
             alsoAnswers={packetAlsoAnswers}
+            // Ruling 324: a create_task confirm names what already looks like it.
+            createTaskEchoes={packetCreateTaskEchoes}
             canResolve={canResolvePacket}
             canResolveCompletion={canDecideOwned}
             // UI-42: an owner-only resolver must not be offered a decision they
