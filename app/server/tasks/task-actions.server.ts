@@ -173,6 +173,7 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
+import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
   agentNamesByProfile,
   getRun,
@@ -2148,7 +2149,9 @@ export async function commentToAgent(
     // resumed (@mention) specialist runs unconfined (XS-1). A refused resume
     // has no run to confine: `resumeRun` hands it to `startRun`, which records
     // the refusal and starts nothing.
-    const { resolveResumeConfinement } = await import("./specialist-run.server");
+    const { resolveResumeConfinement, recordRunInputs } = await import(
+      "./specialist-run.server"
+    );
     const confinement = resumePrincipal.ok
       ? await resolveResumeConfinement(db, ctx, {
           projectSlug: input.projectSlug,
@@ -2205,6 +2208,36 @@ export async function commentToAgent(
     runId = resumed.runId;
     resumeOutcomeKey = confinement?.outcomeKey;
     triggered = "resumed";
+    // Ruling 343: the disclosure the fresh path writes, on the resumed run too.
+    // `resolveResumeConfinement` has always returned `runInputs` for exactly
+    // this and its docstring has always said the caller "passes the whole thing
+    // to `recordRunInputs` once `resumeRun` has minted the run id" — nobody
+    // did, and the field had no reader anywhere in the app. The four fields it
+    // does not own are all in scope here, because this function composes the
+    // prompt.
+    if (confinement) {
+      const resumedRow = getRun(db, runId);
+      if (resumedRow) {
+        recordRunInputs(db, {
+          runId,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          threadId: resumedRow.thread_id,
+          backend: resumeBackend,
+          dataRoot: ctx.dataRoot,
+          inputs: {
+            ...confinement.runInputs,
+            promptChars: followUp.length,
+            anchor: anchor ?? null,
+            spendCapUsd: getMaxRunSpendUsd(db),
+            directive: {
+              from: commenterName,
+              chars: input.text.trim().length,
+            },
+          },
+        });
+      }
+    }
   } else {
     // 4b. No prior session for THIS agent — start a FRESH run. The
     //     dynamic-dispatch auto-engage (startAgentRun) routes the posture: an

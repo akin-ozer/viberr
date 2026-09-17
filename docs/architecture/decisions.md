@@ -5809,6 +5809,45 @@ by rewriting those paragraphs:*
     which is the marker and not a claim about someone else.
     (`docs/architecture/decisions.md`, `app/shared/docs/rulings-supersession.test.ts`.)
 
+342. **A tool description is a prompt, and nothing was reading it (2026-09-17, pass 37;
+    F37-178).** Ruling 336's new `releases` paragraph shipped into `list_decisions` with its
+    closing sentence pasted twice — *"`kind` and `notAcceptableReason` carry that other half.
+    `kind` and `notAcceptableReason` carry that other half."* — in a 1,900-character description
+    assembled from adjacent string literals that every controller turn reads. Six hours old, and
+    mine.
+    These strings are the only agent instructions in the product with no human reader at all: a
+    persona is reviewed in its editor, a knowledge-base document is opened by a person, a packet
+    body is read on a card, and a tool description is read by a model and by nobody. So the one
+    property worth checking is the one a careless edit produces, and it is now swept across the
+    five surfaces that hand descriptions to a model.
+    Deliberately narrow — not a style gate, nothing about length or tone. The first draft was
+    wider and wrong: it split on statements, swept three sibling `.describe()` calls into one
+    text, and called *"Omit to keep the deployment's grants; [] clears them."* a duplicate. That
+    sentence is said once per field, about that field, and saying it three times is correct. The
+    check joins a `+` concatenation chain and nothing else, which is exactly one string as the
+    model receives it.
+    (`controller-toolkit.server.ts`, `app/server/runtimes/tool-description-hygiene.test.ts`.)
+
+343. **The resumed run discloses what it was given, like every other run (2026-09-17, pass 37;
+    F37-179, completes 339).** `resolveResumeConfinement` has always returned `runInputs`, a full
+    `ResolvedResourceInputs` built from its own resolution, and its docstring has always said the
+    caller *"passes the whole thing to `recordRunInputs` once `resumeRun` has minted the run id"*.
+    No caller did. `recordRunInputs` had exactly one call site, on the fresh path, and the field
+    had no reader anywhere in the application — declared, built twice, read never. So every
+    @mention resume, which is the door a PERSON uses to talk to an agent, ran with no record of
+    what it carried: **eleven runs on the shopify-clone board, including one this morning.**
+    The four fields the resolver cannot own are all in scope at that call site, because it is the
+    function that composes the prompt: `promptChars` off the follow-up it just built, the canonical
+    `anchor` it just attached, the instance spend cap, and — the one that only exists on this door
+    — a `directive` naming the person who wrote it.
+    AND THE RESUME HALF HAD A TEST. `specialist-run.server.test.ts` asserts
+    `resolveResumeConfinement` returns the same record the fresh path builds, and its comment
+    explains that the caller hands it on; nothing asserted that anything did. A test that stops at
+    the last honest step is how this survived — the shape of rulings 329 and 338, a third time in
+    one pass, and all three mine. The canary now lives where the write is, on the real @mention
+    path, and both misleading comments say what actually happened.
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `canonical-anchor.server.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

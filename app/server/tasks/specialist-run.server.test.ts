@@ -4896,9 +4896,14 @@ describe("P19-G11 — the run records what it was given", () => {
     // it. So both paths build this record through `resolvedResourceInputs`,
     // from their own resolution.
     //
-    // The caller (task-actions' @mention resume) owns the remaining three
-    // fields and hands the whole thing to `recordRunInputs`; TypeScript makes
-    // that omission explicit rather than lettings a placeholder ship.
+    // The caller (task-actions' @mention resume) owns the remaining four
+    // fields and hands the whole thing to `recordRunInputs`.
+    //
+    // Ruling 343: for two days it did not, and THIS test is why that lasted —
+    // it asserted the record was BUILT and nothing asserted it was WRITTEN, so
+    // `runInputs` had no reader anywhere in the app and eleven resumed runs
+    // disclosed nothing. The canary for the write lives where the write is, in
+    // `canonical-anchor.server.test.ts`, which drives the real @mention door.
     //
     // Canary: drop `runInputs` from the returned object and this fails to
     // compile, then fails here.

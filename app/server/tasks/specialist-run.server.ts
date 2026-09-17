@@ -3628,7 +3628,9 @@ export interface ResumeConfinement {
    *  disclosure — the SAME record the fresh path writes, built from the SAME
    *  resolution this function performs. The caller owns the remaining three
    *  fields (it composes the prompt) and passes the whole thing to
-   *  `recordRunInputs` once `resumeRun` has minted the run id. */
+   *  `recordRunInputs` once `resumeRun` has minted the run id — which ruling
+   *  343 made true; this sentence asserted it for two days while the field had
+   *  no reader at all. */
   runInputs: ResolvedResourceInputs;
   /** C02-R3 (pass 32): the task's attachments drop, when the profile holds
    *  `attach-evidence-references` — re-armed on resume exactly as the fresh
