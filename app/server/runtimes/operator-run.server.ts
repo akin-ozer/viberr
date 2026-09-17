@@ -200,6 +200,9 @@ export interface RunOperatorInput {
     /** Ruling 330: the periodic sweep found this task in a state nothing was
      *  going to move it out of. */
     | "stranded"
+    /** Ruling 332: a person pressed Accept and the acceptance-time refresh
+     *  found the branch in conflict with the base. */
+    | "pr-conflicting"
     | "scheduled"
     | "manual";
   /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
@@ -3984,6 +3987,29 @@ function operatorTurnDoctrine(
       "Rework on a task whose PR is already open is delivered the same way: `deliver_for_review` pushes the new revision to that PR. " +
       "If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
+    );
+  }
+  if (trigger === "pr-conflicting") {
+    // Ruling 332: a person pressed Accept, the acceptance-time refresh found the
+    // branch in conflict, and the refusal used to wake nobody — while YOUR door
+    // for the identical condition opens the packet that resolves it. Live on
+    // SHOP-12 and SHOP-3 that cost 10h45m and 7h45m, each ended by the owner
+    // typing an @operator comment by hand.
+    const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
+    return (
+      `A person pressed Accept on this task and Viberr refused it: the acceptance-time base ` +
+      `refresh found the branch in CONFLICT with the base, so ${prNo} cannot be merged as it ` +
+      `stands. The conflict note on the timeline names the files.\n\n` +
+      `This is YOURS to resolve, not theirs — they have no checkout, and Viberr's own rule is ` +
+      `that the server does the git inside the delivering agent's workspace. Call ` +
+      `\`update_branch_from_base\`: at this boundary it is permitted precisely because the PR is ` +
+      `conflicting, and it opens the conflict decision packet whose recommended option has the ` +
+      `deliverer resolve the files in the workspace it already has. If no agent can take it, open ` +
+      `a packet that says so and names what a person must choose. ` +
+      `Do not tell anyone to merge the base in by hand, and never rebase: the pull request has ` +
+      `published those commits. And say in ONE comment that the acceptance was refused and what ` +
+      `is now happening — the person is waiting on a button that will keep refusing until this ` +
+      `is cleared.`
     );
   }
   if (trigger === "stranded") {

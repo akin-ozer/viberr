@@ -5541,6 +5541,101 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(line.text).toContain("README.md, Makefile");
   });
 
+  it("ruling 332: the refused acceptance hands the conflict to the operator instead of waking nobody", async () => {
+    /**
+     * The refusal above stamps `mergeable: conflicting`, writes the note and
+     * returns a 409 — and that used to be all of it. No packet, no run, no
+     * notification, while the operator's byte-identical door for the same
+     * `conflict` status opens a blocking decision packet whose recommended
+     * option is the deliverer's own workspace merge.
+     *
+     * The stamp is itself the key to that door: `acceptanceBoundaryRefusal`
+     * denies the branch tool at the acceptance boundary EXCEPT while the PR is
+     * conflicting. So this path created the one state in which the in-product
+     * resolver is permitted, and scheduled nothing.
+     *
+     * Live twice, and they are the two longest dead stops on the board.
+     * SHOP-12: refused 08:06:45, nothing for 10h45m, ended by the owner typing
+     * "@operator SHOP-12 … is stuck on me rather than on anyone doing work" —
+     * packet 28 seconds later, and the operator's reply: "It was never a click
+     * you were withholding." SHOP-3: same shape, 7h45m, same exit.
+     *
+     * CANARY: delete the `autoInvokeOperator(… "pr-conflicting")` call.
+     */
+    const store = prepared();
+    // `autoInvokeOperator` returns early with no operator deployed, and the
+    // hand-off is the whole subject of this test.
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "conflict",
+      branch: "vib-1-work",
+      base: "main",
+      files: ["README.md"],
+      detail: "CONFLICT (content): Merge conflict in README.md",
+    }));
+    const runOperator = vi.fn<NonNullable<TaskActionDeps["runOperator"]>>(async () => ({
+      runId: "run_1",
+      queued: false,
+      backend: "claude",
+      autonomy: "supervised",
+    }));
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refreshMock, runOperator } },
+      ),
+    ).rejects.toThrow(/conflicts with the base branch/);
+    /**
+     * The hand-off is fire-and-forget on purpose — the person's 409 is the
+     * answer to their click and must not wait on a coordination turn — so this
+     * waits for the EFFECT rather than sleeping a guessed interval. A fixed
+     * 30ms was not enough: `autoInvokeOperator` awaits two dynamic imports
+     * before it reaches `runOperator`, and the first load of those modules in a
+     * test run is slower than any sleep worth writing.
+     */
+    for (let i = 0; i < 100 && runOperator.mock.calls.length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(runOperator, "the refusal woke nobody").toHaveBeenCalledTimes(1);
+    expect(runOperator.mock.lastCall?.[1]).toMatchObject({
+      taskKey: "VIB-1",
+      trigger: "pr-conflicting",
+    });
+    // The person's 409 still stands — the hand-off is coordination, not an
+    // answer to their click.
+    expect(taskFile(store).frontmatter.stage).toBe("review");
+  });
+
   /**
    * P14-GV-05 applied to the acceptance-time refresh: the refresh is itself an
    * irreversible publish (a workspace merge PUSHED to origin), so the caller's

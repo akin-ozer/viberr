@@ -5570,6 +5570,36 @@ by rewriting those paragraphs:*
     as the only exit.
     (`task-actions.server.ts`.)
 
+332. **The refused acceptance woke nobody, while the operator's identical door opens a packet
+    (owner, 2026-09-17, pass 37; F37-168).** Pressing Accept on a conflicting PR runs the
+    acceptance-time base refresh; on a conflict it stamps `pr.mergeable = "conflicting"`, writes a
+    note and returns a 409. That was all of it — no packet, no run, no notification.
+    Two things make the silence worse than it looks. That stamp is exactly the KEY to the operator's
+    door: `acceptanceBoundaryRefusal` denies `update_branch_from_base` at the acceptance boundary
+    EXCEPT while the PR is conflicting, so this path creates the one state in which the in-product
+    resolver is permitted and then schedules nothing. And because the flag is already set, the
+    reconciler's `flippedToConflict` can never fire afterwards, so ruling 162(d)'s withdrawal of the
+    standing `accept_completion` offer never runs — the card keeps inviting a click its own gate
+    refuses, for as long as the task sits.
+    Live twice, and they are the two longest dead stops on the board. SHOP-12: refused at 08:06:45,
+    then NOTHING for 10h45m while the board logged 8-66 events an hour elsewhere, until the owner
+    typed *"@operator SHOP-12 is the last thing standing between this board and a runnable catalog
+    service, and it is stuck on me rather than on anyone doing work"* — packet 28 seconds later, and
+    the operator's own reply: *"It was never a click you were withholding."* SHOP-3: same shape,
+    7h45m, same exit.
+    Ruling 226's words sit sixty lines below this arm — "A refusal with no exit is its own defect" —
+    and ruling 235 gave exactly this hand-off to the sibling refusal (an unpushed reviewed revision)
+    because only the operator may push. The same is true of the merge; this arm was left out. It now
+    fires `autoInvokeOperator(… "pr-conflicting")`, fire-and-forget, because the person's 409 is the
+    answer to their click and must not wait on a coordination turn.
+    The refuter corrected the headline and was right to: a person is not powerless here (GitHub's
+    web conflict editor exists, and the task page has a Run operator button). The defect is the
+    missing automatic hand-off, not a locked door.
+    NOTE ON THE TEST: the first version slept 30ms for the fire-and-forget and failed —
+    `autoInvokeOperator` awaits two dynamic imports before reaching `runOperator`, and their first
+    load in a test run outlasts any sleep worth writing. It waits for the effect instead.
+    (`task-actions.server.ts`, `operator-run.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

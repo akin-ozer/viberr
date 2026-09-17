@@ -1210,7 +1210,12 @@ export async function autoInvokeOperator(
     // no packet, no recommendation, no queued question, no schedule, no run and
     // no hold. The operator is invoked to decide what happens next, which is
     // what a person ends up doing by hand.
-    | "stranded",
+    | "stranded"
+    // Ruling 332: a person pressed Accept and the acceptance-time refresh found
+    // the branch in conflict. Only the operator can run the workspace merge
+    // that resolves it, so the refusal is handed here rather than left as a
+    // sentence telling a person to do git they have no checkout for.
+    | "pr-conflicting",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
@@ -8152,6 +8157,42 @@ async function refreshBranchForAcceptance(
     });
   });
   reprojectTask(db, ctx, projectSlug, taskKey);
+  /**
+   * Ruling 332: hand it to the operator. This refusal used to wake nobody.
+   *
+   * It stamps `pr.mergeable = "conflicting"`, writes a note, and returns a 409
+   * — and that is all. No packet, no run, no notification. Meanwhile the
+   * operator's byte-identical door (`update_branch_from_base` meeting the same
+   * `conflict` status) opens a blocking decision packet whose recommended
+   * option is the deliverer's own workspace merge.
+   *
+   * Two things make the silence worse than it looks. That stamp is exactly the
+   * key to the operator's door — `acceptanceBoundaryRefusal` denies the branch
+   * tool at the acceptance boundary EXCEPT while `mergeable === "conflicting"`
+   * — so this path creates the one state in which the in-product resolver is
+   * permitted and then schedules nothing. And because the flag is already set,
+   * the reconciler's `flippedToConflict` can never fire afterwards, so ruling
+   * 162(d)'s withdrawal of the standing `accept_completion` offer never runs:
+   * the card invites a click its own gate refuses, for as long as the task
+   * sits.
+   *
+   * Live, twice, and they are the two longest dead stops on the board. SHOP-12:
+   * refused 08:06:45, then NOTHING for 10h45m while the board logged 8-66
+   * events an hour elsewhere, until the owner typed "@operator SHOP-12 is the
+   * last thing standing between this board and a runnable catalog service, and
+   * it is stuck on me rather than on anyone doing work" — packet 28 seconds
+   * later, and the operator's own reply: "It was never a click you were
+   * withholding." SHOP-3: the same shape, 7h45m, same exit.
+   *
+   * Ruling 226's words sit sixty lines below this arm: "A refusal with no exit
+   * is its own defect." Ruling 235 gave exactly this hand-off to the sibling
+   * refusal (an unpushed reviewed revision) because only the operator may push;
+   * the same is true of the merge, and this arm was left out.
+   *
+   * Fire-and-forget, like every other `autoInvokeOperator` caller: the person's
+   * 409 is the answer to their click and must not wait on a coordination turn.
+   */
+  void autoInvokeOperator(db, ctx, projectSlug, taskKey, "pr-conflicting").catch(() => {});
   const after = readTaskFile(ref)?.parsed.frontmatter ?? null;
   const reason = after ? mergeReadinessRefusal(after, taskKey) : null;
   return {
