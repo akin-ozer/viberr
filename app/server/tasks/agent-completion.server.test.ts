@@ -1594,11 +1594,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       await review(blocks(2));
 
-      // The live shape, and the worse one: no person is involved at all. The
-      // verdict was written while the stalled packet stood, so ruling 237
-      // skipped the escalation — and seconds later the SAME run's success
-      // auto-withdrew that packet (withdrawSupersededStuckPacket), taking the
-      // escalation with it.
+      // The automatic clear site: no person is involved at all. The verdict was
+      // written while the stalled packet stood, so ruling 237 skipped the
+      // escalation — and seconds later the SAME run's success auto-withdrew
+      // that packet (withdrawSupersededStuckPacket), taking the escalation with
+      // it. This path has fired ZERO times on the live board; the two real
+      // misses came through the human resolution the sibling test drives. It is
+      // covered because it is the same defect, not because it has bitten.
       const raised = taskFile().parsed.packet;
       expect(raised, "the escalation was dropped for good").not.toBeNull();
       expect(raised!.title).toContain("requested changes 2 times running");
@@ -1612,10 +1614,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     it("ruling 328: the same retry runs when a PERSON clears the packet that blocked it", async () => {
-      // The other clear site. An `input` packet is never auto-withdrawn
-      // (`withdrawSupersededStuckPacket` returns on anything but `blocked`), so
-      // this one survives the run and a person answers it — and the escalation
-      // ruling 237 skipped is owed just the same.
+      // THE PATH THE TWO LIVE MISSES TOOK. An `input` packet is never
+      // auto-withdrawn (`withdrawSupersededStuckPacket` returns on anything but
+      // `blocked`), so it survives the run and a person answers it — which is
+      // what happened on SHOP-18 at 04:38:38 and on SHOP-10 — and the
+      // escalation ruling 237 skipped is owed just the same.
       // CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
       writeReviewTask();
       await review(blocks(1));

@@ -3067,11 +3067,12 @@ async function withdrawSupersededStuckPacket(
     if (!withdrawn) return;
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-    // Ruling 328: this is the clear that needs the retry MOST, because no
-    // person is involved in it. The verdict that just landed was written while
-    // this packet stood, so ruling 237's escalation was skipped; seconds later
-    // the same run's success withdrew the packet, and the escalation was gone
-    // with nothing having decided it should be.
+    // Ruling 328: the automatic clear. The verdict that just landed was written
+    // while this packet stood, so ruling 237's escalation was skipped; seconds
+    // later the same run's success withdraws the packet, and the escalation
+    // would be gone with nothing having decided it should be. This path has
+    // never fired on a real board — the live misses came through the human
+    // resolution — but it is the same defect and gets the same retry.
     await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
     recordAudit(db, {
       action: "task.packet.withdrawn_superseded",

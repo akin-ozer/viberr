@@ -5464,11 +5464,13 @@ by rewriting those paragraphs:*
     with a backend-failure packet open (answered at 04:38:38); it ran another eight hours and ended
     in a force-accept over a wedged Verify gate, with the person writing the routing by hand.
     SHOP-10 reached three rounds the same way.
-    TWO clear sites, and the automatic one is worse. A person answering a packet is one; the other
-    is `withdrawSupersededStuckPacket`, which retires a stalled packet when the run it was about
-    finally succeeds — so the SAME reviewer run that wrote the objection withdrew the packet that
-    had suppressed its escalation, seconds apart, with nobody involved. That is the path the test
-    drives.
+    TWO clear sites, both fixed. The one that produced the live misses is a PERSON answering the
+    unrelated packet — SHOP-18's was resolved at 04:38:38, and nothing re-checked the review. The
+    other is `withdrawSupersededStuckPacket`, which retires a stalled packet when the run it was
+    about finally succeeds: the SAME reviewer run that wrote the objection would withdraw the packet
+    suppressing its escalation, seconds apart, with nobody involved. That second path has fired ZERO
+    times on this board — it is covered because it is the same defect, not because it has bitten,
+    and the tests drive both so neither regresses.
     THE GUARD THAT MAKES IT SAFE: the retry is for an escalation that was NEVER MADE. Without it,
     resolving the deadlock packet re-raises it on the spot — the reviewer is still at N objections
     the instant the card closes — which is the loop the owner called out on SHOP-76 and the whole
