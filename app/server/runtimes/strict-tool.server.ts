@@ -1,6 +1,7 @@
 import { tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { isDatabaseShuttingDown } from "~/server/db/sqlite.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 
@@ -117,6 +118,18 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
  * with the tool's name and answered with a sentence that says what is true:
  * this call produced no answer, so do not report one.
  *
+ * Ruling 340 (F37-176) completes it. Converting the leak left the CAUSE
+ * unspoken, and "failed unexpectedly … the details are in the server log" reads
+ * to a model exactly as the SQLite sentence did: like a hiccup. Measured on the
+ * shopify-clone board across the eight runs that met a closed store, every one
+ * retried, and what they wrote onto the task was "The store dropped a
+ * connection mid-turn. Retrying.", "The dispatch hit a transient store error.
+ * Retrying.", "The live state read failed. Let me retry." None of that is what
+ * happened, and ruling 338 now points a person at the task record for the
+ * account of a restart. Viberr holds the fact — `isDatabaseShuttingDown()`, the
+ * same latch `runPersistDrained` reads one layer down — and was not spending it
+ * on the one reader whose next move depends on it.
+ *
  * It is the OUTERMOST wrapper, never the only one, and that ordering is what
  * keeps it from swallowing a deliberate refusal. The controller's own
  * `run`/`runWith` guards sit inside it and catch `AppError`, `NotVisibleError`
@@ -134,6 +147,25 @@ function guarded(
     try {
       return await handler(args);
     } catch (error) {
+      // Ruling 340: the shutdown arm comes FIRST, including ahead of AppError.
+      // Once the store is closed nothing a tool can say about task state is
+      // worth saying, and the run's next move is the same whatever threw.
+      if (isDatabaseShuttingDown()) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `[error] \`${name}\` did not run: Viberr is shutting down and has closed its ` +
+                "store, so no Viberr tool will answer for the rest of this run. This is NOT " +
+                "transient and retrying cannot succeed — stop here, and say in your report " +
+                "that Viberr shut down mid-run rather than describing a store error. What " +
+                "happens to this task next is decided by restart recovery and recorded on the " +
+                "task itself.",
+            },
+          ],
+        };
+      }
       if (error instanceof AppError) {
         return { content: [{ type: "text", text: `[error] ${error.userMessage}` }] };
       }

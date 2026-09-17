@@ -423,6 +423,57 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
+   * Ruling 339 (pass 37, F37-175): the run record disclosed a toolkit it had
+   * derived a SECOND time, from three of the six gates, and so under-reported
+   * what it mounted on 460 of the 834 specialist runs of the shopify-clone
+   * pass: `github_read` on 460, `read_board` on 307, `read_knowledge_doc` on
+   * 294, `report_outcome` on 227 (its real gate is `verdict || evidence`, and
+   * the record read `verdict` alone).
+   *
+   * `toolNames` comes off the definitions the builder just pushed, so the only
+   * way to make this red again is to restate the gates somewhere.
+   */
+  it("ruling 339: the toolkit reports exactly the tools it mounted", () => {
+    // Canary: return a hand-built list from `buildAgentToolkit` instead of
+    // `tools.map((t) => t.name)`.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const built = buildAgentToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      actorRef: AGENT_REF,
+      outcomeKey: "oc_names",
+      // The exact combination the old record got wrong: no comment, no ask, and
+      // `evidence` rather than `verdict` carrying `report_outcome`.
+      collab: {
+        comment: false,
+        ask: false,
+        verdict: false,
+        evidence: true,
+        githubRead: true,
+      },
+      kb: ["shopify-clone-conventions"],
+    })!;
+    const mounted = Object.keys(
+      mountedTools.parse(built.mcpServers.viberr_agent),
+    ).sort();
+    expect([...built.toolNames].sort()).toEqual(mounted);
+    // Named, so a gate that stops mounting its tool is a failure here and not
+    // a silently shorter list agreeing with itself.
+    expect(mounted).toEqual([
+      "github_read",
+      "read_board",
+      "read_knowledge_doc",
+      "report_outcome",
+    ]);
+  });
+
+  /**
    * Ruling 281 (pass 37, F37-114): an agent could read its repository and not
    * the board it works on. A task key it was TOLD about — in a document, a
    * directive, another agent's report — could not be checked.

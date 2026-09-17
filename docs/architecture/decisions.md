@@ -289,6 +289,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     admin Force-accept is the only bypass (it never bypasses the PR-head-must-contain-the-
     delivered-commit check). Every accept — including force — shows a confirm dialog
     stating what merges and any missing signals.
+    **Narrowed by ruling 59** (noted 2026-08-06): force-accept skips the remaining stages and
+    the review gate as well, so "requires a healthy verdict" describes the ordinary accept only.
+    What force still cannot bypass is this ruling's own PR-head containment check.
+
 21. **R15-2 (2026-07-28): delivery is an operator decision.** Push + review-PR opening is
     no longer a stage side-effect. The operator holds a `deliver-review-pr` capability and
     decides when delivery is plausible, weighing the task's remaining stages; it opens a
@@ -5740,6 +5744,71 @@ by rewriting those paragraphs:*
     the refuter and I agree is more than the lie is worth.
     (`runs-panels.tsx`, `runs-panels.test.tsx`.)
 
+339. **The record of what a run received is read off what it was given (2026-09-17, pass 37;
+    F37-175).** `run_inputs` is Viberr's own disclosure of what it handed a run — the header the
+    console expands, and the only place an owner or the controller can answer "what did this run
+    actually get". Its `tools.toolkit` field derived the answer a SECOND time, from three booleans,
+    while `buildAgentToolkit` mounts on six independent gates. Measured across the whole
+    shopify-clone pass: **460 of 834 specialist runs recorded a toolkit shorter than the one they
+    ran with** — `github_read` missing on 460, `read_board` on 307, `read_knowledge_doc` on 294,
+    `report_outcome` on 227. The last is the sharp one: `report_outcome`'s real gate is
+    `verdict || evidence` and the record read `verdict` alone, so an evidence-only agent's single
+    structured channel was mounted and disclosed as absent.
+    It is not merely incomplete, it is a different rule wearing the same name, and it misleads
+    exactly the reader it exists for: this pass's own investigation of why ruling 283's
+    `read_knowledge_doc` seemed unused began by reading this field and concluding the tool had
+    never been mounted on a single specialist run. It had been mounted on 294. The controller had
+    already named the gap from the other side, on 2026-09-15: *"I cannot measure what a run
+    actually receives."*
+    `buildAgentToolkit` now returns `toolNames`, taken from the definitions it just pushed, and the
+    record passes it through. A toolkit gains a tool by pushing it onto that array, so there is no
+    longer a second place to remember.
+    (`agent-toolkit.server.ts`, `specialist-run.server.ts`.)
+
+340. **A closed store is a shutdown, and the run is told that (2026-09-17, pass 37; F37-176,
+    completes 303).** Ruling 303 stopped `database is not open` reaching a model verbatim and
+    answered *"`get_task` failed unexpectedly and returned no answer. The details are in the server
+    log."* That is true and it is not the useful truth: to a model it reads exactly as the SQLite
+    sentence did, like a hiccup worth one more attempt. All EIGHT shopify-clone runs that met a
+    closed store retried, and what they left on the task is the record a person now reads under
+    ruling 338: *"The store dropped a connection mid-turn. Retrying."*, *"The dispatch hit a
+    transient store error. Retrying."*, *"The live state read failed. Let me retry."* Twenty-one
+    refused calls across `get_task`, `run_agent` and `read_board`, and not one of those sentences
+    says what happened.
+    Viberr holds the fact. `isDatabaseShuttingDown()` is the same latch `runPersistDrained` reads
+    one layer down on the run path, and `shutdownDatabase` raises it synchronously in the `finally`
+    of the close, so it is already true by the time any tool handler resumes. The guard now spends
+    it: the store is closed, no Viberr tool will answer again this run, retrying cannot succeed,
+    stop and report the shutdown rather than a store error. It names the task record as where the
+    rest of the account lives and promises nothing about re-invocation — ruling 338's discipline,
+    one surface over.
+    The shutdown arm is checked FIRST, ahead of `AppError`. A refusal's own words are written for a
+    caller who can act on them, and "SHOP-1 is already running an agent" is a claim about live
+    state read out of a store that has closed; during a shutdown the only thing worth saying is
+    that everything stopped. Ruling 303's own ordering note stands for every other case.
+    (`strict-tool.server.ts`.)
+
+341. **This document keeps the convention it states about itself (2026-09-17, pass 37;
+    F37-177).** The header has always said: *"Several rulings have been narrowed or reversed by a
+    later owner decision. Those are marked **SUPERSEDED** inline, with what replaced them and
+    when… Never restore a superseded rule because you found the ruling text."* Seven rulings are
+    named by a later one as narrowed, reversed or superseded. **Three of the seven said nothing
+    about it** — ruling 20 (force-accept skips the review gate too, narrowed by 59), ruling 193
+    (whose revision-counting 204 reverses) and ruling 261 (superseded by 283; its
+    `RULINGS_KB_FLOOR` has not existed in the source since the same evening).
+    193 is why this is worth a ruling rather than an edit. It is the operator doctrine for a
+    reviewer that cannot pass; the half 204 reversed is a counter that had a test defending it;
+    and `CLAUDE.md` points every agent working on Viberr at this file as the binding rulings. The
+    header's last sentence asks a reader not to restore a superseded rule, which is only
+    followable if the rule's own text says it was superseded.
+    It is unenforceable by reading, because the two ends of a supersession are written hours or
+    weeks apart and only the NEW end knows — so it is checked. `rulings-supersession.test.ts`
+    sweeps every numbered block for a claim about an earlier number and fails naming both, which
+    makes the marker a mechanical follow-up instead of something to remember. The `narrowed by` /
+    `superseded by` forms are excluded on purpose: those are what an old ruling says about ITSELF,
+    which is the marker and not a claim about someone else.
+    (`docs/architecture/decisions.md`, `app/shared/docs/rulings-supersession.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
@@ -7351,6 +7420,13 @@ by rewriting those paragraphs:*
     pass: it asked whether a queue entry EXISTS, which answers yes for one somebody else left
     behind, and now carries the flag saying whether THIS resolution queued.)*
 
+    **SUPERSEDED BY RULING 283** (2026-09-15, hours later): there is no character budget to
+    reserve a floor out of any more. A knowledge base arrives as an INDEX the run pulls
+    documents from, and `RULINGS_KB_FLOOR` is gone from the source. The floor is kept here
+    because it is the measurement that produced 283 — the floor was itself eaten by the
+    alphabetically-first document inside the very knowledge base it was protecting, which is
+    what ruled out a second allocation rule.
+
 262. **A disclosure names everyone it left out, not the one a run would have gone to
     (2026-09-15, pass 37; F37-92).** Ruling 252 stamped a comment that tagged an agent with the
     sentence saying nothing was sent to it, and computed that stamp with
@@ -8144,6 +8220,11 @@ by rewriting those paragraphs:*
     one comment and `open_packet`, naming the three real exits: drop or replace the
     required reviewer, accept past the gate, or fund the missing baseline as its own task.
     (`operator-actions.server.ts`, `operator-run.server.ts`.)
+    **Reversed in part by ruling 204** (2026-09-13, the same pass): the escalation stands, but
+    its counter no longer keys on DISTINCT REVISIONS. In a deadlock the deliverer commits
+    nothing, so a revision count sits at one forever and the escalation this ruling exists for
+    never fires; a round is counted by the deliverer having RUN. Do not restore the
+    revision-counting or the test that defended it.
 
 194. **A retry that starts nothing says so (owner, 2026-09-13, pass 37; F37-16).**
     `startLinkTask` declines silently when the chain is no longer active, and the reconcile

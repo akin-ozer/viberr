@@ -77,6 +77,12 @@ import {
 export interface AgentToolkit {
   /** `{ viberr_agent: <sdk mcp server> }` — merge into the run's mcpServers. */
   mcpServers: Record<string, McpSdkServerConfigWithInstance>;
+  /**
+   * Ruling 339: the names of the tools this toolkit ACTUALLY mounted, taken
+   * from the definitions it just built. The run record discloses this; it used
+   * to restate three of the gates by hand, which is why it under-reported.
+   */
+  toolNames: readonly string[];
 }
 
 interface AgentToolkitDeps {
@@ -720,5 +726,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       "Viberr collaboration tools for this engaged agent. Post material progress, raise blocking questions, and report your structured outcome through these; your final message is still your full report.",
     tools,
   });
-  return { mcpServers: { viberr_agent: server } };
+  return {
+    mcpServers: { viberr_agent: server },
+    // Ruling 339: read off the definitions, never restated. Every gate above
+    // adds its own tool, so the only list that cannot drift from them is this
+    // one.
+    toolNames: tools.map((t) => t.name),
+  };
 }

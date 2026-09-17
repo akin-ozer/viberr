@@ -124,6 +124,55 @@ describe("strictTool (ruling 296)", () => {
     expect(answer).toBe("[error] VIB-1 is already at Review.");
   });
 
+  /**
+   * Ruling 340 (pass 37, F37-176). Ruling 303 stopped the SQLite sentence
+   * reaching the model and put "failed unexpectedly" in its place, which reads
+   * the same way: like a hiccup. All eight shopify-clone runs that met a closed
+   * store retried, and what they left on the task was "The store dropped a
+   * connection mid-turn. Retrying." Viberr holds the fact.
+   */
+  it("ruling 340: a closed store says it is a shutdown, and says not to retry", async () => {
+    const { shutdownDatabase, closeDb } = await import("~/server/db/sqlite.server");
+    const { AppError } = await import("~/server/errors/app-error.server");
+    const client = await connect([
+      strictTool("get_task", "probe", {}, async () => {
+        throw new Error("database is not open");
+      }),
+      // A deliberate refusal, to pin the ORDERING: during a shutdown its words
+      // are about state nothing can still read.
+      strictTool("run_agent", "probe", {}, async () => {
+        throw AppError.validation("SHOP-1 is already running an agent.");
+      }),
+    ]);
+    // No handle is open here, so this only raises the latch — the same latch
+    // `runPersistDrained` reads on the run path.
+    shutdownDatabase();
+    try {
+      const answer = textOf(await client.callTool({ name: "get_task", arguments: {} }));
+      // CANARY: delete the shutdown arm and this is "failed unexpectedly".
+      expect(answer).toContain("Viberr is shutting down");
+      expect(answer).toContain("NOT transient");
+      expect(answer).toContain("retrying cannot succeed");
+      expect(answer).not.toContain("failed unexpectedly");
+      // Ruling 338's discipline: name the record, promise nothing about what
+      // recovery will do.
+      expect(answer).toContain("recorded on the task");
+      expect(answer).not.toMatch(/re-?invoke/i);
+
+      // CANARY: move the shutdown arm below the AppError arm and this becomes
+      // "SHOP-1 is already running an agent." — a claim about live state read
+      // from a closed store.
+      const refusal = textOf(await client.callTool({ name: "run_agent", arguments: {} }));
+      expect(refusal).toContain("Viberr is shutting down");
+    } finally {
+      closeDb();
+    }
+    // And with the latch down, ruling 303's arms are untouched.
+    expect(
+      textOf(await client.callTool({ name: "get_task", arguments: {} })),
+    ).toContain("failed unexpectedly");
+  });
+
   it("publishes additionalProperties:false so the model is TOLD, at every level", async () => {
     const client = await connect([
       strictTool(

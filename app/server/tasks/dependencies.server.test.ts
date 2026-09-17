@@ -289,6 +289,68 @@ const runOperatorStub = () =>
     Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const }),
   );
 
+/**
+ * Ruling 331 (pass 37, F37-167) shipped without a canary, which is how this
+ * note said two false things for a day: it reduced an `error` that was in scope
+ * and being logged on the line above to "(an internal error)", and then claimed
+ * "Coordination is paused for this task" — live on SHOP-38 the operator was
+ * re-invoked automatically eleven seconds later, leaving that durable line as
+ * the only thing still saying the task had stopped.
+ *
+ * `autoInvokeOperator`'s failure arm is reachable from every trigger; a release
+ * is the cheapest one to drive.
+ */
+describe("ruling 331: a failed auto-invocation names its cause and claims nothing", () => {
+  it("writes the thrown reason, the trigger, and no claim that coordination stopped", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-10", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        heldAtStage: "impl",
+        blockedBy: ["VIB-2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
+      Promise.reject(new Error("no runtime is deployed for claude")),
+    );
+    // VIB-2 is already done, so the release fires and its re-invoke throws.
+    expect(
+      await releaseTask(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug, "VIB-10"),
+    ).toBe(true);
+    await eventually(() => expect(runOperator).toHaveBeenCalled());
+    await eventually(() =>
+      expect(
+        file(store, "VIB-10").timeline.some((e) =>
+          (e.text ?? "").includes("could not be started automatically"),
+        ),
+      ).toBe(true),
+    );
+    const note = file(store, "VIB-10").timeline.find((e) =>
+      (e.text ?? "").includes("could not be started automatically"),
+    )!;
+    const text = note.text ?? "";
+    // CANARY: put "(an internal error)" back and the thrown reason is gone.
+    expect(text).toContain("no runtime is deployed for claude");
+    // The trigger it failed ON, because "the operator did not start" is a
+    // different fact depending on what asked for it.
+    expect(text).toContain("dependencies-released");
+    // CANARY: restore "Coordination is paused for this task" and these fail.
+    // This code knows ONE attempt failed; it cannot know nothing else will run,
+    // and ruling 330's sweep guarantees something looks again.
+    expect(text).not.toMatch(/coordination is paused/i);
+    expect(text).toContain("not a decision to stop");
+    expect(text).toContain("sweeps for tasks");
+    // The manual exit survives as an option, not as the only way out.
+    expect(text).toContain("Run the operator yourself");
+    expect(text).not.toMatch(/run the operator manually when you'?re ready/i);
+  });
+});
+
 /** Ruling 131(e): the release engine. */
 describe("the release engine", () => {
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {

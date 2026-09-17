@@ -604,8 +604,13 @@ export function resolvedResourceInputs(input: {
   mcpWriteToolsDenied: McpToolDenial[];
   unresolvedResources: { name: string; reason: string }[];
   deniedTools: string[];
-  /** The collaboration tools actually mounted (null → none). */
-  toolkit: { comment: boolean; ask: boolean; verdict: boolean } | null;
+  /**
+   * Ruling 339: the names the toolkit reports it mounted (null → no toolkit at
+   * all). Handed straight through, because this field is the answer to "what
+   * did this run actually get" and a second derivation of the gates is how it
+   * came to be wrong.
+   */
+  toolkit: readonly string[] | null;
 }): ResolvedResourceInputs {
   const resolved: ResolvedResourceInputs = {
     cwd: input.cwd,
@@ -628,13 +633,7 @@ export function resolvedResourceInputs(input: {
     unresolvedResources: input.unresolvedResources,
     tools: {
       denied: input.deniedTools,
-      toolkit: input.toolkit
-        ? [
-            ...(input.toolkit.comment ? ["post_comment"] : []),
-            ...(input.toolkit.ask ? ["ask_human"] : []),
-            ...(input.toolkit.verdict ? ["report_outcome"] : []),
-          ]
-        : [],
+      toolkit: input.toolkit ? [...input.toolkit] : [],
     },
   };
   if (input.workspaceRefresh) resolved.workspaceRefresh = input.workspaceRefresh;
@@ -2348,7 +2347,7 @@ async function dispatchAgentRun(
         mcpWriteToolsDenied: resolvedMcps.toolDenials,
         unresolvedResources,
         deniedTools: disallowedTools,
-        toolkit: toolkit ? collab : null,
+        toolkit: toolkit?.toolNames ?? null,
       }),
       promptChars: prompt.length,
       anchor,
@@ -3878,7 +3877,7 @@ export async function resolveResumeConfinement(
         mcpWriteToolsDenied: resumeMcps.toolDenials,
         unresolvedResources: resumeUnresolved,
         deniedTools: disallowedTools,
-        toolkit: toolkit ? collab : null,
+        toolkit: toolkit?.toolNames ?? null,
       }),
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
