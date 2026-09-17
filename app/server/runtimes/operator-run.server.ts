@@ -197,6 +197,9 @@ export interface RunOperatorInput {
     | "packet-resolved"
     | "dependencies-released"
     | "head-unpushed"
+    /** Ruling 330: the periodic sweep found this task in a state nothing was
+     *  going to move it out of. */
+    | "stranded"
     | "scheduled"
     | "manual";
   /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
@@ -3981,6 +3984,27 @@ function operatorTurnDoctrine(
       "Rework on a task whose PR is already open is delivered the same way: `deliver_for_review` pushes the new revision to that PR. " +
       "If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
+    );
+  }
+  if (trigger === "stranded") {
+    // Ruling 330: nothing is going to move this task, and nothing noticed until
+    // the sweep did. The turn instruction says exactly that and asks for the
+    // one thing the state needs — a decision about what happens next — rather
+    // than describing an event, because there was no event. That is the point.
+    return (
+      "NOTHING IS MOVING THIS TASK. Viberr's periodic sweep found it with no decision packet, no " +
+      "pending recommendation, no queued question, no scheduled run, no agent running or queued, " +
+      "and nothing it is waiting on — and no event on it for a while. You were not re-invoked by " +
+      "anything that happened; you are here because nothing did.\n\n" +
+      "Read the task and decide. The usual causes are a run that died without re-invoking you (a " +
+      "refused credential, a spent quota, a restart), a report you deferred to that never came, " +
+      "or a boundary only a person can cross. Do ONE of: dispatch the agent the task needs, move " +
+      "it to the stage its state actually warrants, or open a decision packet naming what a person " +
+      "has to settle. If the honest answer is that a person must act and no packet can say it " +
+      "better than a sentence, post ONE comment that names them and says what you need — but " +
+      "prefer the packet, because a comment is not a decision the board can see. " +
+      "Do not end this turn having written nothing: a silent turn here is how the task got into " +
+      "this state, and it will simply be swept again."
     );
   }
   if (trigger === "head-unpushed") {

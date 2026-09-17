@@ -5519,6 +5519,57 @@ by rewriting those paragraphs:*
     The ask itself moved to the packet BODY, which is read on the card and appended to nothing.
     (`review-deadlock.server.ts`, `task-actions.server.ts`, `review-deadlock.server.test.ts` (new).)
 
+330. **Nothing watched for the state itself (owner, 2026-09-17, pass 37; F37-166).** The owner
+    asked the question that made this ruling: *"there were tasks that had no queued runs, packets
+    etc. how did you fix them and how can we make sure it wont happen again"*. Four separate CAUSES
+    of a task stopping dead were fixed the same day (325, 326, 328, and the acceptance-conflict one
+    still open), and the owner had already found a fifth. Fixing causes one at a time never closes
+    the class.
+    A task can reach a state where NOTHING is going to move it — no decision packet, no pending
+    recommendation, no queued question, no scheduled run, no agent running or queued, and no hold
+    that explains the quiet — and Viberr could not see that state at all.
+    `settleAbandonedWaits` covers one narrow slice (the board claims an agent and no run is live)
+    and runs ONCE, at boot: five firings in this board's whole life. Nothing covered the rest.
+    HOW A TASK GETS THERE, measured over 940 operator runs. 111 of them (12%) ended without writing
+    anything, and most of those are RIGHT: the operator reads the task, sees a run already in
+    flight, and correctly declines to duplicate it. But each ends on the same load-bearing sentence
+    — *"I will be re-invoked when the Code Reviewer reports."* That re-invocation is not guaranteed:
+    `operatorShouldReactToReply` requires the run to finish `finished` with a readable reply, so a
+    run that FAILS re-invokes nobody, and the fallback is the stuck-loop packet ruling 326 found
+    refused for four days and ruling 325 found silent. Live on SHOP-61: silent operator turn →
+    `blocked` (credential rejected) → "the recovery packet could not be opened", with the operator's
+    last recorded words saying it would be re-invoked when the reviewer reported.
+    So the sweep does not ask WHY. It asks whether anything is going to happen, and when the answer
+    is no it does what a person ends up doing by hand: invokes the operator. On SHOP-12 that
+    hand-typed `@operator` comment produced a packet 28 seconds later, after 10h45m of silence.
+    It rides the existing 60-second schedule tick and runs after it, so a dispatch that just fired
+    is already a queued run. The note is written FIRST and unconditionally — it has to survive an
+    operator that refuses, is absent or throws, since the whole point is that this state used to
+    leave no trace — and it doubles as the idempotence key.
+    THE GUARD'S OWN TEST CAME OUT GREEN, the fifth time that trap fired this pass. Writing the note
+    bumps `updatedAt`, which drops the task out of the staleness window by itself, so the assertion
+    was measuring the wrong thing. The real invariant is what happens LATER: a task nudged once,
+    which then produced nothing, is quiet again by every clock and must still not be nudged — or it
+    is re-noted and the operator re-invoked every fifteen minutes forever, which is worse noise than
+    the silence it replaced. The test now advances the clock, and a counterweight proves the key
+    means "I already said this about THIS silence", not "about this task".
+    (`stranded-sweep.server.ts` (new), `schedule.server.ts`, `task-actions.server.ts`,
+    `operator-run.server.ts`.)
+
+331. **One failed invocation is not a decision to stop (owner, 2026-09-17, pass 37; F37-167).**
+    `autoInvokeOperator`'s recovery note said *"The operator could not be started automatically (an
+    internal error). Coordination is paused for this task; run the operator manually when you're
+    ready."* Two faults in one sentence: the `error` it reduced to "an internal error" was in scope
+    and being logged on the line above (ruling 325's shape again), and "coordination is paused" is a
+    claim about the future this code cannot make. Live on SHOP-38 the operator was re-invoked
+    automatically eleven seconds later, leaving that durable line as the only thing still saying the
+    task had stopped.
+    It now carries the real message, names the trigger it failed on, and says what is true: one
+    attempt failed, anything that happens on the task invokes the operator again, and ruling 330's
+    sweep looks for tasks nothing is moving. The offer to run it by hand stays — as an option, not
+    as the only exit.
+    (`task-actions.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

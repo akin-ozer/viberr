@@ -1161,6 +1161,35 @@ export interface AutoInvokeOptions {
  *  change (`pr-diverged`) is a coordination event like any other, so the
  *  reconciler wakes the operator through the same seam instead of leaving the
  *  divergence as prose only a human ever acts on. */
+/**
+ * Ruling 330: the record that a task had stopped.
+ *
+ * Written BEFORE the operator is invoked and unconditionally, because it has to
+ * survive an operator that refuses, is not deployed, or throws — the whole
+ * point of the sweep is that this state used to leave no trace at all. It is
+ * also the sweep's idempotence key: while this note is the newest event, the
+ * sweep has already spoken and stays quiet.
+ */
+export async function noteStranded(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  task: { projectSlug: string; taskKey: string; waiting: string | null; quietForMs: number },
+): Promise<void> {
+  const { STRANDED_NOTE_TITLE, strandedNoteText } = await import("./stranded-sweep.server");
+  await updateTaskFile(taskRef(ctx, task.projectSlug, task.taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: STRANDED_NOTE_TITLE,
+      text: strandedNoteText(task),
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, task.projectSlug, task.taskKey);
+}
+
 export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -1176,7 +1205,12 @@ export async function autoInvokeOperator(
     | "dependencies-released"
     // Ruling 235: a refused acceptance whose cause is an unpushed reviewed
     // revision. Only the operator may push it, so the refusal is handed here.
-    | "head-unpushed",
+    | "head-unpushed"
+    // Ruling 330: the periodic sweep found a task nothing was going to move —
+    // no packet, no recommendation, no queued question, no schedule, no run and
+    // no hold. The operator is invoked to decide what happens next, which is
+    // what a person ends up doing by hand.
+    | "stranded",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
@@ -1223,7 +1257,22 @@ export async function autoInvokeOperator(
           type: "note",
           actor: { kind: "system", systemId: "operator" },
           title: null,
-          text: `The operator could not be started automatically (${error instanceof AppError ? error.userMessage : "an internal error"}). Coordination is paused for this task; run the operator manually when you're ready.`,
+          // Ruling 331: the reason, and no claim about what happens next.
+          //
+          // This said "(an internal error)" over an `error` the line above was
+          // already logging, and then asserted "Coordination is paused for this
+          // task" — live on SHOP-38 the operator was re-invoked automatically
+          // eleven seconds later, so the one durable sentence on the timeline
+          // was the only thing still saying the task was stopped. What this
+          // knows is that ONE invocation failed; it does not know that nothing
+          // else will run, and ruling 330's sweep now guarantees something will
+          // look again.
+          text:
+            `The operator could not be started automatically: ` +
+            `${endSentence(error instanceof AppError ? error.userMessage : error instanceof Error ? error.message : String(error))} ` +
+            `That was one attempt on a \`${trigger}\` trigger, not a decision to stop: anything ` +
+            `that happens on this task invokes the operator again, and Viberr sweeps for tasks ` +
+            `nothing is moving. Run the operator yourself if you would rather not wait.`,
           toAgent: false,
           evidence: null,
         });
