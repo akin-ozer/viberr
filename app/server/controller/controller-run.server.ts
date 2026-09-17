@@ -16,6 +16,12 @@ import {
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
+import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
+import {
+  recordRunInputs,
+  resolvedResourceInputs,
+  type ResolvedResourceInputs,
+} from "~/server/runtimes/run-inputs.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { projectAuthorityPrompt } from "~/server/auth/authority-prompt.server";
@@ -439,7 +445,14 @@ async function startTurnRun(
     dataRoot,
   });
 
-  const systemPrompt = buildControllerSystemPrompt(db, {
+  // The controller's world is the product, not the disk: deny the filesystem
+  // and shell entirely (the operator read-only set already denies the write
+  // half at the adapter; these close the read half and web egress).
+  // Ruling 344: resolved BEFORE the prompt, because the prompt build now also
+  // produces this turn's input disclosure and both lists belong in it.
+  const disallowedTools = ["Read", "Grep", "Glob", "WebFetch", "WebSearch"];
+
+  const promptBuild = buildControllerSystemPrompt(db, {
     conversation,
     user: input.user,
     config,
@@ -448,13 +461,12 @@ async function startTurnRun(
     // Ruling 310: with the reason each server gave, not just its name —
     // this is the surface a person asks "why?" on.
     unresolvedMcps: unresolved.filter((u) => !u.mounted),
+    // Ruling 344/339: what `buildControllerMounts` actually mounted.
+    toolkit: allowedTools,
+    deniedTools: disallowedTools,
     dataRoot,
   });
-
-  // The controller's world is the product, not the disk: deny the filesystem
-  // and shell entirely (the operator read-only set already denies the write
-  // half at the adapter; these close the read half and web egress).
-  const disallowedTools = ["Read", "Grep", "Glob", "WebFetch", "WebSearch"];
+  const systemPrompt = promptBuild.prompt;
 
   const prior = latestTurnRun(db, conversation.id);
   const workdir = controllerScratchDir(dataRoot);
@@ -528,6 +540,31 @@ async function startTurnRun(
   }
 
   entry.runId = runId;
+  // Ruling 344: every controller turn discloses what it was given, on the FRESH
+  // path and the resume alike — the controller resumes on every turn after the
+  // first, so recording only fresh starts would have disclosed one turn per
+  // conversation. (Ruling 343 is the same omission on the specialist's resume
+  // door, found the same day.)
+  recordRunInputs(db, {
+    runId,
+    projectSlug: "",
+    taskKey: conversation.id,
+    threadId: conversation.id,
+    backend: "claude",
+    dataRoot,
+    inputs: {
+      ...promptBuild.inputs,
+      promptChars: prompt.length,
+      // A controller turn has no canonical TASK state: its conversation may be
+      // scoped to a project or to nothing, and ruling 121's context read is
+      // part of the prompt rather than an anchor block. `null` is the true
+      // answer here and the console prints it as one.
+      anchor: null,
+      spendCapUsd: getMaxRunSpendUsd(db),
+      // The person's own message is the whole reason this turn exists.
+      directive: { from: input.user.email, chars: input.text.trim().length },
+    },
+  });
   publishConversationUpdated(conversation.id, conversation.userId);
 
   registerRunCompletion(
@@ -933,15 +970,28 @@ interface SystemPromptInput {
    *  `buildControllerMounts`. Rebuilt per turn, so a conversation that was
    *  already running when a tool shipped is told about it. */
   toolManifest?: string;
+  /** Ruling 344/339: the names this turn actually mounted, and the built-ins it
+   *  denies — read off what the caller built, never restated from the gates. */
+  toolkit: readonly string[];
+  deniedTools: readonly string[];
   dataRoot?: string;
 }
 
+/** Ruling 344: the prompt, and the resolution it was built from. */
+export interface ControllerPromptBuild {
+  prompt: string;
+  /** The resource half of this turn's `run_inputs` disclosure. */
+  inputs: ResolvedResourceInputs;
+}
+
 /** Assemble the controller's system prompt: doctrine + resources + runtime +
- *  the conversation contract (whose authority this turn runs under). */
+ *  the conversation contract (whose authority this turn runs under) — and,
+ *  ruling 344, the resource half of this turn's own input disclosure, off the
+ *  same resolution rather than a second reading of the grants. */
 export function buildControllerSystemPrompt(
   _db: DatabaseSync,
   input: SystemPromptInput,
-): string {
+): ControllerPromptBuild {
   const parts: string[] = [readControllerDefinition(input.dataRoot)];
 
   const resourceParts: string[] = [];
@@ -1082,5 +1132,38 @@ export function buildControllerSystemPrompt(
       projectAuthorityPrompt(),
   );
 
-  return parts.join("");
+  const prompt = parts.join("");
+  return {
+    prompt,
+    // Ruling 344: off the same locals the prompt was assembled from.
+    inputs: resolvedResourceInputs({
+      // The controller has no checkout at all — ruling 299 gave it repository
+      // READS through a tool, not a working tree — so a `repo`/`cloned` claim
+      // here would be the only place in the product asserting one.
+      cwd: null,
+      repo: null,
+      cloned: false,
+      workspaceRefresh: undefined,
+      delivers: false,
+      personaChars: prompt.length,
+      skills: [...input.config.skills],
+      // Every controller skill and knowledge base rides this prompt as text or
+      // as an index; nothing mounts natively.
+      nativeSkills: [],
+      kb: [...controllerKb],
+      mountedMcps: [...input.mountedMcps],
+      unresolvedMcps: input.unresolvedMcps.map((u) => u.name),
+      // A controller turn's MCP resolution splits mounted-but-down out before
+      // it arrives (`unresolved.filter((u) => !u.mounted)`), so a down server
+      // is not in this list and claiming one here would be inventing it.
+      unhealthyMcps: [],
+      mcpWriteToolsDenied: [],
+      unresolvedResources: [...skillSet.unresolved, ...kbSet.unresolved].map((m) => ({
+        name: m.name,
+        reason: m.reason,
+      })),
+      deniedTools: [...input.deniedTools],
+      toolkit: [...input.toolkit],
+    }),
+  };
 }

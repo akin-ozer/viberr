@@ -165,8 +165,10 @@ describe("controller mounts (ruling 107)", () => {
       mountedMcps: [],
       unresolvedMcps: [],
       toolManifest: mounts.toolManifest,
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
 
     // CANARY: leave the manifest on the servers' `instructions` and a running
     // conversation never learns what it now holds.
@@ -210,8 +212,10 @@ describe("controller mounts (ruling 107)", () => {
       config: resolveControllerConfig(app.dataRoot),
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     // CANARY: unwire `projectAuthorityPrompt()` and the model is back to
     // supplying viberr's own role tiers from memory.
     expect(prompt).toContain("What a project role may do");
@@ -250,8 +254,10 @@ describe("controller mounts (ruling 107)", () => {
       unresolvedMcps: [
         { name: "kb-architecture", reason: "its stored credential could not be opened" },
       ],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     // CANARY: map the grants back to names and the reason disappears.
     expect(prompt).toContain("kb-architecture (its stored credential could not be opened)");
     expect(prompt).toContain("do not infer a cause the server did not give");
@@ -284,8 +290,10 @@ describe("controller mounts (ruling 107)", () => {
       config: resolveControllerConfig(app.dataRoot),
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     // CANARY: drop the paragraph and "ruling 4" in a task directive and
     // "ruling 246" in a tool description read as the same numbering.
     expect(prompt).toContain("is Viberr's own product decision");
@@ -316,8 +324,10 @@ describe("controller mounts (ruling 107)", () => {
       // No org MCP mounted: the sentence is not conditional on grants.
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     expect(prompt).toContain("viberr_ops");
     expect(prompt).toContain("read-only");
     // …and it says whose permissions the calls run under, because that is what
@@ -361,8 +371,10 @@ describe("controller mounts (ruling 107)", () => {
       config: resolveControllerConfig(app.dataRoot),
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     // CANARY: remove the section and the planner is back to guessing.
     expect(prompt).toContain("# Shell inventory (measured on this host, not a guess)");
     expect(prompt).toContain("NOT installed: make, docker, pnpm, yarn, curl, python3, go.");
@@ -398,8 +410,10 @@ describe("the turn carries the context read (ruling 121)", () => {
       config,
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     expect(task).toContain(
       "This conversation is anchored to task `VIB-142` in project `viberr-core`: tools default to both, and every turn opens with the task's canonical file as a server read.",
     );
@@ -409,8 +423,10 @@ describe("the turn carries the context read (ruling 121)", () => {
       config,
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     expect(board).toContain("bound to the project `viberr-core`: tools default to it, and every turn opens with a board snapshot");
     const instance = buildControllerSystemPrompt(app.db, {
       conversation: { ...base, projectSlug: null, taskKey: null },
@@ -418,8 +434,10 @@ describe("the turn carries the context read (ruling 121)", () => {
       config,
       mountedMcps: [],
       unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
       dataRoot: app.dataRoot,
-    });
+    }).prompt;
     expect(instance).toContain("instance-scoped: name the project when acting on a board.");
   });
 
@@ -504,6 +522,88 @@ describe("the turn carries the context read (ruling 121)", () => {
       "anchored to task `VIB-142` in project `viberr-core`",
     );
     expect(Object.keys(spec!.mcpServers ?? {})).toContain("viberr_controller");
+  });
+
+  /**
+   * Ruling 344 (pass 37, F37-180): the controller turn discloses what it was
+   * given. `recordRunInputs` had two callers, both on the specialist paths, so
+   * none of this instance's 71 controller turns recorded anything — and the
+   * controller had named the gap itself, from the other side, on 2026-09-15:
+   * *"I cannot measure what a run actually receives."*
+   *
+   * It is written where the fresh path and the RESUME join, because a
+   * controller resumes on every turn after the first: recording only fresh
+   * starts would have disclosed one turn per conversation.
+   */
+  it("ruling 344: a controller turn records what it was given, resume included", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { listRunLines } = await import("~/server/runtimes/run-store.server");
+    const { RUN_INPUTS_TAG } = await import("~/features/runtime/runtime-types");
+    await connectFakeBackend(app.db, user.id, "claude");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+    });
+    const disclosureFor = (runId: string) =>
+      listRunLines(app.db, runId).find((l) => l.display.tag === RUN_INPUTS_TAG)
+        ?.display.inputs;
+    try {
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "  which tasks are waiting on me?  ",
+        user: { ...user, orgRole: "admin" },
+        surface: "/projects/viberr-core",
+        dataRoot: app.dataRoot,
+      });
+      const first = lastRunSpec()!.runId;
+      // CANARY: delete the `recordRunInputs` call after `entry.runId = runId`.
+      const inputs = disclosureFor(first);
+      expect(inputs, "the controller turn recorded no input disclosure").toBeTruthy();
+      // The controller has no checkout at all — ruling 299 gave it repository
+      // READS through a tool, not a working tree.
+      expect(inputs!.cloned).toBe(false);
+      expect(inputs!.repo).toBeNull();
+      expect(inputs!.delivers).toBe(false);
+      // CANARY: pass a literal `[]` as the builder's `toolkit` and this empties.
+      // These are the names `buildControllerMounts` really mounted.
+      expect(inputs!.tools.toolkit).toContain("mcp__viberr_controller__get_task");
+      // CANARY: drop `deniedTools` and the controller looks unconfined — the
+      // filesystem and web denials ARE its posture (its world is the product).
+      expect(inputs!.tools.denied).toContain("Read");
+      expect(inputs!.tools.denied).toContain("WebSearch");
+      // The person's own message is the whole reason the turn exists, trimmed
+      // to the text the prompt carries.
+      expect(inputs!.directive).toEqual({
+        from: user.email,
+        chars: "which tasks are waiting on me?".length,
+      });
+
+      // The SECOND turn resumes, and must disclose too. CANARY: move the
+      // `recordRunInputs` call inside the `else` (fresh-start) branch and this
+      // finds nothing — which is the shape ruling 343 fixed on the specialist's
+      // own resume door the same day.
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "and which are blocked?",
+        user: { ...user, orgRole: "admin" },
+        dataRoot: app.dataRoot,
+      });
+      const second = lastRunSpec()!.runId;
+      expect(second, "the second turn reused the first run row").not.toBe(first);
+      expect(
+        disclosureFor(second),
+        "the resumed controller turn recorded no input disclosure",
+      ).toBeTruthy();
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+    }
   });
 
   it("records the surface on the user message the turn was asked from", async () => {

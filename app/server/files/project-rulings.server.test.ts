@@ -139,8 +139,10 @@ describe("the runtimes that build a run's knowledge call it", () => {
         config: resolveControllerConfig(store.dataRoot),
         mountedMcps: [],
         unresolvedMcps: [],
+        toolkit: [],
+        deniedTools: [],
         dataRoot: store.dataRoot,
-      });
+      }).prompt;
 
     // CANARY: replace the `input.conversation.projectSlug` condition with
     // `false` and the scoped prompt loses the rulings text.

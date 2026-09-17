@@ -32,9 +32,11 @@ import {
   connectFakeBackends,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import {
   getRun,
   insertRunLine,
+  nextSeq,
   listRunLines,
   listRunsForTaskRows,
   upsertRun,
@@ -95,7 +97,12 @@ class ControlledAdapter implements RuntimeAdapter {
     const tag = `run·error·${facts.kind}`;
     insertRunLine(store.db, {
       runId: pending.spec.runId,
-      seq: 0,
+      // Ruling 344: the SAME numbering the real sink uses (`nextSeq`), not a
+      // literal 0. A run now carries Viberr's own `run·inputs` disclosure at
+      // its head, and `insertRunLine` is `ON CONFLICT DO NOTHING` — so a
+      // fixture that claims seq 0 silently drops its own line and the run
+      // looks like it said nothing.
+      seq: nextSeq(store.db, pending.spec.runId),
       occurredAt: new Date().toISOString(),
       raw: JSON.stringify({ ev: "err", tag, text }),
       display: { t: "12:00:00", ev: "err", tag, text, failure: facts },
@@ -116,7 +123,8 @@ class ControlledAdapter implements RuntimeAdapter {
     // startCodexOperatorRun has registered its callback first.
     insertRunLine(store.db, {
       runId: pending.spec.runId,
-      seq: 0,
+      // Ruling 344: `nextSeq`, exactly as the sink does — see `fail` above.
+      seq: nextSeq(store.db, pending.spec.runId),
       occurredAt: new Date().toISOString(),
       raw: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }),
       display: { t: "12:00:00", ev: "text", tag: "agent_message", text },
@@ -257,6 +265,79 @@ describe("Codex structured operator completion", () => {
     });
     expect(adapter.pending).not.toBeNull();
   }
+
+  /**
+   * Ruling 344 (pass 37, F37-180): the coordinator discloses what it was given.
+   *
+   * `recordRunInputs` had two callers, both on the specialist paths, so across
+   * the whole shopify-clone pass the corpus held 834 `run·inputs` lines against
+   * 2,317 runs — and the 1,024 with none were every operator drive (953) and
+   * every controller turn (71). P19-G8/G11's rationale never said
+   * "specialist": nobody could check which knowledge bases a run carried, which
+   * grants resolved to nothing, or what state it was anchored on. The operator
+   * is the actor that writes the packets and scoping notes a person reads, and
+   * ruling 261's live incident WAS an operator KB arriving cut off mid-word —
+   * found by reading code, because there was no record to read.
+   */
+  it("ruling 344: a Codex drive records what it was given, read off its own resolution", async () => {
+    // CANARY: delete the `recordRunInputs` call after `startRun` in
+    // `startCodexOperatorRun` and this finds no line.
+    await start();
+    const runId = adapter.pending!.spec.runId;
+    const line = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    );
+    expect(line, "the drive recorded no input disclosure").toBeTruthy();
+    // It sits at the HEAD of the run's block — it is written at run start, so
+    // the first thing a person expanding the console meets is what went in.
+    expect(line!.seq).toBe(0);
+    const inputs = line!.display.inputs!;
+    // The operator has no checkout of its own, and the prompt it carries
+    // forbids it from calling anything it holds "the repository".
+    expect(inputs.cloned).toBe(false);
+    expect(inputs.cwd).toBeNull();
+    expect(inputs.delivers).toBe(false);
+    // Every granted skill rides the prompt as text on this surface — the
+    // disclosure's whole point is saying which channel a grant took.
+    expect(inputs.skills.native).toEqual([]);
+    expect(inputs.skills.injected).toEqual(inputs.skills.granted);
+    // CANARY: hand `buildOperatorSystemPrompt` a literal `[]` for its toolkit
+    // and this empties — the Codex drive's action surface IS its plan envelope,
+    // so those actions are the honest answer to "what could this run do".
+    expect(inputs.tools.toolkit).toContain("run_agent");
+    expect(inputs.tools.toolkit).toContain("transition_stage");
+    // A drive with no human comment carries no directive, and says so rather
+    // than inventing one.
+    expect(inputs.directive).toBeNull();
+    expect(inputs.promptChars).toBeGreaterThan(0);
+    adapter.finish(store, JSON.stringify({ reasoning: "nothing to do", actions: [] }), "finished");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+
+  it("ruling 344: a human's @operator comment is disclosed as the turn's directive, with who wrote it", async () => {
+    // CANARY: return `null` unconditionally from `operatorTurnDirective`.
+    await runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "codex",
+      autonomy: "full",
+      trigger: "manual",
+      humanComment: "  please hold this until VIB-2 lands  ",
+      humanCommentBy: "Arda Test",
+      dataRoot: store.dataRoot,
+    });
+    expect(adapter.pending).not.toBeNull();
+    const inputs = listRunLines(store.db, adapter.pending!.spec.runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )!.display.inputs!;
+    expect(inputs.directive).toEqual({
+      from: "Arda Test",
+      // The TRIMMED length, because that is the text the prompt carries.
+      chars: "please hold this until VIB-2 lands".length,
+    });
+    adapter.finish(store, JSON.stringify({ reasoning: "held", actions: [] }), "finished");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
 
   it("ruling 131(b): the Codex set_dependencies step executes; a null list is a MALFORMED step narrated as state, never policy", async () => {
     // Canary: delete the `set_dependencies` case from the executor switch

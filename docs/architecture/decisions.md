@@ -5848,6 +5848,41 @@ by rewriting those paragraphs:*
     path, and both misleading comments say what actually happened.
     (`task-actions.server.ts`, `specialist-run.server.ts`, `canonical-anchor.server.test.ts`.)
 
+344. **Every runtime that starts a run discloses what it gave it (2026-09-17, pass 37; F37-180,
+    completes 339 and 343).** `recordRunInputs` lived in `specialist-run.server.ts` and had two
+    callers, both on the specialist paths. Measured across the whole shopify-clone corpus: **834
+    `run·inputs` lines against 2,317 runs**, and the 1,024 with none were every operator drive
+    (953) and every controller turn (71).
+    P19-G8/G11's rationale never said "specialist". It said nobody could check the claims the
+    product makes about a run — which knowledge bases it carried, which granted skills actually
+    mounted, which grants resolved to nothing, what state it was anchored on. The operator is the
+    actor that writes the packets and scoping notes every person on the board reads, and ruling
+    261's live incident WAS an operator receiving `standing-corrections.md` cut off mid-word at
+    "fails in about thr" — found by reading code, because there was no record to read. The
+    controller had named the same gap from the other side, unprompted, on 2026-09-15: *"I cannot
+    measure what a run actually receives."*
+    The record now lives in `run-inputs.server.ts`, beside the run store. Its old home is why this
+    lasted: disclosing anything would have meant the operator and controller importing the
+    specialist runtime, a direction this codebase has already refused once (`KB_PRECEDENCE_NOTE`
+    was moved out of there for exactly that reason). A run's disclosure is a property of a RUN.
+    Both coordinators build it the way ruling 339 requires — off the resolution the prompt was
+    assembled from, in the same call, never a second reading of the grants — and both name their
+    real tool surface: the Claude drive and the controller from the definitions their toolkits just
+    built, the Codex drive from its plan envelope, which IS its action surface. Where a field does
+    not apply it says so rather than guessing: neither has a checkout, so `cloned` is false and
+    `repo`/`cwd` are null; a Claude drive reads canonical state through `get_task` and a controller
+    turn has no task at all, so `anchor` is null rather than a prompt pasted into an anchor field.
+    The controller's is written where the fresh path and the RESUME join, because a controller
+    resumes on every turn after the first — recording only fresh starts would have disclosed one
+    turn per conversation, which is ruling 343's omission in a second place.
+    TWO FIXTURES had to be corrected, and they are the finding's own shape once more: both faked a
+    completed Codex drive by writing its plan line at a hard-coded `seq: 0`, where the real sink
+    calls `nextSeq`. A run now carries Viberr's disclosure at seq 0, `insertRunLine` is `ON CONFLICT
+    DO NOTHING`, and so each fixture silently dropped its own plan and 26 tests read as "the
+    operator planned nothing". They now number lines the way the thing they imitate does.
+    (`run-inputs.server.ts`, `operator-run.server.ts`, `controller-run.server.ts`,
+    `specialist-run.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
