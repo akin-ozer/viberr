@@ -1656,6 +1656,21 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const raised = taskFile().parsed.packet;
       expect(raised, "the escalation was dropped when the person answered").not.toBeNull();
       expect(raised!.title).toContain("requested changes 2 times running");
+
+      // A packet that arrives with nobody told is not an escalation. The first
+      // draft of this retry wrote the packet and stopped there — no inbox row,
+      // no audit — which is a quieter version of the defect it exists to fix.
+      // CANARY: drop the notifyTaskWatchers / recordAudit calls from
+      // retryReviewDeadlockEscalation.
+      const { listNotifications } = await import("~/server/projections/notifications.server");
+      const inbox = listNotifications(store.db, store.users.arda.id, { limit: 50 });
+      const told = inbox.find((n) => (n.title ?? "").includes("requested changes 2 times running"));
+      expect(told, "the escalation reached nobody's inbox").toBeTruthy();
+      // Ruling 237's own rule: the policy engine raised this, not the operator.
+      expect(told!.from?.name ?? "").toBe("Policy engine");
+      const audited = listAuditEvents(store.db, { action: "task.review.deadlock" });
+      expect(audited.length).toBeGreaterThan(0);
+      expect(audited.at(-1)!.details).toMatchObject({ retried: true });
     });
 
     it("opens the packet on the second, not the first", async () => {

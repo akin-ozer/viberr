@@ -8649,6 +8649,7 @@ export async function retryReviewDeadlockEscalation(
       delivererName: delivererNameOf(fm, names),
       heldBy: fm.blockedBy,
     });
+    let raised = false;
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       // Re-checked inside the lock: the read above is outside it, and the
       // resolution that just ran may have opened one of its own.
@@ -8667,8 +8668,44 @@ export async function retryReviewDeadlockEscalation(
         toAgent: false,
         evidence: null,
       });
+      raised = true;
     });
+    if (!raised) return;
     reprojectTask(db, ctx, projectSlug, taskKey);
+    /**
+     * Everything ruling 237's own raise does after its lock, because a packet
+     * that arrives with nobody told is not an escalation.
+     *
+     * The first draft of this retry wrote the packet and stopped there: no
+     * inbox row, no audit. It would have put a decision on a task and left the
+     * person to find it, which is a quieter version of the defect it exists to
+     * fix — the escalation reaching nobody. `notifyTaskWatchers` stamps the
+     * OPERATOR as the sender on any notice that names none, so the policy
+     * engine names itself here exactly as ruling 237 does: this is not the
+     * operator's judgement.
+     */
+    recordAudit(db, {
+      action: "task.review.deadlock",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { profileId: found.profileId, rounds: deadlock.rounds, retried: true },
+    });
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug,
+        taskKey,
+        kind: "packet",
+        ptype: "input",
+        title: `Decision needed: ${packet.title}`,
+        text: packet.body,
+        from: { kind: "system", name: "Policy engine" },
+      },
+      ctx,
+    );
   } catch (error) {
     logger.warn("review-deadlock escalation retry failed", {
       taskKey,

@@ -5478,6 +5478,12 @@ by rewriting those paragraphs:*
     the timeline; a timeline that already names this reviewer at this count has had its escalation.
     A later objection raises the count and is a new one, which is ruling 237's own rule. Ruling
     313's tests are what caught the first version of this fix rebuilding the loop.
+    AND THE RETRY DOES WHAT THE ORIGINAL RAISE DOES. The first draft of this fix wrote the packet
+    and stopped: no inbox row, no audit event. That would have put a decision on a task and left
+    the person to find it — a quieter version of the defect it exists to fix, the escalation
+    reaching nobody. It now calls `notifyTaskWatchers` and `recordAudit` exactly as ruling 237's
+    own raise does, naming the policy engine as the sender rather than letting the inbox stamp the
+    operator on it.
     The operator's turn instruction also asserted the wrong inference — "a task you are reading with
     such a reviewer and no packet is one where the escalation COULD NOT BE WRITTEN", a write
     failure, when it was skipped by design and would never be retried. It now says the escalation is
