@@ -944,7 +944,7 @@ export function AgentLogsPanel({
                   </span>
                 </div>
                 {open &&
-                  runInputRows(display.inputs!, cur!.backend).map((row) => (
+                  runInputRows(display.inputs!, cur!.backend, cur!.kind).map((row) => (
                     <div className="log-line meta" key={row.tag}>
                       <span className="lt" />
                       <span className="ltag">{row.tag}</span>

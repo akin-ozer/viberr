@@ -5914,6 +5914,23 @@ by rewriting those paragraphs:*
     (`compose.yml`, `scripts/deploy.ts`, `docs/operations/deployment.md`,
     `app/server/ops/build-stamp-wiring.test.ts`.)
 
+346. **An absence is described as the absence it IS (2026-09-17, pass 37; F37-182, corrects
+    344).** Two rows of the input disclosure describe something missing, and ruling 344 gave that
+    absence two new meanings within the hour. A coordinator legitimately records `cwd: null` and
+    `anchor: null` — the operator has no checkout and reads live task state with `get_task`, and a
+    controller turn is bound to no task at all.
+    The stand-in sentences were written when every caller was a specialist. On the first
+    coordinator run to reach the console they would have said *"no repository attached to this
+    project"* about a repo-backed project, and *"It saw the goal and its directive only"* about a
+    drive whose first act is `get_task`. Two false sentences, introduced by 344 itself, into the
+    surface 344 exists to make trustworthy — pass 24's shape, a fix wired into prose that assumed
+    the old set of callers, caught by reading the renderer instead of trusting the record.
+    `runInputRows` now takes the run's `kind`, which the panel already had and already uses. An
+    older stored line carries no kind and keeps the specialist reading, which is what those lines
+    were. A real anchor still prints verbatim whatever the kind: the absence is the only thing
+    this touches.
+    (`runs-helpers.ts`, `runs-panels.tsx`, `runs-helpers.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

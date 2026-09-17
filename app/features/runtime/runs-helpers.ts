@@ -8,6 +8,7 @@ import {
   type LogLine,
   type RunInputs,
   type RunView,
+  type RunKind,
 } from "./runtime-types";
 
 /**
@@ -173,25 +174,47 @@ const NONE_GRANTED = "none granted";
 export function runInputRows(
   inputs: RunInputs,
   backend?: "claude" | "codex",
+  /**
+   * Ruling 346: WHICH kind of run this is, because two of these rows describe
+   * an absence, and the same absence means different things.
+   *
+   * Ruling 344 gave the operator and the controller this disclosure, and both
+   * legitimately record `cwd: null` and `anchor: null` — neither has a checkout
+   * and neither is handed a canonical task block. The two stand-in sentences
+   * here were written when every caller was a specialist, so they then said
+   * "no repository attached to this project" about repo-backed projects and
+   * "It saw the goal and its directive only" about a drive that reads the task
+   * with `get_task`. Absent (an older stored line) keeps the specialist
+   * reading, which is what those lines were.
+   */
+  kind?: RunKind,
 ): RunInputRow[] {
   const rows: RunInputRow[] = [];
+  const coordinates = kind === "operator" || kind === "controller";
 
   rows.push({
     tag: "workspace",
-    text:
-      (inputs.cwd ?? "no working directory") +
-      (inputs.repo
-        ? inputs.cloned
-          ? ` · checkout of ${inputs.repo}`
-          : ` · ${inputs.repo} was NOT checked out; the agent ran against an empty workspace`
-        : " · no repository attached to this project"),
+    text: coordinates
+      ? kind === "controller"
+        ? "No workspace: a controller turn reads and writes through Viberr's own tools, never a checkout."
+        : "No workspace of its own: the operator coordinates, and reads the deliverer's checkout without owning one."
+      : (inputs.cwd ?? "no working directory") +
+        (inputs.repo
+          ? inputs.cloned
+            ? ` · checkout of ${inputs.repo}`
+            : ` · ${inputs.repo} was NOT checked out; the agent ran against an empty workspace`
+          : " · no repository attached to this project"),
   });
 
   const anchor: RunInputRow = {
     tag: "anchor",
     text:
       inputs.anchor ??
-      "No canonical task state was sent to this run. It saw the goal and its directive only.",
+      (kind === "operator"
+        ? "No canonical block in the prompt: this drive reads the live task with `get_task`, and the turn prompt above is what it was told about the trigger."
+        : kind === "controller"
+          ? "No canonical task state: a controller turn is not bound to one task, and the context read it opens with is part of the prompt."
+          : "No canonical task state was sent to this run. It saw the goal and its directive only."),
   };
   // Only the canonical text is verbatim; the stand-in sentence is prose and
   // must reflow like every other row.

@@ -205,6 +205,61 @@ describe("runInputRows (P19-G11)", () => {
     expect(byTag.persona).toContain("no persona was sent");
   });
 
+  /**
+   * Ruling 346 (pass 37, F37-182): two of these rows describe an ABSENCE, and
+   * ruling 344 gave that absence two new meanings the same day.
+   *
+   * The operator and the controller both legitimately record `cwd: null` and
+   * `anchor: null` — neither has a checkout, and neither is handed a canonical
+   * task block. The stand-in sentences were written when every caller was a
+   * specialist, so on the first coordinator run to reach this surface they
+   * would have said "no repository attached to this project" about a
+   * repo-backed project, and "It saw the goal and its directive only" about a
+   * drive whose first act is `get_task`. Pass 24's shape: a fix wired into a
+   * surface whose prose assumed the old set of callers.
+   */
+  it("ruling 346: a coordinator's missing workspace and anchor are described as what they are", () => {
+    // CANARY: drop the `kind` argument from `runInputRows` and both of these
+    // fall back to the specialist sentences, which are false here.
+    const drive = Object.fromEntries(
+      runInputRows(emptyInputs, "codex", "operator").map((r) => [r.tag, r.text]),
+    );
+    expect(drive.workspace).toContain("No workspace of its own");
+    expect(drive.workspace).not.toContain("no repository attached");
+    expect(drive.anchor).toContain("get_task");
+    expect(drive.anchor).not.toContain("goal and its directive only");
+
+    const turn = Object.fromEntries(
+      runInputRows(emptyInputs, "claude", "controller").map((r) => [r.tag, r.text]),
+    );
+    expect(turn.workspace).toContain("never a checkout");
+    expect(turn.anchor).toContain("not bound to one task");
+
+    // A specialist keeps the reading those sentences were written for, and so
+    // does a stored line from before the kind was passed — the rows are
+    // rendered from history, not only from live runs.
+    for (const rows of [
+      runInputRows(emptyInputs, "claude", "primary"),
+      runInputRows(emptyInputs, "claude"),
+    ]) {
+      const byTag = Object.fromEntries(rows.map((r) => [r.tag, r.text]));
+      expect(byTag.anchor).toContain("No canonical task state was sent");
+      // The fixture IS a specialist's: a checkout of a real repo, which is what
+      // the coordinator rows must never be described as.
+      expect(byTag.workspace).toContain("checkout of acme/widgets");
+    }
+
+    // And a real anchor still prints verbatim whatever the kind — the absence
+    // is the only thing this ruling touches.
+    const anchored = runInputRows(
+      { ...emptyInputs, anchor: "## Canonical task state\nstage: Build" },
+      "claude",
+      "operator",
+    ).find((r) => r.tag === "anchor")!;
+    expect(anchored.text).toContain("stage: Build");
+    expect(anchored.pre).toBe(true);
+  });
+
   it("ruling 185: no sandbox row on either backend — Viberr confines neither", () => {
     // The row existed for the Codex OS sandbox; the sandbox is gone (F36-1 and
     // F36-11 cost more than it bought), so a run that claims one would be a
