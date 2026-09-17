@@ -1684,10 +1684,12 @@ describe("ruling 192: getGoalView carries the task's live goal beside the declar
       actor,
       ctx,
     );
-    // Nothing has moved yet: no `liveGoal` anywhere.
+    // Nothing has moved yet: the declaration IS the contract, and no separate
+    // `declaredGoal` appears beside it.
     const fresh = getGoalView(SLUG, chain.goalId, ctx)!;
-    expect(fresh.links[0]!.liveGoal).toBeUndefined();
-    expect(fresh.links[1]!.liveGoal).toBeUndefined();
+    expect(fresh.links[0]!.declaredGoal).toBeUndefined();
+    expect(fresh.links[1]!.declaredGoal).toBeUndefined();
+    expect(fresh.links[0]!.goal).toContain("DECLARED-GOAL-9");
 
     await updateTaskGoal(
       app.db,
@@ -1700,15 +1702,34 @@ describe("ruling 192: getGoalView carries the task's live goal beside the declar
       ctx,
     );
     const after = getGoalView(SLUG, chain.goalId, ctx)!;
-    // CANARY: drop the `liveGoal` mapping and a planner reads DECLARED-GOAL-9
-    // as the current contract, which is what happened live on goal-2 link 1.
-    expect(after.links[0]!.liveGoal).toBe("MOVED-GOAL-4: ownership changed hands.");
-    // The declared text is NOT overwritten — it is what the chain declared and
-    // what the history and the link record mean.
+    /**
+     * Ruling 335: the PLAIN NAME carries the truth.
+     *
+     * Ruling 192 had it the other way round — `goal` kept the frozen
+     * declaration and `liveGoal` appeared beside it — and the controller
+     * measured the cost: four of seven links on one goal had a superseded
+     * `goal`, including the link of the task that was actively building, whose
+     * declaration instructed work its own design pass had proved impossible.
+     * Its words: "the safe field carries the qualifier and the unsafe one has
+     * the plain name… I only ever noticed because liveGoal happened to sit
+     * adjacent in the payload."
+     *
+     * CANARY: swap them back, or drop the mapping entirely — a planner then
+     * reads DECLARED-GOAL-9 as the current contract, which is what happened
+     * live on goal-2 link 1 and again on goal-5 link 7.
+     */
+    expect(after.links[0]!.goal).toBe("MOVED-GOAL-4: ownership changed hands.");
+    // The declared text is NOT lost — it is what the chain declared and what
+    // the history and the link record mean — but it is named for what it is.
+    expect(after.links[0]!.declaredGoal).toContain("DECLARED-GOAL-9");
     expect(after.links[0]!.title).toBe("Declared title");
-    expect(after.links[0]!.goal).toContain("DECLARED-GOAL-9");
-    // A link with no task of its own has nothing live to report.
-    expect(after.links[1]!.liveGoal).toBeUndefined();
+    // The stored FILE is untouched: the rename is a view, not a rewrite.
+    const { readGoalFile } = await import("~/server/files/goal-writer.server");
+    const stored = readGoalFile({ projectSlug: SLUG, goalId: chain.goalId, dataRoot: app.dataRoot })!;
+    expect(stored.parsed.frontmatter.links[0]!.goal).toContain("DECLARED-GOAL-9");
+    // A link with no task of its own has nothing to have moved past.
+    expect(after.links[1]!.declaredGoal).toBeUndefined();
+    expect(after.links[1]!.goal).toBe("Stays as declared.");
   });
 });
 
@@ -2004,7 +2025,7 @@ describe("ruling 192(b): an edit to a FAILED link outranks the text the retry wo
 
 /** Both found by the self-review: a link declared with no goal read as
  *  permanently drifted, and a resent title claimed a rename that never was. */
-describe("ruling 192: liveGoal and the rename clause stop claiming changes that never happened", () => {
+describe("ruling 192 (+335): the drift split stops claiming changes that never happened", () => {
   it("a link declared with only a title is not reported as drifted", async () => {
     const { createGoal, getGoalView } = await import("./goal-actions.server");
     const actor = actorOf(orgAdminId, "arda@viberr.dev");
@@ -2024,7 +2045,7 @@ describe("ruling 192: liveGoal and the rename clause stop claiming changes that 
     expect(chain.activeTaskKey).toBeTruthy();
     // CANARY: compare against `link.goal.trim()` alone and this is the title,
     // i.e. drift announced on a link nobody touched.
-    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.liveGoal).toBeUndefined();
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.declaredGoal).toBeUndefined();
   });
 
   it("resending the current title with a new description claims no rename", async () => {

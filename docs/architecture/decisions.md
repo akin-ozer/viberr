@@ -5643,6 +5643,29 @@ by rewriting those paragraphs:*
     fired on this board, so "all four are wrong" was not evidenced and is not claimed.
     (`task-actions.server.ts`.)
 
+335. **The plain name has to be the truth (controller, 2026-09-17, pass 37; F37-171).** Ruling 192
+    split a goal link in two: `goal` kept what the chain DECLARED, and `liveGoal` appeared beside it
+    when the task had moved past that text. The split is right. The naming was backwards, and the
+    controller found it by applying this pass's own method to itself when asked what viberr had
+    repeatedly told it wrong.
+    Counted live, in the turn it answered: on goal-5, FOUR of seven links carried a superseded
+    `goal`. Its words: *"the safe field carries the qualifier and the unsafe one has the plain name —
+    `link.goal` is the trap, `link.liveGoal` is the truth, and that is backwards. I only ever noticed
+    because `liveGoal` happened to sit adjacent in the payload; nothing in the reply says the two
+    differ."*
+    Load-bearing at the moment it was found. goal-5's link 7 is SHOP-82, the release candidate,
+    actively building — and its declared goal instructs a builder to generate a CHANGELOG *"from
+    conventional commits"*, which that task's own design pass had just proved impossible (0 of 583
+    commits conventional-shaped), and to own `scripts/seed/demo.ts`, proven unreachable. The task's
+    real goal, corrected hours earlier, says the opposite.
+    `goal` now always carries the contract in force; the superseded declaration is kept as
+    `declaredGoal`, named for what it is. Ruling 192's substance is untouched — the declaration
+    stays, because it is what the chain declared and the history means it — and the stored file is
+    not rewritten: this is a view. A retry was never at risk either; ruling 192's own `body`
+    argument already rebuilds from the task's current text. The whole defect was which name a
+    reader reaches for first.
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

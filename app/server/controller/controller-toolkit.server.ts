@@ -3400,7 +3400,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_goal",
-      "One goal chain in full: description, every link with its task and status, and the chain's history. A link that has a task carries `liveGoal` — that task's CURRENT goal — whenever it has moved past the text the link was declared with; the link's own `title`/`goal` are what the chain declared, which is what a retry used to rebuild from. Membership gated.",
+      "One goal chain in full: description, every link with its task and status, and the chain's history. Ruling 335: a link's `goal` is ALWAYS the contract in force — for a link with a task that has moved past what the chain declared, it is that task's current goal, and the superseded declaration is kept beside it as `declaredGoal` (history, not instructions: never build to it). `title` is immutable and is always the chain's. Membership gated.",
       { projectSlug: z.string().optional(), goalId: z.string() },
       runWith((args: { projectSlug?: string; goalId: string }) => {
         const slug = slugOf(args.projectSlug);

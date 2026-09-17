@@ -1424,7 +1424,33 @@ export function startGoalRunner(db: DatabaseSync): void {
  * field that can never be set.
  */
 export type GoalLinkView = GoalLink & {
-  liveGoal?: string;
+  /**
+   * Ruling 335: what the CHAIN DECLARED, present only when the task has moved
+   * past it. `goal` above always carries the truth.
+   *
+   * Ruling 192 had these the other way round — `goal` kept the frozen
+   * declaration and `liveGoal` appeared beside it when they differed — and the
+   * controller measured what that costs: on one goal, FOUR of seven links'
+   * `goal` fields were superseded, and it said so in its own words: *"the safe
+   * field carries the qualifier and the unsafe one has the plain name —
+   * `link.goal` is the trap, `link.liveGoal` is the truth, and that is
+   * backwards. I only ever noticed because `liveGoal` happened to sit adjacent
+   * in the payload; nothing in the reply says the two differ."*
+   *
+   * Live and load-bearing at the time it was found: goal-5's link 7 is SHOP-82,
+   * the release candidate, actively building. Its declared goal instructs a
+   * builder to generate a CHANGELOG "from conventional commits" — which that
+   * task's own design pass proved impossible, 0 of 583 commits being
+   * conventional-shaped — and to own `scripts/seed/demo.ts`, proven unreachable.
+   * The task's real goal, corrected by the owner, says the opposite.
+   *
+   * Ruling 192's substance stands and is why the declaration is still here: the
+   * stored text is what the chain declared and the history means it. What
+   * changes is which name a reader reaches for first. A retry was never at risk
+   * — ruling 192's own `body` argument already rebuilds from the task's current
+   * text — so this is entirely about the read.
+   */
+  declaredGoal?: string;
 };
 
 export interface GoalView {
@@ -1465,10 +1491,13 @@ export function getGoalView(
     const goal = stripChainHeader(task.parsed.goal);
     // Compare against what the task was BUILT from, not against `link.goal`
     // alone: `linkGoalText` falls back to the title when a link declares no
-    // goal, so a title-only link read as permanently drifted and `liveGoal`
-    // announced a change that never happened.
-    if (goal === (link.goal.trim() || link.title)) return link;
-    return { ...link, liveGoal: goal };
+    // goal, so a title-only link read as permanently drifted and the drift
+    // field announced a change that never happened.
+    const declared = link.goal.trim() || link.title;
+    if (goal === declared) return link;
+    // Ruling 335: the plain name carries the truth; the declaration keeps a
+    // name that says what it is.
+    return { ...link, goal, declaredGoal: link.goal };
   });
   return view;
 }
