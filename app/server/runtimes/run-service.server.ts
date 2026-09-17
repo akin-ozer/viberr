@@ -365,6 +365,10 @@ export interface StartRunInput {
    *  packet body and the disabled control all render, so a person cannot be
    *  told three different stories about one refusal. */
   principalRefusal?: RunPrincipalRefusal;
+  /** Ruling 316: this dispatch withheld the run's VERDICT channel, so a reply
+   *  with no envelope verdict is an answer rather than a silence the prose
+   *  fallback should repair. Stored on the run row. */
+  verdictWithheld?: boolean;
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional — the SDK default applies when absent. */
@@ -899,6 +903,9 @@ export async function startRun(
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId,
     credentialUserId: input.credentialUserId,
+    // Ruling 316: kept on the row so the completion path can tell an answer
+    // from a silence long after the dispatch is gone.
+    verdictWithheld: input.verdictWithheld === true,
     // A reserved row is ALREADY running (that is the point) — re-stamping it
     // `queued` would blink the strip off between preparation and the spawn, and
     // would throw away the clock the human has been watching.

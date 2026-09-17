@@ -2281,6 +2281,10 @@ async function dispatchAgentRun(
     actor: auditActor,
     dataRoot: ctx.dataRoot,
   };
+  // Ruling 316: the run REMEMBERS that its verdict channel was withheld, so the
+  // completion path can tell an answer from a silence. Ruling 313 stopped the
+  // tool; without this the prose fallback manufactures the verdict anyway.
+  if (input.withholdVerdict) runInput.verdictWithheld = true;
   if (!principal.ok) runInput.principalRefusal = principal.refusal;
   if (effort) runInput.effort = effort;
   if (persona) runInput.systemPrompt = persona;

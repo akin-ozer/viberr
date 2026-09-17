@@ -415,6 +415,13 @@ const BASELINE_COLUMNS: readonly {
       // honest value for a row written before viberr recorded the fact — 0 says
       // "nothing here says this run was checkout-less", which is exactly true.
       { name: "no_checkout", ddl: "no_checkout INTEGER NOT NULL DEFAULT 0" },
+      // Ruling 316: 0 is the TRUTH for every historical row — no run before
+      // this column existed had its verdict channel withheld, because nothing
+      // could withhold it — so this needs no backfill.
+      {
+        name: "verdict_withheld",
+        ddl: "verdict_withheld INTEGER NOT NULL DEFAULT 0",
+      },
     ],
   },
   {

@@ -1527,11 +1527,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // because the resolution above started it.
       const started = store.db
         .prepare(
-          `SELECT agent_profile_id AS pid FROM agent_runs
+          `SELECT agent_profile_id AS pid, verdict_withheld AS withheld FROM agent_runs
            WHERE project_slug = ? AND kind <> 'operator'
            ORDER BY created_at DESC, rowid DESC LIMIT 1`,
         )
-        .get(store.slug) as { pid: string };
+        .get(store.slug) as { pid: string; withheld: number };
       // CANARY: remove the dispatch block and this stays flat — the packet
       // would close having promised a run nobody started.
       expect(runCount()).toBe(before + 1);
@@ -1581,8 +1581,94 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       );
       expect(engaged?.verdictCapable).toBe(true);
 
+      // Ruling 316: and the RUN remembers it, because the prompt is not the
+      // only thing that has to honour the withholding — the completion path
+      // reads this row to tell an answer from a silence, long after the
+      // dispatch is gone. CANARY: stop persisting `verdictWithheld` at run
+      // creation and the fallback manufactures the verdict anyway.
+      expect(started.withheld).toBe(1);
+
       expect(taskFile().parsed.packet).toBeNull();
       expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
+    });
+
+    /**
+     * Ruling 316. Ruling 313 withheld the verdict TOOL on the deadlock question
+     * and closed nothing, because the prose fallback manufactures a verdict
+     * from the reply regardless: `verdictAuthorized` reads the ENGAGEMENT
+     * snapshot, which 313 deliberately left intact.
+     *
+     * Live on SHOP-68 the reviewer said so in words and viberr wrote the
+     * verdict under its name 70ms later: "No verdict recorded — the directive
+     * said not to... I deliberately skipped `report_outcome` rather than
+     * omitting it. (Note: last turn the system appears to have derived a
+     * `request_changes` entry from my comment anyway; I can't control that, but
+     * nothing new was authored by me.)" The packet re-raised each time and the
+     * person answered the same question three times.
+     *
+     * The classifier's rule 3 is why: any un-negated "fail"/"blocker" is a
+     * request_changes, so on SHOP-76 it fired on "the five prettier-failing
+     * markdown files fail identically on the base commit" — a sentence whose
+     * whole point is that the failure is NOT a finding.
+     */
+    it("ruling 316: a run whose verdict channel was withheld gets no prose verdict", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      const genuine = taskFile().parsed.frontmatter.verdicts.at(-1);
+      expect(genuine?.result).toBe("request_changes");
+      // The reviewer's REAL findings for this revision. A fabricated verdict
+      // does not add a row — it REPLACES this one (last write wins per
+      // profileId + revisionId), so the count never moves and the reviewer's
+      // actual reasons are what disappears.
+      expect(genuine?.reason).toContain("objection number 1");
+
+      // Exactly the shape that trips the classifier's rule 3 while saying the
+      // OPPOSITE — an un-negated "fail"/"blocker" inside a sentence whose point
+      // is that the failure is pre-existing and therefore not a finding. This
+      // is the SHOP-76 sentence.
+      const answer =
+        "No verdict recorded - the directive said not to return one. " +
+        "The five prettier-failing markdown files fail identically on the base commit, " +
+        "so that is not a blocker I would raise.";
+      const { classifyReviewerVerdict } = await import("./task-actions.server");
+      // The classifier really does read this as an objection; the guard is what
+      // stops it, not a kinder regex.
+      expect(classifyReviewerVerdict(answer)).toBe("request_changes");
+
+      rework();
+      const quiet = await finishedRunWith(answer);
+      // The deadlock question's run: dispatched with its verdict channel taken
+      // away (ruling 313), which ruling 316 makes the completion path honour.
+      const { patchRun } = await import("~/server/runtimes/run-store.server");
+      patchRun(store.db, quiet, { verdictWithheld: true });
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: quiet, state: "finished" },
+      );
+
+      /**
+       * CANARY: drop `verdictSilenced` from the fallback guard and the
+       * reviewer's real findings are replaced by a verdict it did not author.
+       */
+      expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toContain(
+        "objection number 1",
+      );
+
+      // And the rest of the path WOULD have done it: the identical completion
+      // on a run whose channel was NOT withheld overwrites the genuine record.
+      rework();
+      const loud = await finishedRunWith(answer);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: loud, state: "finished" },
+      );
+      const overwritten = taskFile().parsed.frontmatter.verdicts.at(-1);
+      expect(overwritten?.result).toBe("request_changes");
+      expect(overwritten?.reason).not.toContain("objection number 1");
     });
 
     /**

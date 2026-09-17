@@ -549,23 +549,26 @@ export async function drainQueuedQuestions(
   // Dynamic, like every other reach into task-actions from this module: the two
   // import each other and a static edge here closes the cycle.
   const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
+  const { REVIEW_DEADLOCK_QUESTION } = await import("./review-deadlock.server");
   const startAgentRun =
     ctx.deps?.startAgentRun ?? (await import("./specialist-run.server")).startAgentRun;
   const opCtx: TaskActionContext = { ...ctx, operatorAuthorized: true };
   for (const question of taken) {
     try {
-      await startAgentRun(
-        db,
-        {
-          projectSlug,
-          taskKey,
-          profileId: question.profileId,
-          directive: question.directive,
-          directiveFrom: question.decidedByLabel,
-        },
-        OPERATOR_TASK_ACTOR,
-        opCtx,
-      );
+      const run: Parameters<typeof startAgentRun>[1] = {
+        projectSlug,
+        taskKey,
+        profileId: question.profileId,
+        directive: question.directive,
+        directiveFrom: question.decidedByLabel,
+      };
+      // Ruling 316: this is ruling 241's DEFERRED half of the same dispatch
+      // `task-actions` makes when the task is not held, and ruling 313 patched
+      // only the immediate one — so a deadlock question put after a hold
+      // cleared kept the verdict channel the immediate one had lost. A queued
+      // question is the same question; it withholds the same way.
+      if (question.directive === REVIEW_DEADLOCK_QUESTION) run.withholdVerdict = true;
+      await startAgentRun(db, run, OPERATOR_TASK_ACTOR, opCtx);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("queued reviewer question could not be put after the release", {

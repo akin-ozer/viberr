@@ -4469,7 +4469,26 @@ export async function applyAgentCompletionEffects(
     // no-verdict NOTE below already reads a question as "a legitimate no-verdict
     // outcome" (pass 24, C-4) — the classifier is its sibling and never learned
     // it, which is this pass's most-found defect shape.
-    if (!verdict && verdictAuthorized && !readNothing && !outcome?.question) {
+    /**
+     * Ruling 316: a run told NOT to judge did not fall silent, so there is
+     * nothing here for the fallback to repair.
+     *
+     * Ruling 313 withheld the verdict TOOL on the deadlock question and stopped
+     * there, which closed nothing: `verdictAuthorized` reads the ENGAGEMENT
+     * snapshot (correctly — a required reviewer whose live grant was removed
+     * must still be able to record), so the prose fallback ran anyway and
+     * manufactured the verdict the tool had just been taken away to prevent.
+     *
+     * Live on SHOP-68 the reviewer said so in words, and viberr wrote the
+     * verdict under its name 70 milliseconds later: "No verdict recorded — the
+     * directive said not to... I deliberately skipped `report_outcome` rather
+     * than omitting it. (Note: last turn the system appears to have derived a
+     * `request_changes` entry from my comment anyway; I can't control that, but
+     * nothing new was authored by me.)" The person answered the same deadlock
+     * packet three times for one question.
+     */
+    const verdictSilenced = getRun(db, finished.id)?.verdict_withheld === 1;
+    if (!verdict && verdictAuthorized && !readNothing && !outcome?.question && !verdictSilenced) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {
         logger.info("agent verdict resolved by prose fallback (no envelope)", {

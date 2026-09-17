@@ -78,6 +78,10 @@ export type AgentRunRow = {
    *  runs carry the task owner, controller turns the asker. Null only on a run
    *  refused before any credential was looked up (an unowned task). */
   credential_user_id: string | null;
+  /** Ruling 316: 1 when this run was dispatched with its verdict channel
+   *  withheld. A reply with no envelope verdict is then an ANSWER, not silence,
+   *  and the prose fallback must not manufacture one over it. */
+  verdict_withheld: number;
   /** Ruling 248 (pass 37, F37-77): 1 when the workspace checkout could not be
    *  provisioned, so this run executed with NO working tree. A run that could
    *  not read the work judges nothing — the completion pipeline closes the
@@ -119,6 +123,9 @@ export interface InsertRunInput {
    *  The rule "a run that spawned a process has a principal" is enforced one
    *  level up, where `StartRunInput`/`ReserveRunInput` require the field. */
   credentialUserId?: string | null;
+  /** Ruling 316: this run was dispatched with its verdict channel withheld, so
+   *  a reply carrying no envelope verdict is an ANSWER, not silence to repair. */
+  verdictWithheld?: boolean;
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
@@ -130,13 +137,15 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
-        interrupted_by, interrupted_reason, credential_user_id, created_at, updated_at)
+        interrupted_by, interrupted_reason, credential_user_id, verdict_withheld,
+        created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
         @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
-        @interruptedBy, @interruptedReason, @credentialUserId, @createdAt, @updatedAt)
+        @interruptedBy, @interruptedReason, @credentialUserId, @verdictWithheld,
+        @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
@@ -151,6 +160,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         interrupted_by=excluded.interrupted_by,
         interrupted_reason=excluded.interrupted_reason,
         credential_user_id=excluded.credential_user_id,
+        verdict_withheld=excluded.verdict_withheld,
         updated_at=excluded.updated_at`,
   ).run({
     id: input.id,
@@ -178,6 +188,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     interruptedBy: input.interruptedBy ?? null,
     interruptedReason: input.interruptedReason ?? null,
     credentialUserId: input.credentialUserId ?? null,
+    verdictWithheld: input.verdictWithheld ? 1 : 0,
     createdAt: now,
     updatedAt: now,
   });
@@ -212,6 +223,9 @@ export interface RunPatch {
   /** See `AgentRunRow.dispatched_by_name` (pass 32, C02-R11). */
   dispatchedByName?: string | null;
   dispatchedByUserId?: string | null;
+  /** Ruling 316: patchable so a test can put a run in the state the deadlock
+   *  dispatch creates without driving the whole dispatch. */
+  verdictWithheld?: boolean;
   /** Ruling 127: the credential principal, patchable like `backend` is — the
    *  start path stamps it onto the row a reservation already inserted, without
    *  re-writing every other column of a run that is already live. */
@@ -247,6 +261,9 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     dispatchedByName: ["dispatched_by_name", patch.dispatchedByName],
     dispatchedByUserId: ["dispatched_by_user_id", patch.dispatchedByUserId],
     credentialUserId: ["credential_user_id", patch.credentialUserId],
+    // Ruling 316: patchable so a test can put a run in the state the deadlock
+    // dispatch creates without driving the whole dispatch.
+    verdictWithheld: ["verdict_withheld", patch.verdictWithheld === undefined ? undefined : patch.verdictWithheld ? 1 : 0],
     noCheckout: ["no_checkout", patch.noCheckout],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 

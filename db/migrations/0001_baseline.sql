@@ -570,6 +570,11 @@ CREATE TABLE "agent_runs" (
   cached_input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
+  -- Ruling 316: this run was dispatched with its VERDICT channel withheld, so a
+  -- reply carrying no envelope verdict is an ANSWER and not silence. The prose
+  -- fallback that manufactures a verdict from a reply must not fire here: the
+  -- reviewer was told not to judge, and obeying is not an omission to repair.
+  verdict_withheld INTEGER NOT NULL DEFAULT 0,
   -- The PERSON who interrupted the run (a users.id), or NULL. Never a
   -- pseudo-actor: a restart is a reason, not a person (pass 35 U35-7).
   interrupted_by TEXT,

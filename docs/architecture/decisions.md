@@ -5122,6 +5122,45 @@ by rewriting those paragraphs:*
 
     (`project.task.tsx`, `task-actions.server.ts`, `task-file.schema.ts`, `decision-packet.tsx`.)
 
+316. **A reviewer told not to judge did not fall silent, so nothing is there to repair (owner,
+    2026-09-17, pass 37; F37-151; completes ruling 313).** Ruling 313 withheld the verdict TOOL on
+    the deadlock question and closed NOTHING. `verdictAuthorized` reads the ENGAGEMENT snapshot —
+    correctly, because a required reviewer whose live grant was removed must still be able to
+    record — so the prose fallback ran anyway and manufactured the exact verdict the tool had just
+    been taken away to prevent.
+    The reviewer said so in words, and viberr wrote the verdict under its name 70 milliseconds
+    later. SHOP-68: *"**No verdict recorded** — the directive said not to... I deliberately skipped
+    `report_outcome` rather than omitting it. (Note: last turn the system appears to have derived a
+    `request_changes` entry from my comment anyway; I can't control that, but nothing new was
+    authored by me.)"* The person answered the same deadlock packet THREE times for one question,
+    taking the recommended option each time.
+    WHAT IT DESTROYS IS THE WORSE HALF. A fabricated verdict does not append a row: verdicts are
+    last-write-wins per `profileId + revisionId`, so it REPLACES the reviewer's real findings for
+    that revision. On SHOP-76 the genuine round-2 verdict — which named a blocking item — was
+    overwritten by a verdict derived from a sentence saying the opposite: the classifier's rule 3
+    fires on any un-negated "fail"/"blocker", and it fired on *"the five prettier-failing markdown
+    files fail identically on the base commit"*, whose whole point is that the failure is
+    PRE-EXISTING and therefore not a finding.
+    The fallback's own comment already states the principle it failed to apply: *"The fallback is
+    for SILENCE, not for overruling an answer. An agent that filled the envelope and ASKED A
+    QUESTION with the verdict field empty has said which of the two it was doing."* A reviewer told
+    not to return a verdict, which then does not, has said which of the two it was doing just as
+    plainly — by obeying.
+    So the RUN remembers. `agent_runs.verdict_withheld` is written at dispatch and read at
+    completion, because the prompt is not the only thing that has to honour the withholding and the
+    dispatch is long gone by then. It needed the `ON CONFLICT` update list as well as the insert —
+    a reserved row is created before the start, so without it the flag was written and immediately
+    overwritten with the default, which is what the third canary caught.
+    RULING 313 ALSO MISSED A DISPATCHER. Ruling 241's queued half (`dependencies.server.ts`) puts
+    the same question when a hold clears, and 313 patched only the immediate path — so a deadlock
+    question deferred behind a dependency kept the channel the immediate one had lost.
+    Residual, recorded and not fixed: rule 3 is a bad classifier. Making the fabrication impossible
+    where it is known to be wrong is a smaller and safer change than tuning a regex that decides
+    whether a judgement exists, but the regex is still deciding that everywhere else.
+
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `dependencies.server.ts`,
+    `run-service.server.ts`, `run-store.server.ts`, `sqlite.server.ts`, `0001_baseline.sql`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
