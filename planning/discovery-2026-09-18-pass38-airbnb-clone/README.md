@@ -32,8 +32,8 @@ Rulings from **347** in `docs/architecture/decisions.md`. Fixes on
 in one turn and its operator drove every task through design, build, review and verify with its
 own deliveries, PRs, verdicts and acceptance ceremonies. Merged so far: PRs #1, #3, #4, #6, #7, #8,
 #9, #10, #11 (BNB-1, 9, 10, 2, 11, 12, 13, 14, 15); goal-1 (Foundation) complete; the contracts
-(goal-2) at link 4 with two decision-created amendments (BNB-15 merged, BNB-17 in review); the
-gateway (BNB-16) building. Rejection 1 (PR #2), rejection 2 (PR #5, mid-review) and the drift on
+(goal-2) at link 4 with two decision-created amendments merged (BNB-15, BNB-17); the gateway
+(BNB-16) in review as PR #13. Rejection 1 (PR #2), rejection 2 (PR #5, mid-review) and the drift on
 PR #4 were exercised for real and recovered through Viberr's own packets and fresh PRs.
 
 **What broke in Viberr, fixed one by one** (rulings 347–361, each with a red-proven test; see
@@ -142,6 +142,7 @@ README change used as a stimulus.
 | 09:22 | BNB-17's PR #12 approved by the code reviewer; Verify next |
 | 09:30 | BNB-17's PR #12 approved by the integration verifier; acceptance recommended for `1fe1996` (the second decision-created amendment, minted at 09:05, acceptable at 09:30) |
 | 09:31 | **BNB-17 accepted by me**: PR #12 merged. Only BNB-16's backend engineer is live now; rulings 360–361 deploy when it is acceptable and held |
+| 09:41 | PR #13 opened for BNB-16 (the gateway, 5 commits; the operator refreshed the branch from main first: 6 commits in, merge `72dfd26`) and Build → Review; the code reviewer dispatched at 09:42. GitHub already says `mergeable_state: unstable` (the billing-blocked CI) — the running build (bad66ba6, pre-360) shows nothing about it, the 360 build will say "checks not readable" |
 
 ## Questions for the owner (saved for the end, as asked)
 
