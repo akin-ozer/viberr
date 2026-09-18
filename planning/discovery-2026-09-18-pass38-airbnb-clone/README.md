@@ -96,3 +96,4 @@ README change used as a stimulus.
 | 08:05 | F38-13: the Controller page's link rows still printed declared waits raw beside done pills → ruling 359 (the list read resolves the states; the row prints 356's sentence), two canaries red |
 | 08:19 | PR #10 opened for BNB-14 (contracts: messaging, reviews, two-sided rules; head `e9577e2`) by the operator's own delivery, then Design → Build → Review in the same drive — the first delivery under ruling 357: no follow-up no-op drive is expected when this drive ends |
 | 08:20 | **Ruling 357 held live**: BNB-14's delivering drive ended with "drive delivered and kept going — no follow-up operator turn owed" and no second operator run started (every earlier delivery had been followed by one); code reviewer running on PR #10 |
+| 08:26 | BNB-14's PR #10 approved by the code reviewer (validation healthy); the operator reacts (Verify next) |
