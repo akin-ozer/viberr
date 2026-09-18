@@ -241,6 +241,7 @@ README change used as a stimulus.
 | 15:33 | BNB-20 re-delivered PR #18 on `62a95cd` (the conflict-resolved head with the widened listings fix). The freed slots went to BNB-23's reviewer and BNB-5's conflict fix, queued since 13:41 — 1 h 52 min in the queue, 100 of them asleep |
 | 15:35 | **Fifth conflict**: BNB-6's delivery-time refresh met `.env.example` again (every chain regenerates it from `stack/`); packet answered — engineer resolves. BNB-23's PR #24 **approved** by the code reviewer at 15:36 |
 | 15:37 | BNB-23 Review → Verify (verifier queued). Three builds hold the slots (BNB-25 wishlists, BNB-5 conflict fix, BNB-27 host onboarding design); three runs queued (BNB-20's and BNB-23's reviewers, BNB-6's conflict fix) |
+| 15:44 | Insights after the burst: 2,576 runs, $2,799.58 instance-wide (the clone's share is most of today's), 2,258 finished / 53 error / 259 stopped / 3 running / 3 queued — every figure equals the projection's; "9 of 9 active tasks have a definite next actor" |
 
 ## Questions for the owner (saved for the end, as asked)
 
