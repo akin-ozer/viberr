@@ -5931,6 +5931,21 @@ by rewriting those paragraphs:*
     this touches.
     (`runs-helpers.ts`, `runs-panels.tsx`, `runs-helpers.test.ts`.)
 
+347. **A tool manifest names each tool the way the model can call it (2026-09-18, pass 38;
+    F38-1).** Ruling 297's manifest listed every tool by its bare registry name and told the
+    controller the description was "one ToolSearch away (`select:<name>`)". The SDK mounts a
+    server tool as `mcp__<server>__<name>` and ToolSearch answers to nothing else, so the
+    instruction failed whenever it was followed literally. Live on the first turn of pass 38:
+    two `select:whoami,list_capabilities,…` searches answered "No matching deferred tools
+    found" before the model guessed the prefix. Measured over the run logs before the fix: 8
+    of the 40 controller runs that searched opened this way (14 wasted calls), and 2 of 12
+    reviewer runs. Nothing was lost and nobody was told anything false, which is why this is
+    LOW; it is fixed because the wrong instruction was Viberr's own sentence, not the model's
+    guess. The manifest now prints the mounted name on every line and the hint says `select:`
+    takes the full name exactly as listed; `mountedToolName` is the one spelling the
+    manifest and the toolkit's allow-list share.
+    (`tool-manifest.server.ts`, `tool-manifest.server.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
