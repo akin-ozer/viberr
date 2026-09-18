@@ -30,25 +30,32 @@ Rulings from **347** in `docs/architecture/decisions.md`. Fixes on
 
 **What stood up.** Viberr's controller planned the Airbnb clone (8 goals, 30 tasks, 6 profiles)
 in one turn and its operator drove every task through design, build, review and verify with its
-own deliveries, PRs, verdicts and acceptance ceremonies. Merged so far: PRs #1, #3, #4, #6, #7, #8,
-#9, #10, #11, #12, #13 (BNB-1, 9, 10, 2, 11, 12, 13, 14, 15, 17, 16); goal-1 (Foundation) and
-goal-2 (contracts and the gateway, with two decision-created amendments) complete. Rejection 1 (PR #2), rejection 2 (PR #5, mid-review) and the drift on
-PR #4 were exercised for real and recovered through Viberr's own packets and fresh PRs.
+own deliveries, PRs, verdicts and acceptance ceremonies. Merged so far: 14 PRs (#1, #3, #4, #6–#16:
+BNB-1, 9, 10, 2, 11, 12, 13, 14, 15, 17, 16, 4, 19, 18); goal-1 (Foundation) and goal-2 (contracts
+and the gateway) complete; BNB-16's merge released four service chains at once (identity,
+listings, booking, web) and the board has run seven PRs in parallel since (#17–#23), with three
+base-refresh conflicts on the derived files every chain regenerates, each resolved through
+Viberr's own conflict packet and the engineer's rework. Rejection 1 (PR #2), rejection 2 (PR #5,
+mid-review) and the drift on PR #4 were exercised for real and recovered through Viberr's own
+packets and fresh PRs; three decision-created amendment tasks (BNB-15, BNB-17, BNB-20) and two
+controller-filed follow-ups (BNB-18, BNB-19) came out of review findings.
 
-**What broke in Viberr, fixed one by one** (rulings 347–361, each with a red-proven test; see
+**What broke in Viberr, fixed one by one** (rulings 347–362, each with a red-proven test; see
 FINDINGS.md): the tool manifest's names (347), the live step (348), queued-vs-working (349), the
 Agent-logs footer (350), the controller guide (351), stage colours (352), the lease gate's
 baseline (353), holds at two packet arms (354), the hold refusal on a dead entry (355) and on a
 done entry (356), the operator's self-triggered no-op drive after its own delivery (357), the
 minute a minted link waited on the task that minted it (358), the Controller page's link waits
 (359), the check-runs read GitHub refuses on this token — 89 merges past a dialog silent about red
-CI (360) — and the inbox naming the Operator as the author of 816 things it never did (361).
+CI (360) — the inbox naming the Operator as the author of 816 things it never did (361), and the
+"Work stalled: pick a recovery path" packet the depth cap opened 0.1 s after a reviewer's approve,
+five times on this instance (362).
 
 **Method.** Two background code sweeps (enforcement claims; one fact on several surfaces) for the
 first nine; then watching the live board through `audit_events`, `agent_runs`, `run_log_lines`
 and `notifications` for the rest, measuring every candidate on the instance before believing it
-and writing down what killed the ones that died (CANDIDATES.md). Live proofs of the shipped
-rulings are in VERIFIED.md.
+and writing down what killed the ones that died (CANDIDATES.md: 16 confirmed, 20 refuted or
+dispositioned). Live proofs of the shipped rulings are in VERIFIED.md.
 
 **Open, for the owner** (saved for the end, as asked): see the questions at the bottom.
 
