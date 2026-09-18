@@ -197,6 +197,53 @@ describe("chained goals", () => {
     expect(row.links).toHaveLength(3);
   });
 
+  /**
+   * Ruling 358 (pass 38, F38-12). A link minted by the completion of the link
+   * it waits on was born held on finished work and sat until the minute tick
+   * (11 of 15 born-held links on the instance, 16–77 s each), its `create`
+   * drive refused with "waits on other work (goal-2 link 2)" — the very task
+   * whose acceptance had minted it.
+   */
+  it("ruling 358: a link minted by the completion of the link it waits on is released at birth, not at the next tick", async () => {
+    // CANARY: drop the `releaseTask` call after the mint (the new task keeps
+    // its list and its "Waits on other work" note until the tick).
+    const { createGoal, getGoalView, reconcileGoal, updateGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Born on finished work",
+        links: [
+          { title: "First", goal: "One. Done when merged." },
+          { title: "Second", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "edit_link", index: 2, blockedBy: [`${chain.goalId} link 1`] } },
+      actor,
+      ctx,
+    );
+    await closeTaskToDone(chain.activeTaskKey!);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    const view = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(view.links[0]!.status).toBe("done");
+    const minted = view.links[1]!.taskKey!;
+    const task = readTaskFile({ projectSlug: SLUG, taskKey: minted, dataRoot: app.dataRoot })!.parsed;
+    // Born with the declared wait on the record …
+    expect(task.timeline.some((e) => e.title === "Waits on other work")).toBe(true);
+    // … and released in the same mint, without any sweep running.
+    expect(task.frontmatter.blockedBy).toEqual([]);
+    expect(task.frontmatter.readiness).not.toBe("blocked");
+    expect(task.timeline.some((e) => e.title === "Dependencies released")).toBe(true);
+  });
+
   it("link 1 completing advances the chain: link 2's task is created under the creator's authority", async () => {
     await closeTaskToDone(firstTask);
     const { reconcileGoal, getGoalView } = await import("./goal-actions.server");

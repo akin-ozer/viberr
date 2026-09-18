@@ -224,3 +224,19 @@ only the 15-minute sweep (ruling 330) would. **Fix:** ruling 152(a)'s shape for 
 the rescue kept — stamps on the drive, judged at its lease release. **Red-proof:** four canaries
 (drop the live-drive arm at the delivery; drop the follow-up from the lease release; drop the
 transition stamp; drop the dispatch stamp), each failing exactly its own test.
+
+## F38-12 — A minted chain link waited a minute on the task that had just minted it (LOW; ruling 358)
+
+**Found by** watching BNB-13's acceptance: BNB-14 (goal-2 link 3) was created at 07:54:45 waiting
+on "goal-2 link 2" — BNB-13 itself, done in the same ceremony — its `create` operator drive was
+refused ("operator run refused — the task waits on other work"), and the minute tick released it
+at 07:55:42, 57 s later. **Measured:** of the 64 hold releases on this instance, 15 were on links
+minted within two minutes of the release; 11 of those waited 16–77 s (the tick), 3 were released
+within 5 s by a favourably timed sweep. Every airbnb link after the first: BNB-10 +48 s, BNB-12
++16 s, BNB-13 +58 s, BNB-14 +57 s. **Refutation tried:** is the wait honest, since the file
+really lists the entry? The entry is done before the task exists; the sweep that should have
+released it ran before the mint; nothing but a timer stood between the task and its operator. A
+person reading the timeline sees "Waits on other work (goal-2 link 2)" and "Dependencies released"
+a minute apart with nothing having happened in between. Kept LOW: a minute per link, no lie, no
+loss. **Fix:** the mint asks the release engine once after the link carries its task. **Red-proof:**
+dropping the call leaves the minted task held with no release note.

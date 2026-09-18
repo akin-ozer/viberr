@@ -92,3 +92,4 @@ README change used as a stimulus.
 | 07:55 | F38-11: every operator delivery on this board was followed by a paid no-op operator drive (its own `delivered` trigger queued behind its own lease; 330 such drives instance-wide) → ruling 357, four canaries red |
 | 07:53 | rulings 356–357 deployed (`a722d4342ff7`, verified by the deploy script) in the quiet window before BNB-13's acceptance |
 | 07:54 | **BNB-13 accepted by me**: the dialog disclosed revision `a1752c4`, merge head `0cb7bff` ("base refreshed · 1 merge commit · 7 base commits · 0 authored commits since review"); the acceptance-time refresh was `already_current`; PR #9 merged (`46c1e15`); goal-2 link 3 minted as BNB-14 (contracts: messaging, reviews, two-sided rules) |
+| 07:55 | BNB-14 was born waiting on goal-2 link 2 (BNB-13, done in the ceremony that minted it); its `create` drive was refused and the minute tick released it 57 s later → F38-12, ruling 358 (release at the mint), canary red |

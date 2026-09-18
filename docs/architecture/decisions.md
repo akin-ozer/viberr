@@ -6130,6 +6130,19 @@ by rewriting those paragraphs:*
     (`task-actions.server.ts`, `specialist-run.server.ts`, `task-mutation.server.ts`,
     `operator-run.server.ts`, and their tests.)
 
+358. **A link born waiting on the work whose completion minted it is released at birth
+    (2026-09-18, pass 38; F38-12).** A chain link's declared wait is copied onto its task at
+    the mint (ruling 131(c)); when the mint is the completion of the very link it waits on,
+    the task is born held on finished work. The completion's release sweep had listed the
+    held tasks before this one existed, so the task sat until the minute tick: 11 of the 15
+    born-held links on this instance waited 16–77 s, and each one's `create` drive was refused
+    meanwhile with "waits on other work (goal-2 link 2)" — the task whose acceptance had just
+    minted it. So the mint asks the release engine once, after the link carries its task
+    (`releaseTask`, the same two halves a person's clear or the tick performs: the release
+    note, the audit row, the notification and the `dependencies-released` operator turn). The
+    engine is convergent, so an unsatisfied or lagging read leaves the tick to do what it
+    always did. (`goal-actions.server.ts` and its test.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

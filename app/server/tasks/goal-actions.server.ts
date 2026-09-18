@@ -37,7 +37,7 @@ import {
   requireProjectMutable,
   type ProjectContext,
 } from "./task-actions.server";
-import { setTaskDependencies, validateDependencyRefs } from "./dependencies.server";
+import { releaseTask, setTaskDependencies, validateDependencyRefs } from "./dependencies.server";
 import { formatDependencyRef, parseDependencyRef } from "~/shared/dependencies";
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
@@ -1061,6 +1061,24 @@ async function startLinkTaskLocked(
     return null;
   }
   rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
+  // Ruling 358 (pass 38, F38-12): a link minted by the completion of the very
+  // link it waits on is born held on finished work. The completion's own
+  // release sweep listed the held tasks before this one existed, so the task
+  // sat until the minute tick: 11 of the 15 born-held links on this instance
+  // waited 16–77 s, the `create` drive refused meanwhile ("waits on other
+  // work (goal-2 link 2)" — the task whose acceptance had just minted it).
+  // Ask the engine once, now that the link carries its task; it is convergent,
+  // so an unsatisfied or lagging read leaves the tick to do what it always did.
+  if (linkInput.blockedBy) {
+    await releaseTask(db, ctx, projectSlug, created.key).catch((error) => {
+      logger.warn("release check after the link's mint failed — the tick will retry", {
+        goalId,
+        linkIndex,
+        taskKey: created.key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  }
   notifyCreator(
     db,
     fm,
