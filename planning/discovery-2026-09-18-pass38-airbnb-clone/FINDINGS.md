@@ -116,3 +116,14 @@ sentence points non-specialists at the error line.
 **Red-proof.** Four new tests; each fails on its own canary (kind gate restored, `sid` ignored,
 one unclassified sentence, `max_budget` arm dropped). Restored: 94 green across the panel and
 helper files.
+
+## F38-5 — The controller's guide told it to push tasks forward with a route that starts nothing (LOW; ruling 351)
+
+**Found by** the lens-1 sweep (#14). The guide's "prefer `comment_on_task` with a clear @operator
+directive" contradicts the tool's own description ("a comment starts no run", ruling 252) and
+the code. **Measured:** 4 of 21 controller comments on the live shopify board were @operator
+directives. **Refutation tried:** does anything read the comment? Only a later run that happens to
+read the timeline; nothing is dispatched by it. Kept LOW: nothing false was told to a person, but
+the product's own instruction sent its agent through a dead door. **Fix:** the sentence, plus the
+outgoing hash in `PRIOR_SHIPPED_HASHES` so the live store converges at boot. **Red-proof:** the
+seed-asset tests pin the hash list shape (16 green); the sentence is prose, pinned by review.

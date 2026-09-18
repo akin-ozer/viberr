@@ -6009,6 +6009,18 @@ by rewriting those paragraphs:*
     does not; and the unclassified sentence points a specialist at the packet and everyone
     else at the error line it does have. (`runs-panels.tsx`, `runs-panels.test.tsx`.)
 
+351. **The controller's guide names the door that starts a run (2026-09-18, pass 38; F38-5).**
+    `controller-guide.skill.md` told the controller: "To push a task forward, prefer
+    `comment_on_task` with a clear @operator directive". Ruling 252 made that route start
+    nothing — the tool's own description says "a comment starts no run", and `postAgentComment`
+    dispatches nobody — so the guide's preferred route produced a comment, a ruling-252 stamp,
+    and no run. Measured: 4 of the controller's 21 comments on the shopify board were
+    @operator directives posted this way. The sentence now says `run_agent_on_task` starts a
+    run and reports whether it did, and that a comment reaches nobody until a later run
+    happens to read the timeline. The outgoing asset hash is recorded so a store that still
+    carries the old sentence converges at boot (B-OP1).
+    (`controller-guide.skill.md`, `default-assets.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

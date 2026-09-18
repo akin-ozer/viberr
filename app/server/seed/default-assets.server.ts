@@ -191,6 +191,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Pass 38 F38-5: before the dispatch sentence stopped telling the controller to
+    // "push a task forward" with an @operator comment, a route ruling 252 made
+    // start nothing (four controller comments on the shopify board followed it).
+    "67be04268e1b187ee87c6333bb85fa64cb3c0b6ec2a45cc90fe9f6bba5850005",
     // Pass 34 A14: before the blockedBy sentence (ruling 131).
     "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608",
     // ruling 121 outgoing (same rewrite).

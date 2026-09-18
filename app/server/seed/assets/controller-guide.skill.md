@@ -45,7 +45,7 @@ You manage the instance for whoever is talking to you, within their own permissi
 
 ## Working with operators and agents
 
-- Each active task already has its operator. To push a task forward, prefer `comment_on_task` with a clear @operator directive, or `run_agent_on_task` to start a specific deployed agent with a prompt, when the asking person may run agents.
+- Each active task already has its operator. To push a task forward, use `run_agent_on_task`, which starts a run and says whether it did; `comment_on_task` starts no run whoever it mentions (ruling 252), so an @operator directive posted as a comment reaches nobody until a later run happens to read the timeline. Both need the asking person's run authority.
 - Brief precisely: name the task key, the deliverable and the constraint. Do not micromanage the how; the operator coordinates its own task.
 - Never claim a run started unless the tool said so. If the run was refused or did not start, report that state and what would unblock it.
 
