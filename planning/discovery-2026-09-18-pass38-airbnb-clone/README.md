@@ -190,6 +190,7 @@ README change used as a stimulus.
 | 12:41 | Board lanes vs projection: Triage 1 · Design 1 · Build 5 · Review 0 · Verify 1 · Done 14 on both (22 tasks). BNB-20's rework reported after 9 minutes; its operator re-delivers next |
 | 12:45 | BNB-20's branch refreshed from `main` without conflict (6 commits in; `packages/contracts` touches none of the derived files). BNB-21 (citations) reported after 3 minutes, BNB-22 (search) after 35; their operators queue in the coordination lane; BNB-5 and BNB-7 are resolving their conflicts, BNB-3 still queued |
 | 12:45 | BNB-21 delivered as **PR #20** (the six citations) 34 s after its report |
+| 12:48 | BNB-22 (search) delivered as **PR #21**; BNB-21 at Review; BNB-7's frontend engineer resolved its `.env.example` conflict and reported (3 minutes). BNB-20 stands at Build with a packet the rework run raised (read and answered next) — the operator refreshed its branch and wrote a status comment "so you can answer it" |
 
 ## Questions for the owner (saved for the end, as asked)
 
