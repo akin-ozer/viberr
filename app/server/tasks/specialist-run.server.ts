@@ -2266,6 +2266,9 @@ async function dispatchAgentRun(
     // Ruling 133: why the run was admitted at this stage.
     stageEligibility,
   };
+  // Ruling 357: a dispatch after the operator drive's own delivery is the
+  // drive acting on it; the lease release then owes no `delivered` follow-up.
+  if (ctx.operatorRun?.deliveredHeadMoved) ctx.operatorRun.actedAfterDelivery = true;
   recordAudit(db, {
     // ONE action id for every engaged agent (the former
     // task.specialist.run_started / task.reviewer.run_started split);

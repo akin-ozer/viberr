@@ -96,6 +96,17 @@ export interface TaskMutationContext {
      * the settle-time backstop needs to tell them apart.
      */
     planWhollyRefused?: boolean;
+    /**
+     * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
+     * PR or moved its head under full autonomy — the event that used to queue
+     * a `delivered` operator turn behind this very drive's lease. The drive
+     * continues on its own turn, so the follow-up is owed only if it stops
+     * without acting on the delivery; the lease release reads both stamps.
+     */
+    deliveredHeadMoved?: boolean;
+    /** Ruling 357: a transition or a dispatch this drive made AFTER its
+     *  delivery — the drive acted on it, and no follow-up turn is owed. */
+    actedAfterDelivery?: boolean;
   };
 }
 

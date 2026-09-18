@@ -6108,6 +6108,28 @@ by rewriting those paragraphs:*
     (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `execution-profile.tsx`,
     `task-side-panels.tsx`, `schedule.server.ts`, `operator-run.server.ts`, and their tests.)
 
+357. **A drive's own delivery owes a follow-up turn only if the drive stopped there
+    (2026-09-18, pass 38; F38-11).** Ruling 134(b) re-queues the operator when a delivery
+    opens the review PR or moves its head under full autonomy — a new review subject. When
+    the delivery was the operator drive's own `deliver_for_review`, that `delivered` trigger
+    queued behind the drive's own lease and fired at its release: a whole drive that read
+    `get_task`, said "the required reviewer's run is already in flight", and ended — 140 of
+    the 148 deliveries made inside a drive on this instance, 13 of 13 on the airbnb board
+    (every PR it opened), ~$0.15 and ~15 s each; 330 such two-turn drives instance-wide, each
+    holding the coordination lane (ruling 152(b)) while a real drive of another task parked
+    behind one (06:52:17, BNB-2). The other 8 drives stopped right after delivering and the
+    follow-up was what moved them — and ruling 202 makes a delivery count as progress, so the
+    stranded backstop would not have nudged them; only the 15-minute sweep would. So the
+    trigger is not dropped but judged: ruling 152(a)'s shape for a move, applied to a delivery.
+    The delivery stamps the drive (`deliveredHeadMoved`); a transition or a dispatch the same
+    drive makes afterwards stamps `actedAfterDelivery`; and the lease release fires the
+    `delivered` follow-up (`deliveredFollowUpFor`, depth threaded on as before) only when the
+    first stamp stands without the second, filling the machine slot only when it is empty so
+    a queued human question still goes first. A delivery by anyone else re-queues at once, as
+    before.
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `task-mutation.server.ts`,
+    `operator-run.server.ts`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

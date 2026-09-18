@@ -1,3 +1,4 @@
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import {
   existsSync,
   mkdirSync,
@@ -852,6 +853,25 @@ describe("startSpecialistRun", () => {
       status: 400,
       message: expect.stringContaining("VIB-1 waits on VIB-2 (VIB-3 is done) and Viberr is holding it"),
     });
+  });
+
+  it("ruling 357: a dispatch after the operator drive's own delivery stamps `actedAfterDelivery`", async () => {
+    // CANARY: drop the stamp before the run_started audit.
+    await assign();
+    const operatorRun: NonNullable<TaskMutationContext["operatorRun"]> = {
+      backend: "claude",
+      autonomy: "full",
+      reactDepth: 0,
+      deliveredHeadMoved: true,
+    };
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, operatorRun },
+    );
+    expect(result.runId).toBeTruthy();
+    expect(operatorRun.actedAfterDelivery).toBe(true);
   });
 
 

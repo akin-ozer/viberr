@@ -1,3 +1,4 @@
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
@@ -4683,6 +4684,43 @@ describe("pass 35: operator and task actions", () => {
       ]);
       expect(direct.runOperator).toHaveBeenCalledTimes(1);
       expect(direct.runOperator.mock.calls[0]![1].trigger).toBe("transition");
+    });
+
+    it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
+      // CANARY: drop the stamp from the `ctx.operatorRun` arm.
+      const store = prepared();
+      deployOperator(store);
+      seed(store, { stage: "ready" });
+      const delivered: NonNullable<TaskMutationContext["operatorRun"]> = {
+        backend: "claude",
+        autonomy: "full",
+        reactDepth: 0,
+        transitionDepth: 0,
+        deliveredHeadMoved: true,
+      };
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true, operatorRun: delivered },
+      );
+      expect(file(store).frontmatter.stage).toBe("impl");
+      expect(delivered.actedAfterDelivery).toBe(true);
+
+      seed(store, { stage: "ready" });
+      const plain: NonNullable<TaskMutationContext["operatorRun"]> = {
+        backend: "claude",
+        autonomy: "full",
+        reactDepth: 0,
+        transitionDepth: 0,
+      };
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true, operatorRun: plain },
+      );
+      expect(plain.actedAfterDelivery).toBeUndefined();
     });
   });
 

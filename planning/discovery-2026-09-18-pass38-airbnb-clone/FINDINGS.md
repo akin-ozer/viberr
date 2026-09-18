@@ -201,3 +201,26 @@ nothing lost; one surface contradicts another on the same page and at the contro
 feeds the refusal, the note, the hero line and both skipped-schedule notes; the server doors pass
 resolved entries. **Red-proof:** dropping the done split fails 8 tests across the shared, client
 and server layers; handing the server door all-open states fails the two door tests.
+
+## F38-11 — The operator paid a whole turn to learn what it had just done (LOW-MEDIUM; ruling 357)
+
+**Found by** watching BNB-13's delivery live: one drive refreshed the branch, delivered PR #9,
+moved Design → Build → Review and engaged the code reviewer; 0.1 s after it ended a second
+operator drive started, called `get_task`, wrote "the required reviewer's run is already in
+flight" and ended (13 s, $0.15). The app log named the cause: "operator lease released — firing
+the queued trigger … trigger: delivered". **Measured:** 330 of the 1,399 finished operator drives
+on this instance ended within 2 turns and 30 s, every one of them calling nothing but `get_task`
+(114 calls, 0 mutations), 109 minutes of drive time, $18.49; 148 deliveries were made inside an
+operator drive, 140 of which the same drive followed with a transition or a dispatch (the queued
+turn was waste) and 8 of which the drive stopped after (the queued turn did the move); 11 of the
+12 queued triggers fired since the container's boot were `delivered`; at 06:52:17 a real
+coordination drive parked behind the concurrency cap while such a no-op held the lane.
+**Refutation tried:** is the second drive the react chain working as designed? Ruling 152(a)
+already settled that a live drive's own move queues no turn "because the turn continues on its
+own", and the delivery tool's reply names the PR — the same drive moved the task 140 times out
+of 148. Is dropping it safe, then? Not simply: the 8 stopped drives were rescued by it, and
+ruling 202 makes a delivery count as progress, so the stranded backstop would not nudge them;
+only the 15-minute sweep (ruling 330) would. **Fix:** ruling 152(a)'s shape for deliveries with
+the rescue kept — stamps on the drive, judged at its lease release. **Red-proof:** four canaries
+(drop the live-drive arm at the delivery; drop the follow-up from the lease release; drop the
+transition stamp; drop the dispatch stamp), each failing exactly its own test.

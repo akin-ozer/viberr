@@ -6620,6 +6620,9 @@ export async function transitionStage(
       // moves still re-trigger below. The stamp lets the settle-time backstop
       // judge the stage this drive left the task at (`maybeResumeStrandedOperator`).
       ctx.operatorRun.movedToStageId = input.toStageId;
+      // Ruling 357: a move after this drive's own delivery is the drive acting
+      // on it; the lease release then owes no `delivered` follow-up.
+      if (ctx.operatorRun.deliveredHeadMoved) ctx.operatorRun.actedAfterDelivery = true;
     } else {
       const byHuman = ctx.operatorAuthorized
         ? null
@@ -6851,7 +6854,8 @@ export type DeliveryOutcome =
        *  that pushed nothing is `false`, and re-queues nothing (ruling 48). */
       moved: boolean;
       /** Ruling 134(b): a `delivered` operator run was queued for this outcome
-       *  (full autonomy, moved head). */
+       *  (full autonomy, moved head). Ruling 357: false for a delivery made by
+       *  a live operator drive — its own lease release decides the follow-up. */
       operatorRequeued: boolean;
     }
   /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
@@ -7557,7 +7561,22 @@ export async function performDelivery(
       if (autonomy === "full") {
         // Ruling 48 as amended by ruling 134(b): a newly opened PR, OR a head
         // the push moved, is a new review subject and re-queues the operator.
-        if (moved) {
+        if (moved && ctx.operatorRun) {
+          // Ruling 357 (pass 38, F38-11): the drive that delivered IS the
+          // drive that would be re-queued. Its turn continues on its own (the
+          // tool reply names the PR, the prompt says to move the task and
+          // engage the reviewer), so queuing a `delivered` turn behind its own
+          // lease paid a whole drive for one `get_task` and "the reviewer is
+          // already in flight": 140 of the 148 deliveries made inside a drive
+          // on the instance, 13 of 13 on the airbnb board, ~$0.15 and the
+          // coordination lane for ~15 s each, while a real drive of another
+          // task parked behind it. The other 8 drives stopped right after
+          // delivering, and the follow-up did the move. So the stamp defers
+          // the decision to the lease release, which fires the follow-up only
+          // when the drive stopped without moving or dispatching
+          // (`deliveredFollowUpFor`), exactly as ruling 152(a) did for a move.
+          ctx.operatorRun.deliveredHeadMoved = true;
+        } else if (moved) {
           operatorRequeued = true;
           void autoInvokeOperator(
             db,

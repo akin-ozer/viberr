@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -184,6 +185,31 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
       taskKey: "VIB-1",
       trigger: "delivered",
     });
+  });
+
+  it("C. ruling 357: a LIVE operator drive's own delivery queues no turn; it stamps the drive instead", async () => {
+    // CANARY: drop the `ctx.operatorRun` arm before the re-queue (the seam
+    // fires once and the stamp is missing).
+    deployOperator("full");
+    seedTask();
+    const operatorRun: NonNullable<TaskMutationContext["operatorRun"]> = {
+      backend: "claude",
+      autonomy: "full",
+      reactDepth: 0,
+      transitionDepth: 0,
+    };
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, operatorAuthorized: true, operatorRun, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+    expect(outcome).toMatchObject({ status: "delivered", moved: true, operatorRequeued: false });
+    await flush();
+    expect(runOp).not.toHaveBeenCalled();
+    expect(operatorRun.deliveredHeadMoved).toBe(true);
+    expect(operatorRun.actedAfterDelivery).toBeUndefined();
   });
 
   it("B. supervised does NOT re-trigger — but LEAVES an actionable next step (R19-4)", async () => {
