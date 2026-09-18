@@ -229,6 +229,7 @@ README change used as a stimulus.
 | 13:31 | Measured: 56 creation notes on the instance, 4 named a task already Done at creation (SHOP-46, SHOP-61, SHOP-69, BNB-26) — the writer joins the raw labels (`task-actions.server.ts:783`); fixed next as 356(b). BNB-25's operator opened a triage packet (three wishlist bullets collide with the frozen contract: no rename shape, unavailability by omission, `apps/web` not owned) — re-scope to what the contract supports (recommended, `edit_goal`); answered with it |
 | 13:32 | BNB-25's re-scoped goal saved from the 3,209-char draft (rename out of scope, unavailability as the contract expresses it). **Fourth conflict**: `bnb-20` vs `main` on `services/listings/src/repo/rows.ts` — the first content conflict inside a service rather than a derived file (BNB-20's widened listings fix meets BNB-4's merged listings); blocked packet opened, architect resolves (recommended) |
 | 13:33 | Answered BNB-20's conflict packet (architect resolves, queued); BNB-25 Triage → Build on the re-scoped goal (engineer queued). **Ruling 356(b)** written, red-proven (raw join → "VIB-1, VIB-2") and committed as `3d87e197`; deploys when at most two tasks have live runs (five do now) |
+| 13:35 | BNB-5's PR #19 **approved by the integration verifier** — the night ledger, the product's defining invariant (one transaction, one primary key, 20 concurrent holds → one winner), acceptable after a design packet, a widening, a conflict and a re-review; accepted next |
 
 ## Questions for the owner (saved for the end, as asked)
 
