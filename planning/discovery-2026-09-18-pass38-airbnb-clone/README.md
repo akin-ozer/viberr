@@ -255,6 +255,7 @@ README change used as a stimulus.
 | 16:12 | BNB-25's card was the engineer's: a second account is refused a wishlist with 404, not the 403 the done signal asked for, because the frozen routes are all `/me/wishlists/…` and a 403 would disclose that a stranger owns a list by that name; recommended: keep the 404 and amend the done-signal line. Answered with it. BNB-6 re-delivered PR #22 on `06fa1e2`; BNB-27's engineer reported after 25 minutes |
 | 16:12 | BNB-20's PR #18 **approved by the integration verifier** on `62a95cd` — the timezone amendment with its widened listings fix is acceptable after two reworks and a conflict; accepted next. BNB-27's engineer build re-delivered PR #25 on `4ada7e8`; BNB-6 at Review with the code reviewer dispatched; BNB-25's engineer re-engaged to amend the done-signal line |
 | 16:15 | **BNB-20 accepted by me**: refresh brought 4 commits in (merge `f5b4c1d`), PR #18 merged (`f6e83f3`) — the third decision-created amendment lands with the listings fix that keeps `main` green. 20 PRs merged today; four tasks in flight (BNB-5 re-review, BNB-6 review, BNB-27 build → review, BNB-25 amending) |
+| 16:16 | BNB-25's engineer amended the done-signal line (the 404 is the contract's consequence) and reported in 4 minutes; its operator moves it on. BNB-27's engineer building the gateway auth edge on the widened paths |
 
 ## Questions for the owner (saved for the end, as asked)
 
