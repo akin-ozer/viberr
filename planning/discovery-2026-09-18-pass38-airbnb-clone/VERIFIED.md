@@ -126,7 +126,10 @@ tick with its `create` drive refused.
 - The task page's PR card shows "checks not readable" (`data-checks-unread`); the GitHub page's
   PR list shows it on #13; the credential card carries the advisory naming BNB-16 ("Grant it on
   GitHub, then Re-check the credential").
-- The accept dialog's note: checked at BNB-16's acceptance (below).
+- The accept dialog at BNB-16's acceptance (10:33Z): Merges row "PR #13 · in review → main ·
+  checks not readable — GitHub refused this credential's read of the check results (HTTP 403):
+  Resource not accessible by personal access token" (`data-checks-unread`), above the Branch,
+  Revision and Verdict rows; the merge proceeded (checks are not a gate, ruling 304).
 
 ## Ruling 361 — live (deployed ae3a01d3 at 10:10Z)
 

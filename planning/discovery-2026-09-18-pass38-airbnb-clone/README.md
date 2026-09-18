@@ -31,9 +31,8 @@ Rulings from **347** in `docs/architecture/decisions.md`. Fixes on
 **What stood up.** Viberr's controller planned the Airbnb clone (8 goals, 30 tasks, 6 profiles)
 in one turn and its operator drove every task through design, build, review and verify with its
 own deliveries, PRs, verdicts and acceptance ceremonies. Merged so far: PRs #1, #3, #4, #6, #7, #8,
-#9, #10, #11 (BNB-1, 9, 10, 2, 11, 12, 13, 14, 15); goal-1 (Foundation) complete; the contracts
-(goal-2) at link 4 with two decision-created amendments merged (BNB-15, BNB-17); the gateway
-(BNB-16) in review as PR #13. Rejection 1 (PR #2), rejection 2 (PR #5, mid-review) and the drift on
+#9, #10, #11, #12, #13 (BNB-1, 9, 10, 2, 11, 12, 13, 14, 15, 17, 16); goal-1 (Foundation) and
+goal-2 (contracts and the gateway, with two decision-created amendments) complete. Rejection 1 (PR #2), rejection 2 (PR #5, mid-review) and the drift on
 PR #4 were exercised for real and recovered through Viberr's own packets and fresh PRs.
 
 **What broke in Viberr, fixed one by one** (rulings 347–361, each with a red-proven test; see
@@ -152,6 +151,7 @@ README change used as a stimulus.
 | 10:22 | The operator moved BNB-16 Review → Verify 19 s after the answer ("Code review passed") and dispatched the integration verifier on `70f92db`. Lens-2 probe refuted: the Live-run panel's "ELAPSED 00:00" seen at 10:04 was the server-rendered first paint; after hydration it read 00:35 for a run 35 s old |
 | 10:30 | BNB-16 **approved by the integration verifier** on `70f92db` (validation healthy). **Ruling 361 live:** the "Review passed" notification (row 2386) names `agent · BNB Integration Verifier`, where every earlier verdict row named the Operator |
 | 10:31 | The operator recommended acceptance for `70f92db` 59 s after the verdict (no depth-cap packet this time: the packet answer had restarted the chain). Full unit suite on the 362 head: 7,076 green |
+| 10:33 | **BNB-16 accepted by me**: PR #13 merged (`151f035`), the gateway is in; goal-2 (contracts and the gateway) complete, 4 of 4 links. **Ruling 360 on the accept dialog:** the Merges row read "PR #13 · in review → main · checks not readable — GitHub refused this credential's read of the check results (HTTP 403): Resource not accessible by personal access token", the first of the clone's 12 merges to say so |
 
 ## Questions for the owner (saved for the end, as asked)
 
