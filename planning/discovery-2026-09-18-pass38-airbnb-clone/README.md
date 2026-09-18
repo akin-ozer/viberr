@@ -192,6 +192,7 @@ README change used as a stimulus.
 | 12:45 | BNB-21 delivered as **PR #20** (the six citations) 34 s after its report |
 | 12:48 | BNB-22 (search) delivered as **PR #21**; BNB-21 at Review; BNB-7's frontend engineer resolved its `.env.example` conflict and reported (3 minutes). BNB-20 stands at Build with a packet the rework run raised (read and answered next) — the operator refreshed its branch and wrote a status comment "so you can answer it" |
 | 12:49 | BNB-7 re-delivered PR #17 on the conflict-resolved head `e6f8024` (the old approvals sat on `6dd81ce`; ruling 11 of the clone makes approval per-revision, so the operator re-reviews). BNB-20's packet is the architect's question: on the merged base the listings service no longer satisfies the amended contract (21 of 73 tests red), who lands the follow-up — a new listings task with a red window on `main` (recommended), widen BNB-20 to `services/listings/**`, or hold until a follow-up merges. **Deviating from the recommendation** for the clone's sake: a red `make test` on `main` would fail every in-flight review (four PRs gate on it), so I chose the widening with an explicit note |
+| 12:52 | BNB-20's packet answered (widen to `services/listings/**`, no red window); its architect re-engaged and queued. BNB-6's messaging service reported after 27 minutes; BNB-21's reviewer running, BNB-22's and BNB-7's queued |
 
 ## Questions for the owner (saved for the end, as asked)
 
