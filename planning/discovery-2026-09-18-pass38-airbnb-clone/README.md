@@ -178,6 +178,7 @@ README change used as a stimulus.
 | 12:08 | BNB-4's merge released BNB-6 (messaging) and completed goal-4 link 1, whose successor **BNB-22** (Search) was minted at 12:08:19.045 and released at 12:08:19.095 — **ruling 358 live**, 50 ms from mint to release where the same shape waited 57 s on BNB-14 this morning. BNB-5 delivered the night ledger as **PR #19** at 12:09 |
 | 12:09 | **BNB-19 accepted by me**: PR #15 merged (`4feeea3`), the decision-record renaming is in; BNB-21 (citations) released 1.3 s after the merge. Merged so far today: 13 PRs |
 | 12:14 | BNB-22 (Search) Triage → Design → Build in 22 s with its engineer queued; BNB-6 (messaging) at Design; BNB-20's PR #18 got **request_changes** from the code reviewer (the day's second rework), its operator queued behind BNB-5's in the coordination lane. Nine rows live or queued |
+| 12:16 | BNB-18's PR #16 **approved by the integration verifier** (packages/http: typed `details` preserved through the gateway, parent-span header settled); acceptable, accepted next without waiting for the queued operator turn |
 
 ## Questions for the owner (saved for the end, as asked)
 
