@@ -144,6 +144,7 @@ README change used as a stimulus.
 | 09:31 | **BNB-17 accepted by me**: PR #12 merged. Only BNB-16's backend engineer is live now; rulings 360–361 deploy when it is acceptable and held |
 | 09:41 | PR #13 opened for BNB-16 (the gateway, 5 commits; the operator refreshed the branch from main first: 6 commits in, merge `72dfd26`) and Build → Review; the code reviewer dispatched at 09:42. GitHub already says `mergeable_state: unstable` (the billing-blocked CI) — the running build (bad66ba6, pre-360) shows nothing about it, the 360 build will say "checks not readable" |
 | 09:51 | BNB-16's PR #13: **request_changes** by the code reviewer, one blocking finding (an unguarded `decodeURIComponent` in the route matcher turns a malformed URL into a 500 where three documents promise a typed 400; reproduced twice), everything else verified live (789 tests, the strip and the limiter probed with curl). The operator re-prompted the backend engineer in place at 09:53 ("fix the blocking item, make the one truth correction, and nothing else") and parked two cross-package findings for a single decision after the rework |
+| 10:02 | BNB-16's rework delivered on PR #13 (head `70f92db`, nine minutes after the re-prompt); the operator then called `update_branch_from_base` — after the delivery this time, before it at 09:41 — so the reviewer's pinned head is the thing to compare across surfaces |
 
 ## Questions for the owner (saved for the end, as asked)
 
