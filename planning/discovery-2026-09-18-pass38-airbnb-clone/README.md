@@ -250,6 +250,7 @@ README change used as a stimulus.
 | 16:02 | BNB-23's PR #24 **approved by the integration verifier** (the last four citations); acceptable, accepted next. BNB-27's question answered (widen to the gateway auth edge) |
 | 16:04 | **BNB-23 accepted by me**: PR #24 merged (`3528be9`), the last stale citations gone; 19 PRs merged today. Open: #18 (BNB-20 at Verify), #19 (BNB-5, conflict fix running), #22 (BNB-6, conflict fix running), #25 (BNB-27, widened, engineer next), #26 (BNB-25, review next) |
 | 16:06 | BNB-5's engineer resolved the acceptance-time conflict (`.env.example` re-derived after merging `main` in) and reported; the operator re-delivers and both verdicts are owed again on the new head. BNB-27's engineer started on the widened goal |
+| 16:07 | BNB-5 re-delivered PR #19 on `c4a8517`; the night ledger goes round Review and Verify a third time — approval is per revision (the clone's rule 11), which the acceptance-time refresh made necessary |
 
 ## Questions for the owner (saved for the end, as asked)
 
