@@ -181,6 +181,7 @@ README change used as a stimulus.
 | 12:16 | BNB-18's PR #16 **approved by the integration verifier** (packages/http: typed `details` preserved through the gateway, parent-span header settled); acceptable, accepted next without waiting for the queued operator turn |
 | 12:18 | BNB-20's operator moved it Review → Build (manual boundary) for the rework and re-prompted the engineer (queued); the code reviewer's one blocker was a doc-accuracy sentence, everything else green (527 contract tests) |
 | 12:19 | **BNB-18 accepted by me**: acceptance-time base refresh brought 7 commits of `main` into `bnb-18` (merge `7104f4e`, ruling 162), then PR #16 merged (`dc69adb`). BNB-21 released a second time (its operator had added BNB-18 to what it waits on, as its goal asked). 14 PRs merged today |
+| 12:14 | **The predicted collision**: BNB-5's operator refreshed `bnb-5` from `main` before engaging a reviewer (7 commits behind after BNB-4's merge) and hit a **conflict** on `.env.example` and three gateway test files (`composition.test.ts`, `stack-service-contract.test.mjs`, `support/gateway.ts`) — the files BNB-4's, BNB-3's and BNB-5's widened path sets all touch. The operator wrote "No agent should touch this — it needs you" and left it with the open card; the policy engine's own note says the right thing ("merge the base INTO it — never by rebasing — then re-review, or archive"). BNB-21 Triage → Build at 12:20. BNB-7's PR #17 **approved by the integration verifier** at 12:25 |
 
 ## Questions for the owner (saved for the end, as asked)
 
