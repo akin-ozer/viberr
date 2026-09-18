@@ -202,6 +202,8 @@ feeds the refusal, the note, the hero line and both skipped-schedule notes; the 
 resolved entries. **Red-proof:** dropping the done split fails 8 tests across the shared, client
 and server layers; handing the server door all-open states fails the two door tests.
 
+**(b), 13:28Z:** the creation note was one more surface — "Created waiting on BNB-5, BNB-22" on BNB-26 with BNB-22 closed 95 s before the mint; 4 of the instance's 56 creation notes had named a Done task. The note now reads the entries' states like the other five surfaces (ruling 356(b)); canary: join the raw labels again.
+
 ## F38-11 — The operator paid a whole turn to learn what it had just done (LOW-MEDIUM; ruling 357)
 
 **Found by** watching BNB-13's delivery live: one drive refreshed the branch, delivered PR #9,

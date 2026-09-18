@@ -321,6 +321,23 @@ describe("createTask", () => {
     expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
     expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
+    // Ruling 356(b): a done entry is named as done in the creation note too.
+    // Live on BNB-26: "Created waiting on BNB-5, BNB-22" with BNB-22 closed
+    // 95 s before the mint — the fourth such note on the instance.
+    // CANARY: join the raw labels again and the note reads "VIB-1, VIB-2".
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done", title: "Already done" }),
+      goal: "A finished dependency.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Waits on one done and one open", blockedBy: ["VIB-1", "VIB-2"] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const mixed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-101", dataRoot: store.dataRoot })!.parsed;
+    expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 (VIB-2 is done)");
 
     /**
      * Ruling 255 (pass 37, F37-84): one creation is one instant.

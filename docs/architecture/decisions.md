@@ -6108,6 +6108,8 @@ by rewriting those paragraphs:*
     (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `execution-profile.tsx`,
     `task-side-panels.tsx`, `schedule.server.ts`, `operator-run.server.ts`, and their tests.)
 
+    (b) The creation note is one more of those surfaces (pass 38, 2026-09-18 13:28Z). `createTask` wrote "Created waiting on " + the raw labels; live on BNB-26 it read "Created waiting on BNB-5, BNB-22. Held until every entry is done" with BNB-22 closed 95 s before the mint, and 4 of the instance's 56 creation notes had named a task already Done. The note now reads the entries' states through `holdEntriesSentence(resolveDependencies(…))` like the refusal, the hero and the skipped-schedule notes: "Created waiting on BNB-5 (BNB-22 is done)". Test: `task-actions.server.test.ts` ruling-131 creation case, extended with a done entry. Canary: join the raw labels again.
+
 357. **A drive's own delivery owes a follow-up turn only if the drive stopped there
     (2026-09-18, pass 38; F38-11).** Ruling 134(b) re-queues the operator when a delivery
     opens the review PR or moves its head under full autonomy — a new review subject. When

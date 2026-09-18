@@ -1,4 +1,4 @@
-import { holdRefusalFor } from "~/server/projections/dependencies.server";
+import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
@@ -90,7 +90,7 @@ import {
   setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
-import type { DependencyReleasePayload } from "~/shared/dependencies";
+import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -780,7 +780,11 @@ export async function createTask(
       type: "note",
       actor: creator ? humanActorRef(db, creator) : { kind: "operator" },
       title: "Waits on other work",
-      text: `Created waiting on ${blockedBy.join(", ")}. Held until every entry is done; Viberr releases it then.`,
+      // Ruling 356(b): the note names a done entry as done, like every other
+      // hold sentence — 4 of 56 creation notes on the instance had named a task
+      // that was already Done at creation (BNB-26: "waiting on BNB-5, BNB-22"
+      // with BNB-22 closed 95 s earlier).
+      text: `Created waiting on ${holdEntriesSentence(resolveDependencies(db, input.projectSlug, blockedBy))}. Held until every entry is done; Viberr releases it then.`,
       toAgent: false,
       evidence: null,
     };
