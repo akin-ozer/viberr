@@ -51,3 +51,4 @@ FINDINGS.md with a number.
 | Notifications | bell 43 · page "43 unread" · DB 43 unread of 502 | agree |
 | Home | "1 run active across 1 project, 0 decisions waiting" vs 1 running run, 0 packets | agree |
 | Goal completion | `goal.completed` audit row + "Goal completed: every link is settled" notification to the creator; the Controller page marks goal-1 completed | agree (no activity-feed line, by design: the feed is task events) |
+| Agents page (09:00Z) | "2 agent threads with a run in flight", Platform Architect · 1, Code Reviewer · 1, Operator idle · engaged on 2 tasks vs `agent_runs`: 2 running (architect on BNB-16, code reviewer on BNB-15), 0 operator runs live, 2 operator deployments on call | agree |
