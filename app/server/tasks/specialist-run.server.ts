@@ -35,7 +35,7 @@ import {
   cachedToolchain,
   shellInventoryPrompt,
 } from "~/server/ops/toolchain.server";
-import { holdRefusal } from "~/shared/dependencies";
+import { holdRefusalFor } from "~/server/projections/dependencies.server";
 import {
   resolveDeclaredStages,
   stageEligible,
@@ -1161,7 +1161,7 @@ async function dispatchAgentRun(
     const held = existing.parsed.frontmatter.blockedBy;
     if (held.length > 0) {
       throw AppError.validation(
-        holdRefusal(input.taskKey, held, "running an agent on it"),
+        holdRefusalFor(db, input.projectSlug, input.taskKey, held, "running an agent on it"),
       );
     }
   }
@@ -4341,6 +4341,7 @@ export function runEligibilityFor(
  * through, exactly as the dispatch's undeployed catch does.
  */
 export function assertResumeEligible(
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -4374,7 +4375,9 @@ export function assertResumeEligible(
     }
     const held = existing.parsed.frontmatter.blockedBy;
     if (held.length > 0) {
-      throw AppError.validation(holdRefusal(taskKey, held, "resuming an agent on it"));
+      throw AppError.validation(
+        holdRefusalFor(db, projectSlug, taskKey, held, "resuming an agent on it"),
+      );
     }
   }
   let resolved: ResolvedSpecialist | null = null;

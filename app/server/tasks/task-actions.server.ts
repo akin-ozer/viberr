@@ -1,4 +1,4 @@
-import { holdRefusal } from "~/shared/dependencies";
+import { holdRefusalFor } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
@@ -2089,7 +2089,7 @@ export async function commentToAgent(
     // success (comment posted, `runNotStarted` names the refusal) while the
     // engaged deliverer resumes anywhere.
     const { assertResumeEligible } = await import("./specialist-run.server");
-    assertResumeEligible(ctx, input.projectSlug, input.taskKey, target.profileId);
+    assertResumeEligible(db, ctx, input.projectSlug, input.taskKey, target.profileId);
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context. P8 (pass 25): a supporting agent
     //     resumes into its OWN isolated checkout, never the delivering tree.
@@ -7016,7 +7016,7 @@ export async function performDelivery(
       const heldFile = readTaskFile(taskRef(ctx, projectSlug, taskKey));
       const held = heldFile?.parsed.frontmatter.blockedBy ?? [];
       if (held.length > 0) {
-        const message = holdRefusal(taskKey, held, "delivering it for review");
+        const message = holdRefusalFor(db, projectSlug, taskKey, held, "delivering it for review");
         await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
         return { status: "failed", message };
       }
@@ -9541,7 +9541,7 @@ export async function resolvePacket(
         const heldFor = existing.parsed.frontmatter.blockedBy;
         if (heldFor.length > 0) {
           throw AppError.conflict(
-            `${holdRefusal(input.taskKey, heldFor, "retrying it on another backend")} The packet stays open; choose again once the wait clears.`,
+            `${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "retrying it on another backend")} The packet stays open; choose again once the wait clears.`,
           );
         }
       }
@@ -9598,7 +9598,7 @@ export async function resolvePacket(
         text:
           option.ev ??
           (queueing
-            ? `**Decision:** ${option.t}. ${holdRefusal(input.taskKey, heldFor, "asking it now")} ` +
+            ? `**Decision:** ${option.t}. ${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "asking it now")} ` +
               "The question is queued with the task and put the moment the wait clears. " +
               "No rework until the reviewer has answered."
             : `**Decision:** ${option.t}. No rework until the reviewer has answered.`),
@@ -9711,7 +9711,7 @@ export async function resolvePacket(
         const heldFor = existing.parsed.frontmatter.blockedBy;
         if (heldFor.length > 0) {
           throw AppError.conflict(
-            `${holdRefusal(input.taskKey, heldFor, "clearing its branch collision and re-delivering it")} The packet stays open; choose again once the wait clears.`,
+            `${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "clearing its branch collision and re-delivering it")} The packet stays open; choose again once the wait clears.`,
           );
         }
       }

@@ -74,3 +74,38 @@ describe("dependency references — the two spellings and nothing else", () => {
     ]);
   });
 });
+
+import { deadDependencyLabels, holdRefusal } from "./dependencies";
+
+/**
+ * Ruling 355 (pass 38, F38-9): the hold sentence promises a release only when
+ * one can come. The release engine writes "can never complete … edit what it
+ * waits on" for a failed, missing or cancelled entry, and this sentence stood
+ * beside it on the same task promising "Viberr releases it when every entry
+ * is done" — structurally unreachable for such an entry.
+ */
+describe("ruling 355: holdRefusal names an entry that can never complete", () => {
+  it("keeps the release promise while every entry can still complete", () => {
+    expect(holdRefusal("JC-9", ["JC-3"], "running an agent on it")).toContain(
+      "Viberr releases it when every entry is done",
+    );
+  });
+
+  it("replaces the promise with the edit the person has to make when an entry is dead", () => {
+    // CANARY: ignore `dead`.
+    const s = holdRefusal("JC-9", ["JC-3", "goal-1 link 2"], "running an agent on it", ["JC-3"]);
+    expect(s).toContain("running an agent on it is refused");
+    expect(s).toContain("JC-3 can never complete, so Viberr will not release it on its own");
+    expect(s).toContain("edit what it waits on");
+    expect(s).not.toContain("releases it when every entry is done");
+  });
+
+  it("deadDependencyLabels reads the entries' states", () => {
+    const entries = [
+      { ref: "JC-3", label: "JC-3", state: "cancelled" as const, taskKey: "JC-3", goalId: null },
+      { ref: "JC-4", label: "JC-4", state: "open" as const, taskKey: "JC-4", goalId: null },
+      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "missing" as const, taskKey: null, goalId: "goal-1" },
+    ];
+    expect(deadDependencyLabels(entries)).toEqual(["JC-3", "goal-1 link 2"]);
+  });
+});

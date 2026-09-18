@@ -166,3 +166,16 @@ on live tasks (it did so twice last pass), and a failure packet raised before th
 outlives it. Kept LOW-MEDIUM: reachable, destructive on one arm, latent so far. **Fix:** both
 arms read the hold before the write and refuse with the hold sentence; the packet stays open.
 **Red-proof:** with the guards disabled both new tests fail; restored, 117 green.
+
+## F38-9 — The hold refusal promised a release the release engine says can never come (LOW-MEDIUM; ruling 355)
+
+**Found by** the lens-2 sweep (C5), verified: `holdRefusal` reads labels only; the release
+engine writes "can never complete … edit what it waits on" for a failed/missing/cancelled
+entry on the same task. **Measured:** 0 dead-entry notes on this instance so far; reachable on
+any board of chained goals (an archived link, a cancelled goal). **Refutation tried:** is the
+promise merely optimistic rather than false? `dependenciesSatisfied` requires every entry
+`done`; a dead entry never becomes done; the sentence says Viberr will release it. False.
+Kept LOW-MEDIUM (latent; a person told to wait for something that cannot happen). **Fix:** the
+sentence reads the entry states — on the Run control before the click and at every server
+door through one resolver. **Red-proof:** the shared, client and server tests each fail on
+their own canary (ignore `dead`; drop the client argument; pass `[]` from the server door).

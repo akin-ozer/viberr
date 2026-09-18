@@ -172,12 +172,36 @@ export function holdRefusal(
   taskKey: string,
   entries: readonly string[],
   verb: string,
+  /** Ruling 355: the entries that can never complete, by label. */
+  dead: readonly string[] = [],
 ): string {
-  return (
+  const head =
     `${taskKey} waits on ${joinDependencyEntries(entries)} and Viberr is holding it, ` +
-    `so ${verb} is refused. Viberr releases it when every entry is done; ` +
-    `to release it sooner, change what it waits on.`
-  );
+    `so ${verb} is refused. `;
+  // Ruling 355 (pass 38, F38-9): "Viberr releases it when every entry is done"
+  // is a promise `dependenciesSatisfied` can never keep for a failed, missing
+  // or cancelled entry — the release engine writes "can never complete … edit
+  // what it waits on" on the same task, and this sentence stood beside it
+  // promising the opposite. The states are on the entries; say what they say.
+  if (dead.length > 0) {
+    return (
+      head +
+      `${joinDependencyEntries(dead)} can never complete, so Viberr will not release it on ` +
+      `its own: edit what it waits on (remove the entry or point it elsewhere) to release it.`
+    );
+  }
+  return head + `Viberr releases it when every entry is done; to release it sooner, change what it waits on.`;
+}
+
+/** Ruling 355: the states an entry cannot leave on its own. */
+export function isDeadDependencyState(state: DependencyState): boolean {
+  return state === "failed" || state === "missing" || state === "cancelled";
+}
+
+/** Ruling 355: the labels of the entries that can never complete — client-safe,
+ *  so the pre-click control and the server doors read one predicate. */
+export function deadDependencyLabels(entries: readonly DependencyRender[]): string[] {
+  return entries.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
 }
 
 /** "A", "A and B", "A, B and C" — the list as a sentence reads it. */

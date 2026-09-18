@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  deadDependencyLabels,
+  holdRefusal,
+  isDeadDependencyState,
+} from "~/shared/dependencies";
+import {
   formatDependencyRef,
   parseDependencyRef,
   type DependencyRender,
@@ -173,9 +178,22 @@ export function dependenciesSatisfied(entries: readonly DependencyRender[]): boo
 
 /** The entries that can never complete on their own. */
 export function deadDependencies(entries: readonly DependencyRender[]): DependencyRender[] {
-  return entries.filter(
-    (e) => e.state === "failed" || e.state === "missing" || e.state === "cancelled",
-  );
+  return entries.filter((e) => isDeadDependencyState(e.state));
+}
+
+/**
+ * Ruling 355: the hold sentence with the entries' live states read — the
+ * server's one door to `holdRefusal`, so every refusal names an entry that can
+ * never complete instead of promising a release that cannot come.
+ */
+export function holdRefusalFor(
+  db: DatabaseSync,
+  slug: string,
+  taskKey: string,
+  held: readonly string[],
+  verb: string,
+): string {
+  return holdRefusal(taskKey, held, verb, deadDependencyLabels(resolveDependencies(db, slug, held)));
 }
 
 /** Every task in `slug` whose stored list is non-empty, with the raw list. */

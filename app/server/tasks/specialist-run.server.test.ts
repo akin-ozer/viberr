@@ -812,6 +812,28 @@ describe("startSpecialistRun", () => {
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
   });
 
+  it("ruling 355: a refusal names an entry that can never complete instead of promising a release", async () => {
+    // A MISSING entry: no such task exists, so `dependenciesSatisfied` can never
+    // turn true and "Viberr releases it when every entry is done" was a promise
+    // nothing could keep. CANARY: call `holdRefusal` without the resolved states.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", engagements: [], blockedBy: ["VIB-404"] }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("VIB-404 can never complete"),
+    });
+  });
+
+
   /**
    * Ruling 311. `startRun` answers `outcome: "started" | "queued"` and the
    * timeline sentence discarded it, so a run parked behind the concurrent-run
@@ -5499,6 +5521,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
  * whole service, and pushed a branch cut from a base predating its dependency.
  */
 describe("ruling 186: a held task refuses every agent dispatch", () => {
+
   /** Make VIB-1 wait on a second task that is nowhere near done. */
   async function hold(entries: string[] = ["VIB-2"]): Promise<void> {
     writeTask(store.dataRoot, store.slug, {

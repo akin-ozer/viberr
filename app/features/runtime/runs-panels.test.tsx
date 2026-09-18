@@ -1214,7 +1214,7 @@ describe("ruling 350: the footer follows the classified failure for every run ki
   it("a run stopped before a session existed is not called resumable", () => {
     // CANARY: read `interruptedBy` alone.
     const run = mkRun({
-      state: "interrupted", lifecycle: "interrupted", sid: null,
+      state: "idle", lifecycle: "interrupted", sid: null,
       interruptedBy: { userId: "u_1", label: "Arda Kaya" },
     });
     const { container } = render(

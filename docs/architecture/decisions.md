@@ -6069,6 +6069,25 @@ by rewriting those paragraphs:*
     the dispatch anew, and a remote branch is not something to delete on a promise.
     (`task-actions.server.ts`, `task-governance.server.test.ts`.)
 
+355. **A hold refusal names an entry that can never complete instead of promising a release
+    (2026-09-18, pass 38; F38-9).** `holdRefusal` ended every refusal with "Viberr releases it
+    when every entry is done; to release it sooner, change what it waits on" — read from the
+    entry labels alone, on the Run control before the click and at four server doors. The
+    release engine reads the entry STATES and, for a failed, missing or cancelled entry,
+    writes on the same task "X can never complete. This task stays held; edit what it waits
+    on", and sets `waiting: human`; `dependenciesSatisfied` is `every(state === "done")`, so
+    the promise was structurally unreachable there. A person on such a task read the note,
+    a rail saying "a human", and a Run button promising Viberr would release it. Measured: no
+    dead entry has been recorded on this instance yet; a chain link archived or a goal
+    cancelled produces one, and both are ordinary on a board of chained goals.
+    The states are on the entries, so the sentence reads them: `deadDependencyLabels`
+    (client-safe, one predicate with the release engine's `deadDependencies`) feeds
+    `holdRefusal`'s new fourth argument, and the server doors go through
+    `holdRefusalFor`, which resolves the live states first. The resume door takes `db` for
+    it, like every other dispatch door.
+    (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `specialist-run.server.ts`,
+    `task-actions.server.ts`, `execution-profile.tsx`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

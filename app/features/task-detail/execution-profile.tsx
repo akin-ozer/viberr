@@ -5,7 +5,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
-import { holdRefusal, type DependencyRender } from "~/shared/dependencies";
+import { deadDependencyLabels, holdRefusal, type DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -693,6 +693,8 @@ function AgentRunControl({
           taskKey,
           blockedBy.map((e) => e.label),
           "running an agent on it",
+          // Ruling 355: an entry that can never complete is named as such.
+          deadDependencyLabels(blockedBy),
         )
       : null;
   const runRefusal = selected

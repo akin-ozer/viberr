@@ -261,6 +261,23 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(container.textContent).toContain("running an agent on it is refused");
   });
 
+  it("ruling 355: an entry that can never complete is named, not promised a release", () => {
+    // CANARY: drop `deadDependencyLabels(blockedBy)` from the control's call.
+    const held = waits();
+    const { container } = renderExec({
+      task: {
+        ...held,
+        blockedBy: [
+          { ref: "JC-3", label: "JC-3", state: "cancelled" as const, taskKey: "JC-3", goalId: null },
+        ],
+      },
+      runPrincipal: connectedPrincipal(),
+    });
+    expect(agentRunButton(container)!.disabled).toBe(true);
+    expect(container.textContent).toContain("JC-3 can never complete");
+    expect(container.textContent).not.toContain("releases it when every entry is done");
+  });
+
   it("ruling 186: a task that waits on nothing leaves the agent control alone", () => {
     const { container } = renderExec({
       task: { ...waits(), blockedBy: [], readiness: "ready", displayReadiness: "ready" },
