@@ -213,6 +213,7 @@ README change used as a stimulus.
 | 13:09 | BNB-5 Review → Verify (verifier queued); BNB-20's architect reported the widened listings fix after 17 minutes; three reviewers running (BNB-21, BNB-22, BNB-3), three queued |
 | 13:10 | BNB-20 re-delivered PR #18 on `c5d5d19` (the amendment plus the widened listings fix, `make test` green on the merged base) and returned to Review; its reviewer joins the queue (four queued now) |
 | 13:14 | BNB-21's PR #20 **approved by the integration verifier** (the six citations); acceptable, accepted next. BNB-6's engineer got a slot |
+| 13:16 | BNB-3's PR #23 **approved** by the code reviewer (identity, on the resolved head); BNB-21's operator recommended acceptance at 13:15 and then opened an input packet (read next) |
 
 ## Questions for the owner (saved for the end, as asked)
 
