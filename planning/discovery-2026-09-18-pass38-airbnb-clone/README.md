@@ -260,6 +260,7 @@ README change used as a stimulus.
 | 16:17 | BNB-25 Build → Review (reviewer queued behind the cap); BNB-6's code reviewer composing its verdict |
 | 16:20 | BNB-6's PR #22 **approved** by the code reviewer (messaging: threads, authorization as the feature, inert bodies); Verify next |
 | 16:21 | BNB-6 Review → Verify (verifier queued behind BNB-5's re-review, BNB-25's review and BNB-27's build) |
+| 16:25 | BNB-25's PR #26 **approved** by the code reviewer (wishlists, the 404 ruling accepted); BNB-6's verifier got a slot |
 
 ## Questions for the owner (saved for the end, as asked)
 
