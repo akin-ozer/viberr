@@ -105,9 +105,11 @@ test("task page hydrates clean in a non-UTC viewer timezone (open accept card)",
 }) => {
   await page.goto("/projects/viberr-core/tasks/VIB-142");
 
-  // The accept card is on screen: the seeded packet's title.
+  // The accept card is on screen: the seeded packet's title, as the card's
+  // heading. By role, because spec 05's @operator comment leaves a timeline
+  // note that quotes the same title, and a text locator then matches both.
   await expect(
-    page.getByText("Accept completion, or send back for one fix?"),
+    page.getByRole("heading", { name: "Accept completion, or send back for one fix?" }),
   ).toBeVisible();
   // Hydration barrier AND proof the local swap ran: the seed stamps VIB-142's
   // newest events today/yesterday, so once the post-hydration pass swaps in

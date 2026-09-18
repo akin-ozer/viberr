@@ -60,3 +60,4 @@ README change used as a stimulus.
 | 03:18 | BNB-9 (goal-1 link 2, shared packages db/http/testing) dispatched; the controller's `run_agent_on_task` on the held BNB-2 was refused with the hold sentence verbatim (VERIFIED.md) |
 | 03:43 | PR #2 opened for BNB-9 (`3263230`, 4 commits); Review |
 | 03:50 | BNB-9 **request_changes** from the code reviewer: three defects it reproduced on this host, after verifying 89 tests green and path ownership clean; back to Build for rework |
+| 04:12 | BNB-9 rework approved by the code reviewer; Verify next. The hermetic e2e suite ran (Playwright's chromium had to be installed on this host): 70 green after one stale locator was fixed (spec 05's @operator comment leaves a timeline note quoting the accept card's title, so spec 06 now targets the heading) |
