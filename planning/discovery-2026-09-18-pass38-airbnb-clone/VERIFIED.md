@@ -146,3 +146,10 @@ tick with its `create` drive refused.
   restarted at the packet answer, so the cap was not reached again). A live re-occurrence needs
   a chain that reaches four hops at an approve; none has since. The canary (dropping the reset)
   opens the packet in the new test and no operator turn follows the approve.
+
+## Ruling 349 — live again (10:36Z, four chains at once)
+
+- Cap 3 reached with BNB-4, BNB-5 and BNB-7's delivery runs live: BNB-3's architect run sat
+  `queued` (run_QQCHCvmVbI3G, created 10:35:13) and the task page read STATUS "agent queued",
+  the engagement row "BNB Platform Architect · Claude · delivers · queued", and the timeline note
+  "Queued a Claude run … the instance is at its concurrent-run cap" — no surface said "working".
