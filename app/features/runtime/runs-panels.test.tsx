@@ -919,7 +919,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
       "interrupted · by Arda",
     );
     expect(container.textContent).toContain(
-      "interrupted by Arda; the thread stays resumable",
+      "interrupted by Arda; the thread can be resumed where the task still takes a run",
     );
   });
 });
@@ -1172,5 +1172,69 @@ describe("a run interrupted by a restart", () => {
       "interrupted by a restart; the conversation carries a note",
     );
     expect(container.textContent).not.toContain("the operator was re-invoked");
+  });
+});
+
+/**
+ * Ruling 350 (pass 38, F38-4): the Agent-logs footer says what the run row
+ * says, whatever the run's kind. Lens-2 of the pass found the pill and the
+ * footer reading one RunView through different gates.
+ */
+describe("ruling 350: the footer follows the classified failure for every run kind", () => {
+  it("an operator drive refused for `unavailable` names the class, not a continuity error", () => {
+    // Live: one operator drive on this instance carried `run·unavailable`, and
+    // the footer beneath its "backend unavailable" pill read "stream ended on
+    // a continuity error; see the blocked packet". CANARY: gate the class on
+    // `kind === "primary" || "reviewer"` again.
+    const run = mkRun({
+      id: "op", kind: "operator", role: "Operator",
+      who: { kind: "agent", backend: "claude", name: "Operator", role: "Operator" },
+      state: "error", lifecycle: "error", failedBackendUnavailable: true, failureKind: "unavailable",
+    });
+    const { container } = render(
+      <AgentLogsPanel runtime={[run]} sel="op" onSel={() => {}} linesByThread={{ op: [] }} />,
+    );
+    expect(container.textContent).toContain("could not run this");
+    expect(container.textContent).not.toContain("continuity error");
+    // …and no retry is advertised for a drive that has no other backend.
+    expect(container.textContent).not.toContain("Retry on");
+  });
+
+  it("a run the spending cap cut off says so under the pill that says so", () => {
+    // CANARY: drop the `max_budget` arm.
+    const run = mkRun({ state: "error", lifecycle: "error", failureKind: "max_budget" });
+    const { container } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(container.querySelector(".logs-bar .pill")!.textContent).toBe("cut off · spending cap");
+    expect(container.textContent).toContain("cut off by the instance's spending cap");
+    expect(container.textContent).not.toContain("continuity error");
+  });
+
+  it("a run stopped before a session existed is not called resumable", () => {
+    // CANARY: read `interruptedBy` alone.
+    const run = mkRun({
+      state: "interrupted", lifecycle: "interrupted", sid: null,
+      interruptedBy: { userId: "u_1", label: "Arda Kaya" },
+    });
+    const { container } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(container.textContent).toContain("before a session existed, so there is no thread to resume");
+    expect(container.textContent).not.toContain("resumable");
+  });
+
+  it("a controller turn's unclassified error is sent to its error line, not to a packet it cannot have", () => {
+    // CANARY: keep one unclassified sentence for every kind.
+    const run = mkRun({
+      id: "controller", kind: "controller", role: "Controller",
+      who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" },
+      state: "error", lifecycle: "error",
+    });
+    const { container } = render(
+      <AgentLogsPanel runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{ controller: [] }} />,
+    );
+    expect(container.textContent).toContain("the error line above carries what the provider said");
+    expect(container.textContent).not.toContain("blocked packet");
   });
 });

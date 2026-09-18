@@ -5989,6 +5989,26 @@ by rewriting those paragraphs:*
     (`task.server.ts` (mapping), `run-store.server.ts`, `project.tsx`, `project.task.tsx`,
     `pill.tsx`, `board-page.tsx`, `task-side-panels.tsx`, and their tests.)
 
+350. **The Agent-logs footer follows the classified failure for every run kind, and promises only
+    what the row holds (2026-09-18, pass 38; F38-4; ruling 338's shape again).** The pill and the
+    footer of one panel read the same `RunView` through different gates. The class arm for
+    `unavailable` was gated on `kind === "primary" || "reviewer"` — a gate that belonged to the
+    retry CLAUSE and keeps its own — so an operator drive or a controller turn refused for
+    `unavailable` fell through to "stream ended on a continuity error; see the blocked packet",
+    beneath a pill reading "backend unavailable", and a controller turn has no packet at all
+    (live: one operator drive on this instance). `max_budget`, `max_turns`, `idle_timeout` and
+    `session_missing` had no arm, so a run the spending cap cut off read "cut off · spending
+    cap" over "continuity error" (ruling 175's own test asserted the pill and never the footer
+    — ruling 329's shape). And an interrupt by a person always said "the thread stays
+    resumable", a fact the row does not carry: both live person-interrupts on this instance
+    were closure interrupts, where ruling 177 refuses every re-run, and ruling 207(g)'s own
+    note says "there is no thread to resume" when no session was reported.
+    The class now describes the run whatever its kind; the four cut-off and hung classes have
+    sentences beside their pills; a person-interrupt says the thread can be resumed where the
+    task still takes a run when a session exists and that there is none to resume when it
+    does not; and the unclassified sentence points a specialist at the packet and everyone
+    else at the error line it does have. (`runs-panels.tsx`, `runs-panels.test.tsx`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

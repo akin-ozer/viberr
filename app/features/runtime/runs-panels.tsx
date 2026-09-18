@@ -603,10 +603,13 @@ export function AgentLogsPanel({
   // streaming — so a contributor (and everyone during a concurrent run) was told
   // a quota failure was a "continuity error — see the blocked packet", pointing
   // at a packet that need not exist. Only the BUTTON is grant-gated now.
-  const backendUnavailable =
-    (cur!.kind === "primary" || cur!.kind === "reviewer") &&
-    cur!.state === "error" &&
-    !!cur!.failedBackendUnavailable;
+  // Ruling 350: the CLASS describes the run whatever its kind. The kind gate
+  // that used to sit here was for the retry clause, which keeps its own gate
+  // below (`retryOffered`); on the class it sent an operator drive or a
+  // controller turn refused for `unavailable` to the unclassified sentence —
+  // "continuity error; see the blocked packet" — and a controller turn has no
+  // packet at all.
+  const backendUnavailable = cur!.state === "error" && !!cur!.failedBackendUnavailable;
   // Ruling 127: the retry OFFER needs somebody to bill, which is a different
   // question from why this run failed. The projection withholds `altBackend`
   // when the run had no principal at all (an unowned task), and `retryBackends`
@@ -656,7 +659,16 @@ export function AgentLogsPanel({
             // (a controller turn gets a note on its conversation instead), so
             // the footer says what already happened rather than "resumable".
             cur!.interruptedBy
-            ? `interrupted by ${cur!.interruptedBy.label.split(" ")[0]}; the thread stays resumable`
+            ? // Ruling 350: the row knows WHO stopped it and whether a session
+              // existed — not whether the task still takes a run. Both live
+              // person-interrupts on this instance were closure interrupts
+              // (ruling 177 refuses every re-run on a closed task) and the
+              // footer promised "resumable" on each; ruling 207(g)'s note
+              // already says "there is no thread to resume" when no session
+              // was reported, and the footer said the opposite beside it.
+              cur!.sid
+              ? `interrupted by ${cur!.interruptedBy.label.split(" ")[0]}; the thread can be resumed where the task still takes a run`
+              : `interrupted by ${cur!.interruptedBy.label.split(" ")[0]} before a session existed, so there is no thread to resume`
             : cur!.interruptedReason === "restart"
               ? cur!.kind === "controller"
                 ? "interrupted by a restart; the conversation carries a note"
@@ -712,7 +724,17 @@ export function AgentLogsPanel({
                     cur!.failureOrigin === "local"
                     ? `${cur!.backend === "codex" ? "Codex" : "Claude"} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
                     : `${cur!.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
-                  : backendUnavailable
+                  : cur!.failureKind === "max_budget"
+                    ? // Ruling 175 / ruling 350: the pill above already says "cut off ·
+                      // spending cap"; the footer said "continuity error" beneath it.
+                      "cut off by the instance's spending cap (Org settings → Max spend per Claude run): not a task failure; continue the run or raise the cap"
+                    : cur!.failureKind === "max_turns"
+                      ? "cut off at the run's turn cap: not a task failure; continue the run"
+                      : cur!.failureKind === "idle_timeout"
+                        ? "stopped after producing nothing for the whole idle window: the run hung, it did not fail; re-run it"
+                        : cur!.failureKind === "session_missing"
+                          ? "the provider session this run tried to resume no longer exists; a fresh run re-anchored on the task record is the recovery"
+                          : backendUnavailable
                 ? // Ruling 127: the same `run·unavailable` classification now
                   // also covers "the account this run bills has not connected
                   // the backend", so the footer states the CLASS and lets the
@@ -725,7 +747,12 @@ export function AgentLogsPanel({
                   // carries the real remedy (own the task, connect the
                   // account).
                   `${cur!.backend === "codex" ? "Codex" : "Claude"} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
-                : "stream ended on a continuity error; see the blocked packet"
+                : // Ruling 350: only a specialist's failure raises the packet the
+                  // old sentence pointed at; an operator drive or a controller
+                  // turn is sent to the record it does have.
+                  cur!.kind === "primary" || cur!.kind === "reviewer"
+                  ? "stream ended on a continuity error; see the blocked packet"
+                  : "stream ended on a continuity error; the error line above carries what the provider said"
               : "thread alive, no run executing";
 
   return (

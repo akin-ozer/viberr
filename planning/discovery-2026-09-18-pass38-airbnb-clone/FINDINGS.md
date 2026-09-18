@@ -92,3 +92,27 @@ the card, the pill and the rail say "agent queued" without a pulse and name the 
 **Red-proof.** Loader test (`project.server.test.ts`): with the annotation dropped, red.
 Mapping test: with `withLiveRun` returning the display state unchanged, red (and the loader
 test with it). Board test: with the queued branch unreachable, red. Restored: 233 green.
+
+## F38-4 — The Agent-logs footer contradicted the pill above it for four failure classes and two interrupt cases (MEDIUM; ruling 350)
+
+**Found by** the lens-2 sweep (C2, C3, C4), verified in `runs-panels.tsx`: the `unavailable`
+class arm was kind-gated, four classes had no arm, and "the thread stays resumable" was printed
+for every person-interrupt.
+
+**Measured** on this instance: 1 operator drive carried `run·unavailable` (footer: "continuity
+error; see the blocked packet"); 2 of 2 person-interrupted runs were closure interrupts
+(footer: "stays resumable" about a task ruling 177 closes to re-runs); 0 spending-cap /
+turn-cap / idle cut-offs so far (latent arms).
+
+**Refutation tried.** Is the footer's fall-through "continuity error" defensible as a generic
+word? Ruling 130(a) defines it as "only an unclassified" failure, and the pill on the same bar
+names the class. Is "resumable" true in the Stop-click case? Yes — and the row cannot tell a
+Stop click from a closure, which is exactly ruling 338's rule: say only what the row holds.
+
+**Fix.** The class describes the run whatever its kind; arms for `max_budget`, `max_turns`,
+`idle_timeout`, `session_missing`; the interrupt sentence reads `sid`; the unclassified
+sentence points non-specialists at the error line.
+
+**Red-proof.** Four new tests; each fails on its own canary (kind gate restored, `sid` ignored,
+one unclassified sentence, `max_budget` arm dropped). Restored: 94 green across the panel and
+helper files.
