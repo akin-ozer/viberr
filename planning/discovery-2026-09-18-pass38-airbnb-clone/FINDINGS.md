@@ -179,3 +179,25 @@ Kept LOW-MEDIUM (latent; a person told to wait for something that cannot happen)
 sentence reads the entry states — on the Run control before the click and at every server
 door through one resolver. **Red-proof:** the shared, client and server tests each fail on
 their own canary (ignore `dead`; drop the client argument; pass `[]` from the server door).
+
+## F38-10 — The hold sentence named done entries as still waited on (LOW; ruling 356)
+
+**Found by** lens 2 on the live BNB-3 page after BNB-11 merged: the Run-an-agent control read
+"BNB-3 waits on goal-2 link 1 (BNB-2), goal-2 link 4 and BNB-11 and Viberr is holding it" while
+the Blocked-by rail ten lines above marked two of the three "done". A hold releases as a whole,
+so `blockedBy` keeps a done entry until every entry is done, and five surfaces printed the bare
+labels: the refusal at every door (the controller's `run_agent_on_task` too), the run control's
+note, the hero's "Waiting on · Other work" line and the two skipped-schedule notes.
+**Measured:** 2 of the 6 held tasks on this instance (BNB-3, BNB-4) render a done entry as waited
+on right now; 0 of the 10 refusals rendered to agents so far named a done entry (each had a single
+open entry at the time). Three tests pinned the flattening with a fixture whose JC-3 was `done`
+(execution-profile ×2, side-panels ×1). **Refutation tried:** is "waits on BNB-11" true because
+the stored list still holds it? The list is the mechanism; the sentence is addressed to a person
+or an agent deciding what to do next, and it sends them to a finished task — and the operator's
+own prompt already renders the states per entry ("goal-1 link 2 (JC-3) (open), JC-6 (archived,
+can never complete)"), so the product knows the split and says it on one surface only. Kept LOW:
+nothing lost; one surface contradicts another on the same page and at the controller door.
+**Fix:** one shared `holdEntriesSentence` (what still holds the task, then the done ones as done)
+feeds the refusal, the note, the hero line and both skipped-schedule notes; the server doors pass
+resolved entries. **Red-proof:** dropping the done split fails 8 tests across the shared, client
+and server layers; handing the server door all-open states fails the two door tests.

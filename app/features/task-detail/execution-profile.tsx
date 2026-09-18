@@ -5,7 +5,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
-import { deadDependencyLabels, holdRefusal, type DependencyRender } from "~/shared/dependencies";
+import { holdEntriesSentence, holdRefusal, type DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -387,7 +387,8 @@ function PromptInput({
  */
 /** Ruling 131(d): the run control's hold copy. */
 function holdNoteFor(entries: readonly DependencyRender[]): string {
-  return `Waiting on other work (${entries.map((e) => e.label).join(", ")}). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.`;
+  // Ruling 356: a done entry reads as done, not as still waited on.
+  return `Waiting on other work (${holdEntriesSentence(entries)}). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.`;
 }
 
 function OperatorRunControl({
@@ -689,13 +690,9 @@ function AgentRunControl({
   // task — so it stands even with nothing picked.
   const held =
     blockedBy.length > 0
-      ? holdRefusal(
-          taskKey,
-          blockedBy.map((e) => e.label),
-          "running an agent on it",
-          // Ruling 355: an entry that can never complete is named as such.
-          deadDependencyLabels(blockedBy),
-        )
+      ? // Rulings 355 and 356: the entries carry their states, so the sentence
+        // names a dead one as dead and a done one as done.
+        holdRefusal(taskKey, blockedBy, "running an agent on it")
       : null;
   const runRefusal = selected
     ? (held ?? ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))

@@ -1,3 +1,4 @@
+import { holdEntriesSentence } from "~/shared/dependencies";
 import { useEffect, useRef, useState } from "react";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import { useFetcher } from "react-router";
@@ -939,7 +940,7 @@ export function CurrentStatePanel({
                 className="sub"
                 title={task.blockedBy.map((e) => `${e.label} · ${e.state}`).join(" · ")}
               >
-                Other work: {task.blockedBy.map((e) => e.label).join(", ")}
+                Other work: {holdEntriesSentence(task.blockedBy)}
               </span>
             ) : (
               "Nothing"

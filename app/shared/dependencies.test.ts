@@ -75,7 +75,20 @@ describe("dependency references — the two spellings and nothing else", () => {
   });
 });
 
-import { deadDependencyLabels, holdRefusal } from "./dependencies";
+import {
+  deadDependencyLabels,
+  holdEntriesSentence,
+  holdRefusal,
+  type DependencyRender,
+} from "./dependencies";
+
+const entry = (label: string, state: DependencyRender["state"]): DependencyRender => ({
+  ref: label,
+  label,
+  state,
+  taskKey: label.startsWith("goal-") ? null : label,
+  goalId: label.startsWith("goal-") ? label.split(" ")[0]! : null,
+});
 
 /**
  * Ruling 355 (pass 38, F38-9): the hold sentence promises a release only when
@@ -86,14 +99,18 @@ import { deadDependencyLabels, holdRefusal } from "./dependencies";
  */
 describe("ruling 355: holdRefusal names an entry that can never complete", () => {
   it("keeps the release promise while every entry can still complete", () => {
-    expect(holdRefusal("JC-9", ["JC-3"], "running an agent on it")).toContain(
+    expect(holdRefusal("JC-9", [entry("JC-3", "open")], "running an agent on it")).toContain(
       "Viberr releases it when every entry is done",
     );
   });
 
   it("replaces the promise with the edit the person has to make when an entry is dead", () => {
-    // CANARY: ignore `dead`.
-    const s = holdRefusal("JC-9", ["JC-3", "goal-1 link 2"], "running an agent on it", ["JC-3"]);
+    // CANARY: ignore the entries' states.
+    const s = holdRefusal(
+      "JC-9",
+      [entry("JC-3", "cancelled"), entry("goal-1 link 2", "open")],
+      "running an agent on it",
+    );
     expect(s).toContain("running an agent on it is refused");
     expect(s).toContain("JC-3 can never complete, so Viberr will not release it on its own");
     expect(s).toContain("edit what it waits on");
@@ -107,5 +124,53 @@ describe("ruling 355: holdRefusal names an entry that can never complete", () =>
       { ref: "goal-1 link 2", label: "goal-1 link 2", state: "missing" as const, taskKey: null, goalId: "goal-1" },
     ];
     expect(deadDependencyLabels(entries)).toEqual(["JC-3", "goal-1 link 2"]);
+  });
+});
+
+/**
+ * Ruling 356 (pass 38, F38-10): a hold releases as a whole, so the stored list
+ * keeps an entry after the task it names is done — and every sentence built
+ * from the bare labels named it as still waited on, beside a rail marking it
+ * done. The states are on the entries; the sentence reads them.
+ */
+describe("ruling 356: the hold sentence names a done entry as done, not as waited on", () => {
+  it("lists an all-open hold as before", () => {
+    expect(holdEntriesSentence([entry("goal-1 link 2", "open"), entry("JC-3", "open")])).toBe(
+      "goal-1 link 2 and JC-3",
+    );
+    expect(holdEntriesSentence([entry("JC-3", "open")])).toBe("JC-3");
+  });
+
+  it("names what still holds the task, then the finished entries as finished", () => {
+    // CANARY: drop the `state === "done"` split.
+    expect(
+      holdEntriesSentence([
+        entry("goal-2 link 1 (BNB-2)", "done"),
+        entry("goal-2 link 4", "open"),
+        entry("BNB-11", "done"),
+      ]),
+    ).toBe("goal-2 link 4 (goal-2 link 1 (BNB-2) and BNB-11 are done)");
+    expect(holdEntriesSentence([entry("goal-1 link 2", "open"), entry("JC-3", "done")])).toBe(
+      "goal-1 link 2 (JC-3 is done)",
+    );
+  });
+
+  it("lists an all-done hold plainly: the release sweep is on its way", () => {
+    expect(holdEntriesSentence([entry("JC-3", "done"), entry("JC-4", "done")])).toBe("JC-3 and JC-4");
+  });
+
+  it("the refusal reads the same split and keeps its release promise", () => {
+    const s = holdRefusal("BNB-3", [entry("goal-2 link 4", "open"), entry("BNB-11", "done")], "running an agent on it");
+    expect(s).toContain(
+      "BNB-3 waits on goal-2 link 4 (BNB-11 is done) and Viberr is holding it, so running an agent on it is refused.",
+    );
+    expect(s).not.toContain("waits on goal-2 link 4 and BNB-11");
+    expect(s).toContain("Viberr releases it when every entry is done");
+  });
+
+  it("a dead entry still decides the tail", () => {
+    const s = holdRefusal("BNB-3", [entry("goal-2 link 4", "cancelled"), entry("BNB-11", "done")], "running an agent on it");
+    expect(s).toContain("waits on goal-2 link 4 (BNB-11 is done)");
+    expect(s).toContain("goal-2 link 4 can never complete");
   });
 });

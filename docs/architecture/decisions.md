@@ -6088,6 +6088,26 @@ by rewriting those paragraphs:*
     (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `specialist-run.server.ts`,
     `task-actions.server.ts`, `execution-profile.tsx`, and their tests.)
 
+356. **The hold sentence names a done entry as done, not as still waited on (2026-09-18,
+    pass 38; F38-10).** A hold releases as a whole — `dependenciesSatisfied` is
+    `every(state === "done")` and `clearDependencies` empties the list in one write — so
+    `blockedBy` keeps an entry after the task it names is done, and every sentence built from
+    the bare labels named it as waited on: the refusal at every door ("BNB-3 waits on goal-2
+    link 1 (BNB-2), goal-2 link 4 and BNB-11 and Viberr is holding it"), the run control's
+    note, the hero's "Other work" line and the two skipped-schedule notes — beside the
+    Blocked-by rail marking two of the three done, and at the controller's `run_agent_on_task`
+    door, where an agent reading it goes to check a task that is finished. Live: 2 of the 6
+    held tasks on the instance; three tests pinned the flattening with a fixture whose entry
+    was `done`. The operator's own prompt already renders the states per entry. So the states
+    feed every sentence: `holdEntriesSentence` (shared) prints what still holds the task, then
+    the finished entries as finished ("goal-2 link 4 (goal-2 link 1 (BNB-2) and BNB-11 are
+    done)"); `holdRefusal` takes the resolved entries and derives the dead ones itself (ruling
+    355), the server doors resolve them through `holdRefusalFor`, and the two skipped-schedule
+    notes resolve theirs. An all-open list reads as before; an all-done list (the minute before
+    the release sweep) is listed plainly.
+    (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `execution-profile.tsx`,
+    `task-side-panels.tsx`, `schedule.server.ts`, `operator-run.server.ts`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

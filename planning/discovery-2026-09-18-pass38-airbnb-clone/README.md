@@ -84,3 +84,6 @@ README change used as a stimulus.
 | 07:16 | PR #8 opened for BNB-12 (the local stack: supervisor, manifests, make targets, plus the health-only gateway placeholder I widened it to); Review |
 | 07:19 | BNB-11's PR #7 approved by the integration verifier too — acceptable |
 | 07:22 | **BNB-11 accepted by me**: PR #7 merged (the second rejected task, recovered through a fresh PR); BNB-3 (identity accounts) released by it |
+| 07:34 | BNB-12 approved by the integration verifier; acceptance recommended. BNB-13's operator refreshed its branch from main (11 commits) and delivered **PR #9** (contracts: booking, availability, payments); Review, code reviewer engaged |
+| 07:37 | **BNB-12 accepted by me**: the acceptance-time base refresh brought `bnb-12` up to date (11 commits, merge `e9205ae`), the reconcile saw it synced, PR #8 merged; **goal-1 (Foundation) complete**, 4 of 4 links |
+| 07:38 | F38-10 found on BNB-3's page (the hold sentence naming done entries as waited on, beside the rail marking them done) → ruling 356, red-proven on three layers; deploy waits for a quiet moment |

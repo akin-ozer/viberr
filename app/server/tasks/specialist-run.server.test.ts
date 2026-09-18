@@ -833,6 +833,27 @@ describe("startSpecialistRun", () => {
     });
   });
 
+  it("ruling 356: the refusal names a done entry as done, not as still waited on", async () => {
+    // CANARY: hand `holdRefusal` the labels as if every entry were open.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", engagements: [], blockedBy: ["VIB-2", "VIB-3"] }),
+    });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-3", { stage: "done" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("VIB-1 waits on VIB-2 (VIB-3 is done) and Viberr is holding it"),
+    });
+  });
+
 
   /**
    * Ruling 311. `startRun` answers `outcome: "started" | "queued"` and the

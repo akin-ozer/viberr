@@ -131,7 +131,7 @@ import {
   cachedToolchain,
   shellInventoryPrompt,
 } from "~/server/ops/toolchain.server";
-import type { DependencyReleasePayload } from "~/shared/dependencies";
+import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
 import {
   describeRunFailure,
   type DescribeRunFailureInput,
@@ -789,6 +789,7 @@ async function noteQueuedTriggerRefused(
     );
     const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     const { recordAudit } = await import("~/server/audit/audit-recorder.server");
+    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
     await updateTaskFile(ref, (parsed) => {
       const packetTitle = parsed.packet?.title ?? null;
       const cause =
@@ -796,7 +797,8 @@ async function noteQueuedTriggerRefused(
           ? `a decision packet is open on ${queued.taskKey}${packetTitle ? ` ("${packetTitle}")` : ""} and coordination is paused until it is resolved`
           : refused === "closed"
             ? `${queued.taskKey} is closed (${parsed.frontmatter.archived ? "archived" : "at its terminal stage"})`
-            : `${queued.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")})`;
+            : // Ruling 356: a done entry reads as done, not as still waited on.
+              `${queued.taskKey} waits on other work (${holdEntriesSentence(resolveDependencies(db, queued.projectSlug, parsed.frontmatter.blockedBy))})`;
       const arrived =
         arrival === "door" ? "" : " when it reached the front of the queue";
       const text = queued.scheduleId

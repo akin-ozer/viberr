@@ -216,7 +216,8 @@ describe("ruling 131(d): the run control on a held task", () => {
     const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
     const note = container.querySelector("[data-hold-note]")!;
     expect(note.textContent).toBe(
-      "Waiting on other work (goal-1 link 2, JC-3). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
+      // Ruling 356: JC-3 is done in the fixture, and reads as done.
+      "Waiting on other work (goal-1 link 2 (JC-3 is done)). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
     );
     expect(note.className).toContain("sub");
     expect(runButton(container).disabled).toBe(false);
@@ -256,13 +257,22 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(btn!.disabled).toBe(true);
     // The server's own sentence, from the shared `holdRefusal`.
     expect(container.textContent).toContain(
-      "waits on goal-1 link 2 and JC-3 and Viberr is holding it",
+      "waits on goal-1 link 2 (JC-3 is done) and Viberr is holding it",
     );
     expect(container.textContent).toContain("running an agent on it is refused");
   });
 
+  it("ruling 356: a done entry reads as done on the control, not as still waited on", () => {
+    // CANARY: drop the done split from `holdEntriesSentence`. This test's
+    // fixture always carried JC-3 as done; until ruling 356 the assertion
+    // above REQUIRED "waits on goal-1 link 2 and JC-3".
+    const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
+    expect(container.textContent).toContain("waits on goal-1 link 2 (JC-3 is done) and Viberr is holding it");
+    expect(container.textContent).not.toContain("waits on goal-1 link 2 and JC-3");
+  });
+
   it("ruling 355: an entry that can never complete is named, not promised a release", () => {
-    // CANARY: drop `deadDependencyLabels(blockedBy)` from the control's call.
+    // CANARY: hand `holdRefusal` the entries with their states reset to open.
     const held = waits();
     const { container } = renderExec({
       task: {

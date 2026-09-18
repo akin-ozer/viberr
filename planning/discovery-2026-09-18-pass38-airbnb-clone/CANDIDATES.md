@@ -15,6 +15,7 @@ FINDINGS.md with a number.
 | L1-#15 | Lens-1: file leases gate the push delta only; a leased path pushed before the lease still merges. | 0 live refusals; reachable on this board (leases declared mid-flight). | **confirmed → F38-7 (ruling 353)**, LOW-MEDIUM. |
 | L1-#2 | Lens-1: `retry_other_backend` / `resolve_remote_collision` consume the packet, then meet the hold. | 0 live blockedBy cases; 1 quota-hold case that scheduled the run. | **confirmed → F38-8 (ruling 354)**, LOW-MEDIUM. |
 | L2-C5 | Lens-2: `holdRefusal` promises "Viberr releases it when every entry is done" beside a note saying the entry can never complete. | 0 dead entries so far; reachable on chained boards. | **confirmed → F38-9 (ruling 355)**, LOW-MEDIUM. |
+| L2-C10 (live) | Lens-2, on BNB-3's page after BNB-11 merged: the hold sentence names done entries as still waited on (refusal, run-control note, hero line, two skipped-schedule notes) beside the rail marking them done. | 2 of 6 held tasks now (BNB-3, BNB-4); 0 of 10 refusals rendered to agents named a done entry; 3 tests REQUIRED the flattening. | **confirmed → F38-10 (ruling 356)**, LOW. |
 
 ## Dispositions of the sweep candidates not taken up (yet)
 

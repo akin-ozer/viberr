@@ -1,10 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import {
-  deadDependencyLabels,
-  holdRefusal,
-  isDeadDependencyState,
-} from "~/shared/dependencies";
+import { holdRefusal, isDeadDependencyState } from "~/shared/dependencies";
 import {
   formatDependencyRef,
   parseDependencyRef,
@@ -193,7 +189,8 @@ export function holdRefusalFor(
   held: readonly string[],
   verb: string,
 ): string {
-  return holdRefusal(taskKey, held, verb, deadDependencyLabels(resolveDependencies(db, slug, held)));
+  // Rulings 355 and 356: the sentence reads the live states of the entries.
+  return holdRefusal(taskKey, resolveDependencies(db, slug, held), verb);
 }
 
 /** Every task in `slug` whose stored list is non-empty, with the raw list. */
