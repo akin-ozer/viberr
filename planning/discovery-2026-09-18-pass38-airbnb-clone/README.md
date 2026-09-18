@@ -139,3 +139,4 @@ README change used as a stimulus.
 | 09:06 | BNB-15's PR #11 approved by the integration verifier too; acceptance recommendation expected. BNB-17 ("Contract amendment: session introspection for the gateway trust edge") created from BNB-16's packet; BNB-3 now also waits on it |
 | 09:08 | **BNB-15 accepted by me**: PR #11 merged (the first decision-created amendment task, end to end in 26 minutes) |
 | 09:17 | PR #12 opened for BNB-17 (session-introspection contract amendment; the architect designed and wrote it in ten minutes); Review next. BNB-16's backend engineer still building the gateway |
+| 09:22 | BNB-17's PR #12 approved by the code reviewer; Verify next |
