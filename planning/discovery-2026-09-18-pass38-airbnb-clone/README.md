@@ -150,6 +150,8 @@ README change used as a stimulus.
 | 10:20 | **Deployed 39dd7b0c** (ruling 362: a recorded approve resets the react depth, so the operator takes the step behind the gate instead of opening "Work stalled"). Written, red-proven (dropping the reset opens the packet in the new test) and deployed 11 minutes after the packet opened; the ruling-258 test now expects the reset. BNB-16's open packet is answered next, on the fixed build |
 | 10:21 | BNB-16's stalled-work packet answered by me with a custom directive ("Nothing is stalled … move BNB-16 from Review to Verify and dispatch the BNB Integration Verifier on 70f92db"), 14 minutes after it opened — the sixth time on this instance a person has told the operator that approved work is not stalled, and the last: ruling 362 is live |
 | 10:22 | The operator moved BNB-16 Review → Verify 19 s after the answer ("Code review passed") and dispatched the integration verifier on `70f92db`. Lens-2 probe refuted: the Live-run panel's "ELAPSED 00:00" seen at 10:04 was the server-rendered first paint; after hydration it read 00:35 for a run 35 s old |
+| 10:30 | BNB-16 **approved by the integration verifier** on `70f92db` (validation healthy). **Ruling 361 live:** the "Review passed" notification (row 2386) names `agent · BNB Integration Verifier`, where every earlier verdict row named the Operator |
+| 10:31 | The operator recommended acceptance for `70f92db` 59 s after the verdict (no depth-cap packet this time: the packet answer had restarted the chain). Full unit suite on the 362 head: 7,076 green |
 
 ## Questions for the owner (saved for the end, as asked)
 

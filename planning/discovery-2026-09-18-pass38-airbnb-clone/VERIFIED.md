@@ -116,3 +116,30 @@ check cleared its wait ("goal-2 link 3, goal-1 link 4") at 08:42:45.849 and the 
 started at 08:42:48. No "operator run refused — the task waits on other work" line in the
 app log this time; BNB-14, minted the same way at 07:54:45, had waited 57 s for the minute
 tick with its `create` drive refused.
+
+## Ruling 360 — live (deployed ae3a01d3 at 10:10Z)
+
+- 20 s after boot the reconciler's first pass over PR #13 met the 403 and stored
+  `pr.checksUnread: {status: 403, message: "Resource not accessible by personal access token", at: 10:10:50.230Z}`
+  on BNB-16's task file; `scope_violations` has one open `checks:read` row for BNB-16;
+  audit `github.scope_violation.opened` (rowid 16880); the policy event is on BNB-16's timeline.
+- The task page's PR card shows "checks not readable" (`data-checks-unread`); the GitHub page's
+  PR list shows it on #13; the credential card carries the advisory naming BNB-16 ("Grant it on
+  GitHub, then Re-check the credential").
+- The accept dialog's note: checked at BNB-16's acceptance (below).
+
+## Ruling 361 — live (deployed ae3a01d3 at 10:10Z)
+
+- Notification row 2386 ("Review passed", 10:30:46Z) carries
+  `{"kind":"agent","backend":"claude","name":"BNB Integration Verifier","role":"BNB Integration Verifier"}`;
+  rows 2381–2384, written before the deploy, still say `agent · Operator`. The policy row
+  2385 names the policy engine.
+
+## Ruling 362 — deployed 39dd7b0c at 10:20Z; exercised by the test and the precedent
+
+- The packet that prompted it (BNB-16, 10:09:33Z, 0.1 s after the code reviewer's approve) was
+  answered by hand at 10:21Z; the operator moved Review → Verify 19 s later and the verifier
+  approved at 10:30Z, after which the operator recommended acceptance itself (the chain had
+  restarted at the packet answer, so the cap was not reached again). A live re-occurrence needs
+  a chain that reaches four hops at an approve; none has since. The canary (dropping the reset)
+  opens the packet in the new test and no operator turn follows the approve.
