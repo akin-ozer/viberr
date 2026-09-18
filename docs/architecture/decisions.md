@@ -6174,7 +6174,9 @@ by rewriting those paragraphs:*
     does not wait for them, and the person deciding is told so. (`pr-linker.server.ts`,
     `github-reconciler.server.ts`, `task-file.schema.ts`, `mapping/task.server.ts`,
     `github-query.server.ts`, `github-pills.ts`, `task-side-panels.tsx`, `accept-confirm.tsx`,
-    `board-page.tsx`, `github-view.tsx`, `pat-store.server.ts`, and their tests.)
+    `board-page.tsx`, `github-view.tsx`, `pat-store.server.ts`, `controller-toolkit.server.ts`
+    (the controller's `read_github` names the refused read as the third kind of null `checks`),
+    and their tests.)
 
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
