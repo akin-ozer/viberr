@@ -221,6 +221,7 @@ README change used as a stimulus.
 | 13:21 | **BNB-21 accepted by me**: PR #20 merged (`642b3f3`), the citations refreshed; 15 PRs merged today. The recommendation had been re-filed 30 s earlier, once the packet resolved |
 | 13:23 | BNB-23 Triage → Design → Build in 8 s (engineer dispatched). BNB-7's page before its acceptance: the re-review prompts name the superseded revision and the merge commit's two parents; the verdict rail shows the old approve on `6dd81ce` under "revision superseded" and the new pair on `e6f8024` |
 | 13:23 | **BNB-7 accepted by me**: acceptance-time base refresh (2 commits, merge `88e5fef`), PR #17 merged (`0b2e684`), the web shell is in — the first chain to go conflict → engineer fix → re-review → merge, 57 minutes end to end. Its completion minted **BNB-24** (goal-7 link 2), released 0.3 s later. 16 PRs merged today |
+| 13:24 | BNB-22's PR #21 (search) **approved by the integration verifier**; acceptable, accepted next. BNB-24's create-drive running, BNB-23's engineer queued |
 
 ## Questions for the owner (saved for the end, as asked)
 
