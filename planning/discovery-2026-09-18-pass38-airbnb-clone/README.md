@@ -245,7 +245,8 @@ README change used as a stimulus.
 | 15:50 | BNB-27's architect reported the host-onboarding design after 19 minutes; the operator reacts. BNB-20's reviewer got a slot for the re-review of `62a95cd` |
 | 15:51 | BNB-27 delivered as **PR #25** (become a host: the host profile schema and its public surface) 100 s after the architect's report. Open PRs: #18, #19, #22, #24, #25; BNB-25 building; BNB-24/26 held |
 | 15:56 | BNB-27 holds at Design on the architect's open question (PR #25 is design only: the migration and README sections; handlers are Build) — read and answered next. BNB-20's PR #18 **approved** by the code reviewer on `62a95cd`, its third pass through Review |
-| 15:57 | Answered BNB-27's question with the architect's recommendation (widen to the gateway auth edge — the `SessionResolver`, the two route files, `gateway.ts`, the gateway tests — and keep `/me/host-profile`, the spelling the merged web client already calls). BNB-25's engineer reported the wishlists build at 15:56 (2 h 19 min of run time, 100 of them asleep) |
+| 15:57 | BNB-27's question: widen to the gateway auth edge (the `SessionResolver`, the two route files, `gateway.ts`, the gateway tests) and keep `/me/host-profile`, the spelling the merged web client already calls — the architect's recommendation, which I take; the first click was lost to the hidden browser pane and lands at 16:00. BNB-25's engineer reported the wishlists build at 15:56 (2 h 19 min of run time, 100 of them asleep) |
+| 15:59 | BNB-25 delivered as **PR #26** (wishlists, re-scoped to the frozen contract); BNB-20 Review → Verify (verifier owed). Six open PRs: #18, #19, #22, #24, #25, #26 |
 
 ## Questions for the owner (saved for the end, as asked)
 
