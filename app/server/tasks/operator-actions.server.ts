@@ -1,3 +1,4 @@
+import { OPERATOR_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
 import {
   projectRulingsKb,
   withProjectRulings,
@@ -1019,6 +1020,8 @@ async function addRecommendation(
         taskKey,
         kind: "approval",
         ptype: "input",
+        // Ruling 361: the operator's own recommendation, named as such.
+        from: OPERATOR_NOTIFY_FROM,
         title: `Operator recommends: ${rec.label}`,
         text: reasoning,
       },
@@ -1818,6 +1821,8 @@ export async function operatorOpenPacket(
       taskKey: input.taskKey,
       kind: "packet",
       ptype: input.packetType,
+      // Ruling 361: the operator's own packet.
+      from: OPERATOR_NOTIFY_FROM,
       title:
         input.packetType === "blocked"
           ? `Blocked, decision needed: ${title}`
@@ -2833,6 +2838,8 @@ export async function operatorFlagContextConflict(
       title: CONTEXT_CONFLICT_TITLE,
       text: event.text,
       occurredAt: event.occurredAt,
+      // Ruling 361: the operator flagged the conflict (the event's own actor).
+      from: OPERATOR_NOTIFY_FROM,
     },
     ctx,
   );

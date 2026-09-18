@@ -277,3 +277,19 @@ on the credential (`checks:read`, resolved by the first successful read), and pr
 not readable" with GitHub's reason on the PR card, the accept dialog and the GitHub page.
 **Red-proof:** eight canaries (linker, reconciler write, reconciler flag, mapping guard, dialog,
 card, list, advisory), each failing exactly its own test.
+
+## F38-15 — The inbox named the Operator as the author of 816 things it never did (LOW-MEDIUM; ruling 361)
+
+**Found by** lens 2 on the Notifications page: "Operator · Released: everything this task waited
+on is done (goal-2 link 2)" and "Operator · BNB Integration Verifier approved the work" beside a
+task timeline that names the release engine and the verifier for the same events. **Measured:**
+`notifications.actor_json` across the instance: 673 of 673 `quality` rows, 133 of 133
+`dependency` rows and 10 `policy` rows name `agent:Operator`; the writer defaults `from` to the
+Operator and 17 of its 20 callers pass none; the writer's own test required the default. Ruling
+237 had fixed exactly this shape on one site (the deadlock packet) and left the default in place.
+**Refutation tried:** is "Operator" a section label rather than an author? The page renders
+`n.from.name` as the author, the human-authored rows show the person's name and the agent rows
+the agent's, so a reader takes it as the author. Kept LOW-MEDIUM: no loss, but a wrong actor on
+every verdict and release notification, forever. **Fix:** `from` is required; every site names
+the actor its timeline entry names. **Red-proof:** naming the Operator at the release site or
+the verdict site fails the row assertions; naming nobody no longer compiles.

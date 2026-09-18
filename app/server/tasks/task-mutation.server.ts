@@ -184,7 +184,12 @@ export interface TaskWatcherNotice {
   ptype?: "input" | "blocked" | null;
   title?: string | null;
   text: string;
-  from?: ActorRender | null;
+  /** Ruling 361 (pass 38, F38-15): the actor the timeline names for the same
+   *  event — REQUIRED. There is no default: for a year the writer stamped
+   *  "Operator" on any notice that named nobody, and 816 notifications on this
+   *  instance (every reviewer verdict, every dependency release) told the inbox
+   *  the Operator had done what the reviewer or the release engine did. */
+  from: ActorRender;
   occurredAt?: string;
   /** Skip this user (e.g. the human who triggered the event). */
   exceptUserId?: string;
@@ -350,7 +355,7 @@ export function notifyTaskWatchers(
       ptype: notice.ptype ?? null,
       title: notice.title ?? null,
       text: notice.text,
-      from: notice.from ?? OPERATOR_NOTIFY_FROM,
+      from: notice.from,
       projectSlug: notice.projectSlug,
       taskKey: notice.taskKey,
     };

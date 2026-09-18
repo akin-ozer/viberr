@@ -6178,6 +6178,23 @@ by rewriting those paragraphs:*
     (the controller's `read_github` names the refused read as the third kind of null `checks`),
     and their tests.)
 
+361. **A notification names the actor its timeline entry names; there is no default author
+    (2026-09-18, pass 38; F38-15).** `notifyTaskWatchers` stamped "Operator" on any notice
+    that named nobody, and seventeen of its twenty callers named nobody. On this instance 816
+    notifications carry the Operator as author for things it never did: all 673 reviewer
+    verdicts ("Operator · BNB Code Reviewer approved the work"), all 133 dependency releases
+    ("Operator · Released: everything this task waited on is done"), ten policy notes — while
+    the task timeline names the reviewer, the release engine and the policy engine for the
+    same events, and the test that pinned the writer required the default ("an omitted author
+    defaults to the Operator"). Ruling 237 had met the shape once, on the deadlock packet, and
+    fixed that one site. So the notice's `from` is REQUIRED and every site names its actor:
+    the reviewer that judged (verdicts), the agent whose run failed, the release engine by the
+    timeline's own name ("Dependency release"), the delivery system actor, the operator for its
+    own recommendations, packets and flags, the person who asked. A future caller that names
+    nobody does not compile. (`task-mutation.server.ts`, `task-actions.server.ts`,
+    `dependencies.server.ts`, `operator-actions.server.ts`, `agent-toolkit.server.ts`, and
+    their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

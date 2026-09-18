@@ -42,6 +42,9 @@ import type {
   Recommendation,
 } from "~/schemas/task-file.schema";
 
+/** Ruling 361: every notice names its actor; the tests here are about routing. */
+const TEST_FROM = { kind: "system" as const, name: "Test" };
+
 /**
  * The task-mutation SUBSTRATE (`task-mutation.server.ts`) — the three helpers
  * every governed write path threads. It was carved out of
@@ -133,6 +136,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "approval",
+        from: TEST_FROM,
         text: "the operator asks to move this to done",
       },
       { dataRoot: store.dataRoot },
@@ -161,6 +165,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "packet",
+        from: TEST_FROM,
         ptype: "blocked",
         text: "an agent needs a decision",
       },
@@ -185,6 +190,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "quality",
+        from: TEST_FROM,
         text: "the reviewer requested changes",
       },
       { dataRoot: store.dataRoot },
@@ -211,6 +217,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "approval",
+        from: TEST_FROM,
         text: "arda approved the transition",
         exceptUserId: store.users.arda.id,
       },
@@ -238,6 +245,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "quality",
+        from: TEST_FROM,
         text: "review verdict: changes requested",
         exceptUserIds: [store.users.arda.id, store.users.murat.id],
       },
@@ -272,6 +280,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "packet",
+        from: TEST_FROM,
         ptype: "blocked",
         text: "a decision is waiting",
       },
@@ -288,6 +297,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "quality",
+        from: TEST_FROM,
         text: "a decision is waiting (quality fallback)",
         exceptUserIds: packetNotified,
       },
@@ -310,6 +320,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-404",
         kind: "policy",
+        from: TEST_FROM,
         text: "the project policy changed",
       },
       { dataRoot: store.dataRoot },
@@ -320,12 +331,15 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
     );
   });
 
-  it("the notice's fields reach the row, and an omitted author defaults to the Operator", () => {
-    // What the inbox renders. A row with no `actor_json` reads as an anonymous
-    // system notice rather than something the Operator said, and a row that
-    // loses its project/task refs is unclickable (B-FD6). `occurredAt` is
-    // passed through when the caller has the real event time and stamped by the
-    // writer when it does not — never left blank.
+  it("the notice's fields reach the row, and the author is the one the notice names", () => {
+    // What the inbox renders. A row that loses its project/task refs is
+    // unclickable (B-FD6). `occurredAt` is passed through when the caller has
+    // the real event time and stamped by the writer when it does not — never
+    // left blank. Ruling 361 (pass 38, F38-15): this test used to require the
+    // writer to stamp "Operator" on a notice that named nobody — 816 rows on
+    // the live instance (every reviewer verdict, every dependency release)
+    // named the Operator for things it never did. The notice now MUST name
+    // its actor, and the row carries exactly that.
     const store = setupTestStore(ctx);
     withTask(store, store.users.selin.id);
 
@@ -335,6 +349,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "packet",
+        from: TEST_FROM,
         ptype: "input",
         title: "Dev asks: which schema?",
         text: "An engaged agent needs a human decision.",
@@ -356,10 +371,13 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
     expect(row.project_slug).toBe(store.slug);
     expect(row.task_key).toBe("VIB-1");
     expect(row.occurred_at).toBe("2026-07-02T10:11:12.000Z");
-    expect(JSON.parse(row.actor_json ?? "null")).toEqual(OPERATOR_NOTIFY_FROM);
+    // CANARY: restore `notice.from ?? OPERATOR_NOTIFY_FROM` in the writer AND
+    // make `from` optional again — the row then reads Operator for this notice.
+    expect(JSON.parse(row.actor_json ?? "null")).toEqual(TEST_FROM);
+    expect(JSON.parse(row.actor_json ?? "null")).not.toEqual(OPERATOR_NOTIFY_FROM);
   });
 
-  it("an explicit author wins over the Operator default, and an omitted timestamp is stamped", () => {
+  it("the author the notice names reaches the row, and an omitted timestamp is stamped", () => {
     // The agent-authored half: a completion notice says WHO reported, not
     // "Operator". And with no caller timestamp the writer stamps `now` — the
     // inbox sorts on this column, so an empty one buries the row forever.
@@ -427,6 +445,7 @@ describe("notifyTaskWatchers — fail-open when recipients cannot be resolved (C
           projectSlug: store.slug,
           taskKey: "VIB-1",
           kind: "approval",
+          from: TEST_FROM,
           text: "the operator asks to move this to done",
         },
         { dataRoot: store.dataRoot },
@@ -458,6 +477,7 @@ describe("notifyTaskWatchers — fail-open when recipients cannot be resolved (C
           projectSlug: store.slug,
           taskKey: "VIB-1",
           kind: "packet",
+          from: TEST_FROM,
           ptype: "blocked",
           text: "a decision is waiting",
         },
@@ -484,6 +504,7 @@ describe("notifyTaskWatchers — fail-open when recipients cannot be resolved (C
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "approval",
+        from: TEST_FROM,
         text: "the operator asks to move this to done",
       },
       { dataRoot: store.dataRoot },
@@ -564,6 +585,7 @@ describe("notifyTaskWatchers — fail-open when recipients cannot be resolved (C
         projectSlug: store.slug,
         taskKey: "VIB-1",
         kind: "approval",
+        from: TEST_FROM,
         text: "the operator asks to move this to done",
       },
       { dataRoot: store.dataRoot },

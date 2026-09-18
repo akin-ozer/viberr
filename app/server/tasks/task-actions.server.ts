@@ -111,6 +111,7 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
+  systemIdToName,
   encodeActorRef,
 } from "~/server/files/actor-ref.server";
 import {
@@ -4079,15 +4080,12 @@ export async function recordAgentCompletion(
         kind: "approval",
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
+        // Ruling 361: the asker by name; the Operator only when the operator asked.
+        from:
+          actorRef.kind === "agent"
+            ? { kind: "agent", backend: actorRef.backend, name: roleDisplay, role: roleDisplay }
+            : OPERATOR_NOTIFY_FROM,
       };
-      if (actorRef.kind === "agent") {
-        askNotice.from = {
-          kind: "agent",
-          backend: actorRef.backend,
-          name: roleDisplay,
-          role: roleDisplay,
-        };
-      }
       notifyTaskWatchers(db, askNotice, ctx);
     } else if (questionDeferred) {
       logger.info("agent question held — a decision packet is already open", {
@@ -4111,7 +4109,24 @@ export async function recordAgentCompletion(
       // inside notifyTaskWatchers → createNotification.
       notifyTaskWatchers(
         db,
-        { projectSlug, taskKey, kind: "quality", title, text: summary },
+        {
+          projectSlug,
+          taskKey,
+          kind: "quality",
+          title,
+          text: summary,
+          // Ruling 361: the reviewer that judged, not the Operator — 673
+          // "Review passed" notifications on this instance named the wrong agent.
+          from:
+            actorRef.kind === "agent"
+              ? {
+                  kind: "agent",
+                  backend: actorRef.backend,
+                  name: agentRoleDisplay(actorRef),
+                  role: agentRoleDisplay(actorRef),
+                }
+              : OPERATOR_NOTIFY_FROM,
+        },
         ctx,
       );
     }
@@ -5171,6 +5186,9 @@ export async function applyAgentCompletionEffects(
       text: classified
         ? `${input.role} run failed. ${described.reason}`
         : `${input.role} run failed: ${endSentence(reasonText)}`,
+      // Ruling 361: the agent whose run failed — the timeline's actor for the
+      // same event.
+      from: { kind: "agent", backend: input.backend, name: input.role, role: input.role },
     };
     if (escalation.status === "opened") {
       failureNotice.exceptUserIds = escalation.notifiedUserIds;
@@ -8027,7 +8045,15 @@ async function surfaceDeliveryEvent(
     reprojectTask(db, ctx, projectSlug, taskKey);
     notifyTaskWatchers(
       db,
-      { projectSlug, taskKey, kind: "policy", title, text },
+      {
+        projectSlug,
+        taskKey,
+        kind: "policy",
+        title,
+        text,
+        // Ruling 361: the same system actor the note above carries.
+        from: { kind: "system", name: systemIdToName("delivery") },
+      },
       ctx,
     );
   } catch (surfaceErr) {
@@ -11584,15 +11610,18 @@ export async function requestPacketMaintainerDecision(
     title: `Decision needs a maintainer: ${packet.title}`,
     text: noteText,
     occurredAt,
+    // Ruling 361: the person who asked, or the operator when it did.
+    from: actor.userId
+      ? {
+          kind: "human",
+          userId: actor.userId,
+          name: fromName,
+          initials: initialsOfName(fromName),
+          tone: avatarTone(db, actor.userId),
+        }
+      : OPERATOR_NOTIFY_FROM,
   };
   if (actor.userId) {
-    notice.from = {
-      kind: "human",
-      userId: actor.userId,
-      name: fromName,
-      initials: initialsOfName(fromName),
-      tone: avatarTone(db, actor.userId),
-    };
     // Don't notify the owner about their own ask.
     notice.exceptUserId = actor.userId;
   }

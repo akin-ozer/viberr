@@ -93,6 +93,9 @@ import {
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { TaskActionContext } from "./task-actions.server";
 
+/** Ruling 361: every notice names its actor; these tests are about routing. */
+const TEST_FROM = { kind: "system" as const, name: "Test" };
+
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 let github: FakeGithub | null = null;
 
@@ -1707,7 +1710,7 @@ describe("notification routing (FIX #4)", () => {
     withOwnedTask(store);
     const notified = notifyTaskWatchers(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", from: TEST_FROM, text: "operator recommends" },
       { dataRoot: store.dataRoot },
     );
     // arda (admin) + murat (maintainer) + selin (owner); nobody silenced.
@@ -1723,7 +1726,7 @@ describe("notification routing (FIX #4)", () => {
     setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, { approvals: { app: false } });
     const notified = notifyTaskWatchers(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", from: TEST_FROM, text: "operator recommends" },
       { dataRoot: store.dataRoot },
     );
     expect(notified.sort()).toEqual(
@@ -1795,6 +1798,17 @@ describe("reviewer quality notification (FIX #6)", () => {
     expect(rows.map((r) => r.user_id).sort()).toEqual(
       [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
     );
+    // Ruling 361: the row names the reviewer that judged, not the Operator
+    // (CANARY: pass OPERATOR_NOTIFY_FROM at the verdict site).
+    const verdictActors = selectRows(
+      store.db,
+      `SELECT actor_json FROM notifications WHERE kind = 'quality'`,
+      z.object({ actor_json: z.string() }),
+    );
+    expect(verdictActors.length).toBeGreaterThan(0);
+    for (const row of verdictActors) {
+      expect(JSON.parse(row.actor_json)).toMatchObject({ kind: "agent", name: "Review & validation" });
+    }
   });
 
   it("an unclear reviewer reply emits neither quality event nor notification", async () => {
