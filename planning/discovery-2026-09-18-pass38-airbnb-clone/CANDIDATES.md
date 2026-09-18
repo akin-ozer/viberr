@@ -37,3 +37,15 @@ FINDINGS.md with a number.
 | L2-C9 (measured) | `list_runs` rows carry `state` only; the console carries the failure class and the interrupt actor/reason. | 21 of the 53 errored runs on this instance carry a class (quota 8, auth 11, unavailable 2) the reply omits; 254 of 256 interrupts are restarts. | OPEN, LOW: an omission (the controller reads the log for the reason), not a false sentence. Not taken up. |
 | C3 (live) | After the Integration Verifier approved BNB-1 (03:11:14Z), no operator drive ran and no acceptance recommendation was filed: the react-chain depth cap (4) was reached, ruling 258 correctly skipped the stuck packet ("the task is acceptable, so the chain reached a boundary") — and nothing else runs until ruling 330's 15-minute sweep. | 1 occurrence since the container's boot (1 of 1 depth-capped skips). The page offered "Accept completion → Done" and the review queue lists the task, so nothing was hidden or lost. | OPEN, LOW: the owner learns of an acceptable task from the "Review passed" notification and the queue, not from the operator's recommendation; the sweep files it ~15 min later. Fix shape if wanted: on the acceptable branch, file the acceptance recommendation directly (the operator's own act, without a drive) instead of waiting for the sweep. |
 | C4 (live) | The operator's rework directive on BNB-10 stated the deliverer's checkout "still sits at `e17ecac`" (true at 05:52, from the workspace reconcile record); by the run's start at 05:59 Viberr had fast-forwarded the workspace to `3f492ec`, so the agent met a stale premise and said so. | 1 occurrence; two agents (verifier and architect) each corrected one stale sentence of the operator's. | OPEN, LOW: a fact written at one time and read at another; nothing was lost and the record corrected itself. Not taken up. |
+
+## Live probes after the 08:00Z deploy (lens 2, refuted)
+
+| probe | surfaces compared | result |
+|---|---|---|
+| Insights totals | page vs `agent_runs`: 2,410 runs / $2,353.61 instance-wide; 104 / $186.68 for airbnb; 2099 finished + 53 error + 257 stopped + 1 running = 2,410; "7 of 7 active tasks" vs 7 non-done non-archived tasks (shopify: 82 done, 1 archived) | agree |
+| GitHub page | 7 PRs "linked to tasks" (the two rejected PRs #2/#5 are superseded and absent, their tasks point at #3/#7); 8 task-key branches; BNB-14 "no PR · synced" | agree |
+| Reconciler on merged tasks | `github.reconcile.task` rows after each merge: 0 for all 7 airbnb tasks, 1 on shopify | no polling of closed work |
+| Withheld verdicts | `agent_runs.verdict_withheld = 1`: 0 on the instance | nothing to compare |
+| Notifications | bell 43 · page "43 unread" · DB 43 unread of 502 | agree |
+| Home | "1 run active across 1 project, 0 decisions waiting" vs 1 running run, 0 packets | agree |
+| Goal completion | `goal.completed` audit row + "Goal completed: every link is settled" notification to the creator; the Controller page marks goal-1 completed | agree (no activity-feed line, by design: the feed is task events) |
