@@ -36,3 +36,34 @@ so the toolkit's allow-list and the manifest cannot spell the prefix differently
 
 **Red-proof.** `tool-manifest.server.test.ts`: with the line restored to `${t.name}`, three
 tests fail (the new one and the two that read a line by its name); restored, five pass.
+
+## F38-2 — The live-run step named a finished tool as the thing the run was doing (LOW-MEDIUM; ruling 348)
+
+**Observed** 2026-09-18 02:10:31Z → 02:12:33Z: the controller's live row read
+`Working · mcp__viberr_controller__get_github_state · {"projectSlug":…}` for two minutes after
+that call had answered, while the Agent-logs console one panel down logged thinking lines. I
+misread it as a hung tool on the first turn of the pass (`list_mcp_servers`, 72 s).
+
+**Why.** Ruling 250 (F37-79) put the step on the working row, read off the last TOOL line, and
+`lastStep` sticks until the next tool line. Nothing reacted to the tool's result.
+
+**Measured** over the 40 controller turns before the fix (`run_log_lines`, tool_result → next
+tool_use gaps): **76 stretches longer than 20 s on 26 of the 40 runs, 3,198 s (53 min) in all,
+the longest 138 s.** Each one a finished call displayed as current.
+
+**Refutation tried.** Is the row honest anyway because "Working" is true? The row's DETAIL
+names a specific tool with its arguments as the current act; a person reads it as "it is
+running get_github_state now". The console (same page) contradicts it. Same shape as ruling
+311's "Started … streaming" for a queued run: a durable surface saying "in progress" about
+something that is not. Kept: LOW-MEDIUM (false sentence, misled a person; no action taken on
+it beyond mine).
+
+**Fix.** Both adapters mark the step answered on the result line (`composing · <tool> · <input>
+answered`); Codex's succeeding MCP call, which projects no completion row, carries a
+`toolAnswered` fact instead; the service's phase throttle writes a suppressed step when its
+window closes (trailing flush) and never onto a settled row.
+
+**Red-proof.** `adapter.server.test.ts` (3 cases), `claude-runtime.server.test.ts` (1),
+`codex-runtime.server.test.ts` (2): with the answered branches returning null, 6 fail.
+`run-service.server.test.ts`: with the deferred write removed, the throttle test fails. All
+restored green (227 across the five files).

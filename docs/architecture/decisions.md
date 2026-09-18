@@ -5946,6 +5946,29 @@ by rewriting those paragraphs:*
     manifest and the toolkit's allow-list share.
     (`tool-manifest.server.ts`, `tool-manifest.server.test.ts`.)
 
+348. **The live step says a tool has answered once it has (2026-09-18, pass 38; F38-2).** Ruling
+    250 put the run's current step on the row that says it is working, read off the last
+    tool line. The step then stuck, unchanged, from the tool's invocation to the NEXT
+    invocation, so the strip read `Working · mcp__viberr_controller__get_github_state ·
+    {…}` for as long as the model thought after that call came back. Live on the first
+    controller turn of this pass: two minutes, while the console one panel down logged
+    thinking lines. Measured over the 40 controller turns before the fix: 76 such
+    stretches longer than 20 s on 26 of the 40 runs, 53 minutes in all, the longest
+    138 s — every one a finished call shown as the thing the run was doing, and the
+    first one of this pass misread by the person watching it as a hung tool.
+    The adapters keep naming the tool while it runs and, once its result lands, name it as
+    answered: `composing · <tool> · <input> answered`, derived from the same projected line
+    both backends already compute — Claude's `tool_result` row, Codex's completed command
+    output, and, for a succeeding Codex MCP call whose completion projects no row at all,
+    a `toolAnswered` fact on the envelope. "composing" is what the server knows: the
+    result landed and no tool has been invoked since. The update that matters most
+    arrives inside the throttle's one-second window — a tool that answers within a second
+    of being invoked — and a Codex run then emits nothing until its reasoning item
+    completes, so the service now writes a suppressed step when the window closes
+    instead of dropping it, and never onto a settled row.
+    (`adapter.server.ts`, `wire-format.server.ts`, `claude-runtime.server.ts`,
+    `codex-runtime.server.ts`, `run-service.server.ts`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

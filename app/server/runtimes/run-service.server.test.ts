@@ -1950,6 +1950,57 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
  * UPDATE per message.
  */
 describe("run phase throttling (R21-4)", () => {
+  it("writes a step the window suppressed when the window closes, and nothing once the run has settled (ruling 348)", async () => {
+    let callbacks: Parameters<RuntimeAdapter["start"]>[1] | null = null;
+    const captureAdapter: RuntimeAdapter = {
+      backend: "claude",
+      start(spec, cb) {
+        callbacks = cb;
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: captureAdapter, codex: captureAdapter });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    const cb = callbacks!;
+    vi.useFakeTimers();
+    try {
+      cb.onPhase?.("Working", "Bash · npm test");
+      expect(getRun(store.db, runId)!.step).toBe("Bash · npm test");
+      // The result lands 200 ms later, inside the window, and the run then
+      // goes quiet — the Codex shape, where nothing is emitted until the
+      // reasoning item completes.
+      vi.advanceTimersByTime(200);
+      cb.onPhase?.("Working", "composing · Bash · npm test answered");
+      expect(getRun(store.db, runId)!.step).toBe("Bash · npm test");
+      // CANARY: return from the throttle without deferring, and the strip keeps
+      // the finished call through the whole silence.
+      vi.advanceTimersByTime(800);
+      expect(getRun(store.db, runId)!.step).toBe("composing · Bash · npm test answered");
+
+      // A step still deferred when the run settles never lands on the row.
+      // CANARY: drop `settled = true` and the clearTimeout in onExit.
+      vi.advanceTimersByTime(1000);
+      cb.onPhase?.("Working", "Bash · one");
+      vi.advanceTimersByTime(100);
+      cb.onPhase?.("Working", "late");
+      cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
+      vi.advanceTimersByTime(2000);
+      expect(getRun(store.db, runId)!.step).not.toBe("late");
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+  });
+
   it("writes a CHANGED phase immediately and rate-limits step-only churn", async () => {
     // A live handle the test drives — the run never exits, so `finalize` never
     // nulls the phase and the row IS the observable.
