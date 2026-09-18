@@ -141,3 +141,4 @@ README change used as a stimulus.
 | 09:17 | PR #12 opened for BNB-17 (session-introspection contract amendment; the architect designed and wrote it in ten minutes); Review next. BNB-16's backend engineer still building the gateway |
 | 09:22 | BNB-17's PR #12 approved by the code reviewer; Verify next |
 | 09:30 | BNB-17's PR #12 approved by the integration verifier; acceptance recommended for `1fe1996` (the second decision-created amendment, minted at 09:05, acceptable at 09:30) |
+| 09:31 | **BNB-17 accepted by me**: PR #12 merged. Only BNB-16's backend engineer is live now; rulings 360–361 deploy when it is acceptable and held |
