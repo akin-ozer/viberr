@@ -83,3 +83,4 @@ README change used as a stimulus.
 | 07:09 | BNB-11's fresh PR #7 approved by the code reviewer; Verify next |
 | 07:16 | PR #8 opened for BNB-12 (the local stack: supervisor, manifests, make targets, plus the health-only gateway placeholder I widened it to); Review |
 | 07:19 | BNB-11's PR #7 approved by the integration verifier too — acceptable |
+| 07:22 | **BNB-11 accepted by me**: PR #7 merged (the second rejected task, recovered through a fresh PR); BNB-3 (identity accounts) released by it |
