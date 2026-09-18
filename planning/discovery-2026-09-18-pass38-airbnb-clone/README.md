@@ -256,6 +256,7 @@ README change used as a stimulus.
 | 16:12 | BNB-20's PR #18 **approved by the integration verifier** on `62a95cd` — the timezone amendment with its widened listings fix is acceptable after two reworks and a conflict; accepted next. BNB-27's engineer build re-delivered PR #25 on `4ada7e8`; BNB-6 at Review with the code reviewer dispatched; BNB-25's engineer re-engaged to amend the done-signal line |
 | 16:15 | **BNB-20 accepted by me**: refresh brought 4 commits in (merge `f5b4c1d`), PR #18 merged (`f6e83f3`) — the third decision-created amendment lands with the listings fix that keeps `main` green. 20 PRs merged today; four tasks in flight (BNB-5 re-review, BNB-6 review, BNB-27 build → review, BNB-25 amending) |
 | 16:16 | BNB-25's engineer amended the done-signal line (the 404 is the contract's consequence) and reported in 4 minutes; its operator moves it on. BNB-27's engineer building the gateway auth edge on the widened paths |
+| 16:17 | BNB-25 re-delivered PR #26 on `8f10bc4` (the amended done signal); the operator checks the gateway wishlist route files before moving it to Review |
 
 ## Questions for the owner (saved for the end, as asked)
 
