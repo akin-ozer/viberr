@@ -202,6 +202,7 @@ README change used as a stimulus.
 | 13:03 | BNB-3 (identity) delivered as **PR #23** and moved to Review. Every service chain of the burst now has a PR: #17 web, #18 timezone amendment, #19 booking ledger, #20 citations, #21 search, #22 messaging, #23 identity |
 | 13:06 | BNB-6 Design → Build on the widened goal. BNB-7's integration verifier **approved the conflict-resolved head** `e6f8024`, validation `changed`: the code reviewer's approval still sits on the old head `6dd81ce`, so the task is not acceptable until Review is re-judged — watching whether the operator re-dispatches the reviewer or a packet asks me |
 | 13:07 | BNB-7's operator moved it Verify → Review (manual boundary) to have the code reviewer re-judge the resolved head — no packet, no human step; BNB-6's engineer queued |
+| 13:08 | BNB-5's PR #19 **approved** by the code reviewer on the resolved head. Lens-2 on BNB-7's page: "Not acceptable yet. Waiting on 1 required reviewer approval of the current revision" and "Validation: changed. BNB Integration Verifier approved, but the current revision is not yet cleared by all required reviewers" — agrees with the verdict rows |
 
 ## Questions for the owner (saved for the end, as asked)
 
