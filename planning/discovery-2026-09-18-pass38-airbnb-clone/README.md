@@ -65,3 +65,4 @@ README change used as a stimulus.
 | 04:47 | Recovery: the rework landed as `568e7f5` and Viberr opened a **fresh PR #3** (PR #2 stays closed, never resurrected — ruling 160). The operator, still at Verify, engaged the integration verifier first (approve, validation `changed` because the code reviewer's approval was on the superseded revision), then moved the task back to Review and engaged the code reviewer for the new revision — verdicts bind to revisions (rulings 178/242) and the record said so at every step |
 | 05:01 | code reviewer approved PR #3's revision; this time the operator filed the acceptance recommendation itself (the react chain had been reset by the packet resolution) |
 | 05:03 | **BNB-9 accepted by me**: PR #3 merged by the ceremony; goal-1 link 3 minted next |
+| 05:25 | PR #4 opened for BNB-10 (contract core: primitives, error codes, money, dates; head `e17ecac`, platform architect); Review |
