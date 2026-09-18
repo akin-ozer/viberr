@@ -36,3 +36,21 @@ Its stack decision, made from the measured host (no docker, no python, no go, no
 browser): SQLite through `node:sqlite`, one file per service, Node child processes
 supervised by `scripts/stack.mjs` behind `make up`; the booking service owns both
 availability and reservations so a hold is one transaction.
+
+## The board, as it ran
+
+| when (UTC) | what |
+|---|---|
+| 02:02 | goal given; controller turn ran 17 min: project, 3 KBs, 5 skills, 6 profiles, 8 goals, 30 tasks |
+| 02:13 | BNB-1 dispatched (infrastructure engineer, Claude opus); the operator bootstrapped the empty repo with an initial commit itself |
+| 02:37 | PR #1 opened by Viberr's delivery; Review; code reviewer engaged |
+| 02:44 | **request_changes** — a false premise in decision record 0001 (the registry DOES report per-version ages); rule 9 respected (not an environment complaint) |
+| 02:50 | rework delivered as revision `b130929`; reviewer approved at 02:53; Verify; integration verifier engaged |
+
+Rejection and divergence plan (the goal asks for both): close two clone PRs on GitHub
+without merging once they are in review, and watch the closure record, the recovery packet
+and the "no fresh PR until a person answers" rule (ruling 160); after a reviewer approves a
+later revision, push one external commit to that PR branch through the GitHub API and watch
+ruling 179's "Revision moved after review" disclosure void the verdict and return the task
+to the review stage. Neither is clone code: one is a click on GitHub, the other a one-line
+README change used as a stimulus.
