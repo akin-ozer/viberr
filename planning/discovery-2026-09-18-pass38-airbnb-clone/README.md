@@ -152,6 +152,7 @@ README change used as a stimulus.
 | 10:30 | BNB-16 **approved by the integration verifier** on `70f92db` (validation healthy). **Ruling 361 live:** the "Review passed" notification (row 2386) names `agent · BNB Integration Verifier`, where every earlier verdict row named the Operator |
 | 10:31 | The operator recommended acceptance for `70f92db` 59 s after the verdict (no depth-cap packet this time: the packet answer had restarted the chain). Full unit suite on the 362 head: 7,076 green |
 | 10:33 | **BNB-16 accepted by me**: PR #13 merged (`151f035`), the gateway is in; goal-2 (contracts and the gateway) complete, 4 of 4 links. **Ruling 360 on the accept dialog:** the Merges row read "PR #13 · in review → main · checks not readable — GitHub refused this credential's read of the check results (HTTP 403): Resource not accessible by personal access token", the first of the clone's 12 merges to say so |
+| 10:34 | The merge released four service chains at once: BNB-3, BNB-4 (goal-2 links 1 and 4), BNB-5 (links 2 and 4) and BNB-7 (link 4) — four operator drives within 5 s of the merge, each moving its task Triage → Design within 45 s. Four tasks live: no deploy until at most two are |
 
 ## Questions for the owner (saved for the end, as asked)
 
