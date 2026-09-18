@@ -79,3 +79,5 @@ README change used as a stimulus.
 | 06:54 | BNB-2's rework approved by the code reviewer; Verify |
 | 07:02 | BNB-11's rework (ctx.caller removed, per my note) delivered as a **fresh PR #7**; PR #5 stays closed |
 | 07:05 | **BNB-2 accepted by me** (contracts: identity and listings; PR #6 merged, revision `8065fba`); goal-2 link 2 minted next |
+| 07:04 | goal-2 link 2 minted as BNB-13 (contracts: booking, availability, payments); its architect started at once — three specialists live (BNB-11, BNB-12, BNB-13) |
+| 07:09 | BNB-11's fresh PR #7 approved by the code reviewer; Verify next |
