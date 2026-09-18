@@ -100,3 +100,11 @@ approval landed on `e17ecac`:
   0 real `git push` / `gh pr create` / `gh pr merge` commands were issued (dry-runs excluded).
   The claim has never been tested by an agent on this instance; the credential-less workspace
   remains the fence (L1-#17's disposition stands).
+
+## Ruling 357 live (08:20Z, BNB-14)
+
+The operator drive `run_qZ8FzLBZvkuC` (12 turns) refreshed the branch, delivered PR #10,
+moved Design → Build → Review and engaged the code reviewer; it ended at 08:20:25.517 and the
+lease release logged "drive delivered and kept going — no follow-up operator turn owed". No
+second operator run started (the only live run is the reviewer's). Before the ruling, every
+one of the board's 13 deliveries had been followed within 0.1 s by a two-turn no-op drive.
