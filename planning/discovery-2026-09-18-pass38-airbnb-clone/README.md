@@ -243,6 +243,7 @@ README change used as a stimulus.
 | 15:37 | BNB-23 Review → Verify (verifier queued). Three builds hold the slots (BNB-25 wishlists, BNB-5 conflict fix, BNB-27 host onboarding design); three runs queued (BNB-20's and BNB-23's reviewers, BNB-6's conflict fix) |
 | 15:44 | Insights after the burst: 2,576 runs, $2,799.58 instance-wide (the clone's share is most of today's), 2,258 finished / 53 error / 259 stopped / 3 running / 3 queued — every figure equals the projection's; "9 of 9 active tasks have a definite next actor" |
 | 15:50 | BNB-27's architect reported the host-onboarding design after 19 minutes; the operator reacts. BNB-20's reviewer got a slot for the re-review of `62a95cd` |
+| 15:51 | BNB-27 delivered as **PR #25** (become a host: the host profile schema and its public surface) 100 s after the architect's report. Open PRs: #18, #19, #22, #24, #25; BNB-25 building; BNB-24/26 held |
 
 ## Questions for the owner (saved for the end, as asked)
 
