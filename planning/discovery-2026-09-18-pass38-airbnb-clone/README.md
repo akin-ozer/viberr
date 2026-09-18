@@ -200,6 +200,7 @@ README change used as a stimulus.
 | 13:00 | BNB-21 Review → Verify (verifier queued); BNB-22's PR #21 (search) **approved** by the code reviewer; BNB-20's architect running the widened fix |
 | 13:03 | BNB-6's widened goal saved (3,177-char draft: six `messaging-*.route.ts` files, the internal route deferred to an amendment the operator will raise); BNB-22 Review → Verify; BNB-3's engineer resolved its conflict and reported (28 minutes) — the last of the three |
 | 13:03 | BNB-3 (identity) delivered as **PR #23** and moved to Review. Every service chain of the burst now has a PR: #17 web, #18 timezone amendment, #19 booking ledger, #20 citations, #21 search, #22 messaging, #23 identity |
+| 13:06 | BNB-6 Design → Build on the widened goal. BNB-7's integration verifier **approved the conflict-resolved head** `e6f8024`, validation `changed`: the code reviewer's approval still sits on the old head `6dd81ce`, so the task is not acceptable until Review is re-judged — watching whether the operator re-dispatches the reviewer or a packet asks me |
 
 ## Questions for the owner (saved for the end, as asked)
 
