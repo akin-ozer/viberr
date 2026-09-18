@@ -177,6 +177,7 @@ README change used as a stimulus.
 | 12:07 | **BNB-4 accepted by me** through the packet's door: confirming its accept option opened the same "Accept BNB-4" dialog (checks-not-readable note, branch, revision, verdict) and "Accept → Done & merge" merged **PR #14** (`190f98f`), the listings service. So the two doors share one ceremony and one outcome; only the option's sentence ("merge pending — you merge it") was wrong (LOW wording, CANDIDATES). BNB-19 recommended for acceptance at 12:05 |
 | 12:08 | BNB-4's merge released BNB-6 (messaging) and completed goal-4 link 1, whose successor **BNB-22** (Search) was minted at 12:08:19.045 and released at 12:08:19.095 — **ruling 358 live**, 50 ms from mint to release where the same shape waited 57 s on BNB-14 this morning. BNB-5 delivered the night ledger as **PR #19** at 12:09 |
 | 12:09 | **BNB-19 accepted by me**: PR #15 merged (`4feeea3`), the decision-record renaming is in; BNB-21 (citations) released 1.3 s after the merge. Merged so far today: 13 PRs |
+| 12:14 | BNB-22 (Search) Triage → Design → Build in 22 s with its engineer queued; BNB-6 (messaging) at Design; BNB-20's PR #18 got **request_changes** from the code reviewer (the day's second rework), its operator queued behind BNB-5's in the coordination lane. Nine rows live or queued |
 
 ## Questions for the owner (saved for the end, as asked)
 
