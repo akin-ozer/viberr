@@ -328,6 +328,29 @@ export function listLiveRunRows(db: DatabaseSync): AgentRunRow[] {
 }
 
 /**
+ * Ruling 349: the live run state per task of one project — `running` when any
+ * run of the task streams, else `queued` when one is parked behind the cap.
+ * Controller turns are not task work and are left out. Feeds `withLiveRun`.
+ */
+export function liveRunStateByTask(
+  db: DatabaseSync,
+  projectSlug: string,
+): Map<string, "queued" | "running"> {
+  // SAFETY: same `agent_runs` DDL guarantee as `getRun`.
+  const rows = db
+    .prepare(
+      `SELECT task_key, state FROM agent_runs
+       WHERE project_slug = ? AND kind <> 'controller' AND state IN ('queued', 'running')`,
+    )
+    .all(projectSlug) as { task_key: string; state: "queued" | "running" }[];
+  const out = new Map<string, "queued" | "running">();
+  for (const row of rows) {
+    if (row.state === "running" || !out.has(row.task_key)) out.set(row.task_key, row.state);
+  }
+  return out;
+}
+
+/**
  * Map of agent profile id → the agent's DISPLAY NAME, drawn from its run rows
  * for a project (most-recent name wins). This is the authoritative source for
  * "what is this agent CALLED" when rendering a timeline/notification actor:

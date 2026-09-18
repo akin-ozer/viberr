@@ -294,6 +294,17 @@ function useRovingStageMenu(active: boolean) {
 }
 
 function WaitTag({ task }: { task: TaskSummary }) {
+  if (task.waiting === "agent" && task.liveRun === "queued") {
+    // Ruling 349: parked behind the cap — no pulse, because nothing streams.
+    return (
+      <span
+        className="wait-tag agent"
+        title="Behind the instance's concurrent-run cap; it starts when a slot frees."
+      >
+        agent queued
+      </span>
+    );
+  }
   if (task.waiting === "agent") {
     return (
       <span className="wait-tag agent">
@@ -761,7 +772,7 @@ function TaskCard({
  */
 function readinessYields(task: TaskSummary): boolean {
   const r = task.displayReadiness;
-  if (r === "agent_working") return true;
+  if (r === "agent_working" || r === "agent_queued") return true;
   // Ruling 225 extends ruling 168(a)'s yield to a clock rest, and it matters
   // more here than for a human wait: "input required" above "resumes Sep 14 ·
   // 02:28" is not one demand said twice, it is two statements that contradict

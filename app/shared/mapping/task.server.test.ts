@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { PrRef } from "~/schemas/task-file.schema";
 import type { DependencyRender } from "~/shared/dependencies";
 import {
+  withLiveRun,
+  type TaskSummary,
   isAtAcceptanceBoundary,
   mapOperatorRef,
   mapPrChecks,
@@ -751,5 +753,32 @@ describe("nextScheduleDueAt", () => {
     expect(nextScheduleDueAt("[]")).toBeNull();
     expect(nextScheduleDueAt(JSON.stringify([{ nonsense: true }]))).toBeNull();
     expect(nextScheduleDueAt(JSON.stringify([occurrence("whenever", "pending")]))).toBeNull();
+  });
+});
+
+describe("ruling 349: withLiveRun reads the run row into the display state", () => {
+  const agentCarried = {
+    displayReadiness: "agent_working",
+    waiting: "agent",
+  } as unknown as TaskSummary;
+
+  it("downgrades 'agent working' to 'agent queued' while the run is parked behind the cap", () => {
+    // Live before the fix: 129 queued runs across 33 tasks on one instance,
+    // each one a card saying "agent working" with a pulsing dot while the
+    // timeline said "Nothing is streaming yet". CANARY: return the task's own
+    // displayReadiness whatever `liveRun` says.
+    const queued = withLiveRun(agentCarried, "queued");
+    expect(queued.displayReadiness).toBe("agent_queued");
+    expect(queued.liveRun).toBe("queued");
+  });
+
+  it("keeps 'agent working' for a running run, and for a row it cannot see", () => {
+    expect(withLiveRun(agentCarried, "running").displayReadiness).toBe("agent_working");
+    expect(withLiveRun(agentCarried, null).displayReadiness).toBe("agent_working");
+  });
+
+  it("touches no other display state — a queued run under a human wait is still that wait", () => {
+    const human = { displayReadiness: "input_required", waiting: "human" } as unknown as TaskSummary;
+    expect(withLiveRun(human, "queued").displayReadiness).toBe("input_required");
   });
 });

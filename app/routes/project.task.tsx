@@ -71,6 +71,8 @@ import { githubWebHost } from "~/server/github/github-client.server";
 import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
+import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
+import { withLiveRun } from "~/shared/mapping/task.server";
 import {
   runOperator,
   type RunOperatorInput,
@@ -406,7 +408,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     : 0;
 
   return {
-    task: { ...detail, timeline: slice.events },
+    // Ruling 349: the hero and the rail read the run row, like the board card.
+    task: {
+      ...withLiveRun(detail, liveRunStateByTask(db, params.slug).get(params.key) ?? null),
+      timeline: slice.events,
+    },
     // The project's existing label vocabulary, for the Details panel's label
     // autocomplete — same source the board's New-task modal draws from.
     labelSuggestions: listProjectLabels(db, params.slug),

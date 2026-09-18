@@ -5969,6 +5969,26 @@ by rewriting those paragraphs:*
     (`adapter.server.ts`, `wire-format.server.ts`, `claude-runtime.server.ts`,
     `codex-runtime.server.ts`, `run-service.server.ts`, and their tests.)
 
+349. **A run the cap parked reads "agent queued", not "agent working" (2026-09-18, pass 38;
+    F38-3). Ruling 311's twin, one surface over.** `markWaitingAgent` writes `waiting:
+    "agent"` after every dispatch, for a run the concurrency cap PARKED as much as for one
+    that started; ruling 311 corrected the timeline sentence and the operator's reply and
+    left the display state alone. So the board card said "agent working" with a pulsing
+    dot, the hero pill said the same, the rail read "Agent work" and the review queue's
+    copy agreed, while the console said "queued" and the timeline said "Nothing is
+    streaming yet". Measured on this instance before the fix: **129 queued runs across 33
+    tasks**, each one a card claiming work in flight for as long as the queue held it.
+    The fact lives on the run row alone. The layout and task loaders now read it once per
+    project (`liveRunStateByTask`: `running` when any run of the task streams, else
+    `queued`; controller turns excluded) and hand it to `withLiveRun`, in the mapping
+    module where display readiness is derived, which turns `agent_working` into the new
+    `agent_queued` while the run is parked. The card, the pill and the rail say "agent
+    queued" with no pulse and name the cause in a title; the board's agent filter keeps
+    both. `run.state-changed` already rides the project firehose, so the surfaces
+    revalidate when the queue promotes the run.
+    (`task.server.ts` (mapping), `run-store.server.ts`, `project.tsx`, `project.task.tsx`,
+    `pill.tsx`, `board-page.tsx`, `task-side-panels.tsx`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

@@ -67,3 +67,28 @@ window closes (trailing flush) and never onto a settled row.
 `codex-runtime.server.test.ts` (2): with the answered branches returning null, 6 fail.
 `run-service.server.test.ts`: with the deferred write removed, the throttle test fails. All
 restored green (227 across the five files).
+
+## F38-3 — A run parked behind the concurrency cap read "agent working" on the board, the hero and the rail (MEDIUM; ruling 349)
+
+**Found by** the lens-2 sweep (`LENS2-SURFACE-AGREEMENT-SWEEP.md` C1), then verified in code:
+`markWaitingAgent` (`task-actions.server.ts`) is called after `startRun` returns whatever the
+outcome, and `WaitTag` / `ReadinessPill` / the Current-state rail render `waiting === "agent"`
+as work in flight. The console and the timeline say "queued … Nothing is streaming yet".
+
+**Measured** on this instance before the fix: **129 "Queued a … run" timeline events across 33
+tasks** — 129 stretches in which the board card pulsed "agent working" about a run that had
+not started.
+
+**Refutation tried.** Does the board revalidate away from the lie quickly? No: nothing on the
+card changes until the run is promoted, which on a saturated instance is minutes (ruling 311's
+live case was 11 minutes). Is "agent working" defensible because the task IS on an agent? The
+pulsing dot and the word "working" claim streaming work; the product's own sibling surfaces
+disagree on the same page. Ruling 311's twin, so MEDIUM.
+
+**Fix.** The loaders read the run row once per project (`liveRunStateByTask`) and
+`withLiveRun` (mapping) derives `agent_queued` from `agent_working` while the run is parked;
+the card, the pill and the rail say "agent queued" without a pulse and name the cause.
+
+**Red-proof.** Loader test (`project.server.test.ts`): with the annotation dropped, red.
+Mapping test: with `withLiveRun` returning the display state unchanged, red (and the loader
+test with it). Board test: with the queued branch unreachable, red. Restored: 233 green.

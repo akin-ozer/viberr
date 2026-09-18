@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
@@ -154,5 +155,57 @@ describe("F19-9: the rail badges count the tasks their surfaces list", () => {
     } finally {
       await removeTask("VIB-993");
     }
+  });
+});
+
+/**
+ * Ruling 349 (pass 38, F38-3): the board reads the run row, so a run the cap
+ * parked is "agent queued" and only a streaming one is "agent working".
+ */
+describe("ruling 349: the layout annotates each task with its live run", () => {
+  // The loader ships whole TaskSummary objects; RailData names only the fields
+  // the badge tests read, so this test parses the three more it reads.
+  const liveTaskSchema = z.object({
+    key: z.string(),
+    archived: z.boolean(),
+    readiness: z.string(),
+    displayReadiness: z.string(),
+    liveRun: z.string().nullish(),
+  });
+  const liveTasks = (data: RailData) =>
+    z
+      .array(liveTaskSchema)
+      .parse([...data.board.columns.flatMap((c) => c.tasks), ...data.board.orphanTasks]);
+
+  it("reads 'agent queued' while the run row is queued, and 'agent working' once it runs", async () => {
+    const target = liveTasks(await railCounts()).find(
+      (t) => !t.archived && t.readiness === "ready",
+    )!;
+    const { markWaitingAgent } = await import("~/server/tasks/task-actions.server");
+    await markWaitingAgent(app.db, { dataRoot: app.dataRoot }, "viberr-core", target.key);
+    const { upsertRun, patchRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id: "run_r349queued",
+      projectSlug: "viberr-core",
+      taskKey: target.key,
+      threadId: "primary-r349",
+      role: "Developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "test",
+      agentProfileId: "developer",
+      state: "queued",
+    });
+    // CANARY: drop the annotation in the loader and the card still says
+    // "agent working" about a run that has not started.
+    const queued = liveTasks(await railCounts()).find((t) => t.key === target.key)!;
+    expect(queued.liveRun).toBe("queued");
+    expect(queued.displayReadiness).toBe("agent_queued");
+
+    patchRun(app.db, "run_r349queued", { state: "running" });
+    const running = liveTasks(await railCounts()).find((t) => t.key === target.key)!;
+    expect(running.liveRun).toBe("running");
+    expect(running.displayReadiness).toBe("agent_working");
   });
 });

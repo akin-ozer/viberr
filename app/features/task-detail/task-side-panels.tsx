@@ -922,6 +922,14 @@ export function CurrentStatePanel({
                   "a schedule"
                 )}
               </span>
+            ) : task.waiting === "agent" && task.liveRun === "queued" ? (
+              // Ruling 349: the run is parked behind the cap; nothing streams.
+              <span
+                className="by-agent"
+                title="Behind the instance's concurrent-run cap; it starts when a slot frees."
+              >
+                Agent queued
+              </span>
             ) : task.waiting === "agent" ? (
               <span className="by-agent">Agent work</span>
             ) : task.blockedBy.length > 0 ? (
