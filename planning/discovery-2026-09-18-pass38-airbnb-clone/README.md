@@ -212,6 +212,7 @@ README change used as a stimulus.
 | 13:08 | BNB-5's PR #19 **approved** by the code reviewer on the resolved head. Lens-2 on BNB-7's page: "Not acceptable yet. Waiting on 1 required reviewer approval of the current revision" and "Validation: changed. BNB Integration Verifier approved, but the current revision is not yet cleared by all required reviewers" — agrees with the verdict rows |
 | 13:09 | BNB-5 Review → Verify (verifier queued); BNB-20's architect reported the widened listings fix after 17 minutes; three reviewers running (BNB-21, BNB-22, BNB-3), three queued |
 | 13:10 | BNB-20 re-delivered PR #18 on `c5d5d19` (the amendment plus the widened listings fix, `make test` green on the merged base) and returned to Review; its reviewer joins the queue (four queued now) |
+| 13:14 | BNB-21's PR #20 **approved by the integration verifier** (the six citations); acceptable, accepted next. BNB-6's engineer got a slot |
 
 ## Questions for the owner (saved for the end, as asked)
 
