@@ -72,3 +72,5 @@ README change used as a stimulus.
 | 06:06–06:14 | both reviewers re-approved `ae4cd55`; the operator recommended acceptance |
 | 06:16 | **BNB-10 accepted by me**: PR #4 merged after the full drift cycle (external commit → verdicts voided → reverted forward-only → re-approved) |
 | 06:15 | BNB-10 merged → BNB-2 released, BNB-11 released, goal-1 link 4 minted as BNB-12; three operator drives at once. BNB-12's operator held it at Triage with a scope packet: the done signal says `make up` starts a `gateway` placeholder that exists nowhere and belongs to no task (rule 2). I chose its recommended option: widen BNB-12 to ship a health-only gateway placeholder |
+| 06:34 | PR #5 opened for BNB-11 (`3244837`); Review; code reviewer engaged. BNB-12's edit-goal decision opened the goal editor with the operator's widened draft (3,868 chars, naming `services/gateway/**`); I saved it |
+| 06:35 | **Rejection 2**, mid-review this time: I closed PR #5 on GitHub while the code reviewer was still judging it, with the reason as a PR comment |
