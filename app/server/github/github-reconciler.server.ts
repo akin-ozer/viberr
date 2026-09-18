@@ -32,6 +32,7 @@ import {
 } from "~/server/files/project-writer.server";
 import {
   findOpenScopeViolation,
+  listScopeViolations,
 } from "~/server/projections/policy-violations.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -498,8 +499,13 @@ async function reconcileTaskUnlocked(
       { dataRoot: ctx.dataRoot },
     );
   } else if (pr?.checks) {
-    const open = findOpenScopeViolation(db, input.projectSlug, "checks:read", input.taskKey);
-    if (open) await resolveScopeViolationWithEvent(db, open.id, actor, { dataRoot: ctx.dataRoot });
+    // A read that succeeds proves the permission for the whole project, so
+    // every task's open `checks:read` violation resolves — including tasks
+    // whose PRs have since merged and will never read their checks again.
+    for (const open of listScopeViolations(db, input.projectSlug, { status: "open" })) {
+      if (open.scope !== "checks:read") continue;
+      await resolveScopeViolationWithEvent(db, open.id, actor, { dataRoot: ctx.dataRoot });
+    }
   }
   const reviewLive = pr?.review !== undefined ? pr.review : (cachedPr?.review ?? null);
   const review = prState === "review" || prState === "accepted" ? reviewLive : null;

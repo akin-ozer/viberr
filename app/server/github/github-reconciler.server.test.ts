@@ -1949,8 +1949,17 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
       message: "Resource not accessible by personal access token",
     });
     expect(findOpenScopeViolation(store.db, store.slug, "checks:read", "VIB-301")).not.toBeNull();
+    // Another task's row, opened while its PR was still open; that PR has
+    // since merged, so nothing will ever read its checks again.
+    openScopeViolation(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-777",
+      scope: "checks:read",
+      detail: "seeded",
+    });
 
-    // The read succeeds: the summary lands, the refusal goes, the violation resolves.
+    // The read succeeds: the summary lands, the refusal goes, and EVERY open
+    // checks:read row in the project resolves (CANARY: resolve this task's only).
     await reconcileTask(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-301" },
@@ -1961,6 +1970,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     expect(after?.checks).toMatchObject({ total: 2, passing: 2 });
     expect(after?.checksUnread).toBeUndefined();
     expect(findOpenScopeViolation(store.db, store.slug, "checks:read", "VIB-301")).toBeNull();
+    expect(findOpenScopeViolation(store.db, store.slug, "checks:read", "VIB-777")).toBeNull();
   });
 
   it("a real CI/review change overwrites the cache (preservation is not stickiness)", async () => {
