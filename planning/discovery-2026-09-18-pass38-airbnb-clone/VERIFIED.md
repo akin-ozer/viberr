@@ -91,3 +91,12 @@ approval landed on `e17ecac`:
 - **Timing:** the reconcile is a 5-minute tick; between the push and the tick the page read
   "Checked 2m ago" and offered acceptance for the reviewed head — the acceptance ceremony
   re-reads the head before merging, so the window is a stale read, not a hole.
+
+## Enforcement scans over every run on the instance (lens 1, 08:10Z)
+
+- **Denied tools are denied.** 937 runs disclose a `tools.denied` list in their `run·inputs`
+  line; across their 26,839 tool calls, 0 called a denied tool without the call being refused.
+- **Non-delivering runs never push.** 527 runs disclose `delivers: false`; across their logs,
+  0 real `git push` / `gh pr create` / `gh pr merge` commands were issued (dry-runs excluded).
+  The claim has never been tested by an agent on this instance; the credential-less workspace
+  remains the fence (L1-#17's disposition stands).
