@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { parseBlockedByColumn } from "~/server/projections/dependencies.server";
+import { parseBlockedByColumn, resolveDependencies } from "~/server/projections/dependencies.server";
 import { z } from "zod";
 import {
   allLinksSettled,
@@ -38,7 +38,7 @@ import {
   type ProjectContext,
 } from "./task-actions.server";
 import { releaseTask, setTaskDependencies, validateDependencyRefs } from "./dependencies.server";
-import { formatDependencyRef, parseDependencyRef } from "~/shared/dependencies";
+import { formatDependencyRef, parseDependencyRef, type DependencyRender } from "~/shared/dependencies";
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
 
@@ -1442,6 +1442,11 @@ export function startGoalRunner(db: DatabaseSync): void {
  * field that can never be set.
  */
 export type GoalLinkView = GoalLink & {
+  /** Ruling 359: the declared wait with each entry's live state, so the
+   *  Controller page reads a done entry as done (ruling 356's sentence).
+   *  Filled by `listGoals`, which has the projection; absent on the
+   *  file-only detail read. */
+  waits?: DependencyRender[];
   /**
    * Ruling 335: what the CHAIN DECLARED, present only when the task has moved
    * past it. `goal` above always carries the truth.
@@ -1590,7 +1595,11 @@ export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
         createdByLabel: r.created_by_label,
         onFailure: r.on_failure,
         description: r.description,
-        links,
+        // Ruling 359: the states ride along with the declaration.
+        links: links.map((link) => ({
+          ...link,
+          waits: resolveDependencies(db, projectSlug, link.blockedBy),
+        })),
         currentIndex: r.current_index,
         createdAt: r.created_at,
         updatedAt: r.updated_at,

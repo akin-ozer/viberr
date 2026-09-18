@@ -240,3 +240,16 @@ person reading the timeline sees "Waits on other work (goal-2 link 2)" and "Depe
 a minute apart with nothing having happened in between. Kept LOW: a minute per link, no lie, no
 loss. **Fix:** the mint asks the release engine once after the link carries its task. **Red-proof:**
 dropping the call leaves the minted task held with no release note.
+
+## F38-13 — The Controller page's link rows named done entries as waited on (LOW; ruling 359)
+
+**Found by** the same probe as F38-10, on the Controller page after ruling 356 deployed: the
+Goals panel's link rows read "waits on goal-2 link 1, goal-2 link 4, BNB-11" (BNB-3's link) and
+"waits on goal-2 link 1, goal-2 link 4" (BNB-4's) while goal-2's link 1 carried a done pill two
+panels up. **Measured:** on the live board 23 link rows declare a wait; 4 of them name an entry that
+is done (goal-2 link 4, and the first links of goals 3, 4 and 5). **Refutation tried:** the row prints the link's DECLARATION, which is a contract, not a
+state — but the page renders the declaration beside live pills and a reader takes the sentence as
+the state; the task page made the same argument before ruling 356. Kept LOW. **Fix:** the list
+read resolves the states beside the declaration and the row prints ruling 356's sentence.
+**Red-proof:** the page canary (print the raw list) and the server canary (drop the states) each
+fail their own test.

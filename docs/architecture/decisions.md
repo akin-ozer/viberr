@@ -6143,6 +6143,17 @@ by rewriting those paragraphs:*
     engine is convergent, so an unsatisfied or lagging read leaves the tick to do what it
     always did. (`goal-actions.server.ts` and its test.)
 
+359. **The Controller page's link rows read the wait states too (2026-09-18, pass 38;
+    F38-13; ruling 356's sentence on one more surface).** The Goals panel printed each link's
+    declared wait raw — "waits on goal-2 link 1, goal-2 link 4, BNB-11" under a link whose
+    goal-2 link 1 sat two panels up with a `done` pill — so the page contradicted itself the
+    way the task page did before ruling 356, and on the board's main chain view. `listGoals`
+    has the projection, so it resolves each link's entries (`waits`) beside the declaration,
+    and the row prints `holdEntriesSentence` ("goal-2 link 4 (goal-2 link 1 (BNB-2) and
+    BNB-11 are done)"); the file-only detail read carries no states and the row falls back
+    to the declaration in the same sentence form. (`goal-actions.server.ts`,
+    `controller-page.tsx`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

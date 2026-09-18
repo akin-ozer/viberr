@@ -244,6 +244,42 @@ describe("chained goals", () => {
     expect(task.timeline.some((e) => e.title === "Dependencies released")).toBe(true);
   });
 
+  it("ruling 359: listGoals resolves each link's wait with its live states", async () => {
+    // Canary: drop the `waits` fill in listGoals.
+    const { createGoal, listGoals, reconcileGoal, updateGoal } = await import("./goal-actions.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "States ride along",
+        links: [
+          { title: "First", goal: "One. Done when merged." },
+          { title: "Second", goal: "Two. Done when merged." },
+          { title: "Third", goal: "Three. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "edit_link", index: 3, blockedBy: [`${chain.goalId} link 1`, `${chain.goalId} link 2`] } },
+      actor,
+      ctx,
+    );
+    const firstTask = chain.activeTaskKey!;
+    await closeTaskToDone(firstTask);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    const goal = listGoals(app.db, SLUG).find((g) => g.id === chain.goalId)!;
+    const third = goal.links.find((l) => l.index === 3)!;
+    expect(third.waits?.map((w) => [w.label, w.state])).toEqual([
+      [`${chain.goalId} link 1 (${firstTask})`, "done"],
+      [`${chain.goalId} link 2 (${goal.links[1]!.taskKey})`, "open"],
+    ]);
+  });
+
   it("link 1 completing advances the chain: link 2's task is created under the creator's authority", async () => {
     await closeTaskToDone(firstTask);
     const { reconcileGoal, getGoalView } = await import("./goal-actions.server");
