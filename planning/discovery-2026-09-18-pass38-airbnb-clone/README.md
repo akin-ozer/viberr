@@ -227,6 +227,7 @@ README change used as a stimulus.
 | 13:29 | **BNB-26** created ("Composed dated search: the gateway route contract and its availability composition"), held on BNB-5 with BNB-22 already done — the seventh task minted from a finding today |
 | 13:29 | BNB-20's PR #18 **approved** by the code reviewer on `c5d5d19` (the amendment with the widened listings fix); Verify next. BNB-26's creation note reads "Created waiting on BNB-5, BNB-22. Held until every entry is done" with BNB-22 already Done — ruling 356's shape on the creation note (measured next) |
 | 13:31 | Measured: 56 creation notes on the instance, 4 named a task already Done at creation (SHOP-46, SHOP-61, SHOP-69, BNB-26) — the writer joins the raw labels (`task-actions.server.ts:783`); fixed next as 356(b). BNB-25's operator opened a triage packet (three wishlist bullets collide with the frozen contract: no rename shape, unavailability by omission, `apps/web` not owned) — re-scope to what the contract supports (recommended, `edit_goal`); answered with it |
+| 13:32 | BNB-25's re-scoped goal saved from the 3,209-char draft (rename out of scope, unavailability as the contract expresses it). **Fourth conflict**: `bnb-20` vs `main` on `services/listings/src/repo/rows.ts` — the first content conflict inside a service rather than a derived file (BNB-20's widened listings fix meets BNB-4's merged listings); blocked packet opened, architect resolves (recommended) |
 
 ## Questions for the owner (saved for the end, as asked)
 
