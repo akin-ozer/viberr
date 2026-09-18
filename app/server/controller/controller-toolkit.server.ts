@@ -2497,7 +2497,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_github_state",
-      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in two different cases and `checksRead` tells them apart: false means GitHub's check state has never been read for it, true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported). `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
+      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in three different cases: `checksRead` true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported); `checksRead` false with a `checksUnread` object means GitHub REFUSED the read (its status and message are there — a 403 is the credential lacking Checks: read, and the PR card and accept dialog then say "checks not readable"); `checksRead` false with `checksUnread` null means nobody has looked yet. `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
       { projectSlug: z.string().optional() },
       runWith(async (args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -2527,6 +2527,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // "No CI is configured" and "we have not looked" ask for opposite
             // next moves.
             checksRead: p.checksRead,
+            // Ruling 360 (F38-14): the THIRD case — the read was made and GitHub
+            // refused it. Ruling 276's own note says the controller learned that
+            // this account's Actions were billing-blocked "only from prose an
+            // operator had written"; it was never told the read itself failed.
+            checksUnread: p.checksUnread ?? null,
             review: p.review,
             mergeable: p.mergeable,
           })),

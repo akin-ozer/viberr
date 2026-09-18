@@ -534,7 +534,7 @@ interface GithubStateReply {
   defaultBranch: string;
   connection: string;
   reconcile: { at: string | null; label: string | null; stale: boolean };
-  prs: { task: string; number: number; state: string }[];
+  prs: { task: string; number: number; state: string; checksUnread?: unknown }[];
   branches: { task: string; branch: string; sync: string }[];
 }
 
@@ -571,6 +571,11 @@ describe("viberr_controller.get_github_state", () => {
     for (const pr of state.prs) {
       expect(pr.task).toMatch(/^VIB-\d+$/);
       expect(Number.isInteger(pr.number)).toBe(true);
+      // Ruling 360: the THIRD kind of null `checks` — a read GitHub refused —
+      // rides on every row (null here: nothing was refused in the seed), so
+      // the controller never again takes a refusal for "nobody has looked".
+      // CANARY: drop `checksUnread` from the reply.
+      expect(Object.hasOwn(pr, "checksUnread")).toBe(true);
     }
     // Freshness is disclosed, and a board that was NEVER reconciled reads as
     // stale rather than as current — cached PR state must never pass for live.
