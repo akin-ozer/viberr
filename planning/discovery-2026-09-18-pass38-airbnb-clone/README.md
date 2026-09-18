@@ -248,6 +248,7 @@ README change used as a stimulus.
 | 15:57 | BNB-27's question: widen to the gateway auth edge (the `SessionResolver`, the two route files, `gateway.ts`, the gateway tests) and keep `/me/host-profile`, the spelling the merged web client already calls — the architect's recommendation, which I take; the first click was lost to the hidden browser pane and lands at 16:00. BNB-25's engineer reported the wishlists build at 15:56 (2 h 19 min of run time, 100 of them asleep) |
 | 15:59 | BNB-25 delivered as **PR #26** (wishlists, re-scoped to the frozen contract); BNB-20 Review → Verify (verifier owed). Six open PRs: #18, #19, #22, #24, #25, #26 |
 | 16:02 | BNB-23's PR #24 **approved by the integration verifier** (the last four citations); acceptable, accepted next. BNB-27's question answered (widen to the gateway auth edge) |
+| 16:04 | **BNB-23 accepted by me**: PR #24 merged (`3528be9`), the last stale citations gone; 19 PRs merged today. Open: #18 (BNB-20 at Verify), #19 (BNB-5, conflict fix running), #22 (BNB-6, conflict fix running), #25 (BNB-27, widened, engineer next), #26 (BNB-25, review next) |
 
 ## Questions for the owner (saved for the end, as asked)
 
