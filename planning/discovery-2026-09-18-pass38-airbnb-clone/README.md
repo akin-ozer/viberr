@@ -142,3 +142,29 @@ README change used as a stimulus.
 | 09:22 | BNB-17's PR #12 approved by the code reviewer; Verify next |
 | 09:30 | BNB-17's PR #12 approved by the integration verifier; acceptance recommended for `1fe1996` (the second decision-created amendment, minted at 09:05, acceptable at 09:30) |
 | 09:31 | **BNB-17 accepted by me**: PR #12 merged. Only BNB-16's backend engineer is live now; rulings 360–361 deploy when it is acceptable and held |
+
+## Questions for the owner (saved for the end, as asked)
+
+1. **`commit-push-branch: human` on a deliverer** (L1-#6): a delivering run whose push grant is
+   withheld is told "the operator's delivery decision (or a human) publishes them", but nothing
+   publishes — the dirty tree is a delivery failure. What should the grant MEAN for a deliverer:
+   the agent commits and a person pushes from the task page, or delivery is simply refused at
+   dispatch with that sentence? (Never rendered live; latent.)
+2. **Holds and stage moves** (L1-#1/#4): a hold refuses dispatch and delivery but not
+   `move_task`, a board drop or `update_branch_from_base`. Should "the words on the board become
+   true" cover moving a held task? (No live incident.)
+3. **An unmeasurable lease diff** (ruling 353's edge): when the fork point cannot be read, the
+   lease gate refuses nothing. Refuse the push, or keep it advisory as today?
+4. **The depth-capped acceptable branch** (C3): when the react chain hits its cap on a task that
+   is already acceptable, ruling 258 skips the stuck packet and the acceptance recommendation
+   arrives with the 15-minute sweep. File it directly on that branch (the operator's own act,
+   without a drive)?
+5. **Checks as a gate** (ruling 360): failing or unreadable checks are disclosed on the accept
+   dialog and never gate the merge, per ruling 304. Keep it that way, or add a per-project
+   "checks must pass" policy now that the read is honest?
+6. **The `checks:read` violation's home** (ruling 360): it is flagged on the task whose PR met the
+   403 and resolved project-wide on the first successful read; the credential card carries it as
+   an advisory. Should it live on the credential alone (one row per token) rather than per task?
+7. **The credential**: none was needed; the question in the goal ("if a credential needs to go
+   into viberr, ask me") never arose. The token's missing Checks: read is the only credential
+   fact this pass surfaced — grant it on GitHub and press Re-check to make CI status visible.
