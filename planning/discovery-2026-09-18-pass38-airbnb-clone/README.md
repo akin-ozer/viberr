@@ -225,6 +225,7 @@ README change used as a stimulus.
 | 13:27 | **BNB-22 accepted by me**: base refresh brought 11 commits in (merge `d238e7c`), PR #21 merged (`7e41b05`), search is in; **BNB-25** (goal-4 link 3) minted and released 0.3 s later. 17 PRs merged today. BNB-24's operator opened an input packet at 13:26 (read and answered next) |
 | 13:28 | BNB-24's packet came from the operator's own triage check of the goal's premises (rulings.md rule 7, before any dispatch): no gateway search route on `main`, no frozen contract for the composed dated search or its availability-unknown response, and the goal's owned paths named `apps/web/app/**` where the repo has `apps/web/src/app/**`. Recommended: fund the composed search as its own task (waits on BNB-5 and BNB-22, blocks BNB-24). Answered with it |
 | 13:29 | **BNB-26** created ("Composed dated search: the gateway route contract and its availability composition"), held on BNB-5 with BNB-22 already done — the seventh task minted from a finding today |
+| 13:29 | BNB-20's PR #18 **approved** by the code reviewer on `c5d5d19` (the amendment with the widened listings fix); Verify next. BNB-26's creation note reads "Created waiting on BNB-5, BNB-22. Held until every entry is done" with BNB-22 already Done — ruling 356's shape on the creation note (measured next) |
 
 ## Questions for the owner (saved for the end, as asked)
 
