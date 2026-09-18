@@ -253,6 +253,7 @@ README change used as a stimulus.
 | 16:07 | BNB-5 re-delivered PR #19 on `c4a8517`; the night ledger goes round Review and Verify a third time — approval is per revision (the clone's rule 11), which the acceptance-time refresh made necessary |
 | 16:11 | BNB-6's engineer resolved its `.env.example` conflict and reported; the operator re-delivers. BNB-25 has sat at Build since its delivery with an engineer's decision card open (the operator verified its premise on `origin/main` at 16:02 and said so) — my audit filter watched only the operator's packet rows; read and answered next |
 | 16:12 | BNB-25's card was the engineer's: a second account is refused a wishlist with 404, not the 403 the done signal asked for, because the frozen routes are all `/me/wishlists/…` and a 403 would disclose that a stranger owns a list by that name; recommended: keep the 404 and amend the done-signal line. Answered with it. BNB-6 re-delivered PR #22 on `06fa1e2`; BNB-27's engineer reported after 25 minutes |
+| 16:12 | BNB-20's PR #18 **approved by the integration verifier** on `62a95cd` — the timezone amendment with its widened listings fix is acceptable after two reworks and a conflict; accepted next. BNB-27's engineer build re-delivered PR #25 on `4ada7e8`; BNB-6 at Review with the code reviewer dispatched; BNB-25's engineer re-engaged to amend the done-signal line |
 
 ## Questions for the owner (saved for the end, as asked)
 
