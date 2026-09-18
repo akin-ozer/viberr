@@ -29,3 +29,5 @@ FINDINGS.md with a number.
 | L2-C8 | Quota display grace vs dispatch hold. | By design per the sweep. | REFUTED. |
 | L2-C9 | `list_runs` omits the interrupt reason and failure class. | — | LOW; not taken up. |
 | C1 (connection card) | "3 public repos" beside a private-repo token: the number is the ACCOUNT's public-repo count, not the token's reach. | 1 card. | LOW cosmetic; not taken up. |
+| L2-C7 (live) | Bell badge vs popover count. | Checked live at 03:00Z: bell "40 unread", popover header "40 unread". | REFUTED live. |
+| L2-C9 (measured) | `list_runs` rows carry `state` only; the console carries the failure class and the interrupt actor/reason. | 21 of the 53 errored runs on this instance carry a class (quota 8, auth 11, unavailable 2) the reply omits; 254 of 256 interrupts are restarts. | OPEN, LOW: an omission (the controller reads the log for the reason), not a false sentence. Not taken up. |
