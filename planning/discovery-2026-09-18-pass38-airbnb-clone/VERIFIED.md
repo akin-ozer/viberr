@@ -153,3 +153,9 @@ tick with its `create` drive refused.
   `queued` (run_QQCHCvmVbI3G, created 10:35:13) and the task page read STATUS "agent queued",
   the engagement row "BNB Platform Architect · Claude · delivers · queued", and the timeline note
   "Queued a Claude run … the instance is at its concurrent-run cap" — no surface said "working".
+
+## Ruling 358 — live again (12:08Z)
+
+- BNB-22 (goal-4 link 2, "Search: place, guests, price, type and amenities") was minted by BNB-4's
+  acceptance at 12:08:19.045Z and its dependencies released at 12:08:19.095Z (`task.dependencies.released`,
+  entries `goal-4 link 1`), with its operator create-drive queued at 12:08:21 — no minute tick involved.
