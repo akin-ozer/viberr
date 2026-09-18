@@ -15,3 +15,17 @@ FINDINGS.md with a number.
 | L1-#15 | Lens-1: file leases gate the push delta only; a leased path pushed before the lease still merges. | 0 live refusals; reachable on this board (leases declared mid-flight). | **confirmed → F38-7 (ruling 353)**, LOW-MEDIUM. |
 | L1-#2 | Lens-1: `retry_other_backend` / `resolve_remote_collision` consume the packet, then meet the hold. | 0 live blockedBy cases; 1 quota-hold case that scheduled the run. | **confirmed → F38-8 (ruling 354)**, LOW-MEDIUM. |
 | L2-C5 | Lens-2: `holdRefusal` promises "Viberr releases it when every entry is done" beside a note saying the entry can never complete. | 0 dead entries so far; reachable on chained boards. | **confirmed → F38-9 (ruling 355)**, LOW-MEDIUM. |
+
+## Dispositions of the sweep candidates not taken up (yet)
+
+| # | candidate | measured | disposition |
+|---|---|---|---|
+| L1-#6 | A DELIVERING run whose `commit-push-branch` is withheld is told "the operator's delivery decision (or a human) publishes them"; `resolveDeliveryPushGrant` answers `grant_withheld` and a dirty tree is a delivery failure, so nothing publishes. | No deployment on this instance has ever engaged a deliverer without `commit-push-branch` (the stock reviewer profile carries `human`, but reviewers do not deliver); the sentence has not been rendered live. | OPEN — a real false sentence, latent. The honest fix is a design question for the owner: what does `commit-push-branch: human` MEAN for a deliverer (agent commits, human pushes? or nothing publishes)? Filed under questions. |
+| L1-#1 / #4 | The hold gates dispatch and delivery, not stage moves (`move_task`, `move_stage`, the board) nor `update_branch_from_base`. | Not claimed as refused by any prompt; 0 live incidents. | REFUTED as a finding: no surface lies. Filed under questions (should "the words on the board become true" cover stage moves?). |
+| L1-#8/#11/#21/#25 | Wording drift: MCP write tools named natively while Claude denies the mangled id; the operator definition calls a Codex-writable tree "read-only"; "treated as guidance" while the directive reaches the agent; "tools will not take" secrets is true of declared fields only. | — | LOW wording; not taken up this pass. |
+| L1-#17 | "refused however it is wrapped" overclaims; bash-policy calls itself coverage, not containment. | The credential-less workspace is the fence; no live breach. | REFUTED as a lie about outcomes (the push cannot succeed); wording only. |
+| L1-#16 | Declared path sets have no gate. | No prompt claims one; the controller's own text says the reviewer enforces them "as a real finding" — and on BNB-1 the reviewer did check them. | REFUTED: advisory by design and described as such. |
+| L2-C7 | Bell badge count vs popover count. | Not measured. | LOW; not taken up. |
+| L2-C8 | Quota display grace vs dispatch hold. | By design per the sweep. | REFUTED. |
+| L2-C9 | `list_runs` omits the interrupt reason and failure class. | — | LOW; not taken up. |
+| C1 (connection card) | "3 public repos" beside a private-repo token: the number is the ACCOUNT's public-repo count, not the token's reach. | 1 card. | LOW cosmetic; not taken up. |
