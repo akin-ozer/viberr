@@ -1,0 +1,52 @@
+# Pass 38 — what held up under live probing
+
+Each entry: the claim, how it was probed on the live instance, and what was observed.
+
+## A held task refuses dispatch at every door (rulings 186 / 240) — HELD
+
+- **Task page, before the click (03:18Z):** BNB-2 (held by `goal-1 link 3`) shows the Run
+  control disabled and, beneath it, the server's own sentence: "BNB-2 waits on goal-1 link 3
+  and Viberr is holding it, so running an agent on it is refused. Viberr releases it when
+  every entry is done; to release it sooner, change what it waits on."
+- **Controller door (03:20Z):** asked in a fresh project conversation to start the BNB Backend
+  Engineer on BNB-2 without touching its dependencies, the controller answered "No run
+  started. The server answered, verbatim: > [error] BNB-2 waits on goal-1 link 3 and Viberr
+  is holding it, so running an agent on it is refused…" — the same sentence, and no run row,
+  no audit row and no packet were written.
+- **Code (lens-1 sweep):** all 10 `startAgentRun` callers and all 3 `performDelivery` callers
+  land on the gate; recovery re-invokes only the operator, whose dispatch is gated.
+
+## The acceptance gate names the missing verdict (ruling 178) — HELD
+
+At Verify with the code reviewer's approval on the current revision and the integration
+verifier still running, the task page said: "Not acceptable yet. Waiting on 1 required
+reviewer approval of the current revision." Once the verifier approved, the control became
+"Accept completion → Done", and the dialog named the PR, the revision (`b130929b9800`), the
+verdict state and the base refresh before the merge.
+
+## The delivery pipeline, end to end — HELD
+
+BNB-1: the operator bootstrapped the empty repository with an initial commit, cut `bnb-1`,
+dispatched the infrastructure engineer, pushed its four commits and opened PR #1 with the
+task's contract as the body; the required code reviewer requested changes on a real defect
+(a false premise in the ADR, verified by running the registry gate); the rework was delivered
+as revision `b130929`; the reviewer approved; Verify engaged the integration verifier; it
+approved from a cold clone; I accepted; Viberr merged PR #1 (`4e63a07`), deleted the branch,
+minted goal-1 link 2 as BNB-9, released it and dispatched its operator — 71 minutes end to end.
+
+## Ruling 348, live on the new build (03:17Z)
+
+The operator drive on BNB-9 showed `composing · mcp__viberr__read_board · {} answered` while it
+thought after the call — the finished tool no longer reads as current.
+
+## The run-inputs disclosure (rulings 339–346) — HELD
+
+The verifier's run (`run_KjC5xWnv3w05`) recorded `denied: git checkout -b/-B, git switch
+-c/-C, git push, git commit, gh pr create, gh pr merge`, a six-tool viberr toolkit, one skill,
+three knowledge bases and no MCP servers; the deliverer's recorded only `gh pr merge` denied
+(the push is fenced by the credential-less workspace, as the prompt says). Both match the
+grants the controller set.
+
+## The bell (lens-2 C7) — HELD
+
+Bell "40 unread", popover header "40 unread" (03:00Z).
