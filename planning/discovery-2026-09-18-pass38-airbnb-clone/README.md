@@ -170,6 +170,7 @@ README change used as a stimulus.
 | 11:43 | BNB-3: the architect acted on the widening (two of three files derived, 4 commits, unpushed) and found two MORE gateway test files that go red once `stack/identity.json` exists (a substring assertion on the word "identity" in the supervisor source; a hand-built env with no `BNB_URL_*`); the operator opened a second packet — extend the widening to all of `services/gateway/test/**` (recommended, `edit_goal`) or split them out. Answered with the recommended option. BNB-19's PR #15 **approved** by the code reviewer |
 | 11:48 | BNB-3's widened goal saved from the operator's 3,304-char draft (OWNED PATHS now `services/gateway/test/**`); its backend engineer dispatched at 11:49 and queued. BNB-19 Review → Verify, verifier running. BNB-18's PR #16 **approved** by the code reviewer at 11:49 |
 | 11:51 | BNB-18 Review → Verify (verifier queued); BNB-20's engineer reported the timezone amendment after 12 minutes. **Ruling 361 holds on every notification since the deploy**: four "can move again" rows name `Dependency release`, four "Review passed" rows name the reviewer; the two rows named `Operator` are its own "Knowledge base disagrees with the repository" notes on BNB-19 |
+| 11:52 | BNB-20 delivered as **PR #18** (the timezone amendment, 29 minutes from mint to PR) and moved to Review. Five PRs open: #14 (Verify), #15 (Verify), #16 (Verify), #17 (Review), #18 (Review); three reviewers running, three queued |
 
 ## Questions for the owner (saved for the end, as asked)
 
