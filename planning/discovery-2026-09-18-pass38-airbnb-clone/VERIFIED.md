@@ -69,3 +69,25 @@ fresh PR #3 (the closed PR was never resurrected); the verifier re-approved firs
 the operator moved the task back to Review for the code reviewer's verdict on the new
 revision, then to Verify with the acceptance recommendation; the merge went through. Nothing
 was lost and no door was closed without a named way out.
+
+## Reviewed-revision drift (rulings 132 / 179) — HELD, on every surface (05:45Z → 05:52Z)
+
+One README commit pushed to `bnb-10` through the GitHub API, 36 seconds after the second
+approval landed on `e17ecac`:
+
+- **Record:** `workRevision.kind: external`, head `3f492ec`, validation `changed`; policy-engine
+  note "Revision moved after review (ruling 179): PR #4's head is now `3f492ec`, 1 authored
+  commit since review merges unreviewed. The verdict on `e17ecac` no longer binds…".
+- **Task page:** the Commits card lists the commit apart under "ALSO ON THE BRANCH · NOT THIS
+  TASK'S"; the acceptance gate reads "Not acceptable yet. Waiting on 2 required reviewer
+  approvals of the current revision."; the earlier acceptance offer (filed at 05:46:29 for
+  `e17ecac`, 43 seconds after the push and before any reconcile) stands withdrawn.
+- **Operator:** woken by the reconcile, it corrected its own open packet's stale sentence in a
+  comment ("both required reviewers approved `e17ecac`" — "That was true when I wrote it"),
+  observed that the workspace and its cached `origin/bnb-10` both sit at `e17ecac` so the
+  commit "was not authored in this workspace on this timeline", refused to recommend
+  acceptance, and sent the Integration Verifier back to judge the head and report who authored
+  the commit.
+- **Timing:** the reconcile is a 5-minute tick; between the push and the tick the page read
+  "Checked 2m ago" and offered acceptance for the reviewed head — the acceptance ceremony
+  re-reads the head before merging, so the window is a stale read, not a hole.
