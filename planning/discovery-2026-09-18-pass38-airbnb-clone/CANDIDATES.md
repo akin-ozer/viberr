@@ -13,3 +13,4 @@ FINDINGS.md with a number.
 | L2-C6 | Lens-2: `create_project` stores any string as a stage colour; `slate`/`amber` draw nothing. | verified live: 2 of the shopify board's 6 dots are transparent. | **confirmed → F38-6 (ruling 352)**, LOW. |
 | L1-#14 | Lens-1: the controller guide's "push a task forward with an @operator comment" starts nothing (ruling 252). | 4 of 21 controller comments on the shopify board followed it. | **confirmed → F38-5 (ruling 351)**, LOW. |
 | L1-#15 | Lens-1: file leases gate the push delta only; a leased path pushed before the lease still merges. | 0 live refusals; reachable on this board (leases declared mid-flight). | **confirmed → F38-7 (ruling 353)**, LOW-MEDIUM. |
+| L1-#2 | Lens-1: `retry_other_backend` / `resolve_remote_collision` consume the packet, then meet the hold. | 0 live blockedBy cases; 1 quota-hold case that scheduled the run. | **confirmed → F38-8 (ruling 354)**, LOW-MEDIUM. |

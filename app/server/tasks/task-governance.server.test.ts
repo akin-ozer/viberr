@@ -4372,3 +4372,74 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(goalOf(store)).toBe(before);
   });
 });
+
+/**
+ * Ruling 354 (pass 38, F38-8): ruling 241's rule at two more packet arms. A
+ * retry is a dispatch and a collision ceremony ends in a delivery; both are
+ * refused on a held task, and both used to be discovered AFTER the resolution
+ * write had cleared the packet.
+ */
+describe("ruling 354: a hold refuses a retry or a collision ceremony before the packet is consumed", () => {
+  const RETRY_PACKET: TaskPacket = {
+    type: "blocked",
+    kind: "Blocked decision",
+    from: "operator",
+    title: "Claude refused the run",
+    body: "Body.",
+    observations: [],
+    options: [
+      { kind: "retry_other_backend", t: "Retry on Codex", d: "", rec: true, backend: "codex" },
+      { kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false },
+    ],
+  };
+
+  it("refuses the retry with the hold sentence and leaves the packet open", async () => {
+    installFakeRuntime();
+    const store = prepared();
+    seedTasks(store, [{ key: "VIB-9", stage: "impl" }]);
+    withTask(
+      store,
+      { stage: "impl", waiting: "human", readiness: "blocked", blockedBy: ["VIB-9"] },
+      RETRY_PACKET,
+    );
+    // CANARY: read the hold only in startAgentRun and this resolves — the
+    // decision is written, the packet cleared, and the timeline says "The
+    // retry could not start".
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.packet?.title).toBe("Claude refused the run");
+    expect(file.parsed.timeline.some((e) => e.text.includes("**Decision:**"))).toBe(false);
+    expect(file.parsed.timeline.some((e) => e.text.includes("could not start"))).toBe(false);
+  });
+
+  it("refuses the collision ceremony before it closes anything", async () => {
+    const store = prepared();
+    seedTasks(store, [{ key: "VIB-9", stage: "impl" }]);
+    withTask(
+      store,
+      { stage: "impl", waiting: "human", readiness: "blocked", blockedBy: ["VIB-9"], branch: "vib-1" },
+      {
+        ...RETRY_PACKET,
+        title: "Branch collision",
+        options: [{ kind: "resolve_remote_collision", t: "Clear the collision", d: "", rec: true }],
+      },
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.packet?.title).toBe("Branch collision");
+  });
+});

@@ -153,3 +153,16 @@ enforcement claim the controller repeated to me ("another task's push touching t
 before it reaches GitHub") is true only for the first push. **Fix:** the gate measures
 `merge-base(origin/<default>, HEAD)..HEAD --no-merges`. **Red-proof:** with the delta read
 restored, the new test fails; 57 green restored.
+
+## F38-8 — Two packet arms consumed the decision before the hold refused it (LOW-MEDIUM; ruling 354)
+
+**Found by** the lens-1 sweep (#2), verified in `resolvePacket`: `retry_other_backend` and
+`resolve_remote_collision` met the hold only in the act after the resolution write (ruling
+241's shape, fixed there for `question_reviewer` only). **Measured:** 0 blockedBy-held
+resolutions of either arm on this instance; the one live "The retry could not start" (SHOP-37)
+was a quota hold that scheduled the run, so the person lost nothing there. **Refutation tried:**
+can a packet with these options exist on a held task? Yes: the controller re-plans `blockedBy`
+on live tasks (it did so twice last pass), and a failure packet raised before the re-plan
+outlives it. Kept LOW-MEDIUM: reachable, destructive on one arm, latent so far. **Fix:** both
+arms read the hold before the write and refuse with the hold sentence; the packet stays open.
+**Red-proof:** with the guards disabled both new tests fail; restored, 117 green.

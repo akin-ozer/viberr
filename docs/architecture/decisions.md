@@ -6050,6 +6050,25 @@ by rewriting those paragraphs:*
     (`push-workspace.server.ts`, `push-workspace.server.test.ts`, `controller-toolkit.server.ts`,
     `file-formats.md`.)
 
+354. **A hold refuses a retry or a collision ceremony before the packet is consumed (2026-09-18,
+    pass 38; F38-8; ruling 241's rule at two more arms).** Ruling 241 read the hold before the
+    resolution write for `question_reviewer` and queued the question. Two arms still read it
+    only in the act that follows the write: `retry_other_backend` wrote the decision, cleared
+    the packet, then met ruling 186's refusal in `startAgentRun` and left "The retry could not
+    start" on the timeline — the person's choice bought nothing and there was no packet to
+    choose again from (its own comment said "a start failure must not un-resolve the packet",
+    which is right for a provider failure and wrong for a hold the arm could have read);
+    `resolve_remote_collision` closed the squatting PR and deleted the stale remote branch,
+    then met ruling 240's refusal in the re-delivery — the destructive half done, the
+    promised third step not. Measured: no blockedBy-held resolution of either arm on this
+    instance yet (the one live "could not start" was a quota hold that scheduled the run),
+    and both are reachable here, where the controller re-plans `blockedBy` on live tasks.
+    Both arms now read the hold HERE, before the resolution write, and refuse with
+    `holdRefusal`'s sentence plus "The packet stays open; choose again once the wait
+    clears." Refuse rather than queue: the release re-invokes the operator, which decides
+    the dispatch anew, and a remote branch is not something to delete on a promise.
+    (`task-actions.server.ts`, `task-governance.server.test.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
@@ -7203,6 +7222,8 @@ by rewriting those paragraphs:*
     person made and cannot see is the same defect in another place.
     (`task-file.schema.ts`, `review-deadlock.server.ts`, `task-actions.server.ts`,
     `dependencies.server.ts`, `task-side-panels.tsx`.)
+    *Extended by ruling 354 (2026-09-18): `retry_other_backend` and `resolve_remote_collision`
+    read the hold before the resolution write too, and refuse rather than queue.*
 
 242. **A review ROUND is counted by the deliverer having run, not by the reviewer having
     spoken (owner, 2026-09-14, pass 37; F37-69). Amends ruling 204.** Ruling 204 made a

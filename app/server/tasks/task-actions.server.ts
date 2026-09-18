@@ -9530,6 +9530,21 @@ export async function resolvePacket(
       break;
     }
     case "retry_other_backend": {
+      // Ruling 354 (pass 38, F38-8): ruling 241's rule at this arm too. The
+      // retry is an agent dispatch, which ruling 186 refuses on a held task;
+      // reading the hold only in the start below meant the decision was
+      // written, the packet cleared, and THEN "The retry could not start" —
+      // the person's choice bought nothing and there was no packet to choose
+      // again from. The hold is read HERE, before the resolution write, and
+      // the packet stays open until the wait clears or is edited.
+      {
+        const heldFor = existing.parsed.frontmatter.blockedBy;
+        if (heldFor.length > 0) {
+          throw AppError.conflict(
+            `${holdRefusal(input.taskKey, heldFor, "retrying it on another backend")} The packet stays open; choose again once the wait clears.`,
+          );
+        }
+      }
       // Backend-failure recovery (D4): the run restarts below on the option's
       // target backend; startSpecialistRun/startReviewerRun set the engagement's
       // `pinnedBackend` (F27-B1) so the switch STICKS — every later prompt on this
@@ -9688,6 +9703,18 @@ export async function resolvePacket(
         "approve-transition",
         "resolve this task's branch collision",
       );
+      // Ruling 354 (pass 38, F38-8): the ceremony ends in a re-delivery, which
+      // ruling 240 refuses on a held task — after the PR was closed and the
+      // remote branch deleted. Read the hold before any of it, so a held task
+      // keeps both its packet and its remote branch until the wait clears.
+      {
+        const heldFor = existing.parsed.frontmatter.blockedBy;
+        if (heldFor.length > 0) {
+          throw AppError.conflict(
+            `${holdRefusal(input.taskKey, heldFor, "clearing its branch collision and re-delivering it")} The packet stays open; choose again once the wait clears.`,
+          );
+        }
+      }
       // F33-2 (pass 33): the decision event states the DECISION, never its
       // effect. This text was written unconditionally and BEFORE any GitHub
       // work — so when the remedy refused (the delete-first ordering's whole
