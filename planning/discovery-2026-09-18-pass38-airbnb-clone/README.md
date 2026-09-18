@@ -216,6 +216,7 @@ README change used as a stimulus.
 | 13:16 | BNB-3's PR #23 **approved** by the code reviewer (identity, on the resolved head); BNB-21's operator recommended acceptance at 13:15 and then opened an input packet (read next) |
 | 13:17 | BNB-21's packet is the verifier's finding of four more stale `0003` citations with no owner (BNB-19 is Done) — recommended: a follow-up task. Opening it **withdrew the acceptance recommendation** ("Withdrew the offer … a decision packet opened") while the page still offers Accept; the two surfaces are consistent about the reason. Browser pane hidden on the desktop, so the acceptance click waits for it |
 | 13:20 | BNB-3 Review → Verify (verifier queued). BNB-7's code reviewer **approved the resolved head** `e6f8024` — both verdicts now on one revision, acceptable; the operator's turn follows |
+| 13:21 | BNB-7 Review → Verify and acceptance recommended for `e6f8024` 26 s after the re-approval — the conflict cycle closed in 55 minutes without a human step beyond the packet answer. BNB-21's packet answered (follow-up task for the four remaining citations); accepting BNB-21 and BNB-7 next |
 
 ## Questions for the owner (saved for the end, as asked)
 
