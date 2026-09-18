@@ -1327,7 +1327,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         policy: z.enum(["strict", "balanced", "auto"]).describe("strict = humans gate every advance · balanced = defaults · auto = full operator autonomy."),
         description: z.string().optional(),
         stages: z
-          .array(z.strictObject({ name: z.string(), color: z.string().optional() }))
+          .array(
+            z.strictObject({
+              name: z.string(),
+              color: z
+                .string()
+                .optional()
+                .describe(
+                  "A hex value (#8b8b8b) or a theme token (var(--muted)); anything else is refused. Omit for the palette.",
+                ),
+            }),
+          )
           .optional()
           .describe("Custom stage list, 2 to 8, ordered, terminal LAST."),
         boundaries: z

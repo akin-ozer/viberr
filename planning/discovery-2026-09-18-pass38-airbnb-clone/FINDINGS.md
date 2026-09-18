@@ -127,3 +127,14 @@ read the timeline; nothing is dispatched by it. Kept LOW: nothing false was told
 the product's own instruction sent its agent through a dead door. **Fix:** the sentence, plus the
 outgoing hash in `PRIOR_SHIPPED_HASHES` so the live store converges at boot. **Red-proof:** the
 seed-asset tests pin the hash list shape (16 green); the sentence is prose, pinned by review.
+
+## F38-6 — The project door stored stage colours no surface can draw (LOW; ruling 352)
+
+**Found by** the lens-2 sweep (C6); **verified live**: on the shopify board the Triage and Review
+column dots compute to `rgba(0, 0, 0, 0)` — `slate` and `amber` are not CSS colours — while the
+four other stages draw. **Measured:** 2 of 6 stages on the one controller-created board before
+this pass; the airbnb board was created with hex values and draws all six. **Refutation tried:**
+is a missing dot cosmetic? Yes, which is why it is LOW; it is kept because the tool accepted a
+value the product could never render and no later door could fix it. **Fix:** refuse at the
+door, naming the value and the accepted forms; the tool's description says so up front.
+**Red-proof:** with `isCssStageColor` returning true, the new test fails; restored, 134 green.

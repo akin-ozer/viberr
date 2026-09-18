@@ -6021,6 +6021,17 @@ by rewriting those paragraphs:*
     carries the old sentence converges at boot (B-OP1).
     (`controller-guide.skill.md`, `default-assets.server.ts`.)
 
+352. **A stage colour is a CSS value Viberr can draw, or the door refuses it (2026-09-18, pass 38;
+    F38-6).** `create_project` took any string for a stage's `color` and stored it; the board dot,
+    the home meter's `color-mix()`, the task hero and three more surfaces hand the string to CSS
+    as it is. The shopify board was created with `slate` and `amber` — palette names, not CSS
+    colours — and two of its six stage dots drew nothing while `project.md` said otherwise;
+    no later door could correct it (`update_stages` takes no colour). Ruling 15 already states
+    the contract (hex or `var(--*)`), so `resolveProjectBlueprint` refuses anything else by
+    name, naming the stage, the value and the two accepted forms, and the tool's schema says
+    so before the call. Stored values are left as they are: the fix is at the door, not a
+    rewrite of a person's file. (`project-create.server.ts`, `controller-toolkit.server.ts`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
