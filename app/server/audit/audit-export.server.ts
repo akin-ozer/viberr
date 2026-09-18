@@ -20,6 +20,12 @@ export interface AuditExportFilters {
   projectSlug?: string;
   /** Exact action match (e.g. "task.metadata.updated"). */
   action?: string;
+  /**
+   * Ruling 279 (pass 37, F37-112): action PREFIX match (e.g. "task." for every
+   * task action). Kept separate from `action` because the CSV/JSON export's
+   * contract is the exact one and must not change under it.
+   */
+  actionPrefix?: string;
   /** Restrict to one actor. */
   actorUserId?: string;
   /** ISO lower bound on occurred_at (inclusive). */
@@ -75,6 +81,12 @@ export function queryAuditEventsForExport(
   if (filters.action) {
     where.push("action = ?");
     params.push(filters.action);
+  }
+  if (filters.actionPrefix) {
+    // Ruling 279: LIKE with the wildcard only at the END, and the caller's own
+    // `%` / `_` escaped, so a prefix cannot become a pattern.
+    where.push("action LIKE ? ESCAPE '\\'");
+    params.push(`${filters.actionPrefix.replace(/[\\%_]/g, "\\$&")}%`);
   }
   if (filters.actorUserId) {
     where.push("actor_user_id = ?");

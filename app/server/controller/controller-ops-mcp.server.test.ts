@@ -17,7 +17,9 @@ import type { JsonValue } from "~/features/runtime/runtime-types";
  * `instance_health` answers anyone (the health probe is unauthenticated by
  * design); `read_run_log` applies the run-log route's exact gate and answers
  * ONE not-visible sentence to a missing run, a forbidden project and a
- * forbidden conversation alike; `read_store_doc` is org-admin only.
+ * forbidden conversation alike; `list_runs` (ruling 265) answers the run ids
+ * that gate admits and silently drops the rest; `read_store_doc` is org-admin
+ * only.
  *
  * Fixture roles on viberr-core (demo seed): elif = project admin (org member),
  * arda = project admin + ORG admin, deniz = org member and a member of nothing.
@@ -234,6 +236,12 @@ const HEALTH_REPLY = z.object({
     git: z.string().nullable(),
     python3: z.string().nullable(),
     go: z.string().nullable(),
+    // Ruling 191: the five a run reaches for and cannot install.
+    make: z.string().nullable(),
+    docker: z.string().nullable(),
+    pnpm: z.string().nullable(),
+    yarn: z.string().nullable(),
+    curl: z.string().nullable(),
     codexCli: z.string().nullable(),
     claudeAgentSdk: z.string().nullable(),
 
@@ -296,7 +304,7 @@ function parsed<T>(schema: z.ZodType<T>, reply: string): T {
 // ------------------------------------------------------------ tool surface
 
 describe("the diagnostics surface is read-only and named for the mount", () => {
-  it("offers exactly the three read tools, under the viberr_ops tool names", async () => {
+  it("offers exactly the four read tools, under the viberr_ops tool names", async () => {
     const { buildControllerOpsMcp, CONTROLLER_OPS_MCP_NAME } = await import(
       "./controller-ops-mcp.server"
     );
@@ -307,11 +315,13 @@ describe("the diagnostics surface is read-only and named for the mount", () => {
     });
     expect(ops.tools.map((t) => t.name).sort()).toEqual([
       "instance_health",
+      "list_runs",
       "read_run_log",
       "read_store_doc",
     ]);
     expect(ops.allowedTools).toEqual([
       "mcp__viberr_ops__instance_health",
+      "mcp__viberr_ops__list_runs",
       "mcp__viberr_ops__read_run_log",
       "mcp__viberr_ops__read_store_doc",
     ]);
@@ -590,6 +600,198 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
 });
 
 /**
+ * Ruling 265 (pass 37, F37-95): `read_run_log` takes a run id, and until this
+ * existed nothing in either toolkit produced one. Its own description could
+ * only point at "a task's console" — a place a model cannot look. Live, the
+ * controller knew from `instance_health` that five runs were going, could not
+ * learn which five, and read every task on the board matching `waiting:
+ * "agent"` against timeline events to reconstruct it.
+ */
+describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
+  const LIVE_RUN = "run_ops_live";
+  const HIDDEN_LIVE = "run_ops_live_hidden";
+
+  const RUNS_REPLY = z.object({
+    scope: z.string(),
+    // Ruling 302: always the real count, and the note only when it clipped.
+    total: z.number(),
+    truncated: z.string().optional(),
+    runs: z.array(
+      z.object({
+        runId: z.string(),
+        projectSlug: z.string().nullable(),
+        taskKey: z.string().nullable(),
+        state: z.string(),
+        agent: z.string(),
+      }).loose(),
+    ),
+  });
+
+  beforeAll(async () => {
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id: LIVE_RUN,
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      threadId: "thread_ops_live",
+      role: "developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      agentName: "dev",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    // A live run in a project the asker below is not a member of: it must be
+    // ABSENT from the listing, not refused (a refusal would disclose it).
+    upsertRun(app.db, {
+      id: HIDDEN_LIVE,
+      projectSlug: "not-a-project-deniz-can-see",
+      taskKey: "X-1",
+      threadId: "thread_ops_hidden",
+      role: "developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      agentName: "dev",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+  });
+
+  it("lists the LIVE runs, and the id it returns is one read_run_log accepts", async () => {
+    const body = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs"),
+    );
+    expect(body.scope).toBe("live");
+    // CANARY: drop the `state IN ('queued','running')` filter in
+    // `listLiveRunRows` and the finished fixtures come back too, which is the
+    // listing being a history rather than "what is going right now".
+    expect(body.runs.map((r) => r.runId)).toContain(LIVE_RUN);
+    expect(body.runs.map((r) => r.runId)).not.toContain(PROJECT_RUN);
+    expect(body.runs.every((r) => r.state === "running" || r.state === "queued")).toBe(true);
+    // The point of the tool: the id it hands back is usable, in one hop.
+    const log = parsed(
+      RUN_LOG_REPLY,
+      await call(ids.projectAdmin, "read_run_log", { runId: body.runs[0]!.runId }),
+    );
+    expect(log.run.id).toBe(body.runs[0]!.runId);
+  });
+
+  /**
+   * Ruling 268 (F37-100): ruling 99 stores a controller turn's CONVERSATION id
+   * in the runs table's `task_key` column, because that table has one identity
+   * column. Reporting it raw put a `cnv_…` in a field named `taskKey` with
+   * `projectSlug: ""` — the controller's own words: "a conversation id in a
+   * field named taskKey, so anything filtering by task has to know to discard
+   * that row". A storage shape is not a reply shape.
+   */
+  it("a controller turn names its conversation and carries no task (ruling 268)", async () => {
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, {
+      userId: ids.projectAdmin,
+      userLabel: "elif@viberr.dev",
+    });
+    upsertRun(app.db, {
+      id: "run_ops_live_ctl",
+      projectSlug: "",
+      taskKey: conversation.id,
+      threadId: "thread_ops_live_ctl",
+      role: "Controller",
+      kind: "controller",
+      agentProfileId: "controller",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    const body = parsed(RUNS_REPLY, await call(ids.projectAdmin, "list_runs"));
+    const row = body.runs.find((r) => r.runId === "run_ops_live_ctl")!;
+    // CANARY: report `row.task_key` straight through again and a caller
+    // filtering `taskKey` picks up a conversation id.
+    expect(row.taskKey).toBeNull();
+    expect(row.projectSlug).toBeNull();
+    expect(row).toMatchObject({ conversationId: conversation.id, kind: "controller" });
+    // A TASK run is untouched: the correction is scoped to the kind whose
+    // column means something else.
+    const task = body.runs.find((r) => r.runId === LIVE_RUN)!;
+    expect(task.taskKey).toBe("VIB-142");
+    expect(task).not.toHaveProperty("conversationId");
+  });
+
+  it("a run in a project you cannot see is absent, never refused", async () => {
+    const body = parsed(RUNS_REPLY, await call(ids.nonMember, "list_runs"));
+    // CANARY: let `requireRunVisible` throw inside the listing (or drop the
+    // filter) and a non-member either learns a hidden project's slug or gets a
+    // refusal that proves a run exists there.
+    expect(body.runs.map((r) => r.runId)).not.toContain(HIDDEN_LIVE);
+    expect(JSON.stringify(body)).not.toContain("not-a-project-deniz-can-see");
+  });
+
+  /**
+   * Ruling 302's third sibling. `list_runs` clipped at `limit` and said
+   * nothing: a caller asking "which runs are live right now" got a list that
+   * looked complete and could not reconcile it with the count
+   * `instance_health` reports for the same instant. `read_run_log` beside it
+   * has carried `olderExist`/`newerExist` since pass 32, and
+   * `inspect_audit_log` has carried `total`/`shown` since ruling 279.
+   */
+  it("ruling 302: a clipped listing says how many it left out, and is silent when it left out none", async () => {
+    const full = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
+    );
+    // Nothing hidden: no note at all, rather than a note claiming zero.
+    // CANARY: return the note unconditionally.
+    expect(full.total).toBe(full.runs.length);
+    expect(full.truncated).toBeUndefined();
+
+    const clipped = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs", {
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        limit: 1,
+      }),
+    );
+    // CANARY: drop `total` and the window looks like the whole history.
+    expect(clipped.runs).toHaveLength(1);
+    expect(clipped.total).toBe(full.total);
+    expect(clipped.truncated).toContain(String(full.total - 1));
+    expect(clipped.truncated).toContain("limit");
+  });
+
+  it("a taskKey lists that task's runs, finished included, and needs its project", async () => {
+    const body = parsed(
+      RUNS_REPLY,
+      await call(ids.projectAdmin, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
+    );
+    expect(body.scope).toBe(`${SLUG}/VIB-142`);
+    // This arm is how you reach the log of a run that ALREADY FAILED, so a
+    // terminal run has to be in it. CANARY: reuse the live filter here.
+    expect(body.runs.map((r) => r.runId)).toEqual(
+      expect.arrayContaining([LIVE_RUN, PROJECT_RUN, LONG_RUN]),
+    );
+    // Newest first, so the run a person just watched fail is at the top.
+    expect(body.runs[0]!.runId).toBe(LIVE_RUN);
+    // No binding on this server, so the missing argument is NAMED rather than
+    // answered with an empty list.
+    expect(await call(ids.projectAdmin, "list_runs", { taskKey: "VIB-142" })).toContain(
+      "Name projectSlug alongside taskKey",
+    );
+    // And the project gate answers out loud on this arm, because the listing
+    // was asked FOR a project.
+    expect(
+      await call(ids.nonMember, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
+    ).toContain("[denied]");
+  });
+});
+
+/**
  * Paging, on a run LONGER than both bounds (620 lines). The first version of
  * this suite proved its clamp against a 12-line fixture, so "limit: 99999
  * returned 12" was indistinguishable from no clamp at all — and the default
@@ -778,12 +980,38 @@ describe("read_store_doc: org admins only, like the store browser", () => {
         path: ["ops-note.md"],
       }),
     ).toBe("[error] That resource no longer exists.");
-    expect(
-      await call(ids.orgAdmin, "read_store_doc", {
-        kind: "kb",
-        id: kbId,
-        path: ["gone.md"],
-      }),
-    ).toBe("[error] That file no longer exists.");
+    // Ruling 246 (F37-75): "no longer exists" claimed the file once did, and
+    // sent the controller looking for a deletion that never happened. The
+    // message now says what this reader IS. CANARY: restore the old sentence
+    // and the caller most likely to hit this — one that confused the store
+    // with the git repository — learns nothing about which place it asked.
+    const missing = await call(ids.orgAdmin, "read_store_doc", {
+      kind: "kb",
+      id: kbId,
+      path: ["gone.md"],
+    });
+    expect(missing).toContain("has no `gone.md`");
+    expect(missing).toContain("not a git repository");
+    expect(missing).not.toContain("no longer exists");
+  });
+
+  /**
+   * Ruling 246: the live shape. The controller asked for `make/stack.mk` — a
+   * path in the project's git repository — and was told Viberr "only opens text
+   * documents", so it retried as `.md` and was told the file "no longer exists".
+   * Two refusals, two causes that were not the reason, and the real limit
+   * stated by neither.
+   */
+  it("ruling 246: a repository path is answered by SCOPE, never by its extension", async () => {
+    const message = await call(ids.orgAdmin, "read_store_doc", {
+      kind: "kb",
+      id: kbId,
+      path: ["make", "stack.mk"],
+    });
+    // CANARY: put the extension check back in front of the existence check in
+    // `readStoreDoc` and this reads "only opens text documents".
+    expect(message).not.toContain("only opens text documents");
+    expect(message).toContain("not a git repository");
+    expect(message).toContain("Open it on GitHub");
   });
 });

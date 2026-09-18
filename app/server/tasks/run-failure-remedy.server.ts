@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { findUserById } from "~/server/auth/user-store.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { substituteRunModel } from "~/server/runtimes/model-catalog.server";
+import {
+  backendDispatchHold,
+  latestBackendRateLimits,
+} from "~/server/runtimes/backend-quota.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
@@ -9,6 +13,7 @@ import { formatClockUTC, utcDayKey,
 import { formatUsd, localNetworkFailureCode } from "~/shared/run-failure";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
+import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.server";
 
 /**
  * Ruling 130 (pass 34, F34-1 / F34-12 / Q34-7): the ONE home for
@@ -95,6 +100,31 @@ function windowWord(window: string | null | undefined): string {
   }
 }
 
+/**
+ * Ruling 224: the reset instant viberr actually knows, when the run's own
+ * failure facts do not carry one.
+ *
+ * `RunFailureFacts.resetsAt` is set only from a machine `rate_limit_event` the
+ * provider sent during the run. A Codex refusal at spawn time sends no such
+ * event — but its SENTENCE names the date, the quota store parses it
+ * (`parseQuotaResetAt`) and keeps it on the backend's exhaustion record. That
+ * record is the same one Insights and the Profile page render, so reading it
+ * here makes the packet agree with every other surface rather than inventing a
+ * second source of truth. An expired record is already dropped by the reader.
+ */
+function storedQuotaResetIso(db: DatabaseSync, backend: RealBackend): string | null {
+  try {
+    const row = latestBackendRateLimits(db).find((r) => r.backend === backend);
+    const seconds = row?.exhausted?.resetsAt ?? null;
+    if (seconds === null || !Number.isFinite(seconds)) return null;
+    return new Date(seconds * 1000).toISOString();
+  } catch {
+    // A reading that cannot be taken is not a reason to fail a failure
+    // description — the packet simply loses the wait option.
+    return null;
+  }
+}
+
 export function describeRunFailure(
   db: DatabaseSync,
   input: DescribeRunFailureInput,
@@ -105,11 +135,48 @@ export function describeRunFailure(
   const other: RealBackend = input.backend === "codex" ? "claude" : "codex";
   const kind = input.failure?.kind ?? "unknown";
   const facts = input.failure?.facts;
-  const resetLabel = formatResetLabel(facts?.resetsAt);
+  // Ruling 224 (F37-44), second correction: the FACTS carry a reset instant
+  // only when the provider sent a machine `rate_limit_event` this run —
+  // Codex's spawn-time refusal sends none, so `facts.resetsAt` is null on
+  // exactly the failure that stalls a board. Viberr does know the instant: the
+  // quota store parsed it out of the provider's own sentence ("try again at
+  // Sep 14th, 2026 2:27 AM") and holds it as `exhausted.resetsAt`. Read the
+  // store when the facts are silent, or the wait this ruling added never
+  // appears on the packet it was written for — which is what the first deploy
+  // proved, live, on a board with four stalled tasks.
+  const resetsAt = facts?.resetsAt ?? storedQuotaResetIso(db, input.backend);
+  const resetLabel = formatResetLabel(resetsAt);
   const ownerRecord = input.ownerUserId ? findUserById(db, input.ownerUserId) : null;
   const owner = ownerRecord ? { userId: ownerRecord.id, name: ownerRecord.name } : null;
+  /**
+   * Ruling 326: CONNECTED is not the question. RUNNABLE NOW is.
+   *
+   * This used to ask only whether the owner has the other backend connected,
+   * and every option and sentence built on it promises a retry that happens
+   * NOW — "Retry @agent on Codex now", "or the run is retried on Codex". When
+   * that backend is itself out of quota, the promise is false, and
+   * `operatorOpenPacket` says so in its own words and REFUSES THE WHOLE PACKET:
+   * "the dispatch would be HELD and re-scheduled rather than run, so the person
+   * would spend a decision on a wait."
+   *
+   * Two parts of the same server disagreed, and the composer was the wrong one.
+   * Measured on the shopify-clone board: Arda's Codex was recorded out of quota
+   * from 2026-09-15 03:26 until 2026-09-19, and EVERY Claude failure inside
+   * that window composed a packet the authoring guard then refused — eleven
+   * times, in three bursts, each burst one account failure taking out several
+   * tasks at once. Each of the eleven left a note saying only that "the
+   * recovery packet could not be opened" (ruling 325) and no packet at all. For
+   * four days this board could not escalate a stalled task.
+   *
+   * A held backend is a backend the owner has; it is not one the retry can use.
+   */
+  const otherHold =
+    input.ownerUserId !== null
+      ? backendDispatchHold(db, other, { credentialUserId: input.ownerUserId })
+      : null;
   const ownerHasOther =
     input.ownerUserId !== null &&
+    otherHold === null &&
     isBackendAvailableFor(db, input.ownerUserId, other, input.dataRoot ? { dataRoot: input.dataRoot } : {});
   const whose = owner ? `${owner.name}'s` : "the task owner's";
   const profile = "Profile → Agent accounts";
@@ -195,8 +262,20 @@ export function describeRunFailure(
       remedy = "Re-run it; if it hangs again, inspect the session for what it was waiting on.";
       break;
     case "session_missing":
-      reason = "The provider session this run tried to resume no longer exists.";
-      remedy = "Re-run it: a fresh session re-anchors on task.md and continues.";
+      // Ruling 221 (F37-41): two roads to one class, and the difference is
+      // what a human does next. A vanished session heals itself on the next
+      // fresh run; a session STORE that cannot be opened keeps failing every
+      // resume on this host until someone repairs or removes the file, so the
+      // sentence has to say which one this was.
+      if ((input.failure?.text ?? "").includes(SESSION_STORE_UNREADABLE_MARK)) {
+        reason =
+          "The provider's own session store on this host could not be opened, so this run could not resume its conversation.";
+        remedy =
+          "Re-run it: a fresh session re-anchors on task.md and continues. Every resume keeps failing until that store file is repaired or removed, so if this repeats, that file is the thing to fix.";
+      } else {
+        reason = "The provider session this run tried to resume no longer exists.";
+        remedy = "Re-run it: a fresh session re-anchors on task.md and continues.";
+      }
       break;
     default:
       reason = input.failure?.text
@@ -206,7 +285,7 @@ export function describeRunFailure(
   }
 
   const options = input.role === "operator"
-    ? operatorOptions(kind, backend, input.backend, resetLabel)
+    ? operatorOptions(kind, backend, input.backend, resetLabel, resetsAt)
     : specialistOptions(
         kind,
         backend,
@@ -218,6 +297,7 @@ export function describeRunFailure(
         input.profileId,
         input.profileModel,
         facts?.origin === "local",
+        resetsAt,
       );
 
   return { reason, remedy, resetLabel, owner, options };
@@ -234,6 +314,8 @@ function operatorOptions(
    *  backend's exhaustion record on the strength of the assertion. */
   failed: RealBackend,
   resetLabel: string | null,
+  /** Ruling 224: the provider's own reset instant, when it gave one. */
+  resetsAt: string | null = null,
 ): OperatorPacketOptionInput[] {
   const rerun: OperatorPacketOptionInput = {
     kind: "block_on_policy",
@@ -252,18 +334,40 @@ function operatorOptions(
     detail: "Closes this decision and starts NO run. The task stays blocked and waiting on you; use Run operator when you are ready.",
   };
   if (kind === "quota") {
-    return [
-      {
-        kind: "block_on_policy",
-        title: `The usage window has reset${resetLabel ? ` (${resetLabel})` : ""}, or I switched the ${backend} account: re-run`,
-        detail: "Closes this decision and starts a fresh operator run on the owner's current account. If it fails again you get a new decision packet.",
+    // Ruling 224 (F37-44): the operator's packet had the same defect as the
+    // specialist's — its recommended option asks a human to ASSERT the window
+    // has reset, which at the moment it is offered is the one statement on the
+    // packet that is false. When the provider dated the reopening, waiting for
+    // it is the answer, and it takes the recommendation.
+    const waitUntil =
+      resetsAt && Date.parse(resetsAt) > Date.now() ? resetsAt : null;
+    const assertReset: OperatorPacketOptionInput = {
+      kind: "block_on_policy",
+      title: `The usage window has reset${resetLabel ? ` (${resetLabel})` : ""}, or I switched the ${backend} account: re-run`,
+      detail:
+        "Closes this decision and starts a fresh operator run on the owner's current account. If it fails again you get a new decision packet.",
+      backend: failed,
+      ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No project policy was changed.",
+    };
+    if (!waitUntil) assertReset.recommended = true;
+    const options: OperatorPacketOptionInput[] = [];
+    if (waitUntil) {
+      options.push({
+        kind: "wait_for_window",
+        title: `Wait for the window and pick the task back up automatically${resetLabel ? ` (${resetLabel})` : ""}`,
+        detail:
+          `Closes this decision and schedules an operator run for just after ${resetLabel ?? "the window reopens"}, ` +
+          `on the same account and the same model. Nothing runs until then and the board says so. ` +
+          `No account, model or project policy changes.`,
         recommended: true,
-        backend: failed,
-        ev: "**Decision:** the usage window has reset or the account was switched; re-run the operator. No project policy was changed.",
-      },
-      redirect,
-      hold,
-    ];
+        dueAt: waitUntil,
+        ev:
+          `**Decision:** wait for the ${backend} window to reopen${resetLabel ? ` (${resetLabel})` : ""}. ` +
+          `An operator run is scheduled to pick the task back up on the same account. No account or project policy was changed.`,
+      });
+    }
+    options.push(assertReset, redirect, hold);
+    return options;
   }
   if (kind === "auth") {
     return [
@@ -300,6 +404,10 @@ function specialistOptions(
   profileModel: string | undefined,
   /** U35-11: the `overloaded` failure was this deployment's own network path. */
   localNetwork = false,
+  /** Ruling 224: the provider's own reset instant, when it gave one. A spent
+   *  window with a KNOWN reopening has a remedy that is neither a model change
+   *  nor a false assertion: wait for it, and come back by itself. */
+  resetsAt: string | null = null,
 ): OperatorPacketOptionInput[] {
   const handle = agentHandle ? `@${agentHandle}` : "the agent";
   // F36-8 (pass 36): the option says which MODEL the retry runs on. A profile
@@ -307,14 +415,29 @@ function specialistOptions(
   // (`startRun` substitutes and discloses it, F21-13); one the other backend
   // knows keeps its own. Live, the option read "re-run the same agent there and
   // continue", the retry ran on `sonnet`, and nothing on the task named it.
+  // Ruling 254 (pass 37, F37-83): and it says WHEN it was true. This sentence
+  // is frozen into the packet when the option is authored, and a packet can sit
+  // open for hours — live, the owner moved eight profiles from `gpt-5.6-luna`
+  // to `opus` while four of these packets waited, and every one of them went on
+  // offering "on `sonnet` (Claude's default: the profile's `gpt-5.6-luna` is a
+  // Codex model)", a sentence with two now-false claims, to a person choosing
+  // between them. The runs resolved the live deployment and correctly used
+  // `opus`; the promise was the only thing that was wrong. The option pins a
+  // BACKEND, never a model, so the honest sentence names today's model and says
+  // what happens if the deployment moves first.
   const retryModel = profileModel
     ? (() => {
         const swap = substituteRunModel(other, profileModel);
         return swap.foreignBackend
-          ? `on \`${swap.model}\` (${BACKEND_NAME[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_NAME[swap.foreignBackend]} model)`
-          : `on its own \`${profileModel}\``;
+          ? `on \`${swap.model}\` as deployed right now (${BACKEND_NAME[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_NAME[swap.foreignBackend]} model)`
+          : `on its own \`${profileModel}\` as deployed right now`;
       })()
-    : `on ${BACKEND_NAME[other]}'s default model`;
+    : `on ${BACKEND_NAME[other]}'s default model as deployed right now`;
+  /** Ruling 254: the option carries a backend, not a model, so a deployment
+   *  edit between authoring and answering moves the run and not the text. */
+  const retryModelCaveat =
+    " This option pins the backend, not the model: if the deployment changes " +
+    "before you answer, the run follows the deployment rather than the model named here.";
   const redirect: OperatorPacketOptionInput = {
     kind: "redirect",
     title: "Redirect with sharper guidance",
@@ -324,14 +447,57 @@ function specialistOptions(
     kind === "quota" || kind === "auth" || kind === "unavailable" || kind === "overloaded";
   if (backendFailure) {
     const options: OperatorPacketOptionInput[] = [];
+    // Ruling 224 (F37-44): a spent window the provider dated. Every other
+    // option on this packet is wrong at the moment it is offered — the
+    // cross-backend retry permanently moves the task off the model its profile
+    // declares, and the send-back asks a human to ASSERT a window has reset
+    // that the provider just said will not for hours. Waiting is the real
+    // remedy and viberr already has the runner for it, so it is offered first
+    // and it takes the recommendation.
+    const waitUntil =
+      kind === "quota" && resetsAt && Date.parse(resetsAt) > Date.now()
+        ? resetsAt
+        : null;
+    if (waitUntil) {
+      const wait: OperatorPacketOptionInput = {
+        kind: "wait_for_window",
+        title: `Wait for the window and pick ${handle} back up automatically${resetLabel ? ` (${resetLabel})` : ""}`,
+        detail:
+          `Closes this decision and schedules an operator run for just after ${resetLabel ?? "the window reopens"}, ` +
+          `on the same account and the same model. The operator re-reads the task then and continues it — which is ` +
+          `what a gap of hours needs, because the board may have moved while it waited. Nothing runs until then and ` +
+          `the board says so. No account, model or project policy changes.`,
+        recommended: true,
+        dueAt: waitUntil,
+        ev:
+          `**Decision:** wait for the ${backend} window to reopen${resetLabel ? ` (${resetLabel})` : ""}. ` +
+          `An operator run is scheduled to pick the task back up on the same account. No account or project policy was changed.`,
+      };
+      options.push(wait);
+    }
     if (ownerHasOther) {
       const retry: OperatorPacketOptionInput = {
         kind: "retry_other_backend",
         title: `Retry ${handle} on ${BACKEND_NAME[other]} now`,
-        detail: `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.`,
-        recommended: true,
+        detail:
+          `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. ` +
+          `Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.` +
+          retryModelCaveat +
+          // Ruling 212: when the fault is THIS deployment's network path, the
+          // other provider is reached over the same path, so switching is not a
+          // remedy — and it permanently moves the task off the model its
+          // profile declares. Offered, never recommended, and the reason is on
+          // the option rather than left for the reader to work out.
+          (localNetwork
+            ? ` This failure was on this deployment's own network path, which the other provider is reached over too, so this is a change of model rather than a fix.`
+            : ""),
         backend: other,
       };
+      // Ruling 212: not recommended when the fault is this deployment's own
+      // network path. Ruling 224: nor when waiting for a dated window is on the
+      // table — exactly one option is recommended, and a permanent model change
+      // is not it.
+      if (!localNetwork && !waitUntil) retry.recommended = true;
       if (profileId) retry.profileId = profileId;
       options.push(retry);
     }
@@ -353,7 +519,14 @@ function specialistOptions(
             ? "Closes this decision and re-runs the agent on the same account with the same directive. If the deployment still cannot reach the provider you get a new decision packet."
             : "Closes this decision and re-runs the agent on the same account with the same directive. If the provider is still overloaded you get a new decision packet."
           : "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
-      recommended: !ownerHasOther,
+      // Ruling 212: the same-backend retry is the recommendation whenever the
+      // other backend is not a real alternative — either the owner does not
+      // have it, or the fault was local and switching would only change the
+      // model.
+      // Ruling 224: and never when the wait is offered — asking a human to
+      // assert the window has reset, minutes after the provider said it has
+      // hours to run, is the one thing on this packet that is simply false.
+      recommended: (!ownerHasOther || localNetwork) && !waitUntil,
       ev:
         kind === "quota"
           ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."

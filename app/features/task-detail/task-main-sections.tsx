@@ -407,6 +407,7 @@ export function ExecutionSection({
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
+  operatorAcceptsDirectly = false,
   runPrincipal,
   canRunAgents,
   liveAgentRuns,
@@ -422,6 +423,9 @@ export function ExecutionSection({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
+  /** F37-65: whether acceptance actually resolves to `direct` for this
+   *  operator. The caption below used to infer it from autonomy alone. */
+  operatorAcceptsDirectly?: boolean;
   /** Ruling 127: the task owner's accounts, which every run here bills
    *  (null = unowned). */
   runPrincipal: TaskRunPrincipalView | null;
@@ -526,6 +530,7 @@ export function ExecutionSection({
       deployedSpecialists={deployedSpecialists}
       operatorBackend={operatorBackend}
       operatorAutonomy={operatorAutonomy}
+      acceptsDirectly={operatorAcceptsDirectly}
       runPrincipal={runPrincipal}
       canRunAgents={canRunAgents}
       liveAgentRuns={liveAgentRuns}

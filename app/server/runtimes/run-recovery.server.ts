@@ -2,15 +2,17 @@ import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
+import { createNotification } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
-import { patchRun } from "./run-store.server";
+import { patchRun, type AgentRunRow } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
 import {
   codexRunHomeDir,
   finishCodexRunHome,
   userBackendHome,
 } from "./user-homes.server";
+import type { TaskFileRef } from "~/server/files/task-writer.server";
 
 /**
  * Crash-loop backstop for the boot recovery re-invoke (F7-BOOT1). A boot that
@@ -74,6 +76,16 @@ export interface OrphanFinalization {
    * after they landed. Never rejects: each note is caught per task.
    */
   notes: Promise<void>;
+  /**
+   * Ruling 215: the tasks this sweep took, `<projectSlug>/<taskKey>` keyed.
+   *
+   * These tasks HAD a live run when the server stopped, and this pass owns
+   * their recovery — including its own re-invoke, which is launched after the
+   * later passes run. It flips their runs terminal first, so without this list
+   * `settleAbandonedWaits` sees "waiting on an agent, no live run", which is
+   * the one thing that was NOT true of them.
+   */
+  claimedTasks: ReadonlySet<string>;
 }
 
 export interface FinalizeOrphanedRunsDeps {
@@ -108,6 +120,43 @@ export interface FinalizeOrphanedRunsDeps {
  * still alive, so a CLI the dead server left running stops before its row is
  * reported interrupted and its workspace reclaimed.
  */
+/**
+ * Ruling 198: tell the task's OWNER that the crash-loop guard stopped, so a
+ * stranded task is a message rather than a silence. Best-effort by design — a
+ * task with no owner has nobody to tell, and a failure here must never take
+ * boot recovery down with it.
+ */
+function notifyCappedTask(db: DatabaseSync, projectSlug: string, taskKey: string): void {
+  try {
+    // SAFETY: `owner_user_id` is a declared column of `task_projections`
+    // (0001_baseline); the SELECT names it and nothing else, and `.get`
+    // returns undefined when the row is absent.
+    const row = db
+      .prepare(
+        `SELECT owner_user_id FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+      )
+      .get(projectSlug, taskKey) as { owner_user_id: string | null } | undefined;
+    const userId = row?.owner_user_id;
+    if (!userId) return;
+    createNotification(db, {
+      userId,
+      kind: "policy",
+      title: `${taskKey} is waiting for you after a restart`,
+      text:
+        "A restart interrupted this task's run, and Viberr did not re-invoke the operator for it: " +
+        `it had already done so ${RECOVERY_REINVOKE_CAP} times within 30 minutes, which is its ` +
+        "crash-loop guard. Run the operator from the task page when you are ready.",
+      projectSlug,
+      taskKey,
+    });
+  } catch (error) {
+    logger.warn("capped-recovery notification failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
 export function finalizeOrphanedRuns(
   db: DatabaseSync,
   deps: FinalizeOrphanedRunsDeps = {},
@@ -115,11 +164,12 @@ export function finalizeOrphanedRuns(
   // SAFETY: every column named here is declared NOT NULL TEXT on `agent_runs`
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
-  // (`backend` is NOT NULL too; `credential_user_id` is nullable — a row
-  // written before ruling 127 carries none.)
+  // (`backend` is NOT NULL too; `credential_user_id` and `started_at` are
+  // nullable — a row written before ruling 127 carries no credential, and a run
+  // that never got a concurrency slot never got a start.)
   const orphans = db
     .prepare(
-      `SELECT id, project_slug, task_key, kind, backend, credential_user_id
+      `SELECT id, project_slug, task_key, kind, backend, credential_user_id, started_at
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
@@ -130,6 +180,8 @@ export function finalizeOrphanedRuns(
     kind: string;
     backend: string;
     credential_user_id: string | null;
+    /** Ruling 310(b): null for a run that never got a concurrency slot. */
+    started_at: string | null;
   }[];
   if (orphans.length === 0) {
     return {
@@ -139,6 +191,7 @@ export function finalizeOrphanedRuns(
       reinvokes: Promise.resolve(),
       reaped: Promise.resolve(),
       notes: Promise.resolve(),
+      claimedTasks: new Set<string>(),
     };
   }
 
@@ -154,7 +207,10 @@ export function finalizeOrphanedRuns(
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
-  const runsByTask = new Map<string, { id: string; kind: string }[]>();
+  // Ruling 310(b): `started` too. The sweep finalizes QUEUED runs as well as
+  // running ones, and the note used to call every one of them "still running
+  // when the server stopped" — false for a run that never got a slot.
+  const runsByTask = new Map<string, { id: string; kind: string; started: boolean }[]>();
   for (const run of orphans) {
     // Ruling 181 (pass 36): a Codex run's private CODEX_HOME is finished by the
     // adapter's settle — which a process that died never reached. Live
@@ -183,54 +239,33 @@ export function finalizeOrphanedRuns(
       projectSlug: run.project_slug,
       taskKey: run.task_key,
     });
-    runsByTask.set(taskId, [...(runsByTask.get(taskId) ?? []), { id: run.id, kind: run.kind }]);
+    runsByTask.set(taskId, [
+      ...(runsByTask.get(taskId) ?? []),
+      { id: run.id, kind: run.kind, started: run.started_at !== null },
+    ]);
   }
-  // Ruling 177 / U36-8 (pass 36): the task file said NOTHING about a restart
-  // cutting its runs — the re-fired operator's directive was the first trace.
-  // One policy note per task names every run the restart ended, before the
-  // operator is re-invoked below (so the note precedes the turn it explains).
-  const notes: Promise<void> = (async () => {
-    if (realTasks.size === 0) return;
-    const { appendTimelineEvent } = await import("~/server/files/task-writer.server");
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { resolveTaskFilePath } = await import("~/server/files/task-writer.server");
-    for (const [taskId, t] of realTasks) {
-      const runs = runsByTask.get(taskId) ?? [];
-      const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
-      const list = runs
-        .map((r) => `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`)
-        .join(", ");
-      try {
-        await appendTimelineEvent(ref, {
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: "Interrupted by a restart",
-          text:
-            `**Restart:** ${runs.length === 1 ? "the run" : `${runs.length} runs`} ${list} ` +
-            `${runs.length === 1 ? "was" : "were"} still running when the server stopped; ` +
-            `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart, and the operator is re-invoked to decide what to do next.`,
-          toAgent: false,
-          evidence: null,
-        });
-        rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
-      } catch (error) {
-        logger.warn("restart note failed", {
-          taskKey: t.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
-        });
-      }
-    }
-  })();
-  logger.info("finalized non-terminal runs at boot", {
-    total: orphans.length,
-  });
-
+  // Ruling 198 (F37-19): the cap decision is taken BEFORE the restart note is
+  // written, because the note used to promise "the operator is re-invoked to
+  // decide what to do next" on EVERY orphaned task — including the ones this
+  // loop had already decided to skip. A capped task therefore carried a
+  // promise Viberr had structurally chosen not to keep, kept `waiting:
+  // "agent"` with no agent alive, and nothing ever revisited it: live, SHOP-7
+  // sat that way for two hours with the board and the review queue both
+  // showing "agent working".
+  //
+  // The note says what THIS decision was and stops there. It does not say
+  // "nothing further happens on its own", which the first draft did and which
+  // is not Viberr's to promise: `recoverUnreactedAgentRuns` below runs the
+  // completion effects of a finished-but-unreacted run — including an
+  // `agent-reply` operator turn — under its own separate cap, so the same boot
+  // can still coordinate a task this loop skipped.
   // Re-invoke the operator only for tasks under the crash-loop cap. The gate is resolved
   // synchronously — each pass records its own audit row so the NEXT boot counts
   // it — then the (costly) operator runs fire-and-forget for the survivors.
   const windowStart = new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString();
   const toReinvoke: { projectSlug: string; taskKey: string }[] = [];
+  /** Ruling 198: the tasks a turn IS coming for, keyed as `realTasks` keys it. */
+  const reinvoking = new Set<string>();
   let capped = 0;
   for (const t of realTasks.values()) {
     // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
@@ -274,7 +309,90 @@ export function finalizeOrphanedRuns(
       details: { attempt: priorReinvokes + 1 },
     });
     toReinvoke.push(t);
+    reinvoking.add(`${t.projectSlug}/${t.taskKey}`);
   }
+
+  // Ruling 177 / U36-8 (pass 36): the task file said NOTHING about a restart
+  // cutting its runs — the re-fired operator's directive was the first trace.
+  // One policy note per task names every run the restart ended, before the
+  // operator is re-invoked below (so the note precedes the turn it explains).
+  const notes: Promise<void> = (async () => {
+    if (realTasks.size === 0) return;
+    const { appendTimelineEvent } = await import("~/server/files/task-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    for (const [taskId, t] of realTasks) {
+      const runs = runsByTask.get(taskId) ?? [];
+      const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
+      const label = (r: { id: string; kind: string }): string =>
+        `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`;
+      // Ruling 310(b): a run that never got a concurrency slot was not running,
+      // and saying it was is the same defect as ruling 311's "Started". The
+      // controller found this one by joining the timeline against the run
+      // records: `run_VlR9mwnxyouc` carried `startedAt: null, turns: 0` and the
+      // restart note called it still running. `started_at` is the fact, kept on
+      // the row permanently, and this writer had it in hand.
+      const ran = runs.filter((r) => r.started);
+      const never = runs.filter((r) => !r.started);
+      const clause = (rs: typeof runs, tail: string): string =>
+        `${rs.length === 1 ? "the run" : `${rs.length} runs`} ${rs.map(label).join(", ")} ${
+          rs.length === 1 ? "was" : "were"
+        } ${tail}`;
+      const what = [
+        ran.length ? clause(ran, "still running when the server stopped") : "",
+        never.length
+          ? clause(never, "queued behind the concurrent-run cap and had not started")
+          : "",
+      ]
+        .filter(Boolean)
+        .join("; ");
+      try {
+        await appendTimelineEvent(ref, {
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Interrupted by a restart",
+          text:
+            `**Restart:** ${what}; ` +
+            `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart` +
+            (reinvoking.has(taskId)
+              ? ", and the operator is re-invoked to decide what to do next."
+              : // Ruling 198: the honest other half. Say what Viberr decided,
+                // why, and what the person can do — the cap is a guard
+                // against a crash loop, not a judgement about this task.
+                ". Viberr did NOT re-invoke the operator for it: it had already done so " +
+                `${RECOVERY_REINVOKE_CAP} times for this task within the last 30 minutes, which is its ` +
+                "crash-loop guard. Run the operator from this page when you are ready."),
+          toAgent: false,
+          evidence: null,
+        });
+        rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
+        if (!reinvoking.has(taskId)) {
+          // Ruling 198: the note alone would still leave the BOARD claiming an
+          // agent is on it. `clearWaitingToHuman` is a no-op unless the flag is
+          // `agent`, and with no packet and a live stage it settles to
+          // `human` — which is the truth: nobody is coming until a person acts.
+          const { clearWaitingToHuman } = await import("~/server/tasks/task-actions.server");
+          await clearWaitingToHuman(
+            db,
+            deps.dataRoot ? { dataRoot: deps.dataRoot } : {},
+            t.projectSlug,
+            t.taskKey,
+          );
+          rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
+          notifyCappedTask(db, t.projectSlug, t.taskKey);
+        }
+      } catch (error) {
+        logger.warn("restart note failed", {
+          taskKey: t.taskKey,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    }
+  })();
+  logger.info("finalized non-terminal runs at boot", {
+    total: orphans.length,
+  });
 
   let reinvokes: Promise<void> = Promise.resolve();
   if (toReinvoke.length > 0) {
@@ -304,6 +422,10 @@ export function finalizeOrphanedRuns(
     reinvokes,
     reaped,
     notes,
+    // Ruling 215: EVERY task this sweep took, capped ones included. A capped
+    // task is one this pass decided about; it is still not a task that had no
+    // run when the server came back.
+    claimedTasks: new Set(realTasks.keys()),
   };
 }
 
@@ -321,7 +443,12 @@ export function finalizeOrphanedRuns(
  * operator to react — exactly what the lost callback would have done.
  *
  * Safe by construction:
- *  - Only tasks currently `waiting = 'agent'` (a live stall, not old history).
+ *  - Only a live stall, not old history: the task is `waiting = 'agent'`, OR the
+ *    run carries a `run.completion.effects_lost` audit row (ruling 207(a)). That
+ *    second arm exists because `noteCompletionEffectsLost` flips the task to
+ *    `waiting = "human"` in the SAME write as the note promising this replay —
+ *    honest about the board, and self-defeating about the recovery, until the
+ *    selection stopped keying on the flag alone.
  *  - Idempotent: `postAgentReplyComment` writes the `task.agent.replied` audit
  *    row, so a recovered run is not reprocessed on the next boot.
  *  - Fire-and-forget per run; one failure never blocks the others or boot.
@@ -335,6 +462,313 @@ export function finalizeOrphanedRuns(
  *    run within `RECOVERY_WINDOW_MS`, further boots SKIP that run (logged) instead
  *    of re-firing. A restart after the window elapses sees a clean count.
  */
+/**
+ * Ruling 317(b): what the restart can actually SAY about a task left waiting.
+ *
+ * The sweep's own SELECT proves one thing — `waiting = 'agent'` and no run in
+ * `running` or `queued`. The note asserted three more: that a run existed, that
+ * it "finished just before the stop", and that "nothing was lost from the
+ * record". None was checked, and the first is often false: a dispatch HELD on
+ * quota records the wait without ever starting a run.
+ *
+ * Live on SHOP-37 the two entries sit fifteen minutes apart. 09:15:13 —
+ * "**Held:** Codex is out of quota... **nothing was dispatched** and no
+ * decision is needed." 09:30:29 — "the run finished just before the stop". The
+ * first says no run was dispatched; the second says a run finished.
+ *
+ * This is the class ruling 310(b) named, in the neighbouring sweep of the same
+ * file, which its own commit message quoted the controller on: "One writer
+ * fixed, its neighbour still inventing." This is the neighbour.
+ */
+export function abandonedWaitNote(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): string {
+  const head =
+    "**Restart:** this task was waiting on an agent, and no run was live when the server came back. ";
+  /**
+   * Ruling 337(b): the board fact is certain; the re-invoke is an intention.
+   *
+   * This asserted the re-invoke as done, and it is written BEFORE `runOperator`
+   * is called — so a refusal (no operator deployed, a closed task, an open
+   * packet) leaves a note claiming a turn that never happened, which is the
+   * unconditional promise ruling 198 removed from the sibling orphan sweep. The
+   * `!result.runId` branch clears `waiting` but does not correct the sentence.
+   */
+  const tail =
+    " The board has stopped claiming an agent, and Viberr is invoking the operator to decide " +
+    "what happens next; if no operator can run, this task is waiting on a person.";
+  // SAFETY: `agent_runs` declares `id`, `state` and `kind` TEXT NOT NULL
+  // (0001_baseline); `finished_at` and `started_at` are nullable.
+  const last = db
+    .prepare(
+      `SELECT id, state, started_at, finished_at
+         FROM agent_runs
+        WHERE project_slug = ? AND task_key = ? AND kind <> 'operator'
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1`,
+    )
+    .get(projectSlug, taskKey) as
+    | { id: string; state: string; started_at: string | null; finished_at: string | null }
+    | undefined;
+
+  if (!last) {
+    return (
+      `${head}No agent run has ever been started on it, so nothing was interrupted and nothing ` +
+      `was lost — the wait was recorded without a dispatch ever reaching a process.${tail}`
+    );
+  }
+  if (last.started_at === null) {
+    return (
+      `${head}Its most recent run \`${last.id}\` never started — it was ${last.state} and had ` +
+      `no process, so there is no work to have lost.${tail}`
+    );
+  }
+  const when = last.finished_at ? ` at ${last.finished_at}` : "";
+  return (
+    `${head}The run it was waiting for, \`${last.id}\`, ended${when} (${last.state}), and the ` +
+    `follow-up that would have moved the task did not run — which is why the wait outlived it. ` +
+    `The run's own record is intact; what is missing is the step after it.${tail}`
+  );
+}
+
+/**
+ * Ruling 213: settle a task the restart left waiting on an agent that is not
+ * there.
+ *
+ * Every other boot path keys on a RUN: `finalizeOrphanedRuns` takes the ones
+ * still `running`/`queued`, `recoverUnreactedAgentRuns` the finished ones whose
+ * reply never landed, `recoverStrandedOperatorPlans` the Codex plans that never
+ * executed. None of them covers the window this closes — an operator drive that
+ * COMPLETED cleanly and whose settle (the waiting flip, and the stranded-stage
+ * backstop that would have nudged it) was still in flight when the process
+ * died. The run row is `finished`, its reply is not missing, its plan ran. The
+ * only trace is a task whose board says an agent is working and whose runs are
+ * all over.
+ *
+ * Live: SHOP-4's operator moved it Review → Build at 18:57:34 and the container
+ * restarted at 18:57:35. Six minutes later the board still said "agent
+ * working", nothing was running, and no boot sweep had any reason to look at
+ * it.
+ *
+ * The remedy is the one `finalizeOrphanedRuns` already uses for its own case:
+ * say so on the timeline and re-invoke the operator, which re-reads the task
+ * and decides. A project with no operator deployed settles the flag instead, so
+ * the board stops claiming work that is not happening.
+ */
+export async function settleAbandonedWaits(
+  db: DatabaseSync,
+  ctx: TaskMutationContext = {},
+  /**
+   * Ruling 215: `<projectSlug>/<taskKey>` for every task the orphan sweep took
+   * this boot. Those tasks DID have a live run at the stop and that pass owns
+   * them; it just flipped their rows terminal, so the SELECT below would see
+   * them as abandoned and write a note saying the one thing that was not true.
+   */
+  claimedByOrphanSweep: ReadonlySet<string> = new Set<string>(),
+): Promise<number> {
+  // SAFETY: `project_slug` and `task_key` are NOT NULL TEXT on
+  // `task_projections` (0001_baseline.sql); the WHERE clause adds no columns.
+  const rows = db
+    .prepare(
+      `SELECT t.project_slug AS slug, t.task_key AS key
+         FROM task_projections t
+         JOIN projects p ON p.slug = t.project_slug
+        WHERE p.archived = 0
+          AND t.archived = 0
+          AND t.waiting = 'agent'
+          AND NOT EXISTS (
+            SELECT 1 FROM agent_runs r
+             WHERE r.project_slug = t.project_slug
+               AND r.task_key = t.task_key
+               AND r.state IN ('running', 'queued')
+          )`,
+    )
+    .all() as { slug: string; key: string }[];
+  const abandoned = rows.filter(
+    (r) => !claimedByOrphanSweep.has(`${r.slug}/${r.key}`),
+  );
+  if (abandoned.length === 0) return 0;
+  logger.info("settling tasks the restart left waiting on an absent agent", {
+    tasks: abandoned.length,
+    claimedByOrphanSweep: rows.length - abandoned.length,
+  });
+  const [{ appendTimelineEvent }, { runOperator }, { clearWaitingToHuman }] =
+    await Promise.all([
+      import("~/server/files/task-writer.server"),
+      import("./operator-run.server"),
+      import("~/server/tasks/task-actions.server"),
+    ]);
+  const { readTaskFile } = await import("~/server/files/task-writer.server");
+  /**
+   * Ruling 337(c): the count it SETTLED, not the count it looked at.
+   *
+   * This returned `rows.length` — the raw projection result — so it already
+   * over-reported whenever `claimedByOrphanSweep` filtered some but not all
+   * (the ruling-215 test passes only because that case filters ALL of them and
+   * takes the early return). With the file re-read above, the gap is the normal
+   * case: the number a boot log or a test reads has to be the number of tasks
+   * this sweep actually spoke on.
+   */
+  let settled = 0;
+  for (const row of abandoned) {
+    const ref: TaskFileRef = { projectSlug: row.slug, taskKey: row.key };
+    if (ctx.dataRoot) ref.dataRoot = ctx.dataRoot;
+    /**
+     * Ruling 337: the projection is the index; the FILE is the record, and the
+     * file is where the reason for the quiet lives.
+     *
+     * This sweep selected entirely on `t.waiting = 'agent'` with no live run
+     * and never opened the task. So a dispatch viberr ITSELF had parked was
+     * swept as an abandoned wait — and unlike the read-only checks above, this
+     * one writes a note and spends a paid operator turn.
+     *
+     * Live on SHOP-37, 2026-09-15, and it overrode a person:
+     *   09:15:13.200  Arda: "Decision: Re-run the Integration Verifier on the
+     *                 Codex backend."
+     *   09:15:13.298  policy-engine, "Dispatch held": Codex is out of quota
+     *                 until Sep 19; the run is scheduled for then; "nothing was
+     *                 dispatched and no decision is needed."
+     *   09:30:29.868  THIS SWEEP: "Left waiting on an absent agent… the run
+     *                 finished just before the stop and the follow-up that
+     *                 would have moved the task went with the process."
+     *   09:32:25.171  the drive it forced: "a fresh-context re-run of your
+     *                 pass, on the CLAUDE backend."
+     *   09:39:19.846  Arda cancels, by hand, the schedule viberr had promised.
+     * Every clause of that note was false on the task's own record, and the
+     * consequence was not cosmetic: it reversed the owner's explicit backend
+     * decision fifteen minutes after they made it.
+     *
+     * The guard is borrowed verbatim from `findStrandedTasks` (ruling 330,
+     * shipped hours earlier), which re-reads the file for exactly these cases.
+     * The older sweep does MORE and checked LESS.
+     */
+    const file = readTaskFile(ref);
+    if (!file) continue;
+    const fm = file.parsed.frontmatter;
+    // The projection can lag the write that ended the wait.
+    if (fm.archived || fm.waiting !== "agent") continue;
+    // Each of these is silence the product already explains, and the release
+    // engine, the schedule runner or a person owns it.
+    if (file.parsed.packet) continue;
+    if ((fm.blockedBy ?? []).length > 0) continue;
+    if ((fm.queuedQuestions ?? []).length > 0) continue;
+    if ((fm.schedules ?? []).some((sc) => sc.status === "pending")) continue;
+    try {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Left waiting on an absent agent",
+        text: abandonedWaitNote(db, row.slug, row.key),
+        toAgent: false,
+        evidence: null,
+      });
+      const drive: Parameters<typeof runOperator>[1] = {
+        projectSlug: row.slug,
+        taskKey: row.key,
+        trigger: "manual",
+      };
+      if (ctx.dataRoot) drive.dataRoot = ctx.dataRoot;
+      const result = await runOperator(db, drive);
+      // The operator may REFUSE rather than throw (none deployed, a closed
+      // task, an open packet, the task waiting on other work). Either way no
+      // run started, so the board must stop claiming an agent — the whole
+      // reason this sweep exists.
+      if (!result.runId) {
+        await clearWaitingToHuman(db, ctx, row.slug, row.key);
+      }
+      settled += 1;
+    } catch (error) {
+      logger.warn("abandoned-wait settle failed", {
+        taskKey: row.key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      // The operator could not run (none deployed, a refusal): the board must
+      // still stop claiming an agent is on it.
+      await clearWaitingToHuman(db, ctx, row.slug, row.key).catch(() => {});
+    }
+  }
+  return settled;
+}
+
+/**
+ * The sweep's own "this run's reply never landed" clause, as ONE rule.
+ *
+ * F37-67: `noteCompletionEffectsLost` writes a note promising "Run recovery
+ * replays the effects on the next restart" while this clause was excluding the
+ * run permanently — `applyAgentCompletionEffects` records `task.agent.replied`
+ * in its step 1 and can still reject in step 2 or step 4, which is the ONLY
+ * shape that produces that note. Both readers take the clause from here now, so
+ * the promise cannot say one thing while the query does another.
+ *
+ * `runIdExpr` is the SQL expression naming the run: a column in the sweep
+ * (`r.id`), a bound `?` for one run.
+ */
+export function replyNeverLandedSql(runIdExpr: string): string {
+  return (
+    `NOT EXISTS (
+            SELECT 1 FROM audit_events a
+             WHERE a.action = 'task.agent.replied'
+               AND a.details_json LIKE '%"runId":"' || ${runIdExpr} || '"%'
+          )`
+  );
+}
+
+/**
+ * Will the boot sweep replay this run's lost completion effects?
+ *
+ * Every condition `recoverUnreactedAgentRuns` acts on, for one run — the SELECT
+ * above AND the two skips inside its loop, because a run that is selected and
+ * then skipped is not replayed, whatever the query said.
+ *
+ * The `waiting = 'agent' OR effects_lost` arm is the one condition not modelled:
+ * the only caller records its own `run.completion.effects_lost` row before
+ * asking, which satisfies that arm by construction.
+ */
+export async function completionReplayWillRun(
+  db: DatabaseSync,
+  run: Pick<AgentRunRow, "id" | "kind" | "state" | "agent_profile_id" | "task_key">,
+): Promise<boolean> {
+  if (run.kind !== "primary" && run.kind !== "reviewer") return false;
+  if (run.state !== "finished") return false;
+  if (!run.agent_profile_id) return false;
+  // SAFETY: a bare `SELECT <expr>` with no FROM returns exactly one row, and
+  // SQLite renders a NOT EXISTS predicate as the integer 1 or 0.
+  const stillOwed = db
+    .prepare(`SELECT ${replyNeverLandedSql("?")} AS owed`)
+    .get(run.id) as { owed: number } | undefined;
+  if (stillOwed?.owed !== 1) return false;
+  // The loop's first skip: no readable reply means nothing to replay, and it
+  // `continue`s BEFORE recording its attempt — so the run is counted in the
+  // "recovering dropped agent-reply reactions" log line and then quietly
+  // dropped. A note promising a replay here would be wrong in a way nothing
+  // downstream ever corrects.
+  const { replyTextForRun } = await import("~/server/tasks/agent-reply.server");
+  if (!replyTextForRun(db, run.id)) return false;
+  // The crash-loop backstop: at the cap, further boots skip this run entirely.
+  // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
+  const priorReplays = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM audit_events
+          WHERE action = ?
+            AND task_key = ?
+            AND details_json LIKE '%"runId":"' || ? || '"%'
+            AND occurred_at >= ?`,
+      )
+      .get(
+        RECOVERY_REPLAY_ACTION,
+        run.task_key,
+        run.id,
+        new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString(),
+      ) as { n: number }
+  ).n;
+  return priorReplays < RECOVERY_REINVOKE_CAP;
+}
+
 export async function recoverUnreactedAgentRuns(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
@@ -354,12 +788,15 @@ export async function recoverUnreactedAgentRuns(
         WHERE r.kind IN ('primary', 'reviewer')
           AND r.state = 'finished'
           AND r.agent_profile_id IS NOT NULL
-          AND t.waiting = 'agent'
-          AND NOT EXISTS (
-            SELECT 1 FROM audit_events a
-             WHERE a.action = 'task.agent.replied'
-               AND a.details_json LIKE '%"runId":"' || r.id || '"%'
-          )`,
+          AND (
+            t.waiting = 'agent'
+            OR EXISTS (
+              SELECT 1 FROM audit_events e
+               WHERE e.action = 'run.completion.effects_lost'
+                 AND e.details_json LIKE '%"runId":"' || r.id || '"%'
+            )
+          )
+          AND ${replyNeverLandedSql("r.id")}`,
     )
     .all() as {
     id: string;
@@ -469,6 +906,12 @@ export async function recoverUnreactedAgentRuns(
           completion.dispatchedByUserId = row.dispatched_by_user_id;
         }
       }
+      // Ruling 211(c): a replay is not the live completion. The deferred
+      // @mention redelivery is a promise the LIVE refusal made, and this hop
+      // may be running days later — re-delivering from the old run's window
+      // would start a duplicate paid run on an instruction a human has since
+      // had answered through a run of its own.
+      completion.replayed = true;
       await applyAgentCompletionEffects(db, ctx, completion, {
         id: row.id,
         state: "finished",

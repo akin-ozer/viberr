@@ -262,6 +262,8 @@ export function listProjectTasks(
       terminal: accepted,
       runInFlight: facts.runInFlight,
       held: blockedBy.length > 0,
+      // Ruling 225: the clock a schedule-resting task is measured against.
+      resumesAt: summary.resumesAt ?? null,
     };
     // Injected only when a caller supplied it — `isQuiet` reads the CURRENT
     // instant when the key is absent, and a `now: undefined` would not be.

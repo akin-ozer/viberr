@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { VALIDATION_VALUES } from "~/schemas/task-file.schema";
+import { VALIDATION_VALUES, WAITING_VALUES } from "~/schemas/task-file.schema";
 import { NOTIFICATION_KINDS } from "~/shared/mapping/notification.server";
 import { runMigrations } from "./db/migration-runner.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
@@ -19,6 +19,7 @@ import {
 } from "./db/data-root-lock.server";
 import { getDb, getProjectionDbPath } from "./db/sqlite.server";
 import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
+import { repairCodexRolloutPaths } from "./runtimes/user-homes.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
 import {
@@ -53,6 +54,7 @@ import {
 import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
+  settleAbandonedWaits,
   recoverUnreactedAgentRuns,
 } from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
@@ -194,6 +196,16 @@ function notificationKindGaps(db: DatabaseSync): string[] {
 export function projectionCheckGaps(db: DatabaseSync): string[] {
   return [
     ...projectionValidationGaps(db).map((value) => `task_projections.validation: ${value}`),
+    // Ruling 225 (F37-45): the THIRD instance of this drift, and the one that
+    // shows the read above was a list of the columns someone had been bitten by
+    // rather than of the columns at risk. `waiting` is a CHECK over a TS enum
+    // the projector derives into, exactly like `validation` beside it, and when
+    // `schedule` joined the enum the live root refused it with the same
+    // swallowed "projection rebuild failed" and the same stale row. Every such
+    // column belongs here the day it is written, not the day it breaks.
+    ...checkListGaps(db, "task_projections", "waiting", WAITING_VALUES).map(
+      (value) => `task_projections.waiting: ${value}`,
+    ),
     ...notificationKindGaps(db).map((value) => `notifications.kind: ${value}`),
   ];
 }
@@ -434,6 +446,7 @@ interface ReconcileRestartedWorkDeps {
   finalizeOrphanedRuns: typeof finalizeOrphanedRuns;
   recoverUnreactedAgentRuns: typeof recoverUnreactedAgentRuns;
   recoverStrandedOperatorPlans: typeof recoverStrandedOperatorPlans;
+  settleAbandonedWaits: typeof settleAbandonedWaits;
   activeRunCount: typeof activeRunCount;
   reclaimTerminalTaskWorkspaces: typeof reclaimTerminalTaskWorkspaces;
 }
@@ -472,6 +485,7 @@ export async function reconcileRestartedWork(
     finalizeOrphanedRuns,
     recoverUnreactedAgentRuns,
     recoverStrandedOperatorPlans,
+    settleAbandonedWaits,
     activeRunCount,
     reclaimTerminalTaskWorkspaces,
   },
@@ -484,10 +498,13 @@ export async function reconcileRestartedWork(
   // reclaim waits for that too — a CLI the dead server left running could still
   // be writing a tree the reclaim deletes. Never rejects either.
   let orphanReaped: Promise<void> = Promise.resolve();
+  /** Ruling 215: the tasks step 1 took, withheld from step 4 (see below). */
+  let orphanTasks: ReadonlySet<string> = new Set<string>();
   try {
     const finalization = deps.finalizeOrphanedRuns(db);
     orphanReinvokes = finalization.reinvokes;
     orphanReaped = finalization.reaped;
+    orphanTasks = finalization.claimedTasks;
   } catch (error) {
     logger.error("orphaned-run finalize failed", {
       err: error instanceof Error ? error : new Error(String(error)),
@@ -504,6 +521,26 @@ export async function reconcileRestartedWork(
     await deps.recoverStrandedOperatorPlans(db);
   } catch (error) {
     logger.error("codex operator plan recovery failed", {
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  try {
+    // Ruling 213: LAST of the four, deliberately. The three above all key on a
+    // run and may themselves set `waiting: agent` by starting one; this sweep
+    // asks the leftover question — which tasks claim an agent that no run
+    // backs — so it has to see the board they leave behind.
+    //
+    // Ruling 215: which is exactly why it must be told what step 1 took. That
+    // step's whole job is to move live runs to `interrupted`, and its own
+    // re-invokes are launched below, AFTER this line — so on the deploy that
+    // shipped 213 two tasks got both notes at once, the second one saying "no
+    // run was live when the server came back" about runs that had been live and
+    // had their own "Interrupted by a restart" note two lines above. Same
+    // board, two contradictory sentences, and two operator drives for one
+    // event.
+    await deps.settleAbandonedWaits(db, {}, orphanTasks);
+  } catch (error) {
+    logger.error("abandoned-wait settle failed", {
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
@@ -741,6 +778,22 @@ export async function bootServer(): Promise<void> {
   // once here, then on a timer for the deployment that never restarts.
   // Best-effort; canonical task files (source of truth) untouched.
   startStoreMaintenance(db);
+
+  // Ruling 199: the Codex CLI records each rollout under the PER-RUN home it
+  // was written through, and that home is removed when the run settles — so
+  // every thread recorded before the settle learned to re-point is aimed at a
+  // path that no longer exists, and every `thread/resume` fails. The transcripts
+  // themselves are in the shared `sessions/` directory all along. One idempotent
+  // pass restores them; it never throws and it only ever moves a path onto a
+  // file that is really there.
+  {
+    const repaired = repairCodexRolloutPaths();
+    if (repaired > 0) {
+      logger.info("re-pointed Codex rollout paths left behind by removed run homes", {
+        threads: repaired,
+      });
+    }
+  }
 
   // Fire-and-forget: the chain finalizes restart-orphaned runs, recovers what a
   // restart stranded, joins the re-invokes it launched and only then reclaims

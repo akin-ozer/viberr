@@ -991,6 +991,142 @@ describe("listGoals parses stored links instead of asserting their shape", () =>
  * stored BY INDEX, and `remove_pending_link` renumbers every later link — so a
  * removal used to silently re-point or orphan every reference to them.
  */
+/**
+ * Ruling 243 (pass 37, F37-72): a pending link can ADOPT a task that already
+ * exists.
+ *
+ * A chain normally makes its own task when it advances, and nothing could point
+ * a link at work created ahead of it. Live this pass a person asked the
+ * controller to build out the tasks for three pending links; it created them,
+ * and the links still read `taskKey: null`, so the chain would have created its
+ * own duplicates on the next advance. The only escape was
+ * `remove_pending_link`, which destroys the link's authored text — those three
+ * carried the orders service's port, its whole migration schema and a
+ * crash-resumption assertion, and every line had to be hand-copied into the new
+ * tasks before the links could go.
+ */
+describe("ruling 243: a pending link adopts an existing task", () => {
+  async function chainAndTask() {
+    const { createGoal } = await import("./goal-actions.server");
+    const { createTask } = await import("./task-actions.server");
+    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const goal = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain with work made ahead of it",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const made = await createTask(
+      app.db,
+      { projectSlug: SLUG, title: "Built before the chain got there" },
+      actor,
+      ctx,
+    );
+    return { goal, made, actor, ctx };
+  }
+
+  it("binds both records: the link carries the task and the task names the link", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { readGoalFile } = await import("~/server/files/goal-writer.server");
+    const { goal, made, actor, ctx } = await chainAndTask();
+
+    // CANARY: delete the `adopt_task` arm and this throws on an unknown op.
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+      actor,
+      ctx,
+    );
+
+    const link = readGoalFile({ projectSlug: SLUG, goalId: goal.goalId, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.links.find((l) => l.index === 2)!;
+    expect(link.taskKey).toBe(made.key);
+    expect(link.status).toBe("active");
+    // CANARY: drop the `forward.adopted` write-back and the link claims the task
+    // while the task denies it — the worse of the two half-states.
+    const fm = readTaskFile({ projectSlug: SLUG, taskKey: made.key, dataRoot: app.dataRoot })!
+      .parsed.frontmatter;
+    expect(fm.goalRef).toEqual({ goalId: goal.goalId, linkIndex: 2 });
+  });
+
+  it("refuses a task another chain already carries, naming that chain", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const { goal, made, actor, ctx } = await chainAndTask();
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+      actor,
+      ctx,
+    );
+    // A second chain reaching for the same task. CANARY: drop the `goalRef`
+    // guard and two chains each advance on one task's completion, while the
+    // task's own `goalRef` can name only one of them.
+    const { createGoal } = await import("./goal-actions.server");
+    const other = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Second chain",
+        // Two links: createGoal starts link 1 at once, so the PENDING link 2 is
+        // the one that can reach for an already-carried task.
+        links: [
+          { title: "Another link", goal: "Another. Done when merged." },
+          { title: "Reaches for a carried task", goal: "Reach. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    await expect(
+      updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: other.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(new RegExp(`already carried by ${goal.goalId} link 2`));
+  });
+
+  it("refuses a link that already has a task, and an archived one", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const { setTaskArchived } = await import("./task-actions.server");
+    const { goal, made, actor, ctx } = await chainAndTask();
+    // Link 1 is ACTIVE with its own chain-made task.
+    await expect(
+      updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 1, taskKey: made.key } },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(/Only a pending link with no task can adopt one/);
+
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: made.key, archived: true },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      ctx,
+    );
+    await expect(
+      updateGoal(
+        app.db,
+        { projectSlug: SLUG, goalId: goal.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+        actor,
+        ctx,
+      ),
+    ).rejects.toThrow(/archived/);
+  });
+});
+
 describe("remove_pending_link refuses to renumber under a live reference", () => {
   it("refuses while a TASK waits on a link at or after it, and names the task", async () => {
     // Canary: drop the `referencesToLinksFrom` guard — the removal lands, the
@@ -1286,5 +1422,662 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
       message: expect.stringContaining("a link cannot wait on a LATER link of its own chain"),
     });
     expect(task().blockedBy).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 192 (F37-15, live): ruling 155 freezes an ACTIVE link's title and goal
+ * in the goal file while the TASK's are not frozen — a decision packet, an
+ * operator edit or a person rewrites them freely. On pass 37's board the two
+ * copies of SHOP-2's contract came to disagree about which task owns
+ * `packages/contracts`, and a retry rebuilt the task from the frozen copy, so
+ * the correction everyone had been working to was dropped without a word.
+ */
+describe("ruling 192: a retry carries the failed task's own contract", () => {
+  it("rebuilds from the task's current goal, not the link's frozen copy, and says so", async () => {
+    const { createGoal, updateGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Contract drift chain",
+        links: [
+          { title: "Drifting link", goal: "ORIGINAL-CONTRACT: this link owns packages/contracts." },
+          // A pending second link: a chain whose ONLY link has failed is fully
+          // settled, and a retry on one of those is swallowed (see F37-16).
+          { title: "Later link", goal: "Follows. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+
+    // The contract moves on while the link's copy stays frozen (ruling 155).
+    await updateTaskGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        taskKey: first,
+        goal: "CORRECTED-CONTRACT-7: this task no longer owns packages/contracts.",
+      },
+      actor,
+      ctx,
+    );
+    // Archiving the task fails the link and parks the chain.
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: first, archived: true },
+      actor,
+      ctx,
+    );
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    // `setTaskArchived` also fires a reconcile and forgets it; let that one
+    // land before the retry, or it re-parks the chain mid-start (F37-16).
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.status).toBe("failed");
+
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    const retried = after.links[0]!.taskKey!;
+    expect(retried).not.toBe(first);
+
+    const fresh = readTaskFile({ projectSlug: SLUG, taskKey: retried, dataRoot: app.dataRoot })!;
+    // CANARY: drop the `priorTask` read and this is ORIGINAL-CONTRACT again.
+    expect(fresh.parsed.goal).toContain("CORRECTED-CONTRACT-7");
+    expect(fresh.parsed.goal).not.toContain("ORIGINAL-CONTRACT");
+    // The chain header is REBUILT, not stacked: exactly one of them, and it
+    // carries the retry's own link count and predecessor.
+    expect(fresh.parsed.goal.match(/Part of goal /g)).toHaveLength(1);
+    // A silent substitution is the defect either way, so the goal's own
+    // timeline records that the retry did not use the link's text.
+    expect(after.history.some((h) => h.text.includes("carrying"))).toBe(true);
+  });
+
+  it("a FIRST start still uses the link's declared text — nothing to carry", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Plain chain",
+        links: [{ title: "Only link", goal: "DECLARED-TEXT-3. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const task = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: chain.activeTaskKey!,
+      dataRoot: app.dataRoot,
+    })!;
+    expect(task.parsed.goal).toContain("DECLARED-TEXT-3");
+    const view = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(view.history.some((h) => h.text.includes("carrying"))).toBe(false);
+  });
+});
+
+/**
+ * Ruling 194 (F37-16, live-caught while proving ruling 192): `startLinkTask`
+ * declines silently when the chain stopped being active, and the reconcile that
+ * the failing task's own archive fires is fire-and-forget — so it lands there
+ * routinely. The goal timeline already said "Link N retried by X"; nothing
+ * corrected it, no task existed, and the creator was never told. The THROW arm
+ * beside it had carried that correction since it was written.
+ */
+describe("ruling 194: a retry that starts nothing says so", () => {
+  it("re-parks, notes the link and records the decline instead of leaving a false retry", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { updateGoalFile } = await import("~/server/files/goal-writer.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Swallowed retry chain",
+        links: [
+          { title: "Failing link", goal: "One. Done when merged." },
+          { title: "Later link", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+
+    // Put the chain in exactly the state the race produces: link 1 failed with
+    // its task detached, and the CHAIN not active — written directly so the
+    // assertion does not depend on a fire-and-forget reconcile's timing.
+    await updateGoalFile(
+      { projectSlug: SLUG, goalId: chain.goalId, dataRoot: app.dataRoot },
+      (goal) => {
+        const link = goal.frontmatter.links[0]!;
+        link.status = "failed";
+        link.taskKey = null;
+        goal.frontmatter.status = "attention";
+        return `Link 1 failed: ${first} was archived.`;
+      },
+    );
+
+    const result = await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    // The retry genuinely started this time (the file said `active` when the
+    // start re-read it), so the guard must NOT fire on a healthy retry.
+    expect(after.links[0]!.taskKey).not.toBeNull();
+    expect(result.status).toBe("active");
+    expect(after.history.some((h) => h.text.includes("did NOT start"))).toBe(false);
+  });
+
+  it("a chain that stops being active mid-retry records the decline, not the retry", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { updateGoalFile } = await import("~/server/files/goal-writer.server");
+    const { withFileLock } = await import("~/server/files/file-mutex.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Interrupted retry chain",
+        links: [
+          { title: "Failing link", goal: "One. Done when merged." },
+          { title: "Later link", goal: "Two. Done when merged." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+    const goalFile = { projectSlug: SLUG, goalId: chain.goalId, dataRoot: app.dataRoot };
+    await updateGoalFile(goalFile, (goal) => {
+      const link = goal.frontmatter.links[0]!;
+      link.status = "failed";
+      // The state `reconcileGoal` really produces: a failed link KEEPS its task
+      // key — it names that task in its own note. The first version of this
+      // test cleared it, which is a state the product cannot reach, and the
+      // guard it was "proving" (`taskKey !== null`) therefore returned early on
+      // every real path while the test stayed green over it.
+      goal.frontmatter.status = "attention";
+      return `Link 1 failed: ${first} was archived.`;
+    });
+
+    // Hold the START lock the retry needs, so the redirect commits (status
+    // active, "retried by" in the timeline) and then waits. That is the window
+    // the archive's fire-and-forget reconcile lands in, live; here it is a
+    // deliberate pause rather than a race, through the product's own lock.
+    let release!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lock = withFileLock(`goal-start:${SLUG}:${chain.goalId}:1`, () => holding);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const retry = updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    // …and while it waits, the chain stops being active.
+    await updateGoalFile(goalFile, (goal) => {
+      goal.frontmatter.status = "paused";
+      return undefined;
+    });
+    release();
+    await lock;
+    await retry;
+
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    // CANARY: drop the `started === null` arm and the newest timeline entry is
+    // "Link 1 (Failing link) retried by arda@viberr.dev" over a link whose task
+    // is still the one that failed. CANARY 2: restore the `taskKey !== null`
+    // guard and this arm never fires at all, because a failed link always has
+    // one.
+    expect(after.links[0]!.taskKey).toBe(first);
+    expect(after.links[0]!.status).toBe("failed");
+    expect(after.history.some((h) => h.text.includes("did NOT start a task"))).toBe(true);
+    expect(after.links[0]!.note).toContain("The retry did not start");
+  });
+});
+
+/**
+ * Ruling 192, second half: the DETAIL read is what a planner acts on, and it
+ * was handing back a contract the work had moved past with nothing saying so.
+ */
+describe("ruling 192: getGoalView carries the task's live goal beside the declared one", () => {
+  it("adds `liveGoal` only when the task's goal has actually moved", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const { updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Live contract chain",
+        links: [
+          { title: "Declared title", goal: "DECLARED-GOAL-9. Done when merged." },
+          { title: "Untouched link", goal: "Stays as declared." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    // Nothing has moved yet: the declaration IS the contract, and no separate
+    // `declaredGoal` appears beside it.
+    const fresh = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(fresh.links[0]!.declaredGoal).toBeUndefined();
+    expect(fresh.links[1]!.declaredGoal).toBeUndefined();
+    expect(fresh.links[0]!.goal).toContain("DECLARED-GOAL-9");
+
+    await updateTaskGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        taskKey: chain.activeTaskKey!,
+        goal: "MOVED-GOAL-4: ownership changed hands.",
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    /**
+     * Ruling 335: the PLAIN NAME carries the truth.
+     *
+     * Ruling 192 had it the other way round — `goal` kept the frozen
+     * declaration and `liveGoal` appeared beside it — and the controller
+     * measured the cost: four of seven links on one goal had a superseded
+     * `goal`, including the link of the task that was actively building, whose
+     * declaration instructed work its own design pass had proved impossible.
+     * Its words: "the safe field carries the qualifier and the unsafe one has
+     * the plain name… I only ever noticed because liveGoal happened to sit
+     * adjacent in the payload."
+     *
+     * CANARY: swap them back, or drop the mapping entirely — a planner then
+     * reads DECLARED-GOAL-9 as the current contract, which is what happened
+     * live on goal-2 link 1 and again on goal-5 link 7.
+     */
+    expect(after.links[0]!.goal).toBe("MOVED-GOAL-4: ownership changed hands.");
+    // The declared text is NOT lost — it is what the chain declared and what
+    // the history and the link record mean — but it is named for what it is.
+    expect(after.links[0]!.declaredGoal).toContain("DECLARED-GOAL-9");
+    expect(after.links[0]!.title).toBe("Declared title");
+    // The stored FILE is untouched: the rename is a view, not a rewrite.
+    const { readGoalFile } = await import("~/server/files/goal-writer.server");
+    const stored = readGoalFile({ projectSlug: SLUG, goalId: chain.goalId, dataRoot: app.dataRoot })!;
+    expect(stored.parsed.frontmatter.links[0]!.goal).toContain("DECLARED-GOAL-9");
+    // A link with no task of its own has nothing to have moved past.
+    expect(after.links[1]!.declaredGoal).toBeUndefined();
+    expect(after.links[1]!.goal).toBe("Stays as declared.");
+  });
+});
+
+/**
+ * Ruling 192, third half: a chain outlives the sentence it was created with.
+ * Pass 37's `goal-2` still read "Identity and Catalog services" hours after
+ * catalog moved to its own chain, and the only correction on offer was to
+ * cancel the chain and rebuild every link.
+ */
+describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", () => {
+  it("renames the chain, rewrites the description, and says what a rename does NOT reach", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Identity and Catalog services",
+        description: "Both read-side foundations.",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        action: { op: "rename", title: "Identity service", description: "Identity only now." },
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.title).toBe("Identity service");
+    expect(after.description).toBe("Identity only now.");
+    // The already-created link task keeps the old name in its chain header, and
+    // the history says so rather than implying the rename reached back.
+    const task = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: chain.activeTaskKey!,
+      dataRoot: app.dataRoot,
+    })!;
+    expect(task.parsed.goal).toContain("Identity and Catalog services");
+    expect(after.history[0]!.text).toContain("keep the old name in their chain header");
+  });
+
+  it("a description-only edit does not claim anything about names", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Steady name",
+        description: "Old prose.",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        action: { op: "rename", description: "New prose." },
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.title).toBe("Steady name");
+    expect(after.description).toBe("New prose.");
+    // CANARY: append the clause unconditionally and the history tells a reader
+    // the chain was renamed when only its prose moved.
+    expect(after.history[0]!.text).toBe(
+      "Goal description rewritten by arda@viberr.dev.",
+    );
+  });
+
+  /**
+   * Ruling 267 (pass 37, F37-97). Every other `update_goal` op changes what a
+   * chain will DO, and a settled chain will do nothing — the terminal guard is
+   * right for all of them. `rename` changes only what it is CALLED, and a
+   * chain is named before the work is understood. Live: `goal-2` stayed
+   * "Identity and Catalog services" after catalog moved to goal-6 and `goal-4`
+   * stayed "Storefront and Admin surfaces" after admin moved to goal-7; both
+   * completed, so both were permanently wrong on a record people read to learn
+   * what was built, with no door anywhere to fix them.
+   */
+  it("ruling 267: a CANCELLED chain can still be renamed, and nothing else about it moves", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Identity and Catalog services",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const args = { projectSlug: SLUG, goalId: chain.goalId };
+    await updateGoal(app.db, { ...args, action: { op: "cancel" } }, actor, ctx);
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.status).toBe("cancelled");
+
+    // CANARY: restore `if (terminal) throw` on the rename arm and a settled
+    // chain's wrong name is wrong forever.
+    const renamed = await updateGoal(
+      app.db,
+      { ...args, action: { op: "rename", title: "Identity service" } },
+      actor,
+      ctx,
+    );
+    expect(renamed.message).toContain("renamed");
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.title).toBe("Identity service");
+    // The rename is a LABEL: the chain is still cancelled, and the history
+    // records the correction rather than the record changing silently.
+    expect(after.status).toBe("cancelled");
+    expect(after.history.some((h) => h.text.includes("Identity service"))).toBe(true);
+    // …and it says the truth about reach on a settled chain: nothing new will
+    // ever carry the new name.
+    expect(after.history[0]!.text).toContain("this chain is settled");
+
+    // Every OTHER op is still refused: the guard was not loosened generally.
+    for (const op of ["pause", "resume", "cancel"] as const) {
+      await expect(
+        updateGoal(app.db, { ...args, action: { op } }, actor, ctx),
+      ).rejects.toThrow(/cancelled/);
+    }
+  });
+
+  it("refuses an empty title and a rename that names nothing, and no-ops a rename that changes nothing", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Stable chain",
+        links: [{ title: "Only link", goal: "One. Done when merged." }],
+      },
+      actor,
+      ctx,
+    );
+    const args = { projectSlug: SLUG, goalId: chain.goalId };
+    await expect(
+      updateGoal(app.db, { ...args, action: { op: "rename", title: "   " } }, actor, ctx),
+    ).rejects.toThrow(/title cannot be empty/i);
+    await expect(
+      updateGoal(app.db, { ...args, action: { op: "rename" } }, actor, ctx),
+    ).rejects.toThrow(/needs a title or a description/i);
+    const before = getGoalView(SLUG, chain.goalId, ctx)!;
+    const same = await updateGoal(
+      app.db,
+      { ...args, action: { op: "rename", title: "Stable chain" } },
+      actor,
+      ctx,
+    );
+    expect(same.message).toContain("unchanged");
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.history).toHaveLength(before.history.length);
+  });
+
+});
+
+/**
+ * The self-review of ruling 192 found what its first draft broke: `edit_link`
+ * explicitly accepts a FAILED link — "edit a pending or failed link" is in
+ * `update_goal`'s own description — and carrying the failed task's text over
+ * that edit discarded the one correction the product offers there, silently.
+ */
+describe("ruling 192(b): an edit to a FAILED link outranks the text the retry would carry", () => {
+  it("retries from the re-declared link, says so, and clears the flag", async () => {
+    const { createGoal, updateGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Redeclared chain",
+        links: [
+          { title: "Drifting link", goal: "ORIGINAL-TEXT-2. Done when merged." },
+          { title: "Later link", goal: "Follows." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+    // The task's own text moves — the case ruling 192 was written for…
+    await updateTaskGoal(
+      app.db,
+      { projectSlug: SLUG, taskKey: first, goal: "TASK-TEXT-5: what the task ended up saying." },
+      actor,
+      ctx,
+    );
+    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: first, archived: true }, actor, ctx);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    // …and then a person re-declares the link, which is the later instruction.
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        action: { op: "edit_link", index: 1, goal: "REDECLARED-TEXT-9: do it this way instead." },
+      },
+      actor,
+      ctx,
+    );
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.redeclared).toBe(true);
+
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    const retried = after.links[0]!.taskKey!;
+    const fresh = readTaskFile({ projectSlug: SLUG, taskKey: retried, dataRoot: app.dataRoot })!;
+    // CANARY: drop `&& !link.redeclared` from the `priorTask` read and this is
+    // TASK-TEXT-5 — the edit the person just made, thrown away without a word.
+    expect(fresh.parsed.goal).toContain("REDECLARED-TEXT-9");
+    expect(fresh.parsed.goal).not.toContain("TASK-TEXT-5");
+    // The record says which source it used, in this direction too.
+    expect(after.history[0]!.text).toContain("re-declared text");
+    // And the flag is consumed, so the NEXT retry carries the task again.
+    expect(after.links[0]!.redeclared).toBe(false);
+  });
+
+  it("a failed link nobody re-declared still carries the task's text", async () => {
+    const { createGoal, updateGoal, getGoalView, reconcileGoal } = await import(
+      "./goal-actions.server"
+    );
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Untouched chain",
+        links: [
+          { title: "Drifting link", goal: "ORIGINAL-TEXT-3." },
+          { title: "Later link", goal: "Follows." },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const first = chain.activeTaskKey!;
+    await updateTaskGoal(
+      app.db,
+      { projectSlug: SLUG, taskKey: first, goal: "TASK-TEXT-8: the corrected contract." },
+      actor,
+      ctx,
+    );
+    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: first, archived: true }, actor, ctx);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "retry_link", index: 1 } },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    const fresh = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: after.links[0]!.taskKey!,
+      dataRoot: app.dataRoot,
+    })!;
+    expect(fresh.parsed.goal).toContain("TASK-TEXT-8");
+  });
+});
+
+/** Both found by the self-review: a link declared with no goal read as
+ *  permanently drifted, and a resent title claimed a rename that never was. */
+describe("ruling 192 (+335): the drift split stops claiming changes that never happened", () => {
+  it("a link declared with only a title is not reported as drifted", async () => {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Title-only chain",
+        // What `add_link` with no goal produces (`prose(args.goal ?? "")`), and
+        // what the schema's own `goal: z.string().default("")` allows.
+        links: [{ title: "Just a title", goal: "" }],
+      },
+      actor,
+      ctx,
+    );
+    expect(chain.activeTaskKey).toBeTruthy();
+    // CANARY: compare against `link.goal.trim()` alone and this is the title,
+    // i.e. drift announced on a link nobody touched.
+    expect(getGoalView(SLUG, chain.goalId, ctx)!.links[0]!.declaredGoal).toBeUndefined();
+  });
+
+  it("resending the current title with a new description claims no rename", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Same name",
+        description: "Before.",
+        links: [{ title: "Only link", goal: "One." }],
+      },
+      actor,
+      ctx,
+    );
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: chain.goalId,
+        // The shape a caller that echoes the whole object produces.
+        action: { op: "rename", title: "Same name", description: "After." },
+      },
+      actor,
+      ctx,
+    );
+    const after = getGoalView(SLUG, chain.goalId, ctx)!;
+    expect(after.description).toBe("After.");
+    // CANARY: derive `renamed` from `fm.title === title` again and this says
+    // link tasks keep "the old name" after an edit that changed no name.
+    expect(after.history[0]!.text).toBe("Goal description rewritten by arda@viberr.dev.");
   });
 });

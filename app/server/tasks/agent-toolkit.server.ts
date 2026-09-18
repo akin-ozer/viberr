@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import {
   normalizeEvidenceRows,
   type FileActorRef,
@@ -13,6 +15,8 @@ import {
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
+import { readBoardList, readBoardTask } from "./board-read.server";
+import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   readTaskFile,
   updateTaskFile,
@@ -38,6 +42,7 @@ import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 // which a dynamic import hid rather than fixed (see task-mutation.server.ts).
 import {
   notifyTaskWatchers,
+  type TaskWatcherNotice,
   reprojectTask,
   taskRef,
   type TaskMutationContext,
@@ -72,6 +77,12 @@ import {
 export interface AgentToolkit {
   /** `{ viberr_agent: <sdk mcp server> }` — merge into the run's mcpServers. */
   mcpServers: Record<string, McpSdkServerConfigWithInstance>;
+  /**
+   * Ruling 339: the names of the tools this toolkit ACTUALLY mounted, taken
+   * from the definitions it just built. The run record discloses this; it used
+   * to restate three of the gates by hand, which is why it under-reported.
+   */
+  toolNames: readonly string[];
 }
 
 interface AgentToolkitDeps {
@@ -84,6 +95,10 @@ interface AgentToolkitDeps {
   /** Staging key for report_outcome (threaded to the completion input). */
   outcomeKey: string;
   collab: AgentCollab;
+  /** Ruling 283: the knowledge bases attached to THIS run, by store directory.
+   *  Their documents are indexed into the prompt, not injected, so the run
+   *  needs a way to pull one — and may pull only from these. */
+  kb: readonly string[];
 }
 
 const prose = normalizeEscapedNewlines;
@@ -140,7 +155,32 @@ export async function postAgentComment(
   // resolves to a real person who is NOT a member of this project — the
   // fan-out drops those, and without the slug this call could only ever
   // disclose the AMBIGUOUS half, so a non-member tag went silently nowhere.
-  const text = withAmbiguityDisclosure(db, input.text, input.projectSlug);
+  const ambiguity = withAmbiguityDisclosure(db, input.text, input.projectSlug);
+  // Ruling 252 (F37-81): the same disclosure ruling 214 gave the operator, for
+  // the two writers that share this seam. A comment writes a timeline line and
+  // starts nothing, so an @tagged AGENT read it only in the writer's head.
+  //
+  // The controller is the live case and the sharp one: it is the surface a
+  // person drives a board from, its own tool text promises "@mentions notify
+  // people", and the same words typed by that person on the task page DO reach
+  // the agent (`commentToAgent` starts a run). Typed by the controller on their
+  // behalf they reach nobody, and nothing said so.
+  //
+  // `@operator` is excluded, exactly as in ruling 214: several writes in a
+  // controller turn wake the operator on their own, so claiming nothing was
+  // sent to it could be the false half of an honest sentence.
+  //
+  // Ruling 262 (F37-92): EVERY unreached handle, not the one a run would have
+  // gone to. `resolveMentionedAgent` answers the dispatch question, so it
+  // returned the operator for the very comment above and the stamp was skipped
+  // — ruling 252 did not cover its own motivating example until this resolver
+  // replaced it.
+  const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
+  const note = unreachedAgentNote(
+    unreachedAgents(ctx, input.projectSlug, input.taskKey, ambiguity),
+    input.actorRef.kind === "controller" ? "controller" : "agent",
+  );
+  const text = note ? `${ambiguity}\n\n${note}` : ambiguity;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
@@ -269,24 +309,47 @@ export async function openAgentQuestionPacket(
     taskKey: input.taskKey,
     details: { actorRef: encodeActorRef(input.actorRef), title: packet.title },
   });
-  notifyTaskWatchers(
-    db,
-    {
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      kind: "approval",
-      title: `${role} asks: ${packet.title}`,
-      text: packet.body || "An engaged agent needs a human decision.",
-    },
-    ctx,
-  );
+  // Ruling 222 (F37-42): the notification says WHO is asking. `notifyTaskWatchers`
+  // stamps `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so an agent's
+  // own question reached the owner's inbox under the Operator's name and avatar
+  // — on the one surface whose chip IS the "who wants something from you"
+  // signal, and whose row renders the body rather than the title that named the
+  // role. This file already settled the principle for the audit row two calls
+  // above: "P11-23: the agent opened this question packet — attribute it to the
+  // agent." Live on SHOP-18, the Frontend Engineer's question about a missing
+  // catalog contract was announced by the Operator.
+  const notice: TaskWatcherNotice = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    kind: "approval",
+    title: `${role} asks: ${packet.title}`,
+    text: packet.body || "An engaged agent needs a human decision.",
+  };
+  if (input.actorRef.kind === "agent") {
+    notice.from = {
+      kind: "agent",
+      backend: input.actorRef.backend,
+      name: role,
+      role,
+    };
+  }
+  notifyTaskWatchers(db, notice, ctx);
   return true;
 }
+
+/**
+ * Ruling 298: how many answer choices a live agent question may carry. The
+ * number was always four; what changed is that it is DECLARED here and
+ * refused at the boundary, instead of being applied by a silent `.slice(0, 4)`
+ * in the packet builder. A decision card is the one surface where a dropped
+ * option is a choice the person never learns they had.
+ */
+const ASK_HUMAN_MAX_OPTIONS = 4;
 
 /** Build the agent's collaboration toolkit for one run. Returns null when the
  * profile's grants allow none of the tools (no server mounted at all). */
 export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
-  const { db, ctx, projectSlug, taskKey, actorRef, outcomeKey, collab } = deps;
+  const { db, ctx, projectSlug, taskKey, actorRef, outcomeKey, collab, kb } = deps;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: SdkMcpToolDefinition<any>[] = [];
@@ -331,13 +394,18 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             .describe("Context a human needs to answer (no raw logs/secrets)."),
           options: z
             .array(
-              z.object({
+              z.strictObject({
                 title: z.string().describe("A concrete answer choice."),
                 detail: z.string().optional().describe("Short clarification."),
               }),
             )
+            .max(ASK_HUMAN_MAX_OPTIONS)
             .optional()
-            .describe("2-4 answer choices (first is presented as suggested)."),
+            .describe(
+              `2-${ASK_HUMAN_MAX_OPTIONS} answer choices (first is presented as suggested). ` +
+                `More than ${ASK_HUMAN_MAX_OPTIONS} is refused, not trimmed: pick the ones that ` +
+                "are really different and put the rest in `body`.",
+            ),
         },
         async (args) => {
           try {
@@ -406,7 +474,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     // holds the grant, so an agent without it cannot see or use it.
     const evidenceField = z
       .array(
-        z.object({
+        z.strictObject({
           label: z
             .string()
             .describe(
@@ -555,6 +623,95 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
+  // Ruling 281 (pass 37, F37-114): an agent can read its repository and not the
+  // board it works on. Its whole Viberr toolkit was post_comment, ask_human,
+  // report_outcome and (with a grant) github_read — so a task key it is TOLD
+  // about, in a document or a directive, could not be checked.
+  //
+  // The cost, measured: `services/cart/DESIGN.md:458` claimed "SHOP-39 was
+  // created for this gap". Two agents on SHOP-26 read it, correctly refused to
+  // trust a document's claim about the board — "a task named in a document is
+  // not a task until someone checks" — and had no way to check. The operator
+  // re-raised a decision that had already been made, and its recommended option
+  // would have created a SECOND task with SHOP-39's title word for word. The
+  // project's own conventions require a reported gap to end up owned by a live
+  // task; the agent could not verify one.
+  //
+  // Deliberately narrow (owner's call, 2026-09-15): this project only, read
+  // only, and no field a member could not already read on the task page. It is
+  // ungranted because every one of these facts is in the agent's own prompt for
+  // its OWN task already — the gap was only ever the other tasks beside it.
+  // Mounted only when this profile already has a Viberr server — a profile
+  // holding no collaboration grant at all still gets nothing, which is the
+  // gate U11 pinned and this must not widen.
+  if (tools.length > 0) {
+    tools.push(
+      tool(
+        "read_board",
+        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project as a list. THIS project only, and read-only — it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
+        {
+          taskKey: z
+            .string()
+            .optional()
+            .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            const deps = { db, ctx, projectSlug };
+            const wanted = args.taskKey?.trim();
+            return textResult(
+              wanted ? readBoardTask(deps, wanted) : readBoardList(deps),
+            );
+          } catch (error) {
+            logger.warn("agent read_board failed", {
+              taskKey,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+            return textResult("[error] The board could not be read.");
+          }
+        },
+      ),
+    );
+  }
+
+  // Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,
+  // so the grant is only half-delivered without a way to pull a document. Its
+  // gate is the KB grant itself, not the collaboration grants above — an agent
+  // granted a knowledge base and nothing else still has to be able to read it,
+  // and U11's gate was about collaboration, which this is not. (A Codex run
+  // mounts no in-process Viberr tools at all; its channel is the folder path
+  // the index prints, which `KB_INDEX_NOTE` names.)
+  if (kb.length > 0) {
+    tools.push(
+      tool(
+        "read_knowledge_doc",
+        "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index — every document, its size and its sections — and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name.",
+        {
+          kb: z
+            .string()
+            .describe("The knowledge base's name, as its index heading gives it."),
+          path: z
+            .string()
+            .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            return textResult(readKbDocForRun(kb, args.kb, args.path, ctx.dataRoot));
+          } catch (error) {
+            logger.warn("agent read_knowledge_doc failed", {
+              taskKey,
+              kb: args.kb,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+            return textResult("[error] That knowledge-base document could not be read.");
+          }
+        },
+      ),
+    );
+  }
+
   if (tools.length === 0) return null;
 
   const server = createSdkMcpServer({
@@ -569,5 +726,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       "Viberr collaboration tools for this engaged agent. Post material progress, raise blocking questions, and report your structured outcome through these; your final message is still your full report.",
     tools,
   });
-  return { mcpServers: { viberr_agent: server } };
+  return {
+    mcpServers: { viberr_agent: server },
+    // Ruling 339: read off the definitions, never restated. Every gate above
+    // adds its own tool, so the only list that cannot drift from them is this
+    // one.
+    toolNames: tools.map((t) => t.name),
+  };
 }

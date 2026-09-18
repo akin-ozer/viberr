@@ -736,3 +736,143 @@ describe("the usage-window reset renders at the precision it has", () => {
     expect(exact.container.textContent).not.toContain("2026-09-07 (UTC)");
   });
 });
+
+/**
+ * Ruling 294 (pass 37, F37-129): the sign-in link is copyable, and the account's
+ * own usage reading is on the card.
+ *
+ * The owner asked for both. The link half exists because opening it here only
+ * works when the browser reading this page is the one holding the vendor
+ * session, and often it is not; until now the only way to move the URL was to
+ * right-click an anchor whose href is a 300-character OAuth redirect.
+ */
+describe("ruling 294: copy the sign-in link", () => {
+  const CONNECTED_CLAUDE = {
+    ...HEALTH_NONE,
+    backend: "claude" as const,
+    userId: "u_arda",
+    available: true,
+    kind: "login" as const,
+    method: "claudeai" as const,
+    verification: "file" as const,
+    verifiedAt: "2026-09-15T09:00:00.000Z",
+    connectedAt: "2026-09-15T09:00:00.000Z",
+    detail: null,
+  };
+
+  function clipboardSpy() {
+    const writes: string[] = [];
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: {
+        writeText: (v: string) => {
+          writes.push(v);
+          return Promise.resolve();
+        },
+      },
+    });
+    return writes;
+  }
+
+  it("offers it on BOTH backends, carrying each vendor's own url", async () => {
+    // CANARY: drop the copy button from step 1 and neither label is found.
+    // Both are asserted together because step 1 is shared JSX: claude's
+    // Anthropic OAuth url and codex's device-login page are the same prop, and
+    // a change that serves one serves both or neither.
+    const writes = clipboardSpy();
+    const { getByLabelText } = renderPanel([
+      backend("claude", { login: runningLogin("claude") }),
+      backend("codex", { login: runningLogin("codex") }),
+    ]);
+
+    await act(async () => {
+      fireEvent.click(getByLabelText("Copy the Anthropic sign-in link"));
+    });
+    expect(writes).toEqual(["https://claude.ai/oauth"]);
+
+    await act(async () => {
+      fireEvent.click(getByLabelText("Copy the OpenAI sign-in link"));
+    });
+    expect(writes).toEqual([
+      "https://claude.ai/oauth",
+      "https://auth.openai.com/codex/device",
+    ]);
+  });
+
+  it("the link button and the code button do not both say Copied", async () => {
+    // CANARY: make `copied` a boolean again. Codex is the only backend where
+    // both buttons are on screen at once, and one flag made copying the link
+    // announce that the CODE had been copied too.
+    clipboardSpy();
+    const { getByLabelText, getAllByText, queryAllByText } = renderPanel([
+      backend("codex", { login: runningLogin("codex") }),
+    ]);
+    expect(getByLabelText("Copy the sign-in code WDJB-MJHT")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(getByLabelText("Copy the OpenAI sign-in link"));
+    });
+    // Exactly one control reads "Copied": the link's. The code button still
+    // offers its own action.
+    expect(getAllByText("Copied")).toHaveLength(1);
+    expect(queryAllByText("Copy")).toHaveLength(1);
+  });
+
+  it("shows the viewer's own usage reading, with its age and the clamp", () => {
+    // CANARY: render `usage.utilization` without the clamp and an overage
+    // account reads "118% of seven day" on the card built to be trusted.
+    const { getByText, container } = renderPanel([
+      backend("claude", {
+        health: CONNECTED_CLAUDE,
+        usage: {
+          status: "allowed_warning",
+          rateLimitType: "seven_day",
+          utilization: 1.18,
+          resetsAt: "2026-09-17T10:00:00.000Z",
+          isUsingOverage: true,
+          observedAt: "2026-09-15T18:02:00.000Z",
+        },
+      }),
+    ]);
+    expect(getByText("100% of seven day")).toBeTruthy();
+    expect(container.querySelector('[data-usage="seven_day"]')).toBeTruthy();
+    // An observation, never a probe: the age is what stops a figure from this
+    // morning reading as current.
+    expect(getByText(/Observed/)).toBeTruthy();
+    expect(getByText(/not a live reading/)).toBeTruthy();
+    expect(getByText(/running on overage/)).toBeTruthy();
+  });
+
+  it("says a missing utilization is not reported, never a fabricated 0%", () => {
+    // CANARY: `?? 0`. A fabricated zero on this card reads as a completely
+    // fresh window, which is the opposite of not knowing.
+    const { getByText, queryByText } = renderPanel([
+      backend("claude", {
+        health: CONNECTED_CLAUDE,
+        usage: {
+          status: "allowed",
+          // The wire format turns a missing provider string into "", not null,
+          // so an empty window name must not compose "0% of ".
+          rateLimitType: "",
+          utilization: null,
+          resetsAt: null,
+          isUsingOverage: false,
+          observedAt: "2026-09-15T18:02:00.000Z",
+        },
+      }),
+    ]);
+    expect(getByText("window usage not reported")).toBeTruthy();
+    expect(queryByText(/0%/)).toBeNull();
+  });
+
+  it("renders no usage at all when the card carries none", () => {
+    // The honest sparse case, and the one codex is in permanently: only Claude
+    // runs report a rate-limit reading, so a card with no reading shows nothing
+    // rather than an empty row that reads as broken.
+    const { queryByText, container } = renderPanel([
+      backend("codex", { health: { ...CONNECTED_CLAUDE, backend: "codex" } }),
+    ]);
+    expect(container.querySelector("[data-usage]")).toBeNull();
+    expect(queryByText(/usage not reported/)).toBeNull();
+  });
+});

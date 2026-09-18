@@ -23,6 +23,7 @@ import {
   startRun,
 } from "./run-service.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 
 /**
  * The instance run-concurrency cap: `handles.size` (live adapters) is the ground
@@ -115,13 +116,56 @@ describe("run concurrency cap", () => {
     });
   });
 
-  it("drains the oldest queued run when a live run finishes", async () => {
+  /**
+   * Ruling 207(g) (claim audit). The interrupt note said "The thread stays
+   * resumable; re-run the agent to continue" for every run. A QUEUED run — and
+   * a running row in the minutes-long window `reserveRun` opens before any
+   * provider process exists, which is the window a person actually presses Stop
+   * in — has no `session_id`, and `latestSessionRun` skips exactly those. The
+   * person who stopped a long run believed its reasoning survived and got a
+   * fresh agent that re-derived the work and re-spent the budget.
+   */
+  it("ruling 207(g): interrupting a run with NO provider session says so instead of promising a resume", async () => {
+    setMaxConcurrentRuns(store.db, 1);
+    await startHeldRun("r0");
+    const queued = await startHeldRun("r1");
+    await settle();
+    expect(getRun(store.db, queued)?.state).toBe("queued");
+    expect(getRun(store.db, queued)?.session_id).toBeNull();
+
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: queued, dataRoot: store.dataRoot },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
+
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.type === "note" && e.text.includes(queued));
+    // CANARY: emit the single unconditional sentence (the shipped note) and
+    // this promises a resume that `latestSessionRun` will never perform.
+    expect(note!.text).toContain("there is no thread to resume");
+    expect(note!.text).not.toContain("stays resumable");
+  });
+
+  /** The timeline note saying `runId` got its slot (ruling 311, the other half). */
+  function startedNote(runId: string) {
+    return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline.find((e) => e.text.includes(runId) && e.text.includes("got a slot and started"));
+  }
+
+  it("drains the oldest queued run when a live run finishes — and the timeline says so", async () => {
     setMaxConcurrentRuns(store.db, 1);
     const a = await startHeldRun("r0");
     const b = await startHeldRun("r1");
     await settle();
     expect(getRun(store.db, a)?.state).toBe("running");
     expect(getRun(store.db, b)?.state).toBe("queued");
+    // Ruling 311, the other half: while b waits, nothing on the record says it started.
+    expect(startedNote(b)).toBeUndefined();
 
     // Interrupt a → its slot frees → b promotes and launches.
     await interruptRun(
@@ -133,6 +177,12 @@ describe("run concurrency cap", () => {
     expect(getRun(store.db, a)?.state).toBe("interrupted");
     expect(getRun(store.db, b)?.state).toBe("running");
     expect(runConcurrencySnapshot(store.db)).toMatchObject({ live: 1, queued: 0 });
+    // Canary: drop the note from `drainRunQueue` and the timeline reads "Nothing
+    // is streaming yet" for the whole run — the dispatch line's "Queued" with no
+    // transition after it. The note names the run and says it is streaming.
+    expect(startedNote(b)?.text).toContain(`\`${b}\``);
+    // Only the promotion writes it: a was admitted at once and was never "queued".
+    expect(startedNote(a)).toBeUndefined();
   });
 
   it("drops a run interrupted WHILE queued — it never springs to life", async () => {

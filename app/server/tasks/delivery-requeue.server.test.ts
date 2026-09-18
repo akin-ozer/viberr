@@ -287,6 +287,74 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
  * dedicated `packet-resolved` trigger, EXCEPT for the documented NO_REQUEUE set
  * (`hold_runtime_debug` asked for no run). Reuses the same `runOperator` mock.
  */
+/**
+ * Ruling 240 (F37-61, owner): a HELD task refuses delivery, the same way ruling
+ * 186 made every dispatch door refuse it.
+ *
+ * Ruling 186's own live case is the argument: SHOP-2 was marked "Held until
+ * every entry is done" and a run "pushed a branch cut from a base that predated
+ * the foundation it waited on". Publishing that branch to a review PR is
+ * `performDelivery`, which had no `blockedBy` check at all — while the
+ * operator's turn instruction told it the server refused this door.
+ */
+describe("ruling 240 — a held task refuses delivery", () => {
+  it("refuses before anything is pushed, in the same words the dispatch gate uses", async () => {
+    deployOperator("full");
+    seedTask({ blockedBy: ["VIB-2", "VIB-3"] });
+    const pushesBefore = pushMock.mock.calls.length;
+
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+
+    // CANARY: delete the hold block at the top of `performDelivery` and this
+    // reads "delivered" — the branch is pushed and the PR opened on a base that
+    // predates the work the task is waiting for.
+    expect(outcome.status).toBe("failed");
+    // Narrowed before reading `message`: only the failed variant carries one.
+    const failed = outcome.status === "failed" ? outcome : null;
+    expect(failed?.message).toContain("VIB-1 waits on VIB-2 and VIB-3");
+    expect(failed?.message).toContain("delivering it for review is refused");
+
+    // Nothing reached the remote. Counted from a baseline rather than asserted
+    // as "never called": `pushMock` is NOT cleared in this file's beforeEach
+    // (only `runOp` and `openTaskPrMock` are), so a bare not.toHaveBeenCalled()
+    // passes alone and fails after any sibling test — and its failure output
+    // formats the recorded `db` handle, which is closed by then, so the real
+    // assertion is buried under "database is not open".
+    expect(pushMock.mock.calls.length).toBe(pushesBefore);
+    expect(openTaskPrMock).not.toHaveBeenCalled();
+    // And the refusal is on the record, not just in the return value.
+    const events = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!
+      .parsed.timeline.map((e) => e.text)
+      .join("\n");
+    expect(events).toContain("delivering it for review is refused");
+  });
+
+  it("delivers normally the moment nothing is held", async () => {
+    // The gate keys on the list being non-empty, so an empty one must not cost
+    // a delivery. CANARY: gate on the key's presence rather than its length.
+    deployOperator("full");
+    seedTask({ blockedBy: [] });
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+    expect(outcome.status).toBe("delivered");
+  });
+});
+
 describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   const FAILURE_PACKET: TaskPacket = {
     type: "blocked",
@@ -319,6 +387,182 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
       trigger: "packet-resolved",
       resolvedOption: { kind: "block_on_policy" },
     });
+  });
+
+  /**
+   * Ruling 224 (F37-44). The decision IS that nothing runs until the window
+   * reopens; the schedule the resolution writes is what brings the operator
+   * back. Live on SHOP-18 the re-invoke fired seven seconds after the decision
+   * was recorded, was refused by the very quota the human had just chosen to
+   * wait out, and opened a NEW packet asking the same question — so answering
+   * the decision re-created it, in a loop.
+   */
+  it("wait_for_window does NOT re-queue: the schedule is what comes back (ruling 224)", async () => {
+    deployOperator("supervised");
+    seedTask(
+      { stage: "impl", waiting: "agent", readiness: "blocked" },
+      {
+        ...FAILURE_PACKET,
+        options: [
+          {
+            kind: "wait_for_window",
+            t: "Wait for the window and pick the task back up automatically",
+            d: "",
+            rec: true,
+            dueAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot, deps: DEPS },
+    );
+    await flush();
+    // The wait really was recorded, so "no run" cannot pass because nothing
+    // happened at all.
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.schedules).toHaveLength(1);
+
+    // Settled far longer than a re-queue needs: the sibling test above resolves
+    // `block_on_policy` on this same harness and sees its call, so a call here
+    // would be observable — "not called" is a real absence, not a race won by
+    // being too fast.
+    await new Promise((r) => setTimeout(r, 1_000));
+    // CANARY: remove `wait_for_window` from NO_REQUEUE and this fires — a run
+    // against the very quota the decision exists to wait out, which live on
+    // SHOP-18 was refused and opened a NEW packet asking the same question.
+    expect(runOp).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Ruling 230 (F37-50). The decision IS the wait, so the same rule as
+   * `wait_for_window`: re-invoking the operator would pay a drive to rediscover
+   * the hold it was just told about (JC-9's five runs), and ruling 131(d)
+   * refuses the held triggers at the door anyway.
+   *
+   * What makes this worth its own test rather than a line in a list: the hold
+   * has to be REAL. Before this ruling the nearest option was
+   * `block_on_policy`, whose resolution sets `readiness: ready` and
+   * `waiting: agent` — so an option titled "Hold SHOP-11 while…" produced the
+   * record "SHOP-11 is unblocked", measured live at 04:12 UTC.
+   */
+  it("block_on_dependencies records a REAL hold and does NOT re-queue (ruling 230)", async () => {
+    deployOperator("supervised");
+    seedTask(
+      { stage: "impl", waiting: "agent", readiness: "blocked" },
+      {
+        ...FAILURE_PACKET,
+        options: [
+          {
+            kind: "block_on_dependencies",
+            t: "Hold until the gateway work lands",
+            d: "",
+            rec: true,
+            blockedBy: ["VIB-2"],
+          },
+        ],
+      },
+    );
+    // The hold's target has to EXIST: `setTaskDependencies` validates the refs,
+    // and a hold on a task that is not there would be a hold nothing can ever
+    // release. Discovered by this test failing exactly that way first.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "The gateway work this one waits on",
+      }),
+      goal: "Stand in for the blocking task.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot, deps: DEPS },
+    );
+    await flush();
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.packet).toBeNull();
+    // The hold is on the file, written through the same door every other
+    // dependency edit uses — not a sentence in an event.
+    expect(parsed.frontmatter.blockedBy).toEqual(["VIB-2"]);
+    // And the record says wait, not "unblocked".
+    const decision = parsed.timeline.find((e) => e.type === "transition")!;
+    expect(decision.text).toContain("waits on VIB-2");
+    expect(decision.text).not.toContain("unblocked");
+
+    await new Promise((r) => setTimeout(r, 1_000));
+    // CANARY: remove `block_on_dependencies` from NO_REQUEUE.
+    expect(runOp).not.toHaveBeenCalled();
+  });
+
+  it("ruling 230: a hold that cannot be written says so and never un-resolves the decision", async () => {
+    // Found by accident — the test above failed this way first, because its
+    // target did not exist. `setTaskDependencies` validates the refs, which is
+    // right: a hold on a task that is not there releases on nothing. What must
+    // not happen is the decision being thrown away because its side effect
+    // failed, which is why the write is best-effort and narrated.
+    //
+    // Canary: make the post-write effect throw instead of narrating.
+    deployOperator("supervised");
+    seedTask(
+      { stage: "impl", waiting: "agent", readiness: "blocked" },
+      {
+        ...FAILURE_PACKET,
+        options: [
+          {
+            kind: "block_on_dependencies",
+            t: "Hold until the missing task lands",
+            d: "",
+            rec: true,
+            blockedBy: ["VIB-404"],
+          },
+        ],
+      },
+    );
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot, deps: DEPS },
+    );
+    await flush();
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // The human's decision stands.
+    expect(parsed.packet).toBeNull();
+    // The hold did not land, and the record says so in words a person can act
+    // on rather than leaving them to infer it from an empty list.
+    expect(parsed.frontmatter.blockedBy).toEqual([]);
+    const note = parsed.timeline.find((e) => /was \*\*not\*\* recorded as waiting on/.test(e.text));
+    expect(note).toBeTruthy();
+    expect(note!.text).toContain("set what it waits on from the task page");
+    // And still no run: the decision was "do not run", and a failed side effect
+    // does not turn that into a dispatch.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(runOp).not.toHaveBeenCalled();
   });
 
   it("hold_runtime_debug does NOT re-queue (the human asked for no run)", async () => {

@@ -153,6 +153,10 @@ export interface QuietCheck {
   /** Ruling 131 (pass 34): the task waits on other work (`blockedBy` is
    *  non-empty). Such a task is held on purpose and is never "gone quiet". */
   held: boolean;
+  /** Ruling 225: when the task rests on a clock (`waiting: "schedule"`), the
+   *  instant that clock fires. Idle time is measured from THERE, not from the
+   *  last timeline event — see `isQuiet`. */
+  resumesAt?: string | null;
   /** Omitted outside tests — the real clock answers the question. */
   now?: Date;
 }
@@ -178,7 +182,24 @@ export function isQuiet(input: QuietCheck): boolean {
   if (!input.lastActivityAt) return false;
   const at = Date.parse(input.lastActivityAt);
   if (!Number.isFinite(at)) return false;
-  const idleMs = (input.now ?? new Date()).getTime() - at;
+  const now = (input.now ?? new Date()).getTime();
+  // Ruling 225 (F37-45): a task resting on a clock has not stopped moving —
+  // it is between two moves, on purpose, and the gap can be hours (a quota
+  // window). Measuring from its last timeline event would light the "no
+  // activity" cue on the healthiest possible wait, which is the one thing this
+  // check refuses to do.
+  //
+  // Not the `held` short-circuit above, though. A schedule that came DUE and
+  // did not fire is a genuine stall — the runner is the thing that broke — and
+  // exempting it outright would hide exactly that. So the idle clock restarts
+  // at the due instant: silent until then, then quiet on the human threshold,
+  // because past its own due time a schedule owes a person an explanation.
+  if (input.waiting === "schedule") {
+    const due = input.resumesAt ? Date.parse(input.resumesAt) : NaN;
+    if (!Number.isFinite(due)) return false;
+    return now - due >= QUIET_AFTER_HUMAN_MS;
+  }
+  const idleMs = now - at;
   const threshold =
     input.waiting === "human" ? QUIET_AFTER_HUMAN_MS : QUIET_AFTER_AGENT_MS;
   return idleMs >= threshold;

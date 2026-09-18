@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { describeRevisionDrift, revisionDriftNote, classifyRevisionDrift } from "./revision-drift";
+import {
+  describeRevisionDrift,
+  revisionDriftNote,
+  classifyRevisionDrift,
+  reviewSubjectSha,
+} from "./revision-drift";
 
 const HEAD = "a4c790ce63ef0011223344556677889900aabbcc";
 
@@ -156,5 +161,85 @@ describe("classifyRevisionDrift (ruling 132)", () => {
     expect(classifyRevisionDrift({ headSha: "h", since: { ...since, droppedCommits: 1 }, base, recordedMergeShas: recorded })).toBeNull();
     expect(classifyRevisionDrift({ headSha: "h", since: { ...since, aheadBy: 3 }, base, recordedMergeShas: recorded })).toBeNull();
     expect(classifyRevisionDrift({ headSha: "h", since, base: { ...base, droppedCommits: 1 }, recordedMergeShas: recorded })).toBeNull();
+  });
+});
+
+/**
+ * Ruling 238 (pass 37, F37-58): which commit a re-review reads. The pin is
+ * ruling 179's and stays, with exactly one exception — a head that moved only
+ * because Viberr refreshed the base. Live on SHOP-18 the missing exception cost
+ * an admin force-accept: the verifier's two blockers were fixed on `main` and
+ * merged in, and the pin put every re-review back on the base that still had
+ * them.
+ */
+describe("reviewSubjectSha (ruling 238)", () => {
+  const REVIEWED = "b7c4c907eff3001122334455667788990011aabb";
+  const REFRESHED = "aaf5e38b45f5001122334455667788990011ccdd";
+  const baseOnly = {
+    headSha: REFRESHED,
+    authored: 0,
+    baseRefresh: { merges: 1, commits: 20 },
+  };
+
+  it("moves the subject to the refreshed head, and says which revision the verdict still binds to", () => {
+    // CANARY: return `stand` unconditionally and this is the live SHOP-18
+    // state — the reviewer re-reads the base it already objected to.
+    const subject = reviewSubjectSha({
+      reviewedSha: REVIEWED,
+      prHeadSha: REFRESHED,
+      drift: baseOnly,
+    });
+    expect(subject).toEqual({
+      sha: REFRESHED,
+      rePinned: { reviewedSha: REVIEWED, baseRefresh: { merges: 1, commits: 20 } },
+    });
+  });
+
+  it("keeps the pin the moment ANY authored commit is in the drift", () => {
+    // One authored commit is unreviewed work, and reading it unasked is the
+    // failure ruling 179 exists to prevent. CANARY: test `baseRefresh` without
+    // also testing `authored === 0`.
+    for (const drift of [
+      { ...baseOnly, authored: 1 },
+      { ...baseOnly, authored: 3, baseRefresh: { merges: 2, commits: 9 } },
+    ]) {
+      expect(
+        reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift }),
+      ).toEqual({ sha: REVIEWED, rePinned: null });
+    }
+  });
+
+  it("keeps the pin when the drift was measured against a DIFFERENT head", () => {
+    // A measurement against an older head classifies none of the commits on
+    // this one. CANARY: drop the `drift.headSha !== prHeadSha` guard and a
+    // stale base-refresh reading re-pins onto commits nobody has read.
+    const stale = { ...baseOnly, headSha: "c".repeat(40) };
+    expect(
+      reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift: stale }),
+    ).toEqual({ sha: REVIEWED, rePinned: null });
+  });
+
+  it("keeps the pin with no PR, no drift, an empty refresh, or a head that never moved", () => {
+    const stands = { sha: REVIEWED, rePinned: null };
+    expect(reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: null, drift: baseOnly })).toEqual(stands);
+    expect(reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift: null })).toEqual(stands);
+    expect(
+      reviewSubjectSha({
+        reviewedSha: REVIEWED,
+        prHeadSha: REFRESHED,
+        drift: { headSha: REFRESHED, authored: 0, baseRefresh: { merges: 0, commits: 0 } },
+      }),
+    ).toEqual(stands);
+    expect(
+      reviewSubjectSha({
+        reviewedSha: REVIEWED,
+        prHeadSha: REVIEWED,
+        drift: { ...baseOnly, headSha: REVIEWED },
+      }),
+    ).toEqual(stands);
+  });
+
+  it("has nothing to pin when nothing has been delivered", () => {
+    expect(reviewSubjectSha({ reviewedSha: null, prHeadSha: REFRESHED, drift: baseOnly })).toBeNull();
   });
 });

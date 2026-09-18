@@ -77,6 +77,7 @@ import {
 } from "./pr-human-approval.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { latestReconcileSync } from "~/server/provenance/provenance-query.server";
 import {
   canAcceptFromStage,
   isTerminalStage,
@@ -406,7 +407,15 @@ async function reconcileTaskUnlocked(
     compareResult.status === "ok" ? compareResult.compare : null;
 
   // 2. PR lookup (state/draft/merged + checks + change stats).
-  let prResult = await findPrForBranch(gh.client, gh.repo, branch);
+  // Ruling 236: hand the linker the head our cached path list was read at, so
+  // the changed-files call is skipped on every tick where the head has not
+  // moved — which is almost all of them.
+  let prResult = await findPrForBranch(
+    gh.client,
+    gh.repo,
+    branch,
+    fm.pr?.paths?.headSha ?? null,
+  );
   // Ruling 160 (pass 35, F35-11): the branch listing answers `none` for a
   // closed PR whose branch has since advanced (F26), which is exactly what a
   // push landing after a person's close looks like. The task's OWN cached
@@ -623,6 +632,17 @@ async function reconcileTaskUnlocked(
     if (checks) owned.checks = checks;
     if (review) owned.review = review;
     if (mergeable) owned.mergeable = mergeable;
+    // Ruling 236: measured this pass wins; otherwise the SAME PR's cached list
+    // is carried, because a skipped read means "unchanged", not "unknown". A
+    // list read for a DIFFERENT head than the one now live is dropped rather
+    // than shown stale - `paths.headSha` is what makes that decidable.
+    const measuredPaths = pr.paths ?? null;
+    const carriedPaths =
+      measuredPaths ??
+      (cachedPr?.number === pr.number && cachedPr.paths?.headSha === pr.headSha
+        ? (cachedPr.paths ?? null)
+        : null);
+    if (carriedPaths) owned.paths = carriedPaths;
     // A measured drift wins; on a settled PR (nothing measured this pass) the
     // last measurement is carried forward for the SAME PR — see `driftMeasurable`.
     const carriedDrift =
@@ -743,10 +763,68 @@ async function reconcileTaskUnlocked(
           .map((c) => ({ sha: c.sha, msg: c.msg }))
       : null;
   const existingCommits = existingGithub?.commits ?? [];
+  // Ruling 187 (pass 37, F37-8): a recorded commit is marked with whether the
+  // REMOTE has it, and every surface renders that — rather than the record
+  // claiming a workspace-only commit as repository state.
+  //
+  // Live, SHOP-2's `github.commits` held `3aad6ff` (an agent's workspace commit
+  // on a held task, never delivered, its workspace since disposed), origin's
+  // `shop-2` held only the bootstrap commit, and the GitHub page rendered
+  // "1 commit · synced" for work that existed nowhere.
+  //
+  // The first attempt at this DROPPED such an entry and announced it as lost
+  // work. That was wrong, and the live system proved it within the hour: a
+  // reconcile landing in the window between an agent committing in its
+  // workspace and delivery pushing it announced `522e640` on SHOP-7 as lost —
+  // seconds before Viberr pushed it. At reconcile time a pending commit and an
+  // abandoned one are indistinguishable (neither is on the remote, neither has
+  // `pushedAt` yet), so "lost" is a claim this code cannot make. "Not on the
+  // remote" is one it can, it is always true, and it is what the reader needs.
+  //
+  // Ruling 187(b): …and only while the branch's work has NOT landed on the
+  // base. `compare` is `base...branch`, an AHEAD-only list: a commit missing
+  // from it is either absent from the branch OR present on BOTH, which is
+  // exactly what a merge produces. Once the PR merges, the ahead-list goes
+  // empty with `droppedCommits: 0`, and the carve-out below would then stamp
+  // every cached commit `pushed: false` — announcing that origin lacks commits
+  // sitting in `main`. That is this ruling's own prohibited lie pointed the
+  // other way, and it is reachable on any merged PR whose branch still exists
+  // (the branch delete is best-effort and can be refused). After a landing the
+  // compare cannot judge the cache at all, so it does not: the stamps already
+  // written stay, and nothing new is claimed.
+  // The FILE's recorded state counts too: a reconcile whose PR read failed
+  // knows less than the record does, and "the API did not answer" is not a
+  // licence to claim the remote lost merged work.
+  const landedState = (state: string | undefined): boolean =>
+    state === "merged" || state === "accepted";
+  const landed = landedState(prState) || landedState(fm.pr?.state);
+  const compareComplete =
+    compare !== null && provenBranchHead && compare.droppedCommits === 0 && !landed;
+  const remoteShas = new Set<string>();
+  if (compareComplete && compare) {
+    for (const c of compare.commits) {
+      remoteShas.add(c.sha);
+      remoteShas.add(c.fullSha);
+    }
+  }
+  const remoteHas = (sha: string): boolean =>
+    remoteShas.has(sha) ||
+    [...remoteShas].some((r) => r.startsWith(sha) || sha.startsWith(r));
+  /** Stamp `pushed` on every entry we can judge; leave it alone when the
+   *  compare is short or absent, because an unjudged entry must not read as
+   *  judged. */
+  const stamped = (
+    entries: readonly { sha: string; msg: string }[],
+  ): { sha: string; msg: string; pushed?: boolean }[] =>
+    entries.map((c) =>
+      compareComplete ? { ...c, pushed: remoteHas(c.sha) } : { ...c },
+    );
   const branchCommits =
     prefixCommits !== null && prefixCommits.length === 0 && existingCommits.length > 0
-      ? existingCommits
-      : prefixCommits;
+      ? stamped(existingCommits)
+      : prefixCommits === null
+        ? null
+        : stamped(prefixCommits);
   const ownedChanged = pr && ownsAPr ? pr.changed : undefined;
   // The cache a pass that derived nothing falls back to — empty when the task
   // has no delivery record for this branch, because then the cache describes
@@ -1263,7 +1341,18 @@ async function reconcileTaskUnlocked(
 
   // DG-3: skip the no-change heartbeat row on poller ticks so provenance doesn't
   // grow unboundedly; still record every observation for a human-triggered reconcile.
-  if (changed || !ctx.skipUnchangedProvenance) {
+  // Ruling 187's sibling (pass 37, F37-9): the sync pill reads the newest
+  // observation row, and `changed` only compares the task FILE's `pr`/`github`
+  // blocks — the compare verdict lives nowhere in them. So a pass whose only
+  // change was "`main` moved" wrote no row, and the pill kept rendering the
+  // stale verdict. Live, SHOP-2 rendered **synced** while this same pass's
+  // audit row said `behind_main`. A verdict CHANGE is a change worth
+  // recording; an unchanged verdict still writes nothing on a poller tick, so
+  // the table stays bounded by real changes exactly as before.
+  const syncChanged =
+    latestReconcileSync(db, storeRelativePath(resolveTaskFilePath(ref), ctx.dataRoot)) !==
+    sync;
+  if (changed || syncChanged || !ctx.skipUnchangedProvenance) {
     const details: GithubProvenanceDetails = {
       repo: gh.repo,
       branch,
@@ -1676,7 +1765,9 @@ export async function mergeTaskPr(
       return {
         status: "not_mergeable",
         prNumber,
-        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Rebase the branch, then merge.`,
+        // Ruling 291: merge the base IN. Viberr's own remedy is a merge, and a
+        // rebase rewrites commits the pull request already published.
+        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Merge \`${gh.defaultBranch}\` into the branch — never rebase it — then merge.`,
         mergeable,
       };
     }
@@ -2092,8 +2183,23 @@ export async function deleteTaskRemoteBranch(
 
   // GitHub answers "Reference does not exist" with a 422 — someone already
   // cleaned it up. That is the state the human asked for, reported honestly.
+  //
+  // Ruling 207(d): 422 is NOT a synonym for "gone". GitHub also answers 422
+  // "Reference cannot be deleted: …" when a branch-protection rule or a
+  // repository ruleset restricts deletions, and the ref is still there. The old
+  // classifier read every 422 as `already_gone`, so the timeline, the audit row
+  // and the collision ceremony all reported a stale branch removed while GitHub
+  // had refused. The message is the only signal the API gives, so the default
+  // flips: only an explicit "does not exist" is `already_gone`, and anything
+  // else is a refusal carrying GitHub's own words.
   if (del.kind === "http" && del.status === 422) {
-    return { status: "already_gone", branch };
+    if (/does not exist/i.test(del.message)) return { status: "already_gone", branch };
+    return {
+      status: "refused",
+      reason: "github_refused",
+      branch,
+      message: `GitHub refused the deletion (${del.message}).`,
+    };
   }
   return {
     status: "refused",

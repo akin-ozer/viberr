@@ -123,6 +123,76 @@ describe("useLiveUpdates", () => {
     );
   });
 
+  /**
+   * Ruling 301 (pass 37, F37-136). An SSE connection is a permanent one, this
+   * app is served over HTTP/1.1, and a browser allows about six per origin. A
+   * task page holds two streams, so FOUR open tabs exhaust the pool and every
+   * request from every tab queues forever: loaders never resolve, a submitted
+   * form's button stays busy, and nothing anywhere says why. Measured live
+   * against the running instance: one tab 21ms, two tabs 10ms, four tabs still
+   * hung after 300s while the same endpoint answered curl in 12ms, and closing
+   * tabs recovered it.
+   */
+  it("ruling 301: a hidden tab holds NO connection, and gets one back when it returns", () => {
+    const visibility = { current: "visible" };
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility.current,
+    });
+    render(<Probe scopes={["project:viberr-core", "user"]} />, { wrapper: DataRouter });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    const first = FakeEventSource.last();
+    expect(first.closed).toBe(false);
+
+    // CANARY: drop the `hidden` guard and the connection is still held.
+    act(() => {
+      visibility.current = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(first.closed, "a background tab kept its connection").toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    // Coming back opens a fresh one: the tab is live again, not stuck closed.
+    // CANARY: leave `hidden` out of the effect's deps.
+    act(() => {
+      visibility.current = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.last().closed).toBe(false);
+  });
+
+  it("ruling 301: coming back pulls the loaders, because the tab missed every event while it was away", () => {
+    const visibility = { current: "visible" };
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility.current,
+    });
+    render(<Probe scopes={["project:viberr-core"]} />, { wrapper: DataRouter });
+    act(() => {
+      FakeEventSource.last().onopen?.();
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    // The first stream of a surface's life never revalidates on open.
+    expect(loaderRuns).toBe(0);
+
+    act(() => {
+      visibility.current = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    act(() => {
+      visibility.current = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    // The reopen is a RECONNECT, and a reconnect already means "you may have
+    // missed events". CANARY: make the reopen look like a first connect.
+    act(() => {
+      FakeEventSource.last().onopen?.();
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    expect(loaderRuns, "a returning tab rendered a stale snapshot").toBe(1);
+  });
+
   it("coalesces an event burst into ONE debounced revalidation", () => {
     render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();

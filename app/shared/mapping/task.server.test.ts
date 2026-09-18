@@ -5,8 +5,10 @@ import {
   isAtAcceptanceBoundary,
   mapOperatorRef,
   mapPrChecks,
+  prChecksRead,
   mapPrReview,
   mapTaskProjectionRow,
+  nextScheduleDueAt,
   withLiveAgentIdentities,
   type LiveAgentIdentity,
   type TaskProjectionRow,
@@ -23,6 +25,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     stage: "review",
     readiness: "ready",
     stored_readiness: "ready",
+    schedules_json: "[]",
     waiting: "human",
     urgent: 0,
     priority: "normal",
@@ -433,6 +436,32 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
     ).toMatchObject({ state: "passing" });
   });
 
+  /**
+   * Ruling 276 (pass 37, F37-109): `prRefSchema` keeps "never read" (the key is
+   * absent) apart from "read, and GitHub reported no check runs" (`total: 0`),
+   * and says so in its own comment. `mapPrChecks` collapses both to null —
+   * correctly, a display has nothing to draw either way — and every reader
+   * inherited the collapse, including the one for whom the difference IS the
+   * answer. Live, the controller read `checks: null` on all 30 PRs and could
+   * not tell which; "no CI is configured" and "we have not looked" ask for
+   * opposite next moves.
+   */
+  it("ruling 276: `never read` and `GitHub reported none` are told apart", () => {
+    // CANARY: return `pr?.checks != null` without the undefined check, or read
+    // it off `mapPrChecks`, and the two collapse again.
+    expect(prChecksRead(pr())).toBe(false);
+    expect(prChecksRead(pr({ checks: { total: 0, passing: 0, failing: 0, pending: 0 } }))).toBe(
+      true,
+    );
+    // The DISPLAY is deliberately unchanged: both still render nothing.
+    expect(mapPrChecks(pr())).toBeNull();
+    expect(mapPrChecks(pr({ checks: { total: 0, passing: 0, failing: 0, pending: 0 } }))).toBeNull();
+    // A hand-edited null is "never read" too — the writers omit rather than
+    // persist one, so a null that reaches here came from outside.
+    expect(prChecksRead(pr({ checks: null }))).toBe(false);
+    expect(prChecksRead(null)).toBe(false);
+  });
+
   it("F21-7: runs nobody could read degrade to unknown — never to passing", () => {
     // The linker's own count (a drifted check-runs payload).
     expect(
@@ -676,5 +705,51 @@ describe("withLiveAgentIdentities (live deployment wins over the engage-time sna
     const summary = summarize(row(), false);
     const live = identities([["developer", { backend: "claude", name: "Developer" }]]);
     expect(withLiveAgentIdentities(summary, live)).toBe(summary);
+  });
+});
+
+/**
+ * Ruling 225 (F37-45): the card names the instant a clock-resting task picks
+ * itself back up. The read boundary is where a corrupt value must stop, the
+ * same rule `parseTaskLabels` follows.
+ */
+describe("nextScheduleDueAt", () => {
+  const occurrence = (dueAt: string, status: string) => ({
+    id: `sch_${dueAt}`,
+    action: "run-operator",
+    dueAt,
+    status,
+  });
+
+  it("answers the occurrence that fires NEXT, not the one listed first", () => {
+    expect(
+      nextScheduleDueAt(
+        JSON.stringify([
+          occurrence("2026-09-14T06:00:00.000Z", "pending"),
+          occurrence("2026-09-14T02:28:00.000Z", "pending"),
+        ]),
+      ),
+    ).toBe("2026-09-14T02:28:00.000Z");
+  });
+
+  it("ignores occurrences that already fired", () => {
+    expect(
+      nextScheduleDueAt(
+        JSON.stringify([
+          occurrence("2026-09-13T08:19:58.271Z", "fired"),
+          occurrence("2026-09-14T02:28:00.000Z", "pending"),
+        ]),
+      ),
+    ).toBe("2026-09-14T02:28:00.000Z");
+    expect(
+      nextScheduleDueAt(JSON.stringify([occurrence("2026-09-13T08:19:58.271Z", "fired")])),
+    ).toBeNull();
+  });
+
+  it("yields no time rather than throwing on a value it cannot read", () => {
+    expect(nextScheduleDueAt("not json")).toBeNull();
+    expect(nextScheduleDueAt("[]")).toBeNull();
+    expect(nextScheduleDueAt(JSON.stringify([{ nonsense: true }]))).toBeNull();
+    expect(nextScheduleDueAt(JSON.stringify([occurrence("whenever", "pending")]))).toBeNull();
   });
 });

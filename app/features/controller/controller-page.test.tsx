@@ -33,13 +33,14 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     available: true,
     controllerName: "Controller",
     projectName: "Viberr Core",
+    viewerId: "u_arda",
     conversations: [
       { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null },
       { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142" },
     ],
     conversation: null,
     messages: [],
-    turn: { working: false, runId: null },
+    turn: { working: false, runId: null, phase: null, step: null },
     runtime: [],
     canInterruptTurn: false,
     goals: [],
@@ -62,8 +63,8 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
       onFailure: "pause",
       description: "",
       links: [
-        { index: 1, title: "Needs base B", goal: "C.", taskKey: "JC-9", status: "active", note: null, blockedBy: ["goal-1 link 2", "JC-6"] },
-        { index: 2, title: "Free", goal: "D.", taskKey: null, status: "pending", note: null, blockedBy: [] },
+        { index: 1, title: "Needs base B", goal: "C.", taskKey: "JC-9", status: "active", note: null, redeclared: false, blockedBy: ["goal-1 link 2", "JC-6"] },
+        { index: 2, title: "Free", goal: "D.", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
       ],
       currentIndex: 1,
       createdAt: null,
@@ -75,6 +76,52 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
     await screen.findByText("waits on goal-1 link 2, JC-6");
     const waits = [...container.querySelectorAll("[data-link-wait]")].map((n) => n.textContent);
     expect(waits).toEqual(["waits on goal-1 link 2, JC-6"]);
+  });
+
+  /**
+   * Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION.
+   *
+   * `requireGoalAuthority` allows the chain's CREATOR or anyone with
+   * `run-agents`. The page computed one boolean from the viewer's project ROLE
+   * and handed it to every card, so the creator arm was never evaluated —
+   * and a contributor can create a chain (`create-task` is A/M/C) but is not
+   * `run-agents` (A/M). The repo's own toolkit test proves the server answers
+   * yes: a contributor creates goal-1, then pauses it, and both return [done].
+   * This panel is the ONLY goal-redirect UI in the product, so the person who
+   * started the chain had no Pause, Resume, Cancel, Retry or Skip anywhere.
+   */
+  it("ruling 260: a chain's own creator gets its controls even below the run-agents tier", async () => {
+    const mine: NonNullable<ControllerSurfaceView["goals"]>[number] = {
+      id: "goal-7",
+      title: "My own chain",
+      status: "active",
+      createdBy: "u_noor",
+      createdByLabel: "Noor",
+      onFailure: "pause",
+      description: "",
+      links: [
+        { index: 1, title: "First", goal: "A.", taskKey: "JC-1", status: "failed", note: null, redeclared: false, blockedBy: [] },
+      ],
+      currentIndex: 1,
+      createdAt: null,
+      updatedAt: null,
+      history: [],
+    };
+    const theirs = { ...mine, id: "goal-8", title: "Someone else's chain", createdBy: "u_other" };
+
+    // A viewer below the run-agents tier (canRedirectGoals=false in the stub),
+    // looking at one chain they created and one they did not.
+    renderPage(view({ goals: [mine, theirs], viewerId: "u_noor" }));
+    await screen.findByText("My own chain");
+
+    // CANARY: drop `|| g.createdBy === viewerId` and BOTH counts are 0 — the
+    // creator is shown their own chain with no way to redirect it.
+    expect(screen.getAllByRole("button", { name: /Pause/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /Cancel goal/ })).toHaveLength(1);
+    // …and the chain they did not create still offers nothing, so the fix did
+    // not simply open the controls to everybody.
+    const cards = document.querySelectorAll("[data-goal-id]");
+    expect(cards.length === 0 || cards.length === 2).toBe(true);
   });
 });
 
@@ -100,22 +147,24 @@ function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFuncti
 }
 
 /** The instance surface (no project bound), where the ruling-127 copy lives. */
-function renderInstancePage(v: ControllerSurfaceView) {
+function renderInstancePage(v: ControllerSurfaceView, action?: ActionFunction) {
+  const page: Parameters<typeof createRoutesStub>[0][number]["children"] = [
+    {
+      path: "controller",
+      Component: () => (
+        <ToastProvider>
+          <ControllerPage view={v} projectSlug={null} canRedirectGoals={false} />
+        </ToastProvider>
+      ),
+    },
+  ];
+  if (action) page[0]!.action = action;
   const Stub = createRoutesStub([
     {
       id: "root",
       path: "/",
       loader: () => ({ csrf: "tok", theme: "system" }),
-      children: [
-        {
-          path: "controller",
-          Component: () => (
-            <ToastProvider>
-              <ControllerPage view={v} projectSlug={null} canRedirectGoals={false} />
-            </ToastProvider>
-          ),
-        },
-      ],
+      children: page,
     },
   ]);
   return render(<Stub initialEntries={["/controller"]} />);
@@ -274,6 +323,54 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     expect(box.placeholder).toContain("only the conversation's owner");
     expect(box.placeholder).not.toContain("Claude");
   });
+
+  /**
+   * Ruling 259 (pass 37, F37-90): the composer keeps the words until the server
+   * takes them.
+   *
+   * `setText("")` ran synchronously after `fetcher.submit`, optimistically, and
+   * nothing anywhere held the string. An expired CSRF token is refused BEFORE
+   * the engine runs, so the text reached no transcript at all; a 404 on a scope
+   * that is not open, or any transport failure, did the same. The person got a
+   * toast that unmounts itself after 2,600 ms, and their message was gone. Four
+   * of the five longest messages on the live board are 1,800 to 2,200
+   * characters, typed into a two-row textarea.
+   */
+  it("ruling 259: a failed send leaves the typed message in the box", async () => {
+    const typed = "A long ask I do not want to retype. ".repeat(20);
+    const { container } = renderInstancePage(
+      view({ available: true, projectName: null, conversations: [], goals: null }),
+      // The CSRF arm: refused before the controller engine is ever reached.
+      () => ({ ok: false, error: "That request expired. Reload the page and try again." }),
+    );
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    fireEvent.change(box, { target: { value: typed } });
+    expect(box.value).toBe(typed);
+
+    const send = screen.getByRole("button", { name: "Send" });
+    await act(async () => {
+      fireEvent.click(send);
+    });
+
+    // CANARY: move `setText("")` back beside `send.submit(...)` and this is "".
+    expect(box.value).toBe(typed);
+  });
+
+  it("ruling 259: a successful send clears it", async () => {
+    const { container } = renderInstancePage(
+      view({ available: true, projectName: null, conversations: [], goals: null }),
+      () => ({ ok: true, conversationId: "cv_new" }),
+    );
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    fireEvent.change(box, { target: { value: "short ask" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+    // CANARY: clear on neither path and the box keeps every message ever sent.
+    expect(box.value).toBe("");
+  });
 });
 
 /**
@@ -326,11 +423,77 @@ describe("the open conversation's execution", () => {
     view({
       conversation,
       viewerOwnsActive: true,
-      turn: { working: true, runId: "run_ctl" },
-      runtime: [run],
+      turn: { working: true, runId: "run_ctl", phase: null, step: null },
+      // The elapsed cell below is asserted to the second, and `run.startedAt`
+      // is stamped once when this describe body evaluates — so every test that
+      // runs BEFORE it spent part of that assertion's budget, and under a full
+      // suite the clock read 01:07 against a window written for 01:05–01:06.
+      // Stamped per render instead: the only gap left is this call to
+      // `useElapsed`'s first tick, which is milliseconds. (The same defect
+      // SHOP-35 is fixing in the clone — a fixture's cost sitting inside a
+      // waiting test's budget — in Viberr's own suite.)
+      runtime: [{ ...run, startedAt: new Date(Date.now() - 65_000).toISOString() }],
       canInterruptTurn: true,
       ...over,
     });
+
+  /**
+   * Ruling 250 (pass 37, F37-79). A controller turn measured live ran 201s over
+   * 11 turns for $4.11 and the conversation said `Controller is working…` for
+   * all of it, while the SAME page rendered the phase and step in the live-run
+   * panel below. The fact was on the run row and already streaming here.
+   */
+  it("ruling 250: the working row carries the turn's own step", async () => {
+    renderPage(
+      working({
+        turn: {
+          working: true,
+          runId: "run_ctl",
+          phase: null,
+          step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+        },
+      }),
+      "?c=cnv_b",
+    );
+    // CANARY: drop <TurnStep> from the ctl-working row and this is gone, while
+    // the run panel below keeps showing it — the live shape.
+    const row = await screen.findByRole("status");
+    expect(row.textContent).toContain("is working");
+    expect(row.textContent).toContain('get_task · {"taskKey":"SHOP-31"}');
+  });
+
+  it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {
+    // The server sends `phase: null` while it is the generic "Working" — the
+    // row already says that in prose. CANARY: render `turn.phase ?? "Working"`
+    // and the row reads "Controller is working… Working · npm test".
+    renderPage(
+      working({
+        turn: { working: true, runId: "run_ctl", phase: null, step: "Bash · npm test" },
+      }),
+      "?c=cnv_b",
+    );
+    const row = await screen.findByRole("status");
+    const step = row.querySelector(".ctl-working-step");
+    expect(step?.textContent).toBe("Bash · npm test");
+
+    // A phase that MEANS something still shows, ahead of the step.
+    cleanup();
+    renderPage(
+      working({
+        turn: {
+          working: true,
+          runId: "run_ctl",
+          phase: "Preparing workspace",
+          step: "Cloning acme/widgets",
+        },
+      }),
+      "?c=cnv_b",
+    );
+    const row2 = await screen.findByRole("status");
+    expect(row2.querySelector(".ctl-working-step")?.textContent).toBe(
+      "Preparing workspace · Cloning acme/widgets",
+    );
+  });
 
   it("renders the strip (elapsed, turns, tokens, model, View logs, Interrupt) and the console", async () => {
     // Canary: render only the transcript's "is working" row again and every

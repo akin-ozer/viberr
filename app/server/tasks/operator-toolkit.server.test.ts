@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { toolLoading } from "../../../test-support/mcp-tool-meta";
+import { publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+} from "../../../test-support/test-store";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import {
   buildOperatorToolkit,
@@ -147,7 +153,22 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // get_task / read_default_branch_file are read-only Claude tools with no plan
   // mirror (Codex gets that information embedded in its prompt). The two packet
   // tools carry different display names either side; everything else matches.
-  const READ_ONLY = new Set(["get_task", "read_default_branch_file"]);
+  // Ruling 282: `read_board` is a READ, like its two siblings — it changes
+  // nothing, so it is not part of the governed vocabulary the two toolkits
+  // must agree on. (Codex operators get board facts in their prompt, which is
+  // why no read here has a plan mirror.)
+  // Ruling 283 (`read_knowledge_doc`) and ruling 285 (`read_timeline_entry`) add
+  // two more reads for the same reason: each is the pull half of something the
+  // prompt now carries only a clipped or indexed form of.
+  const READ_ONLY = new Set([
+    "get_task",
+    "read_default_branch_file",
+    "read_board",
+    "read_knowledge_doc",
+    "read_timeline_entry",
+    // Ruling 293: the evidence a report only claims. A read like its siblings.
+    "read_task_attachment",
+  ]);
   const RENAME = new Map([
     ["open_decision_packet", "open_packet"],
     ["resolve_decision_packet", "resolve_packet"],
@@ -348,10 +369,24 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
     });
     // R19-1: the operator reads the repository from the full read-only checkout
     // under its cwd (Read/Grep/Glob), not from an MCP tool — so the in-process
-    // toolkit floor is just `get_task`. What "read-only" excludes is every
-    // WRITE, and that is what this asserts: the floor is exactly the one read,
-    // and nothing that changes state is reachable.
-    expect(toolkit.allowedTools).toEqual(["mcp__viberr__get_task"]);
+    // toolkit floor is the READS. What "read-only" excludes is every WRITE, and
+    // that is what this asserts: the floor is exactly the reads, and nothing
+    // that changes state is reachable.
+    //
+    // Ruling 282: `read_board` joins that floor. An undeployed operator holds
+    // no authority, and being able to SEE the board it holds no authority over
+    // takes nothing: the whole point of the floor is that reading is never the
+    // thing being withheld. Ruling 285's `read_timeline_entry` joins it for the
+    // same reason — and more sharply, because the task page shows a person the
+    // whole comment this returns, so withholding it from the coordinator
+    // withholds nothing from anyone. (`read_knowledge_doc` is NOT here: it is
+    // gated on the run's own KB grants, and this authority holds none.)
+    expect(toolkit.allowedTools).toEqual([
+      "mcp__viberr__get_task",
+      "mcp__viberr__read_board",
+      "mcp__viberr__read_task_attachment",
+      "mcp__viberr__read_timeline_entry",
+    ]);
     for (const write of [
       "mcp__viberr__deliver_for_review",
       "mcp__viberr__transition_stage",
@@ -544,7 +579,7 @@ describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (
 /** Ruling 138: the Claude tool declares `goalDraft` on packet options, with a
  *  description that says to write it AS the goal. */
 describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 138)", () => {
-  it("the option schema carries goalDraft and says what it is", () => {
+  it("the option schema carries goalDraft and says what it is", async () => {
     // Canary: remove the field from the option schema.
     const toolkit = buildOperatorToolkit({
       db: ctxDb.makeDb(),
@@ -557,12 +592,13 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
         return auth;
       })(),
     });
-    const def = toolkit.tools.find((t) => t.name === "open_decision_packet");
-    expect(def).toBeDefined();
-    // SAFETY: the SDK types the raw input fields loosely; this tool's `options`
-    // is a zod array whose JSON Schema form carries `goalDraft` and its text.
-    const options = (def!.inputSchema as { options: z.ZodType }).options;
-    const declared = JSON.stringify(z.toJSONSchema(options));
+    expect(toolkit.tools.some((t) => t.name === "open_decision_packet")).toBe(true);
+    // Ruling 296 made the schema a whole strict object, so the field texts are
+    // read off the JSON Schema of the whole tool -- which is the copy the model
+    // is handed, and the only one that can be wrong in a way that matters.
+    const declared = JSON.stringify(
+      (await publishedSchemas(toolkit.mcpServers.viberr)).get("open_decision_packet"),
+    );
     expect(declared).toContain('"goalDraft"');
     expect(declared).toContain("written AS a goal");
     expect(declared).toContain("Refused on any other kind");
@@ -574,7 +610,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * The operator wrote "Force-accept as admin ..." as a `custom` title because
    * nothing here told it there was another way.
    */
-  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", () => {
+  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", async () => {
     // Canary: restore the description and the option schema from before S18.
     const toolkit = buildOperatorToolkit({
       db: ctxDb.makeDb(),
@@ -588,15 +624,298 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       })(),
     });
     const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
     expect(def.description).toContain("An option TITLE is a promise the resolution keeps");
     expect(def.description).toContain("'force_accept'");
     expect(def.description).toContain("'move_stage'");
-    // SAFETY: as above, the SDK types the raw input fields loosely; `options`
-    // is the zod array whose JSON Schema form carries the per-option fields.
-    const options = (def.inputSchema as { options: z.ZodType }).options;
-    const declared = JSON.stringify(z.toJSONSchema(options));
+    const declared = JSON.stringify(published.get("open_decision_packet"));
     expect(declared).toContain('"toStage"');
     expect(declared).toContain("move_stage only");
+  });
+
+  /**
+   * Ruling 282 (pass 37, F37-115): the operator plans ACROSS a board it could
+   * not read. `get_task` takes no arguments — it answers this task and only
+   * this task — and nothing in this toolkit listed the others. So the one actor
+   * that writes `blockedBy`, decides ordering, and is the ONLY author of a
+   * `create_task` option (ruling 269) could not check whether the work it was
+   * about to ask for already had an owner. Two duplicates in one hour: SHOP-39's
+   * title proposed again word for word, and "Gateway routes for orders, cart
+   * and inventory" proposed while SHOP-29 stood.
+   */
+  it("ruling 282: read_board answers one key, lists the board, and denies a key that is not there", async () => {
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "The task the operator is coordinating.",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
+      goal: "Serve the published batch contract.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
+    // a shape change fails the assertions rather than reading undefined.
+    const call = async (args: { taskKey?: string }) =>
+      ((await read.handler(args as never, {} as never)) as { content: { text: string }[] })
+        .content[0]!.text;
+
+    // CANARY: remove the tool and the operator is back to planning a board it
+    // can only see one task of, which is what produced both duplicates.
+    const other = await call({ taskKey: "VIB-2" });
+    expect(other).toContain('"key": "VIB-2"');
+    expect(other).toContain("Serve the published batch contract");
+
+    const all = await call({});
+    expect(all).toContain('"key": "VIB-1"');
+    expect(all).toContain('"key": "VIB-2"');
+
+    // The answer the whole tool exists for.
+    expect(await call({ taskKey: "VIB-404" })).toContain(
+      "[noop] No task VIB-404 in this project",
+    );
+  });
+
+  /**
+   * Ruling 289 (pass 37, F37-124): the excerpt SAYS it is one.
+   *
+   * `read_board` returned a bare `.slice` of another task's goal, so a long
+   * contract came back ending mid-word and read as the whole of it — the shape
+   * rulings 283, 285 and 288 closed on a knowledge base, an agent report and a
+   * goal draft, sitting in the reader those rulings' own author wrote the same
+   * day. The cap stays: this is the SHALLOW read of the tasks beside your own.
+   */
+  it("ruling 289: a clipped goal says it is clipped, and a short one is untouched", async () => {
+    const store = setupTestStore(ctxDb);
+    const long = `Deliverable: the thing. ${"detail ".repeat(500)}END-OF-CONTRACT`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
+      goal: long,
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "triage" }),
+      goal: "Short and whole.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    const call = async (taskKey: string) => {
+      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
+      // a shape change fails the assertions below rather than reading undefined.
+      const answer = (await read.handler({ taskKey } as never, {} as never)) as {
+        content: { text: string }[];
+      };
+      return answer.content[0]!.text;
+    };
+
+    // Canary: put the bare `.slice` back and the excerpt reads as the contract.
+    const clipped = await call("VIB-2");
+    expect(clipped).toContain("Deliverable: the thing.");
+    expect(clipped).not.toContain("END-OF-CONTRACT");
+    expect(clipped).toContain("[excerpt");
+    expect(clipped).toContain("the task's own page has all of it");
+
+    // …and a goal that fits carries no marker: a whole contract that claims to
+    // be an excerpt sends a reader looking for text that does not exist.
+    const whole = await call("VIB-3");
+    expect(whole).toContain("Short and whole.");
+    expect(whole).not.toContain("[excerpt");
+  });
+
+  /**
+   * Ruling 285 (pass 37, F37-120): the coordinator could not read a report it
+   * was handed half of. Its prompt clips an agent report at 4,000 characters,
+   * `get_task` clips every `recentTimeline` entry at 1,500, and nothing in the
+   * toolkit returned one whole. Live on SHOP-42 it said so in a packet it put
+   * to a human — "the reviewer's report reached me truncated at '### Item 3 —',
+   * so I have not read its cross-service audit conclusion; the full text is on
+   * the timeline" — which was true, and was somewhere it could not go. What it
+   * could not read named two unowned defects the reviewer had gone looking for.
+   */
+  it("ruling 285: read_timeline_entry returns a clipped report whole, by its stamp", async () => {
+    const store = setupTestStore(ctxDb);
+    // A report past BOTH clips: the prompt's 4,000 and the snapshot's 1,500.
+    const report = `## Findings\n\n${"filler ".repeat(900)}\n\nSENTINEL-PAST-THE-CLIP`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review" }),
+      goal: "The task the operator is coordinating.",
+      timeline: [
+        {
+          occurredAt: "2026-09-15T13:53:26.000Z",
+          type: "comment",
+          actor: {
+            kind: "agent",
+            backend: "claude",
+            profileId: "code-reviewer",
+            roleHint: "Code Reviewer",
+          },
+          title: null,
+          text: report,
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const textOf = async (
+      name: string,
+      args: { occurredAt?: string },
+    ): Promise<string> => {
+      const tool = toolkit.tools.find((t) => t.name === name)!;
+      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
+      // a shape change fails the assertions below rather than reading undefined.
+      const answer = (await tool.handler(args as never, {} as never)) as {
+        content: { text: string }[];
+      };
+      return answer.content[0]!.text;
+    };
+
+    // What `get_task` shows: the entry CLIPPED, and its address beside the cut.
+    const snapshot = await textOf("get_task", {});
+    expect(snapshot).not.toContain("SENTINEL-PAST-THE-CLIP");
+    expect(snapshot).toContain('"occurredAt": "2026-09-15T13:53:26.000Z"');
+    expect(snapshot).toContain("read_timeline_entry with this occurredAt");
+
+    // …and what the tool returns: the report whole.
+    const full = await textOf("read_timeline_entry", {
+      occurredAt: "2026-09-15T13:53:26.000Z",
+    });
+    expect(full).toContain("SENTINEL-PAST-THE-CLIP");
+    expect(full).toContain('"truncated": false');
+
+    // A stamp that is close but not exact is the likeliest caller error, so the
+    // refusal names the real ones rather than implying a deletion.
+    const missed = await textOf("read_timeline_entry", {
+      occurredAt: "2026-09-15T13:53:26Z",
+    });
+    expect(missed).toContain("[noop]");
+    expect(missed).toContain("2026-09-15T13:53:26.000Z");
+  });
+
+  /**
+   * Ruling 287's DOOR, tested for the reason ruling 270 exists: rulings 224 and
+   * 230 each added an option payload and never added the field to the tool that
+   * AUTHORS options, so the only actor that could have sent one could not.
+   */
+  it("ruling 287: the option schema carries `blocks`, and it reaches the stored packet", async () => {
+    // Canary: drop `blocks` from the authoring schema, or from the forwarder
+    // beneath it, and the reverse edge becomes unauthorable — a field the
+    // resolver reads and nothing can ever write.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "triage" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const open = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    // SAFETY: the SDK types a tool handler's argument as its own generic; this
+    // object is the shape the zod schema above declares, and a field the schema
+    // rejects fails the call rather than reaching the handler — which is the
+    // assertion this test makes.
+    const answer = await open.handler(
+      {
+        title: "The shapes this needs are not published",
+        detail: "Three exports are missing and no task opens them.",
+        options: [
+          {
+            kind: "create_task",
+            title: "Create the contracts amendment",
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              blocks: ["VIB-9"],
+            },
+          },
+        ],
+      } as never,
+      {} as never,
+    );
+    expect(JSON.stringify(answer)).toContain("[done]");
+    // Read the FILE, which is the canonical record the resolver later reads —
+    // not a projection, and not the tool's own reply about itself.
+    const { readFileSync } = await import("node:fs");
+    const raw = readFileSync(
+      `${store.dataRoot}/projects/${store.slug}/tasks/VIB-1/task.md`,
+      "utf8",
+    );
+    expect(raw).toContain("blocks:");
+    expect(raw).toContain("VIB-9");
+  });
+
+  /**
+   * Ruling 270 (pass 37, F37-102): rulings 230 and 224 each added an option
+   * kind with a payload, wrote the two authoring refusals for it, and never
+   * added the field to the tool that AUTHORS options. So the operator could
+   * name `block_on_dependencies`, be told "needs the work it waits on", and
+   * have no way to say — and `block_on_dependencies` has no server-side writer
+   * either, so nothing in the product could produce one. Both rulings' tests
+   * called `operatorOpenPacket` directly, which accepts the field; the DOOR was
+   * never exercised.
+   */
+  it("ruling 270: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", async () => {
+    // Canary: remove either field from the option schema and its kind becomes
+    // unauthorable again — named, refused, and impossible to satisfy.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    const declared = JSON.stringify(published.get("open_decision_packet"));
+    expect(declared).toContain('"blockedBy"');
+    expect(declared).toContain("block_on_dependencies only");
+    expect(declared).toContain('"dueAt"');
+    expect(declared).toContain("wait_for_window only");
+    // Ruling 269's payload rides the same door, and was written with it.
+    expect(declared).toContain('"newTask"');
+    expect(declared).toContain("create_task only");
   });
 
   /**

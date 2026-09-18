@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { VALIDATION_VALUES } from "~/schemas/task-file.schema";
+import { VALIDATION_VALUES, WAITING_VALUES } from "~/schemas/task-file.schema";
 
 /**
  * F21-1: the `task_projections.validation` CHECK and the TS `VALIDATION_VALUES`
@@ -45,5 +45,36 @@ describe("task_projections.validation — single source (F21-1)", () => {
       .map((value) => value.trim().replace(/^'|'$/g, ""))
       .sort();
     expect(inCheck).toEqual([...VALIDATION_VALUES].sort());
+  });
+});
+
+/**
+ * Ruling 225 (F37-45): the same hand-mirrored CHECK, one column over, and the
+ * same drift the moment `schedule` joined `WAITING_VALUES` — the projector
+ * derived it, the store refused it, `rebuildPath` swallowed the refusal, and
+ * every clock-resting task would have gone stale with nothing saying why. The
+ * canary above caught it before the deploy did; this is the structural pin so
+ * the NEXT member needs no fixture either.
+ *
+ * CANARY: drop 'schedule' from the CHECK in `db/migrations/0001_baseline.sql`
+ * and this fails, naming it.
+ */
+describe("task_projections.waiting — single source (ruling 225)", () => {
+  it("the baseline migration CHECK lists exactly WAITING_VALUES", () => {
+    const sql = readFileSync(
+      path.join(__dirname, "..", "..", "..", "db", "migrations", "0001_baseline.sql"),
+      "utf8",
+    );
+    const table = sql.match(/CREATE TABLE task_projections \(([\s\S]*?)\n\);/);
+    expect(table, "task_projections table not found in baseline").toBeTruthy();
+    const match = table![1]!.match(
+      /waiting TEXT NOT NULL CHECK \(waiting IN\s*\(([^)]+)\)\)/,
+    );
+    expect(match, "task_projections.waiting CHECK not found in baseline").toBeTruthy();
+    const inCheck = match![1]!
+      .split(",")
+      .map((value) => value.trim().replace(/^'|'$/g, ""))
+      .sort();
+    expect(inCheck).toEqual([...WAITING_VALUES].sort());
   });
 });

@@ -482,6 +482,9 @@ function ProfileAccess({
             <div className="kv-row" key={r.action}>
               <span className="k strong">
                 {r.action}
+                {/* Ruling 309(a): see policy-page — the grant name is short on
+                    purpose and two of them gate more than they say. */}
+                {r.covers ? <span className="act-covers">{r.covers}</span> : null}
               </span>
               {/* Ruling 148: the fact in words. The check is aria-hidden, so a
                   glyph-only pair left the whole list silent to a reader, and a

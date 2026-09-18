@@ -183,6 +183,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         // DEFAULT_GUARDRAILS every time the set changed (ruling-104 review).
         guardrails: DEFAULT_GUARDRAILS,
         requiredReviewers: [],
+      fileLeases: [],
       },
       description:
         "Viberr Core is the canonical delivery workspace: agents do the stage work, humans govern flow, review and acceptance. Tasks live as markdown files in this store — the board, timelines and packets you see in the app are projections of these files.",
@@ -205,6 +206,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         credentialPolicy: null,
         guardrails: DEFAULT_GUARDRAILS,
         requiredReviewers: [],
+      fileLeases: [],
       },
       description:
         "Continuous delivery pipeline for the Viberr platform. A stub project with one live task so cross-project notifications navigate for real.",
@@ -227,6 +229,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
         credentialPolicy: null,
         guardrails: DEFAULT_GUARDRAILS,
         requiredReviewers: [],
+      fileLeases: [],
       },
       description:
         "Strict human-gate billing service. A stub project with one live task so cross-project notifications navigate for real (custom 3-stage board).",
@@ -305,6 +308,7 @@ function fm(input: {
       result,
       reason: result === "approve" ? "Meets the spec." : "Needs changes.",
       at: input.updatedAt,
+      rounds: 1,
     });
     if (input.validation === "healthy") {
       verdicts = verdictReviewers.map((r) => mk(r.profileId, "approve"));
@@ -326,6 +330,7 @@ function fm(input: {
     operator: input.operator,
     recommendations: input.recommendations ?? [],
     schedules: [],
+    queuedQuestions: [],
     urgent: input.urgent,
     priority: input.priority ?? (input.urgent ? "urgent" : "normal"),
     labels: input.labels ?? [],

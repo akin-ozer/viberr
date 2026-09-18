@@ -226,6 +226,7 @@ describe("getReviewQueue", () => {
       credentialPolicy: null,
       guardrails: [],
       requiredReviewers: [],
+    fileLeases: [],
     });
     writeTask(store.dataRoot, "lite", {
       frontmatter: baseTaskFrontmatter("LP-1", {
@@ -380,6 +381,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
             result: "request_changes",
             reason: "spec violation",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
       }),
@@ -425,6 +427,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
             result: "approve",
             reason: "looks good",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
       }),
@@ -968,6 +971,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     result,
     reason: "r",
     at: "2026-09-06T11:00:00.000Z",
+    rounds: 1,
   });
 
   function seed(workflow: typeof WORKFLOW = WORKFLOW) {
@@ -986,6 +990,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
       credentialPolicy: null,
       guardrails: [],
       requiredReviewers: [],
+    fileLeases: [],
     });
     const write = (key: string, patch: Partial<TaskFrontmatter>) =>
       writeTask(store.dataRoot, "k9c", {
@@ -1143,5 +1148,121 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
     expect(q.ready[0]!.stageName).toBe("Merge");
     expect(q.working.map((t) => t.key)).not.toContain("KNC-3");
+  });
+});
+
+/**
+ * Ruling 236 (owner, 2026-09-14) — the queue says which OTHER open PRs a merge
+ * will put into conflict.
+ *
+ * Live cause: merging SHOP-2 put four of six open pull requests into
+ * CONFLICTING inside a minute, all on the same two shared files
+ * (`pnpm-lock.yaml`, `scripts/stack.test.mjs`), and the queue listed them as
+ * six independent rows the whole time. A person found each collision by
+ * pressing Accept.
+ */
+describe("ruling 236: colliding pull requests are named in the queue", () => {
+  function seedThree(store: ReturnType<typeof setupTestStore>) {
+    const open = (
+      key: string,
+      number: number,
+      changed: string[],
+      truncated = false,
+    ) =>
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, {
+          title: key,
+          stage: "review",
+          waiting: "human",
+          pr: {
+            number,
+            state: "review",
+            title: key,
+            headSha: `${key.toLowerCase()}head`,
+            paths: { headSha: `${key.toLowerCase()}head`, changed, truncated },
+          },
+        }),
+      });
+    // Two share `pnpm-lock.yaml`; the third shares nothing with either.
+    open("VIB-401", 401, ["pnpm-lock.yaml", "services/identity/a.ts"]);
+    open("VIB-402", 402, ["pnpm-lock.yaml", "services/catalog/b.ts"]);
+    open("VIB-403", 403, ["apps/storefront/c.tsx"]);
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  function rowFor(store: ReturnType<typeof setupTestStore>, key: string) {
+    const q = getReviewQueue(store.db, store.slug, {
+      viewerUserId: store.users.arda.id,
+      dataRoot: store.dataRoot,
+    });
+    return [...q.ready, ...q.working].find((r) => r.key === key);
+  }
+
+  it("names the colliding task and the shared path, both ways", () => {
+    const store = setupTestStore(ctx);
+    seedThree(store);
+
+    const a = rowFor(store, "VIB-401");
+    expect(a?.pr?.overlaps).toEqual([
+      {
+        taskKey: "VIB-402",
+        prNumber: 402,
+        paths: ["pnpm-lock.yaml"],
+        partial: false,
+      },
+    ]);
+    // Symmetric: the other row names this one, or only whoever was merged
+    // second would ever be warned.
+    const b = rowFor(store, "VIB-402");
+    expect(b?.pr?.overlaps?.map((o) => o.taskKey)).toEqual(["VIB-401"]);
+  });
+
+  it("says nothing about a pull request that shares no path", () => {
+    const store = setupTestStore(ctx);
+    seedThree(store);
+    expect(rowFor(store, "VIB-403")?.pr?.overlaps).toEqual([]);
+  });
+
+  /**
+   * A capped list can only MISS a collision, never invent one, so the overlap
+   * it reports is a floor. `partial` is how a surface knows to say so rather
+   * than print a number that quietly means "at least".
+   */
+  it("marks the overlap partial when either side's path list was capped", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-411", {
+        title: "VIB-411",
+        stage: "review",
+        waiting: "human",
+        pr: {
+          number: 411,
+          state: "review",
+          title: "VIB-411",
+          headSha: "h411",
+          paths: { headSha: "h411", changed: ["shared.ts"], truncated: true },
+        },
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-412", {
+        title: "VIB-412",
+        stage: "review",
+        waiting: "human",
+        pr: {
+          number: 412,
+          state: "review",
+          title: "VIB-412",
+          headSha: "h412",
+          paths: { headSha: "h412", changed: ["shared.ts"], truncated: false },
+        },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    // Both sides report partial: the cap was on ONE list, and either list being
+    // short makes the intersection a floor.
+    expect(rowFor(store, "VIB-411")?.pr?.overlaps?.[0]?.partial).toBe(true);
+    expect(rowFor(store, "VIB-412")?.pr?.overlaps?.[0]?.partial).toBe(true);
   });
 });

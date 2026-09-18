@@ -18,6 +18,8 @@ import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
+  abandonedWaitNote,
+  settleAbandonedWaits,
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
@@ -72,6 +74,27 @@ describe("outcome_key lives in the run store (C1, pass 31)", () => {
     patchRun(store.db, "run_oc", { outcomeKey: "oc_2" });
     patchRun(store.db, "run_oc", { phase: "working" });
     expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_2");
+  });
+
+  /**
+   * Ruling 248 (pass 37, F37-77): the run executed with NO working tree, so the
+   * completion pipeline closes its verdict path. Persisted on the ROW rather
+   * than held in the completion closure for the reason `outcome_key` is: the
+   * closure dies with the process, and a no-checkout reviewer recovered after a
+   * restart would have its report re-classified into a verdict it never gave.
+   */
+  it("patchRun writes no_checkout and getRun reads it back (ruling 248)", () => {
+    seedRun("run_nc");
+    // A row written before viberr recorded the fact reads 0, which is the
+    // honest value: nothing here says this run was checkout-less.
+    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(0);
+    patchRun(store.db, "run_nc", { noCheckout: 1 });
+    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(1);
+    // CANARY: leave `noCheckout` out of `patchRun`'s assignable map and the
+    // exhaustiveness `satisfies` catches it at compile time; leave it out of
+    // the baseline healer and an existing data root fails every completion.
+    patchRun(store.db, "run_nc", { phase: "working" });
+    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(1);
   });
 
   it("patchRun writes interrupted_reason and getRun reads it back (pass 35 U35-7)", () => {
@@ -145,6 +168,30 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).toMatch(/still running when the server stopped/);
     expect(note!.text).toContain("run_dev_orphan");
     expect(note!.text).toContain("run_op_orphan");
+    /**
+     * Ruling 310(b). This note called EVERY finalized run "still running when
+     * the server stopped", and the sweep finalizes queued runs too — so a run
+     * that never got a concurrency slot was described as having been running.
+     * `run_op_orphan` is seeded `queued` with `startedAt: null` precisely
+     * because that is the case the sentence got wrong.
+     *
+     * Found by the controller joining the timeline against the run records on
+     * the live board: `run_VlR9mwnxyouc` carried `startedAt: null, turns: 0`
+     * and its restart note said it was still running. `started_at` is kept on
+     * the row permanently, and this writer had it in hand.
+     *
+     * CANARY: collapse the two clauses back into one and the queued run is
+     * described as having been running.
+     */
+    expect(note!.text).toContain("queued behind the concurrent-run cap and had not started");
+    // Each run sits under the clause that is true of IT, not of the pair.
+    const [runningClause, queuedClause] = note!.text.split("; ");
+    expect(runningClause).toContain("run_dev_orphan");
+    expect(runningClause).toContain("still running when the server stopped");
+    expect(runningClause).not.toContain("run_op_orphan");
+    expect(queuedClause).toContain("run_op_orphan");
+    expect(queuedClause).toContain("queued behind the concurrent-run cap");
+    expect(queuedClause).not.toContain("run_dev_orphan");
     expect(note!.text).toMatch(/the operator is re-invoked/);
     // One note per task, not one per run.
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
@@ -226,6 +273,91 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(n).toBe(RECOVERY_REINVOKE_CAP);
   });
 
+  /**
+   * Ruling 198 (F37-19, live): the restart note promised "the operator is
+   * re-invoked to decide what to do next" on EVERY orphaned task, and it was
+   * written before the cap loop had even run — so a capped task carried a
+   * promise Viberr had already decided not to keep, kept `waiting: "agent"`
+   * with no agent alive, and nothing revisited it. SHOP-7 sat that way for two
+   * hours while the board and the review queue both said "agent working".
+   */
+  it("ruling 198: a capped task's note says what actually happened, and stops claiming an agent", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        // What a cut delivery leaves behind.
+        waiting: "agent",
+        ownerUserId: "u-arda",
+      }),
+    });
+    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+      recordAudit(store.db, {
+        action: "run.recovery.reinvoked",
+        actor: SYSTEM_ACTOR,
+        subjectKind: "task",
+        subjectId: "VIB-1",
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        details: { attempt: i + 1 },
+      });
+    }
+    seedRun("run_capped", { state: "running", kind: "primary", role: "Implementation" });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    expect(res.capped).toBe(1);
+    expect(res.reinvoked).toBe(0);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const note = parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
+    // CANARY: write the note before the cap loop again and this promise comes
+    // back on a task nothing is coming for.
+    expect(note.text).not.toMatch(/the operator is re-invoked/);
+    expect(note.text).toContain("Viberr did NOT re-invoke the operator");
+    expect(note.text).toContain("crash-loop guard");
+    expect(note.text).toContain("Run the operator from this page when you are ready");
+    // The self-review caught the first draft over-promising here. This loop
+    // decides ONE thing — whether IT re-invokes — and `recoverUnreactedAgentRuns`
+    // further down the same boot chain can still run an `agent-reply` operator
+    // turn on this very task, under its own separate cap. CANARY: put "Nothing
+    // further happens on its own" back and the note claims something about the
+    // rest of the boot that this loop does not know.
+    expect(note.text).not.toContain("Nothing further happens on its own");
+    // CANARY: drop the `clearWaitingToHuman` call and the board keeps saying an
+    // agent is working on a task with no run alive.
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // And the owner is told, rather than left to notice.
+    // SAFETY: `SELECT COUNT(*) AS n` always yields exactly one integer row.
+    const n = (
+      store.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM notifications WHERE user_id = 'u-arda' AND task_key = 'VIB-1'`,
+        )
+        .get() as { n: number }
+    ).n;
+    expect(n).toBe(1);
+  });
+
+  it("ruling 198: an UNCAPPED task keeps the promise, because a turn really is coming", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    seedRun("run_uncapped", { state: "running", kind: "primary", role: "Implementation" });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    expect(res.reinvoked).toBe(1);
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
+    expect(note.text).toMatch(/the operator is re-invoked/);
+    expect(note.text).not.toContain("crash-loop guard");
+  });
+
   it("leaves already-terminal runs untouched and is idempotent", () => {
     seedRun("run_done", { state: "finished", finishedAt: new Date().toISOString() });
     seedRun("run_live", { state: "running" });
@@ -267,6 +399,245 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     });
     await expect(res.reaped).resolves.toBeUndefined();
     expect(res.finalized).toBe(1);
+  });
+});
+
+/**
+ * Ruling 213 (live on SHOP-4). Every other boot path keys on a RUN — the ones
+ * still running, the finished ones whose reply never landed, the Codex plans
+ * that never executed. None covers an operator drive that COMPLETED cleanly and
+ * whose settle was still in flight when the process died: the run row is
+ * `finished`, its reply is not missing, its plan ran, and the only trace is a
+ * board that says an agent is working while every run on the task is over.
+ * SHOP-4's operator moved it Review → Build at 18:57:34 and the container
+ * restarted at 18:57:35; six minutes later nothing had looked at it.
+ */
+describe("settleAbandonedWaits (ruling 213)", () => {
+  it("re-invokes the operator for a task waiting on an agent that is not there, and says so", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // A run that FINISHED — the shape no other boot pass selects.
+    seedRun("run_settled", {
+      kind: "primary",
+      role: "Primary specialist",
+      agentProfileId: "developer",
+      state: "finished",
+      finishedAt: new Date().toISOString(),
+    });
+
+    // CANARY: drop the sweep from `reconcileRestartedWork` (or narrow its SELECT
+    // to live runs) and this returns 0 — the board keeps claiming an agent.
+    const settled = await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot });
+    expect(settled).toBe(1);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    const note = parsed.timeline.find((e) => e.title === "Left waiting on an absent agent");
+    expect(note, "the record must say why a run started").toBeTruthy();
+    expect(note!.text).toContain("no run was live when the server came back");
+    /**
+     * Ruling 317(b). This task DOES have a finished run, so the note may say
+     * the follow-up is what did not happen. CANARY: go back to the fixed
+     * sentence and the no-run case below starts asserting a run that never
+     * existed.
+     */
+    expect(note!.text).toContain("run_settled");
+    expect(note!.text).toContain("the follow-up that would have moved the task did not run");
+    // …and the operator was actually re-invoked, which is the remedy: it
+    // re-reads the task and decides, exactly as it does for an orphaned run.
+    const operatorRuns = store.db
+      .prepare(`SELECT id FROM agent_runs WHERE task_key = ? AND kind = 'operator'`)
+      .all("VIB-1");
+    expect(operatorRuns.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Ruling 317(b). The sweep's SELECT proves ONE thing: `waiting = 'agent'` and
+   * no run in `running` or `queued`. The note asserted three more — that a run
+   * existed, that it "finished just before the stop", and that "nothing was
+   * lost from the record".
+   *
+   * Live on SHOP-37 the contradiction sits fifteen minutes apart in one file.
+   * 09:15:13 — "**Held:** Codex is out of quota... **nothing was dispatched**
+   * and no decision is needed." 09:30:29 — "the run finished just before the
+   * stop". A dispatch held on quota records the wait and starts nothing.
+   *
+   * This is the class ruling 310(b) named in the neighbouring sweep of this
+   * same file, whose commit quoted the controller: "One writer fixed, its
+   * neighbour still inventing."
+   */
+  it("ruling 317(b): a task that never had a run is not told one finished", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // No run at all — the SHOP-37 shape: the dispatch was held before it
+    // reached a process, and the wait was recorded anyway.
+
+    const settled = await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot });
+    expect(settled).toBe(1);
+
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.title === "Left waiting on an absent agent");
+    // CANARY: restore the fixed sentence and viberr tells the person a run
+    // finished on a task where none was ever started.
+    expect(note!.text).toContain("No agent run has ever been started on it");
+    expect(note!.text).not.toContain("the run finished just before the stop");
+    expect(note!.text).not.toMatch(/follow-up that would have moved the task did not run/);
+  });
+
+  /**
+   * Ruling 215 (F37-35). The deploy that shipped 213 produced two restart notes
+   * on the same task, one second apart: "the run `run_JFvmbz…` (reviewer) was
+   * still running when the server stopped" and "no run was live when the server
+   * came back". Both cannot be true. `finalizeOrphanedRuns` runs first and its
+   * whole job is to move live runs to `interrupted`, so by the time this sweep
+   * asks its question the evidence is already gone — and its re-invoke raced the
+   * orphan sweep's own, two coordination drives for one restart.
+   */
+  it("ruling 337: reads the RECORD, not just the index — a parked dispatch is not an abandoned wait", async () => {
+    /**
+     * This sweep selected entirely on `t.waiting = 'agent'` with no live run and
+     * never opened the task file. So a dispatch viberr ITSELF had parked was
+     * swept as an abandoned wait — and unlike the read-only checks around it,
+     * this one writes a note and spends a paid operator turn.
+     *
+     * Live on SHOP-37, 2026-09-15, and it overrode a person:
+     *   09:15:13.200  Arda: "Decision: Re-run the Integration Verifier on the
+     *                 Codex backend."
+     *   09:15:13.298  policy-engine, "Dispatch held": Codex is out of quota
+     *                 until Sep 19, the run is scheduled for then, "nothing was
+     *                 dispatched and no decision is needed."
+     *   09:30:29.868  THIS SWEEP: "Left waiting on an absent agent… the run
+     *                 finished just before the stop and the follow-up that
+     *                 would have moved the task went with the process."
+     *   09:32:25.171  the drive it forced: "a fresh-context re-run of your
+     *                 pass, on the CLAUDE backend."
+     *   09:39:19.846  Arda cancels, by hand, the schedule viberr promised.
+     *
+     * Every clause of that note was false on the task's own record, and it
+     * reversed the owner's explicit backend decision fifteen minutes after they
+     * made it. The guard is borrowed from `findStrandedTasks` (ruling 330,
+     * shipped hours earlier), which re-reads the file for exactly these cases:
+     * the older sweep does MORE and checked LESS.
+     *
+     * CANARY: drop any one of the file-side `continue`s.
+     */
+    const parked: [string, Partial<Parameters<typeof baseTaskFrontmatter>[1]>][] = [
+      // SHOP-37's own shape: a held dispatch parked on a pending schedule.
+      ["VIB-1", {
+        schedules: [{
+          id: "sch_1", action: "run-agent", dueAt: "2026-09-19T09:37:00.000Z",
+          profileId: "integration-verifier", prompt: "", createdBy: "u_1",
+          createdByLabel: "Arda", createdAt: "2026-09-15T09:15:13.275Z",
+          status: "pending", firedAt: null, claimedAt: null, retries: 0,
+        }],
+      }],
+      // The other reasons the file already explains.
+      ["VIB-2", { blockedBy: ["VIB-9"] }],
+      ["VIB-3", {
+        queuedQuestions: [{
+          id: "q1", profileId: "reviewer", directive: "What else blocks?",
+          decidedBy: "u_1", decidedByLabel: "Arda",
+          decidedAt: "2026-09-15T09:00:00.000Z", heldBy: ["VIB-9"],
+        }],
+      }],
+    ];
+    for (const [key, patch] of parked) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl", waiting: "agent", ...patch }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const settled = await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot });
+    expect(settled, "a parked dispatch was swept as an abandoned wait").toBe(0);
+    for (const [key] of parked) {
+      const parsedTask = readTaskFile({
+        projectSlug: store.slug,
+        taskKey: key,
+        dataRoot: store.dataRoot,
+      })!.parsed;
+      expect(
+        parsedTask.timeline.find((e) => e.title === "Left waiting on an absent agent"),
+        `${key} had a reason for the quiet and was swept anyway`,
+      ).toBeUndefined();
+    }
+  });
+
+  it("ruling 337(b): the note states the board fact and does not claim a turn that may not run", async () => {
+    // It asserted "the operator IS re-invoked" and is written BEFORE
+    // `runOperator` is called, so a refusal left a note claiming a turn that
+    // never happened — the unconditional promise ruling 198 removed from the
+    // sibling orphan sweep.
+    // CANARY: restore "the operator is re-invoked to decide what happens next".
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const note = abandonedWaitNote(store.db, store.slug, "VIB-1");
+    expect(note).toContain("The board has stopped claiming an agent");
+    expect(note).toContain("Viberr is invoking the operator");
+    expect(note).toContain("if no operator can run, this task is waiting on a person");
+    expect(note).not.toMatch(/the operator is re-invoked/);
+  });
+
+  it("does not re-claim a task the orphan sweep already took (ruling 215)", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // The shape the orphan sweep leaves behind: its run WAS live at the stop
+    // and it has just been finalized, so the board looks identical to an
+    // abandoned wait and is not one.
+    seedRun("run_orphaned", {
+      kind: "reviewer",
+      role: "Code Reviewer",
+      agentProfileId: "code-reviewer",
+      state: "interrupted",
+      finishedAt: new Date().toISOString(),
+    });
+
+    // CANARY: drop the filter and this settles 1, writing "no run was live"
+    // under the orphan sweep's own "was still running when the server stopped".
+    const settled = await settleAbandonedWaits(
+      store.db,
+      { dataRoot: store.dataRoot },
+      new Set([`${store.slug}/VIB-1`]),
+    );
+    expect(settled).toBe(0);
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(
+      parsed.timeline.find((e) => e.title === "Left waiting on an absent agent"),
+      "the orphan sweep owns this task and already said what happened",
+    ).toBeUndefined();
+  });
+
+  it("leaves a task alone while a run is actually live", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedRun("run_live", {
+      kind: "primary",
+      role: "Primary specialist",
+      agentProfileId: "developer",
+      state: "running",
+    });
+    expect(await settleAbandonedWaits(store.db, { dataRoot: store.dataRoot })).toBe(0);
   });
 });
 
@@ -316,6 +687,51 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     // The attempt audit is recorded BEFORE the effects run — so the next boot
     // counts it even if the effects (or the process) die mid-flight.
     expect(countReplayAudits("run_dropped")).toBe(1);
+  });
+
+  /**
+   * Ruling 207(a) (claim audit). `noteCompletionEffectsLost` writes, in ONE
+   * update, `waiting = "human"` and a note saying "Run recovery replays the
+   * effects on the next restart" — while this reconciler selected on
+   * `t.waiting = 'agent'`. The note's own write made the replay it promised
+   * unreachable, and the effects it names include a required reviewer's VERDICT,
+   * so the acceptance gate stayed shut on a review that had actually happened.
+   */
+  it("ruling 207(a): a run whose completion effects were LOST is still replayed, though its task now waits on a human", async () => {
+    seedDroppedReplyRun("run_lost");
+    // Exactly what noteCompletionEffectsLost leaves behind: the honest board
+    // state, and the marker that says why.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "human" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    recordAudit(store.db, {
+      action: "run.completion.effects_lost",
+      actor: { userId: null, label: "system" },
+      subjectKind: "task",
+      subjectId: "VIB-1",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      details: { runId: "run_lost", kind: "primary" },
+    });
+
+    // CANARY: drop the `run.completion.effects_lost` arm from the SELECT and
+    // this recovers 0 — which is what the note promised would not happen.
+    const res = await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+    expect(res.recovered).toBe(1);
+    expect(countReplayAudits("run_lost")).toBe(1);
+  });
+
+  it("ruling 207(a): a task waiting on a human with NO effects-lost marker is still left alone", async () => {
+    // The scope the original `waiting = 'agent'` filter was protecting: old
+    // history, not a live stall. Widening the selection must not sweep it in.
+    seedDroppedReplyRun("run_old");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "human" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+    expect(res.recovered).toBe(0);
   });
 
   it("consumes a persisted staged report_outcome envelope on recovery (AO-1)", async () => {

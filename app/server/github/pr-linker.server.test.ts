@@ -782,3 +782,86 @@ describe("deriveApprovals (R19-B)", () => {
     if (result.status === "found") expect("approvals" in result.pr).toBe(false);
   });
 });
+
+/**
+ * Ruling 236 (owner, 2026-09-14) — the changed-file list behind the review
+ * queue's collision chip, and the head pin that keeps it nearly free.
+ *
+ * A pull request's file list cannot change without its head moving, so the
+ * fetch is made only when the caller's cached head no longer matches. On a
+ * board where most reconcile ticks find nothing new, that is zero extra API
+ * calls; without the pin it would be one per open PR per tick, every tick,
+ * forever.
+ */
+describe("ruling 236: the PR's changed paths", () => {
+  const routes = (files: { filename: string }[]) => ({
+    [`GET ${REPO_PATH}/pulls`]: {
+      body: [
+        {
+          number: 500,
+          title: "Shared surface",
+          state: "open",
+          draft: false,
+          merged_at: null,
+          head: { sha: "head500" },
+        },
+      ],
+    },
+    [`GET ${REPO_PATH}/pulls/500`]: {
+      body: {
+        number: 500,
+        title: "Shared surface",
+        state: "open",
+        draft: false,
+        merged: false,
+        merged_at: null,
+        head: { sha: "head500" },
+        additions: 1,
+        deletions: 0,
+        changed_files: files.length,
+        mergeable: true,
+        mergeable_state: "clean",
+      },
+    },
+    [`GET ${REPO_PATH}/pulls/500/files`]: { body: files },
+  });
+
+  it("reads the file list when the head is new, pinned to that head", async () => {
+    const { gh, client: c } = client(
+      routes([{ filename: "pnpm-lock.yaml" }, { filename: "scripts/stack.test.mjs" }]),
+    );
+    const result = await findPrForBranch(c, REPO, "shared", null);
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.paths).toEqual({
+      headSha: "head500",
+      changed: ["pnpm-lock.yaml", "scripts/stack.test.mjs"],
+      truncated: false,
+    });
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/500/files`)).toHaveLength(1);
+  });
+
+  it("SKIPS the read when the caller's cached head still matches", async () => {
+    const { gh, client: c } = client(routes([{ filename: "pnpm-lock.yaml" }]));
+    const result = await findPrForBranch(c, REPO, "shared", "head500");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    // ABSENT, not empty: "not read this pass", so the caller keeps its cached
+    // list rather than erasing a real one. Erasing it would make every row's
+    // collision chip vanish on the next tick.
+    expect(result.pr.paths).toBeUndefined();
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/500/files`)).toHaveLength(0);
+  });
+
+  it("leaves the key absent when the files call fails, rather than reporting no paths", async () => {
+    const base = routes([{ filename: "pnpm-lock.yaml" }]);
+    const { client: c } = client({
+      ...base,
+      [`GET ${REPO_PATH}/pulls/500/files`]: { status: 500, body: { message: "boom" } },
+    });
+    const result = await findPrForBranch(c, REPO, "shared", null);
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.paths).toBeUndefined();
+  });
+});

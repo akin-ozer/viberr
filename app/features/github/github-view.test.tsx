@@ -102,6 +102,7 @@ const prs: PrRowView[] = [
     title: "Attach execution workspace",
     branch: "vib-142-attach-workspace",
     checks: null,
+    checksRead: false,
     review: null,
     // F17-L6: an open PR that conflicts with the base branch.
     mergeable: "conflicting",
@@ -113,6 +114,7 @@ const prs: PrRowView[] = [
     title: "Policy split",
     branch: "vib-139-policy-split",
     checks: null,
+    checksRead: false,
     review: null,
     mergeable: null,
   },
@@ -123,6 +125,7 @@ const prs: PrRowView[] = [
     title: "Abandoned spike",
     branch: "vib-777-spike",
     checks: null,
+    checksRead: false,
     review: null,
     mergeable: null,
   },
@@ -136,6 +139,7 @@ const branches: BranchRowView[] = [
     pr: { number: 318, state: "review", checks: null, review: null, mergeable: "conflicting" },
     sync: "synced",
     commitCount: 3,
+    unpushedCommitCount: 0,
   },
   {
     taskKey: "VIB-151",
@@ -144,6 +148,7 @@ const branches: BranchRowView[] = [
     pr: null,
     sync: "behind_main",
     commitCount: 0,
+    unpushedCommitCount: 0,
   },
   {
     taskKey: "VIB-139",
@@ -152,6 +157,7 @@ const branches: BranchRowView[] = [
     pr: { number: 298, state: "merged", checks: null, review: null, mergeable: null },
     sync: "merged",
     commitCount: 0,
+    unpushedCommitCount: 0,
   },
 ];
 
@@ -741,6 +747,7 @@ describe("BranchesPanel", () => {
         pr: { number: 162, state: "closed", checks: null, review: null, mergeable: null },
         sync: "unknown",
         commitCount: 1,
+        unpushedCommitCount: 0,
       },
       {
         taskKey: "VIB-9",
@@ -749,6 +756,7 @@ describe("BranchesPanel", () => {
         pr: { number: 170, state: "merged", checks: null, review: null, mergeable: null },
         sync: "merged",
         commitCount: 0,
+        unpushedCommitCount: 0,
       },
     ];
     const { container } = render(
@@ -806,6 +814,7 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
         pr: null,
         sync: "unknown",
         commitCount: 0,
+        unpushedCommitCount: 0,
       },
       {
         taskKey: "VIB-2",
@@ -814,6 +823,7 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
         pr: null,
         sync: "synced",
         commitCount: 1,
+        unpushedCommitCount: 0,
       },
     ];
     const { container } = render(

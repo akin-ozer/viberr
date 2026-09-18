@@ -2489,6 +2489,13 @@ describe("D6: consequential actions confirm before they act", () => {
     fireEvent.click(trigger);
     // The button opens a confirm; the run keeps going until it is confirmed.
     expect(getByText("Interrupt this run?")).toBeTruthy();
+    // Ruling 272 (F37-104): the body used to promise that uncommitted work is
+    // lost, and an interrupt never touches the workspace — `cloneRepo`'s reuse
+    // path hands the NEXT run that same checkout, fast-forwarding only a tree
+    // that is clean. CANARY: restore "Anything it has not already committed or
+    // delivered is lost" and both assertions below fail.
+    expect(getByText(/stay in the task's workspace exactly as it left them/)).toBeTruthy();
+    expect(container.textContent).not.toContain("is lost");
     expect(submitted).toHaveLength(0);
     const interruptCommit = findButton(container, "Interrupt run")!;
     expect(interruptCommit.className).toBe("btn danger");

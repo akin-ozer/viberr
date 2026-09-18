@@ -202,9 +202,11 @@ describe("reconcileTask", () => {
       title: "Attach execution workspace",
       checks: { total: 2, passing: 2, failing: 0, pending: 0 },
     });
+    // Ruling 187: each entry is stamped with whether the remote has it. These
+    // came FROM the compare, so they are pushed.
     expect(fm.github?.commits).toEqual([
-      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
-      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate", pushed: true },
+      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler", pushed: true },
     ]);
     expect(fm.github?.changed).toEqual({ files: 9, add: 412, del: 87 });
 
@@ -292,6 +294,8 @@ describe("reconcileTask", () => {
       taskKey: "VIB-301",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
+    // Ruling 187: this compare DROPPED an entry, so it is incomplete and no
+    // commit is judged — an unjudged entry must not read as judged.
     expect(fm.github?.commits).toEqual([
       { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
       { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
@@ -868,9 +872,11 @@ describe("reconcileTask", () => {
       taskKey: "VIB-301",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
+    // Ruling 187: each entry is stamped with whether the remote has it. These
+    // came FROM the compare, so they are pushed.
     expect(fm.github?.commits).toEqual([
-      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
-      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+      { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate", pushed: true },
+      { sha: "4ce0b18", msg: "[VIB-301] branch reconciler", pushed: true },
     ]);
   });
 
@@ -1645,8 +1651,11 @@ describe("reconcileTask", () => {
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
     expect(fm.github?.commits).toEqual([
-      { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate" },
-      { sha: "4ce0b18", msg: "wire the branch reconciler" },
+      // Ruling 187: the carve-out's real case — the agent skipped the `[KEY]`
+      // prefix so the filter found nothing, the cache is kept, AND the compare
+      // proves both commits are genuinely on the branch.
+      { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate", pushed: true },
+      { sha: "4ce0b18", msg: "wire the branch reconciler", pushed: true },
     ]);
   });
 
@@ -3409,8 +3418,12 @@ describe("ruling 132: drift is classified, not counted", () => {
     routes[sinceRoute] = { body: { ahead_by: 5, behind_by: 0, status: "ahead", commits: [...B.map((b) => commit(b)), commit(M, [A0, B[3]!])] } };
     const fm = await run(routes);
     expect(fm.pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } });
-    // `github.commits` keeps its `{sha, msg}` shape (the reader's extra fields never reach the file).
-    for (const c of fm.github?.commits ?? []) expect(Object.keys(c).sort()).toEqual(["msg", "sha"]);
+    // `github.commits` keeps its narrow shape: the compare reader's own fields
+    // (`fullSha`, `parents`) never reach the file — ruling 132. Ruling 187 adds
+    // exactly one more, `pushed`, which is schema'd and deliberate; the guard
+    // stays so a THIRD field cannot arrive by accident.
+    for (const c of fm.github?.commits ?? [])
+      expect(Object.keys(c).sort()).toEqual(["msg", "pushed", "sha"]);
   });
 
   it("an authored commit on top of a refresh counts; a merge Viberr did not record counts as authored", async () => {
@@ -3512,7 +3525,7 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
           createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer", kind: "delivered",
         },
         verdicts: [
-          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z" },
+          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z", rounds: 1 },
         ],
         validation: "healthy",
         recommendations: opts.recs
@@ -3555,7 +3568,10 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     expect(fm.pr?.revisionDrift).toMatchObject({ headSha: HEAD, authored: 1 });
     expect(fm.recommendations).toEqual([]);
     // The foreign commit is on the record beside the task's own.
-    expect(fm.github?.commits).toEqual([{ sha: A0.slice(0, 7), msg: "[VIB-301] the work" }]);
+    // Ruling 187: derived from the compare, so the remote demonstrably has it.
+    expect(fm.github?.commits).toEqual([
+      { sha: A0.slice(0, 7), msg: "[VIB-301] the work", pushed: true },
+    ]);
     expect(fm.github?.otherCommits).toEqual([{ sha: X1.slice(0, 7), msg: "observer fixture: drift after review" }]);
     const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Revision moved after review")!;
     expect(note).toBeDefined();
@@ -3769,5 +3785,280 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
     const pr = read(store);
     expect(pr).toMatchObject({ number: 318, state: "review" });
     expect(pr!.closure).toBeUndefined();
+  });
+});
+
+/**
+ * Ruling 187 (pass 37, F37-8): the cache never claims a commit the remote does
+ * not have, and a commit that vanished with its workspace is announced as lost.
+ *
+ * Live: SHOP-2's `github.commits` held `3aad6ff` — the agent's workspace
+ * commit, committed while the task was held (F37-2) and never delivered.
+ * Origin's `shop-2` held only the bootstrap commit, whose message carries no
+ * `[SHOP-2]` prefix, so the prefix filter found nothing and the "agents don't
+ * always follow the prefix convention" carve-out KEPT the phantom. The GitHub
+ * page then rendered "1 commit · synced" for a change that existed nowhere:
+ * the run's workspace had been disposed, so it was not pending push, it was
+ * gone.
+ */
+describe("ruling 187: a workspace commit the remote does not have", () => {
+  type Store = ReturnType<typeof setup>["store"];
+
+  /** The exact live shape: a remote whose only commit is unprefixed, so the
+   *  prefix filter yields nothing and the workspace cache is what survives. */
+  function phantomRoutes(): FakeRoutes {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 0,
+        behind_by: 3,
+        status: "behind",
+        commits: [{ sha: "f6166a9ffff", commit: { message: "Initialize the project" } }],
+      },
+    };
+    return routes;
+  }
+
+  function seedCached(
+    store: Store,
+    sha: string,
+    msg: string,
+    over: { prState?: "review" | "merged"; pushed?: boolean } = {},
+  ): void {
+    const commit =
+      over.pushed === undefined ? { sha, msg } : { sha, msg, pushed: over.pushed };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: {
+          number: 318,
+          state: over.prState ?? "review",
+          title: "Attach execution workspace",
+        },
+        github: { commits: [commit], changed: null, unownedPr: null },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** A MERGED PR's compare: the branch has nothing the base lacks, because the
+   *  base now has all of it. `droppedCommits` is 0 — an empty list drops
+   *  nothing — so the completeness guard alone cannot tell this apart from a
+   *  branch that never received the work. */
+  function mergedRoutes(): FakeRoutes {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] },
+    };
+    // Coherent with the compare: GitHub says the pull request merged, and the
+    // branch still exists (the post-merge delete is best-effort and can be
+    // refused, which is exactly when this path is reachable).
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "closed",
+        merged: true,
+        merged_at: "2026-09-13T12:00:00Z",
+        head: { sha: "headsha318" },
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+      },
+    };
+    // `findPrForBranch` asks for `state=all`, so a merged PR IS listed.
+    routes[`GET ${REPO_PATH}/pulls`] = {
+      body: [
+        {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "closed",
+          draft: false,
+          merged_at: "2026-09-13T12:00:00Z",
+          head: { sha: "headsha318" },
+        },
+      ],
+    };
+    return routes;
+  }
+
+  const fileOf = (store: Store) =>
+    readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+
+  async function reconcileWith(store: Store, actor: { userId: string; label: string }, routes: FakeRoutes): Promise<void> {
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+  }
+
+  it("is marked NOT pushed instead of being rendered as repository state", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice");
+    await reconcileWith(store, actor, phantomRoutes());
+    // The entry SURVIVES — it is real work somebody did — and carries the one
+    // fact that was missing: the remote does not have it. Live, SHOP-2's
+    // GitHub row read "1 commit · synced" for exactly this state.
+    expect(fileOf(store).frontmatter.github?.commits).toEqual([
+      { sha: "3aad6ff", msg: "[VIB-301] Define identity service slice", pushed: false },
+    ]);
+  });
+
+  it("never claims the work is LOST — a pending commit and an abandoned one look identical here", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice");
+    await reconcileWith(store, actor, phantomRoutes());
+    // The first version of this fix DROPPED the entry and announced "Work
+    // lost". Live, that fired on SHOP-7 seconds before Viberr pushed the very
+    // commit it had just called lost: at reconcile time a commit awaiting
+    // delivery and one whose workspace is gone are indistinguishable — neither
+    // is on the remote, neither carries `pushedAt`. "Not pushed" is the only
+    // claim this code can honestly make.
+    expect(fileOf(store).timeline.some((e) => e.text.includes("Work lost"))).toBe(false);
+  });
+
+  /**
+   * Found by the pass's own adversarial self-review, not by me: `compare` is an
+   * AHEAD-only list, so a merged branch answers with an EMPTY one — and the
+   * carve-out then stamped every cached commit `pushed: false`, announcing that
+   * origin lacks commits that are sitting in `main`. This ruling's own
+   * prohibited lie, pointed the other way. It never fired live only because
+   * Viberr deletes the branch after merging, and that delete is best-effort.
+   */
+  it("ruling 187(b): a MERGED pr does not flip its commits to `not pushed`", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice", {
+      prState: "merged",
+      pushed: true,
+    });
+    await reconcileWith(store, actor, mergedRoutes());
+    // CANARY: drop `&& !landed` from `compareComplete` and this reads
+    // `pushed: false` — the record claiming the remote lost work it merged.
+    expect(fileOf(store).frontmatter.github?.commits).toEqual([
+      { sha: "3aad6ff", msg: "[VIB-301] Define identity service slice", pushed: true },
+    ]);
+  });
+
+  it("ruling 187(b): an unjudged commit on a merged pr stays unjudged, never `false`", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice", {
+      prState: "merged",
+    });
+    await reconcileWith(store, actor, mergedRoutes());
+    const commits = fileOf(store).frontmatter.github?.commits ?? [];
+    expect(commits).toHaveLength(1);
+    // Absent, not false: after a landing the compare cannot judge the cache,
+    // and "not judged" is the honest record of that.
+    expect(commits[0]).not.toHaveProperty("pushed");
+  });
+
+  it("marks a commit the remote DOES have as pushed, prefix or no prefix", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "f6166a9", "unprefixed but really pushed");
+    await reconcileWith(store, actor, phantomRoutes());
+    expect(fileOf(store).frontmatter.github?.commits).toEqual([
+      { sha: "f6166a9", msg: "unprefixed but really pushed", pushed: true },
+    ]);
+  });
+
+  it("judges NOTHING when the compare list is incomplete — unjudged must not read as judged", async () => {
+    const { store, actor } = setup();
+    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice");
+    const routes = phantomRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 0,
+        behind_by: 3,
+        status: "behind",
+        // One entry the tolerant reader cannot decode: the list is SHORT, so a
+        // genuinely pushed commit could be missing from it and would otherwise
+        // be stamped `pushed: false` — a lie in the other direction.
+        commits: [null, { sha: "f6166a9ffff", commit: { message: "Initialize the project" } }],
+      },
+    };
+    await reconcileWith(store, actor, routes);
+    expect(fileOf(store).frontmatter.github?.commits).toEqual([
+      { sha: "3aad6ff", msg: "[VIB-301] Define identity service slice" },
+    ]);
+  });
+});
+
+describe("F37-9: a sync verdict that changes is recorded, even on a quiet poll", () => {
+  const syncRows = (store: ReturnType<typeof setup>["store"]): string[] => {
+    // SAFETY: the SELECT names the one nullable TEXT column, and every
+    // `github.reconcile` row the reconciler writes carries a details payload.
+    const rows = store.db
+      .prepare(
+        `SELECT details_json FROM provenance WHERE action = 'github.reconcile' ORDER BY id ASC`,
+      )
+      .all() as { details_json: string | null }[];
+    return rows.map((r) => String(JSON.parse(r.details_json ?? "{}").sync));
+  };
+
+  it("writes a row when the verdict flips, with nothing else changed", async () => {
+    const { store, actor } = setup();
+    // Pass 1: level with main.
+    const level = happyRoutes();
+    level[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(level).fetchImpl },
+    );
+    expect(syncRows(store)).toEqual(["synced"]);
+
+    // Pass 2: main moved. NOTHING in the task file changes — same PR, same
+    // commit cache — so `changed` is false and the poller skips unchanged
+    // provenance. The verdict must still be recorded.
+    const behind = happyRoutes();
+    behind[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 3, status: "behind", commits: [] },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(behind).fetchImpl,
+        skipUnchangedProvenance: true,
+      },
+    );
+    expect(syncRows(store)).toEqual(["synced", "behind_main"]);
+  });
+
+  it("stays quiet while the verdict holds, so a healthy poller adds no rows", async () => {
+    const { store, actor } = setup();
+    const behind = happyRoutes();
+    behind[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: { ahead_by: 0, behind_by: 3, status: "behind", commits: [] },
+    };
+    for (let i = 0; i < 3; i += 1) {
+      await reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        {
+          dataRoot: store.dataRoot,
+          fetchImpl: fakeGithubFetch(behind).fetchImpl,
+          skipUnchangedProvenance: true,
+        },
+      );
+    }
+    // One row for the first (changing) pass; the two repeats add nothing. The
+    // "grow unboundedly" concern the original condition names is untouched.
+    expect(syncRows(store)).toEqual(["behind_main"]);
   });
 });

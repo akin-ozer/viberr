@@ -31,9 +31,11 @@ import {
 } from "~/server/runtimes/model-catalog.server";
 import {
   listTemplateResourceDrift,
+  listTemplateTextDrift,
   propagateTemplateResources,
   type PropagatedCopy,
   type TemplateCopyDrift,
+  type TemplateTextDrift,
 } from "./template-propagation.server";
 
 /**
@@ -414,6 +416,15 @@ export interface SaveGagentResult {
   diverged: TemplateCopyDrift[];
   /** The copies this save rewrote (only with `propagate: true`). */
   propagated: PropagatedCopy[];
+  /**
+   * Ruling 277: the non-archived projects whose copy still runs an OLDER
+   * persona or summary than the template. A deployment snapshots both
+   * (P13-AP-07) and `propagate` rewrites only the grants, so a template edit
+   * that corrects a persona reaches no running agent — and every reply built
+   * from `diverged` alone reported success without saying so. Empty on a
+   * create.
+   */
+  textBehind: TemplateTextDrift[];
 }
 
 /** The product's name for each backend, as the toasts spell it. */
@@ -562,11 +573,30 @@ export async function saveGlobalAgentProfile(
     }
     const copies = copiesClause(diverged, propagated);
     if (copies) clauses.push(copies);
+    // Ruling 277 (F37-110): the PERSONA and the summary are snapshotted onto
+    // every deployment too (P13-AP-07), and `propagate` rewrites only the
+    // grants — so a template edit that corrects a persona reaches no running
+    // agent, and nothing said so at the moment it was made. Live, four
+    // templates were rewritten to fix a persona describing a machine this host
+    // is not, the drift check answered "no copy differs" (it compares grants),
+    // and the four agents running at that moment still mounted the old text.
+    const textBehind = listTemplateTextDrift(db, input.id, ctx);
+    if (textBehind.length > 0) {
+      const fields = [...new Set(textBehind.flatMap((d) => d.fields))].join(" and ");
+      clauses.push(
+        `${textBehind.length} project cop${textBehind.length === 1 ? "y" : "ies"} still ` +
+          `run${textBehind.length === 1 ? "s" : ""} the older ${fields}: ` +
+          `${textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots the ` +
+          `${fields}, and propagate does not rewrite ${textBehind.length === 1 ? "it" : "them"} ` +
+          `— fix each copy on that project's Agents page`,
+      );
+    }
     return {
       profile: toView(input.id, merged, used),
       toast: clauses.join(" · "),
       diverged,
       propagated,
+      textBehind,
     };
   }
 
@@ -637,6 +667,7 @@ export async function saveGlobalAgentProfile(
     profile: toView(id, created, 0),
     toast: `${name} created · add it to a project from Agents → Add from library`,
     diverged: [],
+    textBehind: [],
     propagated: [],
   };
 }

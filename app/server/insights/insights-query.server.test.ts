@@ -2,7 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Guardrail } from "~/schemas/project-file.schema";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { getInsightsSummary } from "./insights-query.server";
+import { compactTimelineEvents } from "~/server/tasks/timeline-compaction.server";
+import { INSIGHTS_NAMED_EXCEPTIONS, getInsightsSummary } from "./insights-query.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -27,6 +28,9 @@ function insertRun(
     interruptedReason?: "restart" | null;
     /** F35-1: 0 while the row holds a live estimate (default 1: a total). */
     usageFinal?: 0 | 1;
+    /** Ruling 308: the two columns the task and profile breakdowns group on. */
+    taskKey?: string;
+    agentProfileId?: string;
   },
 ) {
   seq += 1;
@@ -37,10 +41,10 @@ function insertRun(
         output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
         interrupted_reason)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'developer', ?)`,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?)`,
   ).run(
     `run_${seq}`,
-    `VIB-${seq}`,
+    r.taskKey ?? `VIB-${seq}`,
     r.project ?? "viberr-core",
     `t_${seq}`,
     r.kind ?? "primary",
@@ -55,6 +59,7 @@ function insertRun(
     r.outTok ?? 0,
     r.usageFinal ?? 1,
     r.cost ?? null,
+    r.agentProfileId ?? "developer",
     r.interruptedReason ?? null,
   );
 }
@@ -218,17 +223,17 @@ describe("getInsightsSummary", () => {
     insertRun(db, { backend: "codex", kind: "operator", project: "p2", model: "gpt-5", cost: 0.3 });
 
     const s = getInsightsSummary(db, NOW);
-    const claude = s.byBackend.find((r) => r.label === "claude")!;
+    const claude = s.byBackend.rows.find((r) => r.label === "claude")!;
     expect(claude.runs).toBe(2);
     expect(claude.cost).toBeCloseTo(0.2, 5);
-    expect(s.byBackend.find((r) => r.label === "codex")?.runs).toBe(1);
-    expect(s.byKind.map((r) => r.label).sort()).toEqual([
+    expect(s.byBackend.rows.find((r) => r.label === "codex")?.runs).toBe(1);
+    expect(s.byKind.rows.map((r) => r.label).sort()).toEqual([
       "operator",
       "primary",
       "reviewer",
     ]);
-    expect(s.byProject.find((r) => r.label === "p2")?.cost).toBeCloseTo(0.3, 5);
-    expect(s.byModel.find((r) => r.label === "gpt-5")?.runs).toBe(1);
+    expect(s.byProject.rows.find((r) => r.label === "p2")?.cost).toBeCloseTo(0.3, 5);
+    expect(s.byModel.rows.find((r) => r.label === "gpt-5")?.runs).toBe(1);
   });
 
   it("averages finished-run wall-clock duration in ms", () => {
@@ -278,10 +283,84 @@ describe("getInsightsSummary", () => {
       }
     }
     const s = getInsightsSummary(db, NOW);
-    expect(s.byModel).toHaveLength(8);
+    expect(s.byModel.rows).toHaveLength(8);
     // The expensive outlier is present (a run-first order would have dropped it).
-    expect(s.byModel[0]?.label).toBe("pricey-xl");
-    expect(s.byModel.some((r) => r.label === "pricey-xl")).toBe(true);
+    expect(s.byModel.rows[0]?.label).toBe("pricey-xl");
+    expect(s.byModel.rows.some((r) => r.label === "pricey-xl")).toBe(true);
+  });
+
+  /**
+   * Ruling 308 (pass 37, F37-143): the window says what it left out.
+   *
+   * The cap keeps eight groups and reserves half the slots for the busiest, so
+   * a cost view still shows where the work happens. It dropped everything else
+   * in silence, on the one surface a person opens to decide where their money
+   * goes: eight of thirty groups, presented as the instance.
+   */
+  it("ruling 308: a capped breakdown reports the groups it dropped, their runs and their cost", () => {
+    const db = ctx.makeDb();
+    // 12 models — four more than the cap — so four are dropped.
+    for (let m = 0; m < 12; m++) {
+      insertRun(db, { model: `m-${m}`, cost: 1, state: "finished" });
+      insertRun(db, { model: `m-${m}`, cost: 1, state: "finished" });
+    }
+    const s = getInsightsSummary(db, NOW);
+    expect(s.byModel.rows).toHaveLength(8);
+    // CANARY: return the rows alone and eight of twelve reads as all of them.
+    expect(s.byModel.hidden).toBe(4);
+    expect(s.byModel.hiddenRuns).toBe(8);
+    expect(s.byModel.hiddenCost).toBe(8);
+    // Nothing dropped says so as zero, never as a missing field.
+    expect(s.byBackend.hidden).toBe(0);
+    expect(s.byBackend.hiddenRuns).toBe(0);
+  });
+
+  /**
+   * Ruling 308's other half, from the controller: "'What did SHOP-27 cost
+   * across eleven rework rounds' has no answer. 'Which reviewer earns its runs'
+   * has no answer. You are running this instance and cannot see what it costs
+   * you." `byKind` cannot answer the second, because every reviewer is one kind.
+   */
+  it("ruling 308: breaks down by task and by agent profile, and labels a task with its project when unscoped", () => {
+    const db = ctx.makeDb();
+    insertRun(db, {
+      project: "alpha",
+      taskKey: "A-1",
+      agentProfileId: "code-reviewer",
+      cost: 2,
+      state: "finished",
+    });
+    insertRun(db, {
+      project: "beta",
+      taskKey: "A-1",
+      agentProfileId: "code-reviewer",
+      cost: 3,
+      state: "finished",
+    });
+    insertRun(db, {
+      project: "alpha",
+      taskKey: "A-2",
+      agentProfileId: "backend-engineer",
+      cost: 5,
+      state: "finished",
+    });
+
+    // CANARY: group on `task_key` alone when unscoped and the two projects'
+    // A-1 collapse into one row that belongs to neither.
+    const all = getInsightsSummary(db, NOW);
+    const labels = all.byTask.rows.map((r) => r.label).sort();
+    expect(labels).toContain("alpha/A-1");
+    expect(labels).toContain("beta/A-1");
+
+    // Scoped to a project, the prefix is noise: the keys are already local.
+    const scoped = getInsightsSummary(db, NOW, { projectSlug: "alpha" });
+    expect(scoped.byTask.rows.map((r) => r.label).sort()).toEqual(["A-1", "A-2"]);
+
+    // The question byKind cannot answer: which PROFILE earns its runs.
+    // CANARY: drop byProfile.
+    const reviewer = all.byProfile.rows.find((r) => r.label === "code-reviewer");
+    expect(reviewer?.runs).toBe(2);
+    expect(reviewer?.cost).toBe(5);
   });
 
   /**
@@ -302,7 +381,7 @@ describe("getInsightsSummary", () => {
     }
 
     const s = getInsightsSummary(db, NOW);
-    const busiest = s.byModel.find((r) => r.label === "gpt-5");
+    const busiest = s.byModel.rows.find((r) => r.label === "gpt-5");
     expect(busiest, "the busiest model must survive the cap").toBeTruthy();
     expect(busiest!.runs).toBe(12);
     // Unknown, never "$0.00".
@@ -466,12 +545,13 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // $0.50 operator + $0.10 controller = $0.60 coordination, over $1.00
-    // reported → 60%; the cost-less run contributes to neither side.
+    // reported → 60%. Ruling 201: every run here reports, which is what makes
+    // the quotient a measurement — a single cost-less run and this share is
+    // suppressed instead (asserted in its own test below).
     insertRun(db, { kind: "operator", cost: 0.5 });
     insertRun(db, { kind: "controller", cost: 0.1 });
     insertRun(db, { kind: "primary", cost: 0.3 });
     insertRun(db, { kind: "reviewer", cost: 0.1 });
-    insertRun(db, { kind: "operator", cost: null });
     const g = getInsightsSummary(db, NOW).oversight;
     // CANARY: narrow the totals CASE back to `kind = 'operator'` and the share
     // drops to 50%, hiding the controller's spend inside the denominator.
@@ -490,6 +570,197 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertProject(empty, "gp");
     insertRun(empty, { kind: "operator", cost: null });
     expect(getInsightsSummary(empty, NOW).oversight.coordination.share).toBeNull();
+  });
+
+  /**
+   * Ruling 190 (F37-12, live): a Codex-only delivery fleet reports no cost at
+   * all, so the instance's four Claude CONTROLLER runs were the entire
+   * denominator and the card read "Coordination overhead 100%" — arithmetic
+   * that cannot be wrong and an answer that cannot be right. The share is a
+   * measurement only when its complement could have been observed.
+   */
+  it("ruling 190: the share is null when a side RAN and reported nothing — no fake 100%, no fake 0%", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // The live shape: Claude controller turns cost money, every Codex delivery
+    // run reports nothing.
+    insertRun(db, { kind: "controller", cost: 4.0 });
+    insertRun(db, { kind: "operator", cost: null });
+    insertRun(db, { kind: "primary", cost: null });
+    insertRun(db, { kind: "reviewer", cost: null });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop the `unobserved` guard from the share and this is 1 — the
+    // card prints "100%" off a denominator delivery never entered.
+    expect(g.coordination.share).toBeNull();
+    // Ruling 201 replaced the `unobserved` enum with the counts the card reads:
+    // a side whose every run is cost-silent is the ruling-190 case, and it is
+    // legible here as uncosted === runs.
+    expect(g.coordination.uncosted.delivery).toBe(g.coordination.runs.delivery);
+    expect(g.coordination.uncosted.coordination).toBe(1);
+    // The dollar figure that IS real survives: the card still reports it.
+    expect(g.coordination.coordinationCostUsd).toBeCloseTo(4.0, 5);
+    expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
+
+    // One delivery run reporting a cost makes the complement observable, and
+    // the share comes back — including a real, earned 100%-adjacent figure.
+    insertRun(db, { kind: "primary", cost: 1.0 });
+    const seen = getInsightsSummary(db, NOW).oversight;
+    // Ruling 201: one delivery run reporting is no longer enough — the
+    // operator run in this fixture still reports nothing, so there is still no
+    // share. Ruling 190 stopped here and printed 0.8.
+    expect(seen.coordination.share).toBeNull();
+    expect(seen.coordination.uncosted).toEqual({ delivery: 2, coordination: 1 });
+
+    // A delivery run reporting a genuine $0.00 is an observation, not a gap:
+    // the complement was seen, it was just free, so 100% is earned and shown.
+    const free = ctx.makeDb();
+    insertProject(free, "gp");
+    insertRun(free, { kind: "controller", cost: 2.0 });
+    insertRun(free, { kind: "primary", cost: 0 });
+    const g3 = getInsightsSummary(free, NOW).oversight;
+    expect(g3.coordination.uncosted).toEqual({ delivery: 0, coordination: 0 });
+    expect(g3.coordination.share).toBeCloseTo(1, 5);
+  });
+
+  /**
+   * Self-review of ruling 190's first draft, which guarded only the delivery
+   * side. The mirror is just as reachable — a Codex operator and controller
+   * under a Claude delivery fleet — and reads **0%**, which claims coordination
+   * is free when it merely never reported. Same defect, opposite sign.
+   */
+  it("ruling 190: coordination that ran and reported nothing is a gap too, not a free 0%", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "operator", cost: null });
+    insertRun(db, { kind: "controller", cost: null });
+    insertRun(db, { kind: "primary", cost: 3.0 });
+    insertRun(db, { kind: "reviewer", cost: 1.0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: guard only the delivery side and this reads 0 — "coordination
+    // costs you nothing", off runs that never reported a figure.
+    expect(g.coordination.share).toBeNull();
+    expect(g.coordination.uncosted.coordination).toBe(g.coordination.runs.coordination);
+    expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
+  });
+
+  it("ruling 190: a side that never RAN contributes a real zero, not a gap", () => {
+    // No delivery runs at all is not an unobserved side — this instance really
+    // did spend everything it spent on coordination, and 100% is the answer.
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "controller", cost: 2.0 });
+    insertRun(db, { kind: "operator", cost: 1.0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.coordination.runs.delivery).toBe(0);
+    expect(g.coordination.share).toBeCloseTo(1, 5);
+
+    // And the mirror: no coordination runs at all, so 0% is earned.
+    const none = ctx.makeDb();
+    insertProject(none, "gp");
+    insertRun(none, { kind: "primary", cost: 2.0 });
+    const g2 = getInsightsSummary(none, NOW).oversight;
+    expect(g2.coordination.runs.coordination).toBe(0);
+    expect(g2.coordination.share).toBeCloseTo(0, 5);
+  });
+
+  /**
+   * Ruling 201 (F37-21). Ruling 190 asked whether a side reported ANYTHING and
+   * printed a confident percentage the moment it did. Cost is a Claude-only
+   * observation — the Codex result envelope carries tokens and no price — so on
+   * the live instance 209 of 215 runs reported nothing, and the rule's test was
+   * satisfied by the 6 that did. The share is a measurement only when every run
+   * on both sides reported one.
+   */
+  it("ruling 201: a partly-costed instance has no share, and the silent runs are counted and attributed", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // The live shape in miniature: a Codex fleet that never reports, one Claude
+    // controller that does, and one Claude deliverer — the single ordinary
+    // change that turned ruling 190's honest "n/a" into a confident lie.
+    insertRun(db, { kind: "operator", backend: "codex", cost: null });
+    insertRun(db, { kind: "operator", backend: "codex", cost: null });
+    insertRun(db, { kind: "operator", backend: "codex", cost: null });
+    insertRun(db, { kind: "controller", backend: "claude", cost: 12.0 });
+    insertRun(db, { kind: "primary", backend: "codex", cost: null });
+    insertRun(db, { kind: "reviewer", backend: "codex", cost: null });
+    insertRun(db, { kind: "primary", backend: "claude", cost: 36.0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: restore ruling 190's test (`costedDelivery === 0 || costedCoord
+    // === 0`) and this is 0.25 — "coordination is a quarter of the bill", off
+    // one of four coordination runs, with the other three unpriced.
+    expect(g.coordination.share).toBeNull();
+    expect(g.coordination.coordinationCostUsd).toBeCloseTo(12.0, 5);
+    expect(g.coordination.totalCostUsd).toBeCloseTo(48.0, 5);
+    expect(g.coordination.runs).toEqual({ delivery: 3, coordination: 4 });
+    expect(g.coordination.uncosted).toEqual({ delivery: 2, coordination: 3 });
+    // Named, not hedged: the card can say "5 on Codex" because the rows say so.
+    expect(g.coordination.uncostedByBackend).toEqual([{ backend: "codex", runs: 5 }]);
+
+    // And the complement: price every run and the share is a real measurement.
+    const all = ctx.makeDb();
+    insertProject(all, "gp");
+    insertRun(all, { kind: "operator", cost: 1.0 });
+    insertRun(all, { kind: "primary", cost: 3.0 });
+    const g2 = getInsightsSummary(all, NOW).oversight;
+    expect(g2.coordination.uncostedByBackend).toEqual([]);
+    expect(g2.coordination.share).toBeCloseTo(0.25, 5);
+  });
+
+  /**
+   * Ruling 201, the other half of the owner's call: suppressing the dollar
+   * share leaves the card with nothing to say on an ordinary instance, so it
+   * carries the share that CAN be measured. Tokens are the unit both backends
+   * report.
+   */
+  it("ruling 201: the token share is computed over final provider figures, and names the rows it leaves out", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "operator", backend: "codex", cost: null, inTok: 1000, outTok: 200 });
+    insertRun(db, { kind: "controller", backend: "claude", cost: 12.0, inTok: 500, outTok: 100 });
+    insertRun(db, { kind: "primary", backend: "codex", cost: null, inTok: 5000, outTok: 1000 });
+    insertRun(db, { kind: "reviewer", backend: "codex", cost: null, inTok: 2000, outTok: 200 });
+    // F35-1: a live estimate is not a total. Counted as excluded, not summed —
+    // on BOTH sides, because the numerator has its own guard and a fixture that
+    // only strands a delivery row would let that guard rot untested.
+    insertRun(db, {
+      kind: "primary",
+      backend: "codex",
+      cost: null,
+      inTok: 900_000,
+      outTok: 900_000,
+      usageFinal: 0,
+    });
+    insertRun(db, {
+      kind: "operator",
+      backend: "codex",
+      cost: null,
+      inTok: 900_000,
+      outTok: 900_000,
+      usageFinal: 0,
+    });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop the `usage_final = 1` guard from `coordination_tokens` and
+    // the numerator swallows 1.8M of estimate — a share of 181, printed as
+    // "18100%" — while the guarded denominator stays at 10k.
+    expect(g.coordination.tokenShare).toBeCloseTo(0.18, 5);
+    expect(g.coordination.coordinationTokens).toBe(1800);
+    expect(g.coordination.totalTokens).toBe(10_000);
+    expect(g.coordination.tokenless).toEqual({ delivery: 1, coordination: 1 });
+    // The dollar share is still suppressed on the same data: the two questions
+    // are independent, and only one of them has an answer here.
+    expect(g.coordination.share).toBeNull();
+  });
+
+  it("ruling 201: a side that landed NO provider figure has no token share either", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertRun(db, { kind: "operator", inTok: 1000, outTok: 200 });
+    insertRun(db, { kind: "primary", inTok: 5000, outTok: 1000, usageFinal: 0 });
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop the `tokenBlind` test and this reads 1 — "coordination is
+    // all of the tokens", which is ruling 190's fake 100% in the other unit.
+    expect(g.coordination.tokenShare).toBeNull();
+    expect(g.coordination.tokenless).toEqual({ delivery: 1, coordination: 0 });
   });
 
   it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {
@@ -514,6 +785,49 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.traceability.deliveredTasks).toBe(2);
     expect(g.traceability.tracedTasks).toBe(1);
     expect(g.traceability.pct).toBeCloseTo(0.5, 5);
+    // Ruling 290: and it NAMES the one that cannot be traced. A traceability
+    // metric that reports "1 of 2" and will not say which is withholding the
+    // only fact a person reads it for. CANARY: return the count alone.
+    expect(g.traceability.untraced).toEqual(["gp/VIB-2"]);
+  });
+
+  /**
+   * Ruling 290 (pass 37, F37-125). Three cards on /insights counted EXCEPTIONS
+   * — untraceable work, work with no next actor, records past the readability
+   * guardrail — and named none of them. Live this pass the page read "41 of 42
+   * delivered tasks carry branch + PR" with no way to reach the 1. Ruling 253
+   * settled the same shape for a knowledge base ("an agent cannot ask for a
+   * rule it cannot name"); this is that rule with a person reading it.
+   */
+  it("ruling 290: the clarity and long-timeline cards name their exceptions too, and cap honestly", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // No owner and nothing waited on → no definite next actor.
+    insertTask(db, { key: "VIB-9", waiting: "none" });
+    // Owned, so it IS clear and must not be named.
+    insertTask(db, { key: "VIB-10", waiting: "none", owner: "u_1" });
+
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.clarity.unclear).toEqual(["gp/VIB-9"]);
+    expect(g.clarity.clearTasks).toBe(1);
+    // A card that names everything it counts reports no remainder.
+    expect(g.clarity.activeTasks - g.clarity.clearTasks - g.clarity.unclear.length).toBe(0);
+  });
+
+  it("ruling 290: past the cap the names stop and the count does not", () => {
+    // The cap is what stops one card becoming a wall on a drifted instance;
+    // the remainder is what stops the capped list reading as the whole set.
+    // CANARY: drop the `.slice` in `namedKeys` and the first assertion fails;
+    // drop the remainder arithmetic on the card and a reader sees 8 of 12.
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    for (let i = 0; i < INSIGHTS_NAMED_EXCEPTIONS + 4; i += 1) {
+      insertTask(db, { key: `VIB-${100 + i}`, waiting: "none" });
+    }
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.clarity.unclear).toHaveLength(INSIGHTS_NAMED_EXCEPTIONS);
+    expect(g.clarity.activeTasks).toBe(INSIGHTS_NAMED_EXCEPTIONS + 4);
+    expect(g.clarity.clearTasks).toBe(0);
   });
 
   it("pairs packet-opened with the task's next packet-resolved; unresolved packets count as open, not as zero", () => {
@@ -549,13 +863,36 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.timeToReview.medianMs).toBe(2 * 60 * 60 * 1000);
   });
 
-  it("counts long timelines at the compression threshold and scopes everything by project", () => {
+  /**
+   * The boundary belongs to `compactTimelineEvents`, which opens with
+   * `if (events.length <= options.threshold) return events`. A task sitting
+   * exactly ON the threshold is therefore never folded, so counting it as one
+   * "past their project's compression threshold" names a task the machinery is
+   * not managing. Asserted against the real rule rather than restated, so the
+   * two cannot drift apart again.
+   */
+  it("counts long timelines PAST the threshold, on the same boundary compaction uses", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     insertProject(db, "other");
-    insertTask(db, { key: "VIB-1", eventCount: 40 }); // at threshold → long
-    insertTask(db, { key: "VIB-2", eventCount: 39 });
+    insertTask(db, { key: "VIB-1", eventCount: 40 }); // AT threshold → not folded
+    insertTask(db, { key: "VIB-2", eventCount: 41 }); // past it → folded
     insertTask(db, { project: "other", key: "OT-1", eventCount: 99, waiting: "agent" });
+
+    // The rule itself, on the same two lengths.
+    const ev = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        occurredAt: `2026-08-22T10:00:${String(i).padStart(2, "0")}.000Z`,
+        type: "comment" as const,
+        actor: { kind: "operator" as const },
+        title: null,
+        text: `routine ${i}`,
+        toAgent: false,
+        evidence: null,
+      }));
+    const opts = { threshold: 40, keepRecent: 4 };
+    expect(compactTimelineEvents(ev(40), opts)).toHaveLength(40); // untouched
+    expect(compactTimelineEvents(ev(41), opts).length).toBeLessThan(41);
 
     const all = getInsightsSummary(db, NOW).oversight;
     expect(all.longTimelines).toBe(2);
@@ -579,7 +916,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertProject(db, "off", [
       { id: "compression-threshold", desc: "", on: false, value: 40, unit: "events" },
     ]);
-    // Actively compacted in `tight` (25 >= 10) — invisible against a flat 40.
+    // Actively compacted in `tight` (25 > 10) — invisible against a flat 40.
     insertTask(db, { project: "tight", key: "TI-1", eventCount: 25 });
     // Nothing compacts these: the project has the guardrail off.
     insertTask(db, { project: "off", key: "OF-1", eventCount: 45 });

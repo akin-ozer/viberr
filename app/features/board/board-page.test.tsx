@@ -186,6 +186,82 @@ function subtitle(container: HTMLElement): string {
   return container.querySelector(".board-head .sub")!.textContent!.replace(/\s+/g, " ").trim();
 }
 
+describe("ruling 225: the board says a clock rest is a clock rest", () => {
+  it("names the instant on the card instead of naming a person", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        waiting: "schedule",
+        resumesAt: "2026-09-14T02:28:00.000Z",
+      }),
+    ]);
+    const tag = container.querySelector(".card .wait-tag")!;
+    // The promise ruling 224's own packet copy made: "Nothing runs until then
+    // and the board says so." The INSTANT is rendered by `LocalDayDotTime`,
+    // which swaps to the viewer's zone after hydration and has its own tests —
+    // asserting a formatted string here would only assert this host's timezone.
+    // What this test owns is that the tag names a time at all, and that it
+    // stopped naming a person.
+    expect(tag.textContent!.trim()).toMatch(/^resumes \S/);
+    expect(tag.textContent).not.toContain("on its own");
+    expect(tag.querySelector(".ico")).not.toBeNull();
+    // Scoped to the card: the subtitle legitimately carries the phrase with a
+    // count of zero, which is the whole point.
+    const card = container.querySelector(".card")!;
+    expect(card.textContent).not.toContain("waiting on a human");
+    expect(card.textContent).not.toContain("waiting on you");
+  });
+
+  it("keeps the card honest when the instant is missing", () => {
+    const { container } = renderBoard([
+      task({ key: "VIB-1", stage: "impl", waiting: "schedule", resumesAt: null }),
+    ]);
+    expect(
+      container.querySelector(".card .wait-tag")!.textContent!.trim(),
+    ).toBe("resumes on its own");
+  });
+
+  it("never draws a demand pill over a tag that says nobody is needed", () => {
+    // Ruling 168(a) made a "blocked" pill above "waiting on you" yield, as one
+    // demand said twice. Over a clock rest the two are not a repetition, they
+    // contradict: "input required" says a person is needed right now, the tag
+    // says the task comes back on its own.
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        waiting: "schedule",
+        resumesAt: "2026-09-14T02:28:00.000Z",
+        readiness: "input_required",
+        displayReadiness: "input_required",
+      }),
+    ]);
+    expect(container.querySelector(".card-top .pill")).toBeNull();
+    expect(container.textContent).not.toContain("input required");
+    expect(
+      container.querySelector(".card .wait-tag")!.textContent!.trim(),
+    ).toMatch(/^resumes \S/);
+  });
+
+  it("leaves the subtitle's human count to the humans", () => {
+    const { container } = renderBoard([
+      task({
+        key: "VIB-1",
+        stage: "impl",
+        waiting: "schedule",
+        resumesAt: "2026-09-14T02:28:00.000Z",
+      }),
+      task({ key: "VIB-2", stage: "impl", waiting: "human" }),
+    ]);
+    // The live reading this replaces said "5 waiting on a human" with four of
+    // the five waiting on a clock.
+    expect(subtitle(container)).toBe(
+      "2 tasks · 1 waiting on a human in this project",
+    );
+  });
+});
+
 describe("LV-20 family: the board subtitle counts what the projection says", () => {
   it("does not count a done task whose projected waiting is none", () => {
     const { container } = renderBoard([
@@ -1376,7 +1452,12 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
       },
     });
     expect(text).toContain("conflicts with the base branch");
-    expect(text).toContain("Rebase the branch and re-review");
+    // Ruling 291: the remedy viberr actually implements — merge the base IN.
+    // CANARY: put "Rebase the branch" back and this fails, which is the point:
+    // that sentence recommended the one operation the product forbids
+    // everywhere else, and the one that diverged SHOP-11's branch from its PR.
+    expect(text).toContain("merging the base INTO it");
+    expect(text).not.toContain("Rebase the branch");
   });
 
   it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
@@ -1391,7 +1472,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     });
     expect(text).toContain("delivered revision `9999999` is not on PR #124");
     expect(text).toContain("Deliver the branch to push it");
-    expect(text).not.toContain("Rebase the branch");
+    expect(text).not.toContain("merging the base INTO it");
   });
 
   it("stays silent on a PR that merges cleanly", () => {

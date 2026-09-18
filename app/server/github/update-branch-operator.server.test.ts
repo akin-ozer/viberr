@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -348,10 +349,32 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
   });
 
-  it("says so honestly when the branch is already current", async () => {
+  it("ruling 229: an already-current branch is never narrated as a refused plan step", async () => {
+    // The end-to-end consequence, pinned where it is decidable: the plan
+    // executor files a step under "refused" purely on `outcome`, and
+    // `narrateRefusedActions` headlines any refused step "The operator's plan
+    // was not carried out in full." The sentence is ALSO already on the
+    // timeline as the `github` event ruling 134(c) writes — and 134(c) goes to
+    // the trouble of suppressing that event when it would duplicate, which the
+    // refusal narration then undid with no suppression and a worse headline.
+    //
+    // Canary: return `noop` from either already-current arm.
     const git = fakeGit({ behind: 0 });
     const res = await act(git.exec);
-    expect(res.outcome).toBe("noop");
+    expect(["denied", "noop"]).not.toContain(res.outcome);
+  });
+
+  it("says so honestly when the branch is already current — and calls it DONE", async () => {
+    // Ruling 229 (F37-49): `done`, not `noop`. This is the tool's success
+    // condition, and its own description tells the operator to call it
+    // speculatively for exactly this reason ("idempotent and cheap… call it
+    // when you are unsure rather than guessing"). Returned as `noop` it landed
+    // in the plan executor's `refused` list, and the timeline then carried
+    // "The operator's plan was not carried out in full" over a call the
+    // product had asked for — 51 of 57 such notes on the pass-37 board.
+    const git = fakeGit({ behind: 0 });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("done");
     expect(res.message).toContain("already up to date");
     const file = readTaskFile({
       projectSlug: store.slug,
@@ -437,6 +460,38 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/never propose forcing the branch/i);
   });
 
+  /**
+   * Ruling 232: the persona used to close with "The mention is what notifies
+   * them" and no qualification, which the ruling made FALSE for the one comment
+   * the operator writes most — the directive it hands a specialist. An operator
+   * that believes a tag in a directive reaches a person will keep putting
+   * questions there, and they will now reach nobody. The owner's own words for
+   * this decision were that the operator "already has a separate human-directed
+   * comment path and should use it"; this is the sentence that tells it so.
+   *
+   * Canary: delete the directive sentence from the seed asset.
+   */
+  it("ruling 232: says a directive reaches only the specialist, so a person named in one is not notified", () => {
+    expect(seed).toMatch(/A directive you hand a specialist reaches only that specialist/);
+    expect(seed).toMatch(/naming a person inside one notifies nobody/);
+    // The instruction that remains true is still there, now scoped to a comment.
+    expect(seed).toMatch(/tag them by name with an @mention \(e\.g\. "@Arda"\) in a comment/);
+  });
+
+  /**
+   * F37-56: agents were given the human's NAME and told to answer them, and
+   * never told what to call them - so they guessed, and the record disagreed
+   * with itself. Counted across this pass's project: 7 "him", 5 "he", 2 "his"
+   * and 1 "her", all the same owner. `task.md` is what viberr calls truth, it
+   * is permanent, and the person it describes reads it.
+   *
+   * Canary: delete the pronoun sentence from the seed asset.
+   */
+  it("F37-56: tells the operator to say 'they' rather than guess a pronoun", () => {
+    expect(seed).toMatch(/Refer to a person as "they" unless they have told you otherwise/);
+    expect(seed).toMatch(/you are given names, not pronouns/);
+  });
+
   it("keeps the live store's copy in step when one is present (both copies or neither)", () => {
     if (live === null) return;
     expect(live).toBe(seed);
@@ -454,7 +509,8 @@ describe("ruling 134(c): the remote report", () => {
   const REPO_PATH = "/repos/akin-ozer/viberr";
   it("names a lagging origin, points at deliver_for_review, and writes ONE timeline line across two calls", async () => {
     const first = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
-    expect(first.outcome).toBe("noop");
+    // Ruling 229: `done` — see the already-current test above.
+    expect(first.outcome).toBe("done");
     expect(first.message).toContain("already up to date with `main`");
     expect(first.message).toContain("Origin's copy of `vib-1` (`remote0`) is 2 commits behind the workspace head");
     expect(first.message).toContain("call `deliver_for_review` to push it");
@@ -476,7 +532,9 @@ describe("ruling 134(c): the remote report", () => {
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline).toHaveLength(0);
     const diverged = await act(fakeGit({ behind: 0, remote: "diverged" }).exec);
     expect(diverged.message).toContain("holds commits this workspace does not");
-    expect(diverged.message).toContain("A person resolves the branch history");
+    // Ruling 321: one sentence for a diverged branch, wherever it is said.
+    expect(diverged.message).toContain(DIVERGED_BRANCH_REMEDY);
+    expect(diverged.message).toContain("never a force-push");
     expect(diverged.message).not.toContain("deliver_for_review");
     const absent = await act(fakeGit({ behind: 0, remote: "absent" }).exec);
     expect(absent.message).toContain("does not exist on origin yet: call `deliver_for_review`");

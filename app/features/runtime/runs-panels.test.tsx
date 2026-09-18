@@ -1136,9 +1136,26 @@ describe("a run interrupted by a restart", () => {
     expect(container.querySelector(".logs-bar .pill")!.textContent).toBe(
       "interrupted · by a restart",
     );
+    /**
+     * Ruling 338: this assertion REQUIRED the lie.
+     *
+     * Its fixture is a bare `lifecycle: "interrupted", interruptedReason:
+     * "restart"` run — exactly the case where whether recovery re-invoked
+     * anything is unknown to the panel — and it asserted the panel claim it
+     * anyway. Recovery stamps that identical row state on a re-invoked orphan
+     * and on one its crash-loop guard refused to re-invoke.
+     *
+     * Live: 6 of this board's 250 restart renderings are capped runs (SHOP-27,
+     * SHOP-34 twice, SHOP-35, SHOP-36, SHOP-38), and on every one the task's own
+     * timeline says the opposite one panel away — "Viberr did NOT re-invoke the
+     * operator for it… Run the operator from this page when you are ready."
+     *
+     * CANARY: restore the old sentence in `runs-panels.tsx`.
+     */
     expect(container.textContent).toContain(
-      "interrupted by a restart; the operator was re-invoked",
+      "interrupted by a restart; the task record says what recovery did",
     );
+    expect(container.textContent).not.toContain("the operator was re-invoked");
     expect(container.textContent).not.toContain("continuity error");
   });
 

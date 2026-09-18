@@ -9,6 +9,7 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import type { QueuedQuestion } from "~/schemas/task-file.schema";
 import { readGoalFile, updateGoalFile } from "~/server/files/goal-writer.server";
 import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
 import {
@@ -343,6 +344,17 @@ export async function setTaskDependencies(
       entries: previous,
       clearedBy: actor.label,
     });
+  } else if (previous.length > 0 && next.length === 0) {
+    // Ruling 241, corrected by self-review: the drain belongs wherever the HOLD
+    // GOES AWAY, not only where a release is ANNOUNCED. `releasing` excludes
+    // `ctx.operatorAuthorized` on purpose — `announceRelease` re-invokes the
+    // operator, and doing that from inside the operator's own turn would loop —
+    // so an operator correcting a wait with `set_dependencies` (the door ruling
+    // 240 names as the remedy for a wrong hold) took the last branch and left
+    // the question stranded forever, under a wait panel still promising it
+    // would be put when the wait cleared, on a task with nothing left to clear.
+    // That is F37-68's own shape inside F37-68's own fix.
+    await drainQueuedQuestions(db, ctx, input.projectSlug, input.taskKey);
   }
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true, blockedBy: next, added, removed };
 }
@@ -488,6 +500,13 @@ export async function announceRelease(
     { projectSlug, taskKey, kind: "dependency", title: `${taskKey} can move again`, text },
     ctx,
   );
+  // Ruling 241 (F37-68): drain the questions the hold refused, BEFORE the
+  // operator is re-invoked. A person decided that the reviewer answers before
+  // anyone reworks anything; re-invoking the operator first would let it
+  // dispatch the rework that decision exists to stop, in the window between the
+  // release and the question. Same ordering ruling 203 uses on a completion,
+  // and for the same reason: the person's instruction goes first.
+  await drainQueuedQuestions(db, ctx, projectSlug, taskKey);
   try {
     const { autoInvokeOperator } = await import("./task-actions.server");
     await autoInvokeOperator(db, ctx, projectSlug, taskKey, "dependencies-released", {
@@ -499,6 +518,84 @@ export async function announceRelease(
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
+}
+
+/**
+ * Ruling 241: put the questions a dependency hold refused, now that it is gone.
+ *
+ * Each entry is REMOVED from the task before its run starts, whatever the run
+ * then does. A question that stayed queued through a failed start would be put
+ * again on the next release, and a reviewer asked the same question twice is
+ * the loop ruling 237 exists to break. A start that fails says so on the
+ * timeline instead, which is the same honesty the resolution's own arm keeps.
+ */
+export async function drainQueuedQuestions(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<number> {
+  const queued = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter
+    .queuedQuestions;
+  if (!queued || queued.length === 0) return 0;
+  const taken: QueuedQuestion[] = [];
+  await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    // Re-read under the lock: a concurrent release or a person clearing the
+    // task must not let one question be put twice.
+    taken.push(...parsed.frontmatter.queuedQuestions);
+    parsed.frontmatter.queuedQuestions = [];
+  });
+  if (taken.length === 0) return 0;
+  // Dynamic, like every other reach into task-actions from this module: the two
+  // import each other and a static edge here closes the cycle.
+  const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
+  const { REVIEW_DEADLOCK_QUESTION } = await import("./review-deadlock.server");
+  const startAgentRun =
+    ctx.deps?.startAgentRun ?? (await import("./specialist-run.server")).startAgentRun;
+  const opCtx: TaskActionContext = { ...ctx, operatorAuthorized: true };
+  for (const question of taken) {
+    try {
+      const run: Parameters<typeof startAgentRun>[1] = {
+        projectSlug,
+        taskKey,
+        profileId: question.profileId,
+        directive: question.directive,
+        directiveFrom: question.decidedByLabel,
+      };
+      // Ruling 316: this is ruling 241's DEFERRED half of the same dispatch
+      // `task-actions` makes when the task is not held, and ruling 313 patched
+      // only the immediate one — so a deadlock question put after a hold
+      // cleared kept the verdict channel the immediate one had lost. A queued
+      // question is the same question; it withholds the same way.
+      if (question.directive === REVIEW_DEADLOCK_QUESTION) run.withholdVerdict = true;
+      await startAgentRun(db, run, OPERATOR_TASK_ACTOR, opCtx);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("queued reviewer question could not be put after the release", {
+        taskKey,
+        profileId: question.profileId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+        parsed.frontmatter.waiting = "human";
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: { kind: "system", systemId: "dependency-release" },
+          title: "Queued question not put",
+          text:
+            `${taskKey} was released, but the question ${question.decidedByLabel} decided to put ` +
+            `to the reviewer could not be started: ${message} Nothing was asked and nothing is ` +
+            "running. The decision stands on the record above; ask the reviewer again when the " +
+            "run can start.",
+          toAgent: false,
+          evidence: null,
+        });
+      });
+    }
+  }
+  reprojectTask(db, ctx, projectSlug, taskKey);
+  return taken.length;
 }
 
 // ---------------------------------------------------------------- engine

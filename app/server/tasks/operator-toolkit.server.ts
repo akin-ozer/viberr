@@ -1,11 +1,19 @@
 import type { DatabaseSync } from "node:sqlite";
+import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
+import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import {
+  listTaskAttachments,
+  readTaskAttachmentText,
+} from "~/server/files/task-attachments.server";
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   deliverGate,
@@ -15,6 +23,8 @@ import {
   operatorDeliverForReview,
   operatorDispatchAgent,
   operatorFlagContextConflict,
+  OPERATOR_TIMELINE_DEFAULT,
+  OPERATOR_TIMELINE_MAX,
   operatorOpenPacket,
   operatorResolvePacket,
   operatorPostComment,
@@ -260,12 +270,29 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR; `notAcceptableReason` carries the acceptance gate's own verdict, EVERY gate included: a PR the gate would refuse cannot be recommended for acceptance, and cannot be accepted, while it is set. It also stands on a task that has simply not reached the boundary yet, and its own way out is the workflow, so it is never a reason to hold a task back. The MOVE into the acceptance stage reads the pull request instead: it is refused only while `pr.mergeable: \"conflicting\"` or `pr.unpushedRevision` stands; open the conflict packet or deliver the revision then), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names. `deployedSpecialists[].eligibleForCurrentStage` says whether a profile may RUN at the task's current stage: its declared stages, or it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133); declared stages alone decide where a profile may be NEWLY engaged. `requiredReviewers` (ruling 178) lists the reviewers the PROJECT requires per review stage, by profile id with the stage and agent names: each must hold an `approve` verdict on the delivered revision before acceptance, engaged or not — `reviewers` lists only who you have engaged, so a required reviewer missing from it is a review you still owe.",
-      {},
-      async () =>
+      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR \u2014 except a base refresh, which is named separately and is not unreviewed work; ruling 238: when the drift is base-refresh ONLY, a re-review is checked out at the REFRESHED HEAD rather than at the reviewed revision, so tell a reviewer you re-dispatch to judge the head, and never name the older sha as the commit it will be looking at; `notAcceptableReason` carries the acceptance gate's own verdict, EVERY gate included: a PR the gate would refuse cannot be recommended for acceptance, and cannot be accepted, while it is set. It also stands on a task that has simply not reached the boundary yet, and its own way out is the workflow, so it is never a reason to hold a task back. The MOVE into the acceptance stage reads the pull request instead: it is refused only while `pr.mergeable: \"conflicting\"` or `pr.unpushedRevision` stands; open the conflict packet or deliver the revision then), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names. `deployedSpecialists[].eligibleForCurrentStage` says whether a profile may RUN at the task's current stage: its declared stages, or it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133); declared stages alone decide where a profile may be NEWLY engaged. `requiredReviewers` (ruling 178) lists the reviewers the PROJECT requires per review stage, by profile id with the stage and agent names: each must hold an `approve` verdict on the delivered revision before acceptance, engaged or not — `reviewers` lists only who you have engaged, so a required reviewer missing from it is a review you still owe. Each engaged reviewer also carries `consecutiveRequestChanges`: how many successive times it has requested changes, reset by its own first approve. A re-review that blocks the SAME revision again counts as another objection (ruling 204: in a deadlock the deliverer commits nothing, so no new revision is ever minted and counting revisions would sit at one forever); a re-DISPATCH that records no verdict counts as nothing. One is ordinary review; two or more means the objection outlived either a rework or the deliverer's answer that it had nothing in scope to change, which is when another rework stops being the move \u2014 and Viberr opens the decision packet for that itself when the count reaches two (ruling 237) \u2014 unless another decision was already open on the task at that instant, in which case it is SKIPPED and raised again when that one is answered (ruling 328). So a task you are reading with such a reviewer and no packet is one whose escalation is still owed, not one that failed: do not read the absence of a packet as evidence that the reviewer's objection was judged and dismissed.",
+      {
+        events: z
+          .number()
+          .int()
+          .min(1)
+          .max(OPERATOR_TIMELINE_MAX)
+          .optional()
+          .describe(
+            `Newest timeline entries to include (default ${OPERATOR_TIMELINE_DEFAULT}, max ${OPERATOR_TIMELINE_MAX}). The reply always says how many the timeline HAS, and names this argument when it is showing you fewer.`,
+          ),
+      },
+      async (args: { events?: number }) =>
         textResult(
           JSON.stringify(
-            operatorSnapshot(db, ctx, projectSlug, taskKey, authority),
+            operatorSnapshot(
+              db,
+              ctx,
+              projectSlug,
+              taskKey,
+              authority,
+              args.events ?? OPERATOR_TIMELINE_DEFAULT,
+            ),
             null,
             2,
           ),
@@ -273,6 +300,133 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     ),
     "get_task",
   );
+
+  // Ruling 282 (pass 37, F37-115): the operator plans ACROSS a board it could
+  // not read. `get_task` takes no arguments — it answers this task and only
+  // this task — and there was no listing anywhere in this toolkit. So the one
+  // actor that writes `blockedBy` (`set_dependencies`), that decides ordering,
+  // and that is the ONLY author of a `create_task` option (ruling 269) could
+  // not check whether the work it was about to ask for already had an owner.
+  //
+  // Two duplicates in one hour, from that one cause. On SHOP-26 it proposed
+  // creating "Inventory: serve the published stock batch contract on GET
+  // /stock" — SHOP-39's title, word for word, created by its own earlier
+  // packet. On SHOP-27 it proposed "Gateway routes for orders, cart and
+  // inventory" while SHOP-29, "Gateway routes for inventory, cart and
+  // checkout", already stood and already waited on SHOP-27. Both times a
+  // person was one confirm away from a second task for work that had one.
+  //
+  // The same tool ruling 281 gave a specialist, on the same implementation, so
+  // "is SHOP-39 real" has one answer whoever asks.
+  add(
+    tool(
+      "read_board",
+      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about — in a document, a report or a directive — is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
+      {
+        taskKey: z
+          .string()
+          .optional()
+          .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { taskKey?: string }) => {
+        const boardDeps = { db, ctx, projectSlug };
+        const wanted = args.taskKey?.trim();
+        return textResult(
+          wanted ? readBoardTask(boardDeps, wanted) : readBoardList(boardDeps),
+        );
+      },
+    ),
+    "read_board",
+  );
+
+  // Ruling 293: the EVIDENCE on its own task, not only the report's claim about
+  // it. Mounted here in the SAME change that mounts it on the controller —
+  // ruling 292 exists because ruling 285 gave one coordinator a reader and not
+  // the other, and doing that twice in one pass would be a choice rather than
+  // an oversight.
+  add(
+    tool(
+      "read_task_attachment",
+      "Read ONE of this task's attachments as text. Attachments are where the agents you dispatch put their PROOF - a mutation run with both outputs, before/after captures, a cold-stack log - and a report names them without carrying their contents. Call it before you tell a person something was proved, before you recommend acceptance on the strength of evidence you have not read, and before you repeat a report's claim about what its own attachment shows. Text files only (.txt .log .md .json .yml .yaml .csv .diff .patch); anything else is named and refused rather than guessed at. Read-only.",
+      {
+        name: z
+          .string()
+          .describe("The attachment's file name, exactly as the timeline lists it."),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { name: string }) => {
+        const read = readTaskAttachmentText(projectSlug, taskKey, args.name, ctx.dataRoot);
+        if (!read) {
+          const have = listTaskAttachments(projectSlug, taskKey, ctx.dataRoot).map(
+            (a) => a.name,
+          );
+          return textResult(
+            `[noop] ${taskKey} has no attachment \`${args.name}\`. ` +
+              (have.length
+                ? `It holds: ${have.join(", ")}.`
+                : "It has no attachments at all."),
+          );
+        }
+        if ("unreadable" in read) return textResult(`[noop] ${read.unreadable}`);
+        return textResult(JSON.stringify(read, null, 1));
+      },
+    ),
+    "read_task_attachment",
+  );
+
+  // Ruling 285 (F37-120): the coordinator could not read a report it was handed
+  // half of. Its prompt clips an agent report at 4,000 chars and `get_task`
+  // clips every `recentTimeline` entry at 1,500, and nothing here returned one
+  // whole — so on SHOP-42 it raised a packet to a human saying "the reviewer's
+  // report reached me truncated … the full text is on the timeline", which was
+  // true and was somewhere it could not go. The clip stays; the way out is new.
+  add(
+    tool(
+      "read_timeline_entry",
+      "Read ONE timeline entry of this task in full, addressed by the `occurredAt` stamp `get_task` prints for it. The agent report in your prompt is clipped at 4,000 characters and every `recentTimeline` entry is clipped at 1,500 — this is how you read the rest. Call it before you summarise a report for a human, before you raise a packet about one, and before you conclude a report did not mention something: an agent's findings are routinely past the clip, and a report you only half-read is a report you cannot coordinate from. Read-only.",
+      {
+        occurredAt: z
+          .string()
+          .describe(
+            "The entry's `occurredAt` stamp, exactly as get_task prints it (ISO, to the millisecond).",
+          ),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { occurredAt: string }) =>
+        textResult(
+          readTimelineEntry({ db, ctx, projectSlug }, taskKey, args.occurredAt),
+        ),
+    ),
+    "read_timeline_entry",
+  );
+
+  // Ruling 283: the operator's knowledge bases are INDEXED into its prompt, not
+  // injected, so it needs the same pull the agents it coordinates have. Its
+  // grant list already carries the project's rulings KB (ruling 239), which is
+  // the one it is likeliest to need and the one the old shared budget starved
+  // first.
+  if (authority.kb.length > 0) {
+    const grantedKb = authority.kb;
+    add(
+      tool(
+        "read_knowledge_doc",
+        "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index — every document, its size and its sections — and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read the project's settled rules before you scope a task, answer a packet or write a directive that depends on them, rather than working from what a document's title suggests it says.",
+        {
+          kb: z
+            .string()
+            .describe("The knowledge base's name, as its index heading gives it."),
+          path: z
+            .string()
+            .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args: { kb: string; path: string }) =>
+          textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot)),
+      ),
+      "read_knowledge_doc",
+    );
+  }
 
   // F21-21: the ONE anchored answer to "what is on the default branch?".
   //
@@ -342,7 +496,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "post_comment",
-        "Post a concise operator comment to the task timeline. Use it to narrate your plan and decisions (observed → changed → recommended → decision required). Keep it short.",
+        "Post a concise operator comment to the task timeline. Use it to narrate your plan and decisions (observed → changed → recommended → decision required). Keep it short. It is read by the HUMANS and starts no agent: an @name here reaches nobody. To put a question or a directive to an agent, `run_agent` it with that text as its prompt.",
         { text: z.string().describe("The comment text (markdown allowed).") },
         async (args) =>
           resultText(
@@ -420,7 +574,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           body: z.string().optional().describe("One or two sentences of context (no raw logs/secrets)."),
           observations: z
             .array(
-              z.object({
+              z.strictObject({
                 k: z.string().describe("Label, e.g. 'Branch' or 'Reviewer verdict'."),
                 v: z.string().describe("Value."),
                 code: z.boolean().optional().describe("Render the value as code."),
@@ -430,11 +584,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe("Typed observed facts shown above the options."),
           options: z
             .array(
-              z.object({
+              z.strictObject({
                 kind: z
                   .enum(PACKET_OPTION_KINDS)
                   .describe(
-                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too. Ruling 164: 'force_accept' performs the admin force-accept itself, on the same disclosure and the same audited bypass record as the task page's Force accept button, and only an admin may resolve it, so offer it when a wedged gate leaves no other route and never as a custom option that merely describes one. 'move_stage' carries `toStage` and performs the move on the stage picker's own path; it is how a person shows the task at another stage when you cannot make the move yourself. Neither kind, and no other, can edit an agent profile: name the Agents surface as the remedy instead.",
+                    "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision' — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too. Ruling 164: 'force_accept' performs the admin force-accept itself, on the same disclosure and the same audited bypass record as the task page's Force accept button, and only an admin may resolve it, so offer it when a wedged gate leaves no other route and never as a custom option that merely describes one. 'move_stage' carries `toStage` and performs the move on the stage picker's own path; it is how a person shows the task at another stage when you cannot make the move yourself. Ruling 237: 'question_reviewer' carries `profileId` and starts THAT reviewer with the standing question about everything it would still block on, asking for a comment and no fresh verdict; it is the option for a reviewer that keeps objecting, and Viberr opens it itself at the second consecutive objection, so author one only when no packet was raised. Ruling 269: 'create_task' carries `newTask` and CREATES that task when the person confirms, under their own authority — it is the option for work you have found that belongs outside this task's scope (another service, a contract nobody produces, a gap a report named). Offer it instead of writing 'you create the task' in an option's text: an option that instructs the reader is not a decision they can take. Neither kind, and no other, can edit an agent profile: name the Agents surface as the remedy instead.",
                   ),
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
@@ -449,7 +603,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .string()
                   .optional()
                   .describe(
-                    "retry_other_backend only: the agent profile to re-run; omit to re-run the agent whose run failed.",
+                    "retry_other_backend: the agent profile to re-run; omit to re-run the agent whose run failed. question_reviewer (ruling 237): the engaged non-delivering reviewer the question goes to, and required there \u2014 an option that names no reviewer, or names the deliverer, is refused.",
                   ),
                 deleteBranch: z
                   .boolean()
@@ -468,6 +622,44 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .optional()
                   .describe(
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
+                  ),
+                blockedBy: z
+                  .array(z.string())
+                  .optional()
+                  .describe(
+                    "block_on_dependencies only (ruling 230): what THIS task waits on — task keys, or `goal-N link M`. Required on that kind (an option that names nothing to wait on resolves into a hold that releases on nothing) and refused on every other one.",
+                  ),
+                dueAt: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "wait_for_window only (ruling 224): the instant the provider said its window reopens, as an ISO timestamp — the resolution schedules the re-dispatch just after it. Required on that kind and refused on every other one. Viberr raises the quota packet itself, so author one only when no packet was raised.",
+                  ),
+                newTask: z
+                  .strictObject({
+                    title: z.string().describe("The new task's title."),
+                    goal: z
+                      .string()
+                      .describe(
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria) — it is the contract whoever works it is held to.",
+                      ),
+                    blockedBy: z
+                      .array(z.string())
+                      .optional()
+                      .describe(
+                        "What the NEW task waits on (task keys, or `goal-N link M`) — not what THIS task waits on.",
+                      ),
+                    blocks: z
+                      .array(z.string())
+                      .optional()
+                      .describe(
+                        "Ruling 287: the EXISTING tasks that must WAIT ON the new one — the reverse direction of `blockedBy`, and usually the one that matters, because a task is normally created to unblock something. Each key listed here gets the new task added to its own `blockedBy` when the person confirms, with a note on that task saying which decision did it. Use it whenever other work must not start until the new task lands; read_board first, since every key is checked and a bad one is refused by name. Ruling 322: THIS task's own key belongs here whenever it is the work that must wait, and is often the right entry — the decision then tells the person this task will wait on what it creates, instead of the sentence it used to print unconditionally, that this task is unchanged.",
+                      ),
+                    labels: z.array(z.string()).optional().describe("Labels for the new task."),
+                  })
+                  .optional()
+                  .describe(
+                    "create_task only (ruling 269): the task this option creates when the person confirms. Required on that kind and refused on every other one.",
                   ),
               }),
             )
@@ -494,6 +686,30 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               // Ruling 138: the goal draft is prose bound for the goal editor;
               // `operatorOpenPacket` caps it and refuses it off edit_goal.
               if (o.goalDraft) option.goalDraft = prose(o.goalDraft);
+              // Ruling 270 (F37-102): rulings 230 and 224 each added a kind
+              // whose payload this schema never carried, so the operator could
+              // name the kind and never satisfy the refusal it got back — the
+              // two kinds were unreachable from the one surface that authors
+              // packets. Their tests proved the WRITER, which accepts both, and
+              // never the door.
+              if (o.blockedBy?.length) option.blockedBy = [...o.blockedBy];
+              if (o.dueAt) option.dueAt = o.dueAt.trim();
+              // Ruling 269: the task a create_task option will create;
+              // `operatorOpenPacket` refuses it off that kind and refuses the
+              // kind without it.
+              if (o.newTask) {
+                const newTask: NonNullable<OperatorPacketOptionInput["newTask"]> = {
+                  title: prose(o.newTask.title),
+                  goal: prose(o.newTask.goal),
+                };
+                if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+                // Ruling 287: the reverse edge. Forwarded here for the reason
+                // ruling 270 exists — a payload the schema accepts and the
+                // AUTHOR cannot send is a field that does nothing.
+                if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
+                if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
+                option.newTask = newTask;
+              }
               return option;
             }),
           };
@@ -583,7 +799,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "run_agent",
-        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer). A hand-off is a choice about WHO should build, never a way around a stage: the engaged deliverer runs at EVERY stage (ruling 133), so rework, conflict resolution and follow-ups go back to it wherever the board shows the task; never hand delivery to another profile to get around a stage. Supervised → ONE run-agent recommendation card; full autonomy → runs directly.",
+        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer). A hand-off is a choice about WHO should build, never a way around a stage: the engaged deliverer runs at EVERY stage (ruling 133), so rework, conflict resolution and follow-ups go back to it wherever the board shows the task; never hand delivery to another profile to get around a stage. Whether this RUNS the agent or files a recommendation card is decided by your `dispatch-agents` grant, not by autonomy: `direct` runs it (the seeded default, and what supervised autonomy therefore does too), `recommend` files ONE card — which full autonomy then promotes to a direct run. Read the mode off `operatorPolicy` before you narrate what you did (ruling 207(c)).",
         {
           profileId: z
             .string()
@@ -653,7 +869,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "update_branch_from_base",
-        "Bring the task's branch UP TO DATE with the project's base branch — merge the base into the branch and push it. Other tasks share this repository, so a branch goes stale the moment one of them merges; a reviewer then reads a diff against a base that no longer exists, and delivery can hit a conflict nobody chose. Call it BEFORE you deliver and before you hand work to a reviewer. It is idempotent and cheap: an already-current branch changes nothing and says so, so call it when you are unsure rather than guessing. The server does the git inside the delivering agent's workspace — never ask an agent to rebase, merge or force-push. If the branch CONFLICTS with the base, the merge is aborted, the branch is left exactly as it was, and a blocking decision packet is opened for a human: report that and stop. Do not retry it, and never propose a force-push. Never call it once the task stands at the acceptance stage (the stage before Done): the acceptance ceremony brings the branch up to date once and merges in the same step, so the tool refuses there, unless the pull request already conflicts, when it records the conflict and opens the packet.",
+        "Bring the task's branch UP TO DATE with the project's base branch — merge the base into the branch and push it. Other tasks share this repository, so a branch goes stale the moment one of them merges; a reviewer then reads a diff against a base that no longer exists, and delivery can hit a conflict nobody chose. Call it BEFORE you deliver and before you hand work to a reviewer. It is idempotent and cheap: an already-current branch changes nothing and says so, so call it when you are unsure rather than guessing. `get_task`'s `baseBehindBy` is how sure you can be: a positive number is the base ahead of this branch and the call will do real work; `0` means the last compare found the branch level with the base, so it is a no-op; `null` means nothing has compared them yet, which is not a reason to skip it. The server does the git inside the delivering agent's workspace — never ask an agent to rebase, merge or force-push. If the branch CONFLICTS with the base, the merge is aborted, the branch is left exactly as it was, and a blocking decision packet is opened for a human: report that and stop. Do not retry it, and never propose a force-push. Never call it once the task stands at the acceptance stage (the stage before Done): the acceptance ceremony brings the branch up to date once and merges in the same step, so the tool refuses there, unless the pull request already conflicts, when it records the conflict and opens the packet.",
         {},
         async () =>
           resultText(

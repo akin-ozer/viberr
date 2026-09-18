@@ -24,6 +24,8 @@ export const ROLE_IDS = PROJECT_ROLES;
 
 export interface RbacRow {
   action: string;
+  /** What the action also gates, when the grant name cannot carry it. */
+  covers?: string;
   grant: Record<ProjectRole, 0 | 1>;
 }
 
@@ -38,10 +40,13 @@ function grantByRole(roles: readonly ProjectRole[]) {
   } satisfies Record<ProjectRole, 0 | 1>;
 }
 
-export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => ({
-  action: cap.label,
-  grant: grantByRole(cap.roles),
-}));
+export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => {
+  const row: RbacRow = { action: cap.label, grant: grantByRole(cap.roles) };
+  // Ruling 309(a): the grant name stays short (sentences read it inline); the
+  // table is where a person comes to learn the scope, so the table carries it.
+  if ("covers" in cap) row.covers = cap.covers;
+  return row;
+});
 
 export type BoundaryId = "auto" | "approval" | "human";
 

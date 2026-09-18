@@ -90,6 +90,7 @@ function approval() {
     result: "approve" as const,
     reason: "looks right",
     at: "2026-07-25T09:30:00.000Z",
+    rounds: 1,
   };
 }
 

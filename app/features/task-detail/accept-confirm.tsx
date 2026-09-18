@@ -1,7 +1,8 @@
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
-import { prStatePill } from "~/features/github/github-pills";
+import type { PrChecksRender } from "~/shared/mapping/task.server";
+import { checksPill, prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -84,6 +85,14 @@ export interface AcceptConfirmTask {
   validation: Validation;
   branch: string | null;
   pr: PrRef | null;
+  /**
+   * Ruling 304: the CI state of the pull request this click MERGES.
+   *
+   * Checks are deliberately not an acceptance gate -- the reviewers' verdicts
+   * are -- which is exactly why the person deciding has to be told. Null when
+   * nothing has reported, which reads as "not reported" and never as "green".
+   */
+  prChecks: PrChecksRender | null;
 }
 
 function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
@@ -344,6 +353,25 @@ export function AcceptConfirm({
                     PR #{pr.number} · {prPill.label}
                   </Pill>{" "}
                   into <span className="mono">{defaultBranch}</span>
+                  {/* Ruling 304: this row names the door; ruling 246's rule is
+                      that it also says whether the door is open. The checks
+                      pill was one panel up on the page and absent from the
+                      dialog that authorizes an irreversible merge. */}
+                  {task.prChecks && task.prChecks.state !== "passing" ? (
+                    <>
+                      {" "}
+                      <Pill kind={checksPill(task.prChecks).kind} sm>
+                        {checksPill(task.prChecks).label}
+                      </Pill>{" "}
+                      <span className="pol-note">
+                        {task.prChecks.state === "failing"
+                          ? "Checks are not a gate here, the review verdicts are, so this merge is not blocked by them. Merging anyway is your call."
+                          : task.prChecks.state === "pending"
+                            ? "Checks have not finished. Merging now does not wait for them."
+                            : "GitHub reported no conclusive check result for this head."}
+                      </span>
+                    </>
+                  ) : null}
                 </>
               ) : noChanges ? (
                 // F19-21 opened a SECOND no-change shape and this row asserted

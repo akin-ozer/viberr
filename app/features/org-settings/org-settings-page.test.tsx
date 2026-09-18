@@ -419,9 +419,9 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -504,7 +504,7 @@ describe("ResourcesPanel", () => {
         lastError:
           "exited before responding — ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'",
         warmingSince: null,
-        writeTools: [], writeToolsReviewed: false, discoveredTools: null,
+        writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
       },
     ];
     const { container } = renderPanel(
@@ -530,7 +530,7 @@ describe("ResourcesPanel", () => {
         lastCheckedAt: new Date().toISOString(),
         lastError: "still installing after 20s — …",
         warmingSince: new Date().toISOString(),
-        writeTools: [], writeToolsReviewed: false, discoveredTools: null,
+        writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
       },
     ];
     const { container } = renderPanel(
@@ -564,7 +564,7 @@ describe("ResourcesPanel", () => {
         hasCred: true,
         credUnreadable: true,
         lastError: null, warmingSince: null,
-        writeTools: [], writeToolsReviewed: false, discoveredTools: null,
+        writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
         tools: null,
         up: null,
         lastCheckedAt: new Date().toISOString(),
@@ -630,7 +630,7 @@ describe("ResourcesPanel", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [
       { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
-        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null },
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
     ];
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,
@@ -1243,6 +1243,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
           controllerConfig={CONTROLLER_CONFIG}
           controllerLocks={CONTROLLER_LOCKS}
           auditEvents={[]}
+          auditEventsOrgScoped={[]}
         />,
       );
       expect(opened).toHaveLength(1);
@@ -1281,6 +1282,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
@@ -1338,6 +1340,7 @@ describe("C9: instance storage line", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
@@ -1369,6 +1372,7 @@ describe("C9: instance storage line", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     expect(getByText(/Automatic cleanup is not scheduled/)).toBeTruthy();
@@ -1404,6 +1408,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     expect(getByText(/Capped at 2/)).toBeTruthy();
@@ -1427,6 +1432,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     const sentence = getByText(/Cap 2: up to 2 agent runs at once,/);
@@ -1453,6 +1459,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     expect(
@@ -1472,6 +1479,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     expect(getByText(/Cap 1: up to 1 agent run at once, plus 1 slot for/)).toBeTruthy();
@@ -1489,6 +1497,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     expect(queryByText(/for operator and controller turns/)).toBeNull();
@@ -1506,6 +1515,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     // The reading says "Unlimited · 0 runs live" — distinct from the "0 =
@@ -1529,6 +1539,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1546,7 +1557,7 @@ describe("run concurrency control", () => {
 
   // PG26-A: the in-app audit browse + the Org-scoped toggle that isolates the
   // events the project Activity page cannot show.
-  it("browses recent audit events; the Org-scoped toggle hides project events", () => {
+  it("browses recent audit events; the Org-scoped toggle swaps to its own window (ruling 234)", () => {
     const { getByText, queryByText } = renderPanel(
       <OrgSettingsPage
         view={viewBase}
@@ -1557,16 +1568,12 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
-      auditEvents={[
-          {
-            id: "a1",
-            occurredAt: "2026-08-22T10:00:00.000Z",
-            actorLabel: "arda@viberr.dev",
-            action: "github.pat.created",
-            subjectKind: "github_pat",
-            subjectId: "pat_1",
-            projectSlug: null, // org-scoped
-          },
+      // Ruling 234: the two windows are fetched SEPARATELY, so the unscoped
+        // list here deliberately does NOT contain the PAT row. That is the live
+        // shape the ruling fixes: on a busy instance the org-scoped events fall
+        // out of the unscoped window entirely (measured at 2 visible against 96
+        // on file), and a client-side filter of this list could never find them.
+        auditEvents={[
           {
             id: "a2",
             occurredAt: "2026-08-21T10:00:00.000Z",
@@ -1577,18 +1584,31 @@ describe("run concurrency control", () => {
             projectSlug: "viberr-core", // project-scoped
           },
         ]}
+        auditEventsOrgScoped={[
+          {
+            id: "a1",
+            occurredAt: "2026-08-22T10:00:00.000Z",
+            actorLabel: "arda@viberr.dev",
+            action: "github.pat.created",
+            subjectKind: "github_pat",
+            subjectId: "pat_1",
+            projectSlug: null, // org-scoped
+          },
+        ]}
       />,
     );
-    // Both events render by default.
-    expect(getByText("github.pat.created")).toBeTruthy();
+    // The default view is the unscoped window, and the PAT row is not in it.
     expect(getByText("task.metadata.updated")).toBeTruthy();
+    expect(queryByText("github.pat.created")).toBeNull();
     // P07-H (pass 32): the list caps at 15rem and scrolls, so it must be
     // reachable by keyboard and named (WCAG 2.1.1 / axe
     // scrollable-region-focusable). The fix had no lock; this is it.
     const list = document.querySelector("ul.audit-list")!;
     expect(list.getAttribute("tabindex")).toBe("0");
     expect(list.getAttribute("aria-label")).toBe("Recent audit events");
-    // Toggling "Org-scoped" hides the project-scoped event, keeps the org one.
+    // Toggling "Org-scoped" swaps to the scoped window: the PAT change the
+    // unscoped list never carried is now reachable, and the project-scoped row
+    // is gone. Filtering one list could not have produced this.
     fireEvent.click(getByText("Org-scoped"));
     expect(getByText("github.pat.created")).toBeTruthy();
     expect(queryByText("task.metadata.updated")).toBeNull();
@@ -1606,6 +1626,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1632,6 +1653,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1677,6 +1699,7 @@ describe("run concurrency control", () => {
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
@@ -1725,6 +1748,7 @@ describe("spending cap control (ruling 175)", () => {
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
     />
   );
 
@@ -1816,6 +1840,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
     />
   );
 
@@ -1963,6 +1988,7 @@ describe("FR33: the audit card discloses the export-before-purge record", () => 
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
         auditEvents={[]}
+        auditEventsOrgScoped={[]}
       />,
     );
     const copy = getByText(/Download the audit log/).textContent ?? "";
@@ -2010,6 +2036,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
       auditEvents={[]}
+      auditEventsOrgScoped={[]}
       />,
     );
     const h1s = container.querySelectorAll("h1");
@@ -2066,6 +2093,80 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
 });
 
 /* ------------- ruling 176: the MCP editor's "Write tools" section --------- */
+
+/**
+ * Ruling 220 (F37-40). The MCP row stated the write-tool position only when a
+ * server was GATED, so the one state worth seeing — tools that look like
+ * writes, nobody has reviewed them, so nothing is withheld — was the state the
+ * list was silent about. Live on this instance, `kb-architecture` and
+ * `kb-conventions` are `server-filesystem` rooted at a knowledge base, 14 tools
+ * each, granted to three agent templates each, unmarked: those agents can
+ * rewrite the knowledge bases that are injected into every other agent's prompt
+ * as configuration. The controller reasoned about that exact hazard for a third
+ * such server and granted nothing; the list gave it and the admin nothing.
+ */
+describe("MCP rows state where a server stands on write tools (ruling 220)", () => {
+  const FS_TOOLS = ["read_file", "list_directory", "write_file", "edit_file", "move_file"];
+
+  function rowText(m: McpView): string {
+    // Two rows in one test would make `getByText` ambiguous; each reading is
+    // its own render.
+    cleanup();
+    const { getByText } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={[m]}
+        skills={SKILLS}
+        gagents={GAGENTS}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+    // The posture rides the row's meta line, beside the transport and target —
+    // read the whole row so the assertion cannot pass on a fragment.
+    const row = getByText(m.name).closest("li, .rsrc-row, div");
+    return row?.textContent ?? "";
+  }
+
+  it("names the unreviewed write-looking tools and says nothing is withheld", () => {
+    // CANARY: render "" for the unreviewed case (the old behaviour) and the
+    // row goes back to saying nothing about a server three templates can write
+    // the knowledge bases with.
+    const text = rowText({
+      ...MCPS[0]!,
+      discoveredTools: FS_TOOLS,
+      writeTools: [],
+      writeToolsReviewed: false,
+    });
+    expect(text).toContain("3 tools look like a write and nothing is withheld: not reviewed");
+  });
+
+  it("says so when an admin reviewed the server and withheld nothing", () => {
+    const text = rowText({
+      ...MCPS[0]!,
+      discoveredTools: FS_TOOLS,
+      writeTools: [],
+      writeToolsReviewed: true,
+    });
+    expect(text).toContain("reviewed: none of its 3 write-looking tools is withheld");
+    expect(text).not.toContain("not reviewed");
+  });
+
+  it("keeps ruling 176's sentence for a gated server, and stays quiet when nothing looks like a write", () => {
+    expect(
+      rowText({ ...MCPS[0]!, discoveredTools: FS_TOOLS, writeTools: ["write_file"] }),
+    ).toContain("1 write tool withheld from read-only runs");
+    // A read-only server has no position to state, and a row that alarms on
+    // everything is a row nobody reads.
+    const quiet = rowText({
+      ...MCPS[0]!,
+      discoveredTools: ["read_file", "list_directory"],
+      writeTools: [],
+      writeToolsReviewed: false,
+    });
+    expect(quiet).not.toMatch(/write/i);
+  });
+});
 
 describe("McpModal — write tools (ruling 176)", () => {
   const LISTED = ["get_issue", "create_pull_request", "merge_pull_request", "list_commits"];

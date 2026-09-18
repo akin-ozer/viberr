@@ -714,6 +714,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
             result: "approve",
             reason: "Nothing to change.",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy",

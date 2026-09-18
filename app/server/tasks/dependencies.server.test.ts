@@ -20,9 +20,11 @@ import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import { setTaskArchived, transitionStage } from "./task-actions.server";
 import { goalRunnerTick } from "./goal-actions.server";
+import type { StartAgentRunInput, StartAgentRunResult } from "./specialist-run.server";
 import {
   announceRelease,
   clearDependencies,
+  drainQueuedQuestions,
   noteDeadDependency,
   releaseDependents,
   releaseDueDependents,
@@ -75,6 +77,7 @@ async function seed(store: TestStore): Promise<void> {
             taskKey: l.taskKey,
             status: l.taskKey ? "active" : "pending",
             note: null,
+            redeclared: false,
             blockedBy: l.blockedBy,
           })),
           createdAt: null,
@@ -286,6 +289,68 @@ const runOperatorStub = () =>
     Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const }),
   );
 
+/**
+ * Ruling 331 (pass 37, F37-167) shipped without a canary, which is how this
+ * note said two false things for a day: it reduced an `error` that was in scope
+ * and being logged on the line above to "(an internal error)", and then claimed
+ * "Coordination is paused for this task" — live on SHOP-38 the operator was
+ * re-invoked automatically eleven seconds later, leaving that durable line as
+ * the only thing still saying the task had stopped.
+ *
+ * `autoInvokeOperator`'s failure arm is reachable from every trigger; a release
+ * is the cheapest one to drive.
+ */
+describe("ruling 331: a failed auto-invocation names its cause and claims nothing", () => {
+  it("writes the thrown reason, the trigger, and no claim that coordination stopped", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-10", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        heldAtStage: "impl",
+        blockedBy: ["VIB-2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
+      Promise.reject(new Error("no runtime is deployed for claude")),
+    );
+    // VIB-2 is already done, so the release fires and its re-invoke throws.
+    expect(
+      await releaseTask(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug, "VIB-10"),
+    ).toBe(true);
+    await eventually(() => expect(runOperator).toHaveBeenCalled());
+    await eventually(() =>
+      expect(
+        file(store, "VIB-10").timeline.some((e) =>
+          (e.text ?? "").includes("could not be started automatically"),
+        ),
+      ).toBe(true),
+    );
+    const note = file(store, "VIB-10").timeline.find((e) =>
+      (e.text ?? "").includes("could not be started automatically"),
+    )!;
+    const text = note.text ?? "";
+    // CANARY: put "(an internal error)" back and the thrown reason is gone.
+    expect(text).toContain("no runtime is deployed for claude");
+    // The trigger it failed ON, because "the operator did not start" is a
+    // different fact depending on what asked for it.
+    expect(text).toContain("dependencies-released");
+    // CANARY: restore "Coordination is paused for this task" and these fail.
+    // This code knows ONE attempt failed; it cannot know nothing else will run,
+    // and ruling 330's sweep guarantees something looks again.
+    expect(text).not.toMatch(/coordination is paused/i);
+    expect(text).toContain("not a decision to stop");
+    expect(text).toContain("sweeps for tasks");
+    // The manual exit survives as an option, not as the only way out.
+    expect(text).toContain("Run the operator yourself");
+    expect(text).not.toMatch(/run the operator manually when you'?re ready/i);
+  });
+});
+
 /** Ruling 131(e): the release engine. */
 describe("the release engine", () => {
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
@@ -356,7 +421,7 @@ describe("the release engine", () => {
         frontmatter: {
           id: "goal-3", title: "goal-3", status: "active", createdBy: store.users.arda.id, createdByLabel: "arda",
           onFailure: "continue",
-          links: [{ index: 1, title: "l1", goal: "g", taskKey: null, status: "skipped", note: null, blockedBy: [] }],
+          links: [{ index: 1, title: "l1", goal: "g", taskKey: null, status: "skipped", note: null, redeclared: false, blockedBy: [] }],
           createdAt: null, updatedAt: null,
         },
         description: "",
@@ -567,6 +632,73 @@ describe("the sweep notices a dead wait whatever killed it", () => {
 });
 
 
+/**
+ * F37-63: a pending link on a CANCELLED goal is dead and nothing noticed.
+ *
+ * Every mechanism lined up to miss it. `case "cancel"` sets only
+ * `fm.status = "cancelled"` and leaves the links exactly as they were; the
+ * resolver read `link.status` alone and mapped `pending` to `open`;
+ * `deadDependencies` filtered `failed`/`missing`; and every goal-side remedy
+ * that could rescue it (`skip_link`, `edit_link`, `retry_link`,
+ * `remove_pending_link`) refuses with "Goal X is cancelled". Meanwhile
+ * `releaseDependents`' own comment claimed the sweep "notices a wait that can
+ * NEVER complete, whatever killed it … a cancelled goal, a removed link or a
+ * lost task". It did not notice this one.
+ */
+describe("F37-63: a pending link on a cancelled goal is a dead wait", () => {
+  it("is noted, notified and left on a human, like every other dead wait", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    // goal-1 link 2 has no task yet. Cancel the chain it belongs to.
+    const { updateGoal } = await import("./goal-actions.server");
+    await updateGoal(
+      store.db,
+      { projectSlug: store.slug, goalId: "goal-1", action: { op: "cancel" } },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-13", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        blockedBy: ["goal-1 link 2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runOperator = runOperatorStub();
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
+
+    // CANARY: drop the `goalTerminal` arm from the resolver and this task is
+    // held forever in silence — the sweep sees `open`, writes nothing, and the
+    // minute tick re-confirms it for as long as the instance runs.
+    expect(await releaseDependents(store.db, ctxWith, store.slug)).not.toContain("VIB-13");
+    const parsed = file(store, "VIB-13");
+    const dead = parsed.timeline.filter((e) => e.title === "Waiting on work that cannot complete");
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.text).toContain("can never complete");
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // The entry keeps its own cause, which is what the note points the reader
+    // at ("What KILLED the entry is on the entry itself, rendered as its
+    // state"). CANARY: fold `cancelled` into `failed` and the surface says
+    // "archived", which is a different cause and a false one.
+    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
+    const entries = resolveDependencies(store.db, store.slug, ["goal-1 link 2"]);
+    expect(entries[0]!.state).toBe("cancelled");
+  });
+
+  it("a live chain's pending link is still just open", async () => {
+    // The gate keys on the GOAL's status, so an ordinary wait must not become
+    // dead. CANARY: treat every taskless pending link as cancelled.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
+    expect(resolveDependencies(store.db, store.slug, ["goal-1 link 2"])[0]!.state).toBe("open");
+  });
+});
+
 describe("the archive hook and the convergent sweep state the same fact once", () => {
   it("two archived dependencies produce two notes, not a third from the sweep", async () => {
     // `dead` was FILTERED by the archived key, so the per-key hook spelled
@@ -661,8 +793,8 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
           createdByLabel: store.users.arda.email,
           onFailure: "pause",
           links: [
-            { index: 1, title: "Log view", goal: "g", taskKey: "VIB-7", status: "active", note: null, blockedBy: ["goal-1 link 2"] },
-            { index: 2, title: "Filters", goal: "g", taskKey: null, status: "pending", note: null, blockedBy: [] },
+            { index: 1, title: "Log view", goal: "g", taskKey: "VIB-7", status: "active", note: null, redeclared: false, blockedBy: ["goal-1 link 2"] },
+            { index: 2, title: "Filters", goal: "g", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
           ],
           createdAt: null,
           updatedAt: null,
@@ -727,5 +859,184 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: [] }, actor(store, "arda"), { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } });
     expect(goal2().raw).toBe(before);
     expect(goal2().parsed.frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
+  });
+});
+
+/**
+ * Ruling 241 (pass 37, F37-68): the question a hold refused is put when the
+ * hold lifts, and before the operator gets the task back.
+ *
+ * Live on SHOP-5 ruling 237's escalation recommended asking the reviewer what
+ * else it would block on. The task was held (`blockedBy: [SHOP-23]`), ruling 186
+ * refuses every agent dispatch while it is, and the resolution discovered that
+ * only AFTER writing the decision onto the task contract and clearing the
+ * packet. Nothing was asked, the packet was gone, and the contract said "no
+ * rework until the reviewer has answered" about a reviewer nobody would ask.
+ */
+/** What the drain sends the dispatch: the contract under test, taken from the
+ *  dispatch's own input type so the recorder cannot assert a shape the real
+ *  function would not accept. */
+type QuestionDispatch = StartAgentRunInput;
+
+const QUESTION_RUN: StartAgentRunResult = {
+  runId: "run_q",
+  backend: "claude",
+  role: "Code review",
+  name: "rev",
+  outcome: "started",
+  refusal: null,
+};
+
+const recordDispatch =
+  (into: QuestionDispatch[]) =>
+  (_db: DatabaseSync, input: QuestionDispatch): Promise<StartAgentRunResult> => {
+    into.push(input);
+    return Promise.resolve(QUESTION_RUN);
+  };
+
+describe("F37-68 / ruling 241: a reviewer question the hold refused survives the wait", () => {
+  function seedQueued(store: TestStore, held: string[]): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        stage: "review",
+        waiting: "human",
+        ownerUserId: store.users.arda.id,
+        blockedBy: held,
+        engagements: [
+          { profileId: "rev", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+        ],
+        queuedQuestions: [
+          {
+            id: "qq_1",
+            profileId: "rev",
+            directive: "Name everything you would still block on.",
+            decidedBy: store.users.arda.id,
+            decidedByLabel: "Arda",
+            decidedAt: "2026-09-14T17:35:15.159Z",
+            heldBy: [...held],
+          },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("the drain starts the reviewer with the stored question, and empties the queue first", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, []);
+    const started: QuestionDispatch[] = [];
+    const drained = await drainQueuedQuestions(
+      store.db,
+      { dataRoot: store.dataRoot, deps: { startAgentRun: recordDispatch(started) } },
+      store.slug,
+      "VIB-11",
+    );
+    {
+      expect(drained).toBe(1);
+      expect(started).toHaveLength(1);
+      // The STORED text, not a constant rebuilt at drain time: a person was
+      // promised this question and the wait can outlive the constant.
+      expect(started[0]!.directive).toBe("Name everything you would still block on.");
+      expect(started[0]!.profileId).toBe("rev");
+      expect(started[0]!.directiveFrom).toBe("Arda");
+      // CANARY: drain without clearing and the next release asks the same
+      // reviewer the same question again, which is the loop ruling 237 breaks.
+      expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
+    }
+  });
+
+  it("a start that fails after the release says so, and does not leave the question queued", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, []);
+    await drainQueuedQuestions(
+      store.db,
+      {
+        dataRoot: store.dataRoot,
+        deps: {
+          startAgentRun: () => Promise.reject(new Error("The reviewer is no longer deployed.")),
+        },
+      },
+      store.slug,
+      "VIB-11",
+    );
+    {
+      const parsed = file(store, "VIB-11");
+      expect(parsed.frontmatter.queuedQuestions).toEqual([]);
+      // F37-33: `waiting` must never claim an agent nobody started.
+      expect(parsed.frontmatter.waiting).toBe("human");
+      const note = parsed.timeline.find((e) => e.title === "Queued question not put")!;
+      expect(note.text).toContain("The reviewer is no longer deployed.");
+      expect(note.text).toContain("Nothing was asked and nothing is running.");
+    }
+  });
+
+  it("the OPERATOR clearing the wait puts the question too, though no release is announced", async () => {
+    // Self-review of ruling 241, an hour after shipping it. `setTaskDependencies`
+    // computes `releasing` as `next.length === 0 && previous.length > 0 &&
+    // !ctx.operatorAuthorized` — the operator is excluded deliberately, because
+    // `announceRelease` re-invokes the operator and a write from inside its own
+    // turn would loop. But the drain lived ONLY in `announceRelease`, so the
+    // operator correcting a wait with `set_dependencies` (the door ruling 240
+    // names by name) left the question stranded on the task forever, under a
+    // wait panel still promising it would be put when the wait clears — on a
+    // task with nothing left to clear. F37-68's own shape, in my own fix.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, ["VIB-2"]);
+    const started: QuestionDispatch[] = [];
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-11", blockedBy: [] },
+      actor(store, "arda"),
+      {
+        dataRoot: store.dataRoot,
+        operatorAuthorized: true,
+        deps: { startAgentRun: recordDispatch(started), runOperator: runOperatorStub() },
+      },
+    );
+    expect(file(store, "VIB-11").frontmatter.blockedBy).toEqual([]);
+    // CANARY: drain only inside `announceRelease` and this is 0 — the promise
+    // on the wait panel outlives the wait and nothing ever puts the question.
+    expect(started).toHaveLength(1);
+    expect(started[0]!.profileId).toBe("rev");
+    expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
+  });
+
+  it("the release drains the question BEFORE it hands the task back to the operator", async () => {
+    // Ordering is the whole point: the decision says the reviewer answers
+    // before anyone reworks anything, and an operator re-invoked first can
+    // dispatch that rework in the window between the two.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    seedQueued(store, ["VIB-2"]);
+    const order: string[] = [];
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => {
+      order.push("operator");
+      return Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const });
+    });
+    {
+      await announceRelease(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          deps: {
+            runOperator,
+            startAgentRun: (): Promise<StartAgentRunResult> => {
+              order.push("question");
+              return Promise.resolve(QUESTION_RUN);
+            },
+          },
+        },
+        store.slug,
+        "VIB-11",
+        { entries: ["VIB-2"] },
+      );
+      await eventually(() => expect(order).toContain("operator"));
+      // CANARY: move the drain below the `autoInvokeOperator` call and this
+      // reads ["operator", "question"].
+      expect(order).toEqual(["question", "operator"]);
+    }
   });
 });

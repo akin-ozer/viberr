@@ -1,6 +1,24 @@
 services:
   app:
-    build: .
+    # Ruling 345: the build stamp the image declares is actually SUPPLIED here.
+    # `build-info.server.ts` resolves identity from env first and says that env
+    # "is the only source a container can have" — `.dockerignore` excludes
+    # `.git`, so its file-reading fallback cannot fire in an image. The
+    # Dockerfile has declared these three ARGs since gap 18 and the runbook
+    # documented a `--build-arg` incantation, but nothing here passed them — so
+    # the default `docker compose build` could not stamp, and every container on
+    # this instance reported `revision: null, revisionSource: null,
+    # builtAt: null` and a `version` identical for every build of a release.
+    #
+    # Interpolated with empty defaults, which keeps a bare `docker compose
+    # build` working and honestly unstamped. `npm run deploy` is the path that
+    # fills them from git and then reads the running instance back.
+    build:
+      context: .
+      args:
+        VIBERR_BUILD_VERSION: "${VIBERR_BUILD_VERSION:-}"
+        VIBERR_BUILD_SHA: "${VIBERR_BUILD_SHA:-}"
+        VIBERR_BUILD_TIME: "${VIBERR_BUILD_TIME:-}"
     # STABLE identity across container recreation (B-FD1): the data-root writer
     # lock records its holder's hostname, and a lock from a DIFFERENT host is
     # refused — the one host it cannot probe for liveness. Compose's default
@@ -62,6 +80,19 @@ services:
       # Back this up. Wiping it signs everyone out of Claude and Codex; they
       # reconnect on Profile → Agent accounts.
       - ./docker-data:/data
+    # A run is not the unit of load. The instance's run-concurrency cap counts
+    # RUNS, and one run is an agent that will happily `pnpm -r test` — which
+    # forks a vitest worker per host CPU. Measured on a 10-core / 16 GB Mac
+    # with the cap at 0 (unlimited): six live runs, the container at 723% CPU
+    # and 5.4 GB, host load average 18, and the machine's own UI stuttering.
+    # Capping runs alone cannot fix that, because the multiplier is inside the
+    # run.
+    #
+    # So the container gets a hard ceiling that the cap cannot overrun: some
+    # cores stay for the person whose laptop this is. Tune `cpus` to your host
+    # — roughly (cores - 3) — and remember it is a CEILING, not a reservation:
+    # a quiet instance uses nothing.
+    cpus: "7"
     healthcheck:
       test:
         [

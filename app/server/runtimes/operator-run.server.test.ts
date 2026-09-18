@@ -32,9 +32,11 @@ import {
   connectFakeBackends,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import {
   getRun,
   insertRunLine,
+  nextSeq,
   listRunLines,
   listRunsForTaskRows,
   upsertRun,
@@ -42,6 +44,7 @@ import {
 import { defaultModelFor } from "./model-catalog.server";
 import {
   executeStrandedCodexPlan,
+  maybeResumeStrandedOperator,
   operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   runOperator,
@@ -94,7 +97,12 @@ class ControlledAdapter implements RuntimeAdapter {
     const tag = `run·error·${facts.kind}`;
     insertRunLine(store.db, {
       runId: pending.spec.runId,
-      seq: 0,
+      // Ruling 344: the SAME numbering the real sink uses (`nextSeq`), not a
+      // literal 0. A run now carries Viberr's own `run·inputs` disclosure at
+      // its head, and `insertRunLine` is `ON CONFLICT DO NOTHING` — so a
+      // fixture that claims seq 0 silently drops its own line and the run
+      // looks like it said nothing.
+      seq: nextSeq(store.db, pending.spec.runId),
       occurredAt: new Date().toISOString(),
       raw: JSON.stringify({ ev: "err", tag, text }),
       display: { t: "12:00:00", ev: "err", tag, text, failure: facts },
@@ -115,7 +123,8 @@ class ControlledAdapter implements RuntimeAdapter {
     // startCodexOperatorRun has registered its callback first.
     insertRunLine(store.db, {
       runId: pending.spec.runId,
-      seq: 0,
+      // Ruling 344: `nextSeq`, exactly as the sink does — see `fail` above.
+      seq: nextSeq(store.db, pending.spec.runId),
       occurredAt: new Date().toISOString(),
       raw: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }),
       display: { t: "12:00:00", ev: "text", tag: "agent_message", text },
@@ -256,6 +265,79 @@ describe("Codex structured operator completion", () => {
     });
     expect(adapter.pending).not.toBeNull();
   }
+
+  /**
+   * Ruling 344 (pass 37, F37-180): the coordinator discloses what it was given.
+   *
+   * `recordRunInputs` had two callers, both on the specialist paths, so across
+   * the whole shopify-clone pass the corpus held 834 `run·inputs` lines against
+   * 2,317 runs — and the 1,024 with none were every operator drive (953) and
+   * every controller turn (71). P19-G8/G11's rationale never said
+   * "specialist": nobody could check which knowledge bases a run carried, which
+   * grants resolved to nothing, or what state it was anchored on. The operator
+   * is the actor that writes the packets and scoping notes a person reads, and
+   * ruling 261's live incident WAS an operator KB arriving cut off mid-word —
+   * found by reading code, because there was no record to read.
+   */
+  it("ruling 344: a Codex drive records what it was given, read off its own resolution", async () => {
+    // CANARY: delete the `recordRunInputs` call after `startRun` in
+    // `startCodexOperatorRun` and this finds no line.
+    await start();
+    const runId = adapter.pending!.spec.runId;
+    const line = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    );
+    expect(line, "the drive recorded no input disclosure").toBeTruthy();
+    // It sits at the HEAD of the run's block — it is written at run start, so
+    // the first thing a person expanding the console meets is what went in.
+    expect(line!.seq).toBe(0);
+    const inputs = line!.display.inputs!;
+    // The operator has no checkout of its own, and the prompt it carries
+    // forbids it from calling anything it holds "the repository".
+    expect(inputs.cloned).toBe(false);
+    expect(inputs.cwd).toBeNull();
+    expect(inputs.delivers).toBe(false);
+    // Every granted skill rides the prompt as text on this surface — the
+    // disclosure's whole point is saying which channel a grant took.
+    expect(inputs.skills.native).toEqual([]);
+    expect(inputs.skills.injected).toEqual(inputs.skills.granted);
+    // CANARY: hand `buildOperatorSystemPrompt` a literal `[]` for its toolkit
+    // and this empties — the Codex drive's action surface IS its plan envelope,
+    // so those actions are the honest answer to "what could this run do".
+    expect(inputs.tools.toolkit).toContain("run_agent");
+    expect(inputs.tools.toolkit).toContain("transition_stage");
+    // A drive with no human comment carries no directive, and says so rather
+    // than inventing one.
+    expect(inputs.directive).toBeNull();
+    expect(inputs.promptChars).toBeGreaterThan(0);
+    adapter.finish(store, JSON.stringify({ reasoning: "nothing to do", actions: [] }), "finished");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+
+  it("ruling 344: a human's @operator comment is disclosed as the turn's directive, with who wrote it", async () => {
+    // CANARY: return `null` unconditionally from `operatorTurnDirective`.
+    await runOperator(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "codex",
+      autonomy: "full",
+      trigger: "manual",
+      humanComment: "  please hold this until VIB-2 lands  ",
+      humanCommentBy: "Arda Test",
+      dataRoot: store.dataRoot,
+    });
+    expect(adapter.pending).not.toBeNull();
+    const inputs = listRunLines(store.db, adapter.pending!.spec.runId).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )!.display.inputs!;
+    expect(inputs.directive).toEqual({
+      from: "Arda Test",
+      // The TRIMMED length, because that is the text the prompt carries.
+      chars: "please hold this until VIB-2 lands".length,
+    });
+    adapter.finish(store, JSON.stringify({ reasoning: "held", actions: [] }), "finished");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
 
   it("ruling 131(b): the Codex set_dependencies step executes; a null list is a MALFORMED step narrated as state, never policy", async () => {
     // Canary: delete the `set_dependencies` case from the executor switch
@@ -1163,6 +1245,8 @@ describe("pr-diverged turn instruction (both backends)", () => {
   ): OperatorTaskSnapshot {
     return {
       key: "VIB-9",
+      // Ruling 302: the window's own size, always present.
+      timelineTotal: 0,
       title: "T",
       goal: "Do the thing.",
       priority: "normal",
@@ -1406,6 +1490,8 @@ describe("stranded auto-stage resume", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
       {
         key: "VIB-1",
+        // Ruling 302: the window's own size, always present.
+        timelineTotal: 0,
         title: "t",
         goal: "Goal to be refined at the triage quality gate.",
         priority: "normal",
@@ -1735,6 +1821,185 @@ describe("stranded auto-stage resume", () => {
     });
 
     /**
+     * Ruling 228 (F37-47, live on SHOP-3). The backstop above asks "is the
+     * outbound boundary `auto`?", which is the right question for a drive that
+     * CHOSE to stop and the wrong one for a drive that was STOPPED. SHOP-3 sat
+     * at Verify (boundary `human`) after a plan whose only step — an
+     * `update_branch_from_base` — was refused by the capability policy. The
+     * refusal even told the operator what to do instead ("recommend or accept
+     * the completion instead"), and no operator read it: the turn had ended.
+     * 25 minutes parked, on the very run the Codex window had just been waited
+     * three hours for.
+     *
+     * A malformed step is the cheapest whole-plan refusal there is, and it
+     * exercises the same `refused.length === plan.actions.length` arithmetic a
+     * policy denial does.
+     */
+    it("ruling 228: a plan refused IN FULL is nudged once, even at a human boundary", async () => {
+      // A stage whose outbound boundary is `human`, not `auto` — the shape the
+      // backstop could not see.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          title: "list files in the project",
+          stage: "review",
+          readiness: "ready",
+          waiting: "human",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "A goal with scope.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "manual",
+        dataRoot: store2.dataRoot,
+      });
+      // Drive 1 plans exactly one action and it does not run.
+      // Every field present-but-nullable, the shape OpenAI strict output
+      // produces (B-6) — a missing key would fail the plan schema instead,
+      // which is the escalation path, not this one.
+      // A REAL action the policy refuses: review → done is the locked human
+      // boundary, so the operator may not make this move. An empty or
+      // unparseable plan is a different case viberr already catches
+      // ("produced no actionable plan") — the gap is a plan that named real
+      // work and was not allowed to do it.
+      const refusedPlan = JSON.stringify({
+        reasoning: "Move it along.",
+        actions: [transitionAction({ toStageId: "done" })],
+      });
+      adapter2.finish(store2, refusedPlan, "finished");
+
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      // And it is told WHY it is back — not the idle-stage sentence, which
+      // would be false twice over here (the stage is not auto-advance, and the
+      // run did not end idle by choice).
+      const prompt = adapter2.pending!.spec.prompt;
+      expect(prompt).toContain("EVERY action your previous run planned was refused");
+      expect(prompt).toContain("Do NOT plan the same refused action again");
+      expect(prompt).not.toContain("auto-advance stage idle");
+
+      // Drive 2 is refused in full as well: one nudge, then the hold, exactly
+      // as F31-11 requires — a refused plan must not loop either.
+      adapter2.finish(store2, refusedPlan, "finished");
+      await eventually(() => {
+        const parsed = readTaskFile({
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          dataRoot: store2.dataRoot,
+        })!.parsed;
+        expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
+        expect(parsed.frontmatter.waiting).toBe("human");
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(operatorRuns()).toHaveLength(2);
+    });
+
+    /**
+     * Ruling 202 (F37-22, live on SHOP-10). A nudged drive whose single action
+     * was `deliver_for_review` — it pushed the branch and opened PR #8 — was
+     * recorded by this backstop as having "held it twice in a row without
+     * advancing, dispatching, or opening a packet", and the note told a human
+     * "Coordination is paused here: run the operator manually". It was not
+     * paused: a drive was starting 2ms before the note was written, and it
+     * moved the task to Review 23 seconds later with nobody touching anything.
+     *
+     * The other three ways a drive can act were already covered — a transition
+     * by `movedToStageId`, a dispatch by the live-run check in
+     * `settleWaitingAfterOperator`, a packet or recommendation by
+     * `operatorLeftTaskStranded`. Delivery was covered by nothing.
+     *
+     * Driven through the real backstop with a hand-written finished run row,
+     * because this fixture's project has no repo and a real `deliver_for_review`
+     * would be refused before `performDelivery` ever stamps anything.
+     */
+    it("ruling 202: a nudged drive that DELIVERED is not a deliberate hold", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(
+            id,
+            taskKey,
+            store2.slug,
+            `t_${id}`,
+            "2026-09-13T00:00:00.000Z",
+            "2026-09-13T00:00:00.000Z",
+          );
+      };
+      const held = (taskKey: string) =>
+        readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
+
+      // Control: the same shape WITHOUT the delivery still records the hold,
+      // so this test cannot pass by disabling the backstop.
+      finishedRun("run_ctl", "VIB-1");
+      const heldAgain = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        dataRoot: store2.dataRoot,
+        runId: "run_ctl",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          movedToStageId: "triage",
+        },
+      });
+      expect(heldAgain).toBe(false);
+      expect(held("VIB-1").frontmatter.heldAtStage).toBe("triage");
+      expect(held("VIB-1").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(true);
+
+      // The delivering drive, on a task of its own.
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-2", {
+          title: "ship the parser",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Ship it.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_del", "VIB-2");
+      // CANARY: drop `|| ref.ownRun?.delivered === true` from nudgeMadeProgress
+      // and this returns false, `heldAtStage` is stamped, and the note claiming
+      // coordination is paused lands on a task that was just delivered.
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-2",
+        dataRoot: store2.dataRoot,
+        runId: "run_del",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          movedToStageId: "triage",
+          delivered: true,
+        },
+      });
+      expect(resumed).toBe(true);
+      expect(held("VIB-2").frontmatter.heldAtStage).toBeNull();
+      expect(held("VIB-2").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+    });
+
+    /**
      * V18 (pass-31 review): the hold must survive LATER external triggers. The
      * one-nudge guard alone was per-drive, in-memory — every schedule firing
      * or machine trigger started an unmarked drive, the backstop paid one
@@ -1822,6 +2087,8 @@ describe("stranded auto-stage resume", () => {
 describe("transition trigger carries from → to and who moved it", () => {
   const snap = (): OperatorTaskSnapshot => ({
     key: "VIB-2",
+    // Ruling 302: the window's own size, always present.
+    timelineTotal: 0,
     title: "t",
     goal: "Write the post.",
     priority: "normal",
@@ -1909,6 +2176,8 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     over: Partial<OperatorTaskSnapshot> = {},
   ): OperatorTaskSnapshot => ({
     key: "VIB-6",
+    // Ruling 302: the window's own size, always present.
+    timelineTotal: 0,
     title: "Improve the docs",
     // The live goal that sailed through the gate: no file, no change, no
     // acceptance criteria — and NOT the unspecified placeholder, so the
@@ -1943,6 +2212,98 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     autonomy: "supervised",
     operatorPolicy: { scope: "operator", note: "", capabilities: {} },
     ...over,
+  });
+
+  /**
+   * Ruling 193 (F37-14, live): the doctrine had ONE answer to a
+   * request-changes — re-prompt the deliverer — and a reviewer can request
+   * changes for a reason no revision can satisfy. A required reviewer
+   * chartered to bring a Docker stack up ran on a host with no `make` and no
+   * Docker, said so plainly, and the work went back for rework round after
+   * round. The missing arm is here.
+   */
+  /**
+   * Ruling 210 (owner). Ruling 193 covers a reviewer whose objection SURVIVES a
+   * rework. The other expensive shape had no arm at all: a reviewer whose
+   * objection is answered every round and who returns a new, valid one each
+   * time. Live on this board, twice — SHOP-6 took seven rounds, SHOP-10 five,
+   * every round correct on its own terms and nobody ever asked the reviewer
+   * what else it would block on.
+   */
+  it("ruling 210: the turn names the DIFFERENT-objection-each-round shape too, and what to require", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    // CANARY: delete the arm and the doctrine has one answer for every
+    // request-changes that was actually fixed — send it back again.
+    expect(prompt).toContain("a DIFFERENT objection each round");
+    expect(prompt).toContain("the COMPLETE set it would block on for that revision");
+    expect(prompt).toContain(
+      "name everything you would still block on across your owned surface, now",
+    );
+    expect(prompt).toContain(
+      "Do not send the deliverer back into another round until the reviewer has answered.",
+    );
+  });
+
+  /**
+   * Ruling 214 (F37-34). Ruling 210's arm said "ask in ONE comment", and live
+   * on SHOP-10 the operator did exactly that: it posted "@Code Reviewer, name
+   * everything you would still block on" and stopped. `post_comment` writes a
+   * timeline line and starts nothing, so no reviewer ever read it — and the
+   * stranded backstop, which counts a transition, a dispatch, a delivery or a
+   * packet as progress and a comment as nothing, recorded a deliberate hold
+   * and paused coordination on the task five others were waiting behind. The
+   * turn's own earlier bullet already says a directive comment is not a
+   * running agent; this arm contradicted it.
+   */
+  it("ruling 214: the completeness question is a RUN of the reviewer, not a comment nobody reads", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    // CANARY: put "in ONE comment" back and the only action the arm names is
+    // one that reaches no agent and counts as no progress.
+    expect(prompt).toContain("`run_agent` THE REVIEWER with `delivers: false`");
+    expect(prompt).toContain("`post_comment` is narration for the humans and reaches no agent");
+    expect(prompt).not.toContain("Ask the reviewer which, in ONE comment");
+  });
+
+  it("ruling 193: a second rework on the same reviewer stops being a rework", () => {
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    // CANARY: delete the arm and the line above it — "the deliverer owes NEW
+    // work" — is the only instruction the turn carries for a request-changes.
+    expect(prompt).toContain("consecutiveRequestChanges");
+    expect(prompt).toContain("the deliverer owes NOTHING");
+    // Ruling 200(i): the SHARED doctrine names Claude's tool everywhere else
+    // (`open_decision_packet`, four other places in the same turn text);
+    // `open_packet` is the CODEX plan action. My arm was the only line in the
+    // doctrine naming a tool a Claude operator does not have. CANARY: put
+    // `open_packet` back and this fails.
+    expect(prompt).toContain("`open_decision_packet` for the person who owns the task");
+    expect(prompt).not.toContain("`open_packet` for the person");
+    // It names the three real exits, so the packet is not an empty escalation.
+    expect(prompt).toContain("drop or replace that required reviewer");
+    expect(prompt).toContain("A reviewer that cannot pass is a decision, not a defect.");
+    // And it points at the inventory the same prompt now carries (ruling 191)
+    // rather than asking the model to intuit what is installed.
+    expect(prompt).toContain("your shell inventory says is not installed on this host");
+
+    // And the number the arm names must actually REACH the model — the whole
+    // bug class this pass is about is a fact the server holds and the agent
+    // cannot see. A Codex operator gets the snapshot inline as JSON; a Claude
+    // one reads the same object through `get_task`, whose description points at
+    // the field by name.
+    const withReviewer = operatorPrompts.buildCodexOperatorPrompt(
+      snap({
+        reviewers: [
+          {
+            profileId: "reviewer",
+            role: "Review & validation",
+            backend: "codex",
+            verdict: "request_changes",
+            consecutiveRequestChanges: 3,
+          },
+        ],
+      }),
+      "agent-reply",
+    );
+    expect(withReviewer).toContain('"consecutiveRequestChanges": 3');
   });
 
   it("F15-14: the entry stage carries the gate — no forward move on a vague goal", () => {
@@ -2763,8 +3124,17 @@ describe("runOperator — authority, ordering, orphans", () => {
     const spec = adapter5.pending!.spec;
     // R19-1: an undeployed operator may LOOK at the repository — but through the
     // read-only checkout under its cwd (Read/Grep/Glob), so the in-process MCP
-    // floor is just `get_task`, and it still changes nothing.
-    expect(spec.allowedTools).toEqual(["mcp__viberr__get_task"]);
+    // floor is the READS, and they still change nothing. Ruling 282 adds
+    // `read_board` to that floor and ruling 285 adds `read_timeline_entry`:
+    // seeing a board it holds no authority over takes nothing away, the task
+    // page already shows a person the whole comment that tool returns, and
+    // reading is never the thing being withheld.
+    expect(spec.allowedTools).toEqual([
+      "mcp__viberr__get_task",
+      "mcp__viberr__read_board",
+      "mcp__viberr__read_task_attachment",
+      "mcp__viberr__read_timeline_entry",
+    ]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
   });
 
@@ -3070,6 +3440,52 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
+  /**
+   * Ruling 216 (F37-36): the SAME press, against the OTHER hold. `heldAtStage`
+   * is the stranded backstop's durable marker and its note names running the
+   * operator manually as the remedy — live on SHOP-10 that remedy left the
+   * marker standing, so the board kept reading "Coordination is paused here"
+   * while a person was manually coordinating the task, and the drive they paid
+   * for got no nudge when it stranded.
+   */
+  describe("ruling 216: a person's run ends the deliberate STAGE hold too", () => {
+    const stageHeld = (): void => {
+      writeTask(store5.dataRoot, store5.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          waiting: "human",
+          heldAtStage: "impl",
+          ownerUserId: store5.users.arda.id,
+        }),
+        goal: "Ship the parser.",
+      });
+      rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+    };
+    const arda2 = () => ({ userId: store5.users.arda.id, label: store5.users.arda.email });
+
+    it("clears heldAtStage and says who ended it", async () => {
+      deployAgents([operatorAgent()]);
+      stageHeld();
+      // CANARY: drop the `liftStageHoldForPerson` call in runOperator and the
+      // marker survives the one action its own note tells a human to take.
+      const result = await drive({ trigger: "manual", actor: arda2() });
+      expect(result.refused).toBeUndefined();
+      expect(task().frontmatter.heldAtStage).toBeNull();
+      expect(
+        task().timeline.find((e) => e.title === "Hold lifted")?.text,
+      ).toContain("no longer stands");
+    });
+
+    it("a SCHEDULE does not — re-arming the nudge hourly is what V18 stopped", async () => {
+      deployAgents([operatorAgent()]);
+      stageHeld();
+      const result = await drive({ trigger: "scheduled" });
+      expect(result.refused).toBeUndefined();
+      expect(task().frontmatter.heldAtStage).toBe("impl");
+      expect(task().timeline.some((e) => e.title === "Hold lifted")).toBe(false);
+    });
+  });
+
   describe("ruling 130: a failed operator run's packet", () => {
     const RESET = "2026-09-07T11:50:00.000Z";
     const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";
@@ -3260,6 +3676,38 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(operatorRuns()).toHaveLength(0);
   });
 
+  it("ruling 227: a refused MANUAL turn says so on the task, not only in the log", async () => {
+    // Live on SHOP-2 at 02:44 UTC. A person wrote "@operator PR #13 conflicts
+    // with main, rebase and re-review", the comment landed on the timeline with
+    // the mention rendered as routed, the composer's footer said "@mentions
+    // route to agents" — and the operator was refused at the door because a
+    // packet was open. Nothing anywhere on the task said so. Ruling 141 had
+    // taught this refusal to speak at the front of the LEASE QUEUE and left the
+    // door silent.
+    //
+    // Canary: drop the `noteQueuedTriggerRefused` call from the open-packet arm.
+    deployAgents([operatorAgent()]);
+    seedWithOpenPacket();
+
+    const result = await drive({ trigger: "manual" });
+    expect(result.refused).toBe("open-packet");
+
+    await vi.waitFor(() => {
+      const note = readTaskFile({
+        projectSlug: store5.slug,
+        taskKey: "VIB-1",
+        dataRoot: store5.dataRoot,
+      })!.parsed.timeline.find((e) => /An @operator turn was refused/.test(e.text));
+      expect(note).toBeTruthy();
+      // It names the cause, and says plainly that nothing was acted on — the
+      // sentence a person reading their own unanswered instruction needs.
+      expect(note!.text).toContain("a decision packet is open on VIB-1");
+      expect(note!.text).toContain("nothing on this task has been acted on");
+      // And NOT the queue sentence: this one never reached a queue.
+      expect(note!.text).not.toContain("front of the queue");
+    });
+  });
+
   it("ruling 141: a SCHEDULED run is refused like a manual one while a decision packet is open", async () => {
     // Canary: restore the manual-only guard (`=== "manual"`).
     deployAgents([operatorAgent()]);
@@ -3272,6 +3720,58 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(result.queued).toBe(false);
     expect(adapter5.pending).toBeNull();
     expect(operatorRuns()).toHaveLength(0);
+  });
+
+  /**
+   * Ruling 195 (F37-17, live): a packet opened mid-work does not stop the
+   * MACHINE triggers, so the operator kept coordinating on SHOP-6 and
+   * dispatched a deliverer — `waiting: agent`. The server restarted, boot
+   * finalized that orphan and re-invoked the operator as `manual`, straight
+   * into this refusal, which skipped its settle on the belief that "the packet
+   * already owns waiting: human". It did not. SHOP-6 sat at `waiting: agent`
+   * with nothing running and a decision nobody was told about for 75 minutes,
+   * holding ten downstream tasks, while the board showed an agent working.
+   */
+  it("ruling 195: a refusal over a packet settles `waiting` off a dead agent, onto the human the packet is for", async () => {
+    deployAgents([operatorAgent()]);
+    writeTask(store5.dataRoot, store5.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        // The state the restart leaves: an agent was dispatched WITH the packet
+        // open, and its run is gone.
+        waiting: "agent",
+        ownerUserId: store5.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+      packet: {
+        type: "input",
+        kind: "Agent question",
+        from: "agent:codex/developer (Dev)",
+        title: "Lockfile ownership",
+        body: "Who regenerates the lockfile?",
+        observations: [],
+        options: [{ kind: "custom", t: "Coordinate root fix", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
+
+    const result = await drive({ trigger: "manual" });
+    expect(result.refused).toBe("open-packet");
+    expect(operatorRuns()).toHaveLength(0);
+
+    // The settle is fire-and-forget; let it land.
+    await vi.waitFor(() => {
+      const fm = readTaskFile({
+        projectSlug: store5.slug,
+        taskKey: "VIB-1",
+        dataRoot: store5.dataRoot,
+      })!.parsed.frontmatter;
+      // CANARY: drop the `settleWaitingAfterOperator` call and this stays
+      // "agent" forever — a board claiming an agent is working on a task whose
+      // every trigger is refused.
+      expect(fm.waiting).toBe("human");
+    });
   });
 
   it("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue says so on the task and writes its final row", async () => {
@@ -3335,7 +3835,7 @@ describe("runOperator — authority, ordering, orphans", () => {
     await eventually(() => {
       expect(
         task().timeline.some((e) =>
-          e.text.startsWith("A queued @operator turn was refused when it reached the front of the queue: a decision packet is open on VIB-1"),
+          e.text.startsWith("An @operator turn was refused when it reached the front of the queue: a decision packet is open on VIB-1"),
         ),
       ).toBe(true);
     });
@@ -4148,5 +4648,34 @@ describe("R19-1 — the operator's read-only repository view", () => {
       });
       expect(bad.kind).toBe("unavailable");
     });
+  });
+});
+
+/**
+ * F37-61: the held-task doctrine told the operator that BOTH `run_agent` and
+ * `deliver_for_review` are "REFUSED by the server". Only the first is. Ruling
+ * 186's gate lives in `startAgentRun` ("every dispatch door lands here"), and
+ * delivery is `performDelivery`, a different path with no `blockedBy` check
+ * anywhere in it.
+ *
+ * Asserting a gate that does not exist is the same defect ruling 186 was written
+ * about, inverted: there it was a prompt ASKING where a gate was needed; here it
+ * is a prompt CLAIMING a gate that was never built.
+ */
+describe("F37-61 / ruling 240: the held-task doctrine names two gates, and both exist", () => {
+  it("names both doors, and both are really gated", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("app/server/runtimes/operator-run.server.ts", "utf8");
+    // The sentence names both doors, and BOTH gates now exist — ruling 240 built
+    // the second after the owner's call. The point of this test is that the
+    // claim is checked against the code rather than restated.
+    expect(src).toContain("`run_agent` and `deliver_for_review` are BOTH REFUSED");
+
+    const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
+    expect(specialist).toContain('holdRefusal(input.taskKey, held, "running an agent on it")');
+    // CANARY: delete the hold gate from `performDelivery` and this fails — the
+    // prompt would be back to asserting a gate that was never built.
+    const actions = readFileSync("app/server/tasks/task-actions.server.ts", "utf8");
+    expect(actions).toContain('holdRefusal(taskKey, held, "delivering it for review")');
   });
 });

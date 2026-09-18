@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -16,6 +17,7 @@ import type {
   ParsedTaskFile,
   TaskFrontmatter,
   TaskPacket,
+  TaskSchedule,
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
@@ -26,6 +28,11 @@ import {
   rebuildTaskFile,
 } from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
+import {
+  projectionFault,
+  projectionFaultCount,
+  resetProjectionFaultsForTests,
+} from "./store-health.server";
 import { getTaskDetail } from "./task-query.server";
 
 /** A second project alongside the store's default, for scope tests. */
@@ -44,6 +51,7 @@ function writeSecondProject(store: ReturnType<typeof setupTestStore>, slug: stri
     credentialPolicy: null,
     guardrails: [],
     requiredReviewers: [],
+  fileLeases: [],
   });
 }
 
@@ -585,6 +593,7 @@ describe("rebuilder", () => {
       credentialPolicy: null,
       guardrails: [],
       requiredReviewers: [],
+    fileLeases: [],
     });
     rebuildPath(store.db, projectFilePath(slug, store.dataRoot), {
       dataRoot: store.dataRoot,
@@ -735,6 +744,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
             result: "approve",
             reason: "Nothing to change.",
             at: "2026-08-06T09:01:00.000Z",
+            rounds: 1,
           },
         ],
       }),
@@ -817,6 +827,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     result: "approve" as const,
     reason: "looks good",
     at: "2026-08-06T01:00:00.000Z",
+    rounds: 1,
   };
 
   function seed(
@@ -892,7 +903,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     // which used to be left to each reader to re-derive (and one of them didn't).
     expect(task.validation).toBe("healthy");
     expect(task.blockReason).toBe(
-      "VIB-9's review PR #900 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+      "VIB-9's review PR #900 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. " + "Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.",
     );
   });
 
@@ -1135,6 +1146,183 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
     expect(healed.action).toBe("projected");
     expect(eventCount()).toBe(3);
   });
+
+  /**
+   * Ruling 217 (F37-37). `rebuildPath`'s catch is deliberately quiet so one bad
+   * file cannot take the process down. Live on pass 37 the store went to
+   * `SQLITE_CORRUPT` and quiet is exactly what it stayed: every rebuild threw,
+   * every task page 500ed, and `/resources/health` answered `degraded: []` for
+   * twelve minutes. Viberr logged the store's own error on every failure and
+   * had nowhere to put the fact. This is that place, and the test uses the
+   * crash technique above to produce a REAL failing rebuild rather than calling
+   * the latch by hand.
+   */
+  it("latches a failing rebuild for health, and clears it on the next one that writes", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "Do the thing.",
+      timeline: [mkEvent(store.users.arda.id, "2026-08-26T10:00:00.000Z", "first")],
+    });
+    const taskPath = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "task.md",
+    );
+    expect(rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot }).action).not.toBe(
+      "error",
+    );
+    expect(projectionFault()).toBeNull();
+
+    // A store that cannot take the write — the same way the crash test above
+    // produces one, and the same shape SQLITE_CORRUPT produced live.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    // The file must differ, or the rebuild short-circuits as "unchanged" and
+    // never reaches the write. (Without this the test passes against broken
+    // code, because nothing throws.)
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "Do the thing.",
+      timeline: [
+        mkEvent(store.users.arda.id, "2026-08-26T10:00:00.000Z", "first"),
+        mkEvent(store.users.arda.id, "2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+    // CANARY: drop `recordProjectionFault` from the catch and this is null —
+    // the rebuild still fails, the log line is still written, and every surface
+    // still reports a healthy instance.
+    expect(rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot }).action).toBe(
+      "error",
+    );
+    const fault = projectionFault();
+    expect(fault).not.toBeNull();
+    expect(fault!.sourcePath).toContain("VIB-1");
+    // The STORE's own words, not viberr's paraphrase of them.
+    expect(fault!.message).toContain("task_events");
+    expect(fault!.failures).toBe(1);
+
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    expect(rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot }).action).not.toBe(
+      "error",
+    );
+    // CANARY: drop the `succeeded()` clear and the instance alarms forever
+    // after one bad write, which is what ruling 146 refused to let it do.
+    expect(projectionFault()).toBeNull();
+    resetProjectionFaultsForTests();
+  });
+
+  /**
+   * Ruling 219 (F37-39). `rebuildPath`'s catch exists so one bad file cannot
+   * take the process down — and it wrote its "this failed" provenance row to
+   * the SAME store that had just failed, so when the store itself was the
+   * fault, the catch threw and `rebuildPath` raised after all.
+   *
+   * Live cost: `resolvePacket` wrote SHOP-4's file (packet resolved, `waiting:
+   * agent`), called `reprojectTask`, and died right here. The operator
+   * re-invoke that the resolution owes never ran, and the task sat reading
+   * "agent working" with nothing running for eleven minutes — after the
+   * canonical write had already succeeded. Only the mirror had failed.
+   */
+  it("never throws into its caller, even when the store cannot take the failure note (ruling 219)", () => {
+    const store = setupTestStore(ctx);
+    resetProjectionFaultsForTests();
+    const uid = store.users.arda.id;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [mkEvent(uid, "2026-08-26T10:00:00.000Z", "first")],
+    });
+    const taskPath = path.join(
+      store.dataRoot,
+      "projects",
+      store.slug,
+      "tasks",
+      "VIB-1",
+      "task.md",
+    );
+    rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot });
+
+    // The store is broken for BOTH the rebuild and the note about it — which
+    // is the only interesting case, because a store that can still write the
+    // note was never the one that hurt anybody.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    store.db.exec(`ALTER TABLE provenance RENAME TO provenance_gone`);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [
+        mkEvent(uid, "2026-08-26T10:00:00.000Z", "first"),
+        mkEvent(uid, "2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+
+    // CANARY: take the inner try/catch off `recordProvenance` and this THROWS,
+    // which is what aborted resolvePacket's operator re-invoke live.
+    let result: ReturnType<typeof rebuildPath> | null = null;
+    expect(() => {
+      result = rebuildPath(store.db, taskPath, { dataRoot: store.dataRoot });
+    }).not.toThrow();
+    expect(result!.action).toBe("error");
+    // …and the caller still learns about it, through the latch health reads.
+    expect(projectionFaultCount()).toBe(1);
+
+    store.db.exec(`ALTER TABLE provenance_gone RENAME TO provenance`);
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    resetProjectionFaultsForTests();
+  });
+
+  /**
+   * Ruling 218 (F37-38): 217's latch held ONE slot, so any later rebuild that
+   * wrote cleared it. Live, ninety seconds after the corrupt store was
+   * replaced, a transient `disk I/O error` on SHOP-4 left its card reading
+   * "waiting on you" while its file said `waiting: agent` — and health was back
+   * to `ok`, because SHOP-16's file had rebuilt fine in between.
+   */
+  it("keeps one file's fault when a DIFFERENT file projects (ruling 218)", () => {
+    const store = setupTestStore(ctx);
+    resetProjectionFaultsForTests();
+    const uid = store.users.arda.id;
+    const write = (key: string, events: number) =>
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl" }),
+        goal: "Do the thing.",
+        timeline: Array.from({ length: events }, (_, i) =>
+          mkEvent(uid, `2026-08-26T10:0${i}:00.000Z`, `e${i}`),
+        ),
+      });
+    const pathOf = (key: string) =>
+      path.join(store.dataRoot, "projects", store.slug, "tasks", key, "task.md");
+    write("VIB-1", 1);
+    write("VIB-2", 1);
+    rebuildPath(store.db, pathOf("VIB-1"), { dataRoot: store.dataRoot });
+    rebuildPath(store.db, pathOf("VIB-2"), { dataRoot: store.dataRoot });
+
+    // VIB-1 fails against a store that cannot take the write…
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    write("VIB-1", 2);
+    expect(rebuildPath(store.db, pathOf("VIB-1"), { dataRoot: store.dataRoot }).action).toBe(
+      "error",
+    );
+    expect(projectionFaultCount()).toBe(1);
+
+    // …and VIB-2 then projects fine. VIB-1's row is still stale.
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    write("VIB-2", 2);
+    expect(
+      rebuildPath(store.db, pathOf("VIB-2"), { dataRoot: store.dataRoot }).action,
+    ).not.toBe("error");
+    // CANARY: clear the latch wholesale instead of per path and this is 0,
+    // which is the instance reporting itself healthy over a stale row.
+    expect(projectionFaultCount()).toBe(1);
+    expect(projectionFault()!.sourcePath).toContain("VIB-1");
+
+    // Only VIB-1's own success ends it.
+    expect(
+      rebuildPath(store.db, pathOf("VIB-1"), { dataRoot: store.dataRoot }).action,
+    ).not.toBe("error");
+    expect(projectionFaultCount()).toBe(0);
+  });
 });
 
 /**
@@ -1175,6 +1363,320 @@ describe("task dependencies projection (ruling 131)", () => {
         },
         { task_key: "VIB-8", readiness: "ready", stored_readiness: "ready", blocked_by_json: "[]" },
       ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});
+
+/**
+ * Ruling 225 (F37-45). The live failure: ruling 224 taught viberr to answer a
+ * shut quota window by scheduling its own resumption, and four pass-37 tasks
+ * did exactly that — packet resolved, `run-operator` pending for 02:28 UTC,
+ * nothing asked of anybody. Every card still read "waiting on a human" and the
+ * board header counted them, because `waiting: human` is simply what
+ * `clearWaitingToHuman` writes when the last run ends. The packet that put them
+ * there had promised "Nothing runs until then and the board says so."
+ *
+ * These assert the derivation and, just as hard, its LIMITS: a decision a human
+ * can act on always outranks the clock, because `decisionsRequiring` reads this
+ * same column and a wrong answer here would hide work rather than describe it.
+ */
+describe("ruling 225: a task resting on a clock", () => {
+  /**
+   * The live shape these four tasks were in: delivered work at the review
+   * boundary with no approving verdict, so no human can accept it either. That
+   * last clause is load-bearing — a task a human COULD accept is a decision,
+   * and stays one (see the packet and recommendation cases below).
+   */
+  const unaccepted: Partial<TaskFrontmatter> = {
+    stage: "review",
+    readiness: "ready",
+    waiting: "human",
+    validation: "changed",
+    engagements: [
+      {
+        profileId: "code-reviewer",
+        backend: "codex",
+        role: "Code Reviewer",
+        delivers: false,
+        verdictCapable: true,
+      },
+    ],
+    workRevision: {
+      id: "rev_1",
+      headSha: "b".repeat(40),
+      treeSha: "c".repeat(40),
+      branch: "vib-1",
+      createdAt: "2026-09-13T23:11:18.732Z",
+      sourceProfileId: "developer",
+      kind: "delivered",
+      pushedAt: "2026-09-13T23:11:54.461Z",
+    },
+    verdicts: [],
+  };
+
+  /** An open decision a human can act on, in the shape `decisions.server` counts. */
+  const OPEN_PACKET: TaskPacket = {
+    type: "input",
+    kind: "Decision required",
+    from: "operator",
+    title: "Pick one",
+    body: "",
+    observations: [],
+    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+  };
+
+  const pending = (dueAt: string, patch: Partial<TaskSchedule> = {}): TaskSchedule => ({
+    id: `sch_${dueAt}`,
+    action: "run-operator" as const,
+    dueAt,
+    profileId: null,
+    prompt: "The usage window reopened.",
+    createdBy: "u_1",
+    createdByLabel: "Arda",
+    createdAt: "2026-09-14T00:14:57.815Z",
+    status: "pending" as const,
+    firedAt: null,
+    claimedAt: null,
+    retries: 0,
+    ...patch,
+  });
+
+  it("projects `schedule`, and names the earliest pending instant", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          // The LATER occurrence is written first on purpose: the answer is the
+          // one that fires next, not the one that happens to be listed first.
+          schedules: [
+            pending("2026-09-14T06:00:00.000Z"),
+            pending("2026-09-14T02:28:00.000Z"),
+          ],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).toBe("schedule");
+      expect(task.resumesAt).toBe("2026-09-14T02:28:00.000Z");
+      // The canonical file is untouched — this is a derived display value, the
+      // same contract LV-20's terminal `none` keeps.
+      expect(
+        readFileSync(taskFilePath(store.slug, "VIB-1", store.dataRoot), "utf8"),
+      ).toContain("waiting: human");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("leaves an already-fired schedule alone", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          schedules: [
+            pending("2026-09-13T08:19:58.271Z", {
+              status: "fired",
+              firedAt: "2026-09-13T08:20:09.950Z",
+            }),
+          ],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).toBe("human");
+      expect(task.resumesAt ?? null).toBeNull();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("lets an open packet outrank the clock", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          readiness: "input_required",
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+        packet: OPEN_PACKET,
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      // The schedule does not take the decision off anybody's hands, so the
+      // task still says a human is needed — and `decisionsRequiring`, which
+      // filters on this column, still counts it.
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("human");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("lets a pending recommendation outrank the clock", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+          recommendations: [
+            {
+              id: "rec_1",
+              kind: "transition" as const,
+              toStageId: "done",
+              label: "Move this to Done",
+              detail: "The work looks finished.",
+            },
+          ],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("human");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("rests on the clock at a stage nobody can accept from", () => {
+    // Caught on the live board, not by reading. SHOP-21 sat at Build with no
+    // revision, no PR and a `run-operator` schedule pending for 07:29, and its
+    // card and rail both still read "waiting on a human" after this ruling
+    // shipped — while the board's own "Waiting on me" tally read zero.
+    //
+    // The cause: `acceptanceRefusal === null` is NOT "a human could accept".
+    // The STAGE gate is the one acceptance refusal `acceptanceBlockReason`
+    // deliberately omits (it turns on the workflow graph, not the task file),
+    // so an early-stage task with nothing delivered has no refusal to report —
+    // not because it is acceptable, but because the only thing refusing it was
+    // never consulted.
+    //
+    // Canary: drop `isAtAcceptanceBoundary` from `couldBeAcceptedNow`.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          // `impl` is neither the review stage nor a stage with an edge to the
+          // terminal one, so nothing can be accepted from here.
+          stage: "impl",
+          readiness: "ready",
+          waiting: "human",
+          schedules: [pending("2026-09-14T07:29:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).toBe("schedule");
+      expect(task.resumesAt).toBe("2026-09-14T07:29:00.000Z");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("never promises a resume the schedule runner will refuse", () => {
+    // Caught by re-reading my own predicate, not by any of the 41 tests that
+    // were already green. A task that waits on other work is HELD (ruling
+    // 131(d)), and the schedule runner refuses its occurrence on exactly those
+    // grounds: "waits on other work (…) — no operator run was started; Viberr
+    // releases the task when every entry is done." A card reading "resumes Sep
+    // 14 · 02:28" over an occurrence that will be refused is the same lie this
+    // ruling removes, reintroduced by it.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          blockedBy: ["VIB-2"],
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug)[0]!;
+      expect(task.waiting).not.toBe("schedule");
+      expect(task.resumesAt ?? null).toBeNull();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("never promises a resume on an archived task either", () => {
+    // Third instance of the same hole, found the same way: by asking which
+    // tasks the schedule runner refuses. It has a dedicated `skipped-archived`
+    // outcome, so a resume time on an archived card is a run that will not
+    // happen. Archiving leaves every view but the Archived filter — which
+    // still draws the card, and the card still draws this tag.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          archived: true,
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      const task = listProjectTasks(store.db, store.slug, { includeArchived: true })[0]!;
+      expect(task.archived).toBe(true);
+      expect(task.waiting).not.toBe("schedule");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("invents no claim on a task that was making none", () => {
+    // `waiting: "none"` renders NO wait tag at all, so it tells nobody
+    // anything and there is nothing to correct. The ruling is about the one
+    // stored value that says the false sentence.
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          waiting: "none",
+          schedules: [pending("2026-09-14T02:28:00.000Z")],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("none");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("never lets a hand-authored `schedule` claim a rest it has not earned", () => {
+    const ctx = createTestDbContext();
+    try {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          ...unaccepted,
+          // Nothing authors this value; a file that carries it anyway must not
+          // be able to talk the board out of naming a human.
+          waiting: "schedule",
+          schedules: [],
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+      expect(listProjectTasks(store.db, store.slug)[0]!.waiting).toBe("human");
     } finally {
       ctx.cleanup();
     }

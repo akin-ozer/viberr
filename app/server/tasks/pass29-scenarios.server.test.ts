@@ -169,6 +169,7 @@ describe("reviewers & secondary engagements — the VQP-2 shape, as a contract",
       result: "approve" as const,
       reason: "clean",
       at: "2026-08-27T09:50:00.000Z",
+      rounds: 1,
     });
     const base = { engagements: fm.engagements, workRevision: revision };
     expect(deriveValidation({ ...base, verdicts: [] })).toBe("changed");

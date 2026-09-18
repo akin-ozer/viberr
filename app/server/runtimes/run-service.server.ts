@@ -160,6 +160,10 @@ interface LiveSlot {
 interface PendingRun {
   runId: string;
   launch: () => void;
+  /** The data root `startRun` was given, for the note the promotion writes on
+   *  the task (ruling 311): the drain runs from another run's onExit or the
+   *  org-settings action, neither of which knows it. */
+  dataRoot?: string;
 }
 
 /** The two admission lanes of ruling 152(b). */
@@ -361,6 +365,10 @@ export interface StartRunInput {
    *  packet body and the disabled control all render, so a person cannot be
    *  told three different stories about one refusal. */
   principalRefusal?: RunPrincipalRefusal;
+  /** Ruling 316: this dispatch withheld the run's VERDICT channel, so a reply
+   *  with no envelope verdict is an answer rather than a silence the prose
+   *  fallback should repair. Stored on the run row. */
+  verdictWithheld?: boolean;
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional — the SDK default applies when absent. */
@@ -788,6 +796,24 @@ type RunStartedAudit = {
  */
 const sqliteErrorSchema = z.object({ errcode: z.number(), message: z.string() });
 
+/**
+ * Ruling 263 (pass 37, F37-93): what a start DID, for the doors that report it.
+ *
+ * `startRun` has three endings and used to return the same `{ runId }` for all
+ * three, so every caller that wanted to tell a person what happened had to
+ * either guess or say "started" and be wrong twice. A refused run is a row that
+ * records why no process will exist; a queued one is parked behind the
+ * concurrency cap and starts when a slot frees. Neither is a run that started.
+ */
+export type RunStartOutcome = "started" | "queued" | "refused";
+
+export interface RunStartResult {
+  runId: string;
+  outcome: RunStartOutcome;
+  /** The whole sentence a refused run recorded; null for the other two. */
+  refusal: string | null;
+}
+
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
 export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
@@ -802,12 +828,12 @@ export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
  * `error`. That routes the failure through the EXISTING error-run path
  * (completion callbacks fire immediately, `applyAgentCompletionEffects`
  * posts the typed blocked event and escalation packet via runFailureReason).
- * Returns the run id.
+ * Returns the run id and, since ruling 263, what actually happened to it.
  */
 export async function startRun(
   db: DatabaseSync,
   input: StartRunInput,
-): Promise<{ runId: string }> {
+): Promise<RunStartResult> {
   const state = getState();
   // R21-4: a reserved row already carries this run's identity — adopt it whole
   // (id AND thread) so the strip the human has been watching becomes this run
@@ -877,6 +903,9 @@ export async function startRun(
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId,
     credentialUserId: input.credentialUserId,
+    // Ruling 316: kept on the row so the completion path can tell an answer
+    // from a silence long after the dispatch is gone.
+    verdictWithheld: input.verdictWithheld === true,
     // A reserved row is ALREADY running (that is the point) — re-stamping it
     // `queued` would blink the strip off between preparation and the spawn, and
     // would throw away the clock the human has been watching.
@@ -1021,7 +1050,7 @@ export async function startRun(
     details,
   });
 
-  const refuse = (message: string) => {
+  const refuse = (message: string): RunStartResult => {
     // F26-1: a reserved run that fails here never launches — release its slot
     // and let a run parked behind the cap take it.
     if (reservation) {
@@ -1031,7 +1060,7 @@ export async function startRun(
     failRunUnavailable(db, spec, message, reservation?.startedAt);
     // Ruling 180: a refused run never spawns, so its plugin has no reader.
     removeSkillPlugin(spec.skillPlugin);
-    return { runId };
+    return { runId, outcome: "refused", refusal: message };
   };
   if (!credential.ok) return refuse(credential.message);
   if (refusal !== null) return refuse(refusal);
@@ -1053,10 +1082,10 @@ export async function startRun(
   if (reservation) {
     state.reserved.delete(reservation.runId);
     launchThunk();
-  } else {
-    admitRun(db, runId, launchThunk, input.kind);
+    return { runId, outcome: "started", refusal: null };
   }
-  return { runId };
+  const admitted = admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
+  return { runId, outcome: admitted ? "started" : "queued", refusal: null };
 }
 
 /** What `startRun` got when it asked for its principal's credential. */
@@ -1231,10 +1260,22 @@ export function backendUnavailableMessage(
  */
 const SESSION_MISSING_TAG = "run·session_missing";
 
-/** What the user is told when provider-side history is gone. Never "review your
- *  authentication" — the credential is fine; the transcript is not. */
-function sessionMissingMessage(backend: RealBackend, sessionId: string): string {
+/** Ruling 207(j): WHY a resume could not reach its session. The two causes look
+ *  identical downstream and read completely differently to a human: one is a
+ *  storage fault worth investigating, the other is a decision viberr made. */
+export type ContinuityLossReason = "transcript_gone" | "owner_changed";
+
+/** What the user is told when a session could not be resumed. Never "review your
+ *  authentication" — the credential is fine. */
+function sessionMissingMessage(
+  backend: RealBackend,
+  sessionId: string,
+  reason: ContinuityLossReason,
+): string {
   const label = backend === "claude" ? "Claude" : "Codex";
+  if (reason === "owner_changed") {
+    return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
+  }
   return `The ${label} session ${sessionId} no longer exists on this machine. Its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
 }
 
@@ -1245,9 +1286,13 @@ function sessionMissingMessage(backend: RealBackend, sessionId: string): string 
  * `latestSessionRun` reads to skip the row, and the console shows it exactly
  * where the thread stopped.
  */
-function recordSessionMissing(db: DatabaseSync, run: AgentRunRow): void {
+function recordSessionMissing(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  reason: ContinuityLossReason,
+): void {
   const now = new Date().toISOString();
-  const text = sessionMissingMessage(run.backend, run.session_id ?? "");
+  const text = sessionMissingMessage(run.backend, run.session_id ?? "", reason);
   const raw = JSON.stringify({
     type: "error",
     source: "viberr",
@@ -1307,6 +1352,7 @@ function continuityResetPreamble(backend: RealBackend, kind?: string): string {
 async function noteContinuityReset(
   db: DatabaseSync,
   run: AgentRunRow,
+  reason: ContinuityLossReason,
   dataRoot?: string,
 ): Promise<void> {
   // Ruling 99: a controller conversation has no task file to note on — its
@@ -1326,7 +1372,16 @@ async function noteContinuityReset(
         type: "continuity",
         actor: { kind: "system", systemId: "runtime-continuity" },
         title: null,
-        text: `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
+        // Ruling 207(j): the owner-change branch decides continuity BEFORE any
+        // filesystem is consulted (see resumeRun), so the transcript is intact
+        // in the previous owner's home. Reporting that as "no provider
+        // transcript … retention sweep or a wiped runtime volume" sent an admin
+        // hunting a storage fault that does not exist, and hid the one fact
+        // that explains it.
+        text:
+          reason === "owner_changed"
+            ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+            : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
         toAgent: false,
         evidence: null,
       });
@@ -1362,6 +1417,48 @@ export async function noteCompletionEffectsLost(
     taskKey: run.task_key,
   };
   if (dataRoot) ref.dataRoot = dataRoot;
+  // Ruling 207(a): the marker that makes the sentence below TRUE. The same
+  // write flips `waiting` to "human" — honest, nothing is running — and boot
+  // recovery selects on `t.waiting = 'agent'`, so the note promised a replay
+  // its own write had just made unreachable. Recovery now also matches a run
+  // carrying this row, which is the module's existing idiom: it already keys
+  // idempotency and its crash-loop cap on audit rows, not on task state.
+  recordAudit(db, {
+    action: "run.completion.effects_lost",
+    actor: SYSTEM_ACTOR,
+    subjectKind: "task",
+    subjectId: run.task_key,
+    projectSlug: run.project_slug,
+    taskKey: run.task_key,
+    details: { runId: run.id, kind: run.kind },
+  });
+  // F37-67: what this note may promise depends on what the boot sweep will
+  // actually do with this run, so it asks the sweep's own rule rather than
+  // asserting one. The only shape that produces this note is
+  // `applyAgentCompletionEffects` REJECTING, and that function records the
+  // reply (with any verdict, atomically) in its step 1 before the delivery
+  // reconcile and the operator react that can fail after it. When step 1 did
+  // land, "none of them landed" is false about the one effect a person can see,
+  // and `recoverUnreactedAgentRuns` excludes the run forever on the very audit
+  // row step 1 wrote — so the replay sentence named a mechanism that had
+  // already decided not to run. Both sentences now follow the fact.
+  const { completionReplayWillRun } = await import("./run-recovery.server");
+  let willReplay = false;
+  try {
+    willReplay = await completionReplayWillRun(db, run);
+  } catch (error) {
+    // A predicate that cannot be read must not cost the note itself. Staying
+    // false is the safe side: it promises nothing and points at the one action
+    // a person can always take.
+    logger.warn("completion-replay predicate failed", {
+      runId: run.id,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  const agent = run.agent_name ?? run.role;
+  const text = willReplay
+    ? `The ${agent} run finished, but applying its completion effects (its reply, any verdict, the delivery reconcile, and re-engaging the operator) failed, so none of them landed. This task is not being worked right now. Run recovery replays the effects on the next restart; you can also re-run the agent. The run log it already produced is unchanged.`
+    : `The ${agent} run finished, but applying its completion effects failed partway. Anything already written above stands; what did not run is the delivery reconcile and re-engaging the operator. This task is not being worked right now, and boot recovery will not pick this run up, so nothing changes on its own: re-run the agent to carry on. The run log it already produced is unchanged.`;
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.frontmatter.waiting = "human";
@@ -1370,7 +1467,7 @@ export async function noteCompletionEffectsLost(
         type: "continuity",
         actor: { kind: "system", systemId: "runtime-continuity" },
         title: null,
-        text: `The ${run.agent_name ?? run.role} run finished, but applying its completion effects (its reply, any verdict, the delivery reconcile, and re-engaging the operator) failed, so none of them landed. This task is not being worked right now. Run recovery replays the effects on the next restart; you can also re-run the agent. The run log it already produced is unchanged.`,
+        text,
         toAgent: false,
         evidence: null,
       });
@@ -1569,8 +1666,11 @@ export async function resumeRun(
       backend,
       sessionId: prev.session_id,
     });
-    recordSessionMissing(db, prev);
-    await noteContinuityReset(db, prev, input.dataRoot);
+    const lossReason: ContinuityLossReason = ownerChanged
+      ? "owner_changed"
+      : "transcript_gone";
+    recordSessionMissing(db, prev, lossReason);
+    await noteContinuityReset(db, prev, lossReason, input.dataRoot);
     const freshTurn: StartRunInput = {
       projectSlug: prev.project_slug,
       taskKey: prev.task_key,
@@ -1658,21 +1758,25 @@ function coordinationLiveCount(state: ServiceState): number {
  * non-reserved run) and its launch thunk waits in the lane's queue, promoted by
  * `drainRunQueue` when a live slot frees.
  */
+/** True when the run launched now; false when it was parked behind the cap
+ *  (ruling 263: the caller reports which, instead of saying "started" for
+ *  both). */
 function admitRun(
   db: DatabaseSync,
   runId: string,
   launchThunk: () => void,
   kind: RunKind,
-): void {
+  dataRoot?: string,
+): boolean {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
   const lane = laneOf(kind);
   if (canAdmit(state, cap, lane)) {
     launchThunk();
-    return;
+    return true;
   }
   const queue = state.pending[lane];
-  queue.push({ runId, launch: launchThunk });
+  queue.push({ runId, launch: launchThunk, dataRoot });
   logger.info("run queued behind the concurrency cap", {
     runId,
     lane,
@@ -1681,6 +1785,7 @@ function admitRun(
     coordinationLane: coordinationLane(cap),
     queuedAhead: queue.length - 1,
   });
+  return false;
 }
 
 /**
@@ -1712,6 +1817,9 @@ export function drainRunQueue(db: DatabaseSync): void {
       const row = getRun(db, next.runId);
       if (!row || row.state !== "queued") continue; // stopped while waiting
       next.launch();
+      // Ruling 311, the other half: the timeline said "Queued … Nothing is
+      // streaming yet", and this is the one place that stops being true.
+      void noteRunStarted(db, row, next.dataRoot);
     }
   } finally {
     state.draining = false;
@@ -2113,7 +2221,17 @@ async function noteInterrupt(
         type: "note",
         actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
         title: null,
-        text: `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`,
+        // Ruling 207(g): "the thread stays resumable" is true only when a
+        // provider session was ever reported. `reserveRun` writes a `running`
+        // row minutes before any provider process exists, and that row is what
+        // the Live-run strip's Stop button acts on — the deliberate
+        // minutes-long window a person actually presses Stop in. A run with no
+        // `session_id` is skipped by `latestSessionRun` (agent-reply.server.ts),
+        // so "re-run the agent to continue" hands back a fresh agent with no
+        // memory of the turn it stopped, silently re-spending the budget.
+        text: run.session_id
+          ? `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`
+          : `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}) before ${backend} reported a session, so there is no thread to resume. Re-running the agent starts a fresh one, re-anchored on \`task.md\`.`,
         toAgent: false,
         evidence: null,
       });
@@ -2121,6 +2239,52 @@ async function noteInterrupt(
     rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
   } catch (error) {
     logger.error("interrupt timeline note failed", {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Ruling 311, the other half. `runDispatchLine` now records a run parked
+ * behind the concurrent-run cap as "Queued … starts when a slot frees. Nothing
+ * is streaming yet" — and a parked run is promoted in exactly one place,
+ * `drainRunQueue`, whose `launch()` patches the run row and publishes SSE and
+ * writes nothing on the task. So the durable record every person, operator and
+ * later run reads said "Nothing is streaming yet" for the run's whole life
+ * after admission: the mirror image of the sentence 311 fixed, and the same
+ * shape (a transition the row knew, absent from the timeline). One note at the
+ * transition, naming the run. Only the promotion path writes it — a run
+ * admitted at once was never "queued" on the timeline, and its dispatch line
+ * already said "Started". Best-effort like `noteInterrupt`: a task file we
+ * cannot write never blocks the launch. Controller turns have no task file
+ * (ruling 99).
+ */
+async function noteRunStarted(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  dataRoot?: string,
+): Promise<void> {
+  if (run.kind === "controller") return;
+  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
+  if (dataRoot) ref.dataRoot = dataRoot;
+  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "run-queue" },
+        title: "Run started",
+        text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started — streaming to the agent logs.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error("run-started timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
       err: error instanceof Error ? error : new Error(String(error)),

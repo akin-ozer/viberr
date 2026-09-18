@@ -461,6 +461,7 @@ async function createProjectImpl(
     // declares one; required-ness stays emergent (engaged verdict-capable
     // agents) until then.
     requiredReviewers: [],
+  fileLeases: [],
   };
 
   await (ctx.createProjectFileImpl ?? createProjectFile)(

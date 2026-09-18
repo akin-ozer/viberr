@@ -47,6 +47,7 @@ import {
   deliverGate,
   gate,
   operatorAcceptCompletion,
+  operatorAcceptsDirectly,
   operatorDeliverForReview,
   operatorDispatchAgent,
   operatorOpenPacket,
@@ -160,6 +161,21 @@ beforeEach(async () => {
     "~/server/runtimes/operator-run.server"
   );
   resetOperatorLeasesForTests();
+  // Ruling 127: an agent run bills the TASK OWNER's accounts, so a dispatch
+  // only reaches an adapter when the owner has that backend connected. Arda
+  // owns VIB-1 in `seedTask`. Ruling 263 is why this is here: seventeen tests
+  // in this file named "and starts its run" were asserting the sentence
+  // "Started a Claude run for Dev" on a dispatch that ruling 127 had already
+  // refused for the missing credential, because every ending of a dispatch
+  // reported the same "started". The owner having an account is the ordinary
+  // state of somebody using the product; nothing here tests the refusal.
+  const { connectFakeBackend } = await import(
+    "../../../test-support/backend-credentials"
+  );
+  // CLAUDE only: ruling 207(h)'s test asserts the "no Codex fallback either"
+  // half on this same fixture, and connects Codex itself when it wants the
+  // other arm.
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
 });
 
 afterEach(() => {
@@ -520,9 +536,31 @@ describe("operatorDispatchAgent", () => {
     );
     expect(bare.outcome).toBe("noop");
     expect(bare.message).toContain("Claude is out of quota until");
+    // Ruling 207(h): this fixture's owner has ONLY Claude connected — which is
+    // the shape the advice used to ignore. The hold is scoped to (backend,
+    // owner) because every run bills the owner (ruling 127), so telling the
+    // operator to "pick a Codex profile" would send it into a dispatch that is
+    // refused on the owner's credential, and THAT failure opens the very packet
+    // this sentence forbids.
+    // CANARY: restore the unconditional "pick a Codex profile" and this reads
+    // as advice on a fixture where no Codex account exists.
     expect(bare.message).toContain(
+      "there is no Codex fallback either — this task's runs bill its owner, who has no Codex account connected",
+    );
+    // …and with the other backend actually reachable for the owner, the
+    // fallback is real and is offered. Both arms of ruling 207(h) in one test,
+    // because the sentence is only honest when it tracks this fact.
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    const withFallback = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
+      authority("supervised"),
+    );
+    expect(withFallback.message).toContain(
       "Do not open a packet for this; pick a Codex profile if the work cannot wait.",
     );
+
     // The prompt arm is the same door and answers the same way.
     const prompted = await operatorDispatchAgent(
       store.db,
@@ -1942,6 +1980,77 @@ describe("auto-invoke on stage transition", () => {
   });
 });
 
+/**
+ * F37-65 (pass 37): the Execution caption on every task page of a full-autonomy
+ * board said "this run can move the task and accept completion itself."
+ *
+ * It read `configuredAutonomy === "full"` alone. Live on shopify-clone-platform
+ * the operator is deployed `autonomy: full` with `completion-for-acceptance:
+ * recommend`, and owner ruling Q1 (2026-07-11) holds that grant at `recommend`
+ * whatever the autonomy — so the sentence was false on all 26 tasks, and every
+ * acceptance in the pass was a person pressing the button while the operator
+ * filed cards.
+ *
+ * These tests do not assert the helper's arithmetic; they assert it AGREES with
+ * `operatorAcceptCompletion`, which is the only thing worth promising a reader.
+ * CANARY: `return authority.autonomy === "full"` (the defect itself) reddens the
+ * `recommend` and withheld rows; `return gate(...) === "direct"` reddens the
+ * supervised row.
+ */
+describe("F37-65 — operatorAcceptsDirectly predicts what an acceptance really does", () => {
+  const DIRECT_ACCEPTANCE: { capabilityId: string; mode: CapabilityMode }[] = [
+    ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
+    { capabilityId: "completion-for-acceptance", mode: "direct" },
+  ];
+  const WITHHELD: { capabilityId: string; mode: CapabilityMode }[] = DEFAULT_POLICY.filter(
+    (c) => c.capabilityId !== "completion-for-acceptance",
+  );
+
+  const rows: {
+    what: string;
+    policy: { capabilityId: string; mode: CapabilityMode }[];
+    autonomy: OperatorAutonomy;
+    accepts: boolean;
+  }[] = [
+    // The live board's exact shape, and the one the caption lied about.
+    { what: "full autonomy, acceptance `recommend`", policy: DEFAULT_POLICY, autonomy: "full", accepts: false },
+    { what: "full autonomy, acceptance `direct`", policy: DIRECT_ACCEPTANCE, autonomy: "full", accepts: true },
+    { what: "supervised, acceptance `direct`", policy: DIRECT_ACCEPTANCE, autonomy: "supervised", accepts: false },
+    { what: "full autonomy, acceptance withheld", policy: WITHHELD, autonomy: "full", accepts: false },
+  ];
+
+  for (const row of rows) {
+    it(`${row.what}: says ${row.accepts}, and the runtime does the same`, async () => {
+      deployRoster(row.policy, row.autonomy);
+      expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, store.slug)).toBe(row.accepts);
+      seedTask("review");
+      const r = await operatorAcceptCompletion(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        authority(row.autonomy),
+      );
+      // The claim under test is narrow and total: "accepts completion itself"
+      // means the task reaches the terminal stage on the operator's own move.
+      expect(r.outcome === "done").toBe(row.accepts);
+      expect(task().frontmatter.stage === "done").toBe(row.accepts);
+    });
+  }
+
+  it("is false when the project deploys no operator at all", () => {
+    // Not a redundant guard: the caption is rendered from a project file that
+    // may have had its operator removed since the page last loaded, and the
+    // helper must answer for that project rather than throw into the loader.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, agents: [] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, store.slug)).toBe(false);
+    // And for a project that is not there at all — `resolveOperatorAuthority`
+    // throws `notFound`, which must not become a 500 on the task page.
+    expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, "no-such-project")).toBe(false);
+  });
+});
+
 describe("operatorAcceptCompletion", () => {
   it("supervised posts an actionable accept-completion → Done recommendation (never moves to Done)", async () => {
     deployRoster(DEFAULT_POLICY);
@@ -2071,6 +2180,7 @@ describe("operatorAcceptCompletion", () => {
             result: "approve" as const,
             reason: "looks right",
             at: "2026-07-25T09:30:00.000Z",
+            rounds: 1,
           },
         ],
       },
@@ -2160,6 +2270,7 @@ describe("operatorAcceptCompletion", () => {
             result: "approve" as const,
             reason: "looks right",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy" as const,
@@ -3088,15 +3199,64 @@ describe("applyRecommendation / dismissRecommendation", () => {
   // recommendations at all — so the supervised loop could spin: propose,
   // decline, re-propose, decline.
 
-  function snapshot() {
+  function snapshot(events?: number) {
     return operatorSnapshot(
       store.db,
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
       authority("supervised"),
+      events,
     );
   }
+
+  /**
+   * Ruling 302 (pass 37, F37-137): the operator's timeline WINDOW says it is a
+   * window.
+   *
+   * Ruling 285 fixed the per-ENTRY cut in this very function: a clipped entry
+   * now carries a `clipped` note and the `occurredAt` that reads it whole,
+   * because "an entry that ends mid-sentence with a '…' and no way to ask for
+   * the rest is how a coordinator states half a report as the whole of it,
+   * which it did, live, on SHOP-42." The `.slice(0, 6)` immediately beside it
+   * stayed silent, and the controller's own `get_task` has taken an `events`
+   * count all along while the operator's took no arguments at all.
+   */
+  it("ruling 302: says how many entries exist, how to widen the window, and stays silent when nothing is hidden", async () => {
+    seedTask("impl");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        for (let i = 0; i < 9; i += 1) {
+          parsed.timeline.unshift({
+            occurredAt: new Date(Date.UTC(2026, 8, 16, 1, i)).toISOString(),
+            type: "note",
+            actor: { kind: "operator" },
+            title: `Entry ${i}`,
+            text: `entry ${i}`,
+            toAgent: false,
+            evidence: null,
+          });
+        }
+      },
+    );
+    const six = snapshot();
+    // CANARY: drop `timelineTotal` and a full-looking window is all there is.
+    expect(six.recentTimeline).toHaveLength(6);
+    expect(six.timelineTotal).toBeGreaterThan(6);
+    // CANARY: drop the `timelineOlder` note. The count AND the way out.
+    expect(six.timelineOlder).toContain("older");
+    expect(six.timelineOlder).toContain("events");
+    expect(six.timelineOlder).toContain("read_timeline_entry");
+    expect(six.timelineOlder).toContain(String(six.timelineTotal - 6));
+
+    // The window widens on request, exactly like the controller's.
+    // CANARY: ignore the argument and keep the hardcoded six.
+    const wide = snapshot(50);
+    expect(wide.recentTimeline.length).toBe(wide.timelineTotal);
+    // Nothing hidden, nothing claimed: no note at all.
+    expect(wide.timelineOlder).toBeUndefined();
+  });
 
   it("ruling 131(d): the snapshot carries blockedBy with resolved states", async () => {
     // Canary: omit `blockedBy` from `operatorSnapshot`'s return object.
@@ -3358,6 +3518,41 @@ describe("operatorPostComment", () => {
         (n) => n.kind === "mention",
       ),
     ).toHaveLength(0);
+  });
+
+  /**
+   * Ruling 214 (F37-34). Live on SHOP-10 the operator followed ruling 210's own
+   * words — "ask the reviewer, in ONE comment" — and posted "@Code Reviewer,
+   * name everything you would still block on across your owned surface, now."
+   * `post_comment` starts no run, so the reviewer never read it; the stranded
+   * backstop then recorded a deliberate hold ("without advancing, dispatching,
+   * or opening a packet") and paused coordination on the task five others were
+   * waiting behind. The doctrine now names `run_agent`; this is the backstop
+   * for when the tag happens anyway. Same reasoning as S5-G3 above: a visible
+   * non-delivery beats a silent one.
+   */
+  it("an operator comment that @tags an AGENT says the agent was not reached (ruling 214)", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await operatorPostComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: "@Reviewer name everything you would still block on across your owned surface, now.",
+      },
+      authority("supervised"),
+    );
+    const top = task().timeline[0]!;
+    expect(top.actor.kind).toBe("operator");
+    // CANARY: drop the disclosure and this comment reads as a question put to
+    // the reviewer, on a timeline where nothing was ever sent to it.
+    expect(top.text).toContain("is an agent, and an operator comment starts no run");
+    expect(top.text).toContain("Run the agent to put this to it.");
+    // …and it really did start nothing: the tag is decorative, which is the
+    // whole reason the sentence has to be there.
+    expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
   });
 });
 
@@ -4014,7 +4209,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
         ],
         workRevision: rev,
         verdicts: [
-          { profileId: "reviewer", revisionId: rev.id, headSha: rev.headSha, result: "approve", reason: "ok", at: "2026-08-24T01:00:00.000Z" },
+          { profileId: "reviewer", revisionId: rev.id, headSha: rev.headSha, result: "approve", reason: "ok", at: "2026-08-24T01:00:00.000Z", rounds: 1 },
         ],
       },
       goal: file.parsed.goal,
@@ -4435,7 +4630,7 @@ describe("ruling 137: acceptance offers are bound to a revision and withdrawn on
       ];
       parsed.frontmatter.workRevision = rev;
       parsed.frontmatter.verdicts = [
-        { profileId: "reviewer", revisionId: rev.id, headSha, result: "approve", reason: "clean", at: "2026-09-04T10:05:00.000Z" },
+        { profileId: "reviewer", revisionId: rev.id, headSha, result: "approve", reason: "clean", at: "2026-09-04T10:05:00.000Z", rounds: 1 },
       ];
       parsed.frontmatter.validation = "healthy";
       parsed.frontmatter.branch = "vib-1-work";
@@ -4556,10 +4751,26 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet?.options[1]?.goalDraft).toBeUndefined();
   });
 
-  it("caps an over-long goalDraft at GOAL_DRAFT_MAX_CHARS instead of refusing it", async () => {
+  /**
+   * Ruling 288 (pass 37, F37-123) REVERSES this test, which used to assert the
+   * cap "instead of refusing it".
+   *
+   * A `goalDraft` and a `newTask.goal` both become a task's CONTRACT — the one
+   * document every future run on it re-anchors on (ruling 189) — and both were
+   * a bare `.slice`. Live on SHOP-29: a person's decision asked the operator to
+   * write the REASONING into a corrected acceptance criterion, exactly so a
+   * later reader would not undo it. The draft came back 4,000 characters long
+   * to the character, ending "…a 403 there would be", and the sentence carrying
+   * the reason was gone. The editor rendered it as ordinary text; only counting
+   * the characters showed it. By then the operator's words were unrecoverable,
+   * because the slice ran at write time and what it cut was never stored.
+   */
+  it("ruling 288: refuses an over-long goalDraft by name and writes nothing", async () => {
+    // Canary: restore the `.slice(0, GOAL_DRAFT_MAX_CHARS)` and a contract that
+    // stops mid-sentence is committed with nothing saying it was cut.
     packetsRoster();
     seedTask("impl");
-    await operatorOpenPacket(
+    const r = await operatorOpenPacket(
       store.db,
       { dataRoot: store.dataRoot },
       {
@@ -4571,7 +4782,68 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       },
       authority("full"),
     );
-    expect(task().packet?.options[0]?.goalDraft).toHaveLength(GOAL_DRAFT_MAX_CHARS);
+    expect(r.outcome).toBe("noop");
+    // Named, with both numbers, so the operator can shorten rather than guess.
+    expect(r.message).toContain("goalDraft");
+    expect(r.message).toContain("4,500");
+    expect(r.message).toContain("4,000");
+    expect(r.message).toContain("Nothing was written");
+    // …and nothing WAS: no packet, so no half-written contract to discover.
+    expect(task().packet).toBeNull();
+  });
+
+  it("ruling 288: refuses an over-long newTask.goal too — the same contract, the other field", async () => {
+    // Canary: check only `goalDraft` in the refusal and a created task's whole
+    // contract goes back to being silently cut.
+    packetsRoster();
+    seedTask("impl");
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "A gap has no owner",
+        options: [
+          {
+            kind: "create_task",
+            title: "Create the task",
+            recommended: true,
+            newTask: {
+              title: "The new task",
+              goal: "y".repeat(GOAL_DRAFT_MAX_CHARS + 1),
+            },
+          },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("newTask.goal");
+    expect(task().packet).toBeNull();
+  });
+
+  it("ruling 288: a goal exactly AT the limit is accepted whole", async () => {
+    // The boundary is the thing worth pinning: an off-by-one here either
+    // refuses a legitimate goal or lets one character through the guard.
+    packetsRoster();
+    seedTask("impl");
+    const exact = "z".repeat(GOAL_DRAFT_MAX_CHARS);
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Scope needed",
+        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: exact }],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().packet?.options[0]?.goalDraft).toBe(exact);
   });
 
   it("the operator's snapshot reports the decided packet's awaiting stamp, so it does not re-ask", async () => {
@@ -4626,6 +4898,433 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
     expect(task().packet).toBeNull();
   });
+
+  /**
+   * Ruling 244 (pass 37, F37-73). `resolve_remote_collision` clears a FOREIGN
+   * remote — ruling 122's case. With no collision recorded, the resolution
+   * takes ruling 136(b)'s `own_pr_open` arm and answers "no collision to
+   * clear", leaving the block untouched.
+   *
+   * Live on SHOP-11: a rebase diverged the branch from its OWN PR #15, the
+   * operator offered this as the recommended option promising to close PR #15
+   * and delete the remote, a person confirmed it through the ceremony that
+   * names deleting a branch, and the answer was "The block stays." The decision
+   * was spent and the packet was gone. The sibling `accept_completion` arm
+   * refuses exactly this shape, for exactly this reason.
+   */
+  it("ruling 244: refuses resolve_remote_collision when no FOREIGN collision is recorded", async () => {
+    packetsRoster();
+    seedTask("review");
+    // The task's own PR on its own branch, and no unowned PR: the SHOP-11 shape.
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.branch = "vib-1";
+        parsed.frontmatter.pr = { number: 15, state: "review", title: "VIB-1" };
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "`vib-1` push refused",
+        options: [
+          { kind: "resolve_remote_collision", title: "Clear the stale remote and re-deliver", recommended: true },
+        ],
+      },
+      authority("full"),
+    );
+    // CANARY: delete the ruling 244 arm and the packet opens, promising a
+    // deletion the resolution will refuse after spending the decision.
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("only fits a FOREIGN remote");
+    expect(refused.message).toContain("its own review PR #15");
+    expect(task().packet).toBeNull();
+
+    // With a real collision recorded, the same option is authored. CANARY:
+    // refuse on the option kind alone and ruling 122's actual case dies.
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (parsed) => {
+        // The github block always exists on a delivered task; set the field on
+        // it rather than spreading a fallback that would drop its required keys.
+        if (parsed.frontmatter.github) parsed.frontmatter.github.unownedPr = 99;
+        else parsed.frontmatter.github = { commits: [], changed: null, unownedPr: 99 };
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const allowed = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "`vib-1` is squatted",
+        options: [
+          { kind: "resolve_remote_collision", title: "Clear the stale remote and re-deliver", recommended: true },
+        ],
+      },
+      authority("full"),
+    );
+    expect(allowed.outcome).not.toBe("noop");
+    expect(task().packet?.options[0]?.kind).toBe("resolve_remote_collision");
+  });
+
+  it("ruling 237: refuses a question_reviewer that names no reviewer, or names one this task does not have", async () => {
+    // The option's whole promise is "ask THIS agent". Unchecked, the resolution
+    // would dispatch nobody, or dispatch the deliverer with a prompt telling it
+    // not to review — either way the card said something that did not happen.
+    // Canary: remove either refusal.
+    packetsRoster();
+    seedTask("impl");
+    const nameless = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "The reviewer keeps objecting",
+        options: [{ kind: "question_reviewer", title: "Ask the reviewer", recommended: true }],
+      },
+      authority("full"),
+    );
+    expect(nameless.outcome).toBe("noop");
+    expect(nameless.message).toContain("needs the reviewer it asks");
+    expect(task().packet).toBeNull();
+
+    const stranger = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "The reviewer keeps objecting",
+        options: [
+          {
+            kind: "question_reviewer",
+            title: "Ask the reviewer",
+            profileId: "nobody-here",
+            recommended: true,
+          },
+        ],
+      },
+      authority("full"),
+    );
+    expect(stranger.outcome).toBe("noop");
+    expect(stranger.message).toContain("is not a reviewer engaged on VIB-1");
+    expect(task().packet).toBeNull();
+  });
+
+  it("refuses a hold that names nothing to wait on, and blockedBy on any other kind", async () => {
+    // Ruling 230: a block_on_dependencies with no entries resolves into a hold
+    // that releases on nothing — no dependencies, no run, no owner. Canary:
+    // remove either stray refusal.
+    packetsRoster();
+    seedTask("impl");
+    const empty = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Wait or push on?",
+        options: [
+          { kind: "block_on_dependencies", title: "Hold until the gateway lands", recommended: true },
+          { kind: "request_edit", title: "Send it back" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(empty.outcome).toBe("noop");
+    expect(empty.message).toContain("A block_on_dependencies option needs the work it waits on");
+    expect(task().packet).toBeNull();
+
+    const stray = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "Wait or push on?",
+        options: [
+          { kind: "redirect", title: "Have the developer redo it", recommended: true, blockedBy: ["VIB-2"] },
+          { kind: "request_edit", title: "Send it back" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(stray.outcome).toBe("noop");
+    expect(stray.message).toContain("blockedBy only fits a block_on_dependencies option");
+    expect(task().packet).toBeNull();
+  });
+
+  /**
+   * Ruling 269 (pass 37, F37-101): "this belongs in its own task" — the most
+   * common structural remedy on a multi-service board, and the only one whose
+   * recommended option had to end with an instruction to the reader. Live on
+   * SHOP-26 the operator wrote, verbatim: "You create the task — no option
+   * here can."
+   */
+  it("authors a create_task option, and refuses one with no task on it", async () => {
+    packetsRoster();
+    seedTask("impl");
+    const authored = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "A published contract has no producer — who owns closing it?",
+        options: [
+          {
+            kind: "create_task",
+            title: "Inventory serves the batch contract",
+            recommended: true,
+            newTask: {
+              title: "Inventory: serve the batch stock contract",
+              goal: "GET /stock serves stockBatchResponseSchema. Done when the batch shape is produced.",
+              blockedBy: ["VIB-2"],
+              labels: ["service"],
+            },
+          },
+          { kind: "custom", title: "Leave it as it is" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(authored.outcome).toBe("done");
+    const packet = task().packet!;
+    // CANARY: drop the `create_task` arm from the option builder and the
+    // payload the resolution reads never lands, so the confirm creates nothing.
+    expect(packet.options[0]).toMatchObject({
+      kind: "create_task",
+      newTask: {
+        title: "Inventory: serve the batch stock contract",
+        blockedBy: ["VIB-2"],
+        labels: ["service"],
+      },
+    });
+
+  });
+
+  /**
+   * Ruling 270 (pass 37, F37-102): through the TOOL, which is the surface an
+   * operator actually authors from. Rulings 230 and 224 each added a kind with
+   * a payload, wrote its two authoring refusals, and never added the field to
+   * `open_decision_packet` — so the operator could name `block_on_dependencies`
+   * and be told "needs the work it waits on" with no way to say. Both rulings'
+   * tests called `operatorOpenPacket` directly, which accepts the field, so the
+   * door was never exercised and the kind was dead in the product.
+   */
+  it("ruling 270: block_on_dependencies and wait_for_window are authorable THROUGH the tool", async () => {
+    packetsRoster();
+    seedTask("impl");
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("full"),
+    });
+    const tool = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
+    const dueAt = new Date(Date.now() + 3_600_000).toISOString();
+    await tool.handler(
+      {
+        packetType: "blocked",
+        title: "Wait, hold, or push on?",
+        options: [
+          {
+            kind: "block_on_dependencies",
+            title: "Hold this until the gateway lands",
+            recommended: true,
+            blockedBy: ["VIB-2"],
+          },
+          {
+            kind: "wait_for_window",
+            title: "Wait for the window and pick it back up",
+            dueAt,
+          },
+        ],
+      },
+      {},
+    );
+    const packet = task().packet;
+    // CANARY: drop either field from the tool's forwarding (or its schema) and
+    // the write is refused for the payload it was never given a way to send.
+    expect(packet, "the tool could not author a payload-bearing kind").toBeTruthy();
+    expect(packet!.options[0]).toMatchObject({
+      kind: "block_on_dependencies",
+      blockedBy: ["VIB-2"],
+    });
+    expect(packet!.options[1]).toMatchObject({ kind: "wait_for_window", dueAt });
+  });
+
+  it("refuses a create_task option with no task on it, and newTask on any other kind", async () => {
+    packetsRoster();
+    seedTask("impl");
+    // An option that names no task resolves into nothing, which is the shape
+    // the whole ruling exists to stop. CANARY: remove the empty-newTask arm.
+    const empty = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Who owns it?",
+        options: [
+          { kind: "create_task", title: "Make a task for it", recommended: true },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(empty.outcome).toBe("noop");
+    expect(empty.message).toContain("create_task option with no task on it");
+
+    // …and the payload is refused on every other kind, like `toStage` and
+    // `blockedBy` before it. CANARY: remove the stray-newTask arm.
+    const stray = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Who owns it?",
+        options: [
+          {
+            kind: "redirect",
+            title: "Have the developer redo it",
+            recommended: true,
+            newTask: { title: "Something else", goal: "Elsewhere." },
+          },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(stray.outcome).toBe("noop");
+    expect(stray.message).toContain("newTask only fits a create_task option");
+  });
+
+  /**
+   * Ruling 273 (pass 37, F37-106): a retry onto a backend the instance already
+   * knows is spent. Live on SHOP-37 the operator recommended "Re-run the
+   * Integration Verifier on the Codex backend" six hours after Codex was
+   * recorded exhausted for the owner's credential; a person confirmed it and
+   * the answer was "The retry could not start: Held: Codex is out of quota
+   * until Sep 19… scheduled for then." Nothing lied and nothing was lost — the
+   * hold is ruling 152(c) working — but the decision was spent on a four-day
+   * park that was knowable when the option was written.
+   */
+  it("ruling 273: refuses a retry onto a backend already recorded out of quota for the owner", async () => {
+    packetsRoster();
+    seedTask("impl");
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.round(Date.now() / 1000) + 3600,
+      resetsAtPrecision: "clock",
+      providerText: "You've hit your usage limit",
+      runId: "run_spent",
+      observedAt: new Date().toISOString(),
+    });
+    const refused = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "The verifier never ran — pick a recovery",
+        options: [
+          {
+            kind: "retry_other_backend",
+            title: "Re-run the verifier on Codex",
+            recommended: true,
+            backend: "codex",
+          },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    // CANARY: remove the hold check and the operator may recommend a retry
+    // whose only possible outcome is a park until the window reopens.
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toContain("already recorded Codex as out of quota");
+    expect(refused.message).toContain("wait_for_window");
+    expect(task().packet).toBeNull();
+
+    // The OTHER backend is unaffected: the hold is per (backend, credential),
+    // and this guard must not refuse a recovery that can actually run.
+    const allowed = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "blocked",
+        title: "The verifier never ran — pick a recovery",
+        options: [
+          {
+            kind: "retry_other_backend",
+            title: "Re-run the verifier on Claude",
+            recommended: true,
+            backend: "claude",
+          },
+          { kind: "custom", title: "Leave it" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(allowed.outcome).toBe("done");
+    expect(task().packet?.options[0]).toMatchObject({ backend: "claude" });
+  });
+
+  it("refuses to let the operator offer the head-check override at all", async () => {
+    // Ruling 226: the waiver is granted against a (PR, revision, live head)
+    // triple the ACCEPTANCE GATE read at the moment it refused. An operator
+    // offering it from a board snapshot would be waiving a check over facts it
+    // never read — and the thing waived is the last guard between a review and
+    // the base branch. Canary: remove the stray-waiver refusal.
+    packetsRoster();
+    seedTask("impl");
+    const r = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Pick a path",
+        options: [
+          { kind: "accept_unverified_head", title: "Just merge it", recommended: true },
+          { kind: "request_edit", title: "Send it back" },
+        ],
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("accept_unverified_head is not an option you can offer");
+    expect(task().packet).toBeNull();
+  });
 });
 
 /**
@@ -4656,7 +5355,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
           { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
         ],
         verdicts: [
-          { profileId: "reviewer", revisionId: "rev_1", headSha: HEAD, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z" },
+          { profileId: "reviewer", revisionId: "rev_1", headSha: HEAD, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z", rounds: 1 },
         ],
         validation: "healthy",
         pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: HEAD, mergeable },
@@ -4701,7 +5400,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(snap.pr?.mergeable).toBe("conflicting");
     expect(snap.notAcceptableReason).toContain("VIB-1's review PR #7 conflicts with the base branch");
-    expect(snap.notAcceptableReason).toContain("Rebase the branch and re-review, or archive the task.");
+    expect(snap.notAcceptableReason).toContain("merging the base INTO it");
     seedReviewedWithPr("review", "clean");
     const clean = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(clean.pr?.mergeable).toBe("clean");
@@ -4838,5 +5537,213 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
     expect(snap.requiredReviewers).toEqual([
       { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Rev" },
     ]);
+  });
+});
+
+/**
+ * F37-11 (pass 37): the operator could not tell whether its branch was behind
+ * the base, so it planned `update_branch_from_base` on every delivery and the
+ * server answered "already up to date" every time — eight of the pass's nine
+ * "plan was not carried out in full" notes were that one step.
+ *
+ * The redundant call was DELIBERATE ("call it when you are unsure rather than
+ * guessing", and a stale base is how a reviewer reads a diff against a base
+ * that no longer exists), so the posture is unchanged: the field only lets the
+ * operator BE less unsure. `null` is "nothing has compared them yet" and is
+ * never a reason to skip the call.
+ */
+describe("F37-11: the operator snapshot carries the base compare", () => {
+  function snapOf(): ReturnType<typeof operatorSnapshot> {
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+  }
+
+  /** One `github.reconcile` observation row, shaped exactly as the reconciler
+   *  writes it — the same three fields `latestReconcileSync` and
+   *  `createReconcileBehindByLookup` read back. */
+  function seedCompare(behindBy: number): void {
+    const details = {
+      branch: "vib-1",
+      sync: behindBy > 0 ? "behind_main" : "synced",
+      behindBy,
+    };
+    store.db
+      .prepare(
+        `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
+         VALUES (?, NULL, ?, 'github.reconcile', ?)`,
+      )
+      .run(
+        `projects/${store.slug}/tasks/VIB-1/task.md`,
+        new Date().toISOString(),
+        JSON.stringify(details),
+      );
+  }
+
+  it("reports null when no pass has compared this task", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapOf().baseBehindBy).toBeNull();
+  });
+
+  it("reports the reconciler's reading once one exists", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedCompare(3);
+    expect(snapOf().baseBehindBy).toBe(3);
+  });
+
+  it("reports 0 for a branch level with the base — the case that was being re-planned", () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", branch: "vib-1" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedCompare(0);
+    expect(snapOf().baseBehindBy).toBe(0);
+  });
+});
+
+/**
+ * Ruling 193 (F37-14, live): a required reviewer chartered to bring a Docker
+ * stack up ran on a host with no `make` and no Docker. It said so in its own
+ * words — "an environment/repository-baseline blocker, not a discovered
+ * document-scope defect" — and the turn doctrine had exactly one answer to a
+ * request-changes, so the deliverer was sent back to rework a one-file document
+ * round after round over a wall no revision could move. The snapshot showed
+ * only the CURRENT revision's verdict, so every round looked like the first.
+ */
+describe("ruling 193: the snapshot counts a reviewer's successive request_changes", () => {
+  const head = "a".repeat(40);
+
+  function writeVerdicts(
+    verdicts: {
+      revisionId: string;
+      result: "approve" | "request_changes";
+      at: string;
+      /** Ruling 204: blocking rounds this reviewer spent on THIS revision. */
+      rounds?: number;
+    }[],
+  ): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        branch: "vib-1",
+        workRevision: {
+          id: verdicts.at(-1)?.revisionId ?? "rev_1",
+          headSha: head,
+          treeSha: "t".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-13T09:00:00.000Z",
+          sourceProfileId: "dev",
+        },
+        engagements: [
+          {
+            profileId: "reviewer",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+        verdicts: verdicts.map((v) => ({
+          profileId: "reviewer",
+          revisionId: v.revisionId,
+          headSha: head,
+          result: v.result,
+          reason: "r",
+          at: v.at,
+          rounds: v.rounds ?? 1,
+        })),
+      }),
+      goal: "g",
+      timeline: [],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  function reviewerRow() {
+    const snap = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+    return snap.reviewers.find((r) => r.profileId === "reviewer");
+  }
+
+  it("counts nothing before the reviewer has weighed in", () => {
+    writeVerdicts([]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(0);
+  });
+
+  it("counts one for an ordinary first request_changes", () => {
+    writeVerdicts([{ revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" }]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
+  });
+
+  /**
+   * Ruling 204 REVERSES this case, which ruling 193 decided the other way
+   * ("counts the REVISIONS, so a re-run on the same revision is still one
+   * objection"). Live on SHOP-9 that reading was exactly backwards: the
+   * Integration Verifier blocked on a stack another task owns, the deliverer
+   * reported it had nothing in scope to change and committed nothing, and the
+   * verifier blocked the SAME revision again. No new revision is ever minted in
+   * a deadlock — so a count of distinct revisions sat at 1 while the loop ran,
+   * and the doctrine written to put this in front of a human could not see it.
+   * The counter was keyed on the one signal that stops moving when the work
+   * gets stuck. Rounds, recorded on the verdict as it is overwritten, move.
+   */
+  it("ruling 204: a reviewer that blocks the SAME revision twice has objected twice", () => {
+    // CANARY: sum 1 per verdict row (or count revision ids, ruling 193's
+    // reading) and this reads 1 — the deadlock stays invisible.
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:20:00.000Z", rounds: 2 },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(2);
+  });
+
+  it("ruling 204: an interrupted re-review records no verdict, so it adds no round", () => {
+    // The distinction ruling 193 was reaching for and got wrong by proxy: a
+    // re-DISPATCH is not an objection. Only a completed review writes a verdict,
+    // and only a verdict carrying the same result increments `rounds` — so the
+    // count is objections, never retries.
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
+  });
+
+  it("reaches 2 when the objection survives a rework — the escalation signal", () => {
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_2", result: "request_changes", at: "2026-09-13T09:30:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(2);
+  });
+
+  it("an approve resets the run — history before it is not held against the work", () => {
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_2", result: "approve", at: "2026-09-13T09:30:00.000Z" },
+      { revisionId: "rev_3", result: "request_changes", at: "2026-09-13T09:50:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
+  });
+
+  it("a standing approval counts zero", () => {
+    writeVerdicts([
+      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
+      { revisionId: "rev_2", result: "approve", at: "2026-09-13T09:30:00.000Z" },
+    ]);
+    expect(reviewerRow()?.consecutiveRequestChanges).toBe(0);
   });
 });

@@ -117,10 +117,13 @@ function resolveWithStages(
       });
       continue;
     }
-    // SAFETY: `links_json` is TEXT NOT NULL DEFAULT '[]' on `goal_projections`.
+    // SAFETY: `links_json` is TEXT NOT NULL DEFAULT '[]' and `status` TEXT NOT
+    // NULL on `goal_projections`.
     const goal = db
-      .prepare(`SELECT links_json FROM goal_projections WHERE project_slug = ? AND goal_id = ?`)
-      .get(slug, ref.goal) as { links_json: string } | undefined;
+      .prepare(
+        `SELECT links_json, status FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+      )
+      .get(slug, ref.goal) as { links_json: string; status: string } | undefined;
     const links = goal
       ? z.array(goalLinkRowSchema).catch([]).parse(JSON.parse(goal.links_json))
       : null;
@@ -139,12 +142,24 @@ function resolveWithStages(
       });
       continue;
     }
+    // F37-63: a link with no task, on a goal that has reached a terminal status,
+    // can NEVER acquire one — `reconcileGoal` early-returns on a terminal chain,
+    // and every goal-side remedy (`skip_link`, `edit_link`, `retry_link`,
+    // `remove_pending_link`) refuses with "Goal X is cancelled". Before this it
+    // resolved to `open`, indistinguishable from a live wait, so
+    // `deadDependencies` never saw it and ruling 131(e)'s note and notification
+    // never fired — while `releaseDependents`' own comment claimed the sweep
+    // "notices a wait that can NEVER complete, whatever killed it … a cancelled
+    // goal, a removed link or a lost task". It did not notice this one.
+    const goalTerminal = goal?.status === "cancelled" || goal?.status === "completed";
     const state: DependencyState =
       link.status === "done" || link.status === "skipped"
         ? "done"
         : link.status === "failed"
           ? "failed"
-          : "open";
+          : goalTerminal
+            ? "cancelled"
+            : "open";
     out.push({ ref: canonical, label: canonical, state, taskKey: null, goalId: ref.goal });
   }
   return out;
@@ -158,7 +173,9 @@ export function dependenciesSatisfied(entries: readonly DependencyRender[]): boo
 
 /** The entries that can never complete on their own. */
 export function deadDependencies(entries: readonly DependencyRender[]): DependencyRender[] {
-  return entries.filter((e) => e.state === "failed" || e.state === "missing");
+  return entries.filter(
+    (e) => e.state === "failed" || e.state === "missing" || e.state === "cancelled",
+  );
 }
 
 /** Every task in `slug` whose stored list is non-empty, with the raw list. */
@@ -178,4 +195,90 @@ export function listHeldTasks(
     taskKey: row.task_key,
     blockedBy: parseBlockedByColumn(row.blocked_by_json),
   }));
+}
+
+/**
+ * Ruling 300: which tasks a task's completion would RELEASE, directly and
+ * down the chain.
+ *
+ * The controller asked for this from a decision queue: `list_decisions` gave it
+ * three cards, and that five tasks sat behind them (SHOP-46 → SHOP-48;
+ * SHOP-41 → SHOP-28; SHOP-49 → SHOP-29 → SHOP-28) it worked out by reading each
+ * task's `blockedBy` and walking the chain by hand, across two turns. Its own
+ * words: "the one number that should order a decision queue does not exist, so
+ * the ordering depends on whoever happens to have walked the graph recently."
+ *
+ * A wait that can NEVER clear is not counted. A task blocked on an archived
+ * task, a cancelled goal or a reference nothing answers to is not waiting on
+ * this decision, and counting it would inflate the one number a person is meant
+ * to order their queue by. The same goes for an open goal link with no task
+ * yet: it is a real wait, and no task key completing satisfies it.
+ */
+/**
+ * Ruling 336: what comes unblocked, split by WHEN.
+ *
+ * `direct` are the tasks whose last wait is this task — they move the moment it
+ * completes. `downstream` are the rest of the transitive closure: each needs
+ * one of the `direct` ones to complete FIRST, which is its own review, its own
+ * verify and its own acceptance.
+ *
+ * They were one flat array, and the controller caught the cost by predicting it
+ * and naming the check: SHOP-28's acceptance card claimed it released SHOP-41,
+ * SHOP-29 and SHOP-49, "but at that moment SHOP-49 waited on SHOP-29, not on
+ * SHOP-28." The release rows settle it — SHOP-28 merged at 21:40:32, SHOP-29
+ * released at 21:40:34.685 and SHOP-41 at 21:40:34.502 (two seconds), and
+ * SHOP-49 at 22:33:53.901, **fifty-three minutes later and two and a half
+ * seconds after SHOP-29's own merge**. One click freed two tasks, not three.
+ *
+ * The old field was not lying — `list_decisions` said "down the chain" — but it
+ * is a SORT KEY for a person's decision queue, and its own description had to
+ * warn "do not sort by it alone". A number that mixes "frees now" with "frees
+ * after another human decision" is wrong for the one job it has.
+ */
+export interface ReleasedTasks {
+  /** Unblocked by this task completing, full stop. */
+  direct: string[];
+  /** Unblocked only once one of `direct` also completes. */
+  downstream: string[];
+}
+
+export function tasksReleasedBy(
+  db: DatabaseSync,
+  slug: string,
+  taskKey: string,
+): ReleasedTasks {
+  const waiting = new Map<string, Set<string>>();
+  for (const held of listHeldTasks(db, slug)) {
+    const entries = resolveDependencies(db, slug, held.blockedBy);
+    if (entries.some((e) => e.state !== "open" && e.state !== "done")) continue;
+    const unmet = entries
+      .filter((e) => e.state === "open")
+      // A goal link with no task yet keeps its own spelling, which no task key
+      // can equal, so the wait stands rather than silently clearing.
+      .map((e) => e.taskKey ?? e.ref);
+    if (unmet.length > 0) waiting.set(held.taskKey, new Set(unmet));
+  }
+
+  const direct: string[] = [];
+  const downstream: string[] = [];
+  // Breadth-first, so "how many hops from the decision" is the queue's own
+  // shape: everything freed by the first pass is direct, everything after it
+  // needed one of those to complete too.
+  let frontier = [taskKey];
+  let hop = 0;
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const done of frontier) {
+      for (const [key, blockers] of waiting) {
+        if (!blockers.delete(done)) continue;
+        if (blockers.size > 0) continue;
+        waiting.delete(key);
+        (hop === 0 ? direct : downstream).push(key);
+        next.push(key);
+      }
+    }
+    frontier = next;
+    hop += 1;
+  }
+  return { direct, downstream };
 }

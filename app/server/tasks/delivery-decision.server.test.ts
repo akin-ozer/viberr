@@ -16,6 +16,7 @@ import type {
   TaskFrontmatter,
   WorkRevision,
 } from "~/schemas/task-file.schema";
+import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -129,6 +130,7 @@ function approval(revisionId = "rev_1", sha = "a".repeat(40)) {
     result: "approve" as const,
     reason: "clean",
     at: "2026-07-28T09:30:00.000Z",
+    rounds: 1,
   };
 }
 
@@ -209,6 +211,74 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
   });
 });
 
+/**
+ * Ruling 202 (F37-22). The stranded-operator backstop judges a drive by what it
+ * changed, and delivery changed nothing it could see: a drive whose single
+ * action was `deliver_for_review` was recorded as having "held the stage
+ * without advancing, dispatching, or opening a packet", and coordination was
+ * declared paused on a task that was at that moment being delivered. The stamp
+ * has to land on ENTRY, because the push and the PR call can outlive the run
+ * row — live, the PR event reached the timeline 8 seconds after the drive was
+ * marked finished, and 111ms before that the settle had already called it a
+ * hold.
+ */
+describe("ruling 202: a delivering drive marks itself as having acted", () => {
+  it("stamps `delivered` on entry, whatever GitHub then answers", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "push_failed",
+      reason: "the remote rejected the push",
+    });
+    const ctx = dataCtx();
+    ctx.operatorRun = { backend: "codex", autonomy: "supervised", reactDepth: 0 };
+    // CANARY: stamp on the `delivered` return instead of on entry — the
+    // obvious wrong version, "record it once GitHub said yes" — and this goes
+    // red. A refused push is still a drive that ACTED, and the whole point of
+    // the stamp is that it cannot wait for an answer the settle will not.
+    const outcome = await performDelivery(
+      store.db,
+      ctx,
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome.status).toBe("push_failed");
+    // The drive ACTED. Whether GitHub accepted it is a different question, and
+    // not the one the backstop is asking.
+    expect(ctx.operatorRun.delivered).toBe(true);
+  });
+
+  /**
+   * Ruling 211(d) — the correction to 202's own fix, from the adversarial
+   * self-review. Stamping on ENTRY counted the arms that do nothing at all as
+   * progress, so a nudged drive whose only action was a delivery that could
+   * never leave the machine looked like it had moved: the stranded backstop
+   * then skipped its durable `heldAtStage` marker and every later trigger
+   * re-armed the nudge from scratch — F31-11's fourteen-drives loop, reached
+   * through the fix for ruling 202.
+   */
+  it("ruling 211(d): a delivery REFUSED before the remote is not progress", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "grant_withheld",
+      reason: "the delivering agent's repo-write capability is withheld",
+    });
+    const ctx = dataCtx();
+    ctx.operatorRun = { backend: "codex", autonomy: "supervised", reactDepth: 0 };
+    // CANARY: stamp on entry (ruling 202's first version) and this reads true —
+    // a drive that did nothing at all counts as having delivered.
+    const outcome = await performDelivery(
+      store.db,
+      ctx,
+      store.slug,
+      "VIB-1",
+      actor(store.users.arda),
+    );
+    expect(outcome.status).toBe("grant_withheld");
+    expect(ctx.operatorRun.delivered).toBeUndefined();
+  });
+});
+
 describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed push", () => {
   it("push_conflict: no PR is opened, the event names a history conflict — never the credential", async () => {
     seed({ stage: "review", branch: "vib-1" });
@@ -234,6 +304,84 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(event!.text).toContain("not a credential problem");
     expect(event!.text).toContain("No review PR was opened");
     expect(event!.text).toContain("`vib-1`");
+  });
+
+  it("ruling 321: a conflict on the task's OWN open PR does not tell a person to delete it", async () => {
+    /**
+     * Live on SHOP-11, twice. A backend engineer rebased a branch that had an
+     * open pull request, the delivery push was refused, and this event told
+     * the owner to *"delete or rename it, or force-push deliberately"* — while
+     * Viberr's own collision ceremony wrote, forty-seven milliseconds later,
+     * "No collision to clear: PR #15 on `shop-11` is SHOP-11's own review PR."
+     * Deleting that branch closes the pull request under review; force-pushing
+     * rewrites the commits the reviewers already judged.
+     *
+     * CANARY: pass `departure: null` at the call site in performDelivery.
+     */
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      pr: {
+        number: 15,
+        state: "review",
+        title: "[VIB-1] Cart service",
+        url: "https://github.com/akin-ozer/viberr/pull/15",
+      },
+    });
+    pushMock.mockResolvedValue({
+      status: "push_conflict",
+      branch: "vib-1",
+      reason:
+        "the remote branch `vib-1` holds commits that are not in the local delivery (non-fast-forward)",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const text = fm().timeline.find((e) => e.type === "github")!.text;
+    // The fact the server had and the sentence did not use.
+    expect(text).toContain("OWN review PR #15");
+    expect(text).toContain("deleting that branch closes the pull request");
+    // The act it used to recommend, and what actually works instead.
+    expect(text).not.toContain("delete or rename it");
+    expect(text).toContain(DIVERGED_BRANCH_REMEDY);
+  });
+
+  it("ruling 321: with no PR and no published head, the branch is an anonymous ref and says so", async () => {
+    // The counterweight — the case the old fixed sentence was written for is
+    // still allowed to say "delete or rename it", because there is nothing on
+    // the branch the product knows this task to have put there. A fix that
+    // hedged every push conflict would be its own kind of unhelpful.
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "push_conflict",
+      branch: "vib-1",
+      reason: "the remote branch `vib-1` holds commits that are not in the local delivery",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const text = fm().timeline.find((e) => e.type === "github")!.text;
+    expect(text).toContain("No pull request tracks `vib-1`");
+    expect(text).toContain("Delete or rename it on GitHub");
+    expect(text).not.toContain("OWN review PR");
+  });
+
+  it("ruling 321: a STRANGER's PR on the branch names the ceremony built for it", async () => {
+    seed({
+      stage: "review",
+      branch: "vib-1",
+      github: { commits: [], changed: null, unownedPr: 22 },
+    });
+    pushMock.mockResolvedValue({
+      status: "push_conflict",
+      branch: "vib-1",
+      reason: "the remote branch `vib-1` holds commits that are not in the local delivery",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const text = fm().timeline.find((e) => e.type === "github")!.text;
+    expect(text).toContain("PR #22, which VIB-1 did not open");
+    expect(text).toContain("clear the branch collision");
+    // Never by hand when the product has a ceremony that states what it destroys.
+    expect(text).not.toContain("Delete or rename it on GitHub");
   });
 
   /**
@@ -1145,9 +1293,17 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(mergeMock).not.toHaveBeenCalled();
   });
 
-  it("ruling 135: a compare GitHub answers 404 to, confirmed by a 404 commit read, is a REFUSAL, not unverifiable", async () => {
+  it("ruling 135 + 223: a 404 compare, confirmed by GitHub's real 422 commit read, is a REFUSAL, not unverifiable", async () => {
     // Canary: restore the plain `unverifiable` return on `!cmp.ok` and the
     // never-pushed revision is accepted with an "unverified head" note.
+    //
+    // Ruling 223 (F37-43): this fixture used to stub the commit read as a 404
+    // carrying GitHub's 422 SENTENCE — a status the endpoint does not return
+    // for a well-formed unknown SHA. The test passed and the guard could never
+    // fire on the real API. Live on SHOP-17 that merged the revision the
+    // required reviewer had REJECTED and lost the one both reviewers approved.
+    // The status below is what `gh api repos/<repo>/commits/<unknown-sha>`
+    // actually answers.
     healthySeed();
     const patActor = actor(store.users.arda);
     const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0135" }, patActor);
@@ -1156,7 +1312,10 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
       [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${head}`]: { status: 404, body: { message: "Not Found" } },
-      [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: { status: 404, body: { message: "No commit found for SHA" } },
+      [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: {
+        status: 422,
+        body: { message: `No commit found for SHA: ${"a".repeat(40)}` },
+      },
     });
     await expect(
       transitionStage(
@@ -1172,20 +1331,28 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(fm().frontmatter.stage).toBe("review");
     expect(mergeMock).not.toHaveBeenCalled();
 
-    // The commit exists on GitHub: the 404 compare is unexplained, so the head
-    // stays unverifiable and the acceptance proceeds with its disclosure.
+    // The commit exists on GitHub: the 404 compare is unexplained. Ruling 226
+    // (owner, 2026-09-14): that no longer merges. GitHub answered the pull and
+    // refused only the comparison, so the repository is reachable, the merge
+    // would land, and what would land is unknown.
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
       [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${head}`]: { status: 404, body: { message: "Not Found" } },
       [`GET /repos/akin-ozer/viberr/commits/${"a".repeat(40)}`]: { body: { sha: "a".repeat(40) } },
     });
-    await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
-      dataCtx(),
-    );
-    expect(fm().frontmatter.stage).toBe("done");
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("could not be checked against the delivered revision"),
+    });
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(mergeMock).not.toHaveBeenCalled();
   });
 
   it("a head that CONTAINS the delivered revision (delivery + auto-commit) is accepted", async () => {
@@ -1303,11 +1470,15 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
   });
 
   it("A9: an UNVERIFIABLE head that still merges records the caveat in the completion event", async () => {
-    // The head reads (a different sha), but the CONTAINMENT compare 404s — the
-    // check could not run. Acceptance still proceeds (an unverifiable head is
-    // allowed, unlike a KNOWN mismatch), the merge lands, and the record must
-    // say the containment check did not run. Canary: drop the A9 branch in
+    // A9's own case, narrowed by ruling 226 to what it always described:
+    // GitHub is UNREACHABLE, so the containment check cannot run — and the
+    // merge attempt is subject to the same unreachability, which is what made
+    // "the merge's own honesty covers it" true here. Acceptance proceeds and
+    // the record must say the check did not run. Canary: drop the A9 branch in
     // applyAcceptanceWrite and the completion event reads like a verified accept.
+    //
+    // The case where GitHub ANSWERS the pull and refuses only the comparison is
+    // ruling 226's, and is tested as a refusal above.
     healthySeed();
     const patActor = actor(store.users.arda);
     const pat = createPat(
@@ -1316,12 +1487,8 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       patActor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    // The PR-head read answers; the compare fails in a way that is NOT the
-    // never-pushed evidence (ruling 135 reads a 404 compare confirmed by a 404
-    // commit read as a refusal), so the head stays unverifiable.
     github = fakeGithubFetch({
-      "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: "f".repeat(40) } } },
-      [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${"f".repeat(40)}`]: { status: 500, body: { message: "boom" } },
+      "GET /repos/akin-ozer/viberr/pulls/114": { status: 500, body: { message: "boom" } },
     });
     mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
 
@@ -1338,6 +1505,286 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     const completion = parsed.timeline.find((e) => e.type === "completion");
     expect(completion!.text).toContain("could not be verified against the");
     expect(completion!.text).toContain("without that containment check");
+  });
+
+  /**
+   * Ruling 226 (owner, 2026-09-14) — the surviving half of F37-43.
+   *
+   * Ruling 135 built the guard for a PR head that is not the reviewed revision,
+   * and ruling 223 made it reachable against GitHub's real 422. What stayed was
+   * A9's trade: a head that could not be VERIFIED still merged, with a note
+   * naming the check that did not run rather than the consequence. Live, that
+   * merged SHOP-17 at the revision its Code Reviewer had rejected.
+   */
+  describe("ruling 235: a KNOWN unpushed head is recorded and handed to the operator", () => {
+    const head = "f".repeat(40);
+    const delivered = "a".repeat(40);
+    /** The never-pushed shape: the compare 404s and GitHub's real 422 commit
+     *  read confirms the delivered revision does not exist on the remote. */
+    const neverPushed = () =>
+      fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${head}`]: {
+          status: 404,
+          body: { message: "Not Found" },
+        },
+        [`GET /repos/akin-ozer/viberr/commits/${delivered}`]: {
+          status: 422,
+          body: { message: `No commit found for SHA: ${delivered}` },
+        },
+      });
+    const withCredential = () => {
+      const patActor = actor(store.users.arda);
+      const pat = createPat(
+        store.db,
+        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0235" },
+        patActor,
+      );
+      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    };
+    const accept = () =>
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+    const notes = () =>
+      fm().timeline.filter(
+        (e) =>
+          e.type === "github" &&
+          e.title === "Acceptance refused: the reviewed revision is not on the pull request",
+      );
+
+    /**
+     * F37-55, measured live: SHOP-2's two required reviewers approved
+     * `ea5f2ffd7493`, PR #13's head was `913ce9d`, and pressing Accept refused
+     * with an exact sentence naming both. That sentence reached ONE browser's
+     * toast and nothing else - no audit row, no timeline event, nothing in
+     * `task.md`. The person then pressed "Run operator" to get the branch
+     * pushed; the operator re-anchored on a file that said nothing about a
+     * refusal and filed the SAME acceptance recommendation again.
+     */
+    it("writes the refusal to the timeline and the audit log, and opens NO packet", async () => {
+      healthySeed();
+      withCredential();
+      github = neverPushed();
+
+      await expect(accept()).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringContaining("is not on GitHub"),
+      });
+      expect(mergeMock).not.toHaveBeenCalled();
+      expect(fm().frontmatter.stage).toBe("review");
+
+      // The record now contains what the browser was told.
+      const [note] = notes();
+      expect(note).toBeTruthy();
+      expect(note!.text).toContain("is not on GitHub");
+      expect(note!.text).toContain(delivered.slice(0, 7));
+      expect(note!.text).toContain(head.slice(0, 7));
+
+      // And NOT a packet: a known mismatch is not a decision. The reviewed
+      // revision must be pushed, ruling 134 reserves pushing for the operator,
+      // so there is nothing for a person to choose. Only the UNVERIFIABLE case
+      // (ruling 226) asks.
+      // `packet` is the signal, not `waiting`: a task sitting at the acceptance
+      // boundary already waits on a human before anything here runs, so a
+      // waiting-state assertion would pass whatever this code did.
+      expect(fm().packet).toBeNull();
+
+      expect(
+        listAuditEvents(store.db, { action: "task.acceptance.head_unpushed" }),
+      ).toHaveLength(1);
+    });
+
+    it("presses Accept twice without a second note or a second operator run", async () => {
+      healthySeed();
+      withCredential();
+      github = neverPushed();
+
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+
+      // Idempotent by note text: the button pressed twice is one record and one
+      // hand-off, not two paid operator runs.
+      expect(notes()).toHaveLength(1);
+      expect(
+        listAuditEvents(store.db, { action: "task.acceptance.head_unpushed" }),
+      ).toHaveLength(1);
+    });
+  });
+
+  describe("ruling 226: a head GitHub would not compare is refused, not disclosed", () => {
+    const head = "f".repeat(40);
+    const delivered = "a".repeat(40);
+    /** GitHub answers the pull and refuses the comparison: reachable, mergeable,
+     *  unknown. Not the never-pushed case (the commit read confirms it exists). */
+    const answersPullRefusesCompare = () =>
+      fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${head}`]: {
+          status: 500,
+          body: { message: "boom" },
+        },
+      });
+    const withCredential = () => {
+      const patActor = actor(store.users.arda);
+      const pat = createPat(
+        store.db,
+        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0226" },
+        patActor,
+      );
+      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    };
+    const accept = () =>
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+
+    it("refuses the merge and opens a decision naming both shas", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      expect(mergeMock).not.toHaveBeenCalled();
+      expect(fm().frontmatter.stage).toBe("review");
+
+      // A refusal with no way forward is its own defect, so the gate records
+      // the question rather than only throwing a sentence at the browser.
+      const packet = fm().packet!;
+      expect(packet.title).toContain("could not be checked before merging");
+      expect(packet.body).toContain(head.slice(0, 7));
+      expect(packet.body).toContain(delivered.slice(0, 7));
+      // TWO options, and the missing third is the point: a "try the check
+      // again" option would have to be a `custom`, whose resolution sends the
+      // task back to the agent side and re-queues the operator — re-running
+      // this gate, refusing again, and re-opening this packet. Answering the
+      // decision would re-create it, which is ruling 224's fourth half. A
+      // re-check needs no option at all: this packet does not block acceptance.
+      expect(packet.options.map((o) => o.kind)).toEqual([
+        "request_edit",
+        "accept_unverified_head",
+      ]);
+      expect(packet.body).toContain("Press Accept again to re-run the check");
+      // And it reaches the BOARD, not just the markdown. `updateTaskFile`
+      // writes the file and nothing else; without an explicit reproject the
+      // decision a person was just told about would not appear until the file
+      // watcher happened to notice.
+      // SAFETY: `packet_json` is the only selected column and 0001_baseline
+      // declares it nullable TEXT, so a matching row is exactly this shape —
+      // and the task was written by this test, so a row exists.
+      const projected = store.db
+        .prepare(
+          `SELECT packet_json FROM task_projections WHERE project_slug = ? AND task_key = ?`,
+        )
+        .get(store.slug, "VIB-1") as { packet_json: string | null };
+      expect(projected.packet_json ?? "").toContain("could not be checked before merging");
+      // The recommendation is the safe one — never the override.
+      expect(packet.options.findIndex((o) => o.rec)).toBe(0);
+      expect(fm().frontmatter.waiting).toBe("human");
+    });
+
+    it("presses Accept twice without stacking a second question", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      const first = fm().packet!.id;
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      expect(fm().packet!.id).toBe(first);
+    });
+
+    it("grants NO override when the re-read succeeds", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+
+      // GitHub answers the comparison this time. A waiver written now would be
+      // a permission nobody needed.
+      github = fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${head}`]: {
+          body: { status: "ahead" },
+        },
+      });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+
+      const after = fm();
+      expect(after.packet).toBeNull();
+      expect(after.frontmatter.headCheckWaiver ?? null).toBeNull();
+      expect(
+        after.timeline.find((e) => e.type === "transition")!.text,
+      ).toContain("answered the comparison this time");
+    });
+
+    it("pins the override to the head it was granted for, and says what it admits", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+      const waiver = fm().frontmatter.headCheckWaiver!;
+      expect(waiver).toMatchObject({
+        prNumber: 114,
+        revisionHeadSha: delivered,
+        liveHeadSha: head,
+        byUserId: store.users.arda.id,
+      });
+
+      // The merge now goes through, and the record names the consequence and
+      // the person — not the procedure that was skipped.
+      mergeMock.mockResolvedValue({ status: "merged", prNumber: 114, sha: null });
+      await accept();
+      const completion = fm().timeline.find((e) => e.type === "completion")!;
+      expect(completion.text).toContain("Code no reviewer approved may be on the base branch");
+      expect(completion.text).not.toContain("GitHub could not be reached");
+    });
+
+    it("refuses again once the branch moves under the override", async () => {
+      healthySeed();
+      withCredential();
+      github = answersPullRefusesCompare();
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actor(store.users.arda),
+        dataCtx(),
+      );
+      expect(fm().frontmatter.headCheckWaiver).toBeTruthy();
+
+      // Someone pushes. The waiver names a head that is no longer there, and a
+      // waiver that outlived its head would be a standing permission to merge
+      // whatever the branch later carried.
+      const moved = "e".repeat(40);
+      github = fakeGithubFetch({
+        "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: moved } } },
+        [`GET /repos/akin-ozer/viberr/compare/${delivered}...${moved}`]: {
+          status: 500,
+          body: { message: "boom" },
+        },
+      });
+      await expect(accept()).rejects.toMatchObject({ status: 409 });
+      expect(mergeMock).not.toHaveBeenCalled();
+    });
   });
 
   it("A9: a VERIFIED head adds NO caveat (a clean accept never reads as unverified)", async () => {
@@ -1650,5 +2097,71 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
     pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: HEAD });
     await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
     expect(fm().frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
+  });
+});
+
+/**
+ * Ruling 334 — a transient GitHub blip recorded as broken settings.
+ *
+ * Four `openTaskPr` statuses shared one remedy: "Fix the repository/credential
+ * settings, then deliver again." For the transport one, that accuses a
+ * configuration the record proves is fine.
+ *
+ * Live on SHOP-48, disproved 58 seconds later by the product itself: at
+ * 23:45:36 "GitHub was unreachable (network error). Fix the repository/credential
+ * settings, then deliver again", and at 23:46:34 "Opened PR #52 for review" —
+ * same credential, same repo, nothing touched, and the retry was the operator's
+ * own. A successful push to that same origin is recorded two minutes earlier.
+ *
+ * Ruling 128's comment twelve lines above this arm already states the rule —
+ * never "unreachable" paired with "fix the credential settings (nothing is wrong
+ * with them)" — and fixed only the `base_branch_missing` arm.
+ */
+describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
+  it("names the transport reason and does not accuse the settings", async () => {
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: [],
+    });
+    openPrMock.mockResolvedValue({
+      status: "network_unavailable",
+      message: "fetch failed: ECONNRESET api.github.com",
+    });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
+    expect(event, "the failure was not surfaced").toBeTruthy();
+    // CANARY: fold `network_unavailable` back into the shared remedy.
+    expect(event.text).not.toContain("Fix the repository/credential settings");
+    expect(event.text).toContain("Nothing about this project's repository or credential is wrong");
+    // The reason GitHub's client handed back, which every arm used to drop.
+    expect(event.text).toContain("ECONNRESET");
+    // And the fact that makes the retry safe.
+    expect(event.text).toContain("the branch is pushed and the work is safe");
+  });
+
+  it("keeps the settings remedy where it is TRUE", async () => {
+    // The counterweight: `no_pat_configured` really is a settings problem, and
+    // a fix that hedged every arm would lose the one sentence that helps.
+    seed({ stage: "review", branch: "vib-1" });
+    pushMock.mockResolvedValue({
+      status: "pushed",
+      branch: "vib-1",
+      commits: 1,
+      headSha: "a".repeat(40),
+      remoteHeadBefore: null,
+      workflowFiles: [],
+    });
+    openPrMock.mockResolvedValue({ status: "no_pat_configured", repo: null });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+
+    const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
+    expect(event.text).toContain("no GitHub credential is configured for this project");
+    expect(event.text).toContain("Fix the repository/credential settings");
   });
 });

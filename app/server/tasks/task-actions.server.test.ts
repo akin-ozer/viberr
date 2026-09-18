@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
@@ -36,6 +36,7 @@ import {
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
+  runOutcomeClause,
   appendComment,
   classifyReviewerVerdict,
   createTask,
@@ -59,6 +60,7 @@ import {
   commentToAgent,
   forceAcceptCompletion,
   liftHoldForRun,
+  liftStageHoldForPerson,
   OPERATOR_TASK_ACTOR,
   reorderTask,
   resolvePacket,
@@ -296,9 +298,12 @@ describe("createTask", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-999 is not a task in this project") });
+    // Ruling 255: a fixed creation instant, so the invariant below is a fact
+    // about the code and not about how fast the machine ran.
+    const CREATED_AT = "2026-09-15T09:00:00.000Z";
     const held = await createTask(
       store.db,
-      { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"] },
+      { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"], now: CREATED_AT },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -312,6 +317,27 @@ describe("createTask", () => {
     expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
     expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
+
+    /**
+     * Ruling 255 (pass 37, F37-84): one creation is one instant.
+     *
+     * Measured live on SHOP-27: the wait note read `…19:27:52.529Z` and the
+     * assign event below it read `…19:27:52.530Z` — a 1ms inversion in a
+     * newest-first file, because the note took the frontmatter's `now` and the
+     * assign read the clock again a millisecond later. Viberr ships a
+     * diagnostic that scans timelines for exactly this and reported the board
+     * as having inversions; the only reason it is one millisecond is that
+     * nothing slow sits between the two writes.
+     *
+     * CANARY: drop the `now` argument from the `ownerAssignEvent` calls in
+     * `createTask` and the assign's stamp runs ahead of the note above it.
+     */
+    expect(parsed.timeline[1]).toMatchObject({ type: "assign" });
+    // One act, one instant: equal is the honest relation between two events of
+    // one write, and it is what keeps a newest-first file from claiming an
+    // order its own stamps contradict.
+    expect(parsed.timeline.map((e) => e.occurredAt)).toEqual([CREATED_AT, CREATED_AT]);
+    expect(parsed.frontmatter.createdAt).toBe(CREATED_AT);
   });
 
   it("writes task.md with the mock create defaults and projects it", async () => {
@@ -1187,8 +1213,21 @@ describe("appendComment", () => {
   });
 });
 
-describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
-  it("notifies a human @tagged inside the operator's directive comment", async () => {
+describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () => {
+  /**
+   * P14-GV-06 asserted the OPPOSITE of this: it added the fan-out here because a
+   * human tagged inside an operator directive was never notified. Ruling 232
+   * (owner, 2026-09-14) reverses it for this writer after pass 37 measured what
+   * those tags are in practice — 19 of 49 mention notifications on the live
+   * instance came from directives whose handle was the operator specifying a
+   * deliverable ("end with an explicit @Arda question"), re-sent on every rework
+   * round. The comment's declared audience is the agent, so it pings nobody.
+   *
+   * The directive below is P14-GV-06's own text verbatim, so the two contracts
+   * are compared on identical input rather than on a case chosen to suit the new
+   * rule.
+   */
+  it("does not notify a human @tagged inside the operator's directive (ruling 232)", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
@@ -1196,8 +1235,7 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const firstName = store.users.arda.name.split(" ")[0];
     // The run itself can't start here (no deployed profile) — the directive
-    // COMMENT is written first, and that comment was the one writer in the app
-    // that never fanned its mentions out (NEW-4 gap).
+    // COMMENT is written first, which is the writer under test.
     await expect(
       operatorPromptAgent(
         store.db,
@@ -1222,19 +1260,36 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
         text: z.string(),
       }),
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ user_id: store.users.arda.id, kind: "mention" });
-    // Attributed to the operator, like its narration comments.
-    expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({
-      kind: "agent",
-      name: "Operator",
-    });
+    expect(rows).toEqual([]);
+    // The hand-off is still on the record: the ruling changes who hears about
+    // the directive, not whether it was written.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const directive = file.parsed.timeline.find((e) => e.type === "comment");
+    expect(directive?.toAgent).toBe(true);
+    expect(directive?.text).toContain(`@${firstName}`);
   });
 
   // S5-G3: the POSTED directive discloses an ambiguous tag; the RUN's directive
   // stays the operator's own words (the note addresses the humans reading the
   // timeline, not the agent about to work).
-  it("discloses an ambiguous @tag on the posted directive without notifying anyone", async () => {
+  /**
+   * S5-G3 asserted the OPPOSITE of this: the posted directive carried the
+   * ambiguity disclosure so the humans reading the timeline would learn the tag
+   * reached nobody. Ruling 232 removed that note's premise. A directive now
+   * notifies nobody by declared audience, so the disclosure's remedy - "mention
+   * the full name ('@First Last') or the email handle" - names a cause that is
+   * not the reason and sends a reader to fix the spelling of something that
+   * would not have notified either way. Found by reviewing ruling 232 against
+   * the disclosure it had not touched.
+   *
+   * The tag itself still stands in the posted text: the ruling changes who
+   * hears about the hand-off, not what the operator wrote.
+   */
+  it("posts an ambiguous @tag with NO disclosure, because a directive notifies nobody (ruling 232)", async () => {
     const store = prepared();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
@@ -1267,7 +1322,9 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06)", () => {
       dataRoot: store.dataRoot,
     })!.parsed.timeline.find((e) => e.actor.kind === "operator" && e.type === "comment")!;
     expect(posted.text).toContain("coordinate with");
-    expect(posted.text).toContain("nobody was notified");
+    // The note is GONE: its remedy could not achieve what it promised here.
+    expect(posted.text).not.toContain("nobody was notified");
+    expect(posted.text).not.toContain("mention the full name");
     expect(
       countRow(store.db, `SELECT COUNT(*) c FROM notifications`),
     ).toMatchObject({ c: 0 });
@@ -1901,6 +1958,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
             result: "request_changes",
             reason: "the diff violates the spec",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "failing",
@@ -2881,6 +2939,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
             result: "approve",
             reason: "looks right",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy",
@@ -3337,6 +3396,57 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("impl");
+  });
+
+  it("ruling 327: the packet door dates the Done record when it WRITES it, not when the ceremony began", async () => {
+    /**
+     * `resolvePacket` captures `now` at the top and the accept_completion arm
+     * used it 114 lines and one GitHub round-trip later — and
+     * `attemptAcceptanceMerge` can refresh the base, push, merge and reconcile
+     * before it returns. So the permanent Done record was dated BEFORE the
+     * merge it announces.
+     *
+     * Live on SHOP-77: completion 05:33:35.903Z, the merge it announces
+     * 05:33:43.377Z, the branch deletion 05:33:44.631Z. The timeline is
+     * newest-first, so the file puts the completion at the top while its own
+     * timestamp is the oldest of the three — whichever a reader trusts, the
+     * other is wrong. Its text is ruling 318's drift note, correctly measured
+     * after the refresh, describing a state that did not exist at the instant
+     * the record claims. 78 of the board's other 79 accepted tasks went through
+     * the DIRECT door, which has always stamped at write time; this is the two
+     * doors disagreeing about one ceremony.
+     *
+     * CANARY: put `now` back on either arm of the completion event.
+     */
+    const store = prepared();
+    seedReviewed(store, {}, ACCEPT_PACKET);
+    let mergedAt = "";
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      // A merge takes time: a base refresh, a push, a remote merge, a
+      // reconcile. 7.5 seconds of it, live.
+      await new Promise((r) => setTimeout(r, 25));
+      mergedAt = new Date().toISOString();
+      return { status: "merged", prNumber: 7, sha: "d".repeat(40) };
+    });
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: live(store) },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
+    );
+
+    expect(mergeMock).toHaveBeenCalled();
+    const completion = task(store).timeline.find((e) => e.type === "completion");
+    expect(completion, "an acceptance writes a completion record").toBeTruthy();
+    expect(mergedAt).not.toBe("");
+    // The record cannot predate the merge it announces.
+    expect(
+      completion!.occurredAt >= mergedAt,
+      `completion ${completion!.occurredAt} predates its own merge ${mergedAt}`,
+    ).toBe(true);
+    // ...and it is genuinely the record that names the merge, not some other event.
+    expect(completion!.text).toContain("the review PR was merged");
   });
 
   it("resolving an accept_completion packet option is refused bare, refused stale, and accepted with the echo", async () => {
@@ -4649,6 +4759,7 @@ describe("pass 35: operator and task actions", () => {
               result: "request_changes",
               reason: "needs tests",
               at: "2026-09-06T09:30:00.000Z",
+              rounds: 1,
             },
           ],
           validation: "failing",
@@ -4873,6 +4984,61 @@ describe("pass 35: operator and task actions", () => {
     });
   });
 
+  /**
+   * Ruling 216 (F37-36). `heldAtStage` is the stranded backstop's durable
+   * marker, and its note tells the reader: "Coordination is paused here: run
+   * the operator manually when the hold should end, adjust the goal, or loosen
+   * the boundary." Live on SHOP-10 I did the first one. The operator ran, took
+   * a real action (`update_branch_from_base`, 8 commits), and the marker was
+   * still there afterwards with the board still saying coordination was paused
+   * — so the remedy the sentence names was the one thing on its list that did
+   * not work. Every other human re-litigation clears it: a goal edit, a packet
+   * resolution, a transition, acceptance.
+   */
+  describe("ruling 216 (F37-36): liftStageHoldForPerson", () => {
+    function stageHeld(store: TestStore): void {
+      seed(store, { stage: "review", heldAtStage: "review" });
+    }
+
+    it("a person's operator run clears the stage hold, names them, and audits it", async () => {
+      const store = prepared();
+      stageHeld(store);
+      // CANARY: return true without clearing `heldAtStage` and the board keeps
+      // saying coordination is paused while a person is coordinating it.
+      const lifted = await liftStageHoldForPerson(
+        store.db,
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "VIB-1",
+        { byName: "Arda", by: { userId: store.users.arda.id, label: "arda" } },
+      );
+      expect(lifted).toBe(true);
+      expect(file(store).frontmatter.heldAtStage).toBeNull();
+      const note = file(store).timeline[0]!;
+      expect(note).toMatchObject({ type: "note", title: "Hold lifted" });
+      expect(note.text).toContain("Arda started an operator run");
+      // The stage is named as the BOARD names it, not by its id.
+      expect(note.text).toContain("the hold recorded at Review no longer stands");
+      const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ previous: "stage-hold", stage: "review" });
+    });
+
+    it("finds nothing to lift when no stage hold stands, and writes no note", async () => {
+      const store = prepared();
+      seed(store, { stage: "review" });
+      const lifted = await liftStageHoldForPerson(
+        store.db,
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "VIB-1",
+        { byName: "Arda", by: { userId: store.users.arda.id, label: "arda" } },
+      );
+      expect(lifted).toBe(false);
+      expect(file(store).timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
+    });
+  });
+
   describe("ruling 157 (F35-8): liftHoldForRun", () => {
     const hold: TaskPacket = {
       type: "blocked",
@@ -5016,6 +5182,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
             result: "approve",
             reason: "looked right then",
             at: "2026-08-19T09:30:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "changed",
@@ -5185,7 +5352,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5209,7 +5376,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
     await expect(rejected).rejects.toThrow(
-      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.",
+      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.",
     );
     expect(taskFile(store).frontmatter.stage).toBe("review");
   });
@@ -5220,7 +5387,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5257,6 +5424,83 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(parsed.frontmatter.baseRefreshes[0]).toMatchObject({ mergeSha: "m".repeat(40), base: "main", commits: 2 });
     expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought `vib-1-work` up to date with `main`"))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.details).toMatchObject({ status: "updated", commits: 2 });
+
+  });
+
+  /**
+   * Ruling 318. The permanent Done record's drift note was computed from
+   * `existing` — the frontmatter read BEFORE `attemptAcceptanceMerge`. That
+   * call is the thing that refreshes the branch: `refreshBranchForAcceptance` →
+   * `recordBranchRefresh` pushes the merge commit, calls `reconcileTask`, and
+   * REWRITES `pr.revisionDrift` from the moved head. So on every acceptance
+   * whose own ceremony moved the base, the record either named a head that was
+   * never merged or omitted the refresh the acceptance itself created.
+   *
+   * Live on SHOP-81, three consecutive entries: the github note says "base
+   * refreshed · 2 merge commits · 9 base commits", the branch-deletion note
+   * names head `75786d012de9`, and the completion record names neither.
+   *
+   * R17-1's whole purpose (`revision-drift.ts`) is that the permanent record
+   * names the commits that shipped outside the reviewed revision — and the
+   * acceptance is what ships them.
+   *
+   * The merge mock below stands in for the reconciler: what matters is that the
+   * FILE CHANGES DURING THE MERGE, which is the mechanism, and whether the note
+   * is read before or after it.
+   */
+  it("ruling 318: the Done record names the drift the acceptance itself created", async () => {
+    const store = prepared();
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const drifted = {
+      headSha: "d".repeat(40),
+      reviewedSha: "a".repeat(40),
+      authored: 0,
+      baseRefresh: { merges: 1, commits: 4 },
+    };
+    const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
+      // Exactly what `recordBranchRefresh` → `reconcileTask` does inside the
+      // merge: re-measure the drift onto the file the ceremony is mid-way
+      // through, AFTER `existing` was read.
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          if (parsed.frontmatter.pr) parsed.frontmatter.pr.revisionDrift = drifted;
+        },
+      );
+      return { status: "merged", prNumber: 7, sha: "d".repeat(40) };
+    });
+    await transitionStage(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "done",
+        manual: true,
+        ack: acceptanceDisclosureOf(taskFile(store).frontmatter),
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
+    );
+    const parsed = taskFile(store);
+    const completion = parsed.timeline.find((e) => e.type === "completion");
+    expect(completion, "an acceptance writes a completion record").toBeTruthy();
+    // CANARY: compute `driftNote` from `existing.parsed.frontmatter` again and
+    // this is empty — the record stops naming the refresh it exists to
+    // disclose, on the one write nobody can go back and correct.
+    expect(completion!.text).toContain("base refreshed");
+    expect(completion!.text).toContain("4 base commits");
+    // And it agrees with what the acceptance actually left on the task.
+    expect(revisionDriftNote(parsed.frontmatter)).not.toBe("");
+    expect(completion!.text).toContain(revisionDriftNote(parsed.frontmatter).trim());
   });
 
   it("G35-5 (d): a refresh that CONFLICTS refuses the acceptance with the gate's sentence and records the conflict", async () => {
@@ -5264,7 +5508,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5289,13 +5533,108 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         actor(store.users.arda),
         { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
-    ).rejects.toThrow(/conflicts with the base branch.*Rebase the branch and re-review, or archive the task/);
+    ).rejects.toThrow(/conflicts with the base branch[\s\S]*merging the base INTO it/);
     expect(mergeMock).not.toHaveBeenCalled();
     const parsed = taskFile(store);
     expect(parsed.frontmatter.stage).toBe("review");
     expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
     const line = parsed.timeline.find((e) => e.type === "github" && e.text.includes("CONFLICT"))!;
     expect(line.text).toContain("README.md, Makefile");
+  });
+
+  it("ruling 332: the refused acceptance hands the conflict to the operator instead of waking nobody", async () => {
+    /**
+     * The refusal above stamps `mergeable: conflicting`, writes the note and
+     * returns a 409 — and that used to be all of it. No packet, no run, no
+     * notification, while the operator's byte-identical door for the same
+     * `conflict` status opens a blocking decision packet whose recommended
+     * option is the deliverer's own workspace merge.
+     *
+     * The stamp is itself the key to that door: `acceptanceBoundaryRefusal`
+     * denies the branch tool at the acceptance boundary EXCEPT while the PR is
+     * conflicting. So this path created the one state in which the in-product
+     * resolver is permitted, and scheduled nothing.
+     *
+     * Live twice, and they are the two longest dead stops on the board.
+     * SHOP-12: refused 08:06:45, nothing for 10h45m, ended by the owner typing
+     * "@operator SHOP-12 … is stuck on me rather than on anyone doing work" —
+     * packet 28 seconds later, and the operator's reply: "It was never a click
+     * you were withholding." SHOP-3: same shape, 7h45m, same exit.
+     *
+     * CANARY: delete the `autoInvokeOperator(… "pr-conflicting")` call.
+     */
+    const store = prepared();
+    // `autoInvokeOperator` returns early with no operator deployed, and the
+    // hand-off is the whole subject of this test.
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    seedChangedAt(store, "review", {
+      workRevision: workRev("rev_1"),
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      readiness: "ready",
+      waiting: "human",
+    });
+    const refreshMock = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "conflict",
+      branch: "vib-1-work",
+      base: "main",
+      files: ["README.md"],
+      detail: "CONFLICT (content): Merge conflict in README.md",
+    }));
+    const runOperator = vi.fn<NonNullable<TaskActionDeps["runOperator"]>>(async () => ({
+      runId: "run_1",
+      queued: false,
+      backend: "claude",
+      autonomy: "supervised",
+    }));
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refreshMock, runOperator } },
+      ),
+    ).rejects.toThrow(/conflicts with the base branch/);
+    /**
+     * The hand-off is fire-and-forget on purpose — the person's 409 is the
+     * answer to their click and must not wait on a coordination turn — so this
+     * waits for the EFFECT rather than sleeping a guessed interval. A fixed
+     * 30ms was not enough: `autoInvokeOperator` awaits two dynamic imports
+     * before it reaches `runOperator`, and the first load of those modules in a
+     * test run is slower than any sleep worth writing.
+     */
+    for (let i = 0; i < 100 && runOperator.mock.calls.length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(runOperator, "the refusal woke nobody").toHaveBeenCalledTimes(1);
+    expect(runOperator.mock.lastCall?.[1]).toMatchObject({
+      taskKey: "VIB-1",
+      trigger: "pr-conflicting",
+    });
+    // The person's 409 still stands — the hand-off is coordination, not an
+    // answer to their click.
+    expect(taskFile(store).frontmatter.stage).toBe("review");
   });
 
   /**
@@ -5315,7 +5654,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
-        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z" },
+        { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
       ],
       validation: "healthy",
       readiness: "ready",
@@ -5332,7 +5671,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       if (url.includes(`${REPO_PATH}/pulls/7`)) {
         await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
           parsed.frontmatter.verdicts = [
-            { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "request_changes", reason: "needs tests", at: "2026-08-19T10:30:00.000Z" },
+            { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "request_changes", reason: "needs tests", at: "2026-08-19T10:30:00.000Z", rounds: 1 },
           ];
         });
       }
@@ -5520,5 +5859,103 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
       by: null,
       answered: { at: expect.any(String), byUserId: store.users.arda.id },
     });
+  });
+});
+
+
+/**
+ * Ruling 245 (pass 37, F37-74): the anchor tells a run what another task owns,
+ * BEFORE it edits anything.
+ *
+ * The delivery gate refuses a push that touches a leased file, but a refusal
+ * that arrives after the work is done is a wasted turn, not a guard. The anchor
+ * is the "read this before you act" block, so the lease belongs in it.
+ */
+describe("ruling 245: the canonical anchor names the files another task owns", () => {
+  let canonicalTaskAnchorFn: typeof import("./task-actions.server").canonicalTaskAnchor;
+  beforeEach(async () => {
+    canonicalTaskAnchorFn = (await import("./task-actions.server")).canonicalTaskAnchor;
+  });
+  const anchorFor = (key: string, leases: { paths: string[]; taskKey: string; reason: string }[]) =>
+    canonicalTaskAnchorFn({
+      parsed: {
+        frontmatter: baseTaskFrontmatter(key, { title: "Probe" }),
+        goal: "Do the thing.",
+        timeline: [],
+        packet: null,
+        unknownFrontmatter: {},
+        extraSections: [],
+      },
+      stageName: "Build",
+      fileLeases: leases,
+    });
+
+  it("renders another task's lease, with its holder and its reason", () => {
+    const anchor = anchorFor("VIB-1", [
+      { paths: ["Makefile", "make/**"], taskKey: "VIB-9", reason: "splitting it into fragments" },
+    ]);
+    // CANARY: drop the section and a run learns about the lease only when its
+    // delivery is refused, after it has already edited the file.
+    expect(anchor).toContain("Files another task owns right now");
+    expect(anchor).toContain("`Makefile`");
+    expect(anchor).toContain("`make/**`");
+    expect(anchor).toContain("VIB-9");
+    expect(anchor).toContain("splitting it into fragments");
+    expect(anchor).toContain("refused before it reaches GitHub");
+  });
+
+  it("says nothing to the HOLDER about its own lease, and nothing when there are none", () => {
+    // CANARY: drop the `l.taskKey !== fm.key` filter and the one task given the
+    // file to own is told not to touch it.
+    expect(anchorFor("VIB-9", [
+      { paths: ["Makefile"], taskKey: "VIB-9", reason: "splitting it" },
+    ])).not.toContain("Files another task owns");
+    expect(anchorFor("VIB-1", [])).not.toContain("Files another task owns");
+  });
+});
+
+/**
+ * Ruling 333 — the clause that told the next agent the tree was clean.
+ *
+ * "No changes were delivered." was a literal appended to every classified
+ * provider refusal and to every unclassified failure except the two cut-off
+ * kinds. `max_turns` and `max_budget` were exempted precisely BECAUSE a cut run
+ * leaves work in the tree — and a provider refusal on turn 48 is the same
+ * cut-off, and was not exempt.
+ *
+ * Measured: written 34 times across 27 tasks of the shopify-clone board. 28
+ * followed the run's own start by more than two minutes, the longest by 145.
+ * FOUR were stamped onto the very event carrying the files that run produced.
+ * Live on SHOP-28 the owner hand-wrote the correction eighteen minutes later:
+ * "it ran 48 turns … That file is on disk and uncommitted. … Do not regenerate
+ * work that is already in the tree."
+ */
+describe("runOutcomeClause (ruling 333)", () => {
+  it("says nothing survived only when nothing did", () => {
+    expect(runOutcomeClause({ turns: 0, attachments: 0 })).toBe(" No changes were delivered.");
+  });
+
+  it("a run that had been working says so, and says where the work is", () => {
+    // SHOP-28's shape: a credential refused on turn 48, one file written a third
+    // of a second earlier and still uncommitted.
+    // CANARY: make the clause unconditional again.
+    const cut = runOutcomeClause({ turns: 48, attachments: 1 });
+    expect(cut).not.toContain("No changes were delivered");
+    expect(cut).toContain("48 turns");
+    expect(cut).toContain("1 file saved to this task");
+    expect(cut).toContain("read the workspace before starting anything over");
+    // The half that WAS true is kept: a failed run pushes nothing.
+    expect(cut).toContain("Nothing was delivered to a pull request");
+  });
+
+  it("counts turns and files independently, and reads as English for one of each", () => {
+    expect(runOutcomeClause({ turns: 1, attachments: 0 })).toContain("1 turn behind it");
+    expect(runOutcomeClause({ turns: 2, attachments: 0 })).toContain("2 turns behind it");
+    // Attachments alone are enough: a run can save evidence before its first
+    // turn is counted, and four of the board's four attachment cases are the
+    // whole reason this clause was wrong.
+    const filesOnly = runOutcomeClause({ turns: 0, attachments: 3 });
+    expect(filesOnly).toContain("3 files saved to this task");
+    expect(filesOnly).not.toContain("turn");
   });
 });

@@ -35,17 +35,50 @@ const FULL: InsightsSummary = {
     queued: 0,
     successRate: 30 / 40,
   },
-  byBackend: [
-    { label: "claude", runs: 28, cost: 2.5 },
-    { label: "codex", runs: 14, cost: 1.0 },
-  ],
-  byKind: [
-    { label: "primary", runs: 20, cost: 2.0 },
-    { label: "reviewer", runs: 15, cost: 1.0 },
-    { label: "operator", runs: 7, cost: 0.5 },
-  ],
-  byProject: [{ label: "viberr-core", runs: 42, cost: 3.5 }],
-  byModel: [{ label: "claude-sonnet-4-5", runs: 28, cost: 2.5 }],
+  // Ruling 308: a breakdown is its rows PLUS what the window left out.
+  byBackend: {
+    rows: [
+      { label: "claude", runs: 28, cost: 2.5 },
+      { label: "codex", runs: 14, cost: 1.0 },
+    ],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byKind: {
+    rows: [
+      { label: "primary", runs: 20, cost: 2.0 },
+      { label: "reviewer", runs: 15, cost: 1.0 },
+      { label: "operator", runs: 7, cost: 0.5 },
+    ],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byProject: {
+    rows: [{ label: "viberr-core", runs: 42, cost: 3.5 }],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byModel: {
+    rows: [{ label: "claude-sonnet-4-5", runs: 28, cost: 2.5 }],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byProfile: {
+    rows: [{ label: "code-reviewer", runs: 15, cost: 1.0 }],
+    hidden: 0,
+    hiddenRuns: 0,
+    hiddenCost: null,
+  },
+  byTask: {
+    rows: [{ label: "viberr-core/VIB-1", runs: 9, cost: 0.75 }],
+    hidden: 3,
+    hiddenRuns: 11,
+    hiddenCost: 0.4,
+  },
   avgDurationMs: 185_000,
   daily: Array.from({ length: 30 }, (_, i) => ({
     date: `2026-07-${String(i + 1).padStart(2, "0")}`,
@@ -53,9 +86,20 @@ const FULL: InsightsSummary = {
     cost: i === 29 ? 1.2 : 0,
   })),
   oversight: {
-    coordination: { coordinationCostUsd: 0.6, totalCostUsd: 1.2, share: 0.5 },
-    clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 },
-    traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 },
+    coordination: {
+      coordinationCostUsd: 0.6,
+      totalCostUsd: 1.2,
+      share: 0.5,
+      runs: { delivery: 3, coordination: 2 },
+      uncosted: { delivery: 0, coordination: 0 },
+      uncostedByBackend: [],
+      tokenShare: 0.25,
+      coordinationTokens: 1_000,
+      totalTokens: 4_000,
+      tokenless: { delivery: 0, coordination: 0 },
+    },
+    clarity: { activeTasks: 8, clearTasks: 7, pct: 7 / 8 , unclear: []},
+    traceability: { deliveredTasks: 5, tracedTasks: 5, pct: 1 , untraced: []},
     packetResolution: {
       resolved: 3,
       avgMs: 400_000,
@@ -64,6 +108,7 @@ const FULL: InsightsSummary = {
     },
     timeToReview: { tasks: 4, avgMs: 3_600_000, medianMs: 1_800_000 },
     longTimelines: 2,
+    longTimelineKeys: [],
   },
   backendQuota: [
     {
@@ -177,9 +222,125 @@ describe("InsightsPage", () => {
     expect(getByText("Coordination overhead")).toBeTruthy();
     // CANARY: put "operator runs spent" back and the card credits the whole
     // coordination figure to one of the two kinds that produced it.
-    // D04-U12: the denominator is named — cost-reporting runs only.
+    // D04-U12 named the denominator as "cost-reporting runs"; ruling 201 made
+    // that phrase unnecessary here, because this branch is reached only when
+    // the denominator IS every run.
     expect(
-      getByText("operator and controller runs spent $0.60 of $1.20 reported by cost-reporting runs"),
+      getByText("operator and controller runs spent $0.60 of $1.20; every run reported a cost"),
+    ).toBeTruthy();
+  });
+
+  // Ruling 190 (F37-12, live): on a Codex-only delivery fleet the controller's
+  // turns were the ENTIRE denominator, and the card answered "100%" to a
+  // question the data cannot answer. A null share must not read as a measured
+  // extreme — it must read as the gap it is.
+  it("ruling 190: a share with nothing but coordination in it reads as a gap, not as 100%", () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      oversight: {
+        ...FULL.oversight,
+        // FULL's traceability is a real 100%; move it so the only card that
+        // could print "100%" here is the one under test.
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 , untraced: []},
+        coordination: {
+          ...FULL.oversight.coordination,
+          coordinationCostUsd: 4.34,
+          totalCostUsd: 4.34,
+          share: null,
+          runs: { delivery: 32, coordination: 5 },
+          uncosted: { delivery: 32, coordination: 0 },
+          uncostedByBackend: [{ backend: "codex", runs: 32 }],
+        },
+      },
+    });
+    // CANARY: hand `share: 1` back and "100%" appears on the card.
+    expect(queryByText("100%")).toBeNull();
+    expect(
+      getByText(
+        "operator and controller runs reported $4.34; no delivery run reported a cost (32 on Codex), so there is no share to take",
+      ),
+    ).toBeTruthy();
+  });
+
+  /**
+   * Ruling 201 (F37-21): the partial case. Ruling 190's sentence covers a side
+   * that reported NOTHING; the ordinary mixed-backend instance has a side that
+   * reported a LITTLE, and the old rule printed a confident percentage off it.
+   * The card must name the quantity — "209 of 215" is the fact that makes the
+   * suppression legible — and must still carry a real number, in tokens.
+   */
+  it("ruling 201: a partly-costed instance names how many runs are outside the figure, and the token share stands", () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      oversight: {
+        ...FULL.oversight,
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 , untraced: []},
+        coordination: {
+          coordinationCostUsd: 13.38,
+          totalCostUsd: 49.38,
+          // CANARY: hand back `share: 13.38 / 49.38` and "27%" appears — the
+          // figure ruling 201 exists to keep off the screen.
+          share: null,
+          runs: { delivery: 72, coordination: 143 },
+          uncosted: { delivery: 32, coordination: 137 },
+          uncostedByBackend: [{ backend: "codex", runs: 169 }],
+          tokenShare: 0.087,
+          coordinationTokens: 12_536_746,
+          totalTokens: 144_595_424,
+          tokenless: { delivery: 1, coordination: 0 },
+        },
+      },
+    });
+    expect(queryByText("27%")).toBeNull();
+    expect(
+      getByText(
+        "operator and controller runs reported $13.38; 169 of 215 runs report no cost (169 on Codex), so there is no share to take",
+      ),
+    ).toBeTruthy();
+    // The card that still says something true, in the unit both backends
+    // report — and it discloses its own excluded row.
+    expect(getByText("Coordination tokens")).toBeTruthy();
+    expect(getByText("9%")).toBeTruthy();
+    expect(
+      getByText(
+        "12.5M of 144.6M tokens processed; tokens, not dollars · 1 of 215 runs report no provider total",
+      ),
+    ).toBeTruthy();
+  });
+
+  /**
+   * Ruling 211(g), from the adversarial self-review of ruling 201. The
+   * parenthetical counts the WHOLE cost-silent population, so it may only ride
+   * a clause that names the whole population. Attached to "no delivery run
+   * reported a cost" while coordination was ALSO partly silent, it handed the
+   * reader a number belonging to both sides under a sentence blaming one — and
+   * hid the partly-silent coordination side, which is the very thing ruling 201
+   * exists to disclose.
+   */
+  it("ruling 211(g): when BOTH sides are silent, the sentence says so and the count is labelled as the total", () => {
+    const { getByText } = renderPage({
+      ...FULL,
+      oversight: {
+        ...FULL.oversight,
+        traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5 , untraced: []},
+        coordination: {
+          ...FULL.oversight.coordination,
+          coordinationCostUsd: 13.38,
+          totalCostUsd: 13.38,
+          share: null,
+          runs: { delivery: 32, coordination: 143 },
+          uncosted: { delivery: 32, coordination: 137 },
+          uncostedByBackend: [{ backend: "codex", runs: 169 }],
+        },
+      },
+    });
+    // CANARY: attach "(169 on Codex)" to the delivery-only clause (ruling 201's
+    // shipped text) and the reader is told 169 delivery runs went silent when
+    // there are only 32 of them.
+    expect(
+      getByText(
+        "operator and controller runs reported $13.38; no delivery run reported a cost, and 169 of 175 runs report no cost in total (169 on Codex), so there is no share to take",
+      ),
     ).toBeTruthy();
   });
 

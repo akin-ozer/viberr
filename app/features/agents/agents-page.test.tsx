@@ -473,6 +473,54 @@ describe("ProfileDetail", () => {
    * now render GOVERNED policy only (the partition the matrix draws), and
    * advisory guidance says what it is.
    */
+  it("says 'advisory on Codex' once on the row where both reasons apply", () => {
+    // The repo-write row satisfies BOTH hint conditions on a Codex profile —
+    // the Claude-only-enforcement one and ruling 185's carve-out — and each
+    // used to render its own span, so the row read "Execute code or write to
+    // the repo · advisory on Codex · advisory on Codex". Same four words twice,
+    // with the only difference buried in a tooltip nobody opens. The card makes
+    // each claim ONCE (F15-09).
+    //
+    // Canary: restore the two separate `{claudeOnly && …}{carveOut && …}` spans.
+    const { container } = render(
+      <ProfileDetail
+        a={mkProfile({
+          id: "codex-dev",
+          name: "Codex developer",
+          role: "Implementation",
+          backends: ["codex"],
+          model: "gpt-5-codex",
+          actions: {
+            direct: [],
+            recommend: [],
+            forbidden: ["Execute code or write to the repo"],
+            off: [],
+          },
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "off" }],
+          resources: { skills: [], mcps: [], kb: [] },
+        })}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="Viberr Core"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const row = [...container.querySelectorAll(".cap-item")].find((el) =>
+      (el.textContent ?? "").includes("Execute code or write to the repo"),
+    );
+    expect(row).toBeTruthy();
+    expect(row!.querySelectorAll(".fhint")).toHaveLength(1);
+    // And the one that survives is the SPECIFIC one: it says why the
+    // withholding is advisory on this runtime, not merely that it is.
+    expect(row!.querySelector(".fhint")!.getAttribute("title")).toContain(
+      "ruling 185",
+    );
+  });
+
   it("a fresh minimal profile claims no verdict authority and no skills", () => {
     const { container, getByText, queryByText } = render(
       <ProfileDetail
@@ -870,6 +918,56 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     expect(missing).toHaveLength(1);
     expect(missing[0]!.textContent).toContain("vm-memory");
     expect(getByText("writer-skill").closest(".res-chip")!.className).not.toContain("missing");
+  });
+
+  it("ruling 239: says the rulings KB reaches this profile, EVEN when the profile grants it too", () => {
+    // The first version of this note only rendered when the profile did NOT
+    // grant the KB, which is backwards for the case that actually exists on a
+    // live board: every profile granted it, so the note never appeared and the
+    // chip was left implying that removing the grant would stop the agent
+    // reading it. It would not. CANARY: restore the
+    // `!a.resources.kb.includes(rulingsKb)` condition and this fails.
+    const granted: AgentProfileView = {
+      ...mkProfile({}),
+      resources: { skills: [], mcps: [], kb: ["team-rulings"] },
+    };
+    const { getByText } = render(
+      <ProfileDetail
+        a={granted}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        rulingsKb="team-rulings"
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(
+      getByText(/Removing the grant here would not stop this profile reading it/),
+    ).toBeTruthy();
+  });
+
+  it("says nothing about rulings when the project names no rulings KB", () => {
+    // The overwhelming majority of projects. CANARY: render the note
+    // unconditionally and every project grows a paragraph about a KB it has not
+    // got, naming an empty store directory.
+    const { queryByText } = render(
+      <ProfileDetail
+        a={withGrants()}
+        stages={STAGES}
+        workflow={WORKFLOW}
+        insts={[]}
+        projectName="P"
+        canManage
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    expect(queryByText(/the project's rulings/)).toBeNull();
   });
 
   it("marks nothing when the catalog is unknown — never invents a missing state", () => {
@@ -2941,6 +3039,20 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     )!;
 
   it("clicking a roster entry and Edit in the same beat edits THAT profile", async () => {
+    const { container, getByText, getByTestId } = renderPage();
+    // The page opens on the operator (the `?profile=` default).
+    await waitFor(() =>
+      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
+    );
+    // `waitFor` does NOT mean the mount settled: RTL turns the act environment
+    // OFF while it polls, so the page's own opening navigation could still be
+    // in flight when the two clicks below fire — and then the HELD navigation
+    // is that one rather than the Developer click's, and `url-profile` is not
+    // "" for the reason this test means. It passed alone and failed about one
+    // full-suite run in twenty, under load. Settling here fixes the PRECONDITION
+    // and changes nothing about what is under test: the two clicks still fire
+    // in the same beat, with no wait between them.
+    await act(async () => {});
     const { container, getByText, getByTestId } = await renderPage();
     // The page opens on the operator (the `?profile=` default) — and reading
     // that synchronously is the point: the page is settled, not merely

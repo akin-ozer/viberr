@@ -6,6 +6,7 @@ import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { EditIco } from "./mini-modal";
 import { isStaleCheck, rel, updatedLabel } from "./resource-helpers";
+import { looksLikeWriteTool } from "~/shared/mcp-tools";
 
 /**
  * The four resource list panels (knowledge bases, MCP servers, skills, global
@@ -153,6 +154,32 @@ export function KbPanel({
   );
 }
 
+
+/**
+ * Ruling 220 (F37-40): one sentence about where a server stands on write tools,
+ * for every server rather than only the gated ones.
+ *
+ * The three cases are the controller's three (ruling 188), said to the human:
+ * gated, reviewed-and-none, or never reviewed with tools that look like writes.
+ * A server whose discovered tools contain nothing write-shaped says nothing —
+ * there is no position to state and a row that alarms on everything is a row
+ * nobody reads.
+ */
+function writeToolPosture(m: McpView): string {
+  if (m.writeTools.length > 0) {
+    const n = m.writeTools.length;
+    return ` · ${n} write tool${n === 1 ? "" : "s"} withheld from read-only runs`;
+  }
+  const writeSuspects = (m.discoveredTools ?? []).filter(looksLikeWriteTool);
+  if (m.writeToolsReviewed) {
+    return writeSuspects.length > 0
+      ? ` · reviewed: none of its ${writeSuspects.length} write-looking tool${writeSuspects.length === 1 ? "" : "s"} is withheld`
+      : " · reviewed: no write tools";
+  }
+  if (writeSuspects.length === 0) return "";
+  return ` · ${writeSuspects.length} tool${writeSuspects.length === 1 ? "" : "s"} look${writeSuspects.length === 1 ? "s" : ""} like a write and nothing is withheld: not reviewed`;
+}
+
 export function McpPanel({
   mcps,
   usedBy,
@@ -273,10 +300,22 @@ export function McpPanel({
                     (usedBy(m.name) === 1 ? "" : "s")
                   : ""}
                 {/* Ruling 176: how many of its tools are withheld from agents
-                    that may not write, so the row says the server is gated. */}
-                {m.writeTools.length > 0
-                  ? ` · ${m.writeTools.length} write tool${m.writeTools.length === 1 ? "" : "s"} withheld from read-only runs`
-                  : ""}
+                    that may not write, so the row says the server is gated.
+                    Ruling 220 (F37-40): and the row says so for the other two
+                    cases too. It used to render NOTHING unless a server was
+                    gated, so the one state worth seeing — tools that look like
+                    writes, nobody has reviewed them, so nothing is withheld —
+                    was the one the list was silent about. Live, `kb-architecture`
+                    and `kb-conventions` are `server-filesystem` rooted at a
+                    knowledge base, 14 tools each, granted to 3 agent templates
+                    each, unmarked: those agents can rewrite the knowledge bases
+                    injected into every other agent's prompt as configuration.
+                    The controller reasoned about exactly that hazard for a THIRD
+                    such server and granted nothing; this list gave it and the
+                    admin no standing signal at all. The controller's own read
+                    has carried all three cases since ruling 188 — this is the
+                    human's half of the same sentence. */}
+                {writeToolPosture(m)}
               </span>
               {/* R19-17: WHY it is unreachable, in the command's own words.
                   The reason used to exist only in the toast the probe returned,

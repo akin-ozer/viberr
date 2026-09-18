@@ -13,6 +13,11 @@ import { getBuildInfo, type BuildInfo } from "./build-info.server";
 import { cachedDataRootSpace, type DiskSpace } from "./disk-space.server";
 import { maintenanceState, type MaintenanceState } from "./maintenance.server";
 import { cachedToolchain, type Toolchain } from "./toolchain.server";
+import {
+  projectionFault,
+  projectionFaultCount,
+  type ProjectionFault,
+} from "~/server/projections/store-health.server";
 
 /**
  * The instance's ops reading, assembled once (ruling 107).
@@ -57,6 +62,14 @@ export interface HealthSnapshot {
   /** The failing subsystems, named. Empty when `status` is `ok`. */
   degraded: string[];
   projections: { projects: number; tasks: number };
+  /**
+   * Ruling 217 (F37-37): the standing projection-rebuild fault, or null when
+   * the mirror tracks the files. `projections` above counts ROWS, which a
+   * broken store keeps answering happily — the counts read fine for the twelve
+   * minutes every write was failing, which is exactly why a count is not a
+   * verdict about whether the mirror still follows the record.
+   */
+  projectionStore: { files: number; latest: ProjectionFault } | null;
   watcher: boolean;
   kbWatcher: boolean;
   /** Who holds the single-writer lock on this data root (B-FD1/F18-5).
@@ -129,6 +142,16 @@ export function healthSnapshot(
   if (!kbWatcher) degraded.push("kbWatcher");
   if (!lock) degraded.push("lock");
   if (disk && disk.status !== "ok") degraded.push("disk");
+  // Ruling 217: a projection that cannot be rebuilt from the canonical files is
+  // the one fault this product cannot afford to report as healthy — "files are
+  // truth" is only useful while the mirror follows them. Live: `SQLITE_CORRUPT`
+  // under the process, every task page 500ing, and this array empty.
+  const latestFault = projectionFault();
+  const projectionStore = latestFault
+    ? { files: projectionFaultCount(), latest: latestFault }
+    : null;
+  if (projectionStore) degraded.push("projections");
+
   // Ruling 146 (owner, 2026-09-06) — SUPERSEDES the F32-4/F32-9 entries that
   // used to be pushed here (`credential:<backend>` / `quota:<backend>`).
   //
@@ -156,6 +179,7 @@ export function healthSnapshot(
     status: degraded.length > 0 ? "degraded" : "ok",
     degraded,
     projections: { projects, tasks },
+    projectionStore,
     watcher,
     kbWatcher,
     lock: lock

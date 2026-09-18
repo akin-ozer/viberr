@@ -80,7 +80,12 @@ CREATE TABLE task_projections (
     ('ready', 'input_required', 'inconsistency_risk_detected', 'blocked')),
   -- Raw stored value from the file (NULL when missing/invalid there).
   stored_readiness TEXT,
-  waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none')),
+  -- Ruling 225: `schedule` is derived by the projector, never authored in a
+  -- task file. It belongs here anyway, because this CHECK is what the store
+  -- would have used to refuse the derived value — a refusal that surfaces as
+  -- "projection rebuild failed" and a stale row, which is precisely the
+  -- silent-staleness failure boot.server.ts probes this column for.
+  waiting TEXT NOT NULL CHECK (waiting IN ('human', 'agent', 'none', 'schedule')),
   urgent INTEGER NOT NULL DEFAULT 0,
   -- Pass-25 task metadata: graded priority (urgent is derived into `urgent`
   -- above for the existing board highlight), triage labels (JSON array), and an
@@ -163,6 +168,14 @@ CREATE TABLE task_projections (
   -- as a count so read paths (notifications "Waiting on you", home decisions)
   -- can reconcile decision notifications against LIVE state without file I/O.
   recommendation_count INTEGER NOT NULL DEFAULT 0,
+  -- F37-71: the DISTINCT kinds of those pending recommendations, sorted and
+  -- comma-joined ('accept_completion', 'accept_completion,transition', …).
+  -- The count alone cannot say whether a task's only pending decision is an
+  -- ACCEPTANCE, and UX19-3's gate applies to acceptances: live on SHOP-12 a
+  -- conflicting PR was correctly dropped from the inbox as `kind: acceptance`
+  -- and walked straight back in as `kind: recommendation` the moment the
+  -- operator filed a card for the same acceptance.
+  recommendation_kinds TEXT NOT NULL DEFAULT '',
   -- Pending/fired scheduled actions (O-3), as a JSON array of the task file's
   -- `schedules`. The server-side schedule runner queries this to find due
   -- entries without reading every task file. '[]' when none.
@@ -557,6 +570,11 @@ CREATE TABLE "agent_runs" (
   cached_input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
+  -- Ruling 316: this run was dispatched with its VERDICT channel withheld, so a
+  -- reply carrying no envelope verdict is an ANSWER and not silence. The prose
+  -- fallback that manufactures a verdict from a reply must not fire here: the
+  -- reviewer was told not to judge, and obeying is not an omission to repair.
+  verdict_withheld INTEGER NOT NULL DEFAULT 0,
   -- The PERSON who interrupted the run (a users.id), or NULL. Never a
   -- pseudo-actor: a restart is a reason, not a person (pass 35 U35-7).
   interrupted_by TEXT,
@@ -582,6 +600,14 @@ CREATE TABLE "agent_runs" (
   -- always re-invokes the operator. NULL on runs nobody dispatched by hand.
   dispatched_by_name TEXT,
   dispatched_by_user_id TEXT,
+  -- Ruling 248 (pass 37, F37-77): 1 when this run's workspace checkout could
+  -- NOT be provisioned, so the run executed with no working tree. A run that
+  -- could not read the work judges nothing: the verdict path (envelope AND the
+  -- prose fallback) is closed for these rows. Persisted rather than held in the
+  -- completion closure so a run recovered after a restart keeps the fact --
+  -- the closure dies with the process, and a recovered no-checkout reviewer
+  -- would otherwise have its report re-classified into a verdict.
+  no_checkout INTEGER NOT NULL DEFAULT 0,
   -- Ruling 127: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
   -- run billed. Task runs (operator, specialist, resume, scheduled, boot recovery,
   -- retry) carry the task owner; controller turns carry the asker. NULL only on a

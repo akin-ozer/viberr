@@ -107,6 +107,11 @@ function fakeGit(opts: {
   /** Ruling 144: what `git log --format= --name-only <range> -- .github/workflows/`
    *  lists, keyed by range. Absent ranges list nothing. */
   workflowFilesByRange?: Record<string, string[]>;
+  /** Ruling 245: what the UNFILTERED `git log --name-only <range>` lists — every
+   *  file the push changes, which the lease gate reads. Keyed by range, and
+   *  distinct from the workflow list because the two calls differ only by their
+   *  pathspec and a shared fixture would make one stand in for the other. */
+  changedFilesByRange?: Record<string, string[]>;
   /** Pass 34 review: the `git log` that measures those files FAILS (a shallow
    *  clone with no `origin/<default>`, a truncated history). */
   workflowLogFails?: boolean;
@@ -155,7 +160,11 @@ function fakeGit(opts: {
         return { ok: false, stdout: "", stderr: "fatal: bad revision 'origin/main..HEAD'" };
       }
       const range = args[args.indexOf("--name-only") + 1] ?? "";
-      return { ok: true, stdout: (opts.workflowFilesByRange?.[range] ?? []).join("\n"), stderr: "" };
+      // Ruling 245: the lease gate's read carries no pathspec; ruling 144's
+      // carries `.github/workflows/`. Same command, different question.
+      const scoped = args.includes(".github/workflows/");
+      const table = scoped ? opts.workflowFilesByRange : opts.changedFilesByRange;
+      return { ok: true, stdout: (table?.[range] ?? []).join("\n"), stderr: "" };
     }
     if (args.includes("ls-remote")) {
       if (opts.lsRemoteFails) return { ok: false, stdout: "", stderr: "fatal: could not read from remote" };
@@ -1112,6 +1121,107 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
  * proceeds); read the tree before the auto-commit (the uncommitted folder
  * slips through); treat an unreadable tree as empty.
  */
+/**
+ * Ruling 245 (pass 37, F37-74): a push that changes a file another task LEASES
+ * is refused before it reaches GitHub.
+ *
+ * The seam is ruling 144's: this is the moment the change would become
+ * published history, and the last one at which refusing costs nothing.
+ */
+describe("ruling 245: a leased file refuses the push", () => {
+  const REMOTE = "c".repeat(40);
+  const range = `${REMOTE}..HEAD`;
+  const leaseTo = async (taskKey: string, paths: string[]) => {
+    // Ruling 245(b): the holder must be a LIVE task. A lease naming a task that
+    // is done, archived or absent binds nobody, so a fixture that skipped
+    // seeding it would prove the gate works while actually proving it is
+    // skipped — which is how this test first passed against a phantom holder.
+    if (taskKey !== "VIB-1") {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(taskKey, { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.fileLeases = [{ paths, taskKey, reason: "splitting it into fragments" }];
+    });
+  };
+
+  it("ruling 245(b): a lease whose HOLDER has merged binds nobody", async () => {
+    await leaseTo("VIB-9", ["Makefile"]);
+    // The live shape: SHOP-11 merged and its lease went on refusing SHOP-5.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "done" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await push(fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      changedFilesByRange: { [range]: ["Makefile"] },
+    }));
+    // CANARY: read the raw frontmatter in the gate and this is `lease_held` —
+    // a completed task fencing off a file forever.
+    expect(res.status).toBe("pushed");
+  });
+  const push = (git: ReturnType<typeof fakeGit>) => {
+    bindPat();
+    return pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
+  };
+
+  it("refuses, names the holder and the file, and pushes nothing", async () => {
+    await leaseTo("VIB-9", ["Makefile", "make/**"]);
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 2,
+      remoteHead: REMOTE,
+      changedFilesByRange: { [range]: ["services/cart/src/a.ts", "Makefile"] },
+    });
+    const res = await push(git);
+    expect(res).toMatchObject({ status: "lease_held", path: "Makefile", holder: "VIB-9" });
+    expect(res.status === "lease_held" ? res.reason : "").toContain("VIB-9 holds");
+    // CANARY: drop the gate and this pushes. Nothing may reach the remote.
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("never refuses the HOLDER its own file", async () => {
+    await leaseTo("VIB-1", ["Makefile"]);
+    const res = await push(fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      changedFilesByRange: { [range]: ["Makefile"] },
+    }));
+    expect(res.status).toBe("pushed");
+  });
+
+  it("passes a push that touches nothing leased", async () => {
+    await leaseTo("VIB-9", ["Makefile"]);
+    const res = await push(fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      changedFilesByRange: { [range]: ["services/cart/src/a.ts"] },
+    }));
+    expect(res.status).toBe("pushed");
+  });
+
+  it("an UNMEASURABLE diff refuses nothing, rather than refusing everything", async () => {
+    // Ruling 144's own distinction: `null` is "history could not answer", not
+    // "no files changed". CANARY: treat a failed read as an empty list and this
+    // still passes; treat it as a conflict and every degraded clone is blocked.
+    await leaseTo("VIB-9", ["Makefile"]);
+    const res = await push(fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      workflowLogFails: true,
+    }));
+    expect(res.status).toBe("pushed");
+  });
+});
+
 describe("ruling 159: the store layout never reaches origin", () => {
   const push = (git: ReturnType<typeof fakeGit>) =>
     pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });

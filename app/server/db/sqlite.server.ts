@@ -409,6 +409,19 @@ const BASELINE_COLUMNS: readonly {
         ddl: "usage_final INTEGER NOT NULL DEFAULT 0",
         backfill: "UPDATE agent_runs SET usage_final = 1 WHERE state = 'finished'",
       },
+      // Ruling 248 (F37-77): the run executed with no working tree. Named by
+      // `patchRun` on every completion registration, so a root that predates it
+      // would fail every run's completion. No backfill: the default is the
+      // honest value for a row written before viberr recorded the fact — 0 says
+      // "nothing here says this run was checkout-less", which is exactly true.
+      { name: "no_checkout", ddl: "no_checkout INTEGER NOT NULL DEFAULT 0" },
+      // Ruling 316: 0 is the TRUTH for every historical row — no run before
+      // this column existed had its verdict channel withheld, because nothing
+      // could withhold it — so this needs no backfill.
+      {
+        name: "verdict_withheld",
+        ddl: "verdict_withheld INTEGER NOT NULL DEFAULT 0",
+      },
     ],
   },
   {
@@ -439,6 +452,22 @@ const BASELINE_COLUMNS: readonly {
       {
         name: "required_reviewers_json",
         ddl: "required_reviewers_json TEXT NOT NULL DEFAULT '[]'",
+      },
+    ],
+  },
+  {
+    table: "task_projections",
+    columns: [
+      // F37-71: the DISTINCT kinds of a task's pending recommendations. The
+      // rebuilder names it on EVERY task write, so a root that predates the
+      // baseline edit would fail every projection rather than degrade — the
+      // exact failure this healer exists for. No backfill: the very next
+      // rebuild of each task writes the real value, and the empty default
+      // means "no pending recommendations", which is what a row with
+      // `recommendation_count = 0` already says.
+      {
+        name: "recommendation_kinds",
+        ddl: "recommendation_kinds TEXT NOT NULL DEFAULT ''",
       },
     ],
   },

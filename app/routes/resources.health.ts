@@ -34,6 +34,13 @@ import { healthSnapshot } from "~/server/ops/health-snapshot.server";
  *    lock, so a serving process without one is not a normal state.
  *  - `disk.status` low/critical → degraded. Canonical state is files; a full
  *    volume is the corruption scenario this product cannot afford.
+ *  - `projectionStore` non-null → degraded as `projections` (ruling 217). The
+ *    mirror could not be rebuilt from the canonical files, which is the other
+ *    half of the same scenario: "files are truth" only helps while SQLite
+ *    follows them. It is a LATCH, set by `rebuildPath`'s own catch and cleared
+ *    by the next rebuild that writes — never a probe, so this endpoint stays
+ *    cheap. Note that `projections` above (the row counts) keeps answering
+ *    happily through a corrupt store, which is why a count is not a verdict.
  *  - `backends.<b>.connectedUsers` is a COUNT, never a verdict, and zero is
  *    **NOT** degraded. Ruling 127 made agent backends per-person: there is no
  *    instance credential to probe, so the only true instance-level fact is how

@@ -25,6 +25,14 @@ export const HERMETIC_TOOLCHAIN: Toolchain = {
   git: "2.50.0-test",
   python3: null,
   go: null,
+  // Ruling 191: the suite's host is the real one from pass 37 — node, npm and
+  // git and nothing else — so a prompt assertion reads the same absences the
+  // live instance had.
+  make: null,
+  docker: null,
+  pnpm: null,
+  yarn: null,
+  curl: null,
   codexCli: "0.0.0-test",
   claudeAgentSdk: "0.0.0-test",
 };

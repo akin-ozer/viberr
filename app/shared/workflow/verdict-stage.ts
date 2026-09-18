@@ -1,5 +1,11 @@
 import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
-import { requiredReviewers, type Engagement } from "~/schemas/task-file.schema";
+import {
+  currentVerdicts,
+  requiredReviewers,
+  type Engagement,
+  type ReviewVerdict,
+  type WorkRevision,
+} from "~/schemas/task-file.schema";
 import { stageEligible } from "./stage-eligibility";
 import { resolveStageRoles } from "./stage-roles";
 
@@ -22,8 +28,20 @@ import { resolveStageRoles } from "./stage-roles";
  * `transitionStage` and its boundary checks.
  *
  *  - When the task stands before the review stage: null.
- *  - When any required reviewer is eligible at the task's CURRENT stage, a
- *    verdict can be given here: null.
+ *  - When a required reviewer that still OWES a verdict on the current
+ *    revision is eligible at the task's CURRENT stage, that verdict can be
+ *    given here: null.
+ *
+ *    Ruling 208: it used to ask whether ANY required reviewer was eligible
+ *    here, which is a different question the moment a board declares required
+ *    reviewers at two different stages. Live on SHOP-15: `code-reviewer`
+ *    (stages build+review) had no approve on the delivered revision, and
+ *    `integration-verifier` (stages review+verify) did — and because the
+ *    verifier is eligible at Verify, this returned null, so `reworkStages` was
+ *    empty and `transitionStage` refused "No allowed transition from Verify to
+ *    Review". The task could not reach the only stage its missing reviewer can
+ *    run at: not by the operator, not by a human. The exits were an admin
+ *    force-accept past a gate that was legitimately unmet, or archive.
  *  - Otherwise the nearest EARLIER stage where one is eligible.
  *  - When no required reviewer is deployed (nothing declares eligibility), the
  *    structural acceptance-boundary stage when the task stands past it; null
@@ -36,7 +54,15 @@ export function verdictStageFor(
     stages: readonly Pick<StageDef, "id">[];
     workflow: readonly Pick<WorkflowBoundary, "from" | "to">[];
   },
-  fm: { stage: string; engagements: Engagement[] },
+  fm: {
+    stage: string;
+    engagements: Engagement[];
+    /** Ruling 208: which reviewers still owe a verdict is read from these. A
+     *  caller that has no verdict history (none of the shipped ones) is treated
+     *  as "everybody owes", which is the pre-208 behaviour. */
+    verdicts?: ReviewVerdict[];
+    workRevision?: WorkRevision | null;
+  },
   deployed: readonly { id: string; stages: readonly string[]; spanAll: boolean }[],
 ): string | null {
   const stages = board.stages;
@@ -47,7 +73,20 @@ export function verdictStageFor(
   const reviewIndex =
     roles.reviewId === null ? -1 : stages.findIndex((s) => s.id === roles.reviewId);
   if (reviewIndex < 0) return null;
-  const reviewerSpecs = requiredReviewers(fm).flatMap((e) => {
+  // Ruling 208: only the reviewers whose approve on the CURRENT revision is
+  // missing. The ones that already approved cannot be the reason a re-verdict
+  // is needed, so their eligibility must not answer for the ones that have not.
+  const approved = new Set(
+    currentVerdicts({
+      workRevision: fm.workRevision ?? null,
+      verdicts: fm.verdicts ?? [],
+    })
+      .filter((v) => v.result === "approve")
+      .map((v) => v.profileId),
+  );
+  const owing = requiredReviewers(fm).filter((e) => !approved.has(e.profileId));
+  if (requiredReviewers(fm).length > 0 && owing.length === 0) return null;
+  const reviewerSpecs = owing.flatMap((e) => {
     const view = deployed.find((d) => d.id === e.profileId);
     return view ? [{ stages: view.stages, spanAll: view.spanAll }] : [];
   });

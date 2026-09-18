@@ -1,4 +1,8 @@
 import {
+  projectRulingsKb,
+  withProjectRulings,
+} from "~/server/files/project-rulings.server";
+import {
   describeRevisionDrift,
   type RevisionDrift,
 } from "~/shared/revision-drift";
@@ -48,6 +52,7 @@ import {
 } from "~/schemas/task-file.schema";
 import {
   activeWorkRevision,
+  consecutiveRequestChanges,
   PACKET_OPTION_KINDS,
   revisionLeftWorkspace,
   type ForeignBranchHead,
@@ -80,6 +85,7 @@ import {
   type AuditActor,
   type AuditEventInput,
 } from "~/server/audit/audit-recorder.server";
+import { backendDispatchHold } from "~/server/runtimes/backend-quota.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
@@ -93,11 +99,14 @@ import {
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
+import { createReconcileBehindByLookup } from "~/server/provenance/provenance-query.server";
+import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   defaultModelFor,
   resolveRunModel,
@@ -151,6 +160,11 @@ export type OperatorAutonomy = "supervised" | "full";
 export interface OperatorAuthority {
   /** capabilityId → mode, from the project's operator deployment. */
   policy: Map<string, CapabilityMode>;
+  /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
+   *  239), so its index can say it BINDS. A label; ruling 283 removed the
+   *  budget this used to feed. On the authority because that is where `kb`
+   *  already lives, and hand-built test literals may omit it. */
+  rulingsKb?: string | null;
   /** The autonomy this run ACTUALLY holds — already clamped to
    *  {@link OperatorAuthority.configuredAutonomy}. Never above it (R19-A). */
   autonomy: OperatorAutonomy;
@@ -374,6 +388,44 @@ export function operatorBackendFor(
 }
 
 /**
+ * F37-65: can the deployed operator ACCEPT COMPLETION itself, or does it only
+ * file a card a person applies?
+ *
+ * Autonomy alone does not answer this and the task page's Execution caption
+ * read it as though it did: "Full autonomy: this run can move the task and
+ * accept completion itself." `gate()` keeps `completion-for-acceptance` at
+ * `recommend` whatever the autonomy unless the grant is EXPLICITLY `direct`
+ * (owner ruling Q1, 2026-07-11 — "an admin who configured `recommend`
+ * expecting a human gate must never get a silent agent-close just because the
+ * run was launched at full autonomy"). Live on shopify-clone-platform the
+ * operator is `autonomy: full` with `completion-for-acceptance: recommend`, so
+ * every task page on that board promised something the operator could not do,
+ * and every acceptance in the pass was a person pressing the button.
+ *
+ * The predicate is `operatorAcceptCompletion`'s own recommend-branch condition
+ * negated, character for character, so the caption cannot drift from the
+ * behaviour it describes. No `deployed` check of its own: `gate` already answers
+ * `deny` for an undeployed operator, and its comment asks to be the ONE place
+ * both gates answer from — a second copy here is the drift this finding is
+ * about. Falls back to `false` for an unreadable project, which is the honest
+ * caption (a page that cannot resolve an operator cannot promise one acts).
+ */
+export function operatorAcceptsDirectly(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): boolean {
+  try {
+    const authority = resolveOperatorAuthority(ctx, projectSlug);
+    return (
+      authority.autonomy === "full" &&
+      gate(authority, "completion-for-acceptance") === "direct"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * R19-A — the operator deployment's CONFIGURED autonomy for a project: the
  * ceiling every run is clamped to. The exact sibling of `operatorBackendFor`
  * (P11-76) and for the same reason — the run picker must offer the options that
@@ -484,7 +536,15 @@ export function resolveOperatorAuthority(
     effort: backend === declaredBackend ? view.effort || "" : "",
     name: view.name || "Operator",
     skills: view.resources.skills,
-    kb: view.resources.kb ?? [],
+    // Ruling 239: the operator reads the project's rulings the same as every
+    // agent it coordinates. It writes the packets and scoping notes those
+    // agents work from, so an operator that had not read the project's settled
+    // rules would re-open questions the project had closed.
+    kb: withProjectRulings(view.resources.kb ?? [], projectSlug, ctx),
+    // Ruling 286: which of those names binds. The operator writes the packets
+    // and scoping notes every specialist works from, so it is the worst actor
+    // on the board to be planning from rules it never opened.
+    rulingsKb: projectRulingsKb(projectSlug, ctx),
     mcps: view.resources.mcps ?? [],
     persona: definition?.persona?.trim() || null,
     deployed: true,
@@ -701,12 +761,32 @@ async function writeOperatorComment(
   // own — the comment discloses the non-delivery instead of dropping it in
   // silence. Applied after the guardrails so it rides the text actually written.
   const text2 = withAmbiguityDisclosure(db, guardrail.text ?? text);
+  // Ruling 214 (F37-34): the same principle, one audience over. The operator's
+  // own doctrine used to tell it to put the completeness question to a reviewer
+  // "in ONE comment", and live on SHOP-10 it did — "@Code Reviewer, name
+  // everything you would still block on" — to an audience that does not exist.
+  // `post_comment` writes a timeline line and starts nothing, so no reviewer
+  // ever read it; then the stranded backstop, which counts a transition, a
+  // dispatch, a delivery or a packet as progress and a comment as none,
+  // recorded a deliberate hold and paused coordination on the task five others
+  // were waiting behind. The doctrine now names `run_agent`. This is the
+  // backstop for when it tags an agent anyway: the record says plainly that
+  // nothing was sent, instead of the tag going nowhere in silence.
+  // Ruling 252: the sentence itself now lives beside the resolver, because the
+  // controller and a mid-run agent needed the same one.
+  // Ruling 262: all of them, in one sentence, from the disclosure resolver.
+  const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
+  const note = unreachedAgentNote(
+    unreachedAgents(ctx, projectSlug, taskKey, text2),
+    "operator",
+  );
+  const text3 = note ? `${text2}\n\n${note}` : text2;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
     actor: { kind: "operator" },
     title: null,
-    text: text2,
+    text: text3,
     toAgent: false,
     evidence: null,
   };
@@ -719,7 +799,7 @@ async function writeOperatorComment(
       const lastOperator = parsed.timeline.find(
         (e) => e.type === "comment" && e.actor.kind === "operator",
       );
-      if (lastOperator && lastOperator.text.trim() === text2.trim()) {
+      if (lastOperator && lastOperator.text.trim() === text3.trim()) {
         suppressed = true;
         return;
       }
@@ -784,7 +864,7 @@ async function writeOperatorComment(
       details: {},
     });
   }
-  return { text: text2, dropped: null, trimmedBy: guardrail.trimmedBy };
+  return { text: text3, dropped: null, trimmedBy: guardrail.trimmedBy };
 }
 
 /**
@@ -960,7 +1040,8 @@ export interface OperatorPacketOptionInput {
   ev?: string;
   /** retry_other_backend — the backend to re-run the failed agent on. */
   backend?: "codex" | "claude";
-  /** retry_other_backend — a reviewer retry names its profile. */
+  /** retry_other_backend — a reviewer retry names its profile. Ruling 237:
+   *  question_reviewer names the reviewer the question is put to. */
   profileId?: string;
   /** archive_task — also delete the task's remote branch (discard the work). */
   deleteBranch?: boolean;
@@ -973,6 +1054,24 @@ export interface OperatorPacketOptionInput {
   /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
    *  editor opens with when the human confirms. Refused on any other kind. */
   goalDraft?: string;
+  /** wait_for_window only — ruling 224: the provider's own reset instant, ISO.
+   *  The resolution schedules the agent's re-dispatch just after it. */
+  dueAt?: string;
+  /** block_on_dependencies only — ruling 230: the tasks or goal links this one
+   *  waits on. The resolution writes them through `setTaskDependencies`, so
+   *  Viberr releases the task when the last entry finishes. */
+  blockedBy?: string[];
+  /** create_task only — ruling 269: the task the resolution creates. Required
+   *  on the kind and refused on every other one. */
+  newTask?: {
+    title: string;
+    goal: string;
+    /** What the NEW task waits on — not this one. */
+    blockedBy?: string[];
+    /** Ruling 287: the EXISTING tasks that must wait on the new one. */
+    blocks?: string[];
+    labels?: string[];
+  };
 }
 
 export interface OperatorOpenPacketInput {
@@ -984,6 +1083,9 @@ export interface OperatorOpenPacketInput {
   body?: string;
   observations?: { k: string; v: string; code?: boolean }[];
   options: OperatorPacketOptionInput[];
+  /** Ruling 315: the account-level cause that raised this, when the cause is
+   *  bigger than the task. Packets sharing it are resolved together. */
+  cause?: string;
 }
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
@@ -1193,6 +1295,39 @@ export async function operatorOpenPacket(
       };
     }
   }
+  // Ruling 244 (pass 37, F37-73): the same rule the `accept_completion` arm
+  // above applies, applied to its sibling. `resolve_remote_collision` clears a
+  // FOREIGN remote — ruling 122's case, an unrelated branch or an unowned PR
+  // squatting this task's branch name — and V19 put `unownedPr` in the
+  // operator's own snapshot precisely so it can tell. With no collision
+  // recorded, the resolution takes ruling 136(b)'s `own_pr_open` arm, answers
+  // "No collision to clear: PR #N on `branch` is TASK's own review PR", and
+  // leaves the block exactly where it was.
+  //
+  // Live on SHOP-11: a rebase diverged the branch from its own PR #15, the
+  // operator offered this as the RECOMMENDED option promising to close PR #15
+  // and delete the remote, a person confirmed it through the destructive-action
+  // ceremony that names deleting a branch, and the answer was "The block
+  // stays." The decision was spent, the packet was gone, and nothing had
+  // happened — which is what the accept_completion refusal exists to prevent:
+  // "the human is left confirming a card that cannot succeed."
+  if (rawOptions.some((o) => o.kind === "resolve_remote_collision")) {
+    const fm = existing.parsed.frontmatter;
+    const unowned = fm.github?.unownedPr ?? null;
+    if (unowned === null) {
+      const own = fm.pr?.number ? `its own review PR #${fm.pr.number}` : "no unowned PR";
+      return {
+        outcome: "noop",
+        message:
+          `resolve_remote_collision only fits a FOREIGN remote under ${input.taskKey}'s branch name ` +
+          `(an unrelated branch, or a pull request this task does not own). ` +
+          `${input.taskKey} records no collision — the branch carries ${own} — so the resolution ` +
+          `would answer "no collision to clear" and leave the block where it is. ` +
+          "For a branch whose history diverged from its own PR, a person resolves the history: " +
+          "offer custom naming what they must do, or archive_task with deleteBranch to abandon it.",
+      };
+    }
+  }
   // B3: one open decision at a time, the same refusal every sibling packet
   // writer makes (`openStuckLoopPacket`, `openAgentQuestionPacket`). This
   // writer alone assigned `parsed.packet` unconditionally, so a second packet
@@ -1246,6 +1381,115 @@ export async function operatorOpenPacket(
     // `move_stage` names the stage it moves to, and only that kind carries the
     // field: the same two refusals `resolvePacket` makes, made here so the
     // option is never written in a shape the confirm would refuse.
+    // Ruling 269: `create_task` carries the task it will create, and only that
+    // kind reads it — the same two refusals `move_stage` gets, for the same
+    // reason: an option must never be written in a shape the confirm refuses.
+    // Ruling 273 (pass 37, F37-106): a retry onto a backend the instance
+    // ALREADY knows is spent. The same rule the `accept_completion` and
+    // `resolve_remote_collision` guards apply — "the human is left confirming
+    // a card that cannot succeed" — on the kind whose whole job is recovery.
+    // Live on SHOP-37: Codex had been recorded exhausted for the owner's
+    // credential since 03:26 ("try again at Sep 19th"), the operator
+    // recommended "Re-run the Integration Verifier on the Codex backend" at
+    // 09:0x, a person confirmed it, and the answer was "The retry could not
+    // start: Held: Codex is out of quota until Sep 19… scheduled for then."
+    // Nothing lied and nothing was lost — the hold is ruling 152(c) working —
+    // but the decision was spent on a four-day park that was knowable when the
+    // option was written. `wait_for_window` is the honest kind for that, and
+    // ruling 224 built it for exactly this fact.
+    if (rawOptions.some((o) => o.kind === "retry_other_backend")) {
+      const ownerId = existing.parsed.frontmatter.ownerUserId;
+      const retryTargets = rawOptions
+        .filter((o) => o.kind === "retry_other_backend")
+        .map((o) => ({ option: o, backend: o.backend ?? null }));
+      for (const target of retryTargets) {
+        const backend = target.backend;
+        if (!backend || !ownerId) continue;
+        const hold = backendDispatchHold(db, backend, { credentialUserId: ownerId });
+        if (!hold) continue;
+        const label = backend === "codex" ? "Codex" : "Claude";
+        const until = hold.until
+          ? ` until ${new Date(hold.until).toISOString()}`
+          : "";
+        return {
+          outcome: "noop",
+          message:
+            `"${target.option.title}" retries on ${label}, and this instance already recorded ` +
+            `${label} as out of quota for ${input.taskKey}'s owner${until} — the dispatch would ` +
+            `be HELD and re-scheduled rather than run, so the person would spend a decision on a ` +
+            `wait. Offer the OTHER backend, or offer wait_for_window with dueAt set to the reopen ` +
+            `instant, which resumes by itself and says so.`,
+        };
+      }
+    }
+    const strayNewTask = rawOptions.find(
+      (o) => o.kind !== "create_task" && o.newTask !== undefined,
+    );
+    if (strayNewTask) {
+      return {
+        outcome: "noop",
+        message:
+          `newTask only fits a create_task option. "${strayNewTask.title}" is ` +
+          `${strayNewTask.kind}, and its resolution creates nothing.`,
+      };
+    }
+    const emptyNewTask = rawOptions.find(
+      (o) =>
+        o.kind === "create_task" &&
+        ((o.newTask?.title ?? "").trim() === "" || (o.newTask?.goal ?? "").trim() === ""),
+    );
+    if (emptyNewTask) {
+      return {
+        outcome: "noop",
+        message:
+          `"${emptyNewTask.title}" is a create_task option with no task on it. ` +
+          "Give newTask a title and a goal — the goal is the contract the new task is " +
+          "worked to, so write it as one (deliverable plus acceptance criteria). " +
+          "Without them the confirm would create nothing.",
+      };
+    }
+    // Ruling 288 (F37-123): a goal too long to carry is REFUSED, never cut. Both
+    // of these texts become a task's CONTRACT — the one document every future
+    // run on it re-anchors on (ruling 189) — and both were a bare
+    // `.slice(0, GOAL_DRAFT_MAX_CHARS)`, so an over-long draft was committed
+    // ending mid-sentence with nothing anywhere saying it had been cut.
+    //
+    // Live on SHOP-29 this afternoon: a person's decision asked the operator to
+    // write the REASONING into a corrected acceptance criterion, precisely so a
+    // later reader would not "fix" it back. The draft came out at 4,000
+    // characters exactly, ending "…a 403 there would be", and the sentence
+    // carrying the reason was gone. The editor showed it as ordinary text. Only
+    // counting the characters revealed it, and the operator's own words were
+    // unrecoverable by then — the slice happened at write time, so what was cut
+    // was never stored anywhere.
+    //
+    // Refusing is ruling 139's rule applied to prose: check before anything is
+    // written, name what is wrong, and write nothing. The operator can shorten
+    // and re-offer inside the same turn; a truncated contract cannot be
+    // repaired by anyone who does not already know what it said.
+    const tooLong = rawOptions.find(
+      (o) =>
+        (o.goalDraft ?? "").trim().length > GOAL_DRAFT_MAX_CHARS ||
+        (o.newTask?.goal ?? "").trim().length > GOAL_DRAFT_MAX_CHARS,
+    );
+    if (tooLong) {
+      const draftLen = (tooLong.goalDraft ?? "").trim().length;
+      const which =
+        draftLen > GOAL_DRAFT_MAX_CHARS
+          ? { field: "goalDraft", len: draftLen }
+          : { field: "newTask.goal", len: (tooLong.newTask?.goal ?? "").trim().length };
+      return {
+        outcome: "noop",
+        message:
+          `"${tooLong.title}" carries a ${which.field} of ${which.len.toLocaleString("en-US")} ` +
+          `characters and the limit is ${GOAL_DRAFT_MAX_CHARS.toLocaleString("en-US")}. ` +
+          `Nothing was written. A goal is the contract every future run on the task ` +
+          `re-anchors on, so Viberr will not commit one that stops mid-sentence — shorten ` +
+          `it and offer the option again. Cut narrative and worked examples before you cut ` +
+          `a deliverable or an acceptance criterion; detail that does not fit belongs in ` +
+          `the packet's own text or a comment, which have no such limit.`,
+      };
+    }
     const strayStage = rawOptions.find(
       (o) => o.kind !== "move_stage" && (o.toStage ?? "").trim() !== "",
     );
@@ -1309,6 +1553,110 @@ export async function operatorOpenPacket(
     };
   }
 
+  // Ruling 224: a wait_for_window with no instant resolves into a schedule
+  // with no due time, so it is refused by name like every other option whose
+  // payload its kind requires.
+  const strayWait = rawOptions.find(
+    (o) => o.kind === "wait_for_window" && !(o.dueAt ?? "").trim(),
+  );
+  if (strayWait) {
+    return {
+      outcome: "noop",
+      message:
+        `A wait_for_window option needs the instant the window reopens — "${strayWait.title}" carries none. ` +
+        "Pass dueAt as an ISO timestamp, or offer a different recovery.",
+    };
+  }
+  const strayDue = rawOptions.find(
+    (o) => o.kind !== "wait_for_window" && (o.dueAt ?? "").trim() !== "",
+  );
+  if (strayDue) {
+    return {
+      outcome: "noop",
+      message:
+        `dueAt only fits a wait_for_window option — "${strayDue.title}" is ${strayDue.kind}. ` +
+        "Drop it, or offer the wait as its own option.",
+    };
+  }
+
+  // Ruling 237 (F37-57): a question_reviewer names the reviewer it questions,
+  // and that reviewer must be one this task actually has. Without the check the
+  // resolution would promise "ask X" and then either dispatch nobody or, worse,
+  // start the DELIVERER with a prompt telling it not to review — and the person
+  // who chose the option would read a card that said otherwise.
+  const strayQuestion = rawOptions.find(
+    (o) => o.kind === "question_reviewer" && !(o.profileId ?? "").trim(),
+  );
+  if (strayQuestion) {
+    return {
+      outcome: "noop",
+      message:
+        `A question_reviewer option needs the reviewer it asks — "${strayQuestion.title}" names none. ` +
+        "Pass profileId, or put the question in a comment instead.",
+    };
+  }
+  const wrongQuestion = rawOptions.find(
+    (o) =>
+      o.kind === "question_reviewer" &&
+      !existing.parsed.frontmatter.engagements.some(
+        (e) => e.profileId === o.profileId && !e.delivers,
+      ),
+  );
+  if (wrongQuestion) {
+    return {
+      outcome: "noop",
+      message:
+        `"${wrongQuestion.profileId}" is not a reviewer engaged on ${input.taskKey}, so a question_reviewer ` +
+        `option cannot put a question to it — "${wrongQuestion.title}". ` +
+        "Name an engaged non-delivering agent, or engage one first.",
+    };
+  }
+
+  // Ruling 230: a hold that names nothing to wait on resolves into a hold that
+  // releases on nothing — the task would sit with no dependencies, no run and
+  // no owner. Refused by name like every other option whose payload its kind
+  // requires.
+  const strayHold = rawOptions.find(
+    (o) =>
+      o.kind === "block_on_dependencies" &&
+      (o.blockedBy ?? []).filter((e) => e.trim() !== "").length === 0,
+  );
+  if (strayHold) {
+    return {
+      outcome: "noop",
+      message:
+        `A block_on_dependencies option needs the work it waits on — "${strayHold.title}" names none. ` +
+        "Pass blockedBy as task keys or goal links, or offer a different hold.",
+    };
+  }
+  const strayBlockedBy = rawOptions.find(
+    (o) => o.kind !== "block_on_dependencies" && (o.blockedBy ?? []).length > 0,
+  );
+  if (strayBlockedBy) {
+    return {
+      outcome: "noop",
+      message:
+        `blockedBy only fits a block_on_dependencies option — "${strayBlockedBy.title}" is ${strayBlockedBy.kind}. ` +
+        "Drop it, or offer the hold as its own option.",
+    };
+  }
+
+  // Ruling 226: the head-check override is the policy engine's to offer and
+  // nobody else's. It is granted against a triple the gate read live at the
+  // moment it refused, so an operator authoring it from a stale board would be
+  // offering a waiver over facts it never checked — and the thing being waived
+  // is the last guard between a review and the base branch.
+  const strayWaiver = rawOptions.find((o) => o.kind === "accept_unverified_head");
+  if (strayWaiver) {
+    return {
+      outcome: "noop",
+      message:
+        `accept_unverified_head is not an option you can offer — "${strayWaiver.title}". ` +
+        "The acceptance gate writes it itself when GitHub refuses the head comparison, " +
+        "pinned to the shas it read at that moment.",
+    };
+  }
+
   // Exactly one recommended option (the parser expects this): honour the first
   // one the operator marked, else default to the first option.
   let recSeen = false;
@@ -1347,10 +1695,35 @@ export async function operatorOpenPacket(
     if (o.rework && o.kind === "redirect") option.rework = true;
     // Ruling 164: the stage a move_stage resolution moves to, validated above.
     if (o.kind === "move_stage" && o.toStage) option.toStage = o.toStage.trim();
+    // Ruling 224: only a wait_for_window carries the reset instant, and it is
+    // useless without one — an option promising to resume "when the window
+    // reopens" with no instant would resolve into a schedule with no due time.
+    if (o.kind === "wait_for_window" && o.dueAt) option.dueAt = o.dueAt;
+    if (o.kind === "block_on_dependencies" && o.blockedBy?.length) {
+      option.blockedBy = [...o.blockedBy];
+    }
+    // Ruling 269: the task the create_task resolution will make, validated
+    // above. Trimmed here, the one chokepoint both operator backends reach.
+    if (o.kind === "create_task" && o.newTask) {
+      const newTask: NonNullable<PacketOption["newTask"]> = {
+        title: o.newTask.title.trim(),
+        // Ruling 288: within the cap by construction — an over-long goal was
+        // refused above, with nothing written.
+        goal: o.newTask.goal.trim(),
+      };
+      if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+      // Ruling 287: the reverse edge reaches the stored option, which is the
+      // only place the resolver can read it from.
+      if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
+      if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
+      option.newTask = newTask;
+    }
     // Ruling 138: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();
-    if (goalDraft) option.goalDraft = goalDraft.slice(0, GOAL_DRAFT_MAX_CHARS);
+    // Ruling 288: within the cap by construction (refused above). It was a
+    // silent `.slice` here, which is how a contract came to end mid-sentence.
+    if (goalDraft) option.goalDraft = goalDraft;
     return option;
   });
   if (!recSeen && options[0]) options[0].rec = true;
@@ -1369,6 +1742,9 @@ export async function operatorOpenPacket(
     })),
     options,
   };
+  // Ruling 315: an account-level cause travels onto the packet, so a sibling
+  // raised by the same failure can be found when this one is answered.
+  if (input.cause) packet.cause = input.cause;
 
   let opened = false;
   // Ruling 137: a packet pauses coordination, so the standing acceptance
@@ -1635,6 +2011,14 @@ export interface OperatorTaskSnapshot {
     role: string;
     backend: string;
     verdict: "approve" | "request_changes" | null;
+    /** Ruling 193: successive delivered revisions this reviewer has requested
+     *  changes on, counted back from its newest verdict and stopping at its
+     *  first `approve`. `0` when its newest verdict is an approval or it has
+     *  not weighed in. Two or more means the same objection survived a rework,
+     *  which is when re-prompting the deliverer stops being the move. Optional
+     *  so hand-built fixtures need not restate it; `operatorSnapshot` always
+     *  sets it. */
+    consecutiveRequestChanges?: number;
   }[];
   /** Ruling 178: the reviewers the PROJECT requires, per review stage,
    *  resolved to the names the acceptance gate prints. Each must hold an
@@ -1693,7 +2077,14 @@ export interface OperatorTaskSnapshot {
      *  packet is decided and waits for the edited goal, so do not re-ask. */
     awaiting: "goal_edit" | null;
   } | null;
-  recentTimeline: { type: string; actor: string; text: string }[];
+  recentTimeline: OperatorTimelineRow[];
+  /** Ruling 302: how many entries this task's timeline HAS, against the
+   *  `recentTimeline.length` shown. Present always, so a coordinator never has
+   *  to infer from a full-looking window that it saw everything. */
+  timelineTotal: number;
+  /** Ruling 302: present ONLY when entries were left out, naming the count and
+   *  the way to reach them. */
+  timelineOlder?: string;
   /** [1] The coordinator's OWN proposals — what it already asked for, and what a
    *  human already refused. Without this the supervised loop spins: a supervisor
    *  declines "move to Review", the next drive cannot see the refusal (the
@@ -1798,6 +2189,12 @@ export interface OperatorTaskSnapshot {
    *  too. Null when the head is this task's or was never read. Optional only
    *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
   foreignHead?: ForeignBranchHead | null;
+  /** F37-11 (pass 37): how many commits the BASE is ahead of this task's
+   *  branch, from the reconciler's last compare — the same reading the GitHub
+   *  page's sync pill renders. `0` = level with the base, `null` = no pass has
+   *  compared this task yet. Informational: a stale or absent reading must
+   *  never stop an update, it only stops the step being planned blind. */
+  baseBehindBy?: number | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -2006,12 +2403,36 @@ const liveRunRowsSchema = z.array(
 );
 
 /** Read-only task snapshot for the operator's `get_task` tool. */
+/**
+ * Ruling 302: how many timeline entries `get_task` returns by default, and the
+ * most it will return when asked. The controller's own `get_task` has taken an
+ * `events` count (1..50, default 12) for as long as it has existed; the
+ * operator's took no arguments at all and returned six.
+ */
+export const OPERATOR_TIMELINE_DEFAULT = 6;
+export const OPERATOR_TIMELINE_MAX = 50;
+
+/** One row of {@link OperatorTaskSnapshot.recentTimeline} — the shape the
+ *  snapshot builder writes and the operator reads. Named rather than inline so
+ *  the builder and the contract cannot drift over what `clipped` means. */
+export interface OperatorTimelineRow {
+  /** Ruling 285: the ADDRESS `read_timeline_entry` takes. */
+  occurredAt: string;
+  type: string;
+  actor: string;
+  text: string;
+  /** Ruling 285: present ONLY when the text was cut, naming the tool that
+   *  returns it whole. */
+  clipped?: string;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   authority: OperatorAuthority,
+  events: number = OPERATOR_TIMELINE_DEFAULT,
 ): OperatorTaskSnapshot {
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) throw AppError.notFound(`Task ${taskKey} not found.`);
@@ -2022,6 +2443,14 @@ export function operatorSnapshot(
   if (!project) throw AppError.notFound(`Project ${projectSlug} not found.`);
 
   const fm = file.parsed.frontmatter;
+  // F37-11: the reconciler's own last compare, read the same way the GitHub
+  // page's sync pill reads it.
+  const behindByLookup = createReconcileBehindByLookup(db);
+  // Ruling 302: the window, clamped the way the controller's own `events` is.
+  const timelineWindow = Math.min(
+    Math.max(Math.trunc(events), 1),
+    OPERATOR_TIMELINE_MAX,
+  );
   const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
@@ -2063,7 +2492,7 @@ export function operatorSnapshot(
       ).data?.name ?? null)
     : null;
 
-  return {
+  const snapshot: OperatorTaskSnapshot = {
     key: fm.key,
     title: fm.title,
     goal: file.parsed.goal,
@@ -2106,6 +2535,13 @@ export function operatorSnapshot(
         role: r.role,
         backend: r.backend,
         verdict: verdictOf(r.profileId),
+        // Ruling 193: how many successive DELIVERED REVISIONS this reviewer
+        // has requested changes on. One is ordinary review. A run of them on
+        // revisions that keep changing is the shape of an objection the work
+        // cannot satisfy, and the operator could not see it: the snapshot
+        // showed only the current revision's verdict, so every round looked
+        // like the first.
+        consecutiveRequestChanges: consecutiveRequestChanges(fm, r.profileId),
       }));
     })(),
     // Ruling 178: from the project file, resolved the way the gate prints it.
@@ -2147,17 +2583,32 @@ export function operatorSnapshot(
           awaiting: file.parsed.packet.awaiting ?? null,
         }
       : null,
-    recentTimeline: file.parsed.timeline.slice(0, 6).map((e) => ({
-      type: e.type,
-      actor:
-        e.actor.kind === "human"
-          ? (e.actor.nameHint ?? "human")
-          : e.actor.kind,
+    timelineTotal: file.parsed.timeline.length,
+    recentTimeline: file.parsed.timeline.slice(0, timelineWindow).map((e) => {
       // Timeline comments store the agent's FULL report (no 1,200-char cap
       // since 2026-07-17) — cap here so six entries can't balloon the prompt.
-      text:
-        e.text.length > 1500 ? e.text.slice(0, 1497) + "…" : e.text,
-    })),
+      //
+      // Ruling 285 (F37-120): the cap stays and the ADDRESS ships with it. The
+      // stamp is what `read_timeline_entry` takes, and a clipped entry says it
+      // is clipped — an entry that ends mid-sentence with a "…" and no way to
+      // ask for the rest is how a coordinator states half a report as the whole
+      // of it, which it did, live, on SHOP-42.
+      const clipped = e.text.length > 1500;
+      const row: OperatorTimelineRow = {
+        occurredAt: e.occurredAt,
+        type: e.type,
+        actor:
+          e.actor.kind === "human"
+            ? (e.actor.nameHint ?? "human")
+            : e.actor.kind,
+        text: clipped ? e.text.slice(0, 1497) + "…" : e.text,
+      };
+      if (clipped) {
+        row.clipped =
+          "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole";
+      }
+      return row;
+    }),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.
     recommendations: {
@@ -2220,6 +2671,19 @@ export function operatorSnapshot(
     unownedPr: fm.github?.unownedPr ?? null,
     // Ruling 161: what origin's branch holds when it is not this task's work.
     foreignHead: fm.github?.foreignHead ?? null,
+    // F37-11 (pass 37): how the branch stands against the base, read from the
+    // reconciler's own last compare — the same row the GitHub page's sync pill
+    // renders. Without it the operator planned `update_branch_from_base` on
+    // EVERY delivery and the server answered "already up to date" every time:
+    // eight of the pass's nine "plan was not carried out in full" notes were
+    // this one step. `null` means no pass has compared this task yet, which is
+    // "unknown" and never an excuse to skip the call.
+    baseBehindBy: behindByLookup(
+      storeRelativePath(
+        resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)),
+        ctx.dataRoot,
+      ),
+    ),
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.
@@ -2256,6 +2720,17 @@ export function operatorSnapshot(
       mcps: listMcpServerNames(db),
     },
   };
+  if (snapshot.timelineTotal > snapshot.recentTimeline.length) {
+    // Ruling 302: the same rule the per-ENTRY clip beside it already follows.
+    // A window that does not say it is a window is how a coordinator states
+    // part of a history as the whole of it.
+    const older = snapshot.timelineTotal - snapshot.recentTimeline.length;
+    snapshot.timelineOlder =
+      `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. ` +
+      `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
+      "and read_timeline_entry with an occurredAt for one in full.";
+  }
+  return snapshot;
 }
 
 // ------------------------------------------------------------- actions
@@ -2828,12 +3303,27 @@ export async function operatorDispatchAgent(
   // The retry is already on the task's schedule, so the message ends the
   // subject rather than inviting a packet.
   const heldNoop = (error: DispatchHeldError): OperatorActionResult => {
-    const other = error.hold.backend === "codex" ? "Claude" : "Codex";
+    // Ruling 207(h): the hold is scoped to (backend, TASK OWNER) — every run on
+    // this task bills that one person (ruling 127) — so "pick a <other>
+    // profile" only helps when the OWNER has the other backend connected. When
+    // they do not, the operator follows the advice, the dispatch is refused on
+    // the owner's credential, and the failure opens the very packet this
+    // sentence forbade. So the alternative is offered only when it exists.
+    const otherBackend: RealBackend = error.hold.backend === "codex" ? "claude" : "codex";
+    const other = otherBackend === "claude" ? "Claude" : "Codex";
+    const ownerId =
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter
+        .ownerUserId ?? null;
+    const fallbackReachable =
+      ownerId !== null && isBackendAvailableFor(db, ownerId, otherBackend);
     return {
       outcome: "noop",
       message:
         `${error.userMessage} Do not open a packet for this; ` +
-        `pick a ${other} profile if the work cannot wait.`,
+        (fallbackReachable
+          ? `pick a ${other} profile if the work cannot wait.`
+          : `there is no ${other} fallback either — this task's runs bill its owner, ` +
+            `who has no ${other} account connected. The retry is already scheduled.`),
     };
   };
   if (prompt) {
@@ -2848,11 +3338,32 @@ export async function operatorDispatchAgent(
     // the same rule as the trace above, and an explicit `true` is what asks
     // assignSpecialist for a delivery hand-off.
     if (input.delivers !== undefined) promptInput.delivers = input.delivers;
+    let prompted: Awaited<ReturnType<typeof operatorPromptAgent>>;
     try {
-      await operatorPromptAgent(db, promptInput, ctx);
+      prompted = await operatorPromptAgent(db, promptInput, ctx);
     } catch (error) {
       if (isDispatchHeld(error)) return heldNoop(error);
       throw error;
+    }
+    // Ruling 263 (F37-93): "and started its run" was said for a run that was
+    // refused before any process existed, and for one parked behind the cap.
+    // The operator plans its next move on this sentence.
+    if (prompted.outcome === "refused") {
+      return {
+        outcome: "noop",
+        message:
+          `The prompt is on the timeline for @${agent.name} (${as}), but no run started: ` +
+          `${prompted.refusal ?? "the run was refused before any process started."} ` +
+          `Re-send it once that is resolved.`,
+      };
+    }
+    if (prompted.outcome === "queued") {
+      return {
+        outcome: "done",
+        message:
+          `Prompted @${agent.name} (${as}). The instance is at its concurrent-run cap, ` +
+          `so the run is queued and starts when a slot frees.`,
+      };
     }
     return {
       outcome: "done",
@@ -2871,6 +3382,23 @@ export async function operatorDispatchAgent(
   } catch (error) {
     if (isDispatchHeld(error)) return heldNoop(error);
     throw error;
+  }
+  if (result.outcome === "refused") {
+    return {
+      outcome: "noop",
+      message:
+        `No run started for ${agent.name} (${as}): ` +
+        `${result.refusal ?? "the run was refused before any process started."} ` +
+        `Try again once that is resolved.`,
+    };
+  }
+  if (result.outcome === "queued") {
+    return {
+      outcome: "done",
+      message:
+        `${agent.name}'s (${as}) run is queued: the instance is at its concurrent-run cap, ` +
+        `so it starts when a slot frees.`,
+    };
   }
   return {
     outcome: "done",

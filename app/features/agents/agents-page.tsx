@@ -313,19 +313,22 @@ function CapColumn({
             <div className="cap-item" key={x}>
               <Icon name={m.icon} />
               <span>{x}</span>
-              {claudeOnly && (
+              {/* Both conditions hold at once on the repo-write row, and each
+                  used to render its own span — so the row read "Execute code or
+                  write to the repo · advisory on Codex · advisory on Codex",
+                  the same four words twice, with the only difference buried in
+                  a tooltip. The card makes each claim ONCE (F15-09), and the
+                  carve-out's note is the specific one: it names WHY the
+                  withholding is advisory on this runtime, where the Claude-only
+                  note only says that it is. */}
+              {(claudeOnly || carveOut) && (
                 <span
                   className="fhint"
-                  title="Claude-enforced. On this profile's Codex runtime the tool layer does not bind it; the server-owned delivery gate is the real boundary."
-                >
-                  {" "}
-                  · advisory on Codex
-                </span>
-              )}
-              {carveOut && (
-                <span
-                  className="fhint"
-                  title={`On this profile's Codex runtime ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`}
+                  title={
+                    carveOut
+                      ? `On this profile's Codex runtime ${CODEX_REPO_WRITE_ADVISORY_NOTE}.`
+                      : "Claude-enforced. On this profile's Codex runtime the tool layer does not bind it; the server-owned delivery gate is the real boundary."
+                  }
                 >
                   {" "}
                   · advisory on Codex
@@ -726,6 +729,7 @@ export function ProfileDetail({
   stages,
   workflow,
   resourceCatalog,
+  rulingsKb = null,
   backendHealth,
   insts,
   projectName,
@@ -746,6 +750,10 @@ export function ProfileDetail({
   /** P14-KM-11: the live store catalog, so a grant naming a resource the store
    *  no longer holds renders as missing rather than healthy. */
   resourceCatalog?: readonly ResCatalogGroup[];
+  /** Ruling 239: the project's rulings knowledge base, which every profile
+   *  reads whether or not it grants one. Without saying so here, this card's
+   *  own `kb` list is WRONG about what the profile actually gets. */
+  rulingsKb?: string | null;
   insts: AgentDeploymentView[];
   projectName: string;
   canManage: boolean;
@@ -1051,6 +1059,13 @@ export function ProfileDetail({
               ? { drift: { missing: a.templateDrift.missing.kb, extra: a.templateDrift.extra.kb } }
               : {})}
           />
+          {rulingsKb && (
+            <p className="muted">
+              Every run on this project reads <code className="mono">{rulingsKb}</code>, the
+              project's rulings, whether or not it is granted above (ruling 239). Removing the
+              grant here would not stop this profile reading it.
+            </p>
+          )}
         </div>
         <div className="runtime-row">
           <div className="rt-cell">
@@ -1432,6 +1447,7 @@ export function AgentsPage({
   viewerIsOrgAdmin = false,
   resourceCatalog,
   backendHealth,
+  rulingsKb = null,
 }: {
   profiles: AgentProfileView[];
   /** Org templates not yet deployed here — the "Add from library" options. */
@@ -1454,6 +1470,9 @@ export function AgentsPage({
    *  page, including the editor's note (there is no second, quietly divergent
    *  `backendAvailable` pair any more). */
   backendHealth?: BackendHealthMap | undefined;
+  /** Ruling 239: the project's rulings knowledge base, injected into every run
+   *  the project makes. Null when the project names none. */
+  rulingsKb?: string | null;
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -1814,6 +1833,7 @@ export function AgentsPage({
               workflow={workflow}
               {...(resourceCatalog ? { resourceCatalog } : {})}
               {...(backendHealth ? { backendHealth } : {})}
+              {...(rulingsKb ? { rulingsKb } : {})}
               insts={deployments.filter((d) => d.profileId === current.id)}
               projectName={projectName}
               canManage={canManage}

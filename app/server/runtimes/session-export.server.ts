@@ -295,6 +295,41 @@ export const SESSION_MISSING_RE =
   /no conversation found|conversation not found|session not found|no session (?:with|found)|unknown session|no such session|rollout not found|no rollout/i;
 
 /**
+ * Ruling 221 (F37-41): the same outcome by a different road — the store the
+ * CLI keeps its conversations in is THERE and cannot be opened.
+ *
+ * Live on pass 37, after the host corrupted a SQLite file under load:
+ *
+ *   internal error: failed to open thread history database: failed to open
+ *   thread history DB at /data/runtimes/users/<u>/codex-home/thread_history_1.sqlite:
+ *   error returned from database: (code: 26) file is not a database
+ *
+ * That text matched nothing, fell through to the auth branch, and viberr told
+ * the owner to "review its authentication and runtime configuration" and
+ * recommended re-writing the directive. The credential was fine and no prompt
+ * could have helped: the file's first page was not a SQLite header at all, so
+ * every RESUME failed while fresh runs kept working — which is exactly the
+ * shape {@link SESSION_MISSING_RE} already classifies, and whose remedy (one
+ * fresh run, re-anchored on task.md) is already the right one.
+ *
+ * Deliberately anchored on the STORE's own nouns rather than on "not a
+ * database" alone: an agent building a SQLite-backed service can print that
+ * sentence out of its own work, and a run is not a session failure because the
+ * code it was writing hit a bad file.
+ */
+/**
+ * Ruling 221: the clause viberr's OWN sentence about an unreadable store
+ * carries, so the remedy layer can tell the two roads into `session_missing`
+ * apart without re-parsing the provider's prose a second time. The adapter
+ * writes it; `runFailureReason` reads it; both sides pin it in their tests.
+ */
+export const SESSION_STORE_UNREADABLE_MARK =
+  "session store on this host could not be opened";
+
+export const SESSION_STORE_UNREADABLE_RE =
+  /failed to open (?:the )?(?:thread[-_ ]?history|session|rollout|conversation)[-_ ]?(?:database|db|store|index)|thread[-_]history[\w-]*\.sqlite|(?:sessions?|rollouts?)\.sqlite[^\n]*(?:not a database|malformed|corrupt)/i;
+
+/**
  * The resume-time probe. Deliberately NOT `transcriptExists`, which is the
  * loader-path Export-button probe: that one caches for 30 s (a stale `true`
  * would resume the dead id we are trying to detect) and matches Codex rollouts

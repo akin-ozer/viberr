@@ -113,6 +113,113 @@ describe("DecisionPacket", () => {
     );
   });
 
+  it("ruling 319: states what else the confirm answers, above the options", () => {
+    /**
+     * The reach has to be visible while the person is CHOOSING, not reported
+     * after the click — a confirm that quietly answers four other tasks is the
+     * undisclosed one-way write ruling 20 exists to stop, and this card is the
+     * only place it can be said first.
+     *
+     * CANARY: drop the `alsoAnswers` prop from the card, or move the paragraph
+     * below the radiogroup.
+     */
+    const line = "The same failure stopped 2 other tasks: SHOP-12 and SHOP-19.";
+    const { container } = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        alsoAnswers={line}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const note = container.querySelector("[data-also-answers]")!;
+    expect(note.textContent).toContain(line);
+    // Above the options, in document order.
+    const options = container.querySelector(".options")!;
+    expect(note.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).
+      toBeTruthy();
+    // ...and absent entirely when the decision answers only this task.
+    const plain = render(
+      <DecisionPacket
+        packet={packet142}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    expect(plain.container.querySelector("[data-also-answers]")).toBeNull();
+  });
+
+  it("ruling 324: a create_task option names what already looks like it", () => {
+    /**
+     * The controller, unprompted, on what a reader of the final board would not
+     * learn: "SHOP-27's decision packet was one confirmation away from creating
+     * a duplicate of SHOP-29 — same three route modules, same pattern, already
+     * written and sitting at Triage." Both near-misses were caught by a person
+     * recognising the work, and a task that was never created leaves no trace.
+     *
+     * CANARY: render the echoes unconditionally (not keyed on the selection),
+     * or drop the block entirely.
+     */
+    const packet: PacketRender = {
+      ...packet142,
+      options: [
+        { kind: "custom", t: "Answer in your own words", d: "", rec: false },
+        {
+          kind: "create_task",
+          t: "Create the gateway routes task",
+          d: "",
+          rec: false,
+          newTask: {
+            title: "Gateway routes for orders, cart and inventory",
+            goal: "Expose the write side through the public edge.",
+          },
+        },
+      ],
+    };
+    const echoes = {
+      1: [{ key: "SHOP-29", title: "Gateway routes for inventory, cart and checkout", stage: "Triage" }],
+    };
+    const { container } = render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        createTaskEchoes={echoes}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    // Silent while a different option is selected: this is information about
+    // THAT choice, not about the packet.
+    expect(container.querySelector("[data-create-task-echoes]")).toBeNull();
+
+    const radios = container.querySelectorAll('.options [role="radio"]');
+    fireEvent.click(radios[1]!);
+    const note = container.querySelector("[data-create-task-echoes]")!;
+    expect(note).toBeTruthy();
+    expect(note.textContent).toContain("SHOP-29");
+    expect(note.textContent).toContain("Gateway routes for inventory, cart and checkout");
+    expect(note.textContent).toContain("Triage");
+    // It discloses, it does not refuse: the confirm still stands.
+    expect(note.textContent).toContain("Confirming still creates a new one");
+  });
+
   it("primary button confirms the selected option by index (concise stable label)", () => {
     const onResolve = vi.fn();
     const { container } = render(
@@ -1286,11 +1393,33 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     const { container } = renderExec(execTask({ operator: attachedOperator }), {
       operatorBackend: "claude",
       operatorAutonomy: "full" as const,
+      // F37-65: the acceptance half of this caption is now conditional on the
+      // GRANT resolving to direct, which is what the runtime gate asks.
+      acceptsDirectly: true,
       runPrincipal: connectedPrincipal(),
     });
     expect(container.textContent).toContain(
       "Full autonomy: this run can move the task and accept completion",
     );
+  });
+
+  it("F37-65: full autonomy WITHOUT a direct acceptance grant does not promise acceptance", () => {
+    // `gate()` holds `completion-for-acceptance` at `recommend` whatever the
+    // autonomy unless the grant says direct (owner ruling Q1). This caption read
+    // autonomy alone, so on shopify-clone-platform — `autonomy: full`,
+    // `completion-for-acceptance: recommend` — every task page promised an
+    // acceptance the operator could not perform, while every acceptance in the
+    // pass was a person pressing the button.
+    // CANARY: render the old single sentence unconditionally.
+    const { container } = renderExec(execTask({ operator: attachedOperator }), {
+      operatorBackend: "claude",
+      operatorAutonomy: "full" as const,
+      acceptsDirectly: false,
+      runPrincipal: connectedPrincipal(),
+    });
+    expect(container.textContent).toContain("Full autonomy: this run can move the task.");
+    expect(container.textContent).toContain("Accepting completion still needs a person");
+    expect(container.textContent).not.toContain("accept completion itself");
   });
 
   it("states the operator's dispatch mandate on the cell", () => {
@@ -3763,6 +3892,12 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     // The composed choice renders after the authored options.
     const custom = getByText("Write your own directive").closest("button")!;
     expect(custom.getAttribute("role")).toBe("radio");
+    // Ruling 271: `list_decisions` numbers this choice `options.length + 1` so
+    // a person reading the controller's briefing finds the same one here. Pin
+    // the position the briefing promises. CANARY: render the composed choice
+    // before the authored options and the two stop agreeing.
+    const choices = [...custom.parentElement!.querySelectorAll('[role="radio"]')];
+    expect(choices.indexOf(custom)).toBe(packet142.options.length);
     // No input until the choice is selected; the note field shows instead.
     expect(document.querySelector("#pkt-custom")).toBeNull();
     expect(document.querySelector("#pkt-note")).not.toBeNull();

@@ -65,9 +65,21 @@ export const RBAC_DEFINITIONS = [
   { id: "own-task", label: "Take / release own task ownership", roles: [A, M, C] },
   // Lightweight planning attributes (priority, labels, due date) — a contributor
   // who can create and own a task also grooms its metadata. Distinct from
-  // `update-goal` ([A,M]): the goal is the reviewable acceptance contract, this
-  // is scheduling metadata that changes no gate.
-  { id: "edit-task-meta", label: "Edit task priority, labels & due date", roles: [A, M, C] },
+  // `update-goal` ([A,M]): the goal is the reviewable acceptance contract, and
+  // three of the four things here are scheduling metadata that changes no gate.
+  // Ruling 309(a): the label named three of the four things this gates, and the
+  // fourth is not like the others — `setTaskDependencies` runs on this action
+  // too (dependencies.server.ts), and clearing what a task waits on RELEASES a
+  // held task onto the board. A table saying "priority, labels & due date" tells
+  // a contributor they may tidy, when they may also unblock. The label stays
+  // short because eight sentences on two pages read it inline as "the X grant";
+  // `covers` is where the rest of the truth goes.
+  {
+    id: "edit-task-meta",
+    label: "Edit task priority, labels & due date",
+    covers: "and what a task waits on, which releases it when cleared",
+    roles: [A, M, C],
+  },
   { id: "approve-transition", label: "Approve stage transitions", roles: [A, M] },
   { id: "resolve-packet", label: "Resolve decision packets", roles: [A, M] },
   { id: "accept-completion", label: "Accept completion → Done", roles: [A, M] },
@@ -80,7 +92,15 @@ export const RBAC_DEFINITIONS = [
   { id: "release-any-ownership", label: "Release any task owner", roles: [A] },
   { id: "manage-members", label: "Manage members & roles", roles: [A] },
   { id: "manage-agents", label: "Manage agent profiles", roles: [A] },
-  { id: "edit-policy", label: "Edit workflow & policy", roles: [A] },
+  // Ruling 309(a): also the gate on archiving and restoring a project
+  // (`setProjectArchived`), which the label named nowhere — so "who can
+  // unarchive this?" had no answer on the page that exists to answer it.
+  {
+    id: "edit-policy",
+    label: "Edit workflow & policy",
+    covers: "and archiving or restoring the project itself",
+    roles: [A],
+  },
   // Admin-only override of the required-reviewer / blocked-packet acceptance gate
   // (DG-2). A stuck task — e.g. a required reviewer that can no longer record a
   // verdict — is otherwise permanently un-acceptable; this is the audited escape
@@ -89,6 +109,10 @@ export const RBAC_DEFINITIONS = [
 ] as const satisfies readonly {
   id: string;
   label: string;
+  /** What this action ALSO gates, when the grant name does not carry it.
+   *  Ruling 309(a): the name is used inline ("the X grant") and has to stay
+   *  short; the scope still has to be somewhere a person and a model can read. */
+  covers?: string;
   roles: readonly ProjectRole[];
 }[];
 

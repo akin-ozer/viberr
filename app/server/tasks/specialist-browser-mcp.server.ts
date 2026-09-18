@@ -239,8 +239,22 @@ export function resolveBrowserMcp(input: {
  */
 export function attachmentsDropSection(attachmentsDir: string): string {
   return (
-    "\n\n---\n# Posting files on the task thread\n\n" +
-    `To put a file in front of the humans on this task, copy it into \`${attachmentsDir}\` ` +
+    "\n\n---\n# Files on the task thread\n\n" +
+    // Ruling 306: the directory is read as well as written, and nothing said
+    // so. It was introduced as a drop box, which is half of what it is: on a
+    // task that has run before it already holds what every earlier run
+    // attached -- 27 files on one of this instance's tasks, 90 on another --
+    // and an agent reworking that task was standing next to the evidence its
+    // directive was summarising, told only where to put things.
+    `This is a real directory at \`${attachmentsDir}\`, and it is TWO-WAY.\n\n` +
+    "READING: on a task that has run before, it already holds the files those " +
+    "runs attached. List it before you act on a claim about evidence, and read " +
+    "the ones your directive or the task timeline actually cites, by name -- " +
+    "not the whole folder, which can be dozens of files. A report saying a " +
+    "thing was proved and the file proving it are different objects, and only " +
+    "one of them is evidence.\n\n" +
+    "POSTING: " +
+    `to put a file in front of the humans on this task, copy it into that directory ` +
     "during your run. That is an ABSOLUTE path to a real directory outside the " +
     "repository checkout: do not create a folder of that name inside your working " +
     "directory, and never commit it. " +

@@ -49,7 +49,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     },
     conversation: null,
     messages: [],
-    turn: { working: false, runId: null },
+    turn: { working: false, runId: null, phase: null, step: null },
     threads: [],
     viewerOwnsActive: false,
     ...over,
@@ -151,6 +151,70 @@ describe("the controller dock (ruling 121)", () => {
       expect(document.activeElement).toBe(screen.getByLabelText("Message to the controller")),
     );
     expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1");
+  });
+
+  /**
+   * Ruling 314. The empty dock said what the controller KNOWS and nothing about
+   * what it can DO, so a person who had never used it faced a text box and a
+   * claim. The owner chose examples over a capability list: a list tells and
+   * goes stale, an example teaches by being clicked.
+   */
+  it("ruling 314: the empty state offers scoped examples, and clicking one SENDS it", async () => {
+    const { sends } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+    });
+    await restored();
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText(/Ask about VIB-1 or say what to do with it/);
+
+    // Scoped to the task, and naming it — a generic example would not show that
+    // the controller already knows where it is standing.
+    const first = await screen.findByRole("button", { name: "What is blocking VIB-1?" });
+    expect(
+      screen.getByRole("button", {
+        name: "Draft a directive for the agent on this task, but do not send it.",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.click(first);
+
+    /**
+     * CANARY: have the example call `setText` and then `submit()` and this stays
+     * empty — React has not re-rendered inside the click, so the submit reads
+     * the EMPTY box. That is the same class of loss `pending.current` exists to
+     * prevent for typed messages, which is why the value is a parameter.
+     */
+    await waitFor(() => expect(sends.length).toBe(1));
+    expect(sends[0]!.get("text")).toBe("What is blocking VIB-1?");
+    expect(sends[0]!.get("intent")).toBe("send");
+    expect(sends[0]!.get("task")).toBe("VIB-1");
+  });
+
+  it("ruling 314: the examples follow the scope", async () => {
+    // A board dock must not offer a task's questions. CANARY: collapse
+    // `emptyExamples` to one list and this finds a task example on a board.
+    mount({
+      path: "/projects/viberr/board",
+      view: () =>
+        taskView({
+          scope: {
+            kind: "board",
+            projectSlug: "viberr",
+            taskKey: null,
+            projectName: "Viberr",
+            label: "Viberr",
+            contextLine: "Knows the Viberr board · acts with your permissions",
+            pageHref: "/projects/viberr/controller",
+          },
+        }),
+    });
+    await restored();
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · viberr" }));
+    await screen.findByRole("button", {
+      name: "What is waiting on me right now, and what is waiting on an agent?",
+    });
+    expect(screen.queryByRole("button", { name: /What is blocking VIB-1/ })).toBeNull();
   });
 
   it("keeps an open the person clicked before the restore had read storage", async () => {
@@ -358,7 +422,7 @@ describe("the controller dock (ruling 121)", () => {
     let working = true;
     const { loads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working, runId: "run_1" } }),
+      view: () => taskView({ turn: { working, runId: "run_1", phase: null, step: null } }),
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
     // The poll is armed by an effect of the VIEW that says a turn is working —
@@ -433,7 +497,7 @@ describe("the controller dock (ruling 121)", () => {
             viewerOwnsActive: true,
             // A working turn is what makes the dock poll, which is how the
             // second message arrives while the panel is up.
-            turn: { working: true, runId: "run_1" },
+            turn: { working: true, runId: "run_1", phase: null, step: null },
           }),
       });
       fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
@@ -522,7 +586,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(form.get("_csrf")).toBe("tok");
     expect(form.get("conversationId")).toBe("");
     await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));
-    // The composer is cleared once the send went out.
+    // Ruling 259: cleared once the server TOOK it, not when it went out.
     expect(composer.value).toBe("");
   });
 
@@ -539,6 +603,19 @@ describe("the controller dock (ruling 121)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByText("That request expired.");
     expect(screen.getByText("task page")).toBeTruthy();
+    /**
+     * Ruling 259 (pass 37, F37-90): the composer keeps the words until the
+     * server takes them. `setText("")` ran synchronously after
+     * `fetcher.submit`, so this refusal — which happens BEFORE the controller
+     * engine is reached, leaving the text in no transcript anywhere — used to
+     * destroy what the person had written, with a toast that unmounts itself
+     * after 2,600 ms as the only account of it.
+     *
+     * CANARY: move `setText("")` back beside `send.submit(...)` and this is "".
+     */
+    // SAFETY: `findByLabelText("Message to the controller")` resolves the
+    // composer, which the dock renders as a `<textarea>`.
+    expect((composer as HTMLTextAreaElement).value).toBe("hello");
   });
 
   it("renders the transcript and the working state, and shows the dot on the trigger", async () => {
@@ -561,7 +638,7 @@ describe("the controller dock (ruling 121)", () => {
             { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", createdAt: "2026-09-01T10:00:00.000Z" },
             { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
-          turn: { working: true, runId: "run_2" },
+          turn: { working: true, runId: "run_2", phase: null, step: null },
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z" }],
           viewerOwnsActive: true,
         }),

@@ -2,7 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   assertProjectAction,
   isOrgAdmin,
+  type ProjectActionGrant,
 } from "~/server/auth/project-authority.server";
+import { askerAuthorityLine } from "~/server/auth/authority-prompt.server";
 import { listUsers } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, type TaskFileRef } from "~/server/files/task-writer.server";
@@ -10,7 +12,10 @@ import { storeRelativePath } from "~/server/files/file-store-root.server";
 import { getProject, listProjectTasks } from "~/server/projections/board-query.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { listGoals } from "~/server/tasks/goal-actions.server";
-import { listHomeProjectsForUser } from "~/features/home/home-query.server";
+import {
+  listHomeProjectsForUser,
+  type HomeProjectCard,
+} from "~/features/home/home-query.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
@@ -154,18 +159,19 @@ export function clipTaskFile(content: string, budget: number): ClippedTaskFile {
  * Can this person still see the bound project, right now? The same call
  * `requireVisible` makes for every board tool: missing and forbidden are one
  * answer, archived projects stay readable, org admins pass by the audited
- * override, and the refusal is audited.
+ * override, and the refusal is audited. A pass returns what the gate resolved
+ * (ruling 309): the asker's role, from the project file the gate itself read.
  */
 function projectVisibleTo(
   db: DatabaseSync,
   slug: string,
   user: ControllerContextInput["user"],
   dataRoot: string | undefined,
-): boolean {
+): ProjectActionGrant | null {
   const opts: Parameters<typeof assertProjectAction>[5] = { allowArchived: true };
   if (dataRoot) opts.dataRoot = dataRoot;
   try {
-    assertProjectAction(
+    return assertProjectAction(
       db,
       "any-member",
       slug,
@@ -173,9 +179,8 @@ function projectVisibleTo(
       "read this conversation's context",
       opts,
     );
-    return true;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -221,7 +226,12 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
     task.title,
     `stage ${stageNameOf(stages, task.stage)}`,
     task.readiness,
-    `waiting ${task.waiting}`,
+    // Ruling 225: `waiting schedule` alone would read as a state the controller
+    // has to do something about. It is the opposite — the task moves on its
+    // own — so the line carries the instant and says nothing else is needed.
+    task.waiting === "schedule" && task.resumesAt
+      ? `waiting on a schedule that runs at ${task.resumesAt}`
+      : `waiting ${task.waiting}`,
     `owner ${ownerName(task)}`,
     task.priority,
   ];
@@ -233,11 +243,41 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
   return `- ${bits.join(" · ")}`;
 }
 
+/**
+ * Ruling 309: the asking person's live role on the bound project.
+ *
+ * `instanceContext` has named it per project since ruling 307 and the two
+ * bound scopes — the ones a person is actually standing in when they ask for
+ * something — named nothing. The controller is told "their live permissions are
+ * the ceiling for everything you do here" and then given their ORG role, which
+ * decides nothing on a board. Asked on a live task what the person in front of
+ * it could do, it answered correctly and said how: "your project role was not in
+ * anything I had... I bridged that gap with a rule from my playbook", at the
+ * cost of a `whoami` round trip before it could help at all.
+ *
+ * Built from the membership gate's own grant, not from a second read. The gate
+ * (`projectVisibleTo`, above) resolves the role from the project FILE; a
+ * separate `project_members` SELECT here read the projection, which is a
+ * rebuild of that file and can lag it — so the line could name a role the
+ * enforcement it predicts would not honour. One gate, one read, one fact.
+ * Under the org-admin override the grant's `role` is the EFFECTIVE "admin",
+ * not a membership, and the line says so instead.
+ */
+function askerRole(db: DatabaseSync, grant: ProjectActionGrant, userId: string): string {
+  // An override grant is proof of org admin (the gate just checked it); a
+  // membership grant says nothing about it, so that case reads the users row.
+  return askerAuthorityLine(
+    grant.isOrgAdminOverride ? null : grant.role,
+    grant.isOrgAdminOverride || isOrgAdmin(db, userId),
+  );
+}
+
 function taskContext(
   db: DatabaseSync,
   slug: string,
   key: string,
   dataRoot: string | undefined,
+  authority: string,
 ): string {
   const ref: TaskFileRef = { projectSlug: slug, taskKey: key };
   if (dataRoot) ref.dataRoot = dataRoot;
@@ -272,8 +312,9 @@ function taskContext(
   const stageIndex = stages.findIndex((s) => s.id === summary.stage);
   const header = [
     `stage: ${stageNameOf(stages, summary.stage)}${stageIndex >= 0 ? ` (${stageIndex + 1} of ${stages.length})` : ""} · readiness: ${summary.readiness} · waiting: ${summary.waiting} · validation: ${summary.validation}`,
-    `owner: ${ownerName(summary)} · priority: ${summary.priority}${summary.dueDate ? ` · due ${summary.dueDate}` : ""}${summary.labels.length ? ` · labels: ${summary.labels.join(", ")}` : ""}${summary.archived ? " · ARCHIVED" : ""}`,
+    `owner: ${ownerName(summary)} · priority: ${summary.priority}${summary.dueDate ? ` · due ${summary.dueDate}` : ""}${summary.labels.length ? ` · labels: ${summary.labels.join(", ")}` : ""}${summary.archived ? " · ARCHIVED" : ""}${project.archived ? " · project ARCHIVED (read-only)" : ""}`,
     `next stages: ${next.length ? next.join(", ") : "none from here"}`,
+    authority,
     `engaged agents: ${engaged.length ? engaged.join(", ") : "none"}${summary.operator ? " · operator assigned" : ""}`,
     `branch: ${summary.branch ?? "none"} · ${summary.pr ? `PR #${summary.pr.number} ${summary.pr.state}` : "no PR"}`,
     `open packet: ${summary.packet ? `"${summary.packet.title}"` : "none"}${summary.goalRef ? ` · goal chain ${summary.goalRef.goalId} link ${summary.goalRef.linkIndex}` : ""}`,
@@ -300,6 +341,7 @@ function boardContext(
   db: DatabaseSync,
   slug: string,
   dataRoot: string | undefined,
+  authority: string,
 ): string {
   const project = getProject(db, slug);
   const projectRef: Parameters<typeof readProjectFile>[0] = { projectSlug: slug };
@@ -343,6 +385,10 @@ function boardContext(
       ? `, and ${roster.length - shownMembers.length} more; get_project lists them`
       : "");
   const waitingHuman = open.filter((t) => t.waiting === "human").length;
+  // Ruling 225: counted apart from the human wait, and named, so the controller
+  // neither treats a clock rest as work it must unblock nor re-dispatches a
+  // task that is already coming back on its own.
+  const waitingSchedule = open.filter((t) => t.waiting === "schedule").length;
   const sorted = [...open].sort((a, b) =>
     (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
   );
@@ -372,13 +418,59 @@ function boardContext(
   const description = project.description.trim();
   return (
     `## Board ${project.name} (slug ${slug})${project.archived ? " · ARCHIVED (read-only)" : ""}\n` +
-    (description ? `${description.length > 600 ? `${description.slice(0, 600)}...` : description}\n` : "") +
+    // Ruling 292: the excerpt names its reader, exactly as the goal-chain line
+    // six lines above already does ("list_goals reads them"). `get_project`
+    // carries the description whole (line ~1342); without the pointer this
+    // ellipsis was a cut with nowhere to go, on the one text a board's owner
+    // writes to explain what the board IS.
+    (description
+      ? `${
+          description.length > 600
+            ? `${description.slice(0, 600)}... (excerpt; get_project has the whole description)`
+            : description
+        }\n`
+      : "") +
     `repo: ${project.repo ?? "none"} · members: ${members || "none"}\n` +
+    `${authority}\n` +
     `stages: ${stages}\n` +
     `boundaries: ${boundaries || "none declared"}\n` +
-    `open tasks: ${open.length} (${waitingHuman} waiting on a human${archived ? `, ${archived} archived` : ""})\n` +
+    `open tasks: ${open.length} (${waitingHuman} waiting on a human${waitingSchedule > 0 ? `, ${waitingSchedule} resuming on a schedule` : ""}${archived ? `, ${archived} archived` : ""})\n` +
     (lines.length ? `${lines.join("\n")}\n` : "") +
     `goal chains: ${goals.length ? `\n${goals.join("\n")}` : "none"}`
+  );
+}
+
+/**
+ * Ruling 307: one project's two lines for the instance context — its identity,
+ * and its STATE.
+ *
+ * Every number here was already computed by `listHomeProjectsForUser` for the
+ * home page's own cards, and this read was calling it and throwing them away.
+ * So an instance-scoped conversation opened knowing which projects exist and
+ * nothing whatever about them, and the controller had to spend `list_runs`,
+ * `list_decisions`, `list_tasks` and three `get_task`s before it could answer
+ * "what is blocked?" — which, for a person who asked only that, is the whole
+ * experience of talking to it.
+ */
+export function projectStateLines(
+  project: HomeProjectCard,
+  role: string,
+): string {
+  const terminal = project.stages.at(-1);
+  const doneCount = terminal ? (project.dist[terminal.id] ?? 0) : 0;
+  const open = project.total - doneCount;
+  // A zero says so in WORDS. A blank here reads as either "none" or "not
+  // computed", and the whole point is to answer before a tool call.
+  const waiting =
+    project.waiting > 0
+      ? `${project.waiting} waiting on YOU`
+      : project.overrideWaiting > 0
+        ? `${project.overrideWaiting} waiting on a member (yours only via the org-admin override)`
+        : "nothing waiting on you";
+  return (
+    `- ${project.slug} · ${project.name} · your role ${role}` +
+    `${project.archived ? " · archived" : ""}\n` +
+    `  ${project.total} tasks, ${open} not done · ${project.running} running · ${waiting}`
   );
 }
 
@@ -403,7 +495,7 @@ function instanceContext(
   const lines = projects.slice(0, INSTANCE_CONTEXT_PROJECTS).map((p) => {
     const role =
       roles.get(p.slug) ?? (admin ? "org admin override" : "not a member");
-    return `- ${p.slug} · ${p.name} · your role ${role}${p.archived ? " · archived" : ""}`;
+    return projectStateLines(p, role);
   });
   if (projects.length > INSTANCE_CONTEXT_PROJECTS) {
     lines.push(`- ... ${projects.length - INSTANCE_CONTEXT_PROJECTS} more; whoami lists them`);
@@ -423,10 +515,15 @@ export function gatherControllerContext(
 ): ControllerContextRead {
   const scope = conversationScopeOf(input);
   const at = (input.now ?? new Date()).toISOString();
+  // SAFETY: `conversationScopeOf` returns a bound scope only with a slug set.
+  const grant =
+    scope === "instance"
+      ? null
+      : projectVisibleTo(db, input.projectSlug!, input.user, input.dataRoot);
   let body: string;
   if (scope === "instance") {
     body = instanceContext(db, input.user);
-  } else if (!projectVisibleTo(db, input.projectSlug!, input.user, input.dataRoot)) {
+  } else if (!grant) {
     // The bound project is no longer theirs to read (membership removed, or an
     // org-admin override lost). Say exactly what the tools will say.
     body =
@@ -435,9 +532,20 @@ export function gatherControllerContext(
       `state here and every tool call on it will refuse too.`;
   } else if (scope === "task") {
     // SAFETY: `conversationScopeOf` returns "task" only when both are set.
-    body = taskContext(db, input.projectSlug!, input.taskKey!, input.dataRoot);
+    body = taskContext(
+      db,
+      input.projectSlug!,
+      input.taskKey!,
+      input.dataRoot,
+      askerRole(db, grant, input.user.id),
+    );
   } else {
-    body = boardContext(db, input.projectSlug!, input.dataRoot);
+    body = boardContext(
+      db,
+      input.projectSlug!,
+      input.dataRoot,
+      askerRole(db, grant, input.user.id),
+    );
   }
   const surface = input.surface ? `\nThey are looking at: ${input.surface}\n` : "";
   let text =

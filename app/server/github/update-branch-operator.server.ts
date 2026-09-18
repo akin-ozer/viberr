@@ -27,6 +27,7 @@ import {
 } from "./update-branch.server";
 import type { Exec } from "./push-workspace.server";
 import {
+  DIVERGED_BRANCH_REMEDY,
   deliveringEngagement,
   type Engagement,
   type FileActorRef,
@@ -121,8 +122,8 @@ function remoteSentence(branch: string, remote: RemoteBranchState): string {
     case "diverged":
       return (
         `Origin's copy of \`${branch}\` (\`${remote.headSha.slice(0, 7)}\`) holds commits this workspace ` +
-        `does not, so a plain push would be refused as non-fast-forward. A person resolves the ` +
-        `branch history; do not force it.`
+        `does not, so a plain push would be refused as non-fast-forward. ${DIVERGED_BRANCH_REMEDY} ` +
+        `That is a person's act, not yours, and never a force-push.`
       );
     case "absent":
       return `\`${branch}\` does not exist on origin yet: call \`deliver_for_review\` to push it. Do not ask a person to push.`;
@@ -536,7 +537,18 @@ export async function operatorUpdateBranchFromBase(
       });
       rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
     }
-    return { outcome: "noop", message: sentence };
+    // Ruling 229 (F37-49): `done`, not `noop`. An already-current branch is this
+    // tool's SUCCESS condition, not a state conflict — its own description tells
+    // the operator so ("It is idempotent and cheap: an already-current branch
+    // changes nothing and says so, so call it when you are unsure rather than
+    // guessing"). Returned as `noop` it became a REFUSED plan step, and
+    // `narrateRefusedActions` headlined it "The operator's plan was not carried
+    // out in full." 51 of the 57 such notes on the pass-37 board were this one
+    // line. Worse, the sentence was already on the timeline as the `github`
+    // event three lines up — the event ruling 134(c) deliberately suppresses
+    // when it would duplicate, re-added by the refusal narration with no
+    // suppression and a worse headline.
+    return { outcome: "done", message: sentence };
   }
 
   if (result.status === "conflict" || result.status === "push_conflict") {
@@ -588,6 +600,12 @@ export async function operatorUpdateBranchFromBase(
           ? "Opened a blocking decision packet for a human to resolve — do not retry this yourself."
           : `A decision packet could NOT be opened (${packet.message}) — say so and ask a human to resolve the branch.`),
     };
+  }
+
+  // Ruling 229: the other already-current shape — the remote is level too, so
+  // there is nothing even to note. Same reasoning: the tool did its job.
+  if (result.status === "already_current") {
+    return { outcome: "done", message: outcomeSentence(result) };
   }
 
   return { outcome: "noop", message: outcomeSentence(result) };

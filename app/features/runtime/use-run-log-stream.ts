@@ -197,6 +197,19 @@ export function useRunLogStream(input: {
       ? `task:${source.projectSlug}/${source.taskKey}`
       : `controller:${source.conversationId}`;
   const enabled = input.enabled !== false;
+  // Ruling 301: a hidden tab holds no SSE connection. This is the SECOND
+  // permanent stream a task page opens (the layout's live-updates is the
+  // other), and with HTTP/1.1's six-per-origin budget two of them mean four
+  // open tabs deadlock every tab at once. The tail below resumes from its own
+  // cursor, so coming back catches up rather than losing lines.
+  const [hiddenTab, setHiddenTab] = useState(false);
+  useEffect(() => {
+    if (!("document" in globalThis)) return;
+    const sync = () => setHiddenTab(document.visibilityState === "hidden");
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, []);
   const [streamError, setStreamError] = useState<string | null>(null);
   const revalidator = useRevalidator();
   const revalidateRef = useRef(revalidator.revalidate);
@@ -445,6 +458,8 @@ export function useRunLogStream(input: {
     // the whole console and nothing here runs.
     if (!("EventSource" in globalThis)) return;
     if (!enabled) return;
+    // Ruling 301: the cleanup below closes this tab's stream when it hides.
+    if (hiddenTab) return;
 
     // Aborts in-flight tail fetches on unmount / task change — a bare
     // `cancelled` flag would still let the response land and be parsed.
@@ -581,7 +596,7 @@ export function useRunLogStream(input: {
       stream.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey, enabled]);
+  }, [streamKey, enabled, hiddenTab]);
 
   return { linesByThread, streamError, olderByThread, loadOlder };
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { TurnStep } from "./turn-step";
 import {
   Link,
   useFetcher,
@@ -101,6 +102,41 @@ function localScopeLabel(context: DockContext): string {
   if (context.taskKey) return `${context.taskKey} · ${project}`;
   if (project) return project;
   return "Instance";
+}
+
+/**
+ * Ruling 314: three things to ask, scoped to where the person is standing.
+ *
+ * The empty dock said what the controller KNOWS ("the controller already has
+ * its task file") and nothing about what it can DO, so a person who had never
+ * used it was looking at a text box and a claim. The owner's call was examples
+ * over a capability list: a list tells, and goes stale as the toolkit changes,
+ * while an example teaches the surface by being clicked.
+ *
+ * Each one is a real sentence the controller can act on at that scope, and the
+ * third is deliberately a DO rather than an ask — the dock's own composer says
+ * "or tell it what to do here", and nothing demonstrated that half.
+ */
+function emptyExamples(view: ControllerDockView): string[] {
+  if (view.scope.kind === "task") {
+    return [
+      `What is blocking ${view.scope.taskKey}?`,
+      "Summarise where this task stands and who is waiting on whom.",
+      "Draft a directive for the agent on this task, but do not send it.",
+    ];
+  }
+  if (view.scope.kind === "board") {
+    return [
+      "What is waiting on me right now, and what is waiting on an agent?",
+      "Which tasks have been open longest, and why?",
+      "Draft a task for work this board is missing, but do not create it.",
+    ];
+  }
+  return [
+    "What is blocked across every project I can see?",
+    "What did agent runs cost this week, by project?",
+    "Show me the agent profiles on this instance and what each one can do.",
+  ];
 }
 
 function emptyCopy(view: ControllerDockView): string {
@@ -230,11 +266,21 @@ function DockShell({ context }: { context: DockContext }) {
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
   const sentUnder = useRef(context.key);
+  /** Ruling 259: what was submitted, held until the server answers. */
+  const pending = useRef<string | null>(null);
   useFetcherResult(send, (result) => {
     if (!result.ok) {
+      // The text is still in the composer, and Send is live again: the person
+      // can retry or copy it out.
       push(result.error ?? "The controller could not take that. Try again.", "error");
+      pending.current = null;
       return;
     }
+    // Ruling 259: cleared HERE, and only if the box still holds exactly what
+    // went out — somebody who started typing the next message while this one
+    // was in flight keeps it.
+    setText((cur) => (cur === pending.current ? "" : cur));
+    pending.current = null;
     const key = sentUnder.current;
     setSelected((s) =>
       s[key] === result.conversationId ? s : { ...s, [key]: result.conversationId },
@@ -386,8 +432,14 @@ function DockShell({ context }: { context: DockContext }) {
     if (document.activeElement === panelRef.current) focusInside();
   }, [open, disabled, threadsOpen, focusInside]);
 
-  const submit = () => {
-    const value = text.trim();
+  /**
+   * Ruling 314: `override` is the example the person clicked. It is a parameter
+   * rather than `setText` + `submit()` because React has not re-rendered inside
+   * the click — reading `text` there would post the EMPTY box, which is exactly
+   * the failure `pending.current` exists to make impossible for typed messages.
+   */
+  const submit = (override?: string) => {
+    const value = (override ?? text).trim();
     if (!value || busy || disabled || !current) return;
     const body = new FormData();
     body.set("_csrf", csrf);
@@ -406,8 +458,15 @@ function DockShell({ context }: { context: DockContext }) {
         : (current.conversation?.id ?? "");
     body.set("conversationId", target === NEW_THREAD ? NEW_THREAD : target);
     sentUnder.current = context.key;
+    // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
+    // takes them. `setText("")` used to run here, optimistically, and nothing
+    // anywhere held the string — so an expired CSRF token, a 404 on a scope
+    // that is not open, or any transport failure destroyed what the person had
+    // written, leaving only a toast that unmounts itself after 2.6 seconds.
+    // Four of the five longest messages on the live board are 1,800 to 2,200
+    // characters, typed into a two-row textarea.
+    pending.current = value;
     send.submit(body, { method: "post", action: "/resources/controller" });
-    setText("");
   };
 
   const pick = (id: string) => {
@@ -543,7 +602,27 @@ function DockShell({ context }: { context: DockContext }) {
               {!current ? (
                 <p className="empty sm">Loading…</p>
               ) : !current.conversation ? (
-                <p className="empty sm">{emptyCopy(current)}</p>
+                <div className="ctl-empty">
+                  <p className="empty sm">{emptyCopy(current)}</p>
+                  {/* Ruling 314: clicking one SENDS it. An example that only
+                      fills the box would teach the same lesson and then ask the
+                      person to find the button, which is the thing they were
+                      already unsure about. */}
+                  <ul className="ctl-examples">
+                    {emptyExamples(current).map((example) => (
+                      <li key={example}>
+                        <button
+                          type="button"
+                          className="ctl-example"
+                          onClick={() => submit(example)}
+                          disabled={busy || disabled}
+                        >
+                          {example}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : (
                 <div className="ctl-msgs dock-msgs">
                   {messages.map((m) => (
@@ -572,6 +651,10 @@ function DockShell({ context }: { context: DockContext }) {
                   {current.turn.working && (
                     <div className="ctl-working" role="status">
                       <span className="live-dot" /> {current.controllerName} is working…
+                      {/* Ruling 250: the dock follows a person onto every page
+                          and has no live-run panel at all, so this row is the
+                          ONLY place the turn's own step can reach them here. */}
+                      <TurnStep turn={current.turn} />
                     </div>
                   )}
                 </div>
@@ -611,7 +694,7 @@ function DockShell({ context }: { context: DockContext }) {
                 <button
                   type="button"
                   className="btn primary sm"
-                  onClick={submit}
+                  onClick={() => submit()}
                   disabled={busy || disabled || !text.trim()}
                 >
                   {busy ? "Sending…" : "Send"}

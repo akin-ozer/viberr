@@ -6,7 +6,7 @@ import {
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import {
   openScopeViolation,
   resolveScopeViolation,
@@ -739,5 +739,44 @@ describe("the audit column discloses the controller instrument (C5)", () => {
     );
     const rows = listAuditLog(store.db, store.slug, { limit: 2 });
     expect(rows.map((r) => r.id)).toEqual(["evt_aaaaaaaaaaaa", "evt_zzzzzzzzzzzz"]);
+  });
+});
+
+/**
+ * Ruling 235 — the refused-acceptance row reads as a sentence, not a humanised
+ * action id.
+ *
+ * Registering the action on the feed put it on screen; without a `auditText`
+ * case it rendered "System: task acceptance head unpushed." while every row
+ * around it said things like "Sam Okafor tried to force-accept past the review
+ * gate, but their project role (viewer) is not permitted." The panel exists to
+ * be read, and a reader needs WHICH revision was reviewed against WHICH head.
+ */
+describe("ruling 235: the refused-acceptance audit row", () => {
+  it("names both shas and the pull request", () => {
+    const store = setupTestStore(ctx);
+    recordAudit(store.db, {
+      action: "task.acceptance.head_unpushed",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: "VIB-301",
+      projectSlug: store.slug,
+      taskKey: "VIB-301",
+      details: {
+        prNumber: 13,
+        revisionHeadSha: "ea5f2ffd7493a0b5e338e16636bf1339e48d64ba",
+        liveHeadSha: "913ce9d70967b7eca7d580631b1fd2ca2f179fcc",
+      },
+    });
+    const audit = listAuditLog(store.db, store.slug, { limit: 50 });
+    const row = audit.find((e) => e.text.includes("Acceptance refused"));
+    expect(row).toBeTruthy();
+    expect(row!.text).toContain("`ea5f2ff`");
+    expect(row!.text).toContain("**PR #13**");
+    expect(row!.text).toContain("`913ce9d`");
+    // It is a blocked ACT, beside the RBAC refusals, not a neutral audit note.
+    expect(row!.kind).toBe("blockedact");
+    // And it must not degrade to the humanised action id.
+    expect(row!.text).not.toContain("head unpushed");
   });
 });

@@ -17,15 +17,39 @@ export const MCP_TOOL_NAME_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 /** More names than any real server exposes; a bound on what one save stores. */
 export const MCP_WRITE_TOOLS_MAX = 200;
 
-/** The discovery heuristic's verbs (ruling 176 / plan D2(c)). */
+/**
+ * The discovery heuristic's verbs (ruling 176 / plan D2(c)).
+ *
+ * Pass 37 (F37-4) widened the list. The original seven missed `edit_file` and
+ * `move_file` on a stock `@modelcontextprotocol/server-filesystem` — two of the
+ * commonest non-`write` spellings for a mutation — so an admin who accepted the
+ * pre-ticked default got a server whose edit and move tools still reached a run
+ * that holds no repo write. The word-splitting below is unchanged and already
+ * correct; only the vocabulary grew.
+ *
+ * Still a SUGGESTION, never a claim: the editor pre-ticks these for a server
+ * nobody has reviewed, and the admin's save is what makes a name a deny rule.
+ */
 const WRITE_VERBS: ReadonlySet<string> = new Set([
+  "append",
   "create",
   "delete",
+  "drop",
+  "edit",
+  "insert",
   "merge",
+  "move",
+  "patch",
   "push",
-  "update",
-  "write",
+  "put",
   "remove",
+  "rename",
+  "replace",
+  "set",
+  "truncate",
+  "update",
+  "upsert",
+  "write",
 ]);
 
 /** A tool name's words, lowercased: snake_case, kebab-case, dotted and

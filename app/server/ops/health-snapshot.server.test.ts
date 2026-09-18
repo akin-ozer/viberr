@@ -52,7 +52,10 @@ describe("healthSnapshot reports the toolchain (ruling 182)", () => {
     // the sandbox. Canary: put `codexSandbox` back on `Toolchain` and this
     // `toEqual` against the hermetic reading is the guard that notices.
     expect(Object.keys(snapshot.toolchain)).toEqual([
-      "node", "npm", "git", "python3", "go", "codexCli", "claudeAgentSdk",
+      "node", "npm", "git", "python3", "go",
+      // Ruling 191.
+      "make", "docker", "pnpm", "yarn", "curl",
+      "codexCli", "claudeAgentSdk",
     ]);
   });
 });

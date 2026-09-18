@@ -124,7 +124,22 @@ export function decisionsRequiring(
               (CASE WHEN packet_json IS NOT NULL AND packet_json <> '' THEN 1 ELSE 0 END) AS has_packet,
               recommendation_count
          FROM task_projections
-        WHERE ((packet_json IS NOT NULL AND packet_json <> '') OR recommendation_count > 0)
+        WHERE ((packet_json IS NOT NULL AND packet_json <> '')
+               -- F37-71: see the comment above the acceptance query below. UX19-3
+               -- put both missing refusals into validation_block_reason and wired
+               -- it into the ACCEPTANCE query only; an accept_completion
+               -- recommendation IS an acceptance, so the same conflicting-PR task
+               -- that query correctly drops walked straight back in here the
+               -- moment the operator filed a card for it.
+               --
+               -- Gated on the kinds being EXACTLY acceptance, never on the block
+               -- alone: a transition card is actionable whatever GitHub thinks of
+               -- the merge, and hiding it would lose a real decision. The kinds
+               -- column is sorted and deduped so this is an equality test.
+               OR (recommendation_count > 0
+                   AND NOT (recommendation_kinds = 'accept_completion'
+                            AND validation_block_reason IS NOT NULL
+                            AND validation_block_reason <> '')))
           -- R14-3: archiving already withdraws the packet and the pending
           -- recommendations, so an archived task drops out of the inbox by
           -- itself. This covers the other way in — a task archived by editing

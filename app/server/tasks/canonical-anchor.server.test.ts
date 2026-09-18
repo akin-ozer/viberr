@@ -25,7 +25,12 @@ import {
   configureRunServiceForTests,
   interruptRun,
 } from "~/server/runtimes/run-service.server";
-import { listRunsForTaskRows, upsertRun } from "~/server/runtimes/run-store.server";
+import {
+  listRunLines,
+  listRunsForTaskRows,
+  upsertRun,
+} from "~/server/runtimes/run-store.server";
+import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import {
   canonicalTaskAnchor,
@@ -320,5 +325,49 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     expect(resumeSpec!.prompt).toContain("stage: In Progress");
     // …and the human's actual ask is still there.
     expect(resumeSpec!.prompt).toContain("@dev continue");
+
+    /**
+     * Ruling 343 (pass 37, F37-179): the resumed run carries the input
+     * disclosure too.
+     *
+     * `resolveResumeConfinement` returned `runInputs` for exactly this, and its
+     * docstring said the caller "passes the whole thing to `recordRunInputs`
+     * once `resumeRun` has minted the run id". Nobody did. The field had no
+     * reader anywhere in the app, and eleven resumed specialist runs on the
+     * shopify-clone board — every @mention resume, the door a PERSON uses to
+     * talk to an agent — recorded nothing about what they were given.
+     *
+     * The resume half had a test, and it asserted the record was BUILT. That is
+     * why this lasted: the same shape as rulings 329 and 338, a third time in
+     * one pass.
+     *
+     * CANARY: delete the `recordRunInputs` call in `commentToAgent`'s resume
+     * arm and this finds no line.
+     */
+    const resumedRun = listRunsForTaskRows(store.db, store.slug, "VIB-1")
+      .filter((r) => r.id !== "run_prior")
+      .at(-1)!;
+    const inputs = listRunLines(store.db, resumedRun.id).find(
+      (l) => l.display.tag === RUN_INPUTS_TAG,
+    )?.display.inputs;
+    expect(inputs, "the resumed run recorded no input disclosure").toBeTruthy();
+    // The four fields only the caller can know, because it composes the prompt.
+    expect(inputs!.promptChars).toBe(resumeSpec!.prompt.length);
+    expect(inputs!.anchor).toContain("## Canonical task state");
+    // The person's own words are the directive on this turn, so the record has
+    // to name who wrote it — the resume door's whole difference from a fresh
+    // dispatch.
+    expect(inputs!.directive).toEqual({
+      // The person as the AGENT was told about them (the same name the
+      // directive tells it to tag back), not the address.
+      from: "Arda Test",
+      chars: "@dev continue".length,
+    });
+    // And the resolved half, which is what `resolveResumeConfinement` built.
+    // This fixture's project has no repo, so the honest record is a run with no
+    // checkout — which is itself the kind of fact the disclosure exists for.
+    expect(inputs!.cloned).toBe(false);
+    expect(inputs!.delivers).toBe(true);
+    expect(inputs!.personaChars).toBeGreaterThan(0);
   }, 20_000);
 });

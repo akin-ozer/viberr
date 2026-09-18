@@ -134,6 +134,44 @@ export function latestProvenance(
  *  is missing or not a number is "never compared", exactly as before. */
 const reconcileDetailsSchema = z.object({ behindBy: z.number() });
 
+/** The sync verdict a row recorded, when it recorded one. */
+const reconcileSyncSchema = z.object({ sync: z.string() });
+
+/**
+ * The sync verdict the NEWEST observation row for this task file recorded, or
+ * null when no row has ever recorded one.
+ *
+ * Ruling 187's sibling (pass 37, F37-9): the sync pill reads the newest
+ * `github.reconcile` row, and the reconciler withheld that row on any pass
+ * whose only change was the compare — so when `main` moved, the pill kept
+ * rendering the last verdict. Live, SHOP-2 showed **synced** while the
+ * reconciler's own audit row for the same minute said `behind_main` and git
+ * agreed with the audit. "Behind main" is only interesting BECAUSE main
+ * moved, which was the one transition the pill could not see.
+ *
+ * The reconciler compares against this and writes a row when the verdict
+ * differs, so growth stays bounded by real changes exactly as `changed` bounds
+ * it for the file.
+ */
+export function latestReconcileSync(
+  db: DatabaseSync,
+  sourcePath: string,
+): string | null {
+  // SAFETY: `provenance.details_json` is a nullable TEXT column
+  // (0001_baseline.sql), and it is the only column selected here.
+  const row = db
+    .prepare(
+      `SELECT details_json FROM provenance
+       WHERE source_path = ? AND action = ?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(sourcePath, RECONCILE_ACTION) as { details_json: string | null } | undefined;
+  const details = parseDetails(row?.details_json ?? null);
+  if (details === null) return null;
+  const parsed = reconcileSyncSchema.safeParse(details);
+  return parsed.success ? parsed.data.sync : null;
+}
+
 export function createReconcileBehindByLookup(
   db: DatabaseSync,
 ): (sourcePath: string) => number | null {

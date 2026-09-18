@@ -2,9 +2,16 @@ import {
   describeRevisionDrift,
   type RevisionDrift,
 } from "~/shared/revision-drift";
-import type { PrState, TaskPriority, UnpushedRevision } from "~/schemas/task-file.schema";
+import type {
+  PrState,
+  TaskPriority,
+  UnpushedRevision,
+  Waiting,
+} from "~/schemas/task-file.schema";
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
+
+import type { PrOverlap } from "~/server/projections/review-queue.server";
 
 export interface ReviewRowView {
   key: string;
@@ -22,7 +29,14 @@ export interface ReviewRowView {
   priority: TaskPriority;
   labels: string[];
   dueDate: string | null;
-  waiting: "human" | "agent" | "none";
+  /** The same lesson `PrState` below records: one vocabulary, one union. A
+   *  hand-copied triple here could not express ruling 225's derived
+   *  `schedule`, so a review row would have had to invent its own answer for a
+   *  state the projection already decided. */
+  waiting: Waiting;
+  /** Ruling 225: when `waiting` is `schedule`, the instant the task picks
+   *  itself back up. */
+  resumesAt?: string | null;
   packet: { kind: string; title: string } | null;
   /** Ruling 138: the packet is decided and waits for the edited goal. */
   goalEditPending: boolean;
@@ -44,6 +58,10 @@ export interface ReviewRowView {
     /** Ruling 135: the CURRENT unpushed record, filtered by the row builder. */
     headSha?: string;
     unpushedRevision?: UnpushedRevision;
+    /** Ruling 236: the other open PRs whose diffs collide with this one, as the
+     *  projection computed them. Absent when no file list has been read; empty
+     *  when nothing overlaps. */
+    overlaps?: PrOverlap[];
   } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
@@ -117,7 +135,11 @@ function actionablePrSub(pr: NonNullable<ReviewRowView["pr"]>): string | null {
       : `PR #${pr.number} does not carry the delivered revision ${rev}. Deliver the branch to push it.`;
   }
   if (pr.mergeable === "conflicting") {
-    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the branch is rebased.`;
+    // Ruling 291: merged IN, not rebased. Viberr's own remedy is a merge
+    // (`update_branch_from_base`), and a rebase rewrites commits the pull
+    // request already published — which is how SHOP-11's branch diverged from
+    // its own PR #15.
+    return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the base is merged INTO the branch (not rebased).`;
   }
   // R17-1 (F17-L12) as amended by ruling 132 (pass 34, F34-14): the head moved
   // after the review — the ONE canonical sentence says what moved, and only
@@ -205,6 +227,13 @@ export function reviewRowSub(t: ReviewRowView): string {
   // line: the row is at the boundary with no run and no decision behind it.
   if (t.waiting === "none") {
     return "At the review boundary: no agent is running and no decision is pending.";
+  }
+  // Ruling 225 (F37-45), and F19-31's lesson a second time: a value that falls
+  // through to the sentence below claims a live agent run that does not exist.
+  // A clock-resting row has neither a run nor a decision behind it; it has a
+  // time.
+  if (t.waiting === "schedule") {
+    return "At the review boundary: nothing is running, and a scheduled run picks this task back up.";
   }
   return "Agent working. The packet arrives at the boundary.";
 }

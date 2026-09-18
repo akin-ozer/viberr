@@ -126,6 +126,36 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
     expect(out.recommend).not.toContain("Accept completion into Done");
   });
 
+  it("F37-65: a FULL-autonomy operator's RECOMMEND grant renders ACTS DIRECTLY, because the runtime promotes it", () => {
+    // The ceiling only ever mirrored the DOWNGRADE. `gate()` does the other
+    // half too: `authority.autonomy === "full" ? "direct" : "recommend"` for
+    // every `recommend` grant EXCEPT acceptance. So a full-autonomy operator
+    // acted directly on grants this display called "Recommends only" — the
+    // label whose legend says it proposes a card a person applies.
+    // CANARY: restore `if (autonomy === "full") return grants.map(...)`.
+    const out = capabilitiesToActionLabels(
+      [
+        cap("deliver-review-pr", "recommend"),
+        cap("completion-for-acceptance", "recommend"),
+      ],
+      [],
+      "full",
+    );
+    expect(out.direct).toContain("Deliver the branch & open the review PR");
+    expect(out.recommend).not.toContain("Deliver the branch & open the review PR");
+    // Acceptance is the one carve-out the runtime keeps at recommend whatever
+    // the autonomy (owner ruling Q1), so it must NOT be promoted.
+    expect(out.recommend).toContain("Accept completion into Done");
+    expect(out.direct).not.toContain("Accept completion into Done");
+  });
+
+  it("F37-65: a SUPERVISED operator's recommend grant is untouched", () => {
+    // The promotion is gated on full autonomy. CANARY: promote unconditionally.
+    const out = capabilitiesToActionLabels([cap("deliver-review-pr", "recommend")], [], "supervised");
+    expect(out.recommend).toContain("Deliver the branch & open the review PR");
+    expect(out.direct).not.toContain("Deliver the branch & open the review PR");
+  });
+
   it("effectiveProfileView threads the operator's own autonomy into the ceiling", () => {
     const opDeployment = (
       autonomy: "supervised" | "full" | undefined,

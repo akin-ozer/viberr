@@ -282,6 +282,183 @@ function latestSessionRun(
  *   2. `@agent`    → the task's PRIMARY specialist (frontmatter).
  *   3. a deployed specialist by name / profile id / backend.
  */
+/**
+ * Ruling 252 (pass 37, F37-81): what a comment says when it tagged an agent
+ * that no comment can reach.
+ *
+ * Ruling 214 wrote this for the OPERATOR, because live on SHOP-10 the operator
+ * put a completeness question to "@Code Reviewer" in a comment, no reviewer
+ * ever read it, and the stranded backstop then paused a task five others were
+ * waiting behind. The reasoning was never operator-specific: a comment writes a
+ * timeline line and starts nothing, whoever writes it.
+ *
+ * The CONTROLLER had the same hazard and none of the disclosure, and it is the
+ * surface a person drives a board from. Live on SHOP-26 it wrote "@operator
+ * @platform-architect The funded amendment now exists as a task", followed by
+ * "Two standing facts for the implementation run", and closed with nothing but
+ * "Posted by the controller for Arda" - while its own tool text promises
+ * "@mentions notify people", which is true of people and silent for agents. The
+ * same words typed by a person on the task page DO reach the agent
+ * (`commentToAgent` starts a run); typed by the controller on that person's
+ * behalf they reach nobody.
+ *
+ * `writer` decides only the wording. The `run_agent_on_task` name is the
+ * controller's own tool, so the sentence is actionable by the reader it is
+ * addressed to.
+ */
+/**
+ * Ruling 262 (pass 37, F37-92): every agent handle a comment cannot reach, not
+ * just the one a RUN would have gone to.
+ *
+ * Ruling 252's stamp was computed from `resolveMentionedAgent`, a resolver
+ * built to pick ONE target because `commentToAgent` needs exactly one agent to
+ * start. Reused as a completeness report it under-reports in four ways, and the
+ * first of them is the live comment that prompted ruling 252 in the first
+ * place: "@operator @platform-architect The funded amendment now exists as a
+ * task". `@operator` is precedence 1, so the resolver returns the operator, the
+ * stamp is skipped for being the operator, and @platform-architect is never
+ * mentioned. Ruling 252 did not fix its own motivating example.
+ *
+ * The other three: a second specialist tagged alongside the first is dropped by
+ * `specialists.find`; an ambiguous backend handle (`@claude` on a board with
+ * two claude profiles) resolves to null; and `@agent` with no delivering
+ * engagement resolves to null. The last two are exactly the cases the HUMAN
+ * comment path writes a policy-engine note for, so a person tagging them is
+ * told and the controller doing the same thing is not.
+ *
+ * This asks the disclosure question instead of the dispatch question, so it
+ * needs no backend, session or model: which handles are in the text, and which
+ * of them will read nothing.
+ */
+export interface UnreachedAgents {
+  /** Every deployed specialist the text names, as the @handle that ADDRESSES
+   *  it (`agentMentionHandle`, P14-RT-12), in the order the text tags them so
+   *  the sentence reads back against the comment above it. */
+  named: string[];
+  /** True when `@operator` was tagged. Excluded from the note (ruling 214): a
+   *  controller turn's other writes wake the operator on their own, so claiming
+   *  nothing reached it could be the false half of an honest sentence. */
+  taggedOperator: boolean;
+  /** A backend handle several deployed specialists share, so it engages nobody
+   *  (B-AG2) — with the profiles it covers, so the tag can be re-aimed. */
+  ambiguousBackend: { handle: string; candidates: string[] } | null;
+  /** `@agent` on a task with no delivering engagement: it addresses the task's
+   *  deliverer, and there is none. */
+  agentWithNoDeliverer: boolean;
+}
+
+export function unreachedAgents(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  text: string,
+): UnreachedAgents {
+  const empty: UnreachedAgents = {
+    named: [],
+    taggedOperator: false,
+    ambiguousBackend: null,
+    agentWithNoDeliverer: false,
+  };
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
+  const handles = mentionHandles(text, [
+    ...specialists.flatMap(specialistHandles),
+    ...RESERVED_AGENT_HANDLES,
+  ]);
+  if (handles.length === 0) return empty;
+  const handleSet = new Set(handles);
+  const existing = readTaskFile({ projectSlug, taskKey, dataRoot: ctx.dataRoot });
+  const primaryRef = existing ? deliveringEngagement(existing.parsed.frontmatter) : null;
+
+  // EVERY named specialist, not the first match, ordered by where the TEXT
+  // tags them (project-file order would read back against the comment).
+  const tagOrder = (sp: DeployedSpecialistView): number => {
+    const at = handles.findIndex(
+      (h) => h === sp.name.toLowerCase() || h === sp.id.toLowerCase(),
+    );
+    return at === -1 ? handles.length : at;
+  };
+  const named = specialists
+    .filter((sp) => handleNamesSpecialist(handleSet, sp))
+    .sort((a, b) => tagOrder(a) - tagOrder(b))
+    .map((sp) => agentMentionHandle({ profileId: sp.id, name: sp.name }));
+  // `@agent` names the deliverer, so it names a specialist too when there is
+  // one — and says nobody was reached when there is not.
+  const deliverer =
+    handleSet.has("agent") && primaryRef
+      ? agentMentionHandle({
+          profileId: primaryRef.profileId,
+          name: specialists.find((sp) => sp.id === primaryRef.profileId)?.name ?? null,
+        })
+      : null;
+  if (deliverer && !named.includes(deliverer)) named.push(deliverer);
+
+  const backendCandidates = specialistsForBackendHandle(handleSet, specialists);
+  const firstCandidate = backendCandidates[0];
+  const ambiguousBackend =
+    backendCandidates.length > 1 && firstCandidate
+      ? {
+          handle: firstCandidate.backend,
+          candidates: backendCandidates.map((sp) => sp.name),
+        }
+      : null;
+
+  return {
+    named,
+    taggedOperator: handleSet.has("operator"),
+    ambiguousBackend,
+    agentWithNoDeliverer: handleSet.has("agent") && !primaryRef,
+  };
+}
+
+export function unreachedAgentNote(
+  report: UnreachedAgents,
+  writer: "operator" | "controller" | "agent",
+): string | null {
+  const whose =
+    writer === "operator"
+      ? "an operator comment"
+      : writer === "controller"
+        ? "a controller comment"
+        : "a comment from another agent";
+  const sentences: string[] = [];
+  if (report.named.length > 0) {
+    const list = report.named.map((n) => `@${n}`).join(", ");
+    const isAre = report.named.length === 1 ? "is an agent" : "are agents";
+    const them = report.named.length === 1 ? "it" : "them";
+    sentences.push(
+      `${list} ${isAre}, and ${whose} starts no run \u2014 nothing was sent to ${them}.`,
+    );
+  }
+  if (report.ambiguousBackend) {
+    const { handle, candidates } = report.ambiguousBackend;
+    sentences.push(
+      `@${handle} names a runtime, not an agent: ` +
+        `${candidates.map((c) => `@${c}`).join(", ")} all run on it, so the tag ` +
+        `reached none of them.`,
+    );
+  }
+  if (report.agentWithNoDeliverer) {
+    sentences.push(
+      "@agent addresses the agent delivering this task, and none is engaged yet.",
+    );
+  }
+  if (sentences.length === 0) return null;
+  const single =
+    report.named.length === 1 &&
+    !report.ambiguousBackend &&
+    !report.agentWithNoDeliverer;
+  sentences.push(
+    writer === "controller"
+      ? single
+        ? "Use `run_agent_on_task` to put this to it."
+        : "Use `run_agent_on_task` to start a run that reads it."
+      : single
+        ? "Run the agent to put this to it."
+        : "Start a run to put this in front of an agent.",
+  );
+  return `_${sentences.join(" ")}_`;
+}
+
 export function resolveMentionedAgent(
   db: DatabaseSync,
   ctx: TaskMutationContext,

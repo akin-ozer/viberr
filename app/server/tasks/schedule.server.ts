@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { sweepStrandedTasks } from "./stranded-sweep.server";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { z } from "zod";
 import {
@@ -891,6 +892,17 @@ export function startScheduleRunner(db: DatabaseSync): void {
     void fireDueSchedules(db)
       .catch((error) => {
         logger.warn("schedule runner tick failed", {
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+      })
+      // Ruling 330: the stranded sweep rides this tick rather than standing up a
+      // second interval. It is the same shape of work — "is anything due?" — and
+      // a task that has stopped is due in exactly the sense a schedule is. It
+      // runs AFTER the schedules so a dispatch that just fired is already a
+      // queued run and the sweep does not count the task as stopped.
+      .then(() => sweepStrandedTasks(db))
+      .catch((error) => {
+        logger.warn("stranded sweep tick failed", {
           err: error instanceof Error ? error : new Error(String(error)),
         });
       })

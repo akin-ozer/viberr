@@ -1357,6 +1357,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .wait-tag.you { color: var(--blue-pressed); }
 .rq-row .wait-tag.human { color: var(--muted); font-weight: 600; }
 .wait-tag.agent { color: var(--agent-dark); }
+/* Ruling 225: a clock rest is not a demand, so it reads at the same weight as
+   the muted review-row wait rather than the blue one that asks for a person. */
+.wait-tag.scheduled { color: var(--muted); }
+.by-schedule { color: var(--muted); }
 .wait-tag .ico { width: 13px; height: 13px; }
 .wait-tag .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
 @keyframes pulse-a {
@@ -1741,6 +1745,19 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .opt.sel .radio::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
 .opt .ot { font-weight: 700; font-family: var(--font-display); font-size: .75rem; line-height: 1.35; }
 .opt .od { font-size: .75rem; color: var(--faint); margin-top: .08rem; line-height: 1.4; }
+/* Ruling 269: what a create_task option is about to create, shown on the
+   SELECTED option so a person confirms the task rather than the sentence
+   describing it. A stacked block, indented under the choice it belongs to. */
+.opt .pkt-new-task {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  margin-top: .35rem;
+  padding-left: .5rem;
+  border-left: 2px solid var(--border);
+}
+.opt .pkt-new-task strong { color: var(--fg); font-weight: 600; }
+.opt .pkt-new-task-goal { max-height: 11rem; overflow-y: auto; white-space: pre-wrap; }
 .opt .rec-tag { margin-left: auto; flex: none; margin-top: .05rem; }
 /* Questionnaire shortcut chip (digit selects the choice). `margin-left: auto`
    pushes it right; a rec-tag already claiming the auto margin leaves the chip
@@ -5058,6 +5075,28 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .modal-card.modal-narrow { width: min(560px, calc(100vw - 2rem)); }
 
 /* --- policy / GitHub view / project settings --- */
+/* Ruling 309(a): the scope a short grant name cannot carry, on its own line
+   under it — quiet, because it explains the row rather than competing with it. */
+.act-covers { display: block; color: var(--muted); font-size: .69rem; }
+/* Ruling 314: the dock's empty state — the scope line, then three things to
+   ask, each one a button that sends it. Quiet enough to read as suggestions
+   rather than controls, and left-aligned with the transcript they replace. */
+.ctl-empty { display: grid; gap: .5rem; }
+/* `.empty` is centred with a 60ch measure; the examples sit under it on the
+   same measure so the block reads as one thing rather than a caption over a
+   full-width list. */
+.ctl-examples {
+  list-style: none; margin: 0 auto; padding: 0 .5rem;
+  display: grid; gap: .25rem; max-width: 60ch; width: 100%;
+}
+.ctl-example {
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--surface); color: var(--fg);
+  border: 1px solid var(--border-control); border-radius: var(--radius-button);
+  padding: .35rem .5rem; font: inherit; font-size: .75rem;
+}
+.ctl-example:hover:not(:disabled) { border-color: var(--blue); }
+.ctl-example:disabled { opacity: .5; cursor: default; }
 .pol-note.after { margin-top: .75rem; }
 .pol-note.before { margin-bottom: .75rem; }
 .pol-note.last { margin-bottom: 0; }
@@ -5096,13 +5135,31 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .audit-action { font-family: var(--font-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* `min-width: 0`: the cell's `auto` track would otherwise floor at the tag plus
    a 14rem subject and starve the action; the subject truncates instead. */
-.audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); min-width: 0; }
+/* `max-width: 100%` is what actually holds the cell. `justify-self: end` sizes
+   this item to its content, NOT to its track, so a scope wider than the track
+   overflows LEFTWARDS out of its own grid area and paints over the event name —
+   and `overflow: hidden` cannot help, because the box it clips against is the
+   oversized one. The percentage resolves against the grid area, so the item can
+   never leave it and its children truncate inside it instead. */
+.audit-scope { display: inline-flex; align-items: center; gap: .375rem; justify-self: end; color: var(--muted); min-width: 0;
+  max-width: 100%; overflow: hidden; }
 /* Design pass 2026-09-08: the scope tag is in the quiet tier. `.audit-scope-tag.org`
    is gone — "org" on every row was a blue fill on every row of the log, and the
    word already says which scope an event has. */
+/* Ruling 234 follow-up: the tag TRUNCATES. Its cell is `fit-content(7rem)` at
+   phone width, and a long project slug ("shopify-clone-platform") is far wider
+   than that — with no truncation it overflowed its own grid area and, being
+   `justify-self: end`, painted leftwards straight over the event name beside it.
+   Two unreadable strings on top of each other, only visible once the browse
+   stopped being a wall of same-shaped reconcile rows. Full value in `title`. */
 .audit-scope-tag { font-family: var(--font-mono); font-size: .69rem; padding: .125rem .375rem; border-radius: var(--radius-small);
-  background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); color: var(--muted); white-space: nowrap; }
-.audit-subject { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+  background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 8; }
+/* The slug repeats on every row of a single-project instance; the task key is
+   the one specific thing in the cell. So when the two must share a phone-width
+   track the SLUG gives way first (`flex-shrink: 8` above against this 1). */
+.audit-subject { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem;
+  min-width: 0; flex-shrink: 1; }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
 .audit-dl .btn { text-decoration: none; }
@@ -5136,6 +5193,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .stat-val { font-size: 1.75rem; font-weight: 800; font-family: var(--font-display); line-height: 1.1; }
 .stat-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
 .stat-sub { font-size: .75rem; color: var(--faint); }
+/* Ruling 290: the exceptions a stat counts, by name and linked. Wraps rather
+   than truncates — a name a reader can see but not finish is the shape this
+   rule exists to end. */
+.stat-names { display: flex; flex-wrap: wrap; gap: .25rem .5rem; margin-top: .25rem; }
+.stat-names .linkish { font-family: var(--font-mono); font-size: .69rem; }
 .insights-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .breakdown, .daily { margin-bottom: 1rem; }
 .bar-list { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
@@ -5781,12 +5843,28 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-msg-who svg { width: 14px; height: 14px; color: var(--agent-dark); }
 .ctl-msg .md-body { font-size: .88rem; }
 .ctl-working {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
   gap: .5rem;
   color: var(--muted);
   font-size: .88rem;
   padding: .25rem .25rem;
+}
+/* Ruling 250: the live turn's own step, beside the sentence that says it is
+   working. One line, clipped: the step is a hint the adapter refreshes several
+   times a minute, and a wrapping tool payload would shove the conversation
+   around under the reader. `min-width: 0` is what actually lets the ellipsis
+   happen inside a flex row. */
+.ctl-working-step {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The secondary step, one down from the row it sits in (.88rem). */
+  font-size: .75rem;
+  color: var(--faint);
 }
 .ctl-composer {
   border: 1px solid var(--border-control);

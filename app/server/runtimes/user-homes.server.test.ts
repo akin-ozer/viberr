@@ -10,7 +10,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { logger } from "~/server/logging/logger.server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
@@ -23,6 +25,7 @@ import {
   finishCodexRunHome,
   listUserRuntimeRoots,
   prepareCodexRunHome,
+  repairCodexRolloutPaths,
   USER_RUNTIMES_DIR,
   userBackendHome,
   userRuntimeRoot,
@@ -260,5 +263,161 @@ describe("per-run Codex homes (ruling 181)", () => {
     expect(() => codexRunHomeDir(shared, "../escape")).toThrow();
     expect(() => prepareCodexRunHome(shared, "")).toThrow();
     expect(codexRunHomeDir(shared, "run_ok-1")).toBe(path.join(shared, "runs", "run_ok-1"));
+  });
+});
+
+/**
+ * Ruling 199 (F37-20, live): the Codex CLI writes its rollout THROUGH the run
+ * home's `sessions` symlink — so the bytes land in the shared home and survive —
+ * but it records the path it SAW, `…/runs/<runId>/sessions/…`, in its own thread
+ * index. Ruling 181 removes that directory when the run settles, so every later
+ * `thread/resume` answers "no rollout found for thread id", and Viberr reported
+ * that to a human as "the agent's stored Codex session no longer exists" while
+ * the transcript sat one path segment away.
+ *
+ * Measured on the live instance before the fix: 137 of 137 threads recorded
+ * under a per-run home, 135 of those paths gone, and 135 of 135 of their files
+ * present at the shared path.
+ */
+describe("ruling 199: a settled run's rollout paths are re-pointed at the shared home", () => {
+  function seedThread(
+    sharedHome: string,
+    id: string,
+    rolloutPath: string,
+  ): void {
+    const db = new DatabaseSync(path.join(sharedHome, "state_5.sqlite"));
+    db.exec(
+      `CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, rollout_path TEXT, cwd TEXT)`,
+    );
+    db.prepare(`INSERT OR REPLACE INTO threads (id, rollout_path, cwd) VALUES (?, ?, ?)`).run(
+      id,
+      rolloutPath,
+      "/workspace",
+    );
+    db.close();
+  }
+
+  function threadPath(sharedHome: string, id: string): string | null {
+    const db = new DatabaseSync(path.join(sharedHome, "state_5.sqlite"), { readOnly: true });
+    try {
+      const row = db.prepare(`SELECT rollout_path FROM threads WHERE id = ?`).get(id);
+      // SAFETY: the column is declared TEXT by `seedThread` above and every row
+      // this test writes sets it, so the value is a string when the row exists.
+      return row ? (row as { rollout_path: string }).rollout_path : null;
+    } finally {
+      db.close();
+    }
+  }
+
+  /** A rollout written the way the CLI writes one: through the run home's link,
+   *  so the bytes land in the shared `sessions/` tree. */
+  function writeRollout(home: { dir: string }, name: string): string {
+    const dir = path.join(home.dir, "sessions", "2026", "09", "13");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, name);
+    writeFileSync(file, '{"type":"session_meta"}\n');
+    return file;
+  }
+
+  it("moves the recorded path onto the file the symlink actually wrote", () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", ctx.makeTempDir());
+    const home = prepareCodexRunHome(shared, "run_settling");
+    const recorded = writeRollout(home, "rollout-01a0-abc.jsonl");
+    seedThread(shared, "01a0-abc", recorded);
+    // The bytes are in the SHARED tree even now, because `sessions` is a link.
+    const sharedFile = path.join(shared, "sessions", "2026", "09", "13", "rollout-01a0-abc.jsonl");
+    expect(existsSync(sharedFile)).toBe(true);
+
+    finishCodexRunHome(home);
+
+    // CANARY: drop the `repointRunRollouts` call and this still reads the
+    // removed run-home path — which is what "no rollout found" means.
+    expect(threadPath(shared, "01a0-abc")).toBe(sharedFile);
+    expect(existsSync(sharedFile)).toBe(true);
+    expect(existsSync(home.dir)).toBe(false);
+  });
+
+  it("leaves a thread alone when the shared copy is not there", () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", ctx.makeTempDir());
+    const home = prepareCodexRunHome(shared, "run_nofile");
+    const phantom = path.join(home.dir, "sessions", "2026", "09", "13", "rollout-gone.jsonl");
+    seedThread(shared, "gone", phantom);
+    finishCodexRunHome(home);
+    // A wrong path is worse than a stale one: nothing was written, so nothing
+    // is claimed.
+    expect(threadPath(shared, "gone")).toBe(phantom);
+  });
+
+  it("repairs the threads left behind before the settle learned to, and is idempotent", () => {
+    const dataRoot = ctx.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
+    // Two threads recorded under run homes that are long gone, their files
+    // sitting in the shared tree — the live shape, 135 times over.
+    const dir = path.join(shared, "sessions", "2026", "09", "13");
+    mkdirSync(dir, { recursive: true });
+    for (const id of ["old-1", "old-2"]) {
+      const file = path.join(dir, `rollout-${id}.jsonl`);
+      writeFileSync(file, "{}\n");
+      seedThread(shared, id, path.join(shared, "runs", `run_${id}`, "sessions", "2026", "09", "13", `rollout-${id}.jsonl`));
+    }
+    // …and one whose run is still in flight: its path exists, so it is not this
+    // sweep's business until its own settle.
+    const live = prepareCodexRunHome(shared, "run_live");
+    const liveFile = writeRollout(live, "rollout-live.jsonl");
+    seedThread(shared, "live", liveFile);
+
+    expect(repairCodexRolloutPaths(dataRoot)).toBe(2);
+    expect(threadPath(shared, "old-1")).toBe(path.join(dir, "rollout-old-1.jsonl"));
+    expect(threadPath(shared, "old-2")).toBe(path.join(dir, "rollout-old-2.jsonl"));
+    expect(threadPath(shared, "live")).toBe(liveFile);
+    // CANARY: drop the `existsSync(row.rollout_path)` guard and the live run's
+    // thread is re-pointed out from under it.
+    expect(repairCodexRolloutPaths(dataRoot)).toBe(0);
+  });
+
+  /**
+   * The self-review caught this one as VACUOUS in its first form: it asserted
+   * only `=== 0`, which is what an unrecognised schema returns with the guard
+   * deleted too (the row parse fails and the loop `continue`s anyway). The
+   * assertion that can actually go red is the one that says a repair silently
+   * stopped happening — which is the whole point of the guard, and which the
+   * first version of the code did not emit at all despite its own comment
+   * promising "skipped with a log line".
+   */
+  it("skips a state database whose shape it does not recognise, and SAYS it skipped", () => {
+    const dataRoot = ctx.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
+    const db = new DatabaseSync(path.join(shared, "state_5.sqlite"));
+    db.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, some_other_column TEXT)`);
+    db.prepare(`INSERT INTO threads (id, some_other_column) VALUES ('x', 'y')`).run();
+    db.close();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(repairCodexRolloutPaths(dataRoot)).toBe(0);
+      // CANARY: drop the `logger.warn` and this is empty — a vendor schema
+      // change disables the repair and nobody ever hears about it.
+      expect(warn.mock.calls.map(([msg]) => String(msg)).join("\n")).toContain(
+        "codex rollout paths NOT repaired at boot",
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the SETTLE half says so too when the schema is unrecognised", () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", ctx.makeTempDir());
+    const db = new DatabaseSync(path.join(shared, "state_5.sqlite"));
+    db.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, some_other_column TEXT)`);
+    db.close();
+    const home = prepareCodexRunHome(shared, "run_unknown_schema");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      finishCodexRunHome(home);
+      expect(warn.mock.calls.map(([msg]) => String(msg)).join("\n")).toContain(
+        "codex rollout paths NOT re-pointed",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

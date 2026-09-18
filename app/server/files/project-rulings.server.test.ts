@@ -1,0 +1,155 @@
+import { describe, expect, it, beforeEach } from "vitest";
+import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { projectRulingsKb, withProjectRulings } from "./project-rulings.server";
+
+/**
+ * Ruling 239 (pass 37): the project's rulings knowledge base reaches every run
+ * the project makes, whether or not any profile grants it.
+ *
+ * The unit under test is deliberately tiny, because the interesting property is
+ * not what it computes but WHERE it is called — three runtimes, one of which
+ * (the controller) only when a project is in scope. The call sites are pinned
+ * in the source assertions at the bottom, the same shape ruling 179's dispatch
+ * test uses: a helper with no production caller is the state this pass found
+ * that ruling's own helper in.
+ */
+let ctx: TestDbContext;
+let store: TestStore;
+
+function setRulings(dir: string | null): void {
+  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, { ...file.parsed.frontmatter, rulingsKb: dir });
+}
+
+beforeEach(() => {
+  ctx = createTestDbContext();
+  store = setupTestStore(ctx);
+});
+
+describe("projectRulingsKb", () => {
+  it("is null when the project names none, and trims what it names", () => {
+    expect(projectRulingsKb(store.slug, { dataRoot: store.dataRoot })).toBeNull();
+    setRulings("  team-rulings  ");
+    expect(projectRulingsKb(store.slug, { dataRoot: store.dataRoot })).toBe("team-rulings");
+    // A whitespace-only value is a value nobody meant: it would resolve to a
+    // store path of nothing and inject an empty knowledge base into every run.
+    setRulings("   ");
+    expect(projectRulingsKb(store.slug, { dataRoot: store.dataRoot })).toBeNull();
+  });
+
+  it("is null for a project that does not exist, rather than throwing into a run", () => {
+    // Every caller is on the hot path of starting a run. A missing project is
+    // already refused upstream with a real message; this must not turn into a
+    // second, worse error from the KB reader.
+    expect(projectRulingsKb("no-such-project", { dataRoot: store.dataRoot })).toBeNull();
+  });
+});
+
+describe("withProjectRulings", () => {
+  it("appends the rulings KB, never displacing the profile's own grants", () => {
+    setRulings("team-rulings");
+    // CANARY: prepend instead of append. `readKbBodies` spends one shared
+    // character budget in order, so a rulings KB in front silently takes
+    // context from the thing the profile was deployed to do.
+    expect(withProjectRulings(["mine", "inherited"], store.slug, { dataRoot: store.dataRoot })).toEqual([
+      "mine",
+      "inherited",
+      "team-rulings",
+    ]);
+  });
+
+  it("charges it once when a profile also grants it explicitly", () => {
+    // The expected shape once an existing KB is promoted into this role, which
+    // is what the owner asked to be possible. CANARY: drop the `includes` test
+    // and the KB is injected twice against one budget.
+    setRulings("team-rulings");
+    expect(withProjectRulings(["team-rulings"], store.slug, { dataRoot: store.dataRoot })).toEqual([
+      "team-rulings",
+    ]);
+  });
+
+  it("changes nothing for a project that names none", () => {
+    expect(withProjectRulings(["mine"], store.slug, { dataRoot: store.dataRoot })).toEqual(["mine"]);
+    expect(withProjectRulings([], store.slug, { dataRoot: store.dataRoot })).toEqual([]);
+  });
+});
+
+describe("the runtimes that build a run's knowledge call it", () => {
+  it("specialists and the operator, pinned at the call site", async () => {
+    // The helper is worth nothing unless it is on the path. Source assertions
+    // for these two because both sites sit deep inside a function that starts
+    // a real run; the controller's is covered behaviourally below, which is
+    // stronger and is what caught this test being too weak the first time.
+    const { readFileSync } = await import("node:fs");
+    const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
+    expect(specialist).toContain("kb = withProjectRulings(kb, input.projectSlug, ctx)");
+    // TWO sites in this file, not one. The fresh-run site is the one ruling 239
+    // shipped with; the RESUMED (@mention) run builds its own list for R18-1
+    // parity and was missed, so a reviewer resumed mid-thread silently lost the
+    // project's rulings between turns. An adversarial sweep found it the same
+    // day. CANARY: unwrap either call and the count drops.
+    expect(specialist.split("withProjectRulings(").length - 1).toBe(2);
+    // The operator reads it through its resolved authority, so every consumer
+    // of `authority.kb` gets it and not just the prompt builder.
+    expect(readFileSync("app/server/tasks/operator-actions.server.ts", "utf8")).toContain(
+      "kb: withProjectRulings(view.resources.kb ?? [], projectSlug, ctx)",
+    );
+  });
+
+  it("the controller reads it when scoped to the project, and NOT when instance-scoped", async () => {
+    const { saveKnowledgeBase } = await import("~/server/org/resources.server");
+    const saved = await saveKnowledgeBase(
+      store.db,
+      { name: "Team rulings", refresh: "on change" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    const { writeFileSync } = await import("node:fs");
+    const { kbDirPath } = await import("~/server/files/file-store-root.server");
+    const marker = "LOCKFILE IS DERIVED, NOT SEPARATELY OWNED";
+    // Ruling 283: the prompt carries the INDEX — the doc's name and its
+    // headings — so the marker has to live where an index can carry it.
+    writeFileSync(`${kbDirPath(saved.kb.dir, store.dataRoot)}/rulings.md`, `# ${marker}\n\nbody\n`);
+    setRulings(saved.kb.dir);
+
+    const { buildControllerSystemPrompt } = await import(
+      "~/server/controller/controller-run.server"
+    );
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const { createConversation } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    const user = { ...store.users.arda, orgRole: "admin" as const };
+    // Built in statements, not a conditional spread: an ABSENT `projectSlug`
+    // is the instance-scoped conversation, which is the case under test.
+    const newConversation = (projectSlug: string | null) => {
+      const base = { userId: user.id, userLabel: user.email };
+      return projectSlug
+        ? createConversation(store.db, { ...base, projectSlug })
+        : createConversation(store.db, base);
+    };
+    const promptFor = (projectSlug: string | null) =>
+      buildControllerSystemPrompt(store.db, {
+        conversation: newConversation(projectSlug),
+        user,
+        config: resolveControllerConfig(store.dataRoot),
+        mountedMcps: [],
+        unresolvedMcps: [],
+        toolkit: [],
+        deniedTools: [],
+        dataRoot: store.dataRoot,
+      }).prompt;
+
+    // CANARY: replace the `input.conversation.projectSlug` condition with
+    // `false` and the scoped prompt loses the rulings text.
+    expect(promptFor(store.slug)).toContain(marker);
+    // An instance-scoped conversation belongs to no project and must not
+    // inherit one project's rules. CANARY: drop the condition entirely and
+    // this one gains them.
+    expect(promptFor(null)).not.toContain(marker);
+  });
+});

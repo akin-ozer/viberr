@@ -33,7 +33,15 @@ export const READINESS_VALUES = [
 ] as const;
 export type Readiness = (typeof READINESS_VALUES)[number];
 
-export const WAITING_VALUES = ["human", "agent", "none"] as const;
+// Ruling 225 (F37-45): `schedule` is a DERIVED display value, produced only by
+// the projection (`rebuildPath`) when a task is resting on a clock rather than
+// on a person — `waiting: human` in the file, no packet, no recommendation,
+// nothing a human could accept, and a pending schedule occurrence that will
+// pick the task back up on its own. It is never hand-authored and never
+// written to a task file, exactly like `validation: "bypassed"` below; it is a
+// member of the enum because it rides the same projected column, and the
+// round-trip that reads that column back must accept it.
+export const WAITING_VALUES = ["human", "agent", "none", "schedule"] as const;
 export type Waiting = (typeof WAITING_VALUES)[number];
 
 // N20-14 (§5c / C2): `bypassed` is a DERIVED display value produced only by
@@ -180,6 +188,57 @@ export const PACKET_OPTION_KINDS = [
   // tier and the same transition event and audit row. Before it, "Move KNC-16
   // back to Review" was a `redirect` title and the resolution moved nothing.
   "move_stage",
+  // Ruling 224 (pass 37, F37-44): the remedy a SPENT USAGE WINDOW actually has
+  // — wait, and resume by itself when the window reopens. Payload: `dueAt`
+  // (the provider's own reset instant) plus `profileId` for the agent to
+  // re-dispatch. Resolution closes the packet and writes a `run-agent` schedule
+  // for that instant, which the existing runner fires unattended. Before it,
+  // every option on a quota packet was wrong at the moment it was offered: the
+  // recommended one permanently moved the task off the model its profile
+  // declares, and the alternative asked the human to ASSERT a window had reset
+  // when the provider had just said it would not for another three hours.
+  "wait_for_window",
+  // Ruling 226 (pass 37, F37-43): the deliberate way past a head GitHub would
+  // not compare. NOT `force_accept`, which cannot bypass the head gate and must
+  // not start: this waives ONE check, for ONE (PR, delivered revision, live
+  // head) triple, with the person's name on it and the consequence stated. The
+  // resolution records that triple as `headCheckWaiver`; the gate honours it
+  // only while all three still match, so it cannot be spent on a head that
+  // moved afterwards.
+  "accept_unverified_head",
+  // Ruling 230 (pass 37, F37-50): "hold this until those land". Payload:
+  // `blockedBy`, the tasks or goal links this one waits on. Resolution writes
+  // ruling 131's dependency list, which the board renders, the schedule runner
+  // refuses on, and the dependency release re-triggers automatically when the
+  // last entry finishes. The mechanism was already there and good; the only
+  // thing missing was a way to reach it from the surface where the decision is
+  // actually made, so an operator wanting a hold reached for `block_on_policy`
+  // — whose resolution UNBLOCKS — and the record said "SHOP-11 is unblocked"
+  // under an option titled "Hold SHOP-11 while…".
+  "block_on_dependencies",
+  // Ruling 237 (pass 37, F37-57): "ask the reviewer what it would still block
+  // on, before anyone reworks anything". Payload: `profileId`, the reviewer to
+  // put the question to. Resolution closes the packet and starts THAT reviewer
+  // with the question as its directive and its own non-delivering posture
+  // intact. Ruling 210 already named this as the move at a second consecutive
+  // objection, and wrote it as a paragraph in the operator's turn instruction:
+  // live on SHOP-5 the operator read it and re-dispatched the deliverer forty
+  // six seconds after the third `request_changes` anyway. An option whose
+  // resolution merely re-runs the operator would have repeated that; this one
+  // starts the reviewer itself.
+  "question_reviewer",
+  // Ruling 269 (pass 37, F37-101): "this belongs in its own task." The most
+  // common structural remedy on a multi-service board, and the only one whose
+  // recommended option had to end with an instruction to the reader instead of
+  // an action. Live on SHOP-26 the operator wrote, verbatim, "You create the
+  // task — no option here can": it had found a published contract with no
+  // producer, the project's own conventions say a reported gap has to end up
+  // owned by a live task, and the packet mechanism could not make one. Payload:
+  // `newTask` (title, goal, and optionally what it waits on and its labels).
+  // Resolution creates it through `createTask` — the same door the board and
+  // the toolkits use — under the RESOLVING person's authority, and names the
+  // new key on both timelines so the two are joined on the record.
+  "create_task",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -249,6 +308,40 @@ export function deliveringEngagement(fm: {
   engagements: Engagement[];
 }): Engagement | null {
   return fm.engagements.find((e) => e.delivers) ?? null;
+}
+
+/**
+ * Ruling 193, as amended by ruling 204: successive OBJECTIONS `profileId` has
+ * raised, newest first, stopping at its first `approve` (or at the start of its
+ * history).
+ *
+ * ROUNDS are summed, not revisions. Ruling 193 counted distinct revisions on
+ * the reasoning that "a reviewer re-run twice on the same revision has objected
+ * once" — and live on SHOP-9 that was exactly backwards: in a deadlock the
+ * deliverer commits nothing, so no new revision is ever minted and the count sat
+ * at 1 while the loop ran. The distinction 193 was reaching for survives in the
+ * `rounds` field itself, which the verdict upsert increments only when a
+ * completed review returns the SAME result again; a re-DISPATCH that records no
+ * verdict still counts for nothing.
+ */
+export function consecutiveRequestChanges(
+  fm: { verdicts: readonly ReviewVerdict[] },
+  profileId: string,
+): number {
+  const mine = fm.verdicts.filter((v) => v.profileId === profileId);
+  let rounds = 0;
+  for (let i = mine.length - 1; i >= 0; i -= 1) {
+    const v = mine[i]!;
+    if (v.result !== "request_changes") break;
+    // Ruling 204: ROUNDS, not distinct revisions. Live on SHOP-9 the Integration
+    // Verifier blocked the same revision twice — the deliverer had nothing it
+    // was allowed to change, because the blocker was another task's work — and
+    // the old count read 1, so the doctrine that exists to put exactly that
+    // deadlock in front of a human could not see it. The counter was keyed on
+    // the one signal that STOPS MOVING when the work gets stuck.
+    rounds += v.rounds;
+  }
+  return rounds;
 }
 
 /** Every non-delivering engagement (the former "reviewers" position). */
@@ -345,6 +438,43 @@ export const SCHEDULE_STATUS_VALUES = [
   "cancelled",
 ] as const;
 
+/**
+ * Ruling 241 (pass 37, F37-68): a question put to a reviewer that a DEPENDENCY
+ * HOLD refuses right now, kept until the hold lifts.
+ *
+ * Ruling 237's escalation recommends asking the reviewer to name everything it
+ * would still block on. Ruling 186 refuses every agent dispatch on a held task
+ * ("Every dispatch door lands here, so every one of them refuses"), and ruling
+ * 237 added a dispatch door without checking. Live on SHOP-5 the person chose
+ * the recommended option, the decision was written onto the task contract, the
+ * packet was cleared, and the reviewer was never asked: the one option that
+ * could end the loop consumed the decision and did nothing.
+ *
+ * The owner's call was QUEUE, not refuse: the question survives the wait and is
+ * put the moment the task can run again. `announceRelease` is the one release
+ * chokepoint, so the drain has exactly one home.
+ */
+export const queuedQuestionSchema = z
+  .object({
+    id: z.string().min(1),
+    /** The reviewer the question is for. Resolved against the LIVE engagement
+     *  at drain time, the same R22 rule the schedule's `profileId` follows. */
+    profileId: z.string().min(1),
+    /** The question itself, stored rather than rebuilt: a person was promised
+     *  this text (ruling 237 wrote it down for that reason), and the wait can
+     *  outlive the constant. */
+    directive: z.string().min(1),
+    /** Who decided, for the run's `directiveFrom` and for the record. */
+    decidedBy: z.string().min(1),
+    decidedByLabel: z.string().min(1),
+    decidedAt: z.string().min(1),
+    /** What the task waited on when the question was queued, so the drain note
+     *  can say what it was waiting for. */
+    heldBy: z.array(z.string()).default([]),
+  })
+  .loose();
+export type QueuedQuestion = z.infer<typeof queuedQuestionSchema>;
+
 export const scheduleSchema = z
   .object({
     id: z.string().min(1),
@@ -431,6 +561,13 @@ export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
  * indistinguishable from a credential outage. ABSENT/null means "never read",
  * exactly like `checks`/`review`.
  */
+/** Ruling 236: the cap on `pr.paths.changed`. A PR touching more files than
+ *  this records the first `PR_PATHS_MAX` and sets `truncated`, which the
+ *  overlap read treats as "this list may be short" rather than as the whole
+ *  diff. Chosen to cover any review-sized change while bounding what a
+ *  hand-edited file can put in memory. */
+export const PR_PATHS_MAX = 300;
+
 export const PR_MERGEABLE_VALUES = ["clean", "conflicting", "unknown"] as const;
 export type PrMergeable = (typeof PR_MERGEABLE_VALUES)[number];
 
@@ -466,6 +603,23 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
+    // Ruling 236 (owner, 2026-09-14): the repository paths this PR changes, so
+    // the review queue can say which OTHER open PRs a merge would put into
+    // conflict before a person finds out by pressing Accept. Pinned to the head
+    // it was read at, because a file list cannot change without the head moving
+    // — that pin is what lets the fetch be skipped on every tick where it did
+    // not. `truncated` is honest about the cap rather than silently short: an
+    // overlap computed from a clipped list can only MISS a collision, never
+    // invent one, and a surface that shows it must say which it is.
+    // Same optional-key convention as everything above: absent = never read.
+    paths: z
+      .object({
+        headSha: z.string().min(1),
+        changed: z.array(z.string().min(1)).max(PR_PATHS_MAX),
+        truncated: z.boolean(),
+      })
+      .nullish()
+      .catch(null),
     // Ruling 135 (pass 34, F34-11): the PR's head sha as GitHub last reported
     // it. Absent = never read (the same optional-key convention as the facts
     // above); carried forward by the reconciler and by a PR reuse; never
@@ -571,8 +725,32 @@ export function unpushedRevisionOf(
  * that the delivered revision is not on the pull request. The remedy is to
  * deliver ("push"), never to rebase: a behind or absent remote reaches the PR
  * by a plain push; a diverged remote needs the history resolved first, and the
- * sentence says which.
+ * sentence names the act that resolves it (ruling 321) rather than asserting
+ * that one exists.
  */
+/**
+ * Ruling 321 — the one act that resolves a diverged branch, said once.
+ *
+ * Five separate sentences told a person to "resolve the branch history" and
+ * none of them named an act: this reader, the workspace-delivery timeline line,
+ * the operator's `update_branch_from_base` remote sentence, the collision
+ * ceremony's own-PR-diverged note, and the packet outcome summary. The header
+ * of this very function claimed the opposite — *"a diverged remote needs the
+ * history resolved first, and the sentence says which"* — while the sentence
+ * said only that someone should.
+ *
+ * Live on SHOP-11 the owner supplied the missing half by hand, in a decision
+ * note, and then had the controller write it into the project's rulings KB so
+ * no agent would need telling again: *"Viberr's own update_branch_from_base
+ * merges main into the branch; it does not rewrite history, and that is the
+ * correct shape whenever a PR is already tracking the branch."* That is a fact
+ * about Viberr, learned from Viberr, that Viberr could have said itself.
+ */
+export const DIVERGED_BRANCH_REMEDY =
+  "The way out is a MERGE of the remote branch into the workspace branch, never a rebase or an " +
+  "amend: a branch a pull request tracks has published commits, and rewriting them is what " +
+  "diverges it.";
+
 export function unpushedRevisionBlockedReason(
   pr: PrRef | null | undefined,
   currentRevisionSha: string | null,
@@ -583,7 +761,16 @@ export function unpushedRevisionBlockedReason(
   const rev = record.revisionSha.slice(0, 7);
   const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "an older head";
   if (record.relation === "diverged") {
-    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number}, whose head ${head} holds commits this workspace does not. Resolve the branch history, then deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
+    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number}, whose head ${head} holds commits this workspace does not. ${DIVERGED_BRANCH_REMEDY} Then deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
+  }
+  // Ruling 207(k): `unknown` is not `behind`. It is written when the compare
+  // could not be READ at all (the reconciler's `compare()` failing, a mirror
+  // that could not be built), so the remote may well be diverged — and the old
+  // sentence handed that case the plain-push remedy the `diverged` arm exists
+  // to replace. Naming the uncertainty is the honest answer: the same first
+  // move, without the promise that it will land.
+  if (record.relation === "unknown") {
+    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}), and Viberr could not read how the two relate. Deliver the branch to try the push — if the remote has diverged it will refuse, and the history has to be resolved first. It cannot be accepted until the PR carries the reviewed revision.`;
   }
   return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
 }
@@ -619,7 +806,19 @@ export function revisionLeftWorkspace(fm: {
 /** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
 export const githubCommitSchema = z
-  .object({ sha: z.string(), msg: z.string() })
+  .object({
+    sha: z.string(),
+    msg: z.string(),
+    /** Ruling 187 (pass 37, F37-8): does the REMOTE have this commit? Stamped
+     *  by the reconciler from a complete branch compare. Absent means "not
+     *  judged" — no compare has been able to say — which every renderer must
+     *  treat as unknown rather than as either answer. A workspace commit that
+     *  delivery has not pushed yet reads `false` and is honest; so does one
+     *  whose workspace is gone. Distinguishing those two at reconcile time is
+     *  not possible (neither is on the remote, neither carries `pushedAt`), so
+     *  this says only what is knowable. */
+    pushed: z.boolean().optional(),
+  })
   .loose();
 export const githubCacheSchema = z
   .object({
@@ -672,6 +871,26 @@ export const packetObservationSchema = z
   .loose();
 export type PacketObservation = z.infer<typeof packetObservationSchema>;
 
+/**
+ * Ruling 131: one `blockedBy` entry as stored — a spelling
+ * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (a task
+ * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
+ * carries exactly what the surfaces print and the resolver looks up.
+ */
+export const dependencyRefTextSchema = z
+  .string()
+  .transform((value, ctx) => {
+    const canonical = canonicalDependencyRef(value);
+    if (canonical === null) {
+      ctx.addIssue({
+        code: "custom",
+        message: `not a task key or a goal link (\`${value}\`)`,
+      });
+      return z.NEVER;
+    }
+    return canonical;
+  });
+
 export const packetOptionSchema = z
   .object({
     kind: z.enum(PACKET_OPTION_KINDS),
@@ -685,7 +904,8 @@ export const packetOptionSchema = z
     /** retry_other_backend — the backend to re-run the failed agent on. */
     backend: z.enum(["codex", "claude"]).optional(),
     /** retry_other_backend — a reviewer retry names its profile (the primary
-     *  specialist needs none). */
+     *  specialist needs none). Ruling 237: `question_reviewer` names the
+     *  reviewer the question goes to, and is refused without one. */
     profileId: z.string().optional(),
     /** archive_task — ALSO delete the task's remote branch when archiving
      *  (discard the rejected work entirely, not just the task's board row).
@@ -700,6 +920,38 @@ export const packetOptionSchema = z
      *  moves the task to, as a stage id of this project. Required on the kind
      *  (authoring refuses one without it) and refused on every other kind. */
     toStage: z.string().optional(),
+    /** wait_for_window — ruling 224: the instant the provider said its window
+     *  reopens, as an ISO timestamp. The resolution schedules the agent's
+     *  re-dispatch just after it. Required on the kind, refused on every
+     *  other. */
+    dueAt: z.string().optional(),
+    /** Ruling 230: `block_on_dependencies` — what this task waits on, in the
+     *  same spellings `blockedBy` stores (a task key, or a goal link). */
+    blockedBy: z.array(dependencyRefTextSchema).optional(),
+    /** create_task — ruling 269: the task the resolution creates. `title` and
+     *  `goal` are required on the kind (authoring refuses one without them)
+     *  and the whole field is refused on every other kind. */
+    newTask: z
+      .object({
+        title: z.string().min(1),
+        goal: z.string().min(1),
+        /** What the NEW task waits on, in `blockedBy`'s own spellings. Not the
+         *  same field as `block_on_dependencies`'s, which holds THIS task's. */
+        blockedBy: z.array(dependencyRefTextSchema).optional(),
+        /**
+         * Ruling 287: the EXISTING tasks that must wait on the new one — the
+         * reverse edge, which ruling 269 could not express at all.
+         *
+         * A task is usually created to UNBLOCK something, so the dependency
+         * runs from the existing work to the new task, and that is the
+         * direction `blockedBy` cannot say. Each key is written into THAT
+         * task's own `blockedBy`, checked exactly as its own editor would check
+         * it, and only because a person confirmed the option.
+         */
+        blocks: z.array(dependencyRefTextSchema).optional(),
+        labels: z.array(z.string()).optional(),
+      })
+      .optional(),
     /** redirect — ruling 163 (pass 35, F35-13): the resolution RETURNS the
      *  task to the review stage when it stands at or past it, so the reworked
      *  revision gets its verdict where the reviewers are eligible. Written by
@@ -708,6 +960,22 @@ export const packetOptionSchema = z
   })
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;
+
+/**
+ * Ruling 315: the cap BOTH free-text fields on a decision packet share.
+ *
+ * They used to be 2,000 (silently sliced in the route, with nothing on the box
+ * saying so) and 4,000 (refused by the server), and which one a person got was
+ * decided by whether the selected option happened to be the synthetic "Write
+ * your own directive" index — not by anything they could see. One number now,
+ * refused at both, stated on the label, and enforced by the textarea so the
+ * browser stops the paste rather than the server refusing a confirm the person
+ * has already committed to.
+ *
+ * Lives here because the box that must show it is a client component and the
+ * guard that must enforce it is server-only.
+ */
+export const PACKET_NOTE_MAX = 4000;
 
 export const taskPacketSchema = z
   .object({
@@ -739,6 +1007,22 @@ export const taskPacketSchema = z
         byUserId: z.string().min(1),
       })
       .optional(),
+    /**
+     * Ruling 315: the CAUSE that raised this packet, when the cause is bigger
+     * than the task.
+     *
+     * A backend account losing its quota or its credential takes out every task
+     * running on it at once, and each one raised its own identical packet —
+     * same reason, same remedy, same options, N times. The person is answering
+     * the CAUSE, not the task, so packets that share a cause resolve together:
+     * answering one applies the same option to every sibling still carrying it.
+     *
+     * Absent on every packet whose cause is the task itself, which is almost
+     * all of them. A stable string, not an id: it is built from what actually
+     * failed (backend, failure kind, whose account), so two tasks that failed
+     * for the same reason agree on it without anything coordinating them.
+     */
+    cause: z.string().optional(),
     /** R15-14: profileId of the AGENT that raised this question, when one did.
      *  Resolving such a packet resumes that agent's own session with the answer
      *  rather than handing it to the operator to re-engage a cold run. Absent on
@@ -837,31 +1121,18 @@ export const reviewVerdictSchema = z
     result: z.enum(REVIEW_VERDICT_RESULTS),
     reason: z.string().default(""),
     at: z.string().min(1),
+    /** Ruling 204: how many times this reviewer has returned THIS result on
+     *  THIS revision. The verdict itself stays last-write-wins per
+     *  (profileId, revisionId) — F10-15's model, unchanged — but the count of
+     *  blocking rounds must not be destroyed by the overwrite, because a
+     *  reviewer re-blocking an UNCHANGED revision is the strongest evidence
+     *  there is that the deliverer cannot satisfy it. Absent reads 1. */
+    rounds: z.number().int().min(1).default(1),
   })
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
 // -------------------------------------------------------- frontmatter
-
-/**
- * Ruling 131: one `blockedBy` entry as stored — a spelling
- * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (a task
- * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
- * carries exactly what the surfaces print and the resolver looks up.
- */
-export const dependencyRefTextSchema = z
-  .string()
-  .transform((value, ctx) => {
-    const canonical = canonicalDependencyRef(value);
-    if (canonical === null) {
-      ctx.addIssue({
-        code: "custom",
-        message: `not a task key or a goal link (\`${value}\`)`,
-      });
-      return z.NEVER;
-    }
-    return canonical;
-  });
 
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
 export const baseRefreshSchema = z
@@ -917,6 +1188,9 @@ const taskFrontmatterFields = {
   recommendations: z.array(recommendationSchema),
   /** Pending/fired scheduled actions (O-3) — a server-side runner fires them. */
   schedules: z.array(scheduleSchema),
+  /** Ruling 241: reviewer questions a dependency hold refused, put when the
+   *  hold lifts. Empty on every task that never had one. */
+  queuedQuestions: z.array(queuedQuestionSchema).default([]),
   urgent: z.boolean(),
   /** Task priority (pass-25). A graded triage scale; "urgent" is the top rung and
    *  keeps the board's existing urgent highlight (`urgent` is derived from it at
@@ -992,6 +1266,29 @@ const taskFrontmatterFields = {
   // its card. This is the SERVER half only: the durable fact + its projection +
   // TaskSummary. The "accepted · gate bypassed" display arm is C-VOCAB's.
   acceptance: z.enum(["forced"]).nullable().optional(),
+  /**
+   * Ruling 226 (F37-43): a maintainer took a merge whose containment check
+   * GitHub refused to run, deliberately and on the record.
+   *
+   * Pinned to all three shas/numbers it was granted against, because the whole
+   * danger it admits is that the PR head is unknown: a waiver that outlived the
+   * head it was granted for would be a standing permission to merge anything
+   * that branch later carried. The gate re-reads the live head and honours this
+   * only while the triple still matches.
+   */
+  headCheckWaiver: z
+    .object({
+      prNumber: z.number().int(),
+      /** The delivered revision the reviewers were pinned to. */
+      revisionHeadSha: z.string().min(1),
+      /** The live PR head GitHub reported at the moment of the waiver. */
+      liveHeadSha: z.string().min(1),
+      at: z.string().min(1),
+      byUserId: z.string().min(1),
+      byLabel: z.string().default(""),
+    })
+    .nullable()
+    .optional(),
   github: githubCacheSchema.nullable(),
   /** Chained-goal back-reference (ruling 99): this task is one LINK of a goal
    *  chain. The chain itself is canonical in
@@ -1186,7 +1483,8 @@ export function closedPrBlockedReason(
  * task on a merge that did not happen — live-proven: VM-4 went to Done with
  * `pr.state: accepted` while PR #103 stayed open and conflicting, and the
  * timeline blamed unreachable GitHub / missing credentials. The conflict is a
- * REWORK signal (rebase the branch), not a merge-pending state.
+ * REWORK signal, not a merge-pending state — and the rework is a MERGE of the
+ * base into the branch, never a rebase (ruling 291).
  *
  * `unknown` (GitHub still computing) never blocks — the merge attempt itself is
  * the authority there. Shaped like the other acceptance gates (reason-or-null).
@@ -1198,7 +1496,15 @@ export function conflictingPrBlockedReason(
   const pr = fm.pr;
   if (!pr || pr.mergeable !== "conflicting") return null;
   if (pr.state === "merged" || pr.state === "closed") return null;
-  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`;
+  // Ruling 291 (F37-126): this never names the rewrite. Viberr's own remedy is a
+  // MERGE — `update_branch_from_base` "merge[s] the base into the branch and
+  // push[es] it", and that same tool's text tells the operator to "never ask an
+  // agent to rebase, merge or force-push". This sentence was the one place the
+  // product recommended the operation it forbids everywhere else, to the one
+  // reader with no tool and the most freedom to do it by hand. It is also the
+  // operation that broke a branch on this very board: "Live on SHOP-11: a
+  // rebase diverged the branch from its own PR #15" (operator-actions.server).
+  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`;
 }
 
 /**
@@ -1299,6 +1605,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "operator",
   "recommendations",
   "schedules",
+  "queuedQuestions",
   "urgent",
   "priority",
   "labels",
@@ -1318,6 +1625,10 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "pr",
   "noChanges",
   "acceptance",
+  // Ruling 226: without this line the waiver never reaches the file, so the
+  // gate that re-reads it would refuse forever and the override would be a
+  // button that does nothing. The canary found exactly that.
+  "headCheckWaiver",
   "github",
   "goalRef",
   "createdAt",
@@ -1683,6 +1994,19 @@ export function parseTaskFrontmatter(
       "schedules",
       taskFrontmatterFields.schedules.element,
     ),
+    // Ruling 241: absent on every task that never had a question queued →
+    // empty, silently. Per-ROW, so one malformed entry never drops a question
+    // a person was promised. (`queuedQuestions` carries a `.default([])`
+    // wrapper, so its element is named directly — `.element` is only exposed by
+    // a bare `z.array`, and the same trap dropped `rulingsKb` on the project
+    // parser earlier in this pass: this builder reads field by field, so a
+    // field missing HERE writes fine and reads back undefined.)
+    queuedQuestions: tolerantRows(
+      diagnostics,
+      data,
+      "queuedQuestions",
+      queuedQuestionSchema,
+    ),
     // urgent is an optional boolean by contract — absent means false, silently.
     urgent: tolerant(
       diagnostics,
@@ -1779,6 +2103,14 @@ export function parseTaskFrontmatter(
       data,
       "acceptance",
       taskFrontmatterFields.acceptance,
+      undefined,
+    ),
+    // Ruling 226: absent means "no override was granted" — never a diagnostic.
+    headCheckWaiver: tolerant(
+      diagnostics,
+      data,
+      "headCheckWaiver",
+      taskFrontmatterFields.headCheckWaiver,
       undefined,
     ),
     github: tolerant(
@@ -1995,6 +2327,19 @@ export function sanitizeEventAttachmentNames(
   return out.length > 0 ? out : null;
 }
 
+/**
+ * Ruling 317: the title on a comment that is a verdict's full justification.
+ *
+ * `clipVerdictReason` stores 2,000 characters of it and appends "Its full
+ * report is on this task's timeline, whole." That promise holds only while the
+ * timeline keeps the comment, and compaction folds comments — so the comment
+ * says what it is, and compaction reads the title.
+ *
+ * Lives here because the writer is a server action and the reader is the
+ * compaction pass, and neither should import the other.
+ */
+export const VERDICT_REPORT_TITLE = "Review verdict";
+
 /** One parsed `###` timeline entry. Newest-first in the file and here. */
 export interface TaskFileEvent {
   /** UTC ISO 8601. */
@@ -2014,6 +2359,23 @@ export interface TaskFileEvent {
    *  captures). Optional: most writers never produce files, and an absent field
    *  serializes to nothing. Names only — the directory stays the truth. */
   attachments?: string[];
+  /**
+   * Ruling 317: this comment is the FULL text a stored verdict's `reason` is a
+   * clip of, and whose marker names this timeline as the complete copy.
+   *
+   * Ruling 292 clips a justification at 2,000 characters and appends "Its full
+   * report is on this task's timeline, whole." Compaction then folded exactly
+   * this comment away, because the two fields that protect a comment from
+   * folding — `evidence` and `attachments` — are moved OFF it by
+   * `prepareAgentReplyEvent` precisely when there IS a verdict (P13-D-26 puts
+   * them on the `quality` event instead). So the protection was inverted: a
+   * deliverer's report was immune and the record a stored pointer depends on
+   * was first to go.
+   *
+   * Optional and absent almost everywhere; an absent field serializes to
+   * nothing, so no existing task file changes.
+   */
+  verdictReport?: boolean;
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */

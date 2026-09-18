@@ -11,6 +11,8 @@
  * assert on the one sentence.
  */
 
+import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
+
 export const COLLISION_OUTCOMES = [
   /** The stale remote branch was cleared and the work re-delivered. */
   "cleared_and_delivered",
@@ -64,7 +66,7 @@ export function serverOutcomeSentence(o: CollisionServerOutcome): string {
     case "own_pr_delivery_failed":
       return `there was no collision to clear (${pr} is this task's own review PR), but the delivery that would push the revision to it did not complete (${reason}); the block stays.`;
     case "own_pr_diverged":
-      return `there was no collision to clear (${pr} is this task's own review PR), but its remote copy holds commits this workspace does not; a person resolves the branch history and the block stays.`;
+      return `there was no collision to clear (${pr} is this task's own review PR), but its remote copy holds commits this workspace does not. ${DIVERGED_BRANCH_REMEDY} The block stays until that happens.`;
     case "refused":
       return `the collision was not cleared (${reason}); nothing was re-delivered and the block stays.`;
   }

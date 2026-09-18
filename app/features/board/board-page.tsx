@@ -50,6 +50,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
+import { LocalDayDotTime } from "~/ui/local-time";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill, ReadinessPill, ValidationPill, validationLabel, validationQuiet } from "~/ui/pill";
 import {
@@ -308,6 +309,26 @@ function WaitTag({ task }: { task: TaskSummary }) {
       <span className="wait-tag human">
         <Icon name="hand" />
         {task.waitingOnMe ? "waiting on you" : "waiting on a human"}
+      </span>
+    );
+  }
+  // Ruling 225 (F37-45): resting on a clock, not on a person. The hand icon
+  // above is the demand this tag is NOT making, so it gets a clock instead.
+  // Without the instant the tag would be a worse "waiting on a human" than the
+  // one it replaces, so name it: the projection only ever sets this state from
+  // a pending occurrence, and the wordless fallback covers a schedules list
+  // that failed to parse at the read boundary rather than inventing a time.
+  if (task.waiting === "schedule") {
+    return (
+      <span className="wait-tag scheduled">
+        <Icon name="clock" />
+        {task.resumesAt ? (
+          <>
+            resumes <LocalDayDotTime iso={task.resumesAt} />
+          </>
+        ) : (
+          "resumes on its own"
+        )}
       </span>
     );
   }
@@ -741,7 +762,12 @@ function TaskCard({
 function readinessYields(task: TaskSummary): boolean {
   const r = task.displayReadiness;
   if (r === "agent_working") return true;
-  if (task.waiting !== "human") return false;
+  // Ruling 225 extends ruling 168(a)'s yield to a clock rest, and it matters
+  // more here than for a human wait: "input required" above "resumes Sep 14 ·
+  // 02:28" is not one demand said twice, it is two statements that contradict
+  // each other — a pill claiming a person is needed right now over a tag saying
+  // the task comes back on its own.
+  if (task.waiting !== "human" && task.waiting !== "schedule") return false;
   return r === "ready" || r === "input_required" || r === "blocked" || r === "goal_edit_pending";
 }
 
@@ -1292,6 +1318,9 @@ function AcceptOnBoardConfirm({
         validation: task.validation,
         branch: task.branch,
         pr: task.pr,
+        // Ruling 304: the board summary carries the checks too, so the same
+        // dialog says the same thing from either door.
+        prChecks: task.prChecks ?? null,
       }}
       workRevisionSha={task.workRevisionSha ?? null}
       noChanges={false}

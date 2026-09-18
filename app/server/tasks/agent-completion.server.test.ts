@@ -27,7 +27,7 @@ import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
-import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
+import { insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
@@ -35,8 +35,11 @@ import {
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
+import { stageOutcome } from "./agent-outcome.server";
 import {
+  acceptanceRefusalFor,
   applyAgentCompletionEffects,
+  classifyReviewerVerdict,
   markWaitingAgent,
 } from "./task-actions.server";
 import {
@@ -155,6 +158,36 @@ function writeReviewTask(
       ...patch,
     }),
     goal: "Exercise the reviewer reply + verdict.",
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+/** Add an operator deployment to the fixture project, so the completion react
+ *  actually reaches `runOperator` — with none deployed it returns early and any
+ *  assertion about the react is vacuous. */
+function deployOperator(): void {
+  const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...pf.parsed.frontmatter,
+    agents: [
+      ...pf.parsed.frontmatter.agents,
+      {
+        profileId: "operator",
+        capabilities: [
+          { capabilityId: "generate-packets", mode: "direct" },
+          { capabilityId: "append-typed-events", mode: "direct" },
+        ],
+        extras: [],
+        definition: {
+          kind: "operator",
+          name: "Operator",
+          role: "Task coordinator",
+          backends: ["claude"],
+          model: "sonnet",
+          autonomy: "supervised",
+        },
+      },
+    ],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -279,6 +312,80 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
 
   /**
+   * Ruling 231 (F37-51, live on pass 37). The react re-invocation used to pin
+   * `ctx.operatorRun.backend` — the backend of the drive that prompted the
+   * agent — and pass it as an OVERRIDE, which beats the live deployment. R22
+   * removed exactly that pin from schedules, on exactly this reasoning:
+   * following the profile that is ACTUALLY deployed matters more than freezing
+   * whatever was configured earlier.
+   *
+   * Measured: the owner moved the operator from Codex to `opus[1m]` at
+   * 04:19:56 UTC, and a react chain started a CODEX operator run at 04:31:44
+   * against a deployment that read `claude`.
+   *
+   * Canary: restore `reactBackend = input.operatorRun.backend`.
+   */
+  it("ruling 231: a react uses the DEPLOYED backend, not the one its chain started on", async () => {
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            // The live deployment the owner just set.
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    writeReviewTask({ stage: "impl", waiting: "agent" });
+    const runId = await finishedRunWith("Done with the slice. @operator");
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "developer",
+        role: "Implementation",
+        delivers: true,
+        workdir: null,
+        agentHandle: "developer",
+        // The chain that prompted this agent ran on the OLD backend. This is
+        // the field the react block reads — putting it on `ctx` instead made
+        // the first version of this canary pass with the bug restored.
+        operatorRun: { backend: "codex", autonomy: "supervised", reactDepth: 0 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+
+    // SAFETY: `backend` is a TEXT NOT NULL column on `agent_runs`
+    // (0001_baseline.sql); only operator rows are selected and this test
+    // creates exactly one.
+    const operatorRows = store.db
+      .prepare(`SELECT backend FROM agent_runs WHERE kind = 'operator'`)
+      .all() as { backend: string }[];
+    expect(operatorRows.length).toBeGreaterThan(0);
+    expect(operatorRows.map((r) => r.backend)).not.toContain("codex");
+    expect(operatorRows[0]!.backend).toBe("claude");
+  });
+
+  /**
    * Ruling 177 (pass 36, F36-5): a run that outlives its task's closure —
    * HLC-9 was force-accepted while its developer was still building; the run
    * finished three minutes later, the dispatch-completion contract re-invoked
@@ -395,6 +502,122 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
     expect(fm.recommendations.map((r) => r.id)).toEqual(["rec_run"]);
+  });
+
+  /**
+   * Ruling 248 (pass 37, F37-77): a run that could not read the work judges
+   * nothing.
+   *
+   * LIVE, on SHOP-5. The Code Reviewer's checkout failed to provision, so
+   * viberr told it in the prompt: "The workspace has NO checkout, and this is a
+   * server-side FAILURE, not something you can fix … quote the reason above
+   * verbatim". It did exactly that, returned envelope `verdict: null` and wrote
+   * "No content verdict recorded" in its summary — and viberr recorded
+   * `request_changes` against the revision, because the prose fallback matched
+   * the word "failure" inside viberr's OWN sentence. That fabricated objection
+   * was the second in a row from that reviewer, so the policy engine raised a
+   * review-deadlock packet asking a person to choose between interrogating a
+   * reviewer that never judged and forcing acceptance past a verdict that did
+   * not exist.
+   *
+   * The text below is the sentence viberr itself composes, verbatim.
+   */
+  const VIBERR_OWN_NO_CHECKOUT_REPORT =
+    "The checkout could not be provisioned, so I cannot review revision `81ae03e` or run its suite. " +
+    "Per the workspace contract: \u201cThe workspace has NO checkout, and this is a server-side failure, " +
+    "not something you can fix.\u201d No content verdict recorded.";
+
+  it("ruling 248: a reviewer run with NO checkout records no verdict, however its prose reads", async () => {
+    writeReviewTask();
+    const runId = await finishedRunWith(VIBERR_OWN_NO_CHECKOUT_REPORT);
+    // The durable fact the clone path stamps on the row.
+    patchRun(store.db, runId, { noCheckout: 1 });
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+
+    const fm = taskFile().parsed.frontmatter;
+    // CANARY: drop `&& !readNothing` from the verdict line and this is
+    // `failing` with a `request_changes` row bound to the revision — the live
+    // shape, fabricated out of viberr's own word.
+    expect(fm.verdicts).toEqual([]);
+    expect(fm.validation).toBe("changed");
+    // And the record says what happened, rather than leaving a completed review
+    // run on the page with nothing to explain the silence.
+    const note = taskFile().parsed.timeline.find(
+      (e) => e.type === "note" && e.text.includes("no checkout of the repository"),
+    );
+    expect(note).toBeTruthy();
+    expect(note!.text).toContain("recorded no verdict");
+    // "Re-run the review" is bad advice for a condition a re-run reproduces.
+    expect(note!.text).not.toContain("Re-run the review or record a verdict manually");
+  });
+
+  it("ruling 248: the trap is real — that same prose classifies as request_changes", () => {
+    // Not a hypothetical. The ONE word carrying the verdict is "failure", and
+    // it is in the sentence VIBERR wrote and ordered the agent to quote.
+    // CANARY: this is the pre-fix behaviour, pinned so nobody removes the gate
+    // above believing the classifier is harmless here.
+    expect(classifyReviewerVerdict(VIBERR_OWN_NO_CHECKOUT_REPORT)).toBe("request_changes");
+    expect(
+      classifyReviewerVerdict(
+        VIBERR_OWN_NO_CHECKOUT_REPORT.replace("server-side failure", "server-side condition"),
+      ),
+    ).toBeNull();
+  });
+
+  it("ruling 248: an envelope that ASKED instead of judging is not re-read as a verdict", async () => {
+    writeReviewTask();
+    const runId = await finishedRunWith(
+      "I need the pinned revision before I can judge this. The suite currently fails to run at all.",
+    );
+    // The agent filled the envelope, left `verdict` empty and asked a question:
+    // it said which of the two it was doing.
+    stageOutcome(store.db, `oc-${runId}`, {
+      summary: "I need the pinned revision before I can judge this.",
+      question: {
+        title: "Provision checkout",
+        body: "Provision a usable checkout for the pinned revision, then I can review.",
+      },
+    });
+
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        outcomeKey: `oc-${runId}`,
+      },
+      { id: runId, state: "finished" },
+    );
+
+    const fm = taskFile().parsed.frontmatter;
+    // CANARY: drop `&& !outcome?.question` and the word "fails" in the prose
+    // becomes a blocking review verdict on a revision nobody judged. The
+    // no-verdict NOTE already treats a question as a legitimate no-verdict
+    // outcome (pass 24, C-4); the classifier is its sibling.
+    expect(fm.verdicts).toEqual([]);
+    expect(fm.validation).toBe("changed");
   });
 
   it("records a reviewer verdict from the FULL reply even when the verdict sits past the 1200-char comment cut (X9)", async () => {
@@ -817,6 +1040,255 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(taskFile().parsed.packet).toBeNull();
   });
 
+  /**
+   * Ruling 258 (pass 37, F37-89): a chain that stopped because the work is
+   * FINISHED did not get stuck.
+   *
+   * Live on SHOP-32: the Integration Verifier approved `f5470f05`, both
+   * required verdicts sat on the current head and validation read `healthy` —
+   * and two seconds later the depth cap opened "Work stalled: pick a recovery
+   * path", offering redirect, send-back and hold-for-debugging. Every option
+   * re-dispatches work that had passed, and the packet then blocked the
+   * acceptance it should have been waiting for: "This task has an open blocked
+   * decision. Resolve the operator's packet before accepting it." The only
+   * remaining doors were to redo finished work, or to force-accept past a
+   * review gate that had PASSED and record a bypass that never happened.
+   */
+  it("ruling 326: a refused option set falls back to the stock one — a stalled task always gets a packet", async () => {
+    /**
+     * `operatorOpenPacket`'s authoring guards exist to COACH the operator: it
+     * reads the refusal, revises its options and tries again, and the messages
+     * are written that way — "Offer the OTHER backend, or offer wait_for_window
+     * with dueAt set to the reopen instant". `openStuckLoopPacket` has no such
+     * loop. It composed the options itself, so a refusal there ended with a
+     * stalled task and NO packet at all, which is strictly worse than a packet
+     * with one fewer option.
+     *
+     * Live: eleven times in four days on the shopify-clone board, in three
+     * bursts, every one inside the window where Codex was out of quota.
+     *
+     * CANARY: delete the fallback retry in `openStuckLoopPacket`.
+     */
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    // The owner has BOTH backends, and the other one is out of quota — the
+    // exact live shape. `describeRunFailure` no longer composes the retry
+    // (ruling 326's first half), so force the refusal directly: an option set
+    // whose `resolve_remote_collision` has no collision to clear is refused by
+    // an authoring guard the same way.
+    writeReviewTask({ validation: "changed" });
+    const runId = await finishedRunWith("The credential was rejected again.");
+    const { openStuckLoopPacketForTest } = await import("./task-actions.server");
+    await openStuckLoopPacketForTest(
+      store.db,
+      { dataRoot: store.dataRoot, operatorAuthorized: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        agentHandle: "reviewer",
+        reason: "Claude refused the agent run: the provider rejected the credential.",
+        options: [
+          {
+            kind: "resolve_remote_collision",
+            title: "Clear the branch collision",
+            detail: "There is no collision on this task, so authoring refuses this whole packet.",
+            recommended: true,
+          },
+        ],
+      },
+    );
+    void runId;
+
+    const packet = taskFile().parsed.packet;
+    expect(packet, "a stalled task got no packet at all").not.toBeNull();
+    // The stock set, which carries no conditional kinds.
+    expect(packet!.options.map((o) => o.kind)).toEqual([
+      "redirect",
+      "request_edit",
+      "hold_runtime_debug",
+    ]);
+    // ...and it says what it could not offer, and why, rather than presenting
+    // the general options as if they were the considered ones.
+    const withheld = packet!.observations.find((o) => o.k === "Tailored options withheld");
+    expect(withheld, "the packet hides that a better option set was refused").toBeTruthy();
+    expect(withheld!.v).toContain("refused its own packet");
+  });
+
+  it("ruling 325: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
+    /**
+     * C10.4 added this card so a task that stopped making progress never sits
+     * waiting on a human with nothing explaining why. It said: "This task's
+     * operator turns stopped making progress, but the recovery packet could not
+     * be opened. It is waiting on a human: run the operator manually or
+     * intervene, then resolve it."
+     *
+     * Both callers hold the reason — one has `operatorOpenPacket`'s own refusal
+     * message, the other a thrown Error — and both LOG it. Neither passed it.
+     * So the card that exists to explain a stuck task gave the reader back the
+     * observation they had already made, and then sent them to "resolve it":
+     * there is no packet, which is the entire subject of the note.
+     *
+     * CANARY: stop threading `why` and print the old fixed sentence.
+     */
+    // No operator agent is deployed on this project at all (the store's
+    // default), so the packet the depth cap wants is refused for a REAL reason
+    // the server can state — which is the whole point.
+    writeReviewTask({ validation: "changed" });
+    const runId = await finishedRunWith("Still not right; the same three files.");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await waitFor(() =>
+      taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
+    );
+
+    const note = taskFile().parsed.timeline.find((e) =>
+      e.text.includes("stopped making progress"),
+    );
+    expect(note, "no card explains the stuck task").toBeTruthy();
+    // No packet was opened — that is what the note is about.
+    expect(taskFile().parsed.packet).toBeNull();
+    // It says so, instead of sending the reader to resolve a card that is not there.
+    expect(note!.text).toContain("There is no packet on this task to resolve");
+    expect(note!.text).not.toContain("then resolve it");
+    // And it carries the server's own reason rather than restating the symptom.
+    expect(note!.text).toContain("Viberr refused it:");
+    expect(note!.text.length).toBeGreaterThan(200);
+    // The refusal arm's remedy is the refusal's own, not "run it again".
+    expect(note!.text).toContain("Clear what the refusal names");
+  });
+
+  it("ruling 258: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
+    // An operator that CAN open packets, so the absence below is a decision
+    // rather than a missing grant.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            role: "Task coordinator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    // A task at the review boundary with its required verdict already in.
+    writeReviewTask({
+      validation: "healthy",
+      pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
+    });
+    const runId = await finishedRunWith("Approved. Everything in the done signal is proven.");
+    await updateTaskFile(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      (f) => {
+        f.frontmatter.verdicts = [
+          {
+            profileId: "reviewer",
+            revisionId: f.frontmatter.workRevision!.id,
+            headSha: f.frontmatter.workRevision!.headSha,
+            result: "approve",
+            reason: "Approved.",
+            at: new Date().toISOString(),
+            rounds: 1,
+          },
+        ];
+      },
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const acceptable =
+      acceptanceRefusalFor(
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        { dataRoot: store.dataRoot },
+      ) === null;
+
+    const skipLog = vi.spyOn(logger, "info");
+    skipLog.mockClear();
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        // At the cap, which is what fired on SHOP-32.
+        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+
+    // The premise of the test: this task really is acceptable, so the chain
+    // reached a boundary rather than running out of road.
+    expect(acceptable).toBe(true);
+    // CANARY: drop the `!acceptableNow` guard and a "Work stalled: pick a
+    // recovery path" packet opens here, and then BLOCKS the acceptance —
+    // three options, every one of them re-running work that passed.
+    expect(taskFile().parsed.packet).toBeNull();
+    expect(
+      skipLog.mock.calls.some(([msg]) =>
+        String(msg).includes("stuck-loop packet skipped"),
+      ),
+    ).toBe(true);
+    // And acceptance is still open, which is the whole point.
+    expect(
+      acceptanceRefusalFor(
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        { dataRoot: store.dataRoot },
+      ),
+    ).toBeNull();
+  });
+
   it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {
     // The required-reviewer set (acceptanceBlockedReason) uses the engage-time
     // `verdictCapable` snapshot. If verdict RECORDING used the live grant
@@ -861,6 +1333,974 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(fm.verdicts).toHaveLength(1);
     expect(fm.verdicts[0]).toMatchObject({ profileId: "reviewer", result: "approve" });
     expect(fm.validation).toBe("healthy");
+  });
+
+  /**
+   * Ruling 204 (F37-24, live on SHOP-9). The verdict row is last-write-wins per
+   * (profileId, revisionId) — F10-15's model, and right: a verdict judges a
+   * revision, and the latest judgement is the one that binds. What the overwrite
+   * destroyed was the COUNT of times this reviewer had blocked, which is the
+   * only evidence that the deliverer could not move. Live, the Integration
+   * Verifier blocked a revision, the deliverer reported it had nothing in scope
+   * to change and committed nothing, and the verifier blocked the same revision
+   * again: two objections, one row, and ruling 193's escalation counter read 1.
+   */
+  it("rulings 204 + 242: a second request_changes on the SAME revision counts a round only when the DELIVERER ran", async () => {
+    writeReviewTask();
+    /** Ruling 242: the deliverer took a turn. A run row is the whole signal —
+     *  its state is irrelevant, because a rework that was dispatched and
+     *  crashed still means a round was fought. */
+    let delivererRuns = 0;
+    const delivererRan = (): void => {
+      delivererRuns += 1;
+      upsertRun(store.db, {
+        id: `run_dev_${delivererRuns}`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `dev-${delivererRuns}`,
+        role: "Developer",
+        kind: "primary",
+        backend: "claude",
+        model: "sonnet",
+        sdk: "claude",
+        agentName: "dev",
+        agentProfileId: "dev",
+        state: "finished",
+      });
+    };
+    const reviewerInput = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId: "reviewer",
+      role: "Reviewer",
+      delivers: false,
+      workdir: null,
+      agentHandle: "reviewer",
+    };
+    const review = async (reply: string) => {
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput,
+        { id: runId, state: "finished" },
+      );
+    };
+
+    await review("Verdict: request_changes\n\n@operator the stack cannot start.");
+    expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(1);
+    expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
+
+    // Ruling 242 (F37-69): a repeat objection with NOBODY having reworked is not
+    // a second round. Live on SHOP-25 the reviewer was asked ruling 237's
+    // escalation question, answered it completely, and attached a
+    // `request_changes` to the same untouched revision 8 milliseconds later —
+    // which took the deadlock count from 2 to 3 and re-raised the packet on top
+    // of the answer a person had just paid for.
+    // CANARY: drop the `reworked` term and this reads 2.
+    await review("Verdict: request_changes\n\n@operator here is the complete list.");
+    expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
+
+    // Ruling 204's own case, which still counts: no new revision is minted,
+    // because the DELIVERER ran and reported it had nothing in scope it was
+    // allowed to change. That is a round fought, and the signal is the run.
+    // CANARY: read `finished` runs only, or key on the revision again, and the
+    // deadlock ruling 237 escalates on goes back to sitting flat forever.
+    delivererRan();
+    await review("Verdict: request_changes\n\n@operator the stack still cannot start.");
+    const blocked = taskFile().parsed.frontmatter.verdicts;
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.rounds).toBe(2);
+    expect(blocked[0]?.result).toBe("request_changes");
+
+    // A DIFFERENT result is a fresh position, not another round of the same one.
+    await review("Verdict: approve\n\n@operator the blocker is gone.");
+    const approved = taskFile().parsed.frontmatter.verdicts;
+    expect(approved).toHaveLength(1);
+    expect(approved[0]?.result).toBe("approve");
+    expect(approved[0]?.rounds).toBe(1);
+  });
+
+  it("F37-64: a Codex-envelope question reaches the inbox under the AGENT's name, not the Operator's", async () => {
+    // Ruling 222 fixed the CLAUDE `ask_human` door in agent-toolkit.server.ts
+    // and left this one, the Codex outcome envelope, which copies its title
+    // format and never set `from` — so `notifyTaskWatchers` stamped
+    // OPERATOR_NOTIFY_FROM over it. Live on SHOP-5: title "Infrastructure
+    // Engineer asks: Gateway route proof", sender Operator, on a packet whose
+    // own `from` named the engineer.
+    // CANARY: drop the `askNotice.from` block.
+    writeReviewTask();
+    // The Codex door reads a JSON outcome envelope out of the reply text, so
+    // the question has to arrive that way rather than as prose.
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Blocked on a decision.",
+        question: {
+          title: "Gateway route proof",
+          body: "Should the scoped trace be accepted, or should validation wait for the route?",
+        },
+      }),
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // The envelope door is Codex-only: `parseAgentOutcomeJson` runs behind
+        // `input.backend === "codex"`.
+        backend: "codex",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(taskFile().parsed.packet?.kind).toBe("Agent question");
+    // SAFETY: `actor_json` is TEXT on `notifications`, written by
+    // `createNotification` from an `ActorRender`.
+    // SAFETY: `title` is nullable TEXT and `actor_json` TEXT NOT NULL on
+    // `notifications`; the rows were written by `createNotification` above.
+    const rows = store.db
+      .prepare(
+        `SELECT title, actor_json FROM notifications WHERE kind = 'approval' AND task_key = 'VIB-1'`,
+      )
+      .all() as { title: string | null; actor_json: string }[];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      // SAFETY: `createNotification` serialises an `ActorRender`, and every
+      // variant of that union carries `kind` and `name`.
+      const from = JSON.parse(r.actor_json) as { kind: string; name: string };
+      expect(from.name).not.toBe("Operator");
+      expect(from).toMatchObject({
+        kind: "agent",
+        backend: "codex",
+        name: "Review & validation",
+      });
+    }
+  });
+
+  /**
+   * Ruling 237 (F37-57, live on SHOP-5). Ruling 210 held that a second
+   * consecutive objection from one reviewer is the point to stop reworking and
+   * ask, ruling 204 gave it a counter that reads the deadlock correctly, and
+   * both were spent on a paragraph in the operator's prompt. Live, the operator
+   * read the paragraph, took the third `request_changes`, and had the deliverer
+   * running again 62 seconds later with no question put to anyone.
+   *
+   * The owner's remedy was to escalate rather than gate: the operator keeps
+   * every move, and the second objection reaches a person by itself.
+   */
+  describe("ruling 237: the second consecutive objection escalates to a person", () => {
+    const reviewerInput = (profileId: string) => ({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId,
+      role: "Review & validation",
+      delivers: false,
+      workdir: null,
+      agentHandle: profileId,
+    });
+    /**
+     * Ruling 242: a round is a round only if the DELIVERER RAN. A real deadlock
+     * has the deliverer going back in between objections and coming out with
+     * nothing it is allowed to change — SHOP-5, SHOP-6 and SHOP-10 all did — so
+     * each review here is preceded by the rework it is objecting to. Without
+     * this the fixture models the one case ruling 242 says is NOT a deadlock: a
+     * reviewer repeating itself with nobody having touched the work.
+     */
+    let delivererRuns = 0;
+    const rework = (): void => {
+      delivererRuns += 1;
+      upsertRun(store.db, {
+        id: `run_rework_${delivererRuns}`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `rework-${delivererRuns}`,
+        role: "Developer",
+        kind: "primary",
+        backend: "claude",
+        model: "sonnet",
+        sdk: "claude",
+        agentName: "dev",
+        agentProfileId: "dev",
+        state: "finished",
+      });
+    };
+    const review = async (
+      reply: string,
+      profileId = "reviewer",
+      extra: { dispatchedByName?: string } = {},
+    ) => {
+      rework();
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { ...reviewerInput(profileId), ...extra },
+        { id: runId, state: "finished" },
+      );
+    };
+    const blocks = (n: number) =>
+      `Verdict: request_changes\n\n@operator objection number ${n}.`;
+
+    it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
+      /**
+       * Ruling 237 raises the "N times running" packet from inside the locked
+       * write that records the verdict, and skips it when a packet is already
+       * open — which it must, since a task holds one packet. Nothing came back.
+       *
+       * So the escalation was attempted EXACTLY ONCE, and any unrelated packet
+       * standing at that instant killed it for good. Ruling 326 established
+       * what those packets usually are: a quota or credential failure, raised
+       * in bursts across several tasks at once and nothing to do with the
+       * review.
+       *
+       * Measured: five tasks on the shopify-clone board reached a second
+       * consecutive request_changes and TWO never got the packet. SHOP-18's
+       * second objection landed at 03:44:44 with a backend-failure packet open
+       * (answered at 04:38:38); the task then ran another eight hours and ended
+       * in a force-accept over a wedged Verify gate. SHOP-10 reached three
+       * rounds the same way.
+       *
+       * CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
+       */
+      writeReviewTask();
+      await review(blocks(1));
+
+      // An unrelated decision — a backend failure, the live shape — is open
+      // when the second objection lands.
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.packet = {
+            type: "blocked",
+            kind: "Blocked decision",
+            from: "operator",
+            title: "Work stalled: pick a recovery path",
+            body: "Claude refused the agent run: the usage window is spent.",
+            observations: [],
+            options: [
+              { kind: "request_edit", t: "Send the agent back to continue", d: "", rec: true },
+            ],
+          };
+        },
+      );
+
+      await review(blocks(2));
+
+      // The automatic clear site: no person is involved at all. The verdict was
+      // written while the stalled packet stood, so ruling 237 skipped the
+      // escalation — and seconds later the SAME run's success auto-withdrew
+      // that packet (withdrawSupersededStuckPacket), taking the escalation with
+      // it. This path has fired ZERO times on the live board; the two real
+      // misses came through the human resolution the sibling test drives. It is
+      // covered because it is the same defect, not because it has bitten.
+      const raised = taskFile().parsed.packet;
+      expect(raised, "the escalation was dropped for good").not.toBeNull();
+      expect(raised!.title).toContain("requested changes 2 times running");
+      // ...and it says why it is arriving late, rather than appearing from
+      // nowhere on a task whose last visible event was a packet withdrawal.
+      const note = taskFile().parsed.timeline.find((e) =>
+        e.text.includes("could not be raised then"),
+      );
+      expect(note, "a packet that arrives late says why").toBeTruthy();
+      expect(note!.text).toContain("another decision was already open");
+    });
+
+    it("ruling 328: the same retry runs when a PERSON clears the packet that blocked it", async () => {
+      // THE PATH THE TWO LIVE MISSES TOOK. An `input` packet is never
+      // auto-withdrawn (`withdrawSupersededStuckPacket` returns on anything but
+      // `blocked`), so it survives the run and a person answers it — which is
+      // what happened on SHOP-18 at 04:38:38 and on SHOP-10 — and the
+      // escalation ruling 237 skipped is owed just the same.
+      // CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
+      writeReviewTask();
+      await review(blocks(1));
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.packet = {
+            type: "input",
+            kind: "Decision required",
+            from: "operator",
+            title: "Which of the two contracts wins?",
+            body: "They disagree on the availability field.",
+            observations: [],
+            options: [{ kind: "custom", t: "Answer in your own words", d: "", rec: true }],
+          };
+        },
+      );
+      await review(blocks(2));
+      expect(taskFile().parsed.packet?.title).toBe("Which of the two contracts wins?");
+
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          optionIndex: 0,
+          custom: "The published read wins; narrow the producer.",
+        },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        { dataRoot: store.dataRoot },
+      );
+
+      const raised = taskFile().parsed.packet;
+      expect(raised, "the escalation was dropped when the person answered").not.toBeNull();
+      expect(raised!.title).toContain("requested changes 2 times running");
+
+      // A packet that arrives with nobody told is not an escalation. The first
+      // draft of this retry wrote the packet and stopped there — no inbox row,
+      // no audit — which is a quieter version of the defect it exists to fix.
+      // CANARY: drop the notifyTaskWatchers / recordAudit calls from
+      // retryReviewDeadlockEscalation.
+      const { listNotifications } = await import("~/server/projections/notifications.server");
+      const inbox = listNotifications(store.db, store.users.arda.id, { limit: 50 });
+      const told = inbox.find((n) => (n.title ?? "").includes("requested changes 2 times running"));
+      expect(told, "the escalation reached nobody's inbox").toBeTruthy();
+      // Ruling 237's own rule: the policy engine raised this, not the operator.
+      expect(told!.from?.name ?? "").toBe("Policy engine");
+      const audited = listAuditEvents(store.db, { action: "task.review.deadlock" });
+      expect(audited.length).toBeGreaterThan(0);
+      expect(audited.at(-1)!.details).toMatchObject({ retried: true });
+    });
+
+    it("opens the packet on the second, not the first", async () => {
+      writeReviewTask();
+
+      await review(blocks(1));
+      // CANARY: drop `rounds < REVIEW_DEADLOCK_ROUNDS` from `reviewDeadlockOf`
+      // and this is a packet on ordinary first-round review feedback, which
+      // would pause coordination on every task that ever got a note.
+      expect(taskFile().parsed.packet).toBeNull();
+
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet;
+      // CANARY: delete the `openReviewDeadlockPacket` call in
+      // `recordAgentCompletion` and this is null — the exact state SHOP-5 sat
+      // in for four rounds.
+      expect(packet).not.toBeNull();
+      expect(packet?.title).toContain("requested changes 2 times running");
+      expect(packet?.body).toContain("@reviewer");
+      // The deliverer is named, so the person reading the card knows who has
+      // been reworking against it.
+      expect(packet?.body).toContain("@dev");
+      expect(packet?.options.map((o) => o.kind)).toEqual([
+        "question_reviewer",
+        "custom",
+        "force_accept",
+      ]);
+      // The recommended option is the one that puts the question, and it names
+      // the reviewer it will actually start.
+      const recommended = packet?.options.find((o) => o.rec);
+      expect(recommended?.kind).toBe("question_reviewer");
+      expect(recommended?.profileId).toBe("reviewer");
+      // `input`, not `blocked`: nothing failed, so readiness must not read
+      // blocked over a review that is working and disagreeing.
+      expect(packet?.type).toBe("input");
+      expect(taskFile().parsed.frontmatter.readiness).not.toBe("blocked");
+      expect(taskFile().parsed.frontmatter.waiting).toBe("human");
+    });
+
+    it("counts per reviewer: one objection each from two reviewers is not a deadlock", async () => {
+      writeReviewTask({
+        engagements: [
+          DEV_DELIVERS_ENGAGEMENT,
+          REVIEWER_ENGAGEMENT,
+          {
+            profileId: "second",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+        ],
+      });
+
+      await review(blocks(1), "reviewer");
+      await review(blocks(1), "second");
+
+      // Two objections on the task, one each. Nobody has outlived a rework, and
+      // the owner's threshold is explicitly per reviewer.
+      // CANARY: count `fm.verdicts` instead of this reviewer's own rows and
+      // this opens a packet the moment any two reviewers disagree once.
+      expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(2);
+      expect(taskFile().parsed.packet).toBeNull();
+    });
+
+    it("resets on that reviewer's own approve", async () => {
+      writeReviewTask();
+
+      await review(blocks(1));
+      await review("Verdict: approve\n\n@operator the blocker is gone.");
+      expect(taskFile().parsed.packet).toBeNull();
+
+      // A fresh objection after an approve is a FIRST objection again.
+      // CANARY: count every `request_changes` in the reviewer's history rather
+      // than stopping at its first approve, and this reads 2.
+      await review(blocks(2));
+      expect(taskFile().parsed.packet).toBeNull();
+    });
+
+    it("its recommended option starts the REVIEWER with the question, and nobody else", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet!;
+      expect(packet.options[0]?.kind).toBe("question_reviewer");
+
+      queueFakeRun({
+        lines: [
+          { t: "", ev: "init", tag: "system·init", text: "test session" },
+          { t: "", ev: "text", tag: "assistant", text: "Here is the full list." },
+          { t: "", ev: "result", tag: "result", text: "done" },
+        ],
+        occurredAt: [
+          new Date().toISOString(),
+          new Date().toISOString(),
+          new Date().toISOString(),
+        ],
+        sessionId: "t-question",
+      });
+      // SAFETY: COUNT(*) over a table this store owns is always an integer.
+      const runCount = () =>
+        (
+          store.db
+            .prepare(`SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ?`)
+            .get(store.slug) as { n: number }
+        ).n;
+      const before = runCount();
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+      // SAFETY: `agent_profile_id` is TEXT on `agent_runs`, and the row exists
+      // because the resolution above started it.
+      const started = store.db
+        .prepare(
+          `SELECT agent_profile_id AS pid, verdict_withheld AS withheld FROM agent_runs
+           WHERE project_slug = ? AND kind <> 'operator'
+           ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+        )
+        .get(store.slug) as { pid: string; withheld: number };
+      // CANARY: remove the dispatch block and this stays flat — the packet
+      // would close having promised a run nobody started.
+      expect(runCount()).toBe(before + 1);
+      // What the dispatch actually SENT the runtime, not what the timeline
+      // narrates about it.
+      const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+      const directive = lastRunSpec()?.prompt ?? "";
+      // CANARY: drop `profileId: option.profileId` from the question_reviewer
+      // dispatch and this starts the DELIVERER — with a prompt telling it not
+      // to review, on a task whose card promised the reviewer would answer.
+      expect(started.pid).toBe("reviewer");
+      expect(directive).toContain("name EVERYTHING you would still block on");
+      expect(directive).toContain("do NOT return a verdict");
+
+      /**
+       * Ruling 313. That sentence used to be the ONLY thing standing between
+       * this run and another verdict, and the same prompt contradicted it:
+       * `collab.verdict` comes from the PROFILE's grant, so the collaboration
+       * notes also told the reviewer "`report_outcome` — REQUIRED at the end of
+       * your review: report `approve` or `request_changes`". One prompt, both
+       * instructions, and only one of them backed by a tool.
+       *
+       * Live on SHOP-76 the reviewer did exactly what the tool-backed half said.
+       * The verdict bound to the same revision, counted as the next consecutive
+       * objection, and the deadlock packet re-raised at the SAME round count —
+       * so the person answered the identical question twice, having taken the
+       * option the card recommended both times. `review-deadlock.server.ts`
+       * predicted it in its own words ("a verdict here would bind to the same
+       * revision and count as another objection, which is the loop") and its
+       * header names the construction as the one ruling 186 refused: a request
+       * in a prompt, with nothing that notices when the model does something
+       * else.
+       *
+       * CANARY: drop `withholdVerdict: true` from the question_reviewer
+       * dispatch and the REQUIRED line comes back, in the same prompt as the
+       * sentence forbidding it.
+       */
+      expect(directive).not.toContain("REQUIRED at the end of your review");
+      expect(directive).not.toContain("report `approve` or `request_changes`");
+
+      // The ENGAGEMENT is untouched: withholding is per-run, so the reviewer is
+      // still verdict-capable and acceptance still waits for its approve. A fix
+      // that quietly demoted the reviewer would unblock the task by removing the
+      // gate, which is not what the person asked for.
+      const engaged = taskFile().parsed.frontmatter.engagements.find(
+        (e) => e.profileId === "reviewer",
+      );
+      expect(engaged?.verdictCapable).toBe(true);
+
+      // Ruling 316: and the RUN remembers it, because the prompt is not the
+      // only thing that has to honour the withholding — the completion path
+      // reads this row to tell an answer from a silence, long after the
+      // dispatch is gone. CANARY: stop persisting `verdictWithheld` at run
+      // creation and the fallback manufactures the verdict anyway.
+      expect(started.withheld).toBe(1);
+
+      expect(taskFile().parsed.packet).toBeNull();
+      expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
+    });
+
+    /**
+     * Ruling 316. Ruling 313 withheld the verdict TOOL on the deadlock question
+     * and closed nothing, because the prose fallback manufactures a verdict
+     * from the reply regardless: `verdictAuthorized` reads the ENGAGEMENT
+     * snapshot, which 313 deliberately left intact.
+     *
+     * Live on SHOP-68 the reviewer said so in words and viberr wrote the
+     * verdict under its name 70ms later: "No verdict recorded — the directive
+     * said not to... I deliberately skipped `report_outcome` rather than
+     * omitting it. (Note: last turn the system appears to have derived a
+     * `request_changes` entry from my comment anyway; I can't control that, but
+     * nothing new was authored by me.)" The packet re-raised each time and the
+     * person answered the same question three times.
+     *
+     * The classifier's rule 3 is why: any un-negated "fail"/"blocker" is a
+     * request_changes, so on SHOP-76 it fired on "the five prettier-failing
+     * markdown files fail identically on the base commit" — a sentence whose
+     * whole point is that the failure is NOT a finding.
+     */
+    /**
+     * Ruling 317. The stored `verdicts[].reason` is a 2,000-character clip whose
+     * own marker says "Its full report is on this task's timeline, whole"
+     * (ruling 292) — and compaction folded that comment away, because the two
+     * fields protecting a comment (`evidence`, `attachments`) are moved OFF the
+     * reply precisely when it carries a verdict. The title is what compaction
+     * reads instead.
+     */
+    it("ruling 317: the verdict's reply comment is TITLED, so compaction can spare it", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      const { VERDICT_REPORT_TITLE } = await import("~/schemas/task-file.schema");
+      const reply = taskFile()
+        .parsed.timeline.find((e) => e.type === "comment" && e.actor.kind === "agent");
+      // CANARY: stop setting the title on the verdict path and the comment the
+      // stored record points at becomes indistinguishable from chatter.
+      expect(reply?.title).toBe(VERDICT_REPORT_TITLE);
+      // The inversion this replaces: evidence was moved off it, so the clauses
+      // that protect every other agent comment do not apply here.
+      expect(reply?.evidence ?? null).toBeNull();
+    });
+
+    it("ruling 316: a run whose verdict channel was withheld gets no prose verdict", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      const genuine = taskFile().parsed.frontmatter.verdicts.at(-1);
+      expect(genuine?.result).toBe("request_changes");
+      // The reviewer's REAL findings for this revision. A fabricated verdict
+      // does not add a row — it REPLACES this one (last write wins per
+      // profileId + revisionId), so the count never moves and the reviewer's
+      // actual reasons are what disappears.
+      expect(genuine?.reason).toContain("objection number 1");
+
+      // Exactly the shape that trips the classifier's rule 3 while saying the
+      // OPPOSITE — an un-negated "fail"/"blocker" inside a sentence whose point
+      // is that the failure is pre-existing and therefore not a finding. This
+      // is the SHOP-76 sentence.
+      const answer =
+        "No verdict recorded - the directive said not to return one. " +
+        "The five prettier-failing markdown files fail identically on the base commit, " +
+        "so that is not a blocker I would raise.";
+      const { classifyReviewerVerdict } = await import("./task-actions.server");
+      // The classifier really does read this as an objection; the guard is what
+      // stops it, not a kinder regex.
+      expect(classifyReviewerVerdict(answer)).toBe("request_changes");
+
+      rework();
+      const quiet = await finishedRunWith(answer);
+      // The deadlock question's run: dispatched with its verdict channel taken
+      // away (ruling 313), which ruling 316 makes the completion path honour.
+      const { patchRun } = await import("~/server/runtimes/run-store.server");
+      patchRun(store.db, quiet, { verdictWithheld: true });
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: quiet, state: "finished" },
+      );
+
+      /**
+       * CANARY: drop `verdictSilenced` from the fallback guard and the
+       * reviewer's real findings are replaced by a verdict it did not author.
+       */
+      expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toContain(
+        "objection number 1",
+      );
+
+      // And the rest of the path WOULD have done it: the identical completion
+      // on a run whose channel was NOT withheld overwrites the genuine record.
+      rework();
+      const loud = await finishedRunWith(answer);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: loud, state: "finished" },
+      );
+      const overwritten = taskFile().parsed.frontmatter.verdicts.at(-1);
+      expect(overwritten?.result).toBe("request_changes");
+      expect(overwritten?.reason).not.toContain("objection number 1");
+    });
+
+    /**
+     * Ruling 315. The note on a decision packet was sliced to 2,000 characters
+     * in `project.task.tsx` before the request reached the server — no
+     * `maxLength` on the box, no counter, no marker on the record, no error,
+     * and nothing anywhere holding the tail.
+     *
+     * Live on SHOP-76 a 4,454-character decision was stored at exactly 2,000,
+     * ending mid-word at "`docs/adr/README.md` is this branch's own rule and it
+     * says the record t", and a rework round ran on the operator's
+     * reconstruction of the deleted sentence. The card had promised the
+     * opposite: "anything you type below is recorded on the task's contract and
+     * every later run reads it".
+     *
+     * Ruling 292 permitted a cut on a VERDICT because "the full text is never
+     * lost — the agent's own report is on the same timeline, untruncated". A
+     * person's typed note has no second copy, so the identical cut is loss.
+     */
+    it("ruling 315: a long note is recorded WHOLE, not cut at 2,000", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const { resolvePacket } = await import("./task-actions.server");
+      // Longer than the old silent cap, shorter than the refusal — the exact
+      // band SHOP-76's decision fell into.
+      const long = `HEAD ${"x".repeat(2600)} TAIL`;
+      expect(long.length).toBeGreaterThan(2000);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1, note: long },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const recorded = taskFile()
+        .parsed.timeline.map((e) => e.text)
+        .join("\n");
+      // CANARY: restore the route's `.slice(0, 2000)` and TAIL is gone while
+      // HEAD stays — the shape that makes this invisible to the person who
+      // wrote it.
+      expect(recorded).toContain("TAIL");
+      expect(recorded).toContain("HEAD");
+    });
+
+    it("ruling 315: a note past the shared cap is REFUSED, and nothing is written", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const { resolvePacket } = await import("./task-actions.server");
+      const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
+      const before = taskFile().parsed.timeline.length;
+      await expect(
+        resolvePacket(
+          store.db,
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            optionIndex: 1,
+            note: "y".repeat(PACKET_NOTE_MAX + 1),
+          },
+          actor(store.users.arda),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/too long/);
+      // Refusing and then writing half of it would be the same defect wearing a
+      // message. The packet is still open and the timeline did not move.
+      expect(taskFile().parsed.packet).not.toBeNull();
+      expect(taskFile().parsed.timeline.length).toBe(before);
+    });
+
+    /**
+     * Ruling 241 (F37-68). Live on SHOP-5 this exact resolution ran on a HELD
+     * task: ruling 186 refuses every agent dispatch while a task waits, and
+     * this arm found that out only after writing the decision onto the task
+     * contract and clearing the packet. The person's chosen option did nothing,
+     * and there was no packet left to choose again from.
+     *
+     * The owner's call was to queue rather than refuse.
+     */
+    it("ruling 241: on a HELD task the question is queued, not lost and not dispatched", async () => {
+      writeReviewTask({ blockedBy: ["VIB-9"] });
+      await review(blocks(1));
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet!;
+      expect(packet.options[0]?.kind).toBe("question_reviewer");
+      // Said BEFORE the choice. CANARY: drop `heldBy` from the packet build and
+      // the card promises a question it cannot put.
+      expect(packet.options[0]?.d).toContain("VIB-1 waits on VIB-9");
+      expect(packet.options[0]?.d).toContain("put the moment the wait clears");
+
+      // SAFETY: COUNT(*) over a table this store owns is always an integer.
+      const runCount = () =>
+        (
+          store.db
+            .prepare(`SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ?`)
+            .get(store.slug) as { n: number }
+        ).n;
+      const before = runCount();
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+      const fm = taskFile().parsed.frontmatter;
+      // CANARY: delete the queue write and the person's decision buys nothing —
+      // which is the state this shipped in.
+      expect(fm.queuedQuestions).toHaveLength(1);
+      expect(fm.queuedQuestions[0]).toMatchObject({
+        profileId: "reviewer",
+        decidedByLabel: store.users.arda.email,
+        heldBy: ["VIB-9"],
+      });
+      expect(fm.queuedQuestions[0]!.directive).toContain(
+        "name EVERYTHING you would still block on",
+      );
+      // Nothing was dispatched: ruling 186 would have refused it, and a run
+      // that never started must not be claimed. CANARY: drop the queued check
+      // from the dispatch guard and this fires the refused run.
+      expect(runCount()).toBe(before);
+      expect(fm.waiting).toBe("human");
+      expect(taskFile().parsed.packet).toBeNull();
+      const decision = taskFile().parsed.timeline.find((e) => e.type === "transition")!;
+      expect(decision.text).toContain("queued with the task");
+      expect(decision.text).toContain("VIB-9");
+    });
+
+    it("does NOT hand the task back to the operator on the completion that raised it", async () => {
+      // The packet says "Coordination is paused until you say which", and the
+      // react at the end of this very completion is an `agent-reply` trigger —
+      // which ruling 195 records as deliberately NOT refused by an open packet.
+      // Left alone, the operator gets a turn seconds after the packet opens and
+      // can do the exact re-dispatch the packet exists to interrupt, while the
+      // card tells a person nothing is moving.
+      // CANARY: delete the `raisedDeadlockPacket` arm and the operator runs.
+      deployOperator();
+      const operatorRuns = () =>
+        // SAFETY: COUNT(*) over this store's own table is always an integer.
+        (
+          store.db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ? AND kind = 'operator'`,
+            )
+            .get(store.slug) as { n: number }
+        ).n;
+      writeReviewTask();
+      await review(blocks(1));
+      const before = operatorRuns();
+
+      await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
+      expect(taskFile().parsed.packet).not.toBeNull();
+      expect(operatorRuns()).toBe(before);
+      // The task is on a person, which is what the card claims.
+      expect(taskFile().parsed.frontmatter.waiting).toBe("human");
+    });
+
+    it("the note sits ABOVE the verdict that caused it, newest-first", async () => {
+      // The timeline is newest-first in the file, and viberr runs a
+      // `timeline.out_of_order` diagnostic over it. The reply comment carries
+      // the timestamp it was PREPARED with, which predates anything stamped
+      // during this write — so unshifting the escalation note inside the
+      // verdict block put a note 5ms newer than the reviewer's comment BELOW
+      // it. Live on SHOP-24 within the hour of shipping, and the diagnostic
+      // found it, not me.
+      // CANARY: move the unshift back into the verdict block.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+
+      const timeline = taskFile().parsed.timeline;
+      const noteAt = timeline.findIndex((e) => e.text.startsWith("**Decision packet:**"));
+      const verdictAt = timeline.findIndex((e) => e.type === "quality");
+      expect(noteAt).toBeGreaterThanOrEqual(0);
+      expect(verdictAt).toBeGreaterThan(noteAt);
+      // And the file is strictly newest-first, which is what the diagnostic reads.
+      const inversions = timeline.filter(
+        (e, i) => i > 0 && e.occurredAt > timeline[i - 1]!.occurredAt,
+      );
+      expect(inversions).toEqual([]);
+    });
+
+    it("the card's copy matches the mechanisms it names: authority, the goal, and the real door", async () => {
+      // Four claims in this packet were wrong when it shipped, all of the same
+      // kind: copy that named a mechanism without checking it. An adversarial
+      // sweep found them hours later.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      const packet = taskFile().parsed.packet!;
+      const opt = (kind: string) => packet.options.find((o) => o.kind === kind)!;
+
+      // 1. force-accept-completion is roles: [A] in app/shared/rbac.ts. The RBAC
+      // probe this pass measured it live: maintainer gets 403 "Your project role
+      // (maintainer) cannot force-accept past the review gate".
+      // CANARY: put "maintainer" back into the force_accept detail.
+      // Read from the RBAC table itself, so the copy cannot drift from the
+      // grant it describes without this failing.
+      const { rolesForAction } = await import("~/shared/rbac");
+      const forceRoles = rolesForAction("force-accept-completion");
+      expect(forceRoles).toEqual(["admin"]);
+      expect(opt("force_accept").d).toContain("Admin only");
+      expect(opt("force_accept").d).not.toMatch(/Admin or maintainer/);
+
+      // 2. `custom` is NOT in PROCESS_ONLY_OPTION_KINDS, so this option's own
+      // `t — d` is appended to the task's GOAL as binding contract.
+      // CANARY: restore "with nothing changed".
+      expect(opt("custom").d).not.toMatch(/nothing changed/);
+      /**
+       * Ruling 329: and therefore `d` must contain only what BINDS.
+       *
+       * This assertion used to require the opposite — that `d` contain
+       * "recorded on the task's contract" — and the comment above it named the
+       * wrong mechanism, conflating the `note` box with the synthetic `custom`
+       * CHOICE. `note` posts to the timeline and the operator's summon note and
+       * has never reached a goal. So the sentence this test defended was false
+       * when it was written, and it is the sentence that landed in three tasks'
+       * permanent contracts, twice on SHOP-76: an instruction to type in a
+       * textarea, addressed to every later run, which has no textarea.
+       *
+       * The ask now lives in the packet BODY, which is read on the card and
+       * appended to nothing.
+       */
+      expect(opt("custom").d).not.toMatch(/recorded on the task's contract/);
+      expect(opt("custom").d).not.toMatch(/type below|ruling 189/i);
+      expect(packet.body).toContain("say why in the note box");
+      // The whole of what this option writes into the goal, and every word of
+      // it is about the decision.
+      expect(`${opt("custom").t} — ${opt("custom").d}`).toBe(
+        "Let the rework continue — Each round has found something real and the work is " +
+          "converging on it. Hands the task back to the operator to carry on.",
+      );
+
+      // 3. `deriveValidation` derives from the task's verdict-capable
+      // ENGAGEMENTS, not from the project's required-reviewer rules — so the
+      // body used to send a stuck human to a settings page that cannot unblock
+      // the task it is on. CANARY: restore "in project settings".
+      expect(packet.body).toContain("not in project settings");
+      expect(packet.body).toContain("Remove the engagement here");
+    });
+
+    it("the inbox says the POLICY ENGINE raised it, not the Operator", async () => {
+      // `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any notice that
+      // names nobody, so shipping without a `from` told every watcher the
+      // Operator raised this — while the card beside it reads
+      // `from: policy-engine` and the whole ruling rests on it not being the
+      // operator's judgement.
+      // CANARY: drop the `from` from the notifyTaskWatchers call.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      // SAFETY: `actor_json` is TEXT on `notifications`; the packet rows were
+      // just written by the escalation above.
+      const rows = store.db
+        .prepare(
+          `SELECT actor_json FROM notifications WHERE kind = 'packet' AND task_key = 'VIB-1'`,
+        )
+        .all() as { actor_json: string }[];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        // SAFETY: `actor_json` is written by `createNotification` from an
+        // `ActorRender`, every variant of which carries `kind` and `name`.
+        const from = JSON.parse(r.actor_json) as { kind: string; name: string };
+        expect(from).toEqual({ kind: "system", name: "Policy engine" });
+      }
+    });
+
+    it("ruling 177: no packet on a task that CLOSED while the reviewer was running", async () => {
+      // A reviewer run that finishes after its task was accepted still records
+      // its verdict — evidence is evidence, and ruling 177 says so — but no
+      // coordination follows it. An escalation asking a person to decide
+      // something about a shipped task is exactly the packet ruling 177
+      // refused, and `operatorOpenPacket` would have refused it by name.
+      // CANARY: drop the `taskClosure(...).closed` clause from the escalation
+      // guard and this opens a decision packet on a Done task.
+      writeReviewTask();
+      await review(blocks(1));
+      expect(taskFile().parsed.packet).toBeNull();
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.frontmatter.stage = "done";
+        },
+      );
+
+      await review(blocks(2));
+      expect(taskFile().parsed.packet).toBeNull();
+      // The verdict itself still lands: closing the task does not erase what a
+      // reviewer found.
+      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(2);
+    });
+
+    it("ruling 137: no acceptance offer survives beside the packet", async () => {
+      // A packet pauses coordination, so an offer to accept must not stand
+      // beside it — least of all one the verdict in the same write just made
+      // impossible. This packet needs no withdrawal code of its own: a
+      // `request_changes` always derives `validation: "failing"`, and the
+      // verdict block's own filter drops every `accept_completion` card. The
+      // test is here because that is a COUPLING, not an obvious property, and
+      // the day it changes this packet starts shipping beside a live Accept
+      // button. CANARY: drop `r.kind !== "accept_completion"` from the
+      // recommendation filter.
+      writeReviewTask({
+        recommendations: [
+          {
+            id: "rec_accept",
+            kind: "accept_completion",
+            label: "Accept the completion",
+            detail: "Recorded by Viberr when the delivery landed.",
+          },
+        ],
+      });
+
+      await review(blocks(1));
+      await review(blocks(2));
+      expect(taskFile().parsed.packet).not.toBeNull();
+      expect(
+        taskFile().parsed.frontmatter.recommendations.map((r) => r.id),
+      ).not.toContain("rec_accept");
+    });
+
+    it("never clobbers a packet that is already open", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.packet = {
+            id: "pkt_existing",
+            type: "input",
+            kind: "Decision required",
+            from: "operator",
+            title: "Something else entirely",
+            body: "",
+            observations: [],
+            options: [{ kind: "custom", t: "Carry on", d: "", rec: true }],
+          };
+        },
+      );
+
+      await review(blocks(2));
+      // One packet slot per task. The verdict itself still records — it is the
+      // record, and the escalation is only the thing on top of it.
+      expect(taskFile().parsed.packet?.title).toBe("Something else entirely");
+      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(2);
+    });
   });
 
   /**
@@ -1314,6 +2754,78 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // exactly one row, the actionable one.
     expect(ardas).toHaveLength(1);
     expect(ardas[0]!.kind).toBe("packet");
+  });
+
+  it("ruling 333: a refusal on a run that HAD been working does not tell the next agent the tree is clean", async () => {
+    /**
+     * The same shape as the quota test below, on a run that had taken 48 turns
+     * — SHOP-28's live case, where the provider rejected the credential one
+     * third of a second after the run created a file that is still on disk and
+     * uncommitted.
+     *
+     * The clause was a literal. `max_turns` and `max_budget` were exempted from
+     * it precisely because a cut run leaves work in the tree; a provider refusal
+     * on turn 48 is the same cut-off and was not exempt. It matters because the
+     * sentence is fed forward — `canonicalTaskAnchor` puts recent timeline
+     * events into the NEXT run's prompt — so eighteen minutes later the owner
+     * had to hand-write "it ran 48 turns … Do not regenerate work that is
+     * already in the tree."
+     *
+     * CANARY: make the clause unconditional in `applyAgentCompletionEffects`.
+     */
+    writeReviewTask({ validation: "changed" });
+    const runId = "run_333_cut";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-333",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "claude",
+      model: "opus",
+      sdk: "claude",
+      state: "error",
+      // The one fact the sentence contradicted, already on the row.
+      turns: 48,
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-09-07T10:00:00.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "run·error·auth" }),
+      display: {
+        t: "10:00:00",
+        ev: "err",
+        tag: "run·error·auth",
+        text: "Claude refused the run: the provider rejected the credential.",
+        failure: { ...emptyRunFailureFacts("auth"), apiErrorStatus: 401 },
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    const event = taskFile().parsed.timeline.find(
+      (e) => e.type === "blocked" && /did not complete/.test(e.text),
+    )!;
+    expect(event, "the failure was not recorded at all").toBeTruthy();
+    expect(event.text).not.toContain("No changes were delivered");
+    expect(event.text).toContain("48 turns");
+    expect(event.text).toContain("read the workspace before starting anything over");
   });
 
   it("ruling 130(b): a specialist quota failure names the reset instant and the owner's remedy; the options come from the remedy leaf; never `..`", async () => {

@@ -130,18 +130,62 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     expect(parseAgentOutcomeJson("The tests all pass, approving.")).toBeNull();
   });
 
-  it("keeps a question with capped options", () => {
+  /**
+   * Ruling 298 (pass 37, F37-133): this path keeps EVERY option. It used to
+   * cut at four, silently, and this is the one path that cannot refuse: the
+   * envelope is the agent's last word, parsed after the run has ended, so
+   * there is nobody to hand a refusal to and nothing to retry. A cut here
+   * deletes a choice the person was meant to have and leaves no trace that it
+   * existed. The four belongs on `ask_human`, where an agent can be told.
+   */
+  it("keeps EVERY option a finished agent offered, because this path cannot ask for a shorter list", () => {
     const o = parseAgentOutcomeJson(
       JSON.stringify({
         summary: "Blocked.",
         question: {
           title: "Which DB?",
-          options: [{ title: "Postgres" }, { title: "SQLite" }, { title: "a" }, { title: "b" }, { title: "c" }],
+          options: [
+            { title: "Postgres" },
+            { title: "SQLite" },
+            { title: "a" },
+            { title: "b" },
+            { title: "the fifth, which used to vanish" },
+          ],
         },
       }),
     );
     expect(o?.question?.title).toBe("Which DB?");
-    expect(o?.question?.options?.length).toBe(4);
+    // CANARY: put `.slice(0, 4)` back.
+    expect(o?.question?.options?.map((c) => c.title)).toEqual([
+      "Postgres",
+      "SQLite",
+      "a",
+      "b",
+      "the fifth, which used to vanish",
+    ]);
+  });
+
+  it("ruling 298: and the packet built from it offers all five, not the first four", async () => {
+    const { buildAgentQuestionPacket } = await import("./agent-outcome.server");
+    const packet = buildAgentQuestionPacket(
+      { kind: "agent", backend: "claude", profileId: "ap_1", roleHint: "Dev" },
+      {
+        title: "Which DB?",
+        options: [
+          { title: "Postgres" },
+          { title: "SQLite" },
+          { title: "a" },
+          { title: "b" },
+          { title: "the fifth, which used to vanish" },
+        ],
+      },
+    );
+    // CANARY: `(question.options ?? []).slice(0, 4)` in the builder.
+    expect(packet.options.map((o) => o.t)).toContain("the fifth, which used to vanish");
+    expect(packet.options).toHaveLength(5);
+    // The first is still the suggested one; the cut never decided that.
+    expect(packet.options.filter((o) => o.rec)).toHaveLength(1);
+    expect(packet.options[0]!.rec).toBe(true);
   });
 });
 

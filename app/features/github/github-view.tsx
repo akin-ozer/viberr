@@ -332,6 +332,19 @@ export function BranchesPanel({
                     <span className="fine xs">
                       {row.commitCount}{" "}
                       {row.commitCount === 1 ? "commit" : "commits"}
+                      {/* Ruling 187 (pass 37, F37-8): a commit the remote does
+                          not have is real work, and counting it is right — but
+                          rendering it identically to a pushed one is what let
+                          SHOP-2 read "1 commit · synced" for a change that
+                          existed in no repository and no workspace. */}
+                      {row.unpushedCommitCount > 0 && (
+                        <span className="warn">
+                          {" · "}
+                          {row.unpushedCommitCount === row.commitCount
+                            ? "not pushed"
+                            : `${row.unpushedCommitCount} not pushed`}
+                        </span>
+                      )}
                     </span>
                   )}
                 </span>
@@ -366,8 +379,9 @@ export function BranchesPanel({
                           {reviewPill(row.pr.review).label}
                         </Pill>
                       )}
-                      {/* F17-L6: a conflict is actionable here too — the branch
-                          needs a rebase before its PR can merge. */}
+                      {/* F17-L6: a conflict is actionable here too — the base
+                          must be merged into the branch before its PR can merge
+                          (ruling 291: never a rebase). */}
                       {mergeablePill(row.pr.mergeable) && (
                         <Pill kind={mergeablePill(row.pr.mergeable)!.kind} sm>
                           {mergeablePill(row.pr.mergeable)!.label}

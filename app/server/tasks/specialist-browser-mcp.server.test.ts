@@ -223,6 +223,35 @@ describe("attachmentsDropSection — ruling 159, an absolute path outside the ch
     expect(p).not.toContain("reachable from your working directory");
   });
 
+  /**
+   * Ruling 306 (pass 37, F37-141): the attachments directory is READ as well as
+   * written, and nothing said so.
+   *
+   * It shipped as a drop box, which is half of what it is. On a task that has
+   * run before it already holds what every earlier run attached — 27 files on
+   * SHOP-11 of this instance's board, 90 on SHOP-15 — so an agent reworking
+   * that task was standing next to the evidence its directive was summarising,
+   * and was told only where to put things. That is rulings 285/292/293 one
+   * actor over: the coordinator was given the evidence so it would stop
+   * relaying claims about files it had not read, and the agent doing the work
+   * was left relaying them.
+   */
+  it("ruling 306: names the directory as two-way, and says to read by citation rather than wholesale", () => {
+    const text = attachmentsDropSection("/data/projects/p/tasks/P-1/attachments");
+    // CANARY: restore the write-only framing.
+    expect(text).toContain("TWO-WAY");
+    expect(text).toContain("READING");
+    expect(text).toContain("it already holds the files those runs attached");
+    // The half that keeps it from eating a context: cite, do not sweep.
+    expect(text).toContain("by name");
+    expect(text).toContain("not the whole folder");
+    // And the sentence that says why it matters at all.
+    expect(text).toContain("only one of them is evidence");
+    // The posting half survives intact.
+    expect(text).toContain("POSTING");
+    expect(text).toContain("images render inline");
+  });
+
   it("never prints a bare store-relative path as the instruction", () => {
     const p = attachmentsDropSection(dir);
     // Every `projects/...` mention in the section is the absolute dir itself.

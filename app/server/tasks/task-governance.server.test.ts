@@ -14,6 +14,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import {
+  DIVERGED_BRANCH_REMEDY,
   deliveringEngagement,
   type Engagement,
   type TaskPacket,
@@ -28,7 +29,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { getBoard } from "~/server/projections/board-query.server";
+import { getBoard, listProjectTasks } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
   completeTaskMerge,
@@ -112,6 +113,7 @@ function rejectionVerdict(revisionId = "rev_1") {
     result: "request_changes" as const,
     reason: "standing rejection",
     at: "2026-07-04T01:00:00.000Z",
+    rounds: 1,
   };
 }
 
@@ -1128,7 +1130,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. Use **Run operator** on the task page when the inspection is done.",
+      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. **Run operator** on the task page restarts it — that control belongs to a maintainer or an admin, so ask one if you do not see it.",
     );
     // A repeat confirm on the resolved packet is refused.
     await expect(
@@ -1933,7 +1935,8 @@ describe("resolvePacket kind matrix", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.readiness).toBe("blocked");
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
-    expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("holds commits this workspace does not") && t.includes("A person resolves the branch history"))).toBe(true);
+    // Ruling 321: the note names the act, not merely that an act is owed.
+    expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("holds commits this workspace does not") && t.includes(DIVERGED_BRANCH_REMEDY))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({ outcome: "own_pr_diverged", blockLifted: false });
   });
 
@@ -2489,6 +2492,7 @@ describe("resolvePacket kind matrix", () => {
             result: "approve",
             reason: "fine",
             at: "2026-09-06T19:00:00.000Z",
+            rounds: 1,
           },
         ],
         validation: "healthy",
@@ -3419,6 +3423,139 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     expect(moves[0]!.details!.manual).toBe(true);
   });
 
+  /**
+   * Ruling 224 (F37-44). The Codex window went at 23:28 with the provider
+   * naming its own reopening, and six tasks stalled at once behind a packet
+   * whose every option was wrong right then. The wait is the remedy, and
+   * viberr already had the runner for it — what it lacked was a way to say so
+   * that also closed the decision.
+   */
+  it("wait_for_window: the confirm closes the decision and schedules the resume (ruling 224)", async () => {
+    const store = prepared();
+    const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "agent",
+        readiness: "blocked",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Work stalled: pick a recovery path",
+        body: "Codex refused the agent run: over its usage limit.",
+        observations: [],
+        options: [
+          {
+            kind: "wait_for_window",
+            t: "Wait for the window and resume @dev automatically",
+            d: "",
+            rec: true,
+            dueAt: due,
+          },
+        ],
+      },
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(parsed.packet).toBeNull();
+    // The block the packet held down goes with it…
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    // …and the board must NOT claim an agent: none is coming for three hours,
+    // which is F37-33's lie by another road.
+    expect(parsed.frontmatter.waiting).toBe("human");
+    // CANARY: drop the schedule effect and this is empty — the decision then
+    // promises an automatic resume that nothing performs.
+    expect(parsed.frontmatter.schedules).toHaveLength(1);
+    const sched = parsed.frontmatter.schedules[0]!;
+    // The OPERATOR, not the agent: after a gap of hours the board may have
+    // moved, and every other timed resume viberr has re-invokes the operator
+    // for exactly that reason.
+    expect(sched.action).toBe("run-operator");
+    expect(sched.status).toBe("pending");
+    // Just AFTER the provider's instant: a window that reopens "at 02:27" is
+    // not open at 02:27:00.
+    expect(Date.parse(sched.dueAt)).toBeGreaterThan(Date.parse(due));
+    expect(sched.prompt).toContain("has reopened");
+    // (That this resolution must start NO run is asserted in
+    // `delivery-requeue.server.test.ts`, where `runOperator` is mocked — this
+    // store deploys no operator, so a run-count assertion here would pass
+    // against code with no NO_REQUEUE entry at all.)
+  });
+
+  it("wait_for_window: a schedule that cannot be written says so and leaves the decision resolved (ruling 224)", async () => {
+    const store = prepared();
+    const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    withTask(
+      store,
+      {
+        stage: "impl",
+        waiting: "agent",
+        ownerUserId: store.users.arda.id,
+        archived: true, // a closed task refuses a schedule (ruling 177)
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      {
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Work stalled: pick a recovery path",
+        body: "b",
+        observations: [],
+        options: [
+          {
+            kind: "wait_for_window",
+            t: "Wait for the window and pick it back up automatically",
+            d: "",
+            rec: true,
+            dueAt: due,
+          },
+        ],
+      },
+    );
+
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+
+    const parsed = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    // The decision stands — a refused side effect never un-resolves a decision
+    // a human made, exactly as the move_stage ceremony behaves.
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.schedules).toHaveLength(0);
+    // CANARY: swallow the failure silently and the timeline promises an
+    // automatic resume that will never come, which is worse than the stall.
+    expect(
+      parsed.timeline.some(
+        (e) =>
+          e.text.includes("was **not** scheduled to resume") &&
+          e.text.includes("run it yourself"),
+      ),
+    ).toBe(true);
+  });
+
   it("move_stage: resolving a BLOCKED packet lifts the block it was holding down", async () => {
     // Canary: restore `mutate = () => {}` in the move_stage arm. The packet
     // clears, `transitionStage` deliberately lets a stored `blocked` survive a
@@ -3504,5 +3641,734 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
         dataRoot: store.dataRoot,
       })!.parsed.frontmatter.stage,
     ).toBe("impl");
+  });
+});
+
+/**
+ * Ruling 189 (pass 37, F37-10): a person's decision joins the task's CONTRACT.
+ *
+ * Live on SHOP-7, the goal said "the agent must not select a provider … ask
+ * Arda to choose". Arda chose; the agent recorded the choice; the required
+ * reviewer re-anchored on the canonical file — as its prompt tells it to —
+ * found the deliverable contradicting the goal and requested changes; the
+ * operator told the agent to "remove every claim that mock-only was selected";
+ * and a second packet asked Arda the same question again. The decision lived in
+ * the timeline, the contract lived in the goal, and the goal is what a fresh
+ * run reads.
+ */
+describe("ruling 189: a resolved decision amends the task goal", () => {
+  const QUESTION: TaskPacket = {
+    type: "input",
+    kind: "Agent question",
+    from: "agent:codex/architect (Architect)",
+    title: "Choose the payment provider",
+    body: "Stripe, Adyen or mock-only?",
+    observations: [],
+    // `custom` is what a real agent question carries — SHOP-7's live packet
+    // offered Stripe / Adyen / Mock-only as `custom` options.
+    options: [
+      { kind: "custom", t: "Stripe", d: "Hosted Stripe Checkout.", rec: true },
+      { kind: "custom", t: "Mock-only", d: "Deterministic, non-monetary.", rec: false },
+    ],
+  };
+
+  const goalOf = (store: TestStore): string =>
+    readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.goal;
+
+  /**
+   * Ruling 284 (owner's call, 2026-09-15) inverted this test's subject.
+   *
+   * Ruling 189 welded a typed directive into the goal "because a person wrote
+   * it". One text box takes both a scope decision and a word to the operator
+   * about its own tooling, so the kind of the answer was unknowable — and live
+   * on SHOP-27 a directive that was mostly "call read_board before you offer a
+   * create_task option" went into the goal of the orders service, where every
+   * future run on it re-anchors. The line is drawn by CHANNEL now: choosing a
+   * structured option is a decision and amends the contract; typing free text
+   * is conversation and does not.
+   */
+  it("ruling 284: a typed CUSTOM directive answers the packet and does NOT touch the goal", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        custom: "Mock-only, behind a PaymentProvider port. No provider SDK.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const goal = goalOf(store);
+    expect(goal).not.toContain("Mock-only, behind a PaymentProvider port");
+    expect(goal).not.toContain("the decision wins");
+    // Nothing is lost by leaving it out: the directive is on the timeline
+    // verbatim, which is where a human and the operator both read it.
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.timeline.map((e) => e.text).join("\n")).toContain(
+      "Mock-only, behind a PaymentProvider port",
+    );
+  });
+
+  it("ruling 189 still stands for a CHOSEN option: it amends the contract", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const goal = goalOf(store);
+    expect(goal).toContain("Choose the payment provider");
+    // The clause that settles the contradiction the amendment may create — the
+    // reviewer must not read the answer as an agent overstepping.
+    expect(goal).toContain("the decision wins");
+  });
+
+  it("writes a CHOSEN option into the goal too, title and description", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const goal = goalOf(store);
+    expect(goal).toContain("Mock-only");
+    expect(goal).toContain("Deterministic, non-monetary");
+  });
+
+  it("keeps the original goal above it — the amendment adds, never replaces", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store).startsWith(before.trimEnd())).toBe(true);
+  });
+
+  it("does NOT amend for a RECOVERY choice — that decides what happens next, not what the work is", async () => {
+    const store = prepared();
+    // Live on SHOP-7 the goal collected "Work stalled: pick a recovery path →
+    // Redirect with sharper guidance" beside the real provider decision. A
+    // recovery choice is process, and process accumulating in the text every
+    // future run re-anchors on is the noise this exclusion prevents.
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "Work stalled: pick a recovery path",
+        options: [
+          { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: true },
+          { kind: "request_edit", t: "Send back for another attempt", d: "", rec: false },
+        ],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store)).toBe(before);
+  });
+
+  /**
+   * Found by the pass's own self-review (ruling 200(h)): the ruling's stated
+   * exclusion is "a resolution that ENDS the task", and `acceptsInto` catches
+   * only ONE of the two doors that do. `force_accept` closes the task through
+   * `forceAcceptCompletion` and never assigns it, so a task being closed in the
+   * same breath still collected a contract amendment binding future work it
+   * will never have.
+   */
+  it("does NOT amend when the resolution FORCE-ACCEPTS the task closed", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        workRevision: {
+          id: "rev_fa",
+          headSha: "f".repeat(40),
+          treeSha: "t".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-13T09:00:00.000Z",
+          sourceProfileId: "dev",
+        },
+        noChanges: true,
+      },
+      {
+        ...QUESTION,
+        title: "Acceptance is wedged",
+        options: [
+          {
+            kind: "force_accept",
+            t: "Force-accept as admin without a fresh verdict",
+            d: "",
+            rec: true,
+          },
+        ],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: test only `acceptsInto !== null` again and a closed task's goal
+    // grows a decision block nobody will ever act on.
+    expect(goalOf(store)).toBe(before);
+  });
+
+  it("does NOT amend on block_on_policy — an unblock is what happens next, not what the work is", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        type: "blocked",
+        title: "The run failed on a credential",
+        options: [{ kind: "block_on_policy", t: "Unblock", d: "", rec: true }],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop `block_on_policy` from PROCESS_ONLY_OPTION_KINDS and "I
+    // fixed the credential, carry on" lands in the task's contract.
+    expect(goalOf(store)).toBe(before);
+  });
+
+  it("F37-60: does NOT amend on wait_for_window or block_on_dependencies either", async () => {
+    // Both kinds POSTDATE ruling 189, so neither was added to its exclusion
+    // list, and the defect the ruling exists to stop came back through them.
+    // Live on SHOP-18: its goal carried five decision blocks, THREE of them
+    // "pick a recovery path → Wait for the window and pick the task back up
+    // automatically" — the same sentence ruling 189 quotes from SHOP-7 as the
+    // thing that must not be in a contract.
+    // CANARY: drop either kind from PROCESS_ONLY_OPTION_KINDS.
+    for (const option of [
+      {
+        kind: "wait_for_window" as const,
+        t: "Wait for the window and pick the task back up automatically",
+        d: "",
+        rec: true,
+        dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+      {
+        kind: "block_on_dependencies" as const,
+        t: "Hold this until those land",
+        d: "",
+        rec: true,
+        blockedBy: ["VIB-2"],
+      },
+    ]) {
+      const store = prepared();
+      withTask(
+        store,
+        { stage: "impl", ownerUserId: store.users.arda.id },
+        { ...QUESTION, title: "Work stalled: pick a recovery path", options: [option] },
+      );
+      const before = goalOf(store);
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      expect(goalOf(store)).toBe(before);
+    }
+  });
+
+  /**
+   * Ruling 269 (pass 37, F37-101): the resolution CREATES the task. Live on
+   * SHOP-26 the recommended option's own text read "You create the task — no
+   * option here can", because no kind could: the operator had found a
+   * published contract with no producer, the project's conventions say a
+   * reported gap has to end up owned by a live task, and the packet mechanism
+   * could only describe one.
+   */
+  /**
+   * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
+   *
+   * It could not be, by anyone: `updateTaskGoal` wrote the contract every
+   * future run re-anchors on, and nothing anywhere wrote the one-line summary
+   * of it. The controller found it, about a title it had authored itself and
+   * then disproved: "The title is what every person scanning the board reads;
+   * the correction lives in a body almost nobody opens. A false claim I
+   * authored is still on the board an hour after being disproved."
+   */
+  it("ruling 295: a rename writes the title and records BOTH, so old references still join", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
+    const { updateTaskTitle } = await import("./task-actions.server");
+    // CANARY: drop the writer and the board keeps a title its own goal disproved.
+    const { changed } = await updateTaskTitle(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // Whitespace is collapsed: a title is one line by construction.
+        title: "  Cart   integration suite: establish whether it times out  ",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(changed).toBe(true);
+
+    const file = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(file.parsed.frontmatter.title).toBe(
+      "Cart integration suite: establish whether it times out",
+    );
+    // The note carries the OLD wording too. A silent rename makes every
+    // existing reference to the old words look like a reference to something
+    // else. CANARY: drop `before` from the note text.
+    const note = file.parsed.timeline.find((e) => e.title === "Title updated")!;
+    expect(note, "the rename was silent").toBeTruthy();
+    expect(note.text).toContain("Renamed from");
+    expect(note.text).toContain("Cart integration suite");
+    expect(note.text).toContain("VIB-1");
+  });
+
+  it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
+    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-actions.server");
+    const current = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.title;
+
+    // Saving the same words is not an edit: no note, no audit row.
+    const same = await updateTaskTitle(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", title: current },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(same.changed).toBe(false);
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.timeline.some((e) => e.title === "Title updated"),
+    ).toBe(false);
+
+    // Ruling 288's rule one field over: refused by name with nothing written,
+    // never cut. CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
+    await expect(
+      updateTaskTitle(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          title: "x".repeat(TASK_TITLE_MAX_CHARS + 1),
+        },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Nothing was written/);
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.frontmatter.title,
+    ).toBe(current);
+  });
+
+  /**
+   * Ruling 287 (pass 37, F37-122): connect it in the direction the work runs.
+   *
+   * Ruling 269 let a decision CREATE a task and say what the new task waits on.
+   * A task is usually created to UNBLOCK something, though, so the dependency
+   * points the other way — from the existing work to the new task — and that
+   * direction could not be expressed at all. Live on SHOP-28 the operator wrote
+   * it into its own packet prose: "add the new amendment key to SHOP-41's
+   * waits… only you can add it; I can only set SHOP-28's own." The ordering was
+   * settled and recorded, and delivered as a chore in a person's head, with
+   * nothing on SHOP-41 saying an edit was owed.
+   */
+  it("ruling 287: create_task makes the EXISTING task wait on the new one, and says so on both", async () => {
+    const store = prepared();
+    // The task that must not start until the new one lands.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "triage" }),
+      goal: "Mount the route against the published shapes.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "The shapes this needs are not published",
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the contracts amendment",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              blocks: ["VIB-9"],
+            },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Contracts amendment: publish the webhook shapes",
+    )!;
+    // CANARY: drop the `spec.blocks` loop and VIB-9 keeps an empty wait while
+    // the decision reads as fully delivered.
+    const other = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-9",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(other.parsed.frontmatter.blockedBy).toContain(made.key);
+    // A wait that appears with no reason on a task nobody was looking at reads
+    // as Viberr deciding something on its own, so the provenance lands THERE.
+    //
+    // Matched on THIS note's own words, not merely on the new key: the
+    // dependency writer posts its own "waits on" note naming the same key, so
+    // a looser assertion passes with the provenance note written to the wrong
+    // task entirely — which is how a canary comes out green on the mutation it
+    // was written to catch.
+    const note = other.parsed.timeline.find((e) =>
+      e.text.includes("to unblock this task"),
+    );
+    expect(note, "VIB-9 was not told why its wait grew").toBeTruthy();
+    expect(note!.text).toContain(made.key);
+    expect(note!.text).toContain("VIB-1");
+    expect(note!.title).toBe("Now waits on a new task");
+    // …and it is NOT on the deciding task, which already carries its own join
+    // note and would otherwise read as if its own wait had changed.
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(here.parsed.timeline.some((e) => e.text.includes("to unblock this task"))).toBe(
+      false,
+    );
+  });
+
+  it("ruling 322: when the new task holds the DECIDING task, neither sentence says 'unchanged'", async () => {
+    /**
+     * Ruling 269 wrote two sentences saying this task is untouched — the
+     * decision event's own fallback and the note left after the create — and a
+     * comment beside them calling the mutation "a deliberate NO-OP… this option
+     * says something about work that is NOT this task". All true at the time.
+     *
+     * Ruling 287 then added `newTask.blocks`, and nothing keeps the deciding
+     * task off that list — it is the most natural entry on it, because a task
+     * is usually created when the work in front of you cannot proceed without
+     * it. The resolution then writes the new key into this task's own
+     * `blockedBy` seconds after telling the person it was unchanged, and the
+     * board flips it to blocked with two contradicting cards above it.
+     *
+     * CANARY: make either sentence unconditional again.
+     */
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "This needs a contract nobody publishes",
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the contracts amendment",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              blocks: ["VIB-1"],
+            },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Contracts amendment: publish the webhook shapes",
+    )!;
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    // The wait is real: this is the fact both sentences used to deny.
+    expect(here.parsed.frontmatter.blockedBy).toContain(made.key);
+
+    const texts = here.parsed.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("VIB-1 is unchanged"))).toBe(false);
+    // The decision event, in the person's own record.
+    expect(texts.some((t) => t.includes("VIB-1 will wait on it"))).toBe(true);
+    // ...and the note left after the task actually existed.
+    expect(texts.some((t) => t.includes(`${made.key}`) && t.includes("VIB-1 now waits on it"))).toBe(
+      true,
+    );
+    // One card about the wait, not two: the reverse-edge loop's third-person
+    // note is the deciding task's own fact said again.
+    expect(texts.filter((t) => t.includes("to unblock this task"))).toHaveLength(0);
+  });
+
+  it("ruling 322: a create_task that holds nothing here still reads as unchanged", async () => {
+    // The counterweight — ruling 269's sentence was right for its own case and
+    // stays. A fix that hedged every create_task would lose the one fact the
+    // option exists to convey: the work went somewhere else.
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the follow-up",
+            d: "",
+            rec: true,
+            newTask: { title: "Follow-up: retire the shim", goal: "Delete it once callers move." },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    expect(here.parsed.frontmatter.blockedBy).toEqual([]);
+    expect(here.parsed.timeline.some((e) => e.text.includes("VIB-1 is unchanged"))).toBe(true);
+  });
+
+  it("ruling 287: a reverse wait that CANNOT be written says so, and never undoes the task", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "The shapes this needs are not published",
+        options: [
+          {
+            kind: "create_task",
+            t: "Create the contracts amendment",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Contracts amendment: publish the webhook shapes",
+              goal: "Three exports. The rest of the freeze stands.",
+              // A key this project does not have — the operator can offer one
+              // it read from a document, which is a claim until it is checked.
+              blocks: ["VIB-404"],
+            },
+          },
+        ],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // The task the person confirmed still exists: one unwritable edge must not
+    // undo a decision they made or the work it already produced.
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Contracts amendment: publish the webhook shapes",
+    );
+    expect(made, "a bad reverse key destroyed the created task").toBeTruthy();
+    // …and the half that did NOT happen is on the record, with the remedy.
+    // CANARY: swallow the catch and a settled ordering silently is not applied.
+    const here = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    const failure = here.parsed.timeline.find((e) => e.text.includes("was NOT set to wait on it"));
+    expect(failure, "the unwritten wait was silent").toBeTruthy();
+    expect(failure!.text).toContain("VIB-404");
+  });
+
+  it("ruling 269: a create_task resolution makes the task, joins the record, and leaves this one alone", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "A published contract has no producer",
+        options: [
+          {
+            kind: "create_task",
+            t: "Inventory serves the batch contract",
+            d: "",
+            rec: true,
+            newTask: {
+              title: "Inventory: serve the batch stock contract",
+              goal: "GET /stock serves the batch shape. Done when a producer exists.",
+              labels: ["service"],
+            },
+          },
+        ],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop the post-write `createTask` hook and the decision resolves
+    // into a closed packet and nothing else — the promise unkept, silently.
+    const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+      (t) => t.title === "Inventory: serve the batch stock contract",
+    );
+    expect(made, "the decision created no task").toBeTruthy();
+    expect(made!.labels).toContain("service");
+    // The goal is the CONTRACT, so it has to reach the task the agent reads.
+    const madeFile = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: made!.key,
+      dataRoot: store.dataRoot,
+    })!;
+    expect(madeFile.parsed.goal).toContain("GET /stock serves the batch shape");
+
+    const after = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!;
+    // The two are joined on the record: this option says something about work
+    // that is NOT this task, so the connection is the only thing it leaves here.
+    expect(after.parsed.timeline.some((e) => e.text.includes(made!.key))).toBe(true);
+    expect(after.parsed.packet).toBeNull();
+    // …and it changes nothing else about this task. CANARY: add a `mutate`
+    // that flips `waiting`, and a decision about other work starts claiming
+    // this one.
+    expect(goalOf(store)).toBe(before);
+    expect(after.parsed.frontmatter.stage).toBe("impl");
+    // The decision event is a NOTE, not a transition: sibling kinds write a
+    // transition because they move this task, and this one does not.
+    // CANARY: write it as `type: "transition"` and the timeline claims a state
+    // change that never happened.
+    const decision = after.parsed.timeline.find((e) =>
+      e.text.includes("Inventory serves the batch contract"),
+    )!;
+    expect(decision.type).toBe("note");
+  });
+
+  it("ruling 284: a directive typed on a RECOVERY packet stays out of the goal too", async () => {
+    const store = prepared();
+    // Ruling 189 amended here because "a typed directive is content a person
+    // wrote". Ruling 284 keeps free text out of the contract whatever packet it
+    // was typed on — the channel decides, not the packet.
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        title: "Work stalled: pick a recovery path",
+        options: [{ kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: true }],
+      },
+    );
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        custom: "Drop the Redis dependency entirely; use Postgres advisory locks.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store)).not.toContain("Postgres advisory locks");
+    // …and it still reaches the record: the timeline carries it verbatim, and
+    // the operator's re-queue carries it in its own `note` field.
+    expect(
+      readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!
+        .parsed.timeline.map((e) => e.text)
+        .join("\n"),
+    ).toContain("Postgres advisory locks");
+  });
+
+  it("does NOT amend when the packet stays open for a human to edit the goal", async () => {
+    const store = prepared();
+    // `edit_goal` is the one kind that KEEPS its packet open: the person is
+    // about to rewrite the goal themselves, so appending a line saying they
+    // chose to rewrite it would be noise in the text they are editing.
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        options: [{ kind: "edit_goal", t: "Refine the goal", d: "", rec: true }],
+      },
+    );
+    const before = goalOf(store);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(goalOf(store)).toBe(before);
   });
 });

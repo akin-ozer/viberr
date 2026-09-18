@@ -45,6 +45,6 @@ Keep it short and factual. No status chatter ("working on it"), no restating the
 ## Guardrails
 
 - **Stay on your branch.** The task-key branch is yours; other tasks' branches are not.
-- **Commit, don't deliver.** Commit your work locally with clear `[TASK]`-prefixed messages, then report the branch + commit SHA. Do NOT `git push` or open a PR. The workspace has no push credentials by design; Viberr pushes your branch and opens the review PR when the task enters Review. Never merge and never move the task to Done.
+- **Commit, don't deliver.** Commit your work locally with clear `[TASK]`-prefixed messages, then report the branch + commit SHA. Do NOT `git push` or open a PR. The workspace has no push credentials by design; Viberr pushes your branch and opens the review PR when the operator decides to deliver; it is not a stage side-effect. Never merge and never move the task to Done.
 - **Don't change governance.** Project policy, capability modes, and ownership are not yours to touch.
 - **Be honest about state.** A truthful "blocked because X" is worth far more than a "done" that review will bounce. Your report is a contract the operator acts on.

@@ -41,6 +41,24 @@ export interface InsightsTotals {
   turns: number;
 }
 
+/**
+ * Ruling 308: one breakdown dimension, and what its window left out.
+ *
+ * `rows` is the TOP_N kept (half the slots reserved for the busiest groups so a
+ * cost view still shows where the work happens). `hidden` is how many groups
+ * that dropped, with their runs and — when any of them reported one — their
+ * cost. A breakdown that shows eight of thirty and says nothing reads as the
+ * whole instance.
+ */
+export interface Breakdown {
+  rows: CountRow[];
+  hidden: number;
+  hiddenRuns: number;
+  /** Null when NO hidden group reported a cost, never 0 — the same rule
+   *  `CountRow.cost` follows for the same reason. */
+  hiddenCost: number | null;
+}
+
 export interface CountRow {
   label: string;
   runs: number;
@@ -71,7 +89,13 @@ export interface DailyPoint {
 export interface OversightSummary {
   /** Active (non-archived, non-terminal-stage) tasks with a definite next
    *  actor: `waiting` names human/agent, or a human owns the task. */
-  clarity: { activeTasks: number; clearTasks: number; pct: number | null };
+  clarity: {
+    activeTasks: number;
+    clearTasks: number;
+    pct: number | null;
+    /** Ruling 290: WHICH active tasks have no definite next actor. */
+    unclear: string[];
+  };
   /** Of DELIVERED tasks — a delivered work revision or a recorded PR — how
    *  many carry BOTH the task branch and a recorded PR, the key↔branch↔PR
    *  chain (ruling 143). An allocated branch alone is NOT a delivery: ruling
@@ -82,7 +106,13 @@ export interface OversightSummary {
    *  delivered revision with NO pull request stays in the denominator,
    *  because an unpushed delivery is exactly the untraceable one this number
    *  exists to find. */
-  traceability: { deliveredTasks: number; tracedTasks: number; pct: number | null };
+  traceability: {
+    deliveredTasks: number;
+    tracedTasks: number;
+    pct: number | null;
+    /** Ruling 290: WHICH delivered tasks are untraced, not just how many. */
+    untraced: string[];
+  };
   /** How long an operator-opened decision/blocked packet waits for the human,
    *  from the packet-opened audit row to its task's next packet-resolved row. */
   packetResolution: {
@@ -99,6 +129,8 @@ export interface OversightSummary {
    *  managing. A project with the guardrail off contributes none: nothing is
    *  compacting there. */
   longTimelines: number;
+  /** Ruling 290: WHICH of them, capped — the count alone names no task to open. */
+  longTimelineKeys: string[];
   /** F31-D6 — coordination overhead: the COORDINATION runs' share of all
    *  reported run spend in scope. Live pass 31 read 63% before anyone had a
    *  number for it. Coordination is `operator` + `controller` (RunKind): both
@@ -112,8 +144,41 @@ export interface OversightSummary {
   coordination: {
     coordinationCostUsd: number;
     totalCostUsd: number;
-    /** coordination / total over cost-reporting runs; null when none. */
+    /** Ruling 201 (F37-21): coordination / total, and null unless EVERY run on
+     *  BOTH sides reported a cost. Ruling 190 suppressed the share when a side
+     *  reported *nothing*; the partial case is the same defect and is the
+     *  ordinary one — cost is a Claude-only observation (the Codex result
+     *  envelope carries tokens and no price), so a mixed-backend instance
+     *  computes this over whichever runs happen to bill. With both sides
+     *  partly silent the visible ratio is not even a bound: unreported
+     *  delivery spend pushes it down and unreported coordination spend pushes
+     *  it up. */
     share: number | null;
+    /** Runs in scope per side, and how many of them reported no cost — the
+     *  population a share would have to ignore. The card reads the pair: all
+     *  of a side (the ruling-190 case, "no delivery run reported a cost") and
+     *  some of it (the ruling-201 case, "137 of 142") are different sentences
+     *  and the counts tell them apart. */
+    runs: { delivery: number; coordination: number };
+    uncosted: { delivery: number; coordination: number };
+    /** Those same cost-silent runs by backend, descending, zero counts
+     *  dropped. F35-1 counts the rows its token sums leave out so the card can
+     *  NAME them; cost gets the same treatment, and `agent_runs.backend` makes
+     *  it specific ("209 Codex runs report no cost") rather than the hedge
+     *  "cost-reporting runs", which names no quantity and reads as "all". */
+    uncostedByBackend: readonly { backend: string; runs: number }[];
+    /** Coordination's share of TOKENS processed — the unit both backends
+     *  report, so it survives the blind spot above. A different question from
+     *  the dollar share and never a substitute: a luna-max token and an opus
+     *  token are not the same money. Null when a side ran and contributed no
+     *  final provider figure at all (ruling 190's test, at the token level). */
+    tokenShare: number | null;
+    coordinationTokens: number;
+    totalTokens: number;
+    /** Runs whose provider usage never landed (F35-1: interrupted, or errored
+     *  with an empty usage block), per side — the token share's own excluded
+     *  population, named for the same reason. */
+    tokenless: { delivery: number; coordination: number };
   };
 }
 
@@ -141,10 +206,16 @@ export interface InsightsSummary {
      *  null when that denominator is zero. */
     successRate: number | null;
   };
-  byBackend: CountRow[];
-  byKind: CountRow[];
-  byProject: CountRow[];
-  byModel: CountRow[];
+  byBackend: Breakdown;
+  byKind: Breakdown;
+  byProject: Breakdown;
+  byModel: Breakdown;
+  /** Ruling 308: cost and runs per TASK. Labelled `project/task` when the read
+   *  is not scoped to one project, because a task key is project-local. */
+  byTask: Breakdown;
+  /** Ruling 308: cost and runs per agent PROFILE — "which reviewer earns its
+   *  runs", which `byKind` cannot answer because every reviewer is one kind. */
+  byProfile: Breakdown;
   /** Mean wall-clock duration of finished runs with both timestamps, in ms. */
   avgDurationMs: number | null;
   /** Runs + cost per day over the last WINDOW_DAYS, oldest first, gap-filled. */
@@ -164,6 +235,16 @@ const totalsSchema = z.object({
    *  rows under the same scope, so a second full aggregate over `agent_runs`
    *  bought nothing but another table scan. */
   coordination_cost: z.number().nullable(),
+  /** Ruling 190: each side's runs, and how many of them put a figure into the
+   *  share. A side with runs but no figures was never observed, whichever side
+   *  it is; a side with no runs at all contributes a real zero. */
+  delivery_runs: z.number().nullable(),
+  costed_delivery_runs: z.number().nullable(),
+  coordination_runs: z.number().nullable(),
+  costed_coordination_runs: z.number().nullable(),
+  coordination_tokens: z.number().nullable(),
+  tokenless_delivery_runs: z.number().nullable(),
+  tokenless_coordination_runs: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
@@ -355,9 +436,18 @@ function oversightSummary(
     const terminal = roles.get(t.project_slug)?.terminalId ?? null;
     return terminal == null || t.stage !== terminal;
   });
-  const clearTasks = active.filter(
-    (t) => t.waiting !== "none" || t.owner_user_id != null,
-  ).length;
+  // Ruling 290 (F37-125): the NAMES, not just the counts. Every one of these
+  // three numbers is a count of EXCEPTIONS — work that is untraceable, work
+  // with no next actor, a record past the readability guardrail — and each one
+  // withheld the only fact a person needs to act on it. "41 of 42 delivered
+  // tasks carry branch + PR" is a traceability metric that will not say which
+  // task cannot be traced. Ruling 253 settled this shape for a knowledge base
+  // ("an agent cannot ask for a rule it cannot name"); a dashboard is the same
+  // rule with a person reading it.
+  const unclearTasks = active.filter(
+    (t) => t.waiting === "none" && t.owner_user_id == null,
+  );
+  const clearTasks = active.length - unclearTasks.length;
 
   // 2. Key↔branch↔PR traceability over DELIVERED tasks: a delivered revision
   // or a recorded PR. A branch alone is not a delivery — ruling 122 allocates
@@ -365,9 +455,10 @@ function oversightSummary(
   const delivered = tasks.filter(
     (t) => t.work_revision_sha != null || t.pr_json != null,
   );
-  const traced = delivered.filter(
-    (t) => t.branch != null && t.pr_json != null,
-  ).length;
+  const untracedTasks = delivered.filter(
+    (t) => t.branch == null || t.pr_json == null,
+  );
+  const traced = delivered.length - untracedTasks.length;
 
   // 3. Blocked-decision resolution: pair each packet-opened audit row with the
   // task's NEXT packet-resolved row. Withdrawn/superseded packets never resolve
@@ -439,16 +530,29 @@ function oversightSummary(
   }
   reviewDurations.sort((a, b) => a - b);
 
+  const longTimelineTasks = tasks.filter((t) => {
+    const threshold = compressionAt.get(t.project_slug);
+    // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
+    // opens with `if (events.length <= options.threshold) return events`, so a
+    // task sitting exactly ON the threshold is not compacted and is not one the
+    // readability machinery is managing. Counting it as "past their project's
+    // compression threshold" put a task in the card that the fold never touches
+    // — off by one against the only rule that decides.
+    return threshold != null && t.event_count > threshold;
+  });
+
   return {
     clarity: {
       activeTasks: active.length,
       clearTasks,
       pct: active.length ? clearTasks / active.length : null,
+      unclear: namedKeys(unclearTasks),
     },
     traceability: {
       deliveredTasks: delivered.length,
       tracedTasks: traced,
       pct: delivered.length ? traced / delivered.length : null,
+      untraced: namedKeys(untracedTasks),
     },
     packetResolution: {
       resolved: packetDurations.length,
@@ -461,12 +565,31 @@ function oversightSummary(
       avgMs: avg(reviewDurations),
       medianMs: median(reviewDurations),
     },
-    longTimelines: tasks.filter((t) => {
-      const threshold = compressionAt.get(t.project_slug);
-      return threshold != null && t.event_count >= threshold;
-    }).length,
+    // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
+    // opens with `if (events.length <= options.threshold) return events`, so a
+    // task sitting exactly ON the threshold is not compacted and is not one the
+    // readability machinery is managing. Counting it as "past their project's
+    // compression threshold" put a task in the card that the fold never touches
+    // — off by one against the only rule that decides.
+    longTimelines: longTimelineTasks.length,
+    longTimelineKeys: namedKeys(longTimelineTasks),
     coordination,
   };
+}
+
+/**
+ * Ruling 290: how many exception KEYS a card names before it stops.
+ *
+ * Enough that a small set is named in full — a dashboard's job is to point at
+ * the thing — and few enough that a badly-drifted instance does not turn one
+ * card into a wall. Past it the card says how many more there are, so the
+ * number is never quietly smaller than the truth.
+ */
+export const INSIGHTS_NAMED_EXCEPTIONS = 8;
+
+/** `PROJ/KEY` for each row, capped, newest-looking order preserved. */
+function namedKeys(rows: readonly { project_slug: string; task_key: string }[]): string[] {
+  return rows.slice(0, INSIGHTS_NAMED_EXCEPTIONS).map((t) => `${t.project_slug}/${t.task_key}`);
 }
 
 export function getInsightsSummary(
@@ -497,6 +620,25 @@ export function getInsightsSummary(
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
                 COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
                                   THEN total_cost_usd END), 0) AS coordination_cost,
+                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
+                                  THEN 1 ELSE 0 END), 0) AS delivery_runs,
+                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
+                                   AND total_cost_usd IS NOT NULL
+                                  THEN 1 ELSE 0 END), 0) AS costed_delivery_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                  THEN 1 ELSE 0 END), 0) AS coordination_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                   AND total_cost_usd IS NOT NULL
+                                  THEN 1 ELSE 0 END), 0) AS costed_coordination_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                   AND usage_final = 1
+                                  THEN input_tokens + output_tokens END), 0) AS coordination_tokens,
+                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
+                                   AND usage_final = 0
+                                  THEN 1 ELSE 0 END), 0) AS tokenless_delivery_runs,
+                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
+                                   AND usage_final = 0
+                                  THEN 1 ELSE 0 END), 0) AS tokenless_coordination_runs,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
@@ -509,12 +651,81 @@ export function getInsightsSummary(
 
   // F31-D6: the share is read off the totals pair — both sides come from the
   // same scan, so they can never disagree about what "all reported spend" is.
+  //
+  // Ruling 190 (F37-12): a share is a measurement only when BOTH sides could
+  // have been seen. Live, a Codex delivery fleet reported no cost at all, so
+  // the denominator held nothing but the four Claude controller turns and the
+  // quotient was 1 by construction — "100%" answering a question ("how much of
+  // my spend is coordination?") this data cannot answer. The mirror is just as
+  // wrong and just as reachable (a Codex operator and controller under a Claude
+  // delivery fleet reads 0%, claiming coordination is free when it merely never
+  // reported), so the rule is symmetric: a side that RAN and reported nothing
+  // was not observed, and the share is null. A side that never ran contributes
+  // a real zero and is not a gap — an instance with no delivery runs at all
+  // genuinely spent everything on coordination.
+  //
+  // Ruling 201 (F37-21): ruling 190 guards the EMPTY case and not the PARTIAL
+  // one, and the partial case is the ordinary one. Cost is a Claude-only
+  // observation — `costUsd` is assigned off the Claude result envelope, and the
+  // Codex envelope carries token counts with no price — so on a mixed-backend
+  // instance most runs never report. Live, at the time of the ruling: 209 of
+  // 215 runs, 94% of the tokens. Ruling 190's test passed the moment ONE run on
+  // each side reported, and the card would then divide 6 costed coordination
+  // runs by a denominator the other 137 never entered. So the share is a
+  // measurement only when every run on both sides reported one; short of that
+  // the ratio is not a bound in either direction, and the card says what it
+  // does not know and offers the token share instead.
   const coordinationCost = totals.coordination_cost ?? 0;
   const totalCost = totals.cost ?? 0;
+  const deliveryRuns = totals.delivery_runs ?? 0;
+  const costedDeliveryRuns = totals.costed_delivery_runs ?? 0;
+  const coordinationRuns = totals.coordination_runs ?? 0;
+  const costedCoordinationRuns = totals.costed_coordination_runs ?? 0;
+  const uncosted = {
+    delivery: deliveryRuns - costedDeliveryRuns,
+    coordination: coordinationRuns - costedCoordinationRuns,
+  };
+  const fullyCosted = uncosted.delivery === 0 && uncosted.coordination === 0;
+  // The card names the silent runs by backend rather than by a hedge. Derived
+  // from the rows, never from a list of backend names in the source: ruling
+  // 191's lesson is that advice which hardcodes what the environment contains
+  // goes stale the day the environment changes.
+  const uncostedByBackend = z
+    .array(z.object({ backend: z.string(), runs: z.number() }))
+    .parse(
+      db
+        .prepare(
+          `SELECT backend, count(*) AS runs FROM agent_runs ${and("total_cost_usd IS NULL")}
+           GROUP BY backend ORDER BY runs DESC, backend ASC`,
+        )
+        .all(...params),
+    );
+  // Tokens: the unit both backends report. Same suppression test as ruling 190
+  // applied one level down — a side that RAN and landed no provider figure at
+  // all was not observed, and its 0 is not a measurement. The incidental gap
+  // (F35-1: an interrupted run, or one that errored with an empty usage block)
+  // is COUNTED and named instead of suppressing the figure, because it is not
+  // systematic to one side the way the cost blind spot is.
+  const coordinationTokens = totals.coordination_tokens ?? 0;
+  const totalTokens = (totals.input_tokens ?? 0) + (totals.output_tokens ?? 0);
+  const tokenless = {
+    delivery: totals.tokenless_delivery_runs ?? 0,
+    coordination: totals.tokenless_coordination_runs ?? 0,
+  };
+  const tokenBlind =
+    (deliveryRuns > 0 && tokenless.delivery === deliveryRuns) ||
+    (coordinationRuns > 0 && tokenless.coordination === coordinationRuns);
   const coordination = {
     coordinationCostUsd: coordinationCost,
     totalCostUsd: totalCost,
-    share: totalCost > 0 ? coordinationCost / totalCost : null,
+    share: totalCost > 0 && fullyCosted ? coordinationCost / totalCost : null,
+    runs: { delivery: deliveryRuns, coordination: coordinationRuns },
+    uncosted,
+    uncostedByBackend,
+    tokenShare: totalTokens > 0 && !tokenBlind ? coordinationTokens / totalTokens : null,
+    coordinationTokens,
+    totalTokens,
+    tokenless,
   };
 
   const outcomeRows = z.array(outcomeSchema).parse(
@@ -559,7 +770,7 @@ export function getInsightsSummary(
   // first thing the LIMIT dropped. A label is a backend/kind/model/project, a
   // handful of real entities, so grouping over the whole set is cheap; the top
   // by RUNS is unioned in so no group is dropped purely for being unpriced.
-  const group = (column: string): CountRow[] => {
+  const group = (column: string): Breakdown => {
     const rows: CountRow[] = z
       .array(groupSchema)
       .parse(
@@ -593,9 +804,22 @@ export function getInsightsSummary(
       if (kept.size >= TOP_N) break;
       kept.set(row.label, row);
     }
-    return [...kept.values()].sort(
+    const shown = [...kept.values()].sort(
       (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.runs - a.runs,
     );
+    // Ruling 308: say what the window left out. A breakdown that shows eight
+    // of thirty groups and says nothing reads as the whole instance, which is
+    // the same defect ruling 302 fixed on the timeline windows — and this one
+    // is on the surface a person opens to decide where their money goes.
+    const hiddenRows = rows.filter((r) => !kept.has(r.label));
+    return {
+      rows: shown,
+      hidden: hiddenRows.length,
+      hiddenRuns: hiddenRows.reduce((n, r) => n + r.runs, 0),
+      hiddenCost: hiddenRows.some((r) => r.cost !== null)
+        ? hiddenRows.reduce((n, r) => n + (r.cost ?? 0), 0)
+        : null,
+    };
   };
 
   const duration = durationSchema.parse(
@@ -669,6 +893,14 @@ export function getInsightsSummary(
     byKind: group("kind"),
     byProject: group("project_slug"),
     byModel: group("model"),
+    // Ruling 308: the two the controller asked for and could not answer —
+    // "what did SHOP-27 cost across eleven rework rounds" and "which reviewer
+    // earns its runs". A task key is only unique inside its project, so an
+    // unscoped read labels each row with the project it belongs to.
+    byTask: group(
+      filter.projectSlug ? "task_key" : "project_slug || '/' || task_key",
+    ),
+    byProfile: group("agent_profile_id"),
     avgDurationMs: duration.avg_ms,
     daily,
     oversight: oversightSummary(db, filter, coordination),

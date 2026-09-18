@@ -57,6 +57,31 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Ruling 196 (owner, pass 37): the three an agent reaches for FIRST and cannot
+# install for itself. Pass 37 measured the cost of their absence — 75
+# `command not found` lines in a single pass, a monorepo committed around a
+# package manager nothing here could run, a root Makefile whose every target
+# exits 127, and a REQUIRED reviewer chartered to `make up` a stack, which
+# could therefore never approve anything. Ruling 191 stopped agents
+# rediscovering the gap one exit-127 at a time; this closes the part of it that
+# is cheap to close.
+#
+# Docker is deliberately NOT here and is not coming from this ruling: an agent
+# holding the daemon socket controls every container on the host, and
+# docker-in-docker is a posture change that needs its own pass. A Compose stack
+# still cannot come up in this image, and the shell inventory says so.
+#
+# pnpm comes from npm rather than corepack: Node unbundled corepack, and pass 37
+# logged `corepack: command not found` beside the pnpm one. A pinned global
+# install is one layer instead of a first-run download into a container-local
+# cache. It is ONE version — a repository that pins a different one in
+# `packageManager` reaches it with `npx pnpm@<version>`, which npm can do.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends make curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g pnpm@12.4.1 && npm cache clean --force
+
 # R19-19: agents get a real browser. Debian's chromium (~700MB installed with
 # its dependency closure — the owner accepted the weight over a sidecar), driven
 # by the @playwright/mcp server that ships in node_modules. The env var is how

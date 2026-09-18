@@ -289,6 +289,10 @@ inventory is not regenerated automatically and has drifted; the verified module 
     admin Force-accept is the only bypass (it never bypasses the PR-head-must-contain-the-
     delivered-commit check). Every accept — including force — shows a confirm dialog
     stating what merges and any missing signals.
+    **Narrowed by ruling 59** (noted 2026-08-06): force-accept skips the remaining stages and
+    the review gate as well, so "requires a healthy verdict" describes the ordinary accept only.
+    What force still cannot bypass is this ruling's own PR-head containment check.
+
 21. **R15-2 (2026-07-28): delivery is an operator decision.** Push + review-PR opening is
     no longer a stage side-effect. The operator holds a `deliver-review-pr` capability and
     decides when delivery is plausible, weighing the task's remaining stages; it opens a
@@ -4023,6 +4027,4526 @@ by rewriting those paragraphs:*
     (`codex-runtime.server.ts`; `run-service.server.ts`; `toolchain.server.ts`;
     `boot.server.ts`; `specialist-run.server.ts`; `specialist-tool-policy.ts`;
     `app/shared/capabilities.ts`; `compose.yml`; `docs/operations/deployment.md`.)
+
+186. **A dependency hold refuses every agent dispatch (owner, 2026-09-13, pass 37; D37-1,
+    F37-2).** `blockedBy` held nothing. Ruling 131(d) refused three operator triggers
+    (`create`, `transition`, `scheduled`) and then ASKED the model, in the held doctrine's
+    prompt paragraph, not to "dispatch delivery work"; `startAgentRun` checked nothing at
+    all, so every other door — the operator's `run_agent`, the controller's `run_agent`, the
+    task page's Run-an-agent control — started a real, billable run on a held task. Live
+    (pass 37, SHOP-2): Viberr wrote "Held until every entry is done; Viberr releases it
+    then", started a Codex run **1.9 seconds later**, and let it design and commit the whole
+    identity service onto a pushed branch cut from a base that predated the foundation it
+    waited on — the exact collision the hold existed to prevent, manufactured by the
+    mechanism meant to prevent it. Asked what a hold should gate, the owner chose the hard
+    gate, one spelling, with no supporting-run carve-out and no advisory mode: *"the words on
+    the board become true"*, at the cost of a held task doing no preparatory work at all.
+    **(a)** `holdRefusal` lives in `app/shared/dependencies.ts` beside the vocabulary it
+    reads — pure and client-safe, so the server gate and the pre-click control cannot drift.
+    **(b)** `startAgentRun` refuses a non-empty `blockedBy` beside ruling 177's closure gate,
+    AHEAD of the auto-engage, so no engagement seat lands on a held task either. **(c)** The
+    task page's agent control renders that same sentence and disables Run; a SCHEDULED run
+    stays offerable, because a hold can clear on its own and the gate refuses again at fire
+    time if it has not. **(d)** The held doctrine stops claiming a responsibility the server
+    has taken: it now tells the operator that `run_agent` and `deliver_for_review` are
+    refused, rather than asking it not to try. **(e)** Operator triggers are deliberately NOT
+    narrowed — the reactive ones exist to answer people and react to facts, and with dispatch
+    gated they can no longer cause work. **(f)** Ruling 157 is untouched: its subject is a
+    packet-less, LIST-less stored hold, and it already deferred to ruling 131's floor for a
+    dependency list; the third arm of its test asserted that a dispatch on a
+    dependency-held task SUCCEEDED, which was the ambient behaviour of the day and never
+    that ruling's subject, and it now asserts the refusal.
+    (`app/shared/dependencies.ts`; `specialist-run.server.ts`; `operator-run.server.ts`;
+    `app/features/task-detail/execution-profile.tsx`.)
+
+187. **The record never claims a commit the remote does not have, and work that vanished
+    with its workspace is announced as lost (owner, 2026-09-13, pass 37; F37-8, F37-9).**
+    SHOP-2's `task.md` recorded `3aad6ff` on `shop-2`; origin's `shop-2` held only the
+    bootstrap commit, `git cat-file` found the object nowhere, and no workspace under `/data`
+    held it. The commit was made inside a run's workspace, never delivered, and disposed with
+    the workspace — and the GitHub page rendered "1 commit · synced" for a change that
+    existed nowhere. The carve-out that kept it was written for a different case ("agents
+    don't always follow the prefix convention, so an EMPTY filtered list must not wipe a
+    non-empty cache") and could not tell "our filter missed it" from "it was never pushed".
+    **(a)** Every recorded commit carries `pushed` — whether the REMOTE has it — stamped by
+    the reconciler from a **complete** compare, and every surface renders it (the GitHub
+    page's branch row now reads "1 commit · not pushed" where it read "1 commit"). An absent
+    `pushed` means no compare could judge it, which is neither answer and must render as
+    neither: a short list (the tolerant reader's `droppedCommits > 0`, or GitHub's own cap)
+    judges nothing at all, because stamping a genuinely pushed commit `false` is the same lie
+    pointed the other way. **(b)** The first implementation DROPPED an unmatched entry and
+    announced it as "**Work lost**". That was wrong and the live system proved it within the
+    hour: a reconcile landing in the window between an agent committing in its workspace and
+    delivery pushing it announced SHOP-7's `522e640` as lost **seconds before Viberr pushed
+    it**. At reconcile time a commit awaiting delivery and one whose workspace is gone are
+    indistinguishable — neither is on the remote, neither carries `pushedAt` — so "lost" is a
+    claim this code cannot make. "Not pushed" is one it can, it is always true, and it is what
+    the reader needs. The carve-out's real case is preserved and pinned: an unprefixed commit
+    that IS on the branch survives and is stamped pushed. **(c)** F37-9, the same
+    family: the sync pill reads the newest `github.reconcile` provenance row, and `changed`
+    compares only the task file's `pr`/`github` blocks, so a pass whose only change was
+    "`main` moved" wrote no row and the pill kept the stale verdict — live, SHOP-2 rendered
+    **synced** while the same pass's audit row said `behind_main`. A changed verdict now
+    writes a row; an unchanged one still writes nothing on a poller tick, so the
+    "grow unboundedly" concern the original condition names is untouched.
+    (`github-reconciler.server.ts`; `provenance-query.server.ts`.)
+
+188. **A controller read returns what the equivalent human surface renders (owner,
+    2026-09-13, pass 37; F37-3, F37-5, F37-6, F37-7).** Four reads handed the model
+    less-resolved data than the UI with no marker saying so, and each changed what the
+    controller said or did. **(a)** `get_project` returned RAW declared stage ids; ruling
+    R14-1 remaps a declared id absent from a board onto the stage filling the same
+    structural role, and the Agents page renders the resolved list. The controller read the
+    raw ids and told its owner two deployed profiles were "effectively unselectable" while
+    the audit trail showed one of them being selected. It now emits the board-resolved list
+    through the SAME `resolveDeclaredStages` the Agents page, the task page and the dispatch
+    gate share, with `declaredStages` beside it so a remap is visible rather than silent.
+    **(b)** `get_task` leaked `validation_block_reason`, whose own docstring says every
+    consumer filters on the resolved review stage first — the board does, this read did not,
+    so a Design-stage task reported a Review-stage acceptance sentence recommending
+    force-accept three stages early. Replaced by `notAcceptableReason` via
+    `acceptanceRefusalFor`, the verdict the operator already reads. **(c)**
+    `list_mcp_servers` omitted ruling 176's write-tool marking entirely, so the controller
+    refused a grant that was in fact safe — reasoning correctly from what it could see: *"if
+    Viberr enforces that marking, it does so somewhere I cannot read, and I won't assert that
+    it does."* It now reports `writeTools`, `writeToolsReviewed` and what the marking does.
+    **(d)** `save_mcp_server` could create a server but never govern one, so both servers the
+    controller created landed with a NULL policy; it now takes `writeTools`. **(e)**
+    Auto-marking a create from the name heuristic was considered and REFUSED: the marking is
+    a review, `writeToolsReviewed` says whether one happened, and pre-marking would make
+    Viberr assert a review nobody performed — the same class of lie pointed the other way.
+    `saveMcpServer` returns `writeToolsSuggestion` instead, and the reply states plainly that
+    nothing is withheld and names the tools that look like writes. **(f)** F37-4, adjacent:
+    `WRITE_VERBS` grew from seven words to nineteen, having missed `edit_file` and `move_file`
+    on a stock filesystem MCP server.
+    (`controller-toolkit.server.ts`; `agents-query.server.ts`; `org/resources.server.ts`;
+    `app/shared/mcp-tools.ts`.)
+
+189. **A person's decision joins the task's contract, not just its timeline (owner,
+    2026-09-13, pass 37; F37-10).** SHOP-7's goal said "the agent must not select a provider
+    … ask Arda to choose". Arda chose, through the packet Viberr opened for exactly that.
+    The agent recorded the choice; the required reviewer re-anchored on the canonical file —
+    as its prompt tells it to — found the deliverable contradicting the goal and requested
+    changes; the operator told the agent to "remove every claim that mock-only was selected";
+    the agent "restore[d] a neutral, unresolved comparison"; and a second packet asked the
+    same question again. Nobody misbehaved — enforcing the declared contract is precisely
+    what a required reviewer is for. The defect is that resolving a packet wrote a timeline
+    event and a tagged comment and did not touch the goal, and the goal is what every fresh
+    run reads while a timeline entry twenty events back is not. Resolving a packet now
+    appends the decision to the goal, in the same locked write that clears the packet, with
+    the clause that settles the contradiction it may create: "Where anything above
+    contradicts it, the decision wins — it was made by the person the question was put to,
+    and it is not an agent overstepping." Doing it in the WRITER rather than asking the
+    operator to remember `set_goal` is deliberate: it needs no model judgement and cannot be
+    lost to a turn that fails, is interrupted, or resumes into an expired session — all three
+    of which happened on this task. Exclusions, all because no future run's WORK is bound: a
+    resolution that ENDS the task; `edit_goal`, whose packet stays open because the person is
+    about to rewrite the goal themselves; and a RECOVERY choice (`request_edit`, `redirect`,
+    `retry_other_backend`, `hold_runtime_debug`, `archive_task`, `discard_branch`,
+    `resolve_remote_collision`, `move_stage`), which decides what happens NEXT rather than what
+    the work IS — live, SHOP-7's goal collected "Work stalled: pick a recovery path → Redirect
+    with sharper guidance" beside the real provider decision before this exclusion existed. A
+    typed CUSTOM directive always binds, whatever packet it was typed on, because a person
+    wrote it.
+    (`task-actions.server.ts`.)
+
+190. **A share whose complement was never observed is not a measurement (owner,
+    2026-09-13, pass 37; F37-12).** "Coordination overhead" read **100%** on the live
+    instance, under the sub-text "operator and controller runs spent $4.34 of $4.34
+    reported by cost-reporting runs". Every word of that is true and the headline is
+    worthless: only Claude's result envelope carries a cost, the whole delivery fleet ran
+    on Codex, and the instance's four CONTROLLER turns were therefore the entire
+    denominator. The quotient was 1 by construction — it could not have been anything
+    else — while the question the card exists to answer ("how much of my spend is
+    coordination?") had no answer in this data at all. A reader sees a metric pegged at
+    its maximum and goes to tune the operator; the truth is that coordination cost $4.34
+    and delivery's cost is UNKNOWN, not zero. This is the same defect the card already
+    guards at the other end — F31-D6 refuses a fake 0% when nothing has reported a cost —
+    so it gets the same answer: when no `primary`/`reviewer` run reported a cost, the
+    share is null and the card gives the figure that IS real ("operator and controller
+    runs spent $4.34; no delivery run reported a cost, so there is no share to take").
+    The rule is SYMMETRIC, which the first draft of it was not: the mirror — a Codex
+    operator and controller under a Claude delivery fleet — reads **0%** and claims
+    coordination is free when it merely never reported, and it is just as reachable. So a
+    side that RAN and reported nothing makes the share null whichever side it is, and the
+    card names which one. The test is runs, not dollars, and it separates a side that
+    reported nothing from a side that never ran: a delivery run that genuinely reported
+    $0.00 was observed (100% is earned there and is shown), and an instance with no delivery
+    runs at all really did spend everything it spent on coordination.
+    (`insights-query.server.ts`, `insights-page.tsx`.)
+
+291. **The conflict remedy names the operation Viberr actually performs (2026-09-15, pass
+    37; F37-126).** A pull request that conflicts with its base blocked acceptance with
+    this sentence, on the board card, the accept dialog, the projected column and the
+    operator's own `notAcceptableReason`: "Rebase the branch and re-review, or archive the
+    task."
+    Viberr does not rebase. `update_branch_from_base` "merge[s] the base into the branch
+    and push[es] it", and that same tool's text tells the operator to "never ask an agent
+    to rebase, merge or force-push". So the product recommended, to the ONE reader holding
+    no tool and the most freedom to do it by hand, the single operation it forbids
+    everywhere else. It is also the operation that broke a branch on this instance:
+    `operator-actions.server.ts` carries the note "Live on SHOP-11: a rebase diverged the
+    branch from its own PR #15", and the shopify-clone board's own rulings open with "a
+    branch with an open PR is published history — merge main in, never rebase".
+    Every sentence now names the merge, and says why the alternative is wrong rather than
+    only that it is: rebasing rewrites commits the pull request already published.
+    THE CORRECTION THIS RULING NEEDED ITSELF. Its first draft changed the two strings a
+    grep for one sentence found, and claimed "one string, shared by both call sites, so
+    they cannot drift". Within the hour the review queue was still reading "GitHub can't
+    merge it until the branch is rebased" on a live board. SIX more were standing at that
+    moment: that one, two short `cause` strings beside the long reason already fixed, the
+    GitHub tab's comment, a note handed to the OPERATOR ("delivered work … may need a
+    rebase"), the reconciler's own notification, and the decision packet's PLACEHOLDER —
+    which is Viberr modelling what a good directive looks like at the exact moment a
+    person is writing one, in the operation the product forbids.
+    So the rule is a SWEEP, not a string: `rebase-advice.test.ts` walks every source file
+    under `app/` and fails on any line recommending one, matching the recommendation
+    rather than the word (this ruling has to say it, and so does every comment explaining
+    why not). Writing it caught an eighth site the hand-grep had missed. A claim that N
+    places are fixed is worth exactly as much as the thing that counts them, which is the
+    lesson of the pass applied to the author of the pass.
+    Nothing about the MECHANISM changed here. That is the point: the mechanism was right
+    and the instructions beside it told a person to do the opposite, which is the cheapest
+    kind of defect to ship and among the more expensive to undo — a rewritten branch cannot
+    be un-rewritten by the person who followed the advice.
+    (`task-file.schema.ts`, `task-actions.server.ts`, `review-helpers.ts`,
+    `github-reconciler.server.ts`, `operator-run.server.ts`, `decision-packet.tsx`,
+    `github-view.tsx`, and the sweep that counts them.)
+
+292. **Ruling 285 for the controller, and the verdict reason that was cut in silence
+    (2026-09-15, pass 37; F37-127, completes 285 and 288).** Ruling 285 gave the OPERATOR
+    `read_timeline_entry` so a report its prompt had cut at 4,000 characters could be read
+    whole. The controller got nothing — and it is the SHARPER of the two cases: its
+    `get_task` cuts every timeline entry at 700 rather than 1,500, and it is the actor a
+    PERSON asks about an agent's report. A rule applied to one actor and not its sibling,
+    written into the very ruling that exists to end that shape. Found by sweeping every
+    remaining `.slice(0, N)` on model-facing text rather than by tripping over it, which is
+    the only reason it was found at all.
+    The controller now mounts the same reader, over the same implementation. Its `get_task`
+    payload already printed `at` — the exact address the reader takes — so nothing needed
+    inventing, and a cut entry now carries a `clipped` line naming the tool beside the text
+    it cut. It is a read, so it joins the other reads and needs no grant; `read_run_log` is
+    the RUN's log, which is a different thing from what an agent chose to report.
+    PROVEN THE SAME EVENING, by the tool itself. Asked which claims in SHOP-43's review it
+    had verified and which it was relaying, the controller read the verdict whole with
+    `read_timeline_entry` and reported: "the clip stopped before every one of the caveats
+    below". What the 700 characters cut was the reviewer's own §5 honesty section — that its
+    exit-0 test result required `--workspace-concurrency=1`, and that unconstrained, cart's
+    suite times out and aborts the run before orders ever executes. Its conclusion is the
+    sentence this ruling is for: "if I had relayed 'orders is green on main again' without
+    this, I would have handed you a true sentence that implies a false one." A person was
+    one confirmation from accepting on that sentence. Working from the clip, in good faith,
+    the controller would have supplied it — and nothing afterwards would have looked like a
+    failure.
+    The same sweep found the WRITE-side twin. A reviewer's verdict `reason` — a stored
+    record a person reads on the task page beside approve or request_changes — was a bare
+    `.slice(0, 2000)`, so a long justification was stored ending mid-word and read as the
+    whole of what the reviewer said. Ruling 288's shape, in a second field. The cut stays
+    (a verdict reason is a paragraph, not a report) and it now says it was cut and where
+    the whole of it is: the agent's own report, on the same timeline, never truncated.
+    (`controller-toolkit.server.ts`, `task-actions.server.ts`.)
+
+293. **The evidence, not only the sentence claiming it (2026-09-15, pass 37; F37-128).**
+    A task's attachments are where the proof lives, and every convention on this instance
+    tells agents to put it there. On this board the SHOP-37 deliverer attached its mutation
+    proof — the mutant diff and both vitest runs, raw; the SHOP-42 reviewer attached "full
+    before/after captures and audit table"; the SHOP-28 architect wrote two follow-up task
+    specs into one, "including the literal code to land". A timeline entry names them under
+    `attachments:` and carries none of their contents.
+    So the two actors a PERSON asks "did it actually prove that?" — the controller they
+    talk to, and the operator that recommends acceptance on the strength of a review —
+    could read the claim and never the file. That is the distinction this whole pass turns
+    on, and the controller had already named it about itself: "the citation is inherited,
+    not verified. If my paraphrase of §3 had been wrong, nothing in that run would have
+    caught it."
+    `read_task_attachment` returns one attachment as text, on BOTH toolkits, mounted in one
+    change and pinned by one test that asserts both. That pairing is deliberate: ruling 292
+    exists because ruling 285 gave one coordinator a reader and not the other, and a test
+    holding the two together is what turns doing it twice into a choice rather than an
+    oversight.
+    Text only, by name, and honest about the rest: a `.png` is named and refused rather
+    than handed back as bytes a model will describe as though it had looked at the image; a
+    name that climbs out of the task's own folder resolves to nothing (the containment every
+    store path uses); a file past the read cap says it was cut. A name this task does not
+    hold answers with what it DOES hold, rather than implying a deletion.
+    WHAT IT WAS FOR, an hour after it shipped. The controller had written SHOP-50's goal
+    from a reviewer's summary, asserting as settled that cart's integration suite times out
+    under unconstrained parallelism. Reading the reports and their attachments in full, it
+    found a second run on the SAME head, 40 minutes later, with the SAME unconstrained
+    command, at exit 0 — and a third failure shape again on a clean workspace. It stopped
+    its own dispatch, rewrote the goal to open "the premise of this task is contested, and
+    establishing which account is true IS the first deliverable … Do not inherit it", laid
+    out the three observations with their times and heads, and said in the goal itself: "I
+    have read that report and its attachments in full; this is quoted from them, not from a
+    summary." Then it fenced the work — reproduce before you repair, profile before you
+    assume, a raised timeout is the same defect with a bigger number, and a cost found in
+    production code is a scope question rather than a licence.
+    That is the whole argument for this ruling in one turn: the difference between a
+    coordinator that relays a claim and one that checks it is whether it can open the file
+    the claim was made from. Without it the false premise reaches an agent as settled fact,
+    in a goal, which is the one text every future run re-anchors on (ruling 189).
+    (`task-attachments.server.ts`, `controller-toolkit.server.ts`,
+    `operator-toolkit.server.ts`.)
+
+294. **A usage reading belongs to an account, and the person whose account it is
+    (owner, 2026-09-16, pass 37; F37-129, completes 146(a) and 165).** Three things, one
+    idea, asked for as a UI change and mostly not one.
+    THE READING NOW GOES WITH THE ACCOUNT. Ruling 165's own sentence is "the refusal
+    Viberr observed on the slot goes with it", and `retireBackendRefusalsFor` applied it to
+    two of the three records this module keeps: the exhaustion, the credential refusal, and
+    not the utilization reading. Live, an hour before this was written: the owner connected
+    a Claude account with a fresh window and `/insights` went on reading "claude · 95% of
+    seven day · resets Sep 17" — a figure about an account no longer connected, on the
+    surface a person checks to decide whether there is room to run. The refusal beside it
+    retired correctly; only the percentage lied. A reading is never "stale but roughly
+    right" after a credential change, because a new account's window has no relationship to
+    the old one's, so it is deleted rather than aged. The function is
+    `retireBackendRecordsFor` now, because it retires records and no longer only refusals.
+    THE READING REACHES THE PERSON'S OWN CARD, which ruling 146(a) said it already did:
+    "they are already rendered per person on Insights … and on Profile, which is where a
+    fact about somebody's account belongs." Profile never rendered one. So this closes a
+    drift rather than opening a disclosure — and "per person" is the binding half. The
+    store keeps ONE reading per backend for the whole instance, stamped with whichever run
+    reported it, and `/insights` renders that unscoped behind `requireRole("admin")`. The
+    Agent accounts card is the first NON-admin surface to carry a utilization figure at
+    all, so an unscoped field here would not duplicate an existing disclosure: it would put
+    one member's account consumption in front of every member, under their own name. Two
+    gates, and the second is not redundant — the principal check cannot catch a person's
+    OWN older account, and the panel revalidates the loader the instant a sign-in succeeds,
+    which is exactly when a surviving reading from the account just replaced would be
+    re-rendered as the new one's.
+    It is an observation, never a probe, and the card says so: the age of the reading, and
+    that Viberr cannot ask the provider how much of a window is left. A missing utilization
+    reads "not reported" and never a fabricated 0% (the rule `wire-format.server` already
+    states for the same field); a percentage is clamped, because a provider on overage
+    reports above 1 and an unclamped round renders "118% of seven day"; an empty
+    `rateLimitType` falls back to "window" rather than composing "62% of " with a dangling
+    preposition. Only Claude runs report readings today (`rate_limit_event` has no Codex
+    counterpart), so a Codex card shows nothing rather than an empty row that reads as
+    broken.
+    THE SIGN-IN LINK IS COPYABLE, on both backends, from the step that offers it. Opening
+    it in place only works when the browser reading the page is the one holding the vendor
+    session, and often it is not: the instance runs on a server, the person is on another
+    machine, the sign-in has to finish in a different profile. The only way to move that
+    URL was to right-click an anchor whose href is a 300-character OAuth redirect. Same
+    fixture as the code button beside it, deliberately — one gesture on this card, learned
+    once — and the `copied` flag is keyed by WHICH button copied, because one boolean made
+    both read "Copied" at once on the one backend that shows both.
+
+    (`backend-quota.server.ts`, `profile-query.server.ts`, `agent-accounts-panel.tsx`.)
+
+295. **A task's title is a claim, so it can be corrected like one (owner, 2026-09-16,
+    pass 37; F37-130).** Viberr wrote a title once, at creation, and then never again by
+    anyone: not the controller, not the task page, not an operator. `updateTaskGoal` wrote
+    the contract every future run re-anchors on; nothing wrote the one-line summary of it.
+    The controller found this about a title it had authored itself and then disproved, and
+    ranked it first of five gaps: "What I wanted: change six words in the title I wrote.
+    What I did instead: rewrote the entire 6,000-character goal. The title is what every
+    person scanning the board reads; the correction lives in a body almost nobody opens. A
+    false claim I authored is still on the board an hour after being disproved." It named
+    the asymmetry exactly: `update_task` writes the goal, the priority, the labels, the due
+    date and the wait, the goal being by far the most consequential of those, and then
+    stops at the summary of all of it. There is no safety rationale in that shape. A title
+    and a goal are the same claim at two lengths, and the shorter one was the harder to
+    correct, which is backwards: it is the one that travels.
+    So `updateTaskTitle` exists, behind the GOAL's gate (`update-goal`, maintainer and
+    above) rather than `edit-task-meta`, because a title asserts what the work is and a
+    label only files it. On the controller it is a field of `update_task` reporting on its
+    OWN axis beside goal, metadata and wait: a title that wrote is never hidden behind a
+    goal that was refused, and the reverse, which is the rule that tool already followed
+    for every other field.
+    The rename NOTES BOTH TITLES. A silent rename is the quiet half of this defect: the old
+    wording is what every existing reference to the task says, in a comment, in another
+    task's goal, in somebody's memory, and after a silent rename each of those looks like a
+    reference to something else. The note carries the old title, the new one, and the fact
+    that the key did not change. Ruling 288's rule applies one field over: a title longer
+    than 200 characters is refused by name with NOTHING written and never cut, because a
+    title is the one string the board card, the review-queue row and the goal-chain link
+    all render, so a silently truncated one is wrong in more places than a truncated goal.
+    Saving the same words is a `[noop]` that says so, not a `[done]` about a write that
+    never happened.
+
+296. **An argument Viberr does not know is a refusal, not a silent drop (owner,
+    2026-09-16, pass 37; F37-131).** The SDK's `tool()` takes a raw Zod field map and
+    builds a plain object from it. A plain Zod object STRIPS keys it does not declare, so
+    a caller that invents or misspells an argument has its call run without that argument
+    and gets an answer computed from whatever survived; the published JSON Schema carried
+    no `additionalProperties: false` either, so the model was never told the key was
+    invalid. Measured at the real MCP boundary before this was written, with a live client
+    and server: `{ a: "x", status: "failed" }` reached the handler as `{ a: "x" }` and the
+    call returned success.
+    The controller hit the read half live and ranked it third of five gaps. It asked
+    `list_runs` for failed runs; `list_runs` has no `status` argument; it got the LIVE
+    listing back as though that were the answer. Its words: "it returned a
+    plausible-looking wrong answer rather than refusing." The write half is worse and
+    nobody had hit it yet, because the same machinery backs `update_task`,
+    `run_agent_on_task` and `accept_completion`: a misspelled `duedate` rides along beside
+    a good `goal`, and the tool answers "[done] VIB-1 updated: goal." while the date it was
+    also asked for was never written. That is ruling 292's sentence again, a true one that
+    implies a false one.
+    `strictTool` is now the only way Viberr builds a tool, on all four surfaces (agent,
+    operator, controller, controller-ops; 76 tools). The schema is a whole strict object:
+    the call is refused, the offending key is named, and the handler is never reached, so
+    nothing is half-applied. The refusal is predictable because `additionalProperties:
+    false` is published alongside it, which is the difference between a rule and a trap.
+    NESTED objects are strict at their own call sites with `z.strictObject`, not rebuilt by
+    reflection inside the wrapper: rebuilding drops the `.describe()` text that IS the
+    agent's instructions, and a rule you can read in the field map beats one you have to
+    know a wrapper applies. Eleven nested objects existed and every one was stripping.
+    MEASURED SAFE against live traffic, because a strictness that starts refusing real
+    calls is a worse defect than the one it fixes: 191 tool calls across the stored run
+    logs used only declared top-level arguments, and 94 nested objects (a packet's
+    `observations` and `options`, a goal's `links`) used only declared fields --
+    `code`, `goalDraft`, `newTask` and the rest are all in the schemas. Nothing any
+    agent does today is refused by this.
+    AMENDED the same day, from the controller taking the refusal and calling it "the least
+    helpful of the five": it named the rejected key and not the accepted ones, and `status`
+    was a near-miss of `state`, which IS a field of that tool's output. A refusal you have
+    to guess your way out of is still a guess. The message now names the tool, the key it
+    does not have, the arguments it DOES take, and that nothing ran; a tool with no
+    arguments says that rather than printing an empty list.
+    Three tests, because each one alone passes while the product is broken. A wrapper test
+    drives a real MCP client against a real server, since the stripping happens ABOVE the
+    handler and Viberr's toolkit tests all call handlers directly. A sweep fails if any
+    source imports the SDK's own `tool()`, so a fifth surface cannot quietly opt out. And a
+    walk over every schema the live controller servers PUBLISH finds any object at any
+    depth that would still strip, which is what caught `save_knowledge_base.doc` after a
+    first pass fixed only the one-line spellings of `z.object(`. That walk also broke a
+    test that had been reading field descriptions off `inputSchema` as a raw field map; it
+    reads the published JSON now, which is the only copy a model ever sees.
+
+297. **A server tells the model what it holds, in a list built from what it mounts
+    (owner, 2026-09-16, pass 37; F37-132).** The controller's two servers are mounted
+    DEFERRED behind ToolSearch, which is measured and deliberate: `alwaysLoad` on
+    44 tools tripled turn 1 and quadrupled a cold turn's cost, so the operator and agent
+    toolkits carry it and these do not. What nobody costed is that a deferred toolkit never
+    arrives as a LIST. The controller reported it from inside its own prompt, when asked to
+    report what it could see rather than reason about what should be there: three tools are
+    fully present (`ListAgents`, `ReportFindings`, `ToolSearch`), everything else is names
+    only in a `<system-reminder>`, and "the list is incremental, not a manifest. The turn
+    that shipped `list_decisions` listed four names, the turn that shipped
+    `read_timeline_entry` listed three. So the complete toolkit exists in my context only
+    as a union across eleven turns of reminders, never as one list."
+    The cost is not a wasted search. Asked to drive a board, it answered "do I have
+    `accept_completion`" by searching, finding nothing, and reporting a negative inferred
+    from absence, which is the weakest evidence there is and the shape that had already
+    burned it once. Four verbs it did not have had been attributed to it and it could not
+    check them against anything.
+    So each server's `instructions` now carry every tool it mounts: the name, and the first
+    sentence of the description as its purpose. Instructions were the right place and that
+    was MEASURED, not assumed. The controller confirmed they reach its prompt under
+    `# MCP Server Instructions` and quoted both back verbatim; they sit in the system
+    prompt, so on a 95.8% cache hit rate the manifest is paid once. Schemas stay deferred,
+    because the shape of a call is what ToolSearch is good at; what was missing was knowing
+    the verb EXISTS. The list says so in as many words: if a verb is not on it you do not
+    have it, and say that rather than reporting a search that found nothing.
+    CORRECTED the same day, by the controller looking for the manifest and not finding it.
+    It first shipped in the two servers' `instructions`, on the controller's OWN
+    measurement that those reach its prompt, which they do. What that measurement could not
+    see is that a server's instructions are captured ONCE, when a session starts. Its
+    conversation had been running for hours, so the deploy gave it the new TOOLS (the
+    deferred-name reminder is regenerated every turn) and not the new instructions: "297 is
+    the only one of the five I cannot observe, and the pattern, new tool names arriving
+    while instructions stay frozen, suggests the manifest reaches new conversations and not
+    running ones." That is exactly backwards for what a manifest is for, because the
+    sessions open longest are the ones whose toolkit has changed most. It rides in the
+    SYSTEM PROMPT now, which Viberr rebuilds and re-sends on every turn, and the frozen
+    channel carries no copy at all so there is nothing beside it that can go stale.
+    GENERATED FROM THE REGISTRY, never written, and the proof that this is the binding half
+    was already in the controller's prompt. The one hand-written description of a Viberr
+    toolkit said "Built-in diagnostics (viberr_ops) are always attached: instance health,
+    run logs, store documents" and named three capabilities; `list_runs` shipped after that
+    sentence and was never added to it. That sentence stops enumerating, and the tests
+    check the list BOTH ways, because a hand-written one fails in the second direction
+    first: every mounted tool appears, and nothing appears that is not mounted. A purpose
+    longer than 150 characters is cut at a word and SAYS it was cut, naming where the rest
+    is, which is ruling 285's rule again on a smaller string.
+
+298. **An agent's answer choices are refused or kept, never quietly deleted (owner,
+    2026-09-16, pass 37; F37-133).** `ask_human` told agents to give "2-4 answer choices",
+    and nothing enforced it except a `.slice(0, 4)` in the packet builder and a second one
+    in the Codex envelope parser. An agent that offered five got a decision card with four.
+    Neither the agent nor the person reading the card was told a choice had been removed,
+    and the removed one was the least likely to be reconstructed, because the surviving
+    four read as a complete set.
+    This is the pass's two defect families at once, on the one surface where they cost the
+    most. A cap that truncates with no way out: a decision card is where a person picks,
+    and an option deleted before it is rendered is a choice they never learn they had. And
+    a rule applied to some siblings and not the rest: the OPERATOR authors packet options
+    with no cap at all, and the stored packet schema has none either, so four was never a
+    storage or rendering limit. It was a guideline, enforced by deletion, against one of
+    the two authors.
+    The number stays four for a LIVE question and is declared on `ask_human`'s own schema,
+    so a fifth is refused by name with nothing written and the agent re-asks inside the
+    same run at no cost. That is only possible because of ruling 296: before it, a `.max()`
+    on a field the model overshot would have been a validation the caller was never told
+    about. The refusal names the remedy too, in the field's own text: keep the ones that
+    are really different and put the rest in `body`.
+    The envelope path keeps EVERY option instead, and the asymmetry is the point rather
+    than an oversight. That parse runs after the run has ENDED: it is the agent's last
+    word, there is nobody to hand a refusal to, and refusing would discard the whole
+    outcome rather than one field. Ruling 288's rule decides it: refuse where refusing can
+    be acted on, and never destroy where it cannot. So the packet builder does no cutting
+    at all now, and the only cap that exists is the one an agent is told about before it
+    writes.
+
+299. **The controller reads the repository it plans against (owner, 2026-09-16, pass 37;
+    F37-134).** `read_default_branch_file` was mounted on the operator and nowhere else.
+    The controller is the actor that writes the architecture, the knowledge bases and the
+    goals every agent is then measured against, and that reviews the packets those agents
+    raise, and it could not open a single file in the repository all of that is about. It
+    has `read_pull_request` for a PR's CHANGED files, `read_task_attachment` for evidence,
+    `read_knowledge_doc` and `read_store_doc` for the store. None of them reads the tree.
+    It found this from inside a live decision rather than in the abstract. A packet on
+    SHOP-47 turned entirely on "the goal names four anonymous routes, `origin/main` has
+    nine", a fact the operator had verified by reading the file. The controller endorsed an
+    option on structural reasoning and flagged that its own central claim was second-hand,
+    and named the cost: "verify the claim against the repository yourself is the
+    most-repeated rule in this project's own rulings, four worked incidents, and I am
+    structurally unable to follow it."
+    The checkout was never the source. `resolveReadSource` already prefers the project
+    MIRROR and only falls back to a checkout's clone-time ref, so the operator's signature
+    takes a workspace for the fallback's sake, not the read's.
+    `readProjectDefaultBranchFile` takes the repo and the branch from the PROJECT instead,
+    and therefore has nothing to fall back TO, which is the right shape: when the mirror
+    cannot be built it says which branch it could not reach and why, rather than answering
+    from a tree that is not that branch, which is the error this whole module exists to
+    stop (F21-21, where an operator read the deliverer's own uncommitted row and declared
+    it had landed out-of-band). It passes `create: true` where the operator's read passes
+    false, because a missing mirror would otherwise make the tool permanently unanswerable
+    on exactly the project where nothing has run yet, which is when the controller is doing
+    the architecture work that most needs to read the repository.
+    A project with no GitHub repository at all is answered, not thrown at: it names the
+    missing fact and the tab where a person sets it (ruling 246, existence before type). A
+    path that is not on the branch is `[absent]`, which is an ANSWER. A file past 60,000
+    characters says it clipped and what to do instead (ruling 285).
+    The residual is stated rather than papered over: on a project whose repository has
+    never been cloned here, that first call BUILDS the mirror inside the tool call, bounded
+    by the clone timeout (15 minutes by default), and the tool's own text says so. The
+    alternative was a tool that can never answer on exactly the project where the
+    architecture work happens. Every call after the first is a fetch.
+
+300. **A decision says what answering it releases (owner, 2026-09-16, pass 37; F37-135).**
+    `list_decisions` told the controller what is waiting for a person and what each card
+    asks. It did not say what any of them UNBLOCKS. That five tasks sat behind three cards
+    (SHOP-46 to SHOP-48; SHOP-41 to SHOP-28; SHOP-49 to SHOP-29 to SHOP-28) the controller
+    worked out by reading each task's `blockedBy` and walking the chain by hand, across two
+    turns, and it named the cost precisely: "the one number that should order a decision
+    queue does not exist, so the ordering depends on whoever happens to have walked the
+    graph recently."
+    Every entry now carries `releases`: the tasks that come unblocked, down the chain, once
+    that one completes. The chain matters as much as the count. A card that frees one task
+    which in turn frees three is not a one-task decision, and the direct dependents are
+    exactly what a person can see for themselves by opening the task, so stopping there
+    would have published the number they already had.
+    A wait that can NEVER clear is not counted, and that is the half a naive walk gets
+    wrong. A task also blocked on an archived task, a cancelled goal or a reference nothing
+    answers to is not waiting on this decision, and counting it inflates the one number a
+    person is meant to order their queue by. So does an open goal link with no task yet: it
+    is a real wait, no task key completing satisfies it, and dropping unmatched entries
+    would quietly clear it. The number argues for a decision only when the decision would
+    actually free something.
+    AMENDED the same day, from the controller using it: "it orders the BLOCKING queue
+    correctly and only that... Sorting by `releases` alone would rank three finished tasks
+    that need one click last, behind a design packet. The number answers what does this
+    unblock, not what does this finish, and on a queue that has become mostly acceptances
+    those diverge. It is the right number and it should not be the sort key by itself."
+    Exactly right, and the tool says so in its own description now rather than leaving the
+    next reader to rediscover it: `kind` and `notAcceptableReason` carry the other half.
+
+301. **A background tab holds no live connection (owner, 2026-09-16, pass 37; F37-136).**
+    Four open Viberr tabs deadlock Viberr, in every tab at once, with no error anywhere.
+    An SSE stream is a PERMANENT connection; a browser allows about six per origin on
+    HTTP/1.1; the shipped deployment serves HTTP/1.1 (`curl -w %{http_version}` against
+    `localhost:5173` answers `1.1`); and a task page holds TWO streams, the layout's
+    `useLiveUpdates` and the console's `use-run-log-stream`. Four tabs is eight, the pool is
+    gone, and every request from every tab queues forever.
+    Measured live on the running instance, while resolving a real decision packet: with one
+    tab a `fetch` of `/resources/health` returned in 21ms and with two in 10ms; with four,
+    the page's own POST sat pending and a tool call against that tab was still hung after
+    300 seconds, while the SAME endpoint answered `curl` from the host in 12ms. Closing
+    tabs recovered it. The server was never the problem, which is exactly why this is so
+    hard to see from the inside: nothing is slow, nothing errors, the loaders simply never
+    resolve and a submitted form's button stays busy forever. It is this pass's worst
+    failure shape, a path blocked with no way out, and the way out (close tabs) is
+    unguessable.
+    A hidden tab now holds no stream. Both hooks close on `visibilitychange` and reopen on
+    return, and neither needed new catch-up machinery, which is the sign it was the right
+    cut: `useLiveUpdates` already pulls the loaders on any connect that FOLLOWS a previous
+    stream, so a returning tab revalidates rather than rendering the snapshot it had when it
+    left, and the run-log tail already resumes from its own per-run cursor. A background tab
+    never needed a push. It needs to be correct when you come back to it.
+    The residual is stated rather than papered over. This bounds the steady state by VISIBLE
+    surfaces, not by tabs, so two windows side by side hold four connections and three would
+    still reach the cap. Two streams per page is the remaining constant, and merging them is
+    the next cut if anyone meets it; the proper fix for the class is one shared stream per
+    origin, or a protocol that multiplexes, and neither is this change.
+
+302. **A window says it is a window (owner, 2026-09-16, pass 37; F37-137).** Ruling 285
+    fixed the per-ENTRY cut in `operatorSnapshot` and left the cut immediately beside it
+    silent. A clipped entry now carries a `clipped` note naming the tool and the
+    `occurredAt` that reads it whole, because "an entry that ends mid-sentence with a '…'
+    and no way to ask for the rest is how a coordinator states half a report as the whole
+    of it, which it did, live, on SHOP-42". The very next expression was
+    `file.parsed.timeline.slice(0, 6)`, which said nothing at all: not that there were more
+    entries, not how many, not how to reach one.
+    Both of this pass's defect families, in one function, one of them already fixed. The
+    operator could not know the window was a window, and could not widen it: its `get_task`
+    took NO arguments, while the controller's has taken `events` (1..50, default 12) for as
+    long as it has existed. So the coordinator with the least context about a task's
+    history was the one actor who could not ask for more of it, and a task whose seventh
+    newest entry is a human's instruction, a reviewer's verdict or a packet answer is one
+    the operator would reason about as though that entry did not exist.
+    The snapshot now always carries `timelineTotal`, so a full-looking window is never
+    mistaken for the whole history, and `timelineOlder` appears ONLY when something is
+    hidden, naming how many were left out and both ways to reach them: `events` to widen,
+    `read_timeline_entry` to read one in full. The default stays six, because the size was
+    never the defect; the silence was.
+    CORRECTED, same day, before this ruling had been standing an hour. It first said the
+    prompt-size rationale "did not survive checking" because `operatorSnapshot` had "exactly
+    one caller, this tool, so the window was never riding in every prompt". That was wrong,
+    and wrong the way this pass keeps finding things wrong: a grep scoped to the two
+    directories I was already looking at. `operator-run.server.ts` calls it twice more, to
+    build the prompt, exactly as the original comment said. The bound is real and the
+    default staying six is what respects it. The disclosure is the better for it: both
+    prompt callers take the default, so `timelineTotal` and `timelineOlder` now reach the
+    operator in its PROMPT as well as through the tool, which is where it needed them.
+    EXTENDED, within the hour, to the sibling it was first written without -- which is the
+    defect this ruling is ABOUT, and which ruling 292's own comment had already named
+    inside this pass's own fix: "a rule applied to one actor and not its sibling, which is
+    this pass's own defect shape inside this pass's own fix." 302 fixed the OPERATOR's
+    window and left the controller's `get_task`, where `eventCount` was present and
+    nothing prompted anyone to subtract from it. The controller found it on live work the
+    same turn the fix shipped: "I read 5 of 121 entries on SHOP-36 and 4 of 111 on
+    SHOP-27, and coordinated from them. I can derive the gap from `eventCount` minus what
+    I got, but nothing prompts me to, which is exactly the failure you just fixed one
+    surface over." Its reply carries `timelineTotal` always now, and `timelineOlder` only
+    when something is hidden, naming `events` to widen and `read_timeline_entry` to read
+    one whole: the same two ways out, worded the same way, on both actors.
+    AND A THIRD SIBLING, found by finally sweeping for the shape instead of waiting to be
+    told: `list_runs` clipped at `limit` and said nothing. A caller asking "which runs are
+    live right now" got a list that looked complete and could not reconcile it with the
+    count `instance_health` reports for the same instant. Its two neighbours on that same
+    server were already correct, which is what makes it the family and not an oversight:
+    `read_run_log` has carried `olderExist` / `newerExist` and recovery cursors since pass
+    32, and `inspect_audit_log` has carried `total` / `shown` / `noMatch` since ruling 279.
+    It carries `total` always and `truncated` only when rows were left out, naming the
+    count and the `limit` that returns them.
+
+
+303. **An unexpected failure answers in words, on every surface (owner, 2026-09-16,
+    pass 37; F37-138).** Found by reading what the product actually returned rather than by
+    asking anyone: a sweep of 1,265 tool results across the last sixty run logs turned up
+    22 errors, and four of them were the literal string `database is not open`, answered to
+    a live run by `get_task` and `read_board`. Timestamped 19:30:38 through 19:30:43, with
+    this container starting at 19:30:46 -- the six seconds in which the old process closed
+    its database while a run was still calling tools.
+    The shutdown ordering is not the finding. The LEAK is. Every one of the operator's 17
+    tools handed its handler to the SDK bare, so any throw inside became the model's answer
+    verbatim: a SQLite sentence here, a stack's message elsewhere, whatever it happened to
+    be. Both of its siblings convert. The controller's `run`/`runWith` guards answer
+    "[error] That action failed unexpectedly. The details are in the server log"; the agent
+    toolkit catches per tool and answers "[error] The board could not be read." The
+    operator -- the one actor whose job is to relay what it reads onto a human's timeline,
+    and which had no `catch` in any of its seventeen -- was the one that did not.
+    So the conversion lives in `strictTool`, where ruling 296 already put the rule that
+    every Viberr tool on every surface passes through and a new one cannot opt out. An
+    `AppError` keeps its own words, because those were written for the caller and are the
+    refusals this codebase spends its care on. Anything else is logged with the tool's name
+    and answered with the sentence that stops a relay: this call produced no answer, so do
+    not report one, because not getting a result is different from getting an empty one.
+    It is the OUTERMOST wrapper and never the only one, which is what keeps it from
+    swallowing a refusal somebody worded carefully. The controller's own guards sit inside
+    it and catch `AppError`, `NotVisibleError` (404-shaped by design, controller-only) and
+    everything else first; the operator and agent toolkits throw nothing but `AppError`,
+    which keeps its words here. Checked rather than assumed, because a generic "failed
+    unexpectedly" over a deliberate refusal would be a worse defect than the leak this
+    fixes.
+
+304. **The ceremony that merges says what CI thinks of the head it is merging (owner,
+    2026-09-16, pass 37; F37-139).** The acceptance dialog is the last screen before an
+    irreversible merge into the default branch, and it is built to state what the click
+    does: it names the pull request, the base, the branch it refreshes first, the verdict
+    that cleared the gate, any stage it skips, and the decision it withdraws. It did not
+    name the CHECKS.
+    Checks are deliberately not an acceptance gate on this product; the reviewers' verdicts
+    are. That is the reason to show them, not the reason to omit them: the product has
+    decided not to decide, which leaves the decision with the person clicking, and it was
+    not telling them. The pill existed and was rendered one panel up on the same page
+    (`task-side-panels.tsx`), so the dialog's `AcceptConfirmTask` simply never carried the
+    field.
+    Found by using it. With GitHub Actions quota-blocked on the clone repository, four pull
+    requests were accepted and merged carrying three failing checks each, and the ceremony
+    named the PR, the branch, the base, the verdict and the skipped stages without once
+    mentioning them. Ruling 246's rule decides it: name the door AND say whether it is
+    open.
+    The row appears ONLY when the checks are not green, because a row that fires on a pass
+    is noise on the screen that most needs reading, and it carries the sentence that keeps
+    it from reading as a block: checks are not a gate here, so merging anyway is your call.
+    Pending says the merge does not wait. Nothing reported stays silent rather than
+    rendering as green, which is the same rule `wire-format.server` already states for that
+    field.
+
+305. **A whole-document replace names the version it read (owner, 2026-09-16, pass 37;
+    F37-140).** Ruling 257's guard asks whether a knowledge-base document EXISTS, and
+    refuses a write that would collide unless it is told to replace. It never asked whether
+    the document is still the one the writer READ. Between a read and a write, anybody
+    else's edit lands, and a whole-document replace deletes it and reports only how many
+    bytes it destroyed. That is a lost update, on the one file this instance injects into
+    every run on a board.
+    Not hypothetical. The controller reported it from inside the work: correcting one
+    paragraph of the 26,693-character rulings document, it "re-read the source first
+    specifically to avoid clobbering changes someone else had made since (there were
+    several -- §9 had grown a whole existence-oracle section I had not written)." The
+    product's affordances are what let it avoid the loss: ruling 257's refusal, the byte
+    count in the reply, and a reader to carry the text forward. But avoiding it was
+    DISCIPLINE, and a shape that only careful writers survive is not safe.
+    So `read_knowledge_base_doc` hands back a `version` and a replace must name it.
+    `replace: true` alone is no longer enough, because a flag that says "yes, overwrite"
+    answers a different question from "yes, overwrite THIS". A write whose base has moved
+    is refused whole, with nothing written, naming both versions and saying plainly that
+    somebody else's edit is in there and the change should be redone on top of what is
+    there now. The version is hashed from the FILE, never from `readStoreDoc`'s text, which
+    caps at 256 KB: a version computed from a truncated read would call two different
+    documents the same one.
+
+306. **The attachments directory is read as well as written, and it now says so (owner,
+    2026-09-16, pass 37; F37-141).** It shipped as a DROP BOX -- "to put a file in front of
+    the humans on this task, copy it into ..." -- which is half of what it is. It is a real
+    absolute path, and on a task that has run before it already holds every file those runs
+    attached: 27 on SHOP-11 of this instance's board, 90 on SHOP-15, 44 on SHOP-16. An
+    agent reworking such a task was standing next to the evidence its directive was
+    summarising, told only where to put things.
+    That is rulings 285, 292 and 293 one actor over. Each of those gave a COORDINATOR the
+    thing it was relaying claims about -- a report past its clip, a timeline entry whole, an
+    attachment rather than the sentence claiming it -- and 293's own text says "call it
+    before you tell a person a thing was proved, and before you repeat a report's claim
+    about what its own evidence shows". The agent DOING the work was the one left repeating
+    them, and it was the only actor with no tool for it. The capability was already there:
+    the path is absolute, outside the checkout, and readable by anything with a filesystem.
+    Nothing named it.
+    So the section is two-way, and the reading half carries its own bound: list it, and read
+    what your directive or the timeline actually CITES, by name, never the whole folder,
+    which on this board can be ninety files. A prompt that sends an agent to sweep an
+    evidence directory has traded one silent failure for a context it cannot afford. The
+    sentence that says why it matters at all is the one worth keeping: a report saying a
+    thing was proved and the file proving it are different objects, and only one of them is
+    evidence.
+
+307. **A turn opens knowing what is happening, not only what exists (owner, 2026-09-16,
+    pass 37; F37-142).** An instance-scoped controller conversation opened each turn with a
+    server read listing the person's visible PROJECTS: slug, name, their role. Nothing about
+    any of them. A project-BOUND conversation has opened with a board snapshot all along, so
+    the actor with the widest scope was the one starting from zero.
+    The controller found it by being asked a different question. Every earlier round asked
+    where its toolkit ran out; this one asked where a PERSON talking to it gets a worse
+    outcome than they should. Its answer: "the turn's context block gives me your visible
+    projects, not the board. So every board question starts from zero. On the turn where you
+    said 'drive it', you waited through `list_runs`, `list_decisions`, `list_tasks` and three
+    `get_task`s before I did one useful thing. For a person who just wants 'what is
+    blocked?', that latency is the entire experience of talking to me."
+    The numbers were never missing and never cost anything. `listHomeProjectsForUser` already
+    computes `total`, `running` and a member-scoped `waiting` for the home page's own cards,
+    off the same `indexDecisionInbox` the notifications inbox reads, so the two surfaces
+    cannot answer "waiting on you" differently. This read was CALLING that function and
+    discarding the fields. One line per project now carries them, with no new query.
+    A zero says so in WORDS. "nothing waiting on you" and a blank are the same pixels and
+    opposite claims, and the whole point of the line is to be answerable before a tool call.
+    The org-admin override keeps its own case rather than being folded into "waiting on
+    YOU", which is R8-3's rule on the surface that rule was written for.
+    The controller's own framing of the class is worth keeping, because it is the bar for
+    everything after this: "The goal is not to let me hedge accurately. It is to stop me
+    needing to hedge."
+
+308. **A breakdown says what its window left out, and there is one for the two questions
+    people actually ask (owner, 2026-09-16, pass 37; F37-143).** Insights groups runs by
+    backend, kind, project and model, keeps the top eight of each (half the slots reserved
+    for the busiest groups, so a cost view still shows where the work happens) and dropped
+    everything else in silence. Eight of thirty groups, presented as the instance, on the
+    one surface a person opens to decide where their money goes. Every breakdown now
+    carries `hidden`, `hiddenRuns` and `hiddenCost`, and a dropped-group cost follows
+    `CountRow`'s own rule: null means UNKNOWN, never zero, because only the Claude result
+    envelope reports one.
+    And the two dimensions that were missing are the two a person asks for. The controller
+    put it plainly when asked where someone talking to it gets a worse answer than they
+    should: "'What did SHOP-27 cost across eleven rework rounds' has no answer. 'Which
+    reviewer earns its runs' has no answer. You are running this instance and cannot see
+    what it costs you." `byKind` cannot answer the second, because every reviewer is one
+    kind. `byProfile` and `byTask` are the same `group()` helper on two columns that were
+    already in the table.
+    A task key is unique only inside its project, so an unscoped read labels each row
+    `project/task` and a scoped one drops the prefix, which is noise once the keys are
+    local. Grouping on `task_key` alone would collapse two projects' `A-1` into one row
+    belonging to neither, which is the failure this ruling is about wearing a different
+    hat: a number presented as an answer to a question it is not the answer to.
+
+309. **The controller is told what the person may do, and what a role means (owner,
+    2026-09-16, pass 37; F37-144).** The controller's prompt says "their LIVE permissions
+    are the ceiling for everything you do here" and then names their ORG role — which
+    decides nothing on a board. The role that decides everything is the PROJECT role, and
+    in the two bound scopes, the ones a person is standing in when they ask for something,
+    the turn context named it nowhere. Ruling 307 had given it per project to the instance
+    scope, where it matters least.
+    The second half is worse and was invisible: viberr's authorization map reached the
+    model NOWHERE. Not the prompt; not `whoami`, which returns a tier NAME; not
+    `list_capabilities`, which is the agent capability catalogue and a different axis
+    entirely. So a round trip bought the word "contributor" and the meaning still came out
+    of the model's prose memory. Asked on a live task what the person in front of it could
+    do, the controller answered correctly and then said how: *"your project role was not in
+    anything I had... I bridged that gap with a rule from my playbook. That rule is real,
+    so my answer lands correctly — but I reached it by policy reasoning, not by reading
+    your role"*, and on the map, *"that is documentation, not the server's live
+    authorization table"*. Its summary of the class: **"the task file is over-supplied and
+    the actor is under-supplied."**
+    The cost is not a wrong sentence. It is an OFFER that cannot be kept, and a fan-out —
+    create, invite, deploy, set policy — that stops at step four leaving a half-built
+    board. The tier list is GENERATED from `RBAC_DEFINITIONS`, for the reason `rbac.ts`
+    already gives for rendering the Policy page from the same object: one source, so
+    display and enforcement cannot drift. A hand-written summary in a prompt is that drift.
+    Three things the controller argued for, against the version first put to it, and was
+    right about each:
+    IT IS ADVISORY, NEVER ENFORCING, and the prompt says so in those words. *"A table in my
+    prompt creates a second authorization evaluator that can disagree with the first... if
+    I start pre-refusing on that basis, I convert a server [denied] — authoritative,
+    audited, correct at the instant of the write — into a controller refusal that is none
+    of those three."* So: predict the refusal, say why, **make the call anyway**, and let
+    the server's answer be the answer.
+    THE FACTORS STAY SEPARATE. The obvious alternative was for the server to compute the
+    asking person's held and not-held sets and hand over only those — shorter, and
+    impossible to mis-apply. It is also the answer with the reasoning deleted: *"when it
+    tells me I don't hold `set_file_leases`, I cannot tell you why: whether it's maintainer
+    or project admin that's missing, whether promoting someone one tier fixes it or only
+    two."* Every question about GRANTING a role is a question about a tier other than the
+    asker's, and a set describing only the asker cannot answer one. The static list says
+    what a role holds, the live read says which role this is, and the model multiplies.
+    THE HAND-WRITTEN HALF SAYS IT IS HAND-WRITTEN. *"Is the exception text also generated,
+    or hand-written prose sitting next to a generated table? If it's hand-written, it is
+    the new prose summary — same failure mode as today, now with a generated table's
+    credibility lending it authority."* The exceptions live in code paths, not in a table,
+    so they cannot be generated; the block therefore marks where generation stops, and
+    `authorityTiers` throws rather than emit a tier list if `RBAC_DEFINITIONS` ever stops
+    being monotonic over the tier — the invariant `rbac.ts` asserts in prose and nothing
+    checked.
+    What it does NOT close, in the controller's accounting: the fan-out has three causes
+    and this addresses one. State-dependent denials (a name already taken, a task key that
+    does not exist) are a different gate, and *derived* authority is a different problem
+    again — `create_project` makes its creator that project's admin, so step one changes
+    the authority steps two through four are judged against, which no turn-start snapshot
+    can model. Its own prescription there is not a feature: *"don't check a chain, don't
+    undo a chain, don't have a chain"* — make genuinely compound operations single calls
+    the server applies as a unit — plus reporting exactly which steps landed when one does
+    not. Recorded, not built.
+    One amendment it asked for was REFUSED on the facts: moving the org role out of the
+    preamble because *"my preamble asserts your org role as prose fixed at conversation
+    start"*. It is not. `buildControllerSystemPrompt` runs every turn and
+    `resources.controller.ts` passes `auth.user.role` from `requireUser`, which loads the
+    canonical `users` row per request. A demotion reaches the next turn already. Its own
+    reading of the error is the useful part: *"I inferred it from how chat systems are
+    generally built, not from anything I'd observed about viberr, and then asserted it as a
+    property of your pipe. That is the same error as the prose-summary one, one level up."*
+    A LAST LINE, ADDED AFTER SHIPPING, because the fix creates a hazard of its own. Most
+    of the refusals in the hand-written half are not about tier at all — archived, disabled,
+    non-member, name taken — and the block hands the model tier VOCABULARY. The controller
+    saw it first: *"'you need maintainer, ask a project admin' isn't an incomplete
+    explanation, it's a false one, and the table will actively tempt me toward it... the
+    thing to watch for isn't 'I hit a denial I couldn't explain in tier terms', it's 'I
+    explained a denial in tier terms when tier was never the gate'."* So the block ends by
+    saying that a refusal whose own words name no role was not stopped by one, that the
+    model must not supply one from the list, and why: a person sent to fix the wrong gate
+    is worse off than one told nothing.
+    A measurement this leaves available, recorded and not run: the audit log plus the
+    generated list is an offline diff — every permitted action against what the list
+    predicts. It checks the generated half automatically and cannot touch the exceptions,
+    which is exactly where the risk is.
+    309(a), TWO GRANTS THAT GATE MORE THAN THEIR NAME SAYS, found by the controller on the
+    turn after the generated list shipped, by reading it and asking what was NOT in it. Two
+    answers held up in code, and both are defects in the permission table itself, not in
+    the prompt — the Policy page and the profile's "Your access" list render the same
+    labels. `edit-task-meta` reads "Edit task priority, labels & due date", and
+    `setTaskDependencies` runs on it too: clearing what a task waits on RELEASES a held task
+    onto the board, so the table told a contributor they may tidy when they may also
+    unblock. `edit-policy` reads "Edit workflow & policy", and `setProjectArchived` runs on
+    it, so "who can unarchive this project?" had no answer anywhere in the product. The
+    labels stay SHORT, because eight sentences across two pages read them inline as "the X
+    grant" and a lengthened label reads badly there; the scope goes in a `covers` field on
+    the definition — the one object the table and the prompt are both generated from —
+    rendered as a quiet second line under the label in the Policy table and on the profile
+    page, and appended in parentheses to the controller's generated tier list, so a name
+    the model can only take literally no longer has it predicting that a contributor may
+    retitle a label and not that the same grant lets them release a held task.
+
+    (`authority-prompt.server.ts`, `controller-context.server.ts`, `controller-run.server.ts`,
+    `rbac.ts`, `policy-data.ts`, `policy-page.tsx`, `profile-page.tsx`.)
+
+310. **A run is told WHY its granted server did not arrive, and the reason is the one the
+    server gave (owner, 2026-09-16, pass 37; F37-145).** Both run prompts answered "your
+    profile grants this and it is not here" with a single hardcoded sentence — *"no such
+    server is in the org registry"* — for a condition with many causes. Neither prompt had
+    checked it. The mount verifier had already produced the real one and
+    `UnresolvedMcpGrant.reason` carries it under a comment that says exactly what it is for:
+    *"why it produced no usable tools, in words a human can act on"*. Six call sites then
+    did `.map((u) => u.name)` and dropped it.
+    Found live, and the invented cause was FALSE. On SHOP-55 the Platform Architect reported
+    that the `kb-architecture` MCP server *"is not in the org registry"* — faithfully
+    relaying what viberr had put in its prompt — and the operator checked and corrected the
+    record in its packet: *"That is wrong: it IS registered and IS granted to the Platform
+    Architect profile — it simply was not mounted on that run."* So a reader was sent after
+    a registration bug that did not exist, and whatever actually went wrong went unreported.
+    This is the failure ruling 303 is about, arrived at from the other direction: 303 was an
+    error that said nothing, this is an error that said something specific and untrue. A
+    manufactured diagnosis is worse than none, because it is actionable.
+    THE CODE ALREADY KNEW. Pass 32 (C02-R5) wrote an exclusion into the resolver with this
+    comment: the persona's copy *"would be false for a server that IS mounted"*. It saw the
+    sentence lying, and fixed the CASE rather than the sentence — while the same loop was
+    already producing two other reasons the sentence was equally false for (an unreadable
+    credential, a server that fails to start). A known-false sentence with a documented
+    exception is a bug with a note attached, and it survived four passes that way.
+    `unavailableMcpSection` is one renderer for both surfaces, for the same reason ruling
+    296 and 303 live in `strict-tool.server.ts`: two prompts describing one fact in their
+    own words is how the sentence came to state a cause at all. It lists each grant with the
+    reason its own probe returned, and closes the inference the old sentence invited — do
+    not infer a cause, and do not assume the grant or the registration is missing unless the
+    reason says so.
+    310(b), A FOURTH SITE, found by the controller ninety seconds after 311 deployed and on
+    the same timeline. The restart-recovery note says *"the run `X` (agent) was still
+    running when the server stopped"* — and the sweep finalizes QUEUED runs as well as
+    running ones, so a run that never got a concurrency slot was described as having been
+    running. Live: `run_VlR9mwnxyouc`, `startedAt: null`, zero turns, queued 44 minutes. The
+    controller put the adjacency better than any argument for the class could: *"At 01:24:19
+    the recovery note asserts a run was running that never ran. At 01:25:49 the new 311 line
+    says, correctly, 'Queued a Claude run … Nothing is streaming yet.' One writer fixed, its
+    neighbour still inventing."* `started_at` was on the row and the query did not select
+    it. The note now splits its list: what was running, and what was queued and had not
+    started.
+    It also showed the 282 historical "Started a Claude run" entries are not lost to doubt:
+    `started_at` is kept permanently, so an entry can be classified by joining it to its run
+    — null means the entry was false when written, a later `started_at` means it was false
+    for exactly that interval.
+    THREE SURFACES, not two. The controller found the third by reading its own prompt and
+    asking which of its claims say how they know — the habit ruling 309's provenance marker
+    taught it: *"other environment assertions in my prompt don't: the shell inventory
+    declares itself measured, but the line telling me no org MCP servers are attached to me
+    doesn't say how it knows."* Its prompt was the best of the three and still not enough —
+    it asserted no cause at all, naming the servers and stopping — but it is the surface a
+    person asks WHY on, and the reason was one `.map((u) => u.name)` away there too.
+    The run RECORD still keeps names; the reasons ride the prompt, where the agent that has
+    to report the gap can read them. (The KB and skill misses have carried name-and-reason
+    on that record since C1, which is the asymmetry that made the MCP path's silence easy
+    to miss.)
+    Canaries: restoring the hardcoded cause, dropping the per-server reason lines, removing
+    the do-not-infer instruction, and having the renderer substitute a sentence of its own
+    all go red. The last of those is the one that matters — it binds the RESOLVER's words to
+    the rendered text, because a test that hands the renderer its own fixture proves only
+    that the renderer can print.
+
+    (`specialist-mcp.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
+
+311. **"Started" only when it started (owner, 2026-09-16, pass 37; F37-146).** `startRun`
+    answers `outcome: "started" | "queued"`, and the task timeline's dispatch sentence threw
+    it away. A run parked behind the instance's concurrent-run cap wrote *"Started a Claude
+    run for the X agent — streaming to the agent logs"* onto the timeline. Both halves were
+    false, for as long as the queue held it.
+    Live, eleven minutes on SHOP-55, and it propagated exactly as far as a false record
+    does: the operator read the timeline and told a person the Backend Engineer's run *"was
+    already in flight"*; the controller relayed that to me as fact; I was about to decide a
+    dispatch on it. The controller then spent one `list_runs` and found the truth —
+    `state: queued, startedAt: null, 0 turns, 1 log line`, with three runs ahead of it — and
+    corrected itself unprompted: *"Symptom right, cause wrong, and I carried it. That is
+    ruling 310's shape, committed by me, in the turn before you described it."*
+    The fact was never missing, and one surface already said it properly: `operator-actions`
+    has answered *"the instance is at its concurrent-run cap, so the run is queued and
+    starts when a slot frees"* since B10. That is a tool reply — read once, by one agent.
+    The timeline is the durable record every person, every later run and the controller read
+    instead, and it said the opposite.
+    THE CLASS, in the controller's words, which is the most useful sentence of the pass:
+    *"a fact the system genuinely had was displaced by a confident hand-written sentence …
+    authoritative-sounding text standing in front of available ground truth."* Rulings 309,
+    310 and 311 are three instances inside two hours — `RBAC_DEFINITIONS` displaced by
+    prose, a stored mount-failure reason displaced by an invented cause, and a live `outcome`
+    displaced by the word "Started". Its own prescription is the sweep: **anywhere a string
+    literal explains a condition that has a stored reason.** That sweep over the timeline
+    writers found no fourth instance — `Pushed`, `Opened PR #n`, `Merged` are all written
+    after the call that did the thing, and the operator's `Started` reply sits below an
+    explicit `queued` branch.
+    `runDispatchLine` is pure and exported, for the reason ruling 307 extracted
+    `projectStateLines`: the branch IS the ruling, and testing it through the dispatch path
+    needs a live cap, two tasks and a fake runtime that does not finish before the second
+    dispatch arrives — which is how the first attempt at this test came out green.
+
+    (`specialist-run.server.ts`.)
+
+312. **Two ruling namespaces, one word, and the prompt now says which (owner, 2026-09-16,
+    pass 37; F37-147).** Forty-one of the controller's tool descriptions cite "ruling N"
+    meaning VIBERR's own product decisions — the numbers in this very file — and a run can
+    read none of them. Meanwhile a project's rulings knowledge base numbers its own rules
+    from 1, and operator directives on the live board cite those as "ruling 1", "ruling 4",
+    inside task instructions. Nothing anywhere said which numbering a given citation meant.
+    The controller found it auditing its own prompt for claims that do not say where they
+    came from — the habit ruling 309's provenance seam taught it — and was right about why
+    it is not yet broken: *"There is no collision today only because every product ruling
+    happens to be ≥107. That's luck. The day one is numbered under eleven, 'ruling 4
+    reserves that to a stack-owned task' becomes genuinely ambiguous to every agent reading
+    it."*
+    Its second half is the part that makes this the same family rather than a naming nit:
+    *"the product rulings are cited AT me as authority and I cannot read a single one. A
+    citation that looks like it points somewhere consultable, and doesn't, is a soft version
+    of the same class."* Not false — unfollowable, which is its own dead end.
+    The prompt now says it above the tool manifest: a ruling number in a tool description is
+    Viberr's own decision, not readable from a run and not a project's rule; a project's
+    rules live in its knowledge base and number from 1; and cite a project's rule by
+    document and section rather than a bare number. That last part codifies a practice the
+    board had already invented for itself — the operator wrote "conventions §4" in a quality
+    entry the same hour.
+    Scoped to the controller, and the reason first given for that was wrong. *(Corrected
+    2026-09-17 — this used to say the operator's and the specialist's tool descriptions
+    cite no viberr ruling at all, "checked, zero matches", so only this surface had the
+    collision. The specialist's own tool descriptions do cite none: every match in
+    `agent-toolkit.server.ts` is a code comment. The operator's do — `get_task` cites
+    rulings 133, 178, 204, 237 and 238, `open_decision_packet` 85 and 164, `run_agent` 133
+    and 207(c), `deliver_for_review` 160 and 161, `transition_stage` 133 — and so do its
+    packet-option PARAMETER descriptions ("block_on_dependencies only (ruling 230)",
+    "wait_for_window only (ruling 224)", "create_task only (ruling 269)"), and so do the
+    prompt bodies every agent re-reads: the specialist's delivery contract says "(ruling
+    207(f))" and "(ruling 211(f) …)", and the task anchor's lease block is headed "### Files
+    another task owns right now (ruling 245)". So the collision exists on those surfaces
+    too, and the note above had reached only the controller's prompt when this was
+    written.)* The residual is open: a namespace cited AT THE SOURCE — "viberr ruling N"
+    wherever a description or a prompt means a number in this file — would cover every
+    reader without a rule any of them has to remember. Recorded, not built.
+    *(Amended 2026-09-17 — the note now reaches the operator too, and from one constant:
+    `RULING_NAMESPACE_NOTE` in `kb-injection.server.ts`, beside `KB_RULINGS_NOTE`, read by
+    `buildControllerSystemPrompt` and pushed by `buildOperatorSystemPrompt` under the heading
+    `# Two kinds of "ruling"` (asserted in `operator-kb-injection.server.test.ts`), because
+    the operator is the surface where the two namespaces actually meet: its own tool
+    descriptions cite viberr rulings and the directives it writes cite the project's. The
+    specialist persona still does not carry it — its tool descriptions cite no viberr
+    ruling, but its prompt bodies do, at `specialist-run.server.ts` ~3309 and ~3315 (the
+    delivery contract) and `task-actions.server.ts` ~1518 (the lease block) — so that
+    surface, and the at-source "viberr ruling N" namespace that would make every citation
+    say which file it means, remain the open residual.)*
+
+    (`controller-run.server.ts`, `operator-run.server.ts`, `kb-injection.server.ts`.)
+
+313. **The way out of the review deadlock was a step in the deadlock (owner, 2026-09-17, pass 37;
+    F37-148).** Ruling 237 raises a packet when one reviewer requests changes twice running, and
+    its recommended option, `question_reviewer`, re-runs that reviewer with a standing question:
+    answer in a comment, *"Do NOT review again and do NOT return a verdict"*. Ruling 237 wrote
+    down exactly why, in `review-deadlock.server.ts`: *"a verdict here would bind to the same
+    revision and count as another objection, which is the loop."*
+    Nothing enforced it. The dispatch re-runs the reviewer "exactly as it stands", and the verdict
+    channel is gated on the PROFILE's grant, so `report_outcome` kept its verdict field — and the
+    SAME prompt carried the collaboration note *"`report_outcome` — REQUIRED at the end of your
+    review: report `approve` or `request_changes`"*. One prompt, two instructions, one of them
+    backed by a tool. The model followed the tool.
+    THE OWNER FOUND IT FROM THE OUTSIDE, without reading any code: *"that shop-76 constantly
+    bringing up ask what else would block on packet, check the comments for it. I think there is a
+    bug with it."* SHOP-76's timeline is the proof, read chronologically: packet raised at 21:53
+    saying "2 times running" → answered "Ask Code Reviewer what else it would block on" at 04:28 →
+    the reviewer returned a VERDICT at 04:34:35 → the packet re-raised at 04:34:35, still **"2
+    times running"** → answered identically at 04:36. The same question, at the same round count,
+    answered twice, by a person taking the option the card recommended both times.
+    `review-deadlock.server.ts`'s own header names the construction: *"The same construction ruling
+    186 refused: a request in a prompt, with nothing that notices when the model does something
+    else."* Ruling 237 was written to replace that shape and its own remedy was built in it.
+    The fix is one variable. `collab` feeds all three consumers — the Claude toolkit's
+    `report_outcome` field, the Codex envelope schema, and the persona's collaboration notes — so
+    `withholdVerdict` on the run suppresses the channel on both backends and stops the prompt
+    contradicting itself, in one place.
+    PER RUN, NEVER THE ENGAGEMENT. The reviewer stays `verdictCapable` and stays a required
+    reviewer, so acceptance still waits for its approve. A fix that demoted the reviewer would
+    unblock the task by removing the gate, which is not what the person choosing that option asked
+    for — and `deriveValidation` reads the engagement, so it would have gone healthy on a task
+    nobody had approved.
+    Canaries at both ends: dropping `withholdVerdict: true` from the dispatch, and accepting the
+    flag but ignoring it at the collab, each turn the test red.
+
+    (`specialist-run.server.ts`, `task-actions.server.ts`.)
+
+314. **The empty dock says what you can ASK it, not only what it knows (owner, 2026-09-17, pass
+    37; F37-149).** Opening the controller on a task showed one sentence — *"Ask about SHOP-54 or
+    say what to do with it. The controller already has its task file."* — which states what the
+    controller KNOWS and nothing about what it can DO. A person who had never used it faced a text
+    box and a claim.
+    The owner's call was examples over a capability summary: a list tells, and goes stale as the
+    toolkit changes; an example teaches the surface by being clicked. Three per scope, each a real
+    sentence the controller can act on there, and the third deliberately a DO rather than an ask,
+    because the composer's own placeholder says "or tell it what to do here" and nothing
+    demonstrated that half.
+    CLICKING ONE SENDS IT. An example that only filled the box would teach the lesson and then
+    leave the person looking for the button, which is the thing they were unsure about. The value
+    is a PARAMETER on `submit`, not `setText` then `submit()`: React has not re-rendered inside the
+    click, so reading the state there posts the EMPTY box — the same loss ruling 259's
+    `pending.current` exists to make impossible for typed messages. The canary is that exact
+    mistake, and it goes red.
+    Two things this cost on the way, both caught by viberr's own gates rather than by review.
+    `onClick={submit}` on the Send button had been harmless while `submit` took no arguments;
+    giving it one made React hand it the MouseEvent as the message. Typescript refused it. And the
+    first stylesheet used `6px` and `--bg-2`/`--line`, which the pass-30 radius-scale and
+    token-resolution tests rejected — a bare radius and two tokens that do not exist. The design
+    system is enforced, which is the point of having written it down.
+
+    (`controller-dock.tsx`, `app.css`.)
+
+315. **Viberr deleted the owner's own words on the highest-stakes card in the product (owner,
+    2026-09-17, pass 37; F37-150).** The note on a decision packet was cut to 2,000 characters by
+    `const note = String(formData.get("note") ?? "").slice(0, 2000)` in `project.task.tsx` — in the
+    ROUTE, before the request reached the server. No `maxLength` on the textarea, no counter, no
+    marker on the record, no error, and nothing anywhere holding the tail.
+    It happened to this pass. A 4,454-character decision on SHOP-76 was stored at exactly 2,000,
+    ending mid-word at *"`docs/adr/README.md` is this branch's own rule and it says the record t"*,
+    and everything after it — including "do NOT fix this by editing the six files outside `docs/`"
+    — was gone. Rework round 4 ran on the operator's reconstruction of the deleted sentence. The
+    operator's conduct is the only reason that was survivable: it noticed the cut, named it, said
+    plainly *"that reading is mine, reconstructed"*, told the deliverer to verify against the tree
+    and stop if it contradicted, and offered to re-prompt. Its reconstruction was correct.
+    The card had promised the opposite. The option chosen was authored in `review-deadlock.server.ts`
+    with the description *"Anything you type below is recorded on the task's contract and every
+    later run reads it (ruling 189), so say why rather than just yes."* Viberr invited the long
+    "why" on that exact field and deleted the end of it.
+    RULING 292 IS THE PRECEDENT AND THE DISTINCTION. It permitted a cut on a reviewer's verdict for
+    a stated reason: *"The full text is never lost — the agent's own report is on the same
+    timeline, untruncated."* A person's typed note has no second copy. The same cut is a pointer
+    there and actual loss here, and 292's own comment names the defect it fixed — *"What was wrong
+    was the silence: a bare `.slice`"* — which is exactly what stood here.
+    Ruling 288 had already settled the shape one field over: an over-long goal and an over-long
+    title are REFUSED, *"a contract Viberr will not write half of"*. And the field beside this one
+    on the same card refused at 4,000 characters. Which of the two a person got was decided by
+    whether the selected option happened to be the synthetic "write your own directive" INDEX —
+    not by anything visible — so two fields on one card differed by a factor of two and by
+    refuse-versus-truncate.
+    One number now, `PACKET_NOTE_MAX`, in the shared schema because the box that must show it is a
+    client component and the guard that must enforce it is server-only: stated on the label,
+    enforced by `maxLength` so the browser stops the paste, refused by the server naming both the
+    limit and what was written, and the refusal says "Nothing was recorded" because refusing and
+    then writing half of it would be the same defect wearing a message.
+    THE TEST HAD TO MOVE TO THE ROUTE. The first version called `resolvePacket` directly and its
+    canary came out GREEN with the slice restored — the server function never saw the cut, because
+    the cut was upstream of it. A test one layer away from the defect proves nothing about the
+    defect.
+
+    (`project.task.tsx`, `task-actions.server.ts`, `task-file.schema.ts`, `decision-packet.tsx`.)
+
+316. **A reviewer told not to judge did not fall silent, so nothing is there to repair (owner,
+    2026-09-17, pass 37; F37-151; completes ruling 313).** Ruling 313 withheld the verdict TOOL on
+    the deadlock question and closed NOTHING. `verdictAuthorized` reads the ENGAGEMENT snapshot —
+    correctly, because a required reviewer whose live grant was removed must still be able to
+    record — so the prose fallback ran anyway and manufactured the exact verdict the tool had just
+    been taken away to prevent.
+    The reviewer said so in words, and viberr wrote the verdict under its name 70 milliseconds
+    later. SHOP-68: *"**No verdict recorded** — the directive said not to... I deliberately skipped
+    `report_outcome` rather than omitting it. (Note: last turn the system appears to have derived a
+    `request_changes` entry from my comment anyway; I can't control that, but nothing new was
+    authored by me.)"* The person answered the same deadlock packet THREE times for one question,
+    taking the recommended option each time.
+    WHAT IT DESTROYS IS THE WORSE HALF. A fabricated verdict does not append a row: verdicts are
+    last-write-wins per `profileId + revisionId`, so it REPLACES the reviewer's real findings for
+    that revision. On SHOP-76 the genuine round-2 verdict — which named a blocking item — was
+    overwritten by a verdict derived from a sentence saying the opposite: the classifier's rule 3
+    fires on any un-negated "fail"/"blocker", and it fired on *"the five prettier-failing markdown
+    files fail identically on the base commit"*, whose whole point is that the failure is
+    PRE-EXISTING and therefore not a finding.
+    The fallback's own comment already states the principle it failed to apply: *"The fallback is
+    for SILENCE, not for overruling an answer. An agent that filled the envelope and ASKED A
+    QUESTION with the verdict field empty has said which of the two it was doing."* A reviewer told
+    not to return a verdict, which then does not, has said which of the two it was doing just as
+    plainly — by obeying.
+    So the RUN remembers. `agent_runs.verdict_withheld` is written at dispatch and read at
+    completion, because the prompt is not the only thing that has to honour the withholding and the
+    dispatch is long gone by then. It needed the `ON CONFLICT` update list as well as the insert —
+    a reserved row is created before the start, so without it the flag was written and immediately
+    overwritten with the default, which is what the third canary caught.
+    RULING 313 ALSO MISSED A DISPATCHER. Ruling 241's queued half (`dependencies.server.ts`) puts
+    the same question when a hold clears, and 313 patched only the immediate path — so a deadlock
+    question deferred behind a dependency kept the channel the immediate one had lost.
+    Residual, recorded and not fixed: rule 3 is a bad classifier. Making the fabrication impossible
+    where it is known to be wrong is a smaller and safer change than tuning a regex that decides
+    whether a judgement exists, but the regex is still deciding that everywhere else.
+
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `dependencies.server.ts`,
+    `run-service.server.ts`, `run-store.server.ts`, `sqlite.server.ts`, `0001_baseline.sql`.)
+
+317. **The record pointed at a copy the product then deleted (owner, 2026-09-17, pass 37;
+    F37-152).** Ruling 292 clips a reviewer's justification into `verdicts[].reason` at 2,000
+    characters and appends *"Its full report is on this task's timeline, whole."* That sentence was
+    292's whole justification for cutting at all. Compaction then folds the comment it names.
+    THE PROTECTION WAS EXACTLY INVERTED. A comment survives compaction only if it carries
+    `evidence` or `attachments` (rulings 209 and 211(e)) — and `prepareAgentReplyEvent`'s caller
+    moves both OFF the reply precisely WHEN it carries a verdict, because P13-D-26 puts them on the
+    `quality` event so the chips render with the outcome. So a deliverer's report was immune and
+    the one record a stored pointer depends on was first to go.
+    Measured live on SHOP-76, mid-session, while the task was being worked: the round-1 verdict
+    report (7,211 characters), the round-2 report, and the reviewer's "complete list" answer — the
+    one a person had spent a decision and a run to obtain — all gone from canonical `task.md`,
+    replaced by *"6 earlier routine comments compacted"*, while `verdicts[0].reason` still ended
+    *"...this is its first 2,000. Its full report is on this task's timeline, whole."* Three of four
+    rounds of review reasoning, unrecoverable from the file agents re-anchor on.
+    The fix is a TITLE, not a new field. `title` already round-trips through the task-file format
+    and was `null` on these comments; the verdict path now sets `VERDICT_REPORT_TITLE` and
+    compaction never folds it. No format change, no cross-referencing of frontmatter from a pure
+    function, and the comment gains a heading that says what it is — which the UI wanted anyway.
+    The constant lives in the schema module because the writer is a server action and the reader is
+    the compaction pass, and neither should import the other.
+    Note what this does NOT do: the clip stays. A justification over 2,000 characters is still
+    stored partial, and the promise that the whole of it is on the timeline is now true again
+    rather than removed. If compaction ever gains another way to drop a titled comment, this ruling
+    is the one it breaks.
+
+    317(b), THE NEIGHBOUR RULING 310(b) NAMED AND DID NOT FIX. `settleAbandonedWaits` sits in the
+    same file as the orphan sweep 310(b) corrected, and 310(b)'s own commit quoted the controller
+    on it: *"One writer fixed, its neighbour still inventing."* Its SELECT proves exactly one
+    thing — `waiting = 'agent'` and no run in `running` or `queued` — and its note asserted three
+    more: that a run existed, that it *"finished just before the stop"*, and that *"nothing was
+    lost from the record"*. None was checked.
+    The first is often false. A dispatch HELD on quota records the wait and starts nothing, and on
+    SHOP-37 the contradiction sits fifteen minutes apart in one file: 09:15:13 *"**Held:** Codex is
+    out of quota... **nothing was dispatched** and no decision is needed"*, then 09:30:29 *"the run
+    finished just before the stop"*. The note now reads the task's own last run and says what is
+    true of it — no run ever started, a run that never got a process, or a run that ended and whose
+    follow-up did not, which is the only case the old sentence described.
+
+    (`timeline-compaction.server.ts`, `task-actions.server.ts`, `task-file.schema.ts`,
+    `run-recovery.server.ts`.)
+
+318. **The Done record names the head that actually merged (owner, 2026-09-17, pass 37;
+    F37-153).** R17-1's whole purpose, stated in `revision-drift.ts`, is that *"a Done task's own
+    timeline says... the head it was accepted with"* and that the permanent record names the
+    commits which shipped outside the reviewed revision. It was computed from `existing` — the
+    frontmatter read BEFORE `attemptAcceptanceMerge`.
+    That call is the thing that moves the branch. `refreshBranchForAcceptance` →
+    `recordBranchRefresh` pushes the base merge, calls `reconcileTask`, and rewrites
+    `pr.revisionDrift` from the head that resulted. So on every acceptance whose own ceremony
+    refreshed the base, the permanent record either named a head that was never merged or omitted
+    the refresh the acceptance itself created — and the acceptance is precisely what ships the
+    commits R17-1 exists to disclose.
+    Live on SHOP-81, three consecutive entries seconds apart: the github note says *"Drift
+    re-measured: base refreshed · 2 merge commits · 9 base commits"*, the branch-deletion note says
+    *"Its head was `75786d012de9`"*, and the completion record — the one that is permanent and that
+    nobody goes back to correct — names neither.
+    Both acceptance paths now read the file after the merge. The test drives the mechanism rather
+    than the reconciler: a merge mock that rewrites `pr.revisionDrift` mid-ceremony, which is
+    exactly what `reconcileTask` does, and the assertion is that the completion record sees it.
+
+    (`task-actions.server.ts`, both the direct and the packet acceptance paths.)
+
+319. **One account failure, one decision (owner, 2026-09-17, pass 37; F37-155).** Ruling 315
+    stamped `packet.cause` — `backend:<backend>:<kind>:<credentialUserId>`, the thing that
+    actually failed — onto every packet a quota, auth or unavailable failure raises, because such
+    a failure takes out every task that account is paying for at the same instant and each one
+    raised its own identical packet. The field's own comment in `task-file.schema.ts` then
+    described what the stamp was for: *"packets that share a cause resolve together: answering one
+    applies the same option to every sibling still carrying it."* Nothing read the field. The
+    sentence was true about the intent and false about the product, which is the shape this pass
+    has been chasing since 309 — a confident line standing in front of behaviour that does not
+    exist — and 315 wrote it into the schema itself.
+    `resolvePacket` now fans out. The siblings are found in the projection by
+    `json_extract(packet_json, '$.cause')`, across projects, because the cause names a credential
+    and a credential does not stop at a project boundary. Each sibling is resolved through the
+    REAL `resolvePacket`, not a cheaper write: a decision that reaches another task passes that
+    task's authority check, writes that task's decision event, notifies that task's watchers and
+    runs that task's dispatch arm, or it is a second quieter resolution path that can disagree
+    with the first.
+    Three things the loop refuses to guess. It matches the option by KIND, never by index —
+    `describeRunFailure` composes each option set from the failure AND from what that task's own
+    owner has connected (ruling 127), so "retry on the other backend" is present on one task and
+    absent on the next and every index behind it shifts; resolving a sibling at the origin's index
+    is how "wait for the window to reopen" becomes "send the agent back" on the task nobody was
+    looking at. It fans out only an ALLOW-list of coordination kinds, so a one-way write can never
+    reach a task whose human never saw it, and `custom` is deliberately outside it — a directive a
+    person types is about the task in front of them. And it does not recurse: a sibling's own
+    resolution carries `fanOutOrigin`, so every record names the one task a human actually decided
+    on.
+    The misses are the point of the record. A sibling that offers no such option, or sits in a
+    project where the decider holds nothing, is named on the deciding task's timeline with the
+    reason and "Its packet is still open" — because the person who just cleared four packets with
+    one click is the one who has to know about the fifth. And the card discloses the reach BEFORE
+    the confirm, above the options, since a confirm that quietly answers four other tasks is the
+    undisclosed write ruling 20 exists to stop.
+    (`packet-fanout.server.ts` (new), `task-actions.server.ts`, `project.task.tsx`,
+    `decision-packet.tsx`.)
+
+320. **A field the loader computes for the page has to reach the page (owner, 2026-09-17, pass 37;
+    F37-156).** Ruling 241 built a row on the Details panel that says *"Viberr puts Arda's question
+    to @reviewer when the wait clears"* — the standing surface for a promise whose only other
+    trace is one timeline note that scrolls away. The loader read `queuedQuestions` from the task
+    file and returned it; `TaskDetailPage` declared the prop; `TaskDetailsPanel` rendered the row.
+    The route never passed it. Both ends default to `[]`, so nothing failed, nothing logged, and
+    the row never appeared on any task from the day it shipped.
+    A default value is what makes this class of break silent, so the test is aimed exactly there:
+    every field the REAL loader returns whose name `TaskDetailPage` declares as a prop must appear
+    in the route's own `<TaskDetailPage …/>`. It reads source text rather than rendering, because
+    the defect is not in any render — it is in the join, and a render test that supplies the prop
+    by hand proves the opposite of what is needed. It failed on two fields the moment it was
+    written: ruling 241's, and ruling 319's own disclosure, which had just been wired at both ends
+    and not in the middle.
+    (`project.task.tsx`; the wire test in `task-detail-route.server.test.ts`.)
+
+321. **A push conflict names what is on the branch before it says what to do to it (owner,
+    2026-09-17, pass 37; F37-157).** A non-fast-forward push ended in one fixed sentence:
+    *"Resolve the remote branch `X` (delete or rename it, or force-push deliberately), then deliver
+    again."* The same advice whether the branch is an abandoned ref, a stranger's pull request, or
+    the head of THIS task's own open review PR — and in that last case both named acts are
+    destructive: deleting the branch closes the pull request under review, force-pushing rewrites
+    the commits the reviewers judged.
+    Live on SHOP-11, twice. A backend engineer rebased a branch with an open pull request; the
+    push was refused; this sentence told the owner to delete `shop-11` — and **forty-seven
+    milliseconds later** Viberr's own collision ceremony wrote *"No collision to clear: PR #15 on
+    `shop-11` is SHOP-11's own review PR."* The product had the fact in the same second and the
+    remedy did not use it. The owner then priced the loss by hand in a decision note (*"closing PR
+    #15 loses a thread whose conclusion we already have"*).
+    The remedy now reads `revisionLeftWorkspace` — the shared answer to "has this revision left
+    the workspace, and by what" — and has four arms: this task's own PR (named, with what deleting
+    costs), a stranger's PR (named, pointed at the ceremony built for it, which states what it
+    destroys before the confirm), a head this task published with no PR, and a genuinely anonymous
+    ref, which still gets the old blunt advice because for it the old advice was right.
+    321(b), THE SENTENCE FIVE FILES INVENTED SEPARATELY. "Resolve the branch history" appeared in
+    five places — `unpushedRevisionBlockedReason`, the workspace-delivery timeline line, the
+    operator's `update_branch_from_base` remote sentence, the collision ceremony's own-PR-diverged
+    note, and the packet outcome summary — and not one of them named an act. The header of
+    `unpushedRevisionBlockedReason` claimed the opposite in the same file: *"a diverged remote
+    needs the history resolved first, and the sentence says which."* It did not.
+    The missing half is a fact about Viberr that the owner had to learn from Viberr and write into
+    the project's KB by hand: `update_branch_from_base` MERGES the base in, it does not rewrite
+    history, and that is the correct shape once a pull request tracks the branch. It is now
+    `DIVERGED_BRANCH_REMEDY`, one exported constant, printed by all five. The test that pins it
+    scans those five files with comments stripped — the regression it guards is not a reworded
+    string, it is a sixth site inventing a sixth sentence, which is how the first five happened.
+    (`task-file.schema.ts`, `task-actions.server.ts`, `workspace-delivery.server.ts`,
+    `update-branch-operator.server.ts`, `packet-server-outcome.ts`.)
+
+322. **A later ruling retired the premise of an earlier ruling's sentence (owner, 2026-09-17,
+    pass 37; F37-158).** Ruling 269's `create_task` option wrote two sentences saying the deciding
+    task is untouched — the decision event's own fallback (*"`VIB-1` is unchanged; the new task
+    carries the work"*) and the note left after the create — with a comment beside them calling the
+    mutation *"a deliberate NO-OP… this option says something about work that is NOT this task"*.
+    All three were true when they were written.
+    Ruling 287 then added `newTask.blocks`, the reverse edge: the EXISTING tasks that must wait on
+    the new one. Nothing keeps the deciding task off that list, and it is the most natural entry on
+    it — a task is normally created because the work in front of you cannot proceed without it, and
+    the operator's own field description says to use it "whenever other work must not start until
+    the new task lands". When it is there the resolution writes the new key into this task's own
+    `blockedBy`, seconds after telling the person this task was unchanged, and the board flips it to
+    blocked with two contradicting cards above it.
+    Neither sentence was revisited. Both now read `createTaskHoldsDecider`, and the reverse-edge
+    loop skips its third-person provenance note on the deciding task, which already said it in the
+    first person one card up. The counterweight has its own test: a `create_task` that holds nothing
+    here still reads as unchanged, because for ruling 269's own case ruling 269 was right.
+    The shape is worth naming on its own. This is not a sentence that was wrong when written — it is
+    a sentence that a LATER ruling made wrong, in a file where both rulings are cited three hundred
+    lines apart. The prose that survives a feature is the prose nobody re-read.
+    (`task-actions.server.ts`, `operator-toolkit.server.ts`.)
+
+323. **A heuristic that writes a permanent accusation was wrong fourteen times out of fourteen
+    (owner, 2026-09-17, pass 37; F37-159).** `directiveRequestsDelivery` flags a directive that
+    asks a specialist to perform a server-owned delivery action. It is a SECONDARY reminder — the
+    base prompt forbids pushing unconditionally and the clone holds no push credential — so a miss
+    costs an extra nudge and nothing else. A false positive writes a permanent `policy` event on
+    the task saying the directive *"asked the specialist to push or open/merge a pull request"*,
+    plus an audit flag. The two costs are not remotely symmetric, and the detector was built the
+    other way round: broad, with narrow carve-outs.
+    Measured across the shopify-clone board: **fifteen firings, fifteen wrong.** (Fourteen when
+    the fix was written; a fifteenth landed on SHOP-83 forty minutes later, while the fix sat
+    undeployed, on the phrase *"if it ever carries an open PR, merge, never rebase"* — the rule
+    against rewriting published history, recorded as a demand to push and merge.)
+    - THIRTEEN were the adjective. `open` sits in an alternation of verbs (`open|create|raise|
+      submit|file`), so *"this branch has an open PR"* matched as an instruction to open one. In
+      every one of the thirteen, that clause was the operator's own preamble to **"merge, never
+      rebase"** — the opposite instruction. SHOP-54 carried five, one of them a citation of the
+      project's own conventions file: *"§2 (open PR ⇒ merge, never rebase — governs this whole
+      run)"*. A determiner, possessive or quantifier before `open` means the word describes the
+      pull request; that is now the guard.
+    - The FOURTEENTH was a prohibition wearing bold. P14-LV-10 added the negation guard precisely
+      so *"Do not push the branch, open a PR"* would stop firing — and the operator writes it as
+      `Do **not** push and do **not** open a PR`, which `\bdo\s+not\b` cannot match across the
+      asterisks. Emphasis is now stripped before anything else, which also fixes the miss in the
+      other direction: a bolded `**Push the branch**` was never detected at all.
+    - A third hole, found while fixing these: SHOP-47's *"write it into your report; I open the
+      PR"* — the operator stating that delivery is ITS OWN job, recorded as the operator demanding
+      the specialist do it.
+    The detector now returns the matched PHRASE rather than a boolean, and the event quotes it and
+    says plainly that nothing was withheld. A heuristic that writes an accusation has to show its
+    evidence: a reader who disagrees can see what it matched on, and so can whoever finds the next
+    hole. The tests are the fourteen real sentences, from the real tasks.
+    P14-LV-10 found this harm and fixed it through one hole while two others stood open. That is
+    the lesson worth keeping: a carve-out fixes a case; only a corpus tells you the rate.
+    (`specialist-run.server.ts`.)
+
+324. **The `create_task` confirm names what already looks like it (owner, 2026-09-17, pass 37;
+    F37-160).** Ruling 269's option creates a real task on a person's confirm, and the card
+    discloses what it WILL create. It said nothing about what already exists, and the operator
+    authoring it reasons about a board it cannot see all of.
+    Found by ASKING. The controller, at the end of the run, was asked what a reader of the final
+    board would not learn from the board itself, and volunteered this without being pointed at it:
+    *"the near-misses were about as frequent as the catches, and they leave no trace… SHOP-27's
+    decision packet was one confirmation away from creating a duplicate of SHOP-29 — same three
+    route modules, same pattern, already written and sitting at Triage… SHOP-26's packet, before
+    you re-raised it, was one confirmation from creating a second SHOP-39 with the title word for
+    word."* Both were caught by a person reading the packet and recognising the work. A task that
+    was never created leaves nothing behind, so the RATE of this is invisible in any record — the
+    only way to learn it was to ask something that was there.
+    Ruling 273's `read_board` gave the OPERATOR a way to check before it offers. This is the other
+    half: the person confirming gets the same fact, under the option it is about, at the moment the
+    confirm is in front of them, without having to recognise it themselves.
+    THE THRESHOLD IS MEASURED, NOT CHOSEN. Jaccard overlap of the titles' significant words, at
+    0.6. Against the 83 real titles of this board — 3,403 pairs — it flags **none**, while the two
+    real near-misses clear it comfortably: *"Gateway routes for orders, cart and inventory"* scores
+    0.67 against SHOP-29's *"Gateway routes for inventory, cart and checkout"*, and the SHOP-26 case
+    was a title repeated word for word. 0.5 would have flagged three pairs, all of them the
+    genuinely distinct `Admin product / inventory / order management` trio. A disclosure a person
+    learns to skip is worse than no disclosure, and the tests pin both ends: the near-misses clear
+    the bar and the adjacent trio does not.
+    It discloses, it never refuses. A second task that looks like a first is sometimes exactly what
+    a person means, and the one who knows is the one confirming.
+    (`similar-tasks.server.ts` (new), `project.task.tsx`, `decision-packet.tsx`.)
+
+325. **The card that exists to explain a stuck task explained nothing (owner, 2026-09-17, pass 37;
+    F37-161).** C10.4 added a fallback note so a task whose operator turns stopped making progress
+    never sits waiting on a human with nothing on the timeline saying why. It read: *"This task's
+    operator turns stopped making progress, but the recovery packet could not be opened. It is
+    waiting on a human: run the operator manually or intervene, then resolve it."*
+    Both callers hold the reason. One has `operatorOpenPacket`'s own refusal message, the other a
+    thrown `Error`; both LOG it, and neither passed it. So the card built to explain a stuck task
+    handed the reader back the observation they had already made by the time they were reading it.
+    And it sent them to *"resolve it"* — there is no packet, which is the entire subject of the
+    note, so a person following that sentence goes looking for a card that does not exist. The two
+    arms are different situations too: a REFUSAL is a governance answer with a remedy inside it (an
+    authority, a closed task, a packet already open), a THROW is a fault. Telling them apart is most
+    of the help.
+    Same shape as ruling 317(b), one file over. Neither had a test: this note had never been
+    asserted on anywhere, which is how a fallback nobody sees until the bad day stays wrong.
+    (`task-actions.server.ts`; tested through the depth cap in `agent-completion.server.test.ts`.)
+
+326. **For four days this board could not escalate a stalled task (owner, 2026-09-17, pass 37;
+    F37-162).** Found by asking ruling 325's question backwards: its note had fired ELEVEN times
+    live, so what had it been hiding?
+    `describeRunFailure` composes a backend failure's options, and offers `retry_other_backend`
+    whenever `ownerHasOther` — which asked only whether the owner has the other backend CONNECTED.
+    Every option and sentence built on that flag promises a retry that happens NOW ("Retry
+    @developer on Codex now", "or the run is retried on Codex"). When that backend is itself out of
+    quota, the promise is false — and `operatorOpenPacket` says so in its own words and refuses the
+    WHOLE packet: *"the dispatch would be HELD and re-scheduled rather than run, so the person would
+    spend a decision on a wait."*
+    Two parts of the same server disagreed, and the composer was the wrong one. Measured: Arda's
+    Codex was recorded out of quota from 2026-09-15 03:26 until 2026-09-19, and every Claude
+    failure inside that window composed a packet the guard then refused — **eleven times, in three
+    bursts** (17:18:0x ×3, 18:50:3x ×5, 10:05:3x ×3), each burst one account failure taking several
+    tasks out at once. Not one produced a packet. `ownerHasOther` now means runnable NOW, which
+    fixes the option and the prose together because both are built from it.
+    326(b), THE STRUCTURAL HALF. `operatorOpenPacket`'s authoring guards exist to COACH the
+    operator: it reads the refusal, revises and tries again, and the messages are written that way
+    ("Offer the OTHER backend, or offer wait_for_window with dueAt set to the reopen instant").
+    `openStuckLoopPacket` has no such loop — it composed the options itself, so a refusal ended with
+    a stalled task and NO packet, which is strictly worse than a packet with one fewer option. It
+    now falls back to the stock set (redirect / send back / hold), whose kinds carry no conditional
+    guard, and says on the packet what was withheld and why. Only when the failure supplied its own
+    options: the stock set IS the other callers' set, and retrying it unchanged would be a loop.
+    The general rule: a guard whose remedy is addressed to a reader that is not in the loop is not a
+    guard, it is a dead end. When the server is both author and audience, a refusal has to leave it
+    somewhere better than where it started.
+    (`run-failure-remedy.server.ts`, `task-actions.server.ts`.)
+
+327. **The packet door dated the Done record before the merge it announces (owner, 2026-09-17,
+    pass 37; F37-163).** `resolvePacket` captures `now` at the top, and the `accept_completion` arm
+    used it 114 lines and one GitHub round-trip later — `attemptAcceptanceMerge` can refresh the
+    base, push, merge and reconcile before it returns.
+    Live on SHOP-77: the completion reads `05:33:35.903Z`, the merge it announces `05:33:43.377Z`,
+    the branch deletion `05:33:44.631Z`. The timeline is newest-first, so the file puts the
+    completion at the top while its own timestamp is the oldest of the three — whichever a reader
+    trusts, the other is wrong. Its text is ruling 318's drift note, correctly measured after the
+    refresh, describing a state that did not exist at the instant the record claims.
+    78 of the board's other 79 accepted tasks went through the DIRECT door, which has always
+    stamped at write time. This is one ceremony dating itself two ways depending on which control
+    a person used; the packet door now stamps when it writes, like its sibling. Every other arm of
+    that switch keeps `now` — they write before any remote call.
+    (`task-actions.server.ts`.)
+
+328. **An escalation skipped because another packet was open was skipped forever (owner,
+    2026-09-17, pass 37; F37-164).** Ruling 237 raises the "N times running" packet from inside the
+    locked write that records the verdict, and skips it when a packet is already open — which it
+    must, since a task holds one packet. Nothing ever came back.
+    So the escalation was attempted EXACTLY ONCE, and any unrelated packet standing at that instant
+    killed it for good. Ruling 326 established what those packets usually are: a quota or
+    credential failure, raised in bursts across several tasks and nothing to do with the review.
+    Measured: five tasks on the shopify-clone board reached a second consecutive
+    `request_changes`; **two never got the packet**. SHOP-18's second objection landed at 03:44:44
+    with a backend-failure packet open (answered at 04:38:38); it ran another eight hours and ended
+    in a force-accept over a wedged Verify gate, with the person writing the routing by hand.
+    SHOP-10 reached three rounds the same way.
+    TWO clear sites, both fixed. The one that produced the live misses is a PERSON answering the
+    unrelated packet — SHOP-18's was resolved at 04:38:38, and nothing re-checked the review. The
+    other is `withdrawSupersededStuckPacket`, which retires a stalled packet when the run it was
+    about finally succeeds: the SAME reviewer run that wrote the objection would withdraw the packet
+    suppressing its escalation, seconds apart, with nobody involved. That second path has fired ZERO
+    times on this board — it is covered because it is the same defect, not because it has bitten,
+    and the tests drive both so neither regresses.
+    THE GUARD THAT MAKES IT SAFE: the retry is for an escalation that was NEVER MADE. Without it,
+    resolving the deadlock packet re-raises it on the spot — the reviewer is still at N objections
+    the instant the card closes — which is the loop the owner called out on SHOP-76 and the whole
+    subject of ruling 313. Raising the packet writes its title, which carries the round count, onto
+    the timeline; a timeline that already names this reviewer at this count has had its escalation.
+    A later objection raises the count and is a new one, which is ruling 237's own rule. Ruling
+    313's tests are what caught the first version of this fix rebuilding the loop.
+    AND THE RETRY DOES WHAT THE ORIGINAL RAISE DOES. The first draft of this fix wrote the packet
+    and stopped: no inbox row, no audit event. That would have put a decision on a task and left
+    the person to find it — a quieter version of the defect it exists to fix, the escalation
+    reaching nobody. It now calls `notifyTaskWatchers` and `recordAudit` exactly as ruling 237's
+    own raise does, naming the policy engine as the sender rather than letting the inbox stamp the
+    operator on it.
+    The operator's turn instruction also asserted the wrong inference — "a task you are reading with
+    such a reviewer and no packet is one where the escalation COULD NOT BE WRITTEN", a write
+    failure, when it was skipped by design and would never be retried. It now says the escalation is
+    still owed, and that an absent packet is not evidence the objection was judged and dismissed.
+    (`task-actions.server.ts`, `operator-toolkit.server.ts`.)
+
+329. **An option's description BECOMES the contract, so it may only contain what binds (owner,
+    2026-09-17, pass 37; F37-165).** `resolvePacket` appends `${option.t} — ${option.d}` to the
+    task's goal for every option kind outside `PROCESS_ONLY_OPTION_KINDS`. The deadlock card's "Let
+    the rework continue" is one of the very few SERVER-AUTHORED options on that side of the line,
+    and its description ended: *"Anything you type below is recorded on the task's contract and
+    every later run reads it (ruling 189), so say why rather than just yes."*
+    That is the sentence that landed in the goal — five times, across SHOP-5, SHOP-25 and SHOP-76
+    (twice) — while the reasoning the person typed went to the timeline. The permanent contract of
+    three tasks now instructs every later run to type in a textarea it will never see, and cites a
+    ruling number at it.
+    It was false in both directions at once. The note box under a listed option posts `note`, which
+    `resolvePacket` sends to the timeline and the operator's summon note and never to a goal — it
+    has never amended the contract, before ruling 284 or after it; 284 only closed the last route by
+    which any typed words reached a goal. So the card asked a person for their reasoning on the
+    highest-stakes decision it raises, promised that reasoning would bind, filed it elsewhere, and
+    wrote its own dialog copy into the record instead. Whether typed reasoning SHOULD bind is
+    ruling 284's question and stays answered as 284 answered it.
+    A TEST DEFENDED THE LIE, which is why it survived: `agent-completion.server.test.ts` asserted
+    the description CONTAINS "recorded on the task's contract", with a comment naming the wrong
+    mechanism (it conflated the `note` box with the synthetic `custom` CHOICE). The assertion is
+    now its inverse, and the whole amendment is pinned as an exact string.
+    `PROCESS_ONLY_OPTION_KINDS` is exported for the guard, which reads it to know which authored
+    options it must hold to contract language — so the rule is checkable rather than remembered.
+    The ask itself moved to the packet BODY, which is read on the card and appended to nothing.
+    (`review-deadlock.server.ts`, `task-actions.server.ts`, `review-deadlock.server.test.ts` (new).)
+
+330. **Nothing watched for the state itself (owner, 2026-09-17, pass 37; F37-166).** The owner
+    asked the question that made this ruling: *"there were tasks that had no queued runs, packets
+    etc. how did you fix them and how can we make sure it wont happen again"*. Four separate CAUSES
+    of a task stopping dead were fixed the same day (325, 326, 328, and the acceptance-conflict one
+    still open), and the owner had already found a fifth. Fixing causes one at a time never closes
+    the class.
+    A task can reach a state where NOTHING is going to move it — no decision packet, no pending
+    recommendation, no queued question, no scheduled run, no agent running or queued, and no hold
+    that explains the quiet — and Viberr could not see that state at all.
+    `settleAbandonedWaits` covers one narrow slice (the board claims an agent and no run is live)
+    and runs ONCE, at boot: five firings in this board's whole life. Nothing covered the rest.
+    HOW A TASK GETS THERE, measured over 940 operator runs. 111 of them (12%) ended without writing
+    anything, and most of those are RIGHT: the operator reads the task, sees a run already in
+    flight, and correctly declines to duplicate it. But each ends on the same load-bearing sentence
+    — *"I will be re-invoked when the Code Reviewer reports."* That re-invocation is not guaranteed:
+    `operatorShouldReactToReply` requires the run to finish `finished` with a readable reply, so a
+    run that FAILS re-invokes nobody, and the fallback is the stuck-loop packet ruling 326 found
+    refused for four days and ruling 325 found silent. Live on SHOP-61: silent operator turn →
+    `blocked` (credential rejected) → "the recovery packet could not be opened", with the operator's
+    last recorded words saying it would be re-invoked when the reviewer reported.
+    So the sweep does not ask WHY. It asks whether anything is going to happen, and when the answer
+    is no it does what a person ends up doing by hand: invokes the operator. On SHOP-12 that
+    hand-typed `@operator` comment produced a packet 28 seconds later, after 10h45m of silence.
+    It rides the existing 60-second schedule tick and runs after it, so a dispatch that just fired
+    is already a queued run. The note is written FIRST and unconditionally — it has to survive an
+    operator that refuses, is absent or throws, since the whole point is that this state used to
+    leave no trace — and it doubles as the idempotence key.
+    THE GUARD'S OWN TEST CAME OUT GREEN, the fifth time that trap fired this pass. Writing the note
+    bumps `updatedAt`, which drops the task out of the staleness window by itself, so the assertion
+    was measuring the wrong thing. The real invariant is what happens LATER: a task nudged once,
+    which then produced nothing, is quiet again by every clock and must still not be nudged — or it
+    is re-noted and the operator re-invoked every fifteen minutes forever, which is worse noise than
+    the silence it replaced. The test now advances the clock, and a counterweight proves the key
+    means "I already said this about THIS silence", not "about this task".
+    (`stranded-sweep.server.ts` (new), `schedule.server.ts`, `task-actions.server.ts`,
+    `operator-run.server.ts`.)
+
+331. **One failed invocation is not a decision to stop (owner, 2026-09-17, pass 37; F37-167).**
+    `autoInvokeOperator`'s recovery note said *"The operator could not be started automatically (an
+    internal error). Coordination is paused for this task; run the operator manually when you're
+    ready."* Two faults in one sentence: the `error` it reduced to "an internal error" was in scope
+    and being logged on the line above (ruling 325's shape again), and "coordination is paused" is a
+    claim about the future this code cannot make. Live on SHOP-38 the operator was re-invoked
+    automatically eleven seconds later, leaving that durable line as the only thing still saying the
+    task had stopped.
+    It now carries the real message, names the trigger it failed on, and says what is true: one
+    attempt failed, anything that happens on the task invokes the operator again, and ruling 330's
+    sweep looks for tasks nothing is moving. The offer to run it by hand stays — as an option, not
+    as the only exit.
+    (`task-actions.server.ts`.)
+
+332. **The refused acceptance woke nobody, while the operator's identical door opens a packet
+    (owner, 2026-09-17, pass 37; F37-168).** Pressing Accept on a conflicting PR runs the
+    acceptance-time base refresh; on a conflict it stamps `pr.mergeable = "conflicting"`, writes a
+    note and returns a 409. That was all of it — no packet, no run, no notification.
+    Two things make the silence worse than it looks. That stamp is exactly the KEY to the operator's
+    door: `acceptanceBoundaryRefusal` denies `update_branch_from_base` at the acceptance boundary
+    EXCEPT while the PR is conflicting, so this path creates the one state in which the in-product
+    resolver is permitted and then schedules nothing. And because the flag is already set, the
+    reconciler's `flippedToConflict` can never fire afterwards, so ruling 162(d)'s withdrawal of the
+    standing `accept_completion` offer never runs — the card keeps inviting a click its own gate
+    refuses, for as long as the task sits.
+    Live twice, and they are the two longest dead stops on the board. SHOP-12: refused at 08:06:45,
+    then NOTHING for 10h45m while the board logged 8-66 events an hour elsewhere, until the owner
+    typed *"@operator SHOP-12 is the last thing standing between this board and a runnable catalog
+    service, and it is stuck on me rather than on anyone doing work"* — packet 28 seconds later, and
+    the operator's own reply: *"It was never a click you were withholding."* SHOP-3: same shape,
+    7h45m, same exit.
+    Ruling 226's words sit sixty lines below this arm — "A refusal with no exit is its own defect" —
+    and ruling 235 gave exactly this hand-off to the sibling refusal (an unpushed reviewed revision)
+    because only the operator may push. The same is true of the merge; this arm was left out. It now
+    fires `autoInvokeOperator(… "pr-conflicting")`, fire-and-forget, because the person's 409 is the
+    answer to their click and must not wait on a coordination turn.
+    The refuter corrected the headline and was right to: a person is not powerless here (GitHub's
+    web conflict editor exists, and the task page has a Run operator button). The defect is the
+    missing automatic hand-off, not a locked door.
+    NOTE ON THE TEST: the first version slept 30ms for the fire-and-forget and failed —
+    `autoInvokeOperator` awaits two dynamic imports before reaching `runOperator`, and their first
+    load in a test run outlasts any sleep worth writing. It waits for the effect instead.
+    (`task-actions.server.ts`, `operator-run.server.ts`.)
+
+333. **"No changes were delivered." was a literal, over runs that had been working for two hours
+    (owner, 2026-09-17, pass 37; F37-169).** Every classified provider refusal appended it, and so
+    did every unclassified failure except the two cut-off kinds. Nothing was consulted before the
+    assertion. `max_turns` and `max_budget` were exempted precisely BECAUSE a cut run can leave work
+    in the tree — its own canary comment says so — and a provider refusal on turn 48 is the same
+    cut-off and was not exempt.
+    Measured on the shopify-clone board: written **34 times across 27 tasks**. 28 of them followed
+    the run's own start by more than two minutes, the longest by 145. **Four were stamped onto the
+    very event that attaches the files that run produced** (SHOP-16, SHOP-18, SHOP-2, SHOP-41),
+    because `runAttachments` is written onto the same event eleven lines below, under a comment
+    reading "Files the run saved before it died still get their producer named".
+    The cost is not cosmetic, because the sentence is FED FORWARD: `canonicalTaskAnchor` puts recent
+    timeline events into the next run's prompt, and 124 run logs under the data root carry the
+    phrase. Live on SHOP-28 the owner hand-wrote the correction eighteen minutes later: *"Your
+    previous run did not fail on the work — it ran 48 turns … That file is on disk and uncommitted.
+    … Do not regenerate work that is already in the tree."*
+    Gated on EVIDENCE now, not on kind: the turn count is on the run row the function already read,
+    and the attachment list is a local it already built. The true half is kept — a failed run pushes
+    nothing and opens no PR — and the false half is replaced by what the owner had to write by hand.
+    (`task-actions.server.ts`.)
+
+334. **An unreachable GitHub is not a broken credential (owner, 2026-09-17, pass 37; F37-170).**
+    Four `openTaskPr` statuses shared one remedy — *"Fix the repository/credential settings, then
+    deliver again."* For the transport one that accuses a configuration the record proves is fine,
+    and every one of the four dropped `result.message`, the reason GitHub's client handed back.
+    Ruling 128's own comment twelve lines above this arm states the rule: a GitHub outcome must be
+    "named as what they are, never as 'unreachable' and never with 'fix the credential settings'
+    (nothing is wrong with them)". It fixed the `base_branch_missing` arm and left the arm that
+    really IS a network failure sharing the credential sentence.
+    Live on SHOP-48, and the product disproves itself 58 seconds later: at 23:45:36 *"GitHub was
+    unreachable (network error). Fix the repository/credential settings, then deliver again"*, at
+    23:46:34 *"Opened PR #52 for review"* — same credential, same repo, nothing touched, and the
+    retry was the operator's own. A successful push to that same origin is recorded two minutes
+    BEFORE the refusal.
+    The network arm now quotes the transport reason, says plainly that nothing about the repository
+    or credential is wrong, and — the fact that makes the retry safe — that the branch is already
+    pushed. Viberr already had the right words in `codex-runtime.server.ts`; this arm just never
+    read them. The two `no_*_configured` arms keep the settings remedy, pinned by a counterweight
+    test, because for them it is the true one.
+    The refuter scoped this correctly and its correction is kept: only ONE of the four has ever
+    fired on this board, so "all four are wrong" was not evidenced and is not claimed.
+    (`task-actions.server.ts`.)
+
+335. **The plain name has to be the truth (controller, 2026-09-17, pass 37; F37-171).** Ruling 192
+    split a goal link in two: `goal` kept what the chain DECLARED, and `liveGoal` appeared beside it
+    when the task had moved past that text. The split is right. The naming was backwards, and the
+    controller found it by applying this pass's own method to itself when asked what viberr had
+    repeatedly told it wrong.
+    Counted live, in the turn it answered: on goal-5, FOUR of seven links carried a superseded
+    `goal`. Its words: *"the safe field carries the qualifier and the unsafe one has the plain name —
+    `link.goal` is the trap, `link.liveGoal` is the truth, and that is backwards. I only ever noticed
+    because `liveGoal` happened to sit adjacent in the payload; nothing in the reply says the two
+    differ."*
+    Load-bearing at the moment it was found. goal-5's link 7 is SHOP-82, the release candidate,
+    actively building — and its declared goal instructs a builder to generate a CHANGELOG *"from
+    conventional commits"*, which that task's own design pass had just proved impossible (0 of 583
+    commits conventional-shaped), and to own `scripts/seed/demo.ts`, proven unreachable. The task's
+    real goal, corrected hours earlier, says the opposite.
+    `goal` now always carries the contract in force; the superseded declaration is kept as
+    `declaredGoal`, named for what it is. Ruling 192's substance is untouched — the declaration
+    stays, because it is what the chain declared and the history means it — and the stored file is
+    not rewritten: this is a view. A retry was never at risk either; ruling 192's own `body`
+    argument already rebuilds from the task's current text. The whole defect was which name a
+    reader reaches for first.
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
+336. **One number that mixed "frees now" with "frees after another decision" (controller,
+    2026-09-17, pass 37; F37-172).** `list_decisions` gives every entry a `releases` array — the
+    tasks that come unblocked once this one completes — and it is the number a person sorts a
+    decision queue by. It was the full transitive closure in one flat list.
+    The controller raised it as a SUSPICION it could not prove, said exactly what it would need, and
+    named the check: *"SHOP-28's acceptance card carried releases: [SHOP-41, SHOP-29, SHOP-49]. But
+    at that moment SHOP-49 waited on SHOP-29, not on SHOP-28… The cheapest check is the SHOP-28 case
+    in the audit log: task.dependencies.released rows in the window after SHOP-28 merged."* It also
+    cited my own earlier report back at me as half the evidence — I had written that SHOP-28
+    released two tasks, and named only two.
+    The record settles it. SHOP-28 merged at 21:40:32. SHOP-41 released at 21:40:34.502 and SHOP-29
+    at 21:40:34.685 — **two seconds**. SHOP-49 released at 22:33:53.901: **fifty-three minutes
+    later, two and a half seconds after SHOP-29's own merge**. One click freed two tasks, not three.
+    `releases` is now `{ direct, downstream }`. `direct` is the tasks whose LAST wait is this one;
+    `downstream` needs one of those to be built, reviewed and accepted first. The old field was not
+    lying — the description said "down the chain" — but its own text had to warn *"do not sort by it
+    alone"*, which is what a sort key says when it knows it is wrong. A number that conflates one
+    click with two more cycles is wrong for the single job it has.
+    THE METHOD IS THE POINT. Asked what viberr had repeatedly told it wrong, the controller returned
+    three findings with counts, refused to inflate a fourth it had seen only once (*"I will not
+    inflate one observation into a pattern"*), and filed this one as an unproven suspicion with the
+    exact query that would settle it. That is a better bug report than most of mine.
+    (`dependencies.server.ts`, `controller-toolkit.server.ts`.)
+
+337. **The projection is the index; the FILE is where the reason for the quiet lives (owner,
+    2026-09-17, pass 37; F37-173).** `settleAbandonedWaits` selected entirely on
+    `t.waiting = 'agent'` with no live run, and never opened the task. Unlike the read-only checks
+    around it, this one writes a note and spends a paid operator turn.
+    Live on SHOP-37, 2026-09-15, and it overrode a person. 09:15:13.200 — Arda: *"Decision: Re-run
+    the Integration Verifier on the Codex backend."* 09:15:13.298 — policy-engine, "Dispatch held":
+    Codex is out of quota until Sep 19, the run is scheduled for then, *"nothing was dispatched and
+    no decision is needed."* 09:30:29.868 — THIS SWEEP: *"Left waiting on an absent agent… the run
+    finished just before the stop and the follow-up that would have moved the task went with the
+    process."* 09:32:25.171 — the drive it forced: *"a fresh-context re-run of your pass, on the
+    CLAUDE backend."* 09:39:19.846 — Arda cancels, by hand, the schedule viberr had promised.
+    Every clause of that note was false on the task's own record: no run had finished just before
+    the stop (the last was interrupted 39 minutes earlier), nothing went with the process, and the
+    silence was a dispatch viberr itself had parked. It reversed the owner's explicit backend
+    decision fifteen minutes after they made it.
+    The guard is borrowed verbatim from `findStrandedTasks` (ruling 330, shipped hours earlier),
+    which re-reads the file for exactly these cases. **The older sweep does MORE and checked LESS.**
+    337(b): the note asserted *"the operator is re-invoked"* and is written BEFORE `runOperator` is
+    called, so a refusal left a claim about a turn that never happened — the unconditional promise
+    ruling 198 removed from the sibling orphan sweep. It now states the board fact, which is
+    certain, and the invocation as an intention with its failure case named.
+    337(c): it returned `rows.length`, the raw projection result, so it over-reported whenever the
+    orphan-sweep filter took some but not all. It counts what it settled.
+    The refuter corrected the claim DOWN — from "at least 3 of 6" to 1 of 6, the other five being
+    two that ruling 215 already retired, one correct firing, and two it could not falsify — and
+    dropped a throwing-re-invoke variant with no live instance. The count stands as one.
+    (`run-recovery.server.ts`.)
+
+338. **A panel claimed a system act it holds no fact about, and a test required it (owner,
+    2026-09-17, pass 37; F37-174).** The Agent-logs footer printed *"interrupted by a restart; the
+    operator was re-invoked"* for every non-controller run interrupted by a restart. The panel has
+    no such fact: recovery stamps the identical row state on a re-invoked orphan and on one its
+    crash-loop guard REFUSED to re-invoke (`RECOVERY_REINVOKE_CAP`, three in thirty minutes), and
+    records the refusal only as an audit row and a note on the task.
+    Live: 250 restart renderings on this board, **6 of them capped** — SHOP-27, SHOP-34 (twice, two
+    separate boots), SHOP-35, SHOP-36, SHOP-38 — and on every one the task's own timeline says the
+    opposite one panel away: *"Viberr did NOT re-invoke the operator for it: it had already done so
+    3 times for this task within the last 30 minutes… Run the operator from this page when you are
+    ready."* A person who believes the footer does not do the one thing the note asks. At the
+    13:01:50Z boot, SHOP-34/35/38 sat two and a half hours until a human commented by hand.
+    This is ruling 198's defect surviving in the second surface a person opens when a run stops —
+    198 fixed the timeline note for precisely this reason and the console was not looked at.
+    AND A TEST REQUIRED THE LIE, which is why it lasted: the assertion's fixture is a bare
+    `interrupted` + `restart` run — the case where the outcome is unknown to the panel — and it
+    asserted the claim anyway. Second instance of ruling 329's shape in one day.
+    The panel now says only what it knows and points at the record that knows the rest. A stronger
+    sentence would need a real `recoveryReinvoked` field written on both recovery branches, which
+    the refuter and I agree is more than the lie is worth.
+    (`runs-panels.tsx`, `runs-panels.test.tsx`.)
+
+339. **The record of what a run received is read off what it was given (2026-09-17, pass 37;
+    F37-175).** `run_inputs` is Viberr's own disclosure of what it handed a run — the header the
+    console expands, and the only place an owner or the controller can answer "what did this run
+    actually get". Its `tools.toolkit` field derived the answer a SECOND time, from three booleans,
+    while `buildAgentToolkit` mounts on six independent gates. Measured across the whole
+    shopify-clone pass: **460 of 834 specialist runs recorded a toolkit shorter than the one they
+    ran with** — `github_read` missing on 460, `read_board` on 307, `read_knowledge_doc` on 294,
+    `report_outcome` on 227. The last is the sharp one: `report_outcome`'s real gate is
+    `verdict || evidence` and the record read `verdict` alone, so an evidence-only agent's single
+    structured channel was mounted and disclosed as absent.
+    It is not merely incomplete, it is a different rule wearing the same name, and it misleads
+    exactly the reader it exists for: this pass's own investigation of why ruling 283's
+    `read_knowledge_doc` seemed unused began by reading this field and concluding the tool had
+    never been mounted on a single specialist run. It had been mounted on 294. The controller had
+    already named the gap from the other side, on 2026-09-15: *"I cannot measure what a run
+    actually receives."*
+    `buildAgentToolkit` now returns `toolNames`, taken from the definitions it just pushed, and the
+    record passes it through. A toolkit gains a tool by pushing it onto that array, so there is no
+    longer a second place to remember.
+    (`agent-toolkit.server.ts`, `specialist-run.server.ts`.)
+
+340. **A closed store is a shutdown, and the run is told that (2026-09-17, pass 37; F37-176,
+    completes 303).** Ruling 303 stopped `database is not open` reaching a model verbatim and
+    answered *"`get_task` failed unexpectedly and returned no answer. The details are in the server
+    log."* That is true and it is not the useful truth: to a model it reads exactly as the SQLite
+    sentence did, like a hiccup worth one more attempt. All EIGHT shopify-clone runs that met a
+    closed store retried, and what they left on the task is the record a person now reads under
+    ruling 338: *"The store dropped a connection mid-turn. Retrying."*, *"The dispatch hit a
+    transient store error. Retrying."*, *"The live state read failed. Let me retry."* Twenty-one
+    refused calls across `get_task`, `run_agent` and `read_board`, and not one of those sentences
+    says what happened.
+    Viberr holds the fact. `isDatabaseShuttingDown()` is the same latch `runPersistDrained` reads
+    one layer down on the run path, and `shutdownDatabase` raises it synchronously in the `finally`
+    of the close, so it is already true by the time any tool handler resumes. The guard now spends
+    it: the store is closed, no Viberr tool will answer again this run, retrying cannot succeed,
+    stop and report the shutdown rather than a store error. It names the task record as where the
+    rest of the account lives and promises nothing about re-invocation — ruling 338's discipline,
+    one surface over.
+    The shutdown arm is checked FIRST, ahead of `AppError`. A refusal's own words are written for a
+    caller who can act on them, and "SHOP-1 is already running an agent" is a claim about live
+    state read out of a store that has closed; during a shutdown the only thing worth saying is
+    that everything stopped. Ruling 303's own ordering note stands for every other case.
+    (`strict-tool.server.ts`.)
+
+341. **This document keeps the convention it states about itself (2026-09-17, pass 37;
+    F37-177).** The header has always said: *"Several rulings have been narrowed or reversed by a
+    later owner decision. Those are marked **SUPERSEDED** inline, with what replaced them and
+    when… Never restore a superseded rule because you found the ruling text."* Seven rulings are
+    named by a later one as narrowed, reversed or superseded. **Three of the seven said nothing
+    about it** — ruling 20 (force-accept skips the review gate too, narrowed by 59), ruling 193
+    (whose revision-counting 204 reverses) and ruling 261 (superseded by 283; its
+    `RULINGS_KB_FLOOR` has not existed in the source since the same evening).
+    193 is why this is worth a ruling rather than an edit. It is the operator doctrine for a
+    reviewer that cannot pass; the half 204 reversed is a counter that had a test defending it;
+    and `CLAUDE.md` points every agent working on Viberr at this file as the binding rulings. The
+    header's last sentence asks a reader not to restore a superseded rule, which is only
+    followable if the rule's own text says it was superseded.
+    It is unenforceable by reading, because the two ends of a supersession are written hours or
+    weeks apart and only the NEW end knows — so it is checked. `rulings-supersession.test.ts`
+    sweeps every numbered block for a claim about an earlier number and fails naming both, which
+    makes the marker a mechanical follow-up instead of something to remember. The `narrowed by` /
+    `superseded by` forms are excluded on purpose: those are what an old ruling says about ITSELF,
+    which is the marker and not a claim about someone else.
+    (`docs/architecture/decisions.md`, `app/shared/docs/rulings-supersession.test.ts`.)
+
+342. **A tool description is a prompt, and nothing was reading it (2026-09-17, pass 37;
+    F37-178).** Ruling 336's new `releases` paragraph shipped into `list_decisions` with its
+    closing sentence pasted twice — *"`kind` and `notAcceptableReason` carry that other half.
+    `kind` and `notAcceptableReason` carry that other half."* — in a 1,900-character description
+    assembled from adjacent string literals that every controller turn reads. Six hours old, and
+    mine.
+    These strings are the only agent instructions in the product with no human reader at all: a
+    persona is reviewed in its editor, a knowledge-base document is opened by a person, a packet
+    body is read on a card, and a tool description is read by a model and by nobody. So the one
+    property worth checking is the one a careless edit produces, and it is now swept across the
+    five surfaces that hand descriptions to a model.
+    Deliberately narrow — not a style gate, nothing about length or tone. The first draft was
+    wider and wrong: it split on statements, swept three sibling `.describe()` calls into one
+    text, and called *"Omit to keep the deployment's grants; [] clears them."* a duplicate. That
+    sentence is said once per field, about that field, and saying it three times is correct. The
+    check joins a `+` concatenation chain and nothing else, which is exactly one string as the
+    model receives it.
+    (`controller-toolkit.server.ts`, `app/server/runtimes/tool-description-hygiene.test.ts`.)
+
+343. **The resumed run discloses what it was given, like every other run (2026-09-17, pass 37;
+    F37-179, completes 339).** `resolveResumeConfinement` has always returned `runInputs`, a full
+    `ResolvedResourceInputs` built from its own resolution, and its docstring has always said the
+    caller *"passes the whole thing to `recordRunInputs` once `resumeRun` has minted the run id"*.
+    No caller did. `recordRunInputs` had exactly one call site, on the fresh path, and the field
+    had no reader anywhere in the application — declared, built twice, read never. So every
+    @mention resume, which is the door a PERSON uses to talk to an agent, ran with no record of
+    what it carried: **eleven runs on the shopify-clone board, including one this morning.**
+    The four fields the resolver cannot own are all in scope at that call site, because it is the
+    function that composes the prompt: `promptChars` off the follow-up it just built, the canonical
+    `anchor` it just attached, the instance spend cap, and — the one that only exists on this door
+    — a `directive` naming the person who wrote it.
+    AND THE RESUME HALF HAD A TEST. `specialist-run.server.test.ts` asserts
+    `resolveResumeConfinement` returns the same record the fresh path builds, and its comment
+    explains that the caller hands it on; nothing asserted that anything did. A test that stops at
+    the last honest step is how this survived — the shape of rulings 329 and 338, a third time in
+    one pass, and all three mine. The canary now lives where the write is, on the real @mention
+    path, and both misleading comments say what actually happened.
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `canonical-anchor.server.test.ts`.)
+
+344. **Every runtime that starts a run discloses what it gave it (2026-09-17, pass 37; F37-180,
+    completes 339 and 343).** `recordRunInputs` lived in `specialist-run.server.ts` and had two
+    callers, both on the specialist paths. Measured across the whole shopify-clone corpus: **834
+    `run·inputs` lines against 2,317 runs**, and the 1,024 with none were every operator drive
+    (953) and every controller turn (71).
+    P19-G8/G11's rationale never said "specialist". It said nobody could check the claims the
+    product makes about a run — which knowledge bases it carried, which granted skills actually
+    mounted, which grants resolved to nothing, what state it was anchored on. The operator is the
+    actor that writes the packets and scoping notes every person on the board reads, and ruling
+    261's live incident WAS an operator receiving `standing-corrections.md` cut off mid-word at
+    "fails in about thr" — found by reading code, because there was no record to read. The
+    controller had named the same gap from the other side, unprompted, on 2026-09-15: *"I cannot
+    measure what a run actually receives."*
+    The record now lives in `run-inputs.server.ts`, beside the run store. Its old home is why this
+    lasted: disclosing anything would have meant the operator and controller importing the
+    specialist runtime, a direction this codebase has already refused once (`KB_PRECEDENCE_NOTE`
+    was moved out of there for exactly that reason). A run's disclosure is a property of a RUN.
+    Both coordinators build it the way ruling 339 requires — off the resolution the prompt was
+    assembled from, in the same call, never a second reading of the grants — and both name their
+    real tool surface: the Claude drive and the controller from the definitions their toolkits just
+    built, the Codex drive from its plan envelope, which IS its action surface. Where a field does
+    not apply it says so rather than guessing: neither has a checkout, so `cloned` is false and
+    `repo`/`cwd` are null; a Claude drive reads canonical state through `get_task` and a controller
+    turn has no task at all, so `anchor` is null rather than a prompt pasted into an anchor field.
+    The controller's is written where the fresh path and the RESUME join, because a controller
+    resumes on every turn after the first — recording only fresh starts would have disclosed one
+    turn per conversation, which is ruling 343's omission in a second place.
+    TWO FIXTURES had to be corrected, and they are the finding's own shape once more: both faked a
+    completed Codex drive by writing its plan line at a hard-coded `seq: 0`, where the real sink
+    calls `nextSeq`. A run now carries Viberr's disclosure at seq 0, `insertRunLine` is `ON CONFLICT
+    DO NOTHING`, and so each fixture silently dropped its own plan and 26 tests read as "the
+    operator planned nothing". They now number lines the way the thing they imitate does.
+    (`run-inputs.server.ts`, `operator-run.server.ts`, `controller-run.server.ts`,
+    `specialist-run.server.ts`.)
+
+345. **The build stamp is part of the deploy, not a thing to remember (2026-09-17, pass 37;
+    F37-181).** `build-info.server.ts` exists because *"every upgrade/rollback instruction in
+    docs/operations/deployment.md ('redeploy the previous image') assumes the operator can tell
+    two builds apart at runtime; none of them was verifiable"*. It resolves identity from env
+    first and says why: `.dockerignore` excludes `.git`, so its file-reading fallback cannot fire
+    inside an image and **env is the only source a container can have**.
+    The Dockerfile declared all three ARGs and promoted each to ENV. The runbook documented a
+    four-line `--build-arg` incantation. `compose.yml` said `build: .` and passed none of them —
+    so the DEFAULT deploy could not stamp, and stamping was a thing to remember. Nobody
+    remembered: every container on this instance has reported `revision: null`,
+    `revisionSource: null`, `builtAt: null` and a `version` identical for every build of a
+    release. Eleven deploys on 2026-09-17 alone, none stamped.
+    It cost the pass directly, and that is why it is a ruling rather than a chore. A killed build
+    left me unable to say whether the running container held the new image or the 17:30 one; I
+    inferred it from `docker compose ps` uptime and a `ps` on the build process, because the
+    surface built to answer exactly that question returned `0.19.0` and three nulls.
+    `compose.yml` now passes the three args interpolated with empty defaults, so a bare
+    `docker compose build` still works and is still honestly unstamped. `npm run deploy` fills
+    them from git and then **reads `/resources/health` back**, refusing to report success unless
+    the running instance names the sha just built — the half that makes a stamp worth having,
+    since the failure was never "which sha did I build" but "is the thing answering the port the
+    thing I built". A dirty tree is named, not refused: deploying one is the normal preprod move,
+    but the stamped sha then describes HEAD and not the tree.
+    Verified live: `serving 0.19.0 @ c89ba82720a0 (env)`, matching HEAD.
+    Three ends have to agree — the module READS a name, the Dockerfile DECLARES it, the compose
+    build PASSES it — and only the middle one was ever checked. `build-stamp-wiring.test.ts`
+    asserts all three against each other, from the module's own `env.VIBERR_BUILD_*` reads, so a
+    fourth stamp cannot land half-wired.
+    (`compose.yml`, `scripts/deploy.ts`, `docs/operations/deployment.md`,
+    `app/server/ops/build-stamp-wiring.test.ts`.)
+
+346. **An absence is described as the absence it IS (2026-09-17, pass 37; F37-182, corrects
+    344).** Two rows of the input disclosure describe something missing, and ruling 344 gave that
+    absence two new meanings within the hour. A coordinator legitimately records `cwd: null` and
+    `anchor: null` — the operator has no checkout and reads live task state with `get_task`, and a
+    controller turn is bound to no task at all.
+    The stand-in sentences were written when every caller was a specialist. On the first
+    coordinator run to reach the console they would have said *"no repository attached to this
+    project"* about a repo-backed project, and *"It saw the goal and its directive only"* about a
+    drive whose first act is `get_task`. Two false sentences, introduced by 344 itself, into the
+    surface 344 exists to make trustworthy — pass 24's shape, a fix wired into prose that assumed
+    the old set of callers, caught by reading the renderer instead of trusting the record.
+    `runInputRows` now takes the run's `kind`, which the panel already had and already uses. An
+    older stored line carries no kind and keeps the specialist reading, which is what those lines
+    were. A real anchor still prints verbatim whatever the kind: the absence is the only thing
+    this touches.
+    (`runs-helpers.ts`, `runs-panels.tsx`, `runs-helpers.test.ts`.)
+
+202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
+    stranded-operator backstop judges a finished drive by whether it moved the stage, and on
+    SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
+    `shop-10` and opened PR #8 — and wrote: "the operator held it twice in a row without
+    advancing, dispatching, or opening a packet … **Coordination is paused here: run the
+    operator manually**". Both halves were false. The first of the two drives had
+    *advanced* (Design → Build) and the second had *delivered*; and coordination was not
+    paused — the next operator drive had started **two milliseconds before the note was
+    written**, moved the task to Review 23 seconds later and engaged a reviewer, with no
+    person involved. Three of the four things a drive can do were already covered: a
+    transition by `movedToStageId`, a dispatch by the live-run check in
+    `settleWaitingAfterOperator`, a packet or a recommendation by `operatorLeftTaskStranded`.
+    Delivery was covered by nothing — and it is the one act whose effect can outlive the run
+    row, because the push and the PR call answer after the row is `finished` (live: an
+    eight-second window, and the settle ran inside it). So `performDelivery` stamps
+    `ctx.operatorRun.delivered` on ENTRY, before its first await, and the backstop counts
+    delivery as progress beside a transition. On entry and not on GitHub's answer: a refused
+    push is still a drive that acted, and the question the backstop asks is what the operator
+    did, not what GitHub allowed. The cost of the old reading was not only a false sentence:
+    the note also writes the durable `heldAtStage` marker, which silences the nudge at that
+    stage until a human re-litigates it, so a task whose delivery is its last event would sit
+    with a manufactured pause and a person told to end it. This is F37-17's mirror, and it
+    gets the same answer: the record has to say what happened.
+    (`task-actions.server.ts`, `task-mutation.server.ts`, `operator-run.server.ts`.)
+
+203. **A refusal may not promise a delivery viberr has no way to make (owner, 2026-09-13,
+    pass 37; F37-23).** An @mention of an agent that already has a live run on the task is
+    refused by the single-flight guard — correctly; two processes in one checkout is what it
+    exists to prevent. The sentence that followed was not: "it will see the comment when it
+    next re-anchors". Re-anchoring is `canonicalTaskAnchor`, built only by a FRESH run, whose
+    timeline section is the **five** most recent events, each clamped. So the promise held
+    only if that agent ran again on that task before five more events landed, and viberr
+    checks neither condition and knows neither. Live on SHOP-6 both failed: an owner's
+    correction was eight events back within 75 seconds, and the Platform Architect it named
+    never ran on that task again before the task was accepted. Meanwhile the un-refused path
+    hands the agent the comment as its DIRECTIVE (`directive`, `directiveFrom`) — the whole
+    instruction, verbatim, as the reason the run exists — so the refused path was not a
+    degraded delivery but a different thing wearing the same words. This is the bar's two
+    halves at once: viberr states a delivery it cannot make, and a person's typed instruction
+    is accepted, rendered, addressed to a named agent and then silently dropped, with the note
+    reading as reassurance. Viberr had already ruled on this one layer up — the operator lease
+    keeps queued human `@operator` comments and drains them oldest-first ahead of the machine
+    trigger, "because the question exists NOWHERE else in the run's input" (B-OP2) — and the
+    specialists got the refusal without the queue. So: at a specialist run's completion,
+    `deliverDeferredMention` finds a human comment addressed to that agent posted after that
+    run started (by construction undelivered: the single-flight guard is the only thing that
+    could have refused it), and starts the run for it with the person's words as the
+    directive, BEFORE the operator's own react trigger — a person's instruction goes first,
+    and the operator is re-invoked by that run's completion, so nothing is skipped, only
+    ordered. Oldest first, one per completion, which drains a burst in order. **Nothing is
+    queued in memory**: the comment is the record and "undelivered" is derived from it, so a
+    restart cannot lose it. The refusal copy now states what viberr will do. A redelivery that
+    fails writes no second note — the first one already named the agent and the reason.
+    (`task-actions.server.ts`.)
+
+204. **A deadlock counter may not be keyed on the thing that stops moving in a deadlock
+    (owner, 2026-09-13, pass 37; F37-24). Reverses ruling 193's revision-counting.**
+    Ruling 193 escalates when a reviewer's objection survives a rework
+    (`consecutiveRequestChanges` ≥ 2), and counted DISTINCT REVISIONS — a deliberate choice,
+    with a test defending it, so that a reviewer re-run on the same revision would not
+    escalate. Live on SHOP-9 that is exactly backwards. Its Verify charter demanded a
+    cold-started stack the task is not allowed to build (another task owns the Makefile and
+    the services); the deliverer answered "no legitimate deficiency remains within the owned
+    paths" and committed nothing; the operator re-engaged the verifier on the SAME revision and
+    it blocked again. Verdicts are last-write-wins per (profileId, revisionId) (F10-15), so the
+    second objection REPLACED the first and the counter read **1**. The count can only exceed 1
+    when the deliverer minted a new revision — that is, when the work is moving — so it fires
+    where a packet is least warranted and is pinned at 1 in the deadlock it was written for.
+    (The operator opened the packet anyway, on its own reading. That is a good model, not a
+    mechanism; F37-14's ten rework rounds are what the same board looks like without one.)
+    The verdict row keeps last-write-wins, which is right — a verdict judges a revision and the
+    latest judgement binds. What survives the overwrite now is `rounds` on the verdict:
+    incremented when the same reviewer returns the SAME result on the SAME revision, summed
+    across the trailing request_changes streak. A re-review that blocks an unchanged revision
+    is the second objection it plainly is; a re-DISPATCH that records no verdict still counts
+    for nothing, which is the distinction ruling 193 was reaching for and missed by using
+    revisions as its proxy. `get_task`'s field description and the turn doctrine were both
+    rewritten to teach the new meaning, because a field whose description and behaviour
+    disagree is ruling 200(i)'s defect.
+    (`task-file.schema.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
+    `operator-toolkit.server.ts`, `operator-run.server.ts`.)
+
+205. **A person's burst is one message, and none of it may be dropped (owner, 2026-09-13,
+    pass 37; F37-25 — self-review of ruling 203, one hour old).** Ruling 203 delivers the
+    @mention that the single-flight guard refused, at the busy run's completion, and its own
+    doc said: "Oldest first, one per completion, which drains a burst in order — the next one
+    rides the next completion." It does not. The window is "posted after the busy run started",
+    so the instant the oldest comment starts a redelivery run, every other comment in the burst
+    is older than THAT run's start and no later completion can ever see it. Two messages typed
+    thirty seconds apart, the second silently discarded: ruling 203's own failure mode,
+    reintroduced by ruling 203's fix, under a comment claiming the opposite. So every pending
+    comment for that agent now goes into ONE directive. One author's consecutive messages read
+    as one message — which is what the operator lease already does with a person's burst, "one
+    person's three-message burst is one question, not three governed drives" — and several
+    authors keep their names inline, because the directive can only tell the agent to tag one
+    person back (NEW-4) and the others must at least be visible in what it is answering; the
+    person who has waited longest is the one it is told to tag. **The test that found this
+    passed against the broken code on its first writing**: it asserted the run's prompt
+    contained both comments, and it did, because the canonical anchor quotes the last five
+    timeline events — the second comment was in the SUMMARY while never reaching the DIRECTIVE.
+    Padding each comment past `ANCHOR_EVENT_MAX_CHARS` with a unique tail token made the clamp
+    cut it, so only the directive could carry it, and the test then failed for the real reason.
+    (`task-actions.server.ts`.)
+
+206. **Anti-noise compaction folds routine comments wherever they sit, not only where they
+    happen to be adjacent (owner, 2026-09-13, pass 37; F37-26).** The guardrail was on,
+    configured at 40 events, counted by Insights as managing six tasks — and had never removed
+    a single event from any task in the project. `compactTimelineEvents` collapsed each run of
+    CONSECUTIVE routine comments, and viberr's own event stream never produces one: a typed
+    `agent`, `quality`, `github` or `transition` event lands between every pair of agent
+    replies, and the operator's prompt in between is excluded as a `toAgent` governance
+    hand-off. Measured live, the longest consecutive run on the six tasks past the threshold was
+    **two** (and a two-run folds nothing either, since the newest reply is kept and one event
+    replaced by one marker is no saving), while the foldable comments were 29% of SHOP-7's
+    timeline bytes and 34% of SHOP-6's. The module's own note says agent replies were brought
+    into the foldable set precisely because "an agent-heavy timeline — the flood case anti-noise
+    exists for — never compacted at all"; the adjacency requirement cancelled that change on
+    exactly that workload. So folding is now position-independent within the older region: every
+    typed event stays in place, the newest older agent reply stays verbatim, and ONE marker
+    takes the oldest folded event's slot so the file stays newest-first. Running the real
+    function over the real files: SHOP-7 200→174 events and 27% fewer text bytes, SHOP-6
+    134→118 and 32%, SHOP-15 23%, SHOP-9 19%, SHOP-10 9%, SHOP-1 (at the threshold, not over)
+    untouched. Every pre-existing compaction test still passes — all of them place the foldable
+    comments next to each other, which is why the defect was invisible for six passes. Also
+    corrected: the rule's comment cited `hasReworkSinceLastRejection` as the reason to keep the
+    newest reply, and no such function exists; what reads a previous reply today is
+    `latestAgentReplyText`, which looks before the CURRENT run — inside the untouched recent
+    window.
+    (`timeline-compaction.server.ts`.)
+
+207. **Twelve claims viberr makes that its own code refuses (owner, 2026-09-13, pass 37;
+    F37-27).** F37-21 to F37-26 all came from one move — read a sentence viberr shows a human,
+    then check whether the mechanism behind it can keep the promise — so it was run as a
+    14-agent audit over seven claim-emitting surfaces, each candidate handed to a skeptic told
+    to refute it. Twenty candidates, thirteen survived (two were one defect found twice), each
+    re-verified against the code by hand. They are one ruling because they share a lesson: a
+    sentence that names a mechanism is a claim about that mechanism, and the hole is usually in
+    the state the sentence is most about.
+    (a) **"Run recovery replays the effects on the next restart"** — written by
+    `noteCompletionEffectsLost`, in the SAME update that sets `waiting: "human"`, while boot
+    recovery selects `t.waiting = 'agent'`. The note's own write made its promise unreachable,
+    and the effects include a required reviewer's VERDICT, so the acceptance gate stayed shut on
+    a review that happened and is readable in the run log. Recovery now also matches a run
+    carrying a `run.completion.effects_lost` audit row — the module's existing idiom, since it
+    already keys idempotency and its crash-loop cap on audit rows rather than task state.
+    (b) **"writes to it are refused"** — the Codex operator's prompt describing its scratch
+    folder. Ruling 185 removed the OS sandbox; every Codex thread starts `danger-full-access`.
+    The prompt promised a wall that does not exist, in the one direction that invites a model to
+    test it. It now states the rule as a rule and says plainly that nothing will stop the write.
+    (c) **"Supervised → ONE recommendation card; full autonomy → runs directly"** — `run_agent`'s
+    description. `gate()` returns `direct` for a `direct` GRANT whatever the autonomy, and
+    `direct` is `dispatch-agents`' seeded default, so a supervised operator narrated a card it
+    had not filed while the agent was already writing.
+    (d) **"Branch was already gone on GitHub"** — recorded for every 422 on the ref DELETE.
+    GitHub answers 422 "Reference cannot be deleted" for branch protection and rulesets too,
+    with the branch still there. Only an explicit "does not exist" is `already_gone` now.
+    (e) **tag "@<dispatcher>" so they are notified** — the dispatcher reaches the prompt as
+    `TaskActor.label`, documented as "e.g. the email", and the mention ladder matches a local
+    part, a full name or a first name, never a whole address. Resolved through the display-name
+    lookup that exists for this, extracted to its own module to keep specialist-run out of a
+    cycle with task-actions.
+    (f) **"Viberr … pushes the branch + opens the review PR when the task enters Review"** — told
+    to every delivering agent. R15-2 deleted that hook on 2026-07-28; delivery is an operator
+    decision. Corrected in all six places, the seeded developer profile's description included.
+    (g) **"The thread stays resumable"** — on every interrupt. `reserveRun` writes a running row
+    minutes before a provider process exists, which is the window a person actually presses Stop
+    in, and `latestSessionRun` skips a run with no `session_id`. That case now says there is no
+    thread to resume.
+    (h) **"pick a <other> profile if the work cannot wait"** — after a quota hold. The hold is
+    scoped to (backend, task OWNER), because every run bills the owner (ruling 127), so the
+    advice only helps when the owner has that backend connected; otherwise it sends the operator
+    into a refused dispatch whose failure opens the packet the same sentence forbids. Offered
+    only when it exists.
+    (i) **"Use Run operator on the task page"** — in the hold-for-runtime-debug resolution.
+    `run-agents` is admin/maintainer, so a CONTRIBUTOR who owns the task (and may resolve the
+    packet through the owner exception) never sees that control, and the `@operator` door is
+    gated on the same role. The sentence now names who holds it.
+    (j) **"no longer has a provider transcript … retention sweep or a wiped runtime volume"** —
+    written on an OWNER CHANGE, which `resumeRun` decides before any filesystem is consulted.
+    The transcript is intact, in the previous owner's home. An admin was sent hunting a storage
+    fault for a condition viberr chose; the two causes now read differently.
+    (k) **"Deliver the branch to push it"** on `relation: "unknown"` — whose premise ("a behind
+    or absent remote reaches the PR by a plain push") `unknown` does not satisfy: it is written
+    when the compare could not be READ, so the remote may be diverged. It now names the
+    uncertainty instead of promising the push will land.
+    (l) **"PR #N is still open on GitHub"** — asserted from `task_projections.pr_json`, a cache.
+    The 5-minute reconcile poll kept it honest, and ruling 177 excludes terminal-stage tasks
+    from every budgeted pass — an accepted task IS terminal, so the exact rows this nudge
+    describes are the rows nothing refreshes. It now reports its own last reading and says why.
+    Three of the twelve were pinned by tests that had to be UPDATED rather than written: the
+    fixtures encoded the old claim as correct. A test that agrees with the defect is how a
+    defect survives.
+    (`run-service.server.ts`, `run-recovery.server.ts`, `operator-run.server.ts`,
+    `operator-toolkit.server.ts`, `operator-actions.server.ts`, `github-reconciler.server.ts`,
+    `reconcile-poller.server.ts`, `specialist-run.server.ts`, `task-actions.server.ts`,
+    `task-file.schema.ts`, `user-display-name.server.ts`, `agent-catalog.server.ts`.)
+
+208. **The reviewers who still OWE a verdict decide where a task goes back to (owner,
+    2026-09-13, pass 37; F37-29).** `verdictStageFor` names the stage a task whose revision
+    changed after a verdict returns to, and it asked whether ANY required reviewer is eligible
+    at the current stage — "a verdict can be given here". On a board with required reviewers at
+    TWO stages that answers for the wrong reviewer. Live on SHOP-15: `code-reviewer` (declared
+    build+review) held no approve on the delivered revision, `integration-verifier` (declared
+    review+verify) held one and is eligible at Verify — so the scan returned null,
+    `reworkStages` came back empty, and `transitionStage` refused "No allowed transition from
+    Verify to Review". The task could not reach the only stage where the reviewer it was
+    waiting on may run: not by the operator, not by a human, because the stage control offers
+    the same graph. Acceptance was blocked on a gate that was genuinely unmet, and the exits
+    were archive or an admin force-accept past it — the board lying to itself to move. Below
+    admin there was no exit. Every rule involved was right: ruling 179 staled the older
+    approval, ruling 133 refused to run a profile outside its stages, the gate reported the
+    truth. The defect was one premise inside the scan. So it now considers only the required
+    reviewers whose approve on the CURRENT revision is missing: a reviewer that already
+    approved cannot be the reason a re-verdict is needed, and its eligibility must not answer
+    for one that has not. It survived this long because every board the codebase had been
+    tested on declares its required reviewers at ONE stage, where the two questions coincide —
+    the shopify-clone board is the first with two, and the controller designed it that way
+    itself.
+    (`verdict-stage.ts`.)
+
+209. **A comment that carries evidence is a pointer, not prose (owner, 2026-09-13, pass 37;
+    F37-30).** Found by checking ruling 206's first live firing instead of trusting it. The
+    `evidence-separation` guardrail takes an agent's raw output OFF the timeline and onto disk,
+    leaving a reference behind — and such a comment is agent-authored, untitled and not
+    `toAgent`, so it matched every clause of compaction's foldable test. Folding it keeps a
+    count and drops the pointer: the attachment stays on disk, unreferenced, and the proof
+    behind a verdict becomes a file nobody can reach from the record. Ruling 206 did not create
+    this (the old adjacency rule folded agent replies too) but it made it reachable on every
+    long task instead of almost never. So a comment with a non-empty `evidence` list is never
+    folded, beside the two exclusions that were already there — a person's prose (B-FD9) and a
+    to-agent hand-off.
+    (`timeline-compaction.server.ts`.)
+
+210. **A request_changes is the complete list, not the first thing found (owner, 2026-09-13,
+    pass 37).** Ruling 193 escalates a reviewer whose objection SURVIVES a rework, and ruling
+    204 fixed the counter that sees it. Neither addresses the other expensive shape: a reviewer
+    whose objection is answered every round and who returns a different, equally valid one next
+    time. Live on this board twice — SHOP-6 took **seven** rounds and broke only when the owner
+    told the reviewer to name the defect CLASS rather than instances; SHOP-10 took **five**,
+    each on a different revision, each finding real issues. Every round is correct on its own
+    terms, the work is better for them, and nobody had ever asked the reviewer what ELSE it
+    would block on. So the reviewer's own contract now says: a `request_changes` is a COMPLETE
+    list — sweep the whole owned surface for this revision, name every change you would block
+    on (including ones you have not verified in detail, marked as such), and state in one
+    sentence that this is the complete set and that a fix addressing all of it should pass. A
+    deliberate escape hatch keeps the rule from pushing a reviewer into hiding a late finding:
+    when something is genuinely new (the rework introduced it, or it was unreachable until an
+    earlier blocker cleared) it says THAT, and why it could not have been named before. The
+    operator's turn doctrine carries the matching arm beside ruling 193's: when the same
+    reviewer returns a DIFFERENT objection each round and the earlier findings were actually
+    fixed, ask which of the three it is in ONE comment and require "name everything you would
+    still block on across your owned surface, now" before sending the deliverer back. Finding
+    one defect, returning the work, and finding the next one next round is not review; it is a
+    queue, paid for a round at a time. Cost accepted by the owner: reviews get slower per round,
+    because the round count is the expensive thing.
+    (`specialist-run.server.ts`, `operator-run.server.ts`.)
+
+211. **Nine defects the adversarial self-review found in rulings 201-208 (owner, 2026-09-13,
+    pass 37; F37-31).** Five lenses over the pass's own diff, each candidate handed to a
+    skeptic told to refute it: 21 candidates, 13 survivors, 9 distinct, every one in code
+    written the same day. They are one ruling because they share the pass's central lesson —
+    a fix is a change like any other, and the fix for a lie can tell a smaller one.
+    (a) **Ruling 203's window opened at the wrong instant.** The single-flight guard that
+    refuses a mention keys on `state IN ('running','queued')`, which begins at the run row's
+    INSERT; the redelivery scanned from `started_at`, which a run admitted behind a
+    concurrency cap does not have for minutes. Every comment refused during that wait was
+    filtered out, silently, under a note promising delivery. The window now opens at
+    `created_at`.
+    (b) **Ruling 203's hop sat after two early returns** — the `error` branch and the
+    closed-task branch — so a busy run that ended in error, or a task that closed underneath
+    it, dropped the person's instruction. It runs before both now, and when the delivery
+    cannot start at all, the promise is WITHDRAWN on the record ("Not delivered: … the
+    delivery promised when the comment was refused has not happened"), because silence there
+    is the same defect one layer in.
+    (c) **Boot recovery is not the live completion.** It replays a finished run's lost effects
+    possibly days later, and it handed the redelivery the ORIGINAL run's window — so a comment
+    a human had since had answered by its own run was re-delivered as a fresh directive,
+    starting a duplicate paid run on a stale instruction. The replay path now skips it.
+    (d) **Ruling 202 stamped `delivered` on ENTRY to `performDelivery`**, counting the arms
+    where nothing reaches the remote (`grant_withheld`, `no_workspace`, `bootstrap_failed`) as
+    operator progress. A nudged drive whose only action was an impossible delivery looked like
+    it had moved, so the stranded backstop skipped its durable `heldAtStage` marker and every
+    later trigger re-armed the nudge — F31-11's fourteen-drive loop, reached through the fix
+    for ruling 202. The stamp moved to after the push is attempted; a refused push still
+    counts, a refusal that never reached the remote does not.
+    (e) **Ruling 209 was incomplete**: `attachments` is a second, separate pointer list on the
+    same event, and 209 excluded only `evidence`. Both are excluded now.
+    (f) **Ruling 207(f) overstated itself** — "corrected in all six places" — while a
+    specialist prompt branch and a seeded skill doc still said delivery happens on the Review
+    transition. (The copy-ban allowlist row that pinned the old sentence went with it.)
+    (g) **Ruling 201's suppression sentence** attached a count of the WHOLE cost-silent
+    population to a clause naming only delivery. When the other side is partly silent too it
+    now says so, and labels the count as the total.
+    (h) **Ruling 207(e) was half-done**: the prompt got the resolved display name, and the cc
+    line the completion pipeline appends when the model forgets to tag still carried the raw
+    email — the fallback that exists precisely because the model forgot.
+    (i) **Ruling 204's JSDoc** still stated the rule 204 reversed, and argued for it.
+    **A third vacuous test, also mine.** The cross-agent guard test took three versions to
+    reach the guard: v1 named nobody (a different branch); v2 named a real agent but posted
+    through `appendComment`, which does not set `toAgent` — the flag the scan filters on — so
+    the comment was invisible before any profile comparison happened. Only v3, through
+    `commentToAgent` with two busy agents, goes red when the guard is relaxed.
+    (`task-actions.server.ts`, `run-recovery.server.ts`, `timeline-compaction.server.ts`,
+    `specialist-run.server.ts`, `operator-actions.server.ts`, `insights-page.tsx`,
+    `developer-expertise.skill.md`, `copy-ban.test.ts`.)
+
+212. **A transport failure is a transport failure, and switching providers is not a fix for
+    the path they share (owner, 2026-09-13, pass 37; F37-32).** Two live recovery packets from
+    transient host network faults, wrong in two different ways.
+    (a) The Codex CLI reported `failed to lookup address information: Name does not resolve`,
+    and viberr answered "Codex execution failed. **Review its authentication and runtime
+    configuration**", recommending "Redirect with sharper guidance" — a rewritten directive, to
+    fix DNS. `LOCAL_NETWORK_FAILURE_RE` was written against Node's error codes and Node's prose;
+    the Codex CLI is Rust and says it differently, so this matched nothing and fell to
+    `unknown`, whose sentence is the credential one. (Its TLS sibling matched only by accident,
+    through `\btls\b` inside a `close_notify` message.) The patterns now carry the CLI's own
+    prose: `failed to lookup address information`, `name does not resolve`, `nodename nor
+    servname`, `temporary failure in name resolution`, `peer closed connection`, `close_notify`.
+    (b) The packet that DID classify the fault correctly then recommended "Retry on the other
+    backend now", whose own detail says "Later runs on this task stay on {other} until another
+    retry moves them". The fault is this deployment's network path — the other provider is
+    reached over the same path — so switching is not a remedy, and it permanently moves the
+    task off the model its profile declares (on the live board, off the owner's standing luna
+    policy onto `sonnet`, in one recommended click). It stays OFFERED, because the owner may
+    want it, and it is no longer RECOMMENDED when the fault was local; the option says why in
+    its own words, and the same-backend retry takes the recommendation.
+    (`run-failure.ts`, `run-failure-remedy.server.ts`.)
+
+213. **A restart that lands between a run's end and its consequence leaves the board
+    claiming an agent nobody can see (owner, 2026-09-13, pass 37; F37-33).** SHOP-4 sat at
+    `waiting: agent` for six minutes with no live run. The container had stopped one second
+    after the operator's own `Review -> Build` transition: the operator run was already
+    `finished`, so every existing boot pass had a reason to skip it. `finalizeOrphanedRuns`
+    looks for non-terminal runs, `recoverUnreactedAgentRuns` for a finished run with no
+    reply, `recoverStrandedOperatorPlans` for a plan nobody executed - this run had replied,
+    had executed, and had died only in the step AFTER all of that, the settle that flips
+    `waiting` and backstops a stranded stage. All three passes are keyed on a RUN; the
+    damage here is keyed on a TASK, and no pass was looking at tasks. The board's own
+    sentence, "waiting on an agent", was false, with no run page to open and no button to
+    press: the only way out was for a human to guess that a comment would wake the
+    operator. So `reconcileRestartedWork` gains a fourth pass, `settleAbandonedWaits`, that
+    asks the question the other three cannot - which live tasks claim an agent while no run
+    of theirs is `running` or `queued`? Each one gets a timeline note in its own words
+    ("Left waiting on an absent agent") and a fresh operator invocation, which re-reads the
+    task and decides. If the operator cannot start - none deployed, a refusal, a throw - the
+    task is settled to `waiting: human` instead, because a board that cannot name who it is
+    waiting for must not name an agent. It runs after the three run-keyed passes, so a run
+    those can still repair is repaired by its owner and never double-handled.
+    (`run-recovery.server.ts`, `boot.server.ts`.)
+
+214. **A question put to an agent in a comment is put to nobody, and the doctrine that
+    asked for one paused a task five others were waiting behind (owner, 2026-09-13, pass 37;
+    F37-34).** Ruling 210 gave the operator its arm for a reviewer that returns a NEW valid
+    objection every round: ask it to name everything it would still block on, "in ONE
+    comment", and do not rework again until you have the answer. Live on SHOP-10, at round
+    six, the operator did exactly that, and wrote a good question: "@Code Reviewer, before
+    another rework run, name everything you would still block on across your owned surface
+    for the current revision, now." Nothing read it. `post_comment` writes a timeline line
+    for the humans and starts no run; an agent only ever reads a directive that comes with
+    one. Forty-five seconds later the stranded backstop - which counts a transition, a
+    dispatch, a delivery or a packet as progress, and a comment as nothing - recorded a
+    deliberate hold, paused coordination and settled the task to `waiting: human`, with
+    SHOP-2, SHOP-3, SHOP-11, SHOP-12 and SHOP-13 all declared blocked on it. The turn's own
+    text already said it, six bullets above the arm: "a directive comment on the timeline is
+    not a running agent." So: ruling 210's arm now names the only action that can get the
+    answer, `run_agent` on the reviewer with `delivers: false` and the question as its
+    prompt, and says why a comment cannot. The `post_comment` tool and the Codex plan
+    schema say the same in their own descriptions. And when an operator comment tags an
+    agent anyway, the comment discloses it - "_@X is an agent, and an operator comment
+    starts no run; nothing was sent to it. Run the agent to put this to it._" - which is
+    S5-G3's rule one audience over: a visible non-delivery beats a silent one.
+    (`operator-run.server.ts`, `operator-toolkit.server.ts`, `operator-actions.server.ts`.)
+
+215. **Ruling 213's own deploy wrote both restart notes on the same task, and one of them
+    was false (owner, 2026-09-13, pass 37; F37-35).** The deploy that shipped 213 landed on
+    two tasks with live runs, and each came back carrying two system notes one second apart:
+    "the run `run_JFvmbz...` (reviewer) was still running when the server stopped, it is
+    recorded as interrupted by the restart" and, directly beside it, "no run was live when
+    the server came back". Both cannot be true, and the second is the wrong one. Step 1 of
+    the boot chain, `finalizeOrphanedRuns`, exists to move live runs to `interrupted`; it
+    does that synchronously and launches its re-invokes at the END of the chain. So the
+    board `settleAbandonedWaits` reads at step 4 has already had exactly the evidence it
+    keys on erased by step 1, and every genuinely-orphaned task looks abandoned. The cost is
+    two contradictory sentences in the canonical record and a second operator drive for one
+    event. The sweep that was written to stop viberr claiming an agent that is not there
+    spent its first deploy claiming a restart that did not happen. So step 1 now reports the
+    tasks it took - all of them, capped ones included, since a capped task is still one this
+    pass decided about - and step 4 withholds them. Its ordering is unchanged and still
+    right: a pass that STARTS a run must be seen by the sweep, which is why it runs last;
+    what it needed was not a different position but the one fact it could not read off the
+    board.
+    (`run-recovery.server.ts`, `boot.server.ts`.)
+216. **A person's own operator run ends the deliberate stage hold, because that is
+    what its note tells them to do (owner, 2026-09-13, pass 37; F37-36).** The stranded
+    backstop's durable marker, `heldAtStage`, comes with this sentence: "Coordination is
+    paused here: run the operator manually when the hold should end, adjust the goal, or
+    loosen the boundary in Policy → Workflow rules." Live on SHOP-10 I did the first one.
+    The operator ran, took a real action (`update_branch_from_base`, 8 commits), and the
+    marker was still standing afterwards with the board still reading "Coordination is
+    paused here" - so of the three remedies the sentence offers, the one it names first was
+    the one that did nothing. Every other human re-litigation clears the marker already: a
+    goal edit (V18), a stage transition, a packet resolution, acceptance, a dependency
+    release. A press of Run operator did not, which also means the drive that person paid
+    for got no nudge when it stranded, since the backstop reads the standing hold and
+    returns before it. The same branch that already lifts ruling 157's packet-less hold now
+    lifts this one, with the same discriminator it already computed: a `manual` trigger
+    carrying an `actor` is a person and nothing else is. A SCHEDULE deliberately does not -
+    an hourly schedule re-arming the nudge forever is the exact thing V18 stopped.
+    (`operator-run.server.ts`, `task-actions.server.ts`.)
+
+217. **An instance whose projection stopped tracking its own files reported itself
+    healthy for twelve minutes (owner, 2026-09-13, pass 37; F37-37).** The projection store
+    went to `SQLITE_CORRUPT` under a running process. Every rebuild threw
+    ("database disk image is malformed"), the watcher's rebuilds threw, an operator's plan
+    execution threw halfway through and took its decision with it, `clearWaitingToHuman`
+    threw behind it, the task page answered 500 to the human, and a run sat `running` for
+    twenty minutes with no process behind it. Throughout, `/resources/health` answered
+    `{"ok": true, "status": "ok", "degraded": []}`. It was not lying about anything it
+    checked: the row COUNTS still read fine, because the damage was in particular btree
+    pages, and a count is not a verdict about whether the mirror still follows the record.
+    Viberr knew the whole time - `rebuildPath`'s catch wrote the store's own error to the
+    log on every single failure - and had nowhere to put the fact. `boot.server.ts` already
+    names this exact shape for the one cause it probes for: "the task stops projecting and
+    its row goes stale, with nothing on any surface saying why." So that catch now sets a
+    process latch (`store-health.server.ts`) carrying the failing file, the store's own
+    sentence and a count, and the next rebuild that WRITES clears it. Health reports it as
+    `degraded: ["projections"]` with the reading in `projectionStore`, so readiness answers
+    503 and an orchestrator can act. A latch, never a probe: no `PRAGMA integrity_check` on
+    an 87MB file every few seconds, and no alarm that outlives its fault - which is the
+    same thing ruling 146 refused to let this endpoint do. "Files are truth" is only worth
+    anything while SQLite follows them, so a projection that cannot be rebuilt from the
+    canonical files is the one fault this product must never report as healthy.
+    (`store-health.server.ts`, `rebuilder.server.ts`, `health-snapshot.server.ts`,
+    `resources.health.ts`.)
+
+218. **A projection rebuild that fails is retried, and a fault belongs to the file that
+    has it (owner, 2026-09-13, pass 37; F37-38).** Ninety seconds after the corrupt store of
+    ruling 217 was replaced, a transient `disk I/O error` hit SHOP-4's rebuild - once, during
+    `resolvePacket`, and once more a second later from the watcher. The card then read
+    "waiting on you" while the file it mirrors said `waiting: agent`, and it stayed that way
+    until a human pressed Re-scan. Two things were wrong, and one of them was mine.
+    (a) **Nothing retries.** A projection is rebuilt when its file CHANGES; if that one
+    rebuild fails, the file does not change again, so the row keeps whatever it held before,
+    forever, with no surface saying to press anything. The watcher's own debounce queue now
+    re-arms a failed path on a backoff (2s, 5s, 15s, 45s, 120s), resets on the first success
+    and gives up after the last step - past that it is not transient, it stands in the latch,
+    and health calls the instance degraded, which is a person's problem and not a timer's.
+    (b) **Ruling 217's latch held one slot**, so the next file that rebuilt cleared it. That
+    is how health was back to `ok` while SHOP-4's row disagreed with its own file: SHOP-16
+    had projected fine in between. A fault is a fact about ONE file and is over only when
+    THAT file projects again, so the latch is a map, `projectionStore` reports how many files
+    are failing alongside the most recent one, and a success clears only its own path.
+    (`file-watch.service.server.ts`, `store-health.server.ts`, `rebuilder.server.ts`,
+    `health-snapshot.server.ts`.)
+
+219. **A catch that writes to the thing that just failed is not a catch (owner,
+    2026-09-13, pass 37; F37-39).** `rebuildPath` wraps every rebuild so one bad file cannot
+    take the process down, and inside that catch it wrote a provenance row saying the rebuild
+    failed - to the same store that had just failed. So in the one case the catch exists for,
+    a broken store, it threw, and `rebuildPath` raised into its caller after all. Live:
+    `resolvePacket` wrote SHOP-4's file (the packet resolved, `waiting: agent`), called
+    `reprojectTask`, and died at that line with `disk I/O error`. The canonical write had
+    already landed - the decision is on the record, correctly - but everything the resolution
+    still owed, the operator re-invoke included, went with the throw. SHOP-4 read
+    "agent working" with nothing running for eleven minutes, on the board of a task five
+    others were waiting behind. A projection is a MIRROR: its failure is reported, never
+    raised, because the action that called it has already told the truth in the file. The
+    note is now attempted inside its own try, and a store too broken to take even that gets
+    one warn line; the return is `{ action: "error" }` on every path.
+    (`rebuilder.server.ts`.)
+
+220. **The MCP list states where every server stands on write tools, not only the gated
+    ones (owner, 2026-09-13, pass 37; F37-40).** Ruling 176 lets an admin mark a server's
+    write tools, and Viberr withholds them from every run that holds no repo write and from
+    every operator run. The Org settings row said so - but only when a server WAS gated.
+    A server nobody had reviewed rendered nothing at all, so the one state worth seeing was
+    the state the list was silent about. Live on this instance: `kb-architecture` and
+    `kb-conventions` are stock `server-filesystem` rooted at a knowledge base, 14 tools each,
+    granted to three agent templates each, and unmarked - which means those agents can
+    rewrite the knowledge bases Viberr injects into every other agent's prompt as trusted
+    configuration. The controller reasoned about exactly that hazard for a THIRD such server
+    and granted it to nobody; for the two it had already created and granted, the list gave
+    it, and the admin, no standing signal. Ruling 188 gave the controller's own read all
+    three cases ("Not reviewed yet: nothing is withheld. Viberr makes no claim about the
+    tools nobody has marked."); this is the human's half of that sentence. The row now says
+    which of the three it is: gated and how many; reviewed with nothing withheld; or N tools
+    that look like writes with nothing withheld and nobody having reviewed them. A server
+    whose discovered tools contain nothing write-shaped stays quiet, because there is no
+    position to state and a row that alarms on everything is a row nobody reads.
+    (`resource-rows.tsx`.)
+
+221. **A provider store that cannot be OPENED is a session problem, not a credential one
+    (owner, 2026-09-13, pass 37; F37-41).** Ruling 212 taught viberr the Codex CLI's words for
+    a network fault. This is the same lesson for the CLI's own disk. After the host corrupted
+    a SQLite file under load, the CLI reported `failed to open thread history database ... (code:
+    26) file is not a database`. That matched nothing, fell through to `unknown`, and
+    `unknown`'s sentence is the credential one - so viberr told the owner to "review its
+    authentication and runtime configuration" and RECOMMENDED "Redirect with sharper guidance",
+    a rewritten directive, for a corrupt file on its own disk. The credential was fine and no
+    prompt could have helped: the file's first page was not a SQLite header at all. What made
+    it costly is that fresh runs kept working while every RESUME failed - which is precisely
+    the shape `session_missing` already names, and whose remedy, one fresh run re-anchored on
+    task.md, is already the right one. So an unreadable store classifies as `session_missing`,
+    and the two roads into that class are told apart where it matters to a person: a vanished
+    session heals itself on the next run, while a store that cannot be opened keeps failing
+    every resume until the file is repaired or removed, and the sentence says so. One shared
+    marker constant carries the distinction from the adapter to the remedy layer, so neither
+    side re-parses the provider's prose. The pattern is anchored on the STORE's own nouns, not
+    on "not a database" alone: an agent building a SQLite-backed service can print that
+    sentence out of its own work, and a run is not a session failure because the code it was
+    writing hit a bad file.
+    (`session-export.server.ts`, `codex-runtime.server.ts`, `run-failure-remedy.server.ts`.)
+
+222. **A question an agent asks reaches the person under that agent's name (owner,
+    2026-09-13, pass 37; F37-42).** `notifyTaskWatchers` stamps `OPERATOR_NOTIFY_FROM` on any
+    notice that names nobody, and the agent-question path named nobody - so an agent's own
+    question arrived in the owner's inbox under the Operator's name and avatar, on the one
+    surface whose chip IS "who wants something from you", and whose row renders the packet
+    BODY rather than the title that did name the role. Live on SHOP-18 the Frontend Engineer
+    asked the owner to publish a catalog facet contract or cut the scope, and the inbox said
+    "Operator: SHOP-18 cannot satisfy its required filter/facet sidebar…" - the agent's words
+    over another actor's name. The principle was already settled one file over and two calls
+    up, for the audit row of the same event: "P11-23: the agent opened this question packet -
+    attribute it to the agent." The notification now carries the same actor. The DEFAULT is
+    left alone deliberately: it is right for the many notices the operator really does author,
+    and narrowing it further is a change to make when a surface is caught getting it wrong,
+    not on a hunch.
+    (`agent-toolkit.server.ts`.)
+
+223. **The never-pushed guard could not fire, because GitHub answers an unknown commit with
+    422 and viberr only knew 404 (owner, 2026-09-13, pass 37; F37-43).** Ruling 135 gave the
+    acceptance gate a containment check: if the delivered revision is not on GitHub, the
+    compare 404s, one direct commit read confirms it, and the acceptance is REFUSED because
+    "it cannot be accepted until the PR carries the reviewed revision." The confirming read
+    asked `isMissingRefAnswer`, which knows 404 and the empty-repository 409.
+    `GET /repos/{repo}/commits/{sha}` does not 404 a well-formed 40-character SHA it cannot
+    find: it answers **422** with `No commit found for SHA: <sha>`. So the probe never
+    confirmed anything, the refusal was unreachable on the real API, and a never-pushed
+    revision degraded to an `unverifiable` head - which acceptance deliberately lets through
+    with a disclosure. Live on SHOP-17 that cost exactly what the gate exists to prevent:
+    both required reviewers approved `1f99f68`, that revision was never pushed, and the
+    acceptance merged PR #12 whose head was `9104562` - **the revision the Code Reviewer had
+    rejected** - then deleted the branch. `1f99f68` exists nowhere on the remote. The
+    completion note said only that the head "could not be verified". Ruling 135's own test
+    hid it: the fixture stubbed the commit read as a **404 carrying GitHub's 422 sentence**, a
+    combination the endpoint never returns, so the canary passed against a fact that was
+    wrong. A commit read now has its own predicate, `isMissingCommitAnswer`, which accepts
+    404, the empty-repository 409, and a 422 whose message names a missing commit; it is kept
+    SEPARATE from `isMissingRefAnswer` because 422 is GitHub's generic validation status and
+    widening the shared predicate would make unrelated failures everywhere read as "the ref is
+    gone". The real answer is pinned as its own test, not as a fixture's guess.
+    (`github-client.server.ts`, `task-actions.server.ts`.)
+
+224. **A spent usage window the provider dated has a remedy that is neither a model change
+    nor a false assertion (owner, 2026-09-13, pass 37; F37-44).** At 23:28 the Codex window
+    went, and six tasks stalled at once behind the same packet. The provider named its own
+    reopening - "try again at Sep 14th, 2026 2:27 AM" - and viberr parsed it, stored it, and
+    printed it. Every option it then offered was wrong at the moment it was offered. The
+    RECOMMENDED one, "Retry on Claude now", says in its own detail that it moves the task
+    permanently off the model its profile declares ("Later runs on this task stay on Claude")
+    - on a deployment whose owner had set every specialist to one model on purpose. The
+    alternative asks a human to assert "The window has reset", three hours before it would.
+    The remaining two freeze coordination or re-prompt an agent that cannot run. And the
+    packet cannot simply be left open, because an open packet refuses the operator: the only
+    exits were a policy change, a false statement, or being awake at 02:27.
+    Viberr already had the machinery for the true answer - a schedule runner that fires an
+    unattended run at an instant. So a quota refusal whose reset instant is KNOWN and still
+    in the future offers `wait_for_window`, and that option takes the recommendation: the
+    packet closes, the board settles to `waiting: human` (no agent is coming for hours, and
+    claiming one is F37-33's lie by another road), and a `run-operator` schedule is written
+    for one minute past the provider's instant. The OPERATOR, never a blind re-dispatch of
+    the same agent: hours pass, the board may have moved, and every other timed resume viberr
+    has - the dependency release, the restart recoveries - re-invokes the operator for that
+    reason. A schedule that cannot be written says so on the timeline and names the manual
+    fallback, and never un-resolves the decision the human made. The OPERATOR's own quota
+    packet is a second builder with the same defect and gets the same arm: its recommended
+    option asked a human to assert the window had reset, which is the one statement on that
+    packet that is false at the moment it is offered. And the instant is read from the QUOTA
+    STORE, not only from the run's own failure facts: `RunFailureFacts.resetsAt` is set from a
+    machine `rate_limit_event` the provider sends DURING a run, and a Codex refusal at spawn
+    time sends none - so on exactly the failure that stalls a board the facts are silent while
+    the store holds the date parsed out of the provider's own sentence. Without that read the
+    whole ruling is inert on the case it was written for, which the first deploy proved live.
+    Finally, the kind joins NO_REQUEUE: the decision IS that nothing runs, so re-invoking the
+    operator on resolution spends a run against the very quota the human chose to wait out,
+    gets refused, and opens a NEW packet asking the same question - answering the decision
+    re-created it. Live on SHOP-18, seven seconds after the decision was recorded.
+
+225. **A task resting on a clock stops claiming it rests on a person (owner, 2026-09-14,
+    pass 37; F37-45).** `waiting: human` in a task file means "no agent is working, a human
+    is next" - it is simply what `clearWaitingToHuman` writes when the last run ends. Every
+    waiting-sensitive surface renders that as the sentence "waiting on a human", which was
+    true while a person was the only way forward. Ruling 224 made it false. Four tasks
+    resolved their quota packet by scheduling their own resumption for 02:28 UTC, and the
+    board then showed "waiting on a human" on all four cards under a header counting "5
+    waiting on a human in this project" - while the packet that put them there had promised,
+    in viberr's own words, "Nothing runs until then and the board says so." It did not. So
+    the projection derives a fourth value, `schedule`, exactly as LV-20 derives the terminal
+    `none` and as `validation: bypassed` is derived: nothing authors it, the canonical file
+    keeps saying `human`, and one derivation moves every reader at once - the card, the
+    board subtitle and its filters, the review row and its subline, the task page's
+    "Waiting on" rail, and the controller's own board summary, which now counts clock rests
+    apart from human ones and carries the instant on the task line so it neither treats the
+    rest as work to unblock nor re-dispatches a task that is already coming back.
+    The predicate is about the STATE, not its cause - a quota-only reading would be a second
+    lie the day anything else writes a schedule - and its limit is the load-bearing half: a
+    human-actionable decision OUTRANKS the clock. An open packet, a live recommendation, or
+    a completion a human could accept right now all keep `human`, because the schedule takes
+    none of that off anybody's hands, and because `decisionsRequiring` reads this very
+    column: getting it backwards would not soften a lie, it would HIDE a decision. The
+    "no activity" cue follows the same care. A clock rest is not measured from its last
+    timeline event - the gap is hours by design, so the agent threshold would fire the cue
+    on the healthiest wait there is - but neither is it exempt, because a schedule that came
+    DUE and did not fire is a genuine stall in the runner. The idle clock restarts at the due
+    instant: silent until then, quiet on the human threshold after. Finally the store's own
+    CHECK constraint was widened to admit the value. It refused it at first, which is worth
+    recording: the refusal arrives as "projection rebuild failed" and a stale row, the exact
+    silent-staleness failure `boot.server.ts` probes this column for and ruling 217 built the
+    health latch for. The canary caught it before the deploy did.
+    Amended the same day, from re-reading the predicate rather than from a failing test: it must
+    also require `waiting: "human"` exactly, and an EMPTY `blockedBy`. A task that waits on other
+    work is held (ruling 131(d)) and the schedule runner refuses its occurrence on precisely
+    those grounds - "waits on other work (...) - no operator run was started; Viberr releases the
+    task when every entry is done" - so a card reading "resumes Sep 14 · 02:28" over it would be
+    this ruling's own lie, reintroduced by this ruling. And `waiting: "none"` renders no wait tag
+    at all, so it claims nothing and has nothing to correct; deriving over it would invent a
+    promise where the board had made none. Forty-one green tests covered neither case, which is
+    the point: a predicate is not verified by the tests that happen to pass.
+    Amended twice more, from the same question asked properly the second time: **what states does
+    the schedule runner refuse?** It refuses a held task, an archived one, and a closed one, each
+    with its own outcome (`skipped-held`, `skipped-archived`, `skipped-done`). A card that names
+    a resume time for an occurrence the runner will refuse is a promise nothing intends to keep,
+    so the derivation excludes every one of them: the terminal case via LV-20's `none` above,
+    and `blockedBy` and `archived` by name. R14-3 archiving removes a task from every view except
+    the Archived filter, and that filter still draws the card, so "a consumer filters it out"
+    does not hold here. The general rule this ruling ended up standing for: a derived promise is
+    bounded by what the mechanism behind it will actually do, and the way to find its edges is to
+    read that mechanism's refusals rather than to imagine the cases.
+    Amended a third time, and this one was caught on the LIVE BOARD rather than by reading.
+    `acceptanceRefusal === null` is not "a human could accept this": the STAGE gate is the one
+    acceptance refusal `acceptanceBlockReason` deliberately omits, because it turns on the
+    project's workflow graph rather than on anything in the task file. So a task at an early
+    stage with nothing delivered reports no refusal - not because it is acceptable, but because
+    the only thing refusing it was never consulted. SHOP-21 sat at Build with no revision and no
+    PR, a `run-operator` schedule pending for 07:29, and its card and its rail both still read
+    "waiting on a human" after this ruling shipped, while the board's own "Waiting on me" tally
+    read zero. The predicate now asks `isAtAcceptanceBoundary` as well - the same question
+    `TaskSummary.atAcceptanceBoundary` answers for the board, from the same workflow graph, now
+    selected into the projector's project row for the purpose.
+
+226. **A head GitHub will not compare is refused, not disclosed (owner, 2026-09-14, pass 37;
+    F37-43).** Ruling 135 built the guard for a PR head that is not the reviewed revision and
+    ruling 223 made it reachable against GitHub's real 422. What survived was A9's trade: a head
+    that could not be VERIFIED still merged, with a note naming the check that did not run. Live
+    that merged SHOP-17 at `9104562` - the revision its Code Reviewer had REJECTED - while both
+    reviewers' approvals pointed at `1f99f68`, which was never pushed, and the completion note
+    said only that the head "could not be verified."
+    A9's reasoning was that "the merge's own honesty covers unreachability", and for an
+    unreachable GitHub that is true: the merge fails too. It is false in exactly one case, and
+    that case is the dangerous one - GitHub ANSWERS the pull request and refuses only the
+    comparison. Then the repository is reachable, the merge will succeed, and the only thing
+    missing is the knowledge of what is being merged. That case now REFUSES, and the sentence
+    names the consequence rather than the procedure: "code no reviewer approved could reach the
+    base branch." Every other unverifiable head still passes with A9's disclosure, which is the
+    case A9 described.
+    A refusal with no exit is its own defect, and this one could strand a task permanently,
+    since no amount of re-delivering makes GitHub answer. So the gate does not only throw a
+    sentence at the browser: it records the question on the task, with both shas in it, and the
+    three real answers - try the check again (recommended, because a refused comparison is
+    usually a bad minute), send it back to be re-delivered, or take the merge deliberately. That
+    third option is NOT force-accept and must not borrow its door: force-accept bypasses the
+    VERDICT gate and has never been able to touch this one. It waives ONE containment check, for
+    ONE (PR, delivered revision, live head) triple, re-read live at the moment of the decision,
+    with the deciding person's name on it. Pinned, because the whole danger it admits is that
+    the head is unknown: a waiver that outlived the head it was granted for would be a standing
+    permission to merge whatever that branch later carried. The operator cannot offer the option
+    at all - it would be waiving a check over facts it never read - and when the re-read
+    succeeds the resolution grants nothing and says so, because a waiver written on a check that
+    would now pass is a permission nobody needed.
+    Two canaries paid for themselves before the deploy. The first: the waiver had no line in the
+    frontmatter key order, so it never reached disk, and the gate that re-reads it would have
+    refused forever - an override button that did nothing. The second: A9's own test described
+    "GitHub unreachable" while its fixture answered the pull and failed the compare, which is
+    this ruling's case, not A9's. The fixture, not the ruling, was what made the old behaviour
+    look intended.
+    Amended the same day by re-reading the packet I had just written: it offers TWO options, not
+    three. A "try the check again" option would have to be a `custom`, and a `custom` resolution
+    sends the task back to the agent side and re-queues the operator - which re-runs this very
+    gate, refuses again, and opens this very packet again. Answering the decision would re-create
+    it, which is ruling 224's fourth half repeating on a different packet. A re-check needs no
+    option at all: this packet does not set `readiness: blocked`, so it never refuses the
+    acceptance, and pressing Accept again IS the re-check - which the body now says, and which a
+    successful acceptance finishes by withdrawing the packet on its own. The remaining two
+    options both do exactly what they say.
+
+227. **A refusal a person is waiting on is written on the task, not only in the log (owner,
+    2026-09-14, pass 37; F37-46).** Ruling 141 taught the operator's refusals to speak when a
+    trigger met them at the front of the LEASE QUEUE, on the reasoning that "the refusal used to
+    exist only in the server log while the timeline still said 'Scheduled action starting'". The
+    same three refusals AT THE DOOR stayed silent, and the door is where a person's instruction
+    arrives. Live on SHOP-2: someone wrote "@operator PR #13 conflicts with main, rebase and
+    re-review", the comment landed on the timeline with the mention rendered as routed, the
+    composer's own footer promised "@mentions route to agents", `runOperator` refused it at the
+    door because a decision packet was open, and nothing on any surface said so. The instruction
+    read as accepted and nobody was coming.
+    So a `manual` trigger refused at the door gets ruling 141's note, with the sentence about
+    how it arrived corrected (it never reached a queue) and the consequence stated plainly:
+    "no run was started, so nothing on this task has been acted on." The blocked-by silence —
+    a drained transition on a held task IS the ruling-131 hold, already on the record — does not
+    apply to a person, who is owed an answer to the thing they just typed.
+    Exactly one trigger, and the other two are the interesting part. `scheduled` is NOT added,
+    though ruling 141's reasoning covers it: the schedule runner already notes and retires its
+    own fire-time refusals, so this would have written the same note twice, and its tests are
+    what caught the duplicate. And the machine triggers (`create`, `transition`, `delivered`,
+    `agent-reply`) stay silent because they fire constantly and refuse routinely — noting each
+    would bury the one that means something, which is R16-2's failure applied to a timeline.
+
+228. **A plan refused in full is a drive that was STOPPED, not one that decided to wait (owner,
+    2026-09-14, pass 37; F37-47).** The settle-time stranded backstop (F31-11, ruling 152(a),
+    ruling 202) asks whether the stage's outbound boundary is `auto`. That is the right question
+    for a drive that CHOSE to do nothing and the wrong one for a drive that chose actions and was
+    not allowed to take any of them. SHOP-3 sat at Verify - boundary `human`, so invisible to the
+    backstop - after a plan whose only step, an `update_branch_from_base`, was refused by the
+    capability policy. The refusal even named the remedy ("Do not refresh it here; recommend or
+    accept the completion instead") and no operator ever read it, because the turn had already
+    ended. 25 minutes parked, on the very run the Codex window had just been waited three hours
+    for.
+    So a drive whose plan was refused IN FULL is stranded whatever the boundary, and takes the
+    same single nudge. Its turn instruction is its own, because the idle-stage sentence would be
+    false twice over here - the stage need not be auto-advance and the run did not end idle by
+    choice: it says every action was refused, that the refusals are on the timeline with their
+    remedies in them, and that re-planning the same refused action is forbidden. Everything else
+    is F31-11's machinery unchanged: one nudge, and a nudged drive that is refused in full again
+    records the durable `heldAtStage` hold and settles to a human instead of looping.
+    "In full" is exact and load-bearing: `refused` holds one entry per step that did not run, so
+    equality with the plan length IS "nothing happened". A step that THREW breaks the loop and
+    leaves the counts unequal, which is correct - an abort is narrated on its own terms. An empty
+    or unparseable plan never reaches this at all; viberr already opens a packet for that
+    ("Operator turn produced no actionable plan"), and the gap was only ever the plan that named
+    real work and was refused every bit of it.
+
+229. **The one call viberr tells the operator to make speculatively stops being reported as a
+    failure (owner, 2026-09-14, pass 37; F37-49).** `update_branch_from_base`'s own tool
+    description says: "It is idempotent and cheap: an already-current branch changes nothing and
+    says so, **so call it when you are unsure rather than guessing**", and of `baseBehindBy`:
+    "`null` means nothing has compared them yet, **which is not a reason to skip it**." The
+    operator complies. The already-current answer then came back as `outcome: "noop"`, which the
+    plan executor files under REFUSED, which `narrateRefusedActions` headlines "**The operator's
+    plan was not carried out in full.**" On the pass-37 board that note stood 57 times and **51
+    of them were this one line** - the product asking for a call and then recording it as an
+    incomplete plan.
+    The duplication is the sharper half. Ruling 134(c) already writes the same sentence as a
+    `github` event, and deliberately SUPPRESSES it when the newest such event says the same
+    thing, on the reasoning that "the tool is idempotent by contract, so the record is too". The
+    refusal narration then re-added that identical sentence with no suppression and a worse
+    headline. So `already_current` returns `done`: it is this tool's success condition, not a
+    state conflict. The Claude operator reads `[done] … is already up to date`, the plan executor
+    files nothing, and the `github` event remains the one record - which is what 134(c) intended
+    before the second writer undid it.
+    What this leaves behind is the point of the note in the first place: the six refusals on that
+    board that a human should actually read are no longer the twelfth of it. A record that
+    reports encouraged, designed behaviour as a failure teaches people to skim it, which is
+    R16-2's rule about filters applied to a timeline.
+
+230. **"Hold this until those land" becomes an option that performs it (owner, 2026-09-14, pass
+    37; F37-50).** Ruling 131 built the whole dependency mechanism - the board renders `blockedBy`,
+    the schedule runner refuses a held occurrence, the dependency release re-triggers the operator
+    when the last entry finishes - and none of it was reachable from a decision packet. So an
+    operator that wanted a hold reached for the nearest-sounding kind, `block_on_policy`, whose
+    resolution is R20-1's "I fixed the credential, carry on": it sets `readiness: ready`,
+    `waiting: agent` and re-queues. Live on SHOP-11 at 04:12, an option titled "**Hold** SHOP-11
+    while gateway routing, tracing and stack-test work lands" produced the record "SHOP-11 is
+    **unblocked** and the operator re-runs to re-check", and the frontmatter agreed. The option
+    promised a hold and performed an unblock, and none of the fifteen kinds could have done
+    otherwise, because not one of them writes a dependency.
+    `block_on_dependencies` takes a `blockedBy` payload and writes it through `setTaskDependencies`
+    - the same door the operator's own tool and the task page use, so the canonicalisation, the
+    goal-link mirror and the "Dependencies updated" note are the ones every other caller gets
+    (ruling 164: an option performs the real action through the real door). It joins `NO_REQUEUE`
+    for ruling 224's reason: the decision IS that nothing runs, and re-invoking the operator would
+    pay a drive to rediscover the hold it was just told about, which is JC-9's five runs and the
+    same thing ruling 131(d) refuses at the door.
+    Two refusals at authoring time, by name like every other payload-bearing kind: a
+    `block_on_dependencies` naming nothing to wait on is refused (it would resolve into a hold
+    that releases on nothing), and a `blockedBy` on any other kind is refused. And the write is
+    best-effort with its failure narrated rather than thrown: `setTaskDependencies` validates the
+    refs, so a hold on a task that does not exist is correctly refused, and when that happens the
+    human's decision must still stand while the record says plainly that nothing releases this
+    task and where to set it by hand. That path was found by the canary hitting it first.
+
+231. **A react chain follows the deployed operator, not the one it started on (owner, 2026-09-14,
+    pass 37; F37-51).** The reply/react re-invocation carried three things forward: the chain
+    depth, the autonomy, and the BACKEND of the drive that prompted the agent - and it passed that
+    backend as an OVERRIDE, which beats the live deployment inside
+    `resolveOperatorAuthority`. R22 removed exactly that pin from schedules, in exactly these
+    words: "A schedule fires unattended, so following the profile that is actually deployed then
+    matters MORE than freezing whatever was configured hours earlier." A react is the same shape
+    for the same reason - the agent it reacts to may have been running for an hour.
+    Measured live. The owner changed the operator from Codex to `opus[1m]` at 04:19:56 UTC; a
+    react chain started a CODEX operator run at 04:31:44 against a deployment that read `claude`,
+    twelve minutes after the policy changed and with only one operator deployment on the project.
+    A model policy that takes effect only once every in-flight chain drains is not the policy the
+    owner set.
+    Depth still travels, because it is the loop bound and nothing else can carry it. Autonomy
+    still travels, because the resolver clamps it to the deployment's configured ceiling (R19-A),
+    so a chain cannot hold an autonomy the project has since lowered. Only the backend is dropped,
+    and dropping it is safe because the operator re-anchors on `task.md` rather than on a provider
+    transcript: a chain whose backend changes between turns loses nothing it was relying on.
+    The canary for this passed while the bug was restored, the first time it was written - the
+    override lives on `input.operatorRun`, and the test had set it on `ctx`. It was only a test
+    of the fix once it could fail without it.
+    (`run-failure-remedy.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
+    `task-file.schema.ts`.)
+
+232. **A comment whose DECLARED audience is the agent notifies no person (owner, 2026-09-14,
+    pass 37; F37-53).** P14-GV-06 added the mention fan-out to `operatorPromptAgent` because a
+    human tagged inside an operator directive ("...coordinate with @Arda on the copy") was never
+    notified - the tag was decoration. Pass 37 measured what those tags actually are on a live
+    instance: of 49 mention notifications sent to the owner, 19 came from directives where the
+    handle was the operator SPECIFYING a deliverable to a specialist - "Ensure the document ends
+    with an explicit @Arda question naming Stripe, Adyen, and Mock-only" - re-issued verbatim on
+    every rework round, and SHOP-7 reworked twelve times. Viberr cannot tell "coordinate with
+    @Arda" from "write an @Arda question" by parsing, so the owner ruled on the audience instead:
+    a directive handed to an agent is addressed to that agent, and a person named inside it is
+    being described TO the agent, not addressed.
+    DECLARED, not inferred, and the distinction is load-bearing. `appendComment` DERIVES its
+    `toAgent` from the presence of an agent handle, so a blanket rule would silently drop the
+    human half of "@dev implement the endpoint, @Bora look at the schema first" - and a human has
+    one comment box, not a second human-directed channel to fall back on. The gate is therefore
+    for writers that set the audience themselves; today that is `operatorPromptAgent` alone.
+    The rule lives at the fan-out seam (`audience: "agent"` on `NotifyMentionsInput`), not at the
+    call site, so a future declared-agent writer inherits it. The handles that reached nobody are
+    still reported, because they are facts about the text that the author's disclosure is written
+    from, and the directive comment itself still lands on the timeline tagged to-agent: the ruling
+    changes who hears about the hand-off, not whether it is on the record.
+    The OPERATOR had to be told, or the ruling is a trap rather than a rule. Its persona closed
+    with "When you answer or address a specific person, tag them by name with an @mention. The
+    mention is what notifies them" - no qualification, and now false for the comment the operator
+    writes most. An operator that believes a tag in a directive reaches a person keeps putting
+    questions there, and they reach nobody. The owner's words for this decision were that the
+    operator "already has a separate human-directed comment path and should use it", so the
+    persona now says which path is which: the @mention notifies in a COMMENT, and "a directive you
+    hand a specialist reaches only that specialist: naming a person inside one notifies nobody, so
+    put anything a person must see in a comment of its own."
+    The shipped asset changed, and the live store refreshed ITSELF on the next boot
+    (`a48b34db` to `b5f35eef`, matching the shipped bytes exactly) through the
+    `PRIOR_SHIPPED_HASHES` / `shipped-assets.json` path, which is what that machinery is for and
+    is the first time this pass exercised it. No instance file was edited by hand.
+    **Amendment, found by reviewing this ruling against what it did not touch.** The dispatch site
+    also wraps the directive in `withAmbiguityDisclosure`, which appends "@x matches more than one
+    person here, so nobody was notified - mention the full name" or, for a non-member, "add them to
+    the project first". Both notes name a REMEDY, and under this ruling neither can work: the
+    comment notifies nobody however the handle is spelled and whoever is a member, so the note
+    sends a reader to fix something that was not the reason. S5-G3 added the disclosure to tell the
+    humans reading the timeline that a tag reached nobody; that is now true of EVERY tag in a
+    directive, which makes a per-ambiguity note both noise and misleading. It is therefore skipped
+    on a declared-agent comment. The tag itself still stands in the posted text: the ruling changes
+    who hears about the hand-off, not what the operator wrote.
+    (`mention-notify.server.ts`, `task-actions.server.ts`, `operator.definition.md`,
+    `operator-run.server.ts`, `default-assets.server.ts`.)
+
+233. **A mention notification quotes the mention, not the opening of the comment (pass 37;
+    F37-53).** The inbox row reads `mentioned you - "<first 240 characters>"`, and the head is the
+    right window only when the handle is near the top. It often is not: an operator directive
+    opens by naming the AGENT it is dispatching and reaches the person hundreds of characters
+    later, and an agent's report reaches them later still. Measured over every mention
+    notification this instance had sent the owner, 19 of 49 (39%) quoted a window that EXCLUDED
+    the handle they were sent for - the handles sat at characters 274, 316, 414 and 935. The
+    header said "mentioned you" above a sentence addressed to somebody else, and the only
+    reliable way to find out what was said to you was to open the task and search it for your own
+    name, which is the work the notification exists to save.
+    The quote is now windowed on the first span that resolved to THIS recipient, which is why
+    `resolveMentionTargets` returns the handle-to-user map it always computed and threw away. The
+    head window is kept whenever it already covers the mention, so the common case is unchanged
+    byte for byte; only a mention past the cap moves the window, and it then carries a leading
+    ellipsis. One recipient's quote is theirs alone - two people tagged in different paragraphs
+    of the same comment each see their own.
+    (`mention-notify.server.ts`, `mention-spans.ts`.)
+
+234. **The in-app audit browse reaches the class it exists for (pass 37; F37-52).** The panel
+    shipped as ONE `ORDER BY occurred_at DESC LIMIT 150` with the "Org-scoped" toggle filtering
+    those rows client-side, so the toggle could only narrow a window it did not control. Two
+    facts then composed badly. `github.reconcile.task` is written UNCONDITIONALLY, once per
+    delivered task per poller tick - deliberately and correctly, per F19-22: it is the honest
+    answer to "when did we last look" and must exist whether or not the pass changed anything.
+    Seven delivered tasks on a five-minute tick is 2,016 rows a day that arrive while nobody
+    touches the instance. A heartbeat that must be unconditional, read through a window that is a
+    fixed row count: the heartbeat wins, and it wins harder the longer the instance lives.
+    Measured live on a board that had not moved in two and a half hours: 91 of the 150 rows (61%)
+    were that one action, the window spanned 53 minutes, and clicking "Org-scoped" left TWO rows,
+    both `projection.rescan`. Not one sign-in, not one PAT change, not one user-administration
+    event - while 96 such events sat on file, including the instance's only `github.pat.created`,
+    the most security-relevant row in the table. The feature's own module doc says it exists
+    because "nothing let an admin READ org/instance-scoped events inside the app"; it still did
+    not.
+    So the heartbeat is excluded from the BROWSE and nowhere else - the table, the retention
+    sweep, the export and `latestTaskReconcileCheckAt` all still see every row, so F19-22's
+    guarantee is intact - and the org-scoped list is its own SQL query. The loader fetches both
+    windows so the toggle stays instant and the text filter keeps working over whichever one is
+    showing. Excluding a row from an audit browse is a deliberate act, so the hidden actions are
+    listed by name and never pattern-matched.
+    (`audit-browse.server.ts`, `org.settings.tsx`, `org-settings-page.tsx`.)
+
+235. **A refused acceptance is recorded, and the delivery is handed to the operator (pass 37;
+    F37-55).** SHOP-2 reached the acceptance boundary with both required reviewers approving
+    revision `ea5f2ffd7493` and the operator recommending "Accept completion and move SHOP-2 to
+    Done. The review is clean." Pressing Accept refused, correctly: PR #13's head was `913ce9d`,
+    and the reviewed revision had never been pushed. The Integration Verifier had said so inside
+    its own approval - it reviewed `ea5f2ffd7493` "with `913ce9d` as its ancestor".
+    The refusal went to one browser's toast and nowhere else. No audit row, no timeline event,
+    the string "not on GitHub" absent from `task.md`. Two things followed. The RECORD did not
+    contain the most consequential human action on the task, which is files-are-truth failing at
+    the one place it is least affordable. And the OPERATOR could not learn it: it re-anchors on
+    `task.md` every turn, so when the human pressed "Run operator" to get the branch pushed, it
+    ran, saw nothing about any refusal, and filed the SAME acceptance recommendation again. It
+    holds `deliver-review-pr: direct` and could have pushed in that turn. Accept, refuse, run
+    operator, be re-recommended the same accept - and the refusal's own remedy ("Deliver the
+    branch to push it") names an action ruling 134 reserves for the operator, so the human cannot
+    perform it and no button offers it.
+    The mechanism was one missing field. Every refusal funnels through `refuseUnverifiedHead`,
+    whose recorder is guarded on `check.liveHeadSha` - and the KNOWN-mismatch branch of
+    `evaluateAcceptancePrHead` returned `{refusal, verification}` and no `liveHeadSha`, so the
+    guard skipped and nothing was written. The refusal sentence quotes both SHAs; the value was
+    in hand and simply not carried.
+    Ruling 226 had already fixed this shape one branch away, for the case where GitHub answers the
+    pull and refuses the compare: it writes a packet BEFORE it throws, because a refusal that
+    leaves no record strands the task. The certain case gets the same durability and a different
+    instrument. Not a packet: a known mismatch is not a decision, the reviewed revision must be
+    pushed, and only the operator may push it - so there is nothing to ask. It gets a `github`
+    timeline event, a `task.acceptance.head_unpushed` audit row (on the Activity feed beside
+    `task.acceptance.forced`, for the same reason), and a `head-unpushed` operator hand-off whose
+    turn instruction names the delivery and says explicitly NOT to file another acceptance
+    recommendation. Idempotent by note text, like `noteDeadDependency`: a button pressed five
+    times is one record and one hand-off, never five paid runs. The human keeps the toast.
+    (`task-actions.server.ts`, `operator-run.server.ts`, `activity-feed.server.ts`.)
+
+236. **The review queue names which other pull requests a merge will conflict (owner,
+    2026-09-14, pass 37).** Accepting SHOP-2 put FOUR of the six open pull requests into
+    `CONFLICTING` inside one minute, every one of them on the same two shared files
+    (`pnpm-lock.yaml`, `scripts/stack.test.mjs`), and the review queue listed all six as
+    independent rows throughout. A person discovered each collision by pressing Accept and
+    reading a refusal. The pass carries 71 `github.branch_update.operator` events and 12
+    acceptance-time refreshes; the operator does reason about merge order, but in prose on
+    individual task timelines, and it reversed its own ordering once.
+    Viberr reconciles each pull request's mergeability already and did NOT know what any of them
+    changed: `changed_files` was stored as a COUNT. So the queue could see that a PR conflicts,
+    only ever after the fact, and never that two PRs are about to.
+    `pr.paths` now records the changed paths, pinned to the head they were read at. The pin is
+    what makes it nearly free: a file list cannot change without the head moving, so the fetch is
+    skipped on every tick where it has not, which on a quiet board is all of them. A failed read
+    leaves the key ABSENT, the same "not read this pass" convention as `checks`, `review` and
+    `mergeable`, so a GitHub hiccup keeps the cached list instead of erasing every collision chip
+    on the board. Capped at `PR_PATHS_MAX` with `truncated` carried through to the surface,
+    because a clipped list can only MISS a collision and never invent one: the count shown is a
+    floor, and the tooltip says so rather than printing a number that quietly means "at least".
+    The intersection is computed server-side over the rows the queue already loaded, and it is
+    SYMMETRIC - both rows name each other, or only whoever merged second would ever be warned.
+    The chip names the tasks rather than counting them ("collides with SHOP-3, SHOP-11"), because
+    a count says there is a problem and nothing about which merge to do first, which is the
+    question the queue exists to answer.
+    Read-only by the owner's choice: it orders nothing, blocks nothing, and starts nothing. The
+    alternatives on the table were a merge lease that serializes acceptances and a decision to
+    treat the collisions as the clone's problem; the owner took the one that adds information and
+    leaves every decision with the person.
+    (`task-file.schema.ts`, `pr-linker.server.ts`, `github-reconciler.server.ts`,
+    `review-queue.server.ts`, `review-helpers.ts`, `review-page.tsx`.)
+
+237. **A reviewer that objects twice running is a decision for a person, and Viberr raises
+    it itself (owner, 2026-09-14, pass 37; F37-57).** SHOP-5 took three `request_changes`
+    verdicts from one reviewer on three revisions, each naming something real the last
+    round had not. Every mechanism built for exactly this worked: ruling 204's counter read
+    3, and ruling 210's doctrine sat in the operator's turn instruction ending "Do not send
+    the deliverer back into another round until the reviewer has answered." The operator
+    moved Review to Build 46 seconds after the third verdict and re-dispatched the
+    deliverer 16 seconds later, with no question put to the reviewer on any round. SHOP-6
+    took seven rounds, SHOP-10 five. It is the construction ruling 186 refused: a request
+    in a prompt, with nothing that notices when the model does something else.
+    The owner's choice was to ESCALATE rather than gate, and the reasoning is that a fresh
+    class of finding on round three is sometimes exactly right, so a gate would refuse
+    correct behaviour to stop the incorrect kind. The operator keeps every move it had.
+    What changed is that the second consecutive objection from one reviewer now opens a
+    decision packet by itself, written inside the verdict's own locked write so the two can
+    never land apart. The pause that follows is the one every packet has carried since
+    ruling 76, not a new constraint.
+    Threshold two, per reviewer, on the owner's call - which is what `consecutiveRequestChanges`
+    already computed, since it filters to one `profileId`: another reviewer's objections never
+    count toward this one and never keep it alive, and the counter resets on that reviewer's own
+    approve.
+    Written by the POLICY ENGINE, not through `operatorOpenPacket`, for ruling 226's reason:
+    that door checks the OPERATOR's `generate-packets` grant, and this packet is not the
+    operator's judgement. A project that told its operator to stop opening packets said nothing
+    about whether a person should hear that their reviewer has blocked the same work twice.
+    Three options, and each does what it says. `question_reviewer` is the 17th packet kind:
+    it carries the reviewer's `profileId` and its resolution STARTS that reviewer with the
+    standing question ruling 210 wrote, asking for a comment and forbidding a fresh verdict
+    (a verdict here would bind to the same revision and count as another objection, which is
+    the loop). Authoring refuses one that names no reviewer or names a non-reviewer, because
+    otherwise the card could promise "ask X" and dispatch the deliverer. The other two are
+    "let the rework continue" (a `custom`, whose resolution hands the task back unchanged) and
+    `force_accept`. Replacing the reviewer is named in the body as prose and is deliberately
+    NOT an option: the resolution cannot edit project settings, and ruling 164 already
+    established that an option whose title promises what its resolution does not do is worse
+    than no option.
+    The completion that RAISES the packet does not then hand the task to the operator, and
+    that clause is load-bearing. Ruling 195 records that "a packet opened mid-work does NOT
+    stop the machine triggers", and the react at the end of an agent completion is one
+    (`agent-reply`, deliberately outside `PACKET_REFUSED_TRIGGERS`). Live on SHOP-24 the
+    first firing proved it: the `task.review.deadlock` audit row landed at 13:52:53.488Z and
+    an operator run started at 13:52:53.585Z, 97 milliseconds later, while the card told a
+    person the task was theirs. That turn happened to be benign — it posted evidence for the
+    human — but nothing constrained it, and the move it is free to make is the re-dispatch
+    this packet exists to interrupt. The other machine triggers keep ruling 195's carve-out;
+    a packet is not a lock, and the card's copy now states what HAPPENED ("Nothing was
+    dispatched on this objection: the task is on you") instead of promising a future the
+    mechanism does not guarantee.
+    Writing the packet directly rather than through `operatorOpenPacket` means carrying that
+    door's guards too, and an adversarial pass over this ruling's own code found one missing:
+    ruling 177 refuses a packet on a CLOSED task, and a reviewer run that finishes after its
+    task was accepted or archived still records its verdict (ruling 177's own arm says so —
+    evidence is evidence, and no coordination follows). The escalation now checks closure in
+    the same locked read. The OTHER guard, ruling 137's acceptance-offer withdrawal, is
+    deliberately absent: a `request_changes` always derives `validation: "failing"`, and the
+    verdict block's own filter already drops every `accept_completion` card, so calling the
+    withdrawal would withdraw nothing and write a second line into the decision log for one
+    disappearance. A test pins that coupling, because it is a coupling and not an obvious
+    property.
+    (`review-deadlock.server.ts`, `task-actions.server.ts`, `operator-actions.server.ts`,
+    `task-file.schema.ts`, `operator-toolkit.server.ts`, `operator-run.server.ts`,
+    `activity-feed.server.ts`.)
+
+238. **A re-review follows a base refresh, because the defect it blocked on may be in the
+    base (owner, 2026-09-14, pass 37; F37-58).** Three correct mechanisms composed into a
+    task no rework could unblock. A verdict binds to a work revision. A base refresh mints
+    no new revision and `describeRevisionDrift` reports it as not unreviewed, which is
+    right: on SHOP-18 the deliverable's own tree sha was identical across the refresh, and
+    I checked that with `git rev-parse` before overriding anything. And
+    `pinSupportCheckout` detached every re-review at the reviewed revision, so it re-read
+    the base it had already objected to.
+    The Integration Verifier's two blockers were defects on `main`, outside SHOP-18's owned
+    paths. They were routed to SHOP-21, fixed, and merged into the branch by Viberr's own
+    `update_branch` (`1 merge commit, 20 base commits, 0 authored`). The verifier objected
+    to the same revision a second time, its report asking for a re-run on the merged head,
+    and the operator opened a packet saying plainly that no tool of its own could make that
+    happen. It was right. The task escaped by an admin force-accept over a gate that wedged
+    because a task did exactly what it was asked to do.
+    `reviewSubjectSha` now decides what a re-review reads, and the subject moves to the PR
+    head when the drift is base-refresh ONLY. One authored commit anywhere in the drift
+    keeps the pin: that is unreviewed work, and reading it unasked is the failure ruling 179
+    exists to prevent. The drift must also have been measured AT the head being offered, or
+    it classifies none of the commits on it.
+    The disclosure changes with the subject. A reviewer standing on a different commit from
+    the one its verdict binds to is told so in the same sentence, naming both shas and the
+    refresh between them, because a reviewer told only "the revision under review" while
+    standing elsewhere would report against a tree it never read. The verdict still binds to
+    the reviewed revision: the revision is the DELIVERABLE's identity, which the refresh did
+    not change, and that is the same fact ruling 132 already asserts.
+    The owner's alternatives were an option on ruling 237's packet and minting a revision for
+    every base refresh. The second was rejected as the most disruptive: it would stale
+    passing approvals too, so a refresh on a task that was ready to accept would cost a full
+    re-review round.
+    (`revision-drift.ts`, `specialist-run.server.ts`, `operator-toolkit.server.ts`.)
+
+239. **A project names ONE knowledge base as its rulings, and every run it makes reads it
+    (owner, 2026-09-14, pass 37).** A knowledge base is granted per profile, which makes it
+    a thing you attach to eight profiles and forget on the ninth, and the ninth is the one
+    that needed it. Live, the conventions KB carried a section headed "For reviewers"
+    stating that a missing lockfile importer "is a KNOWN systemic condition on this
+    repository with a stated rule above, not a novel defect to be re-derived from first
+    principles on each task", and recording its own past cost: four reviewers each
+    re-deriving it, four rework rounds. SHOP-24's Code Reviewer then blocked on exactly that
+    rule twice, which raised ruling 237's packet and cost a human a goal amendment.
+    That reviewer HAD the KB. Checked twice, because the obvious hypothesis was that it did
+    not: the grants were right, its run mounted both knowledge bases, and `kb-conventions`
+    was healthy. What was missing is a channel that cannot be got wrong.
+    So `project.md` carries `rulingsKb`, and `withProjectRulings` puts it into every KB list
+    the project builds: each specialist (after its own grants and R18-1's inherited ones, so
+    it never displaces them in the shared injection budget), the operator, and the
+    controller while its conversation is scoped to that project. Appended and deduped, so a
+    profile that also grants it explicitly is not charged twice against one budget, which is
+    the expected shape when an existing KB is promoted into the role. A project that names
+    none behaves exactly as before.
+    The owner's framing, which this implements verbatim: "per project kb with rulings …
+    this kb must be used by every agent in the project, when the controller session also
+    using a project it should read the project kb as well. If we already have a kb for this
+    we can transform it to this."
+    The controller sets it with `set_project_rulings_kb` under the same `edit-policy`
+    authority as every other project policy, and a directory no knowledge base occupies is
+    refused by name with nothing written: a rulings KB that resolved to nothing would inject
+    silently-empty context into every run and read, on every surface, as though the project
+    had settled rules it has not. The Agents page says so under each profile's knowledge
+    bases, because a card that lists a profile's grants while the runtime injects one more
+    is wrong about what that profile reads, which is the pass-27 capability-matrix defect in
+    another costume.
+    (`project-file.schema.ts`, `project-rulings.server.ts`, `settings-actions.server.ts`,
+    `controller-toolkit.server.ts`, `specialist-run.server.ts`, `operator-actions.server.ts`,
+    `controller-run.server.ts`, `project.agents.tsx`, `agents-page.tsx`.)
+
+240. **A held task refuses DELIVERY, not just dispatch (owner, 2026-09-14, pass 37; F37-61).**
+    Ruling 186 made the hold a gate at the dispatch chokepoint and its comment says "Every
+    dispatch door lands here, so every one of them refuses". The operator's turn instruction
+    then told it, on every held task, that "`run_agent` and `deliver_for_review` are REFUSED
+    by the server while the task is held". Only the first was. `performDelivery` had no
+    `blockedBy` check anywhere in it, for a pass and a half, while the prompt asserted one.
+    That is ruling 186's own defect inverted: there a prompt ASKED where a gate was needed,
+    here a prompt CLAIMED a gate nobody built.
+    It matters because of the live case ruling 186 was written on. SHOP-2 was marked "Held
+    until every entry is done" and a run "pushed a branch cut from a base that predated the
+    foundation it waited on" — and publishing that branch to a review pull request is
+    `deliver_for_review`, not `run_agent`. The gated door was not the one the harm went
+    through.
+    The gate now sits at the top of `performDelivery`, before the branch bootstrap, the push
+    and the PR open, and refuses with `holdRefusal`'s own sentence so a person meets one
+    wording wherever a hold stops them. The refusal is written to the timeline, not only
+    returned.
+    The owner's alternatives were to leave it as doctrine with honest copy, and to gate it
+    with a packet-based override for the case where a task's own work is finished while it
+    waits on something unrelated. The owner took the plain gate: the same shape as ruling
+    186, and a task that genuinely should deliver can have its `blockedBy` corrected with
+    `set_dependencies`, which is the door ruling 131 already provides.
+    (`task-actions.server.ts`, `operator-run.server.ts`.)
+
+241. **A decision a hold refuses is QUEUED, not consumed for nothing (owner, 2026-09-14,
+    pass 37; F37-68).** Ruling 237's escalation recommends asking the reviewer to name
+    everything it would still block on. Ruling 186 refuses every agent dispatch on a held
+    task. Ruling 237 added a dispatch door and checked neither, so live on SHOP-5 a person
+    chose the recommended option, the decision was written onto the task contract, the
+    packet was cleared, and only THEN did the refusal surface: nothing was asked, the
+    packet was gone, and the contract said "no rework until the reviewer has answered"
+    about a reviewer nobody would ever ask.
+    `force_accept`'s own arm had already written the rule this broke: "Both refusals the
+    force path can still make are run HERE, before the resolution write: that write clears
+    the packet, and a refusal discovered after it would leave the decision recorded with no
+    acceptance behind it."
+    The owner's alternatives were to let a question through the hold (it forbids reviewing
+    and forbids a verdict, so it builds nothing on a stale base), and to refuse up front on
+    the card. The owner took QUEUE: the hold stays absolute and the person's intent
+    survives it. The question rides the task as `queuedQuestions` — the profile, the
+    directive TEXT (a person was promised those words, and the wait can outlive the
+    constant) and who decided — and `announceRelease`, the single release chokepoint, puts
+    it BEFORE it re-invokes the operator. That ordering is ruling 203's: an operator
+    re-invoked first could dispatch the very rework the decision exists to stop, in the
+    window between the release and the question.
+    The list is emptied before any run starts, whatever the run then does: a question left
+    queued through a failed start would be asked again on the next release, and a reviewer
+    asked the same question twice is the loop ruling 237 breaks. A failed start says so on
+    the timeline instead.
+    Said BEFORE the choice, not discovered after it: the packet is built with the task's
+    `blockedBy` in the same locked write that raises it, and the option reads "X waits on Y,
+    and Viberr refuses every agent run while it does, so the question is held with the task
+    and put the moment the wait clears." The wait panel names it too, because a promise a
+    person made and cannot see is the same defect in another place.
+    (`task-file.schema.ts`, `review-deadlock.server.ts`, `task-actions.server.ts`,
+    `dependencies.server.ts`, `task-side-panels.tsx`.)
+
+242. **A review ROUND is counted by the deliverer having run, not by the reviewer having
+    spoken (owner, 2026-09-14, pass 37; F37-69). Amends ruling 204.** Ruling 204 made a
+    reviewer's repeat objection on the SAME revision count as a fresh round, because a real
+    deadlock mints no new revision: live on SHOP-9 the deliverer ran, reported it had
+    nothing in scope it was allowed to change, committed nothing, and the old
+    distinct-revision count sat at 1 while the loop ran. That reasoning is right and stands.
+    What it could not distinguish is a repeat objection with NO rework behind it at all —
+    and ruling 237's own escalation question provokes exactly that. Its directive says "Do
+    NOT review again and do NOT return a verdict: nothing has changed since your last one",
+    and its rationale says why: "a verdict here would bind to the same revision and count as
+    another objection, which is the loop". That enforcement was a sentence in a prompt with
+    nothing that notices when the model does otherwise — the construction ruling 186 refused,
+    which ruling 237's own comment cites as the reason ruling 237 exists.
+    Live on SHOP-25 the Code Reviewer answered the question exactly as asked (a complete,
+    bounded list, with the out-of-scope items separated) and attached a `request_changes` to
+    the same untouched revision 8 milliseconds later. That took `rounds` on
+    `rev_HzViP4JzPI5d` to 2 and the deadlock count from 2 to 3, so the person who had just
+    paid for the answer was handed a fresh "requested changes 3 times running" card, and
+    every later round would read one too high.
+    A DELIVERER RUN is the signal that separates the two. `rounds` now increments only when
+    the task's delivering profile has a run row created since the reviewer's previous verdict
+    (`profileRanSince`). SHOP-9 still counts: the deliverer ran. A question run counts for
+    nothing: nobody reworked. Any run row does, whatever its state, because a rework
+    dispatched that crashed is still a round fought; and a task with no deliverer engaged
+    counts as before, since there is nothing to read.
+    The owner's alternatives were a task-level record of which reviewer owes an answer, and
+    leaving the verdict alone while stopping the packet re-raising. The owner took the
+    counter, which needs no new state and survives what neither would: the run that verdicted
+    on SHOP-25 was not the packet's own dispatch — that one was interrupted by a server
+    restart — but an operator re-dispatch by comment, so any mark on the run would have died
+    with it.
+    NOT fixed by this, deliberately and recorded: a `request_changes` arriving while the
+    count already stands at two still raises a fresh packet. The count it names is now true.
+    (`run-store.server.ts`, `task-actions.server.ts`.)
+
+243. **A pending goal link can ADOPT a task that already exists (2026-09-15, pass 37;
+    F37-72).** A chain makes its link's task when it advances, and nothing could point a
+    link at work created ahead of it. `create_task` takes no link, `edit_link` takes title,
+    goal and `blockedBy`, and the server's own op list had no binding op either — so a
+    person who asked the controller to build out the work for three pending links got three
+    real tasks the chain did not know about, and the chain would have created its own
+    duplicates on the next advance.
+    The only escape was `remove_pending_link`, which destroys the link's authored text. Live
+    those three links carried the orders service's port, its whole `orders` /
+    `order_lines` / `addresses` / `order_saga_steps` / `outbox` schema, a SIGKILL
+    crash-resumption assertion, the cart/checkout token-scoping rules and a diff assertion
+    naming an exact line count — and every line had to be hand-copied into the new tasks
+    before the links could go. Copying a specification between two records because nothing
+    binds them is the absurd thing this removes.
+    `adopt_task` binds an existing task to a PENDING link: the link takes the task, goes
+    `active`, and the task gains the `goalRef` back-reference, written AFTER the link
+    commits because a task claiming a link that does not claim it back is the worse
+    half-state. Ruling 155 runs the other way here than on an advance — the task already
+    exists and OWNS its wait, so the link mirrors the task's `blockedBy` rather than
+    overwriting it.
+    Refused: a link that already has a task, an archived task, and a task another chain
+    already carries (named, because a task belongs to one chain and its own `goalRef` can
+    name only one).
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
+244. **A packet option whose premise is false is refused where it is WRITTEN (2026-09-15, pass 37;
+    F37-73). Extends the `accept_completion` authoring rule to its sibling.** The
+    `accept_completion` arm already refuses an option the acceptance gate would reject, for a
+    stated reason: "the human is left confirming a card that cannot succeed."
+    `resolve_remote_collision` had no such check. It clears a FOREIGN remote — ruling 122's
+    case, an unrelated branch or an unowned PR squatting the task's branch name — and V19 put
+    `unownedPr` into the operator's own snapshot precisely so it can tell one exists. With no
+    collision recorded, ruling 136(b)'s `own_pr_open` arm answers "No collision to clear: PR
+    #N on `branch` is TASK's own review PR" and leaves the block where it was.
+    Live on SHOP-11: a rebase diverged the branch from its own PR #15, the operator offered
+    this as the RECOMMENDED option, promising in its own description to close PR #15, delete
+    the remote branch and re-deliver. A person confirmed it through the destructive-action
+    ceremony that names deleting a branch and closing a pull request — and the answer was
+    "The block stays." The decision was spent, the packet was gone, the consent had been given
+    for a cost never paid, and nothing had happened.
+    The server behaved honestly at every step; the defect was upstream, in accepting an option
+    whose premise the authoring context already disproves. `operatorOpenPacket` now refuses it
+    when `github.unownedPr` is null, names what the branch actually carries, and points at the
+    kinds that fit: `custom` naming what a person must do to the history, or `archive_task`
+    with `deleteBranch`.
+    (`operator-actions.server.ts`.)
+
+245. **Per-file LEASES: which task owns a shared path until it merges (owner, 2026-09-15,
+    pass 37; F37-74).** The project's conventions encode at least four rules that all need
+    to name a file's current owner — only the branch at the head of the merge queue
+    regenerates the lockfile freely, an authorized shared-file edit names its order, the
+    approved branch merges first, SERIALISE's "the authorization names the merge order".
+    Viberr had nowhere to put that fact. `blockedBy` was the only ordering primitive and it
+    means "do not START until done", which is far too strong: the statement actually wanted
+    is "both may proceed, this one owns `pnpm-lock.yaml` until it lands". So it lived in
+    prose inside task texts, and every agent re-derived it every run.
+    The absence cost two decision packets in one evening. SHOP-19 merged the Makefile
+    fragment layout while SHOP-5 still carried the pre-refactor monolith — entirely
+    predictable, nobody holding it. And SHOP-11 was made to WAIT on two tasks when sequence
+    was meant, drifting twelve commits behind, conflicting, refusing a push, and spending a
+    human decision that could not take effect.
+    The owner's alternatives were an ordered merge queue and doing nothing. The owner took
+    LEASES, which answer the sharper question: not "who is next" but "who owns this file
+    right now", and that one is checkable at delivery.
+    A lease is some path globs, the one task holding them, and why. Two wildcards only —
+    `*` within a segment, `**` across them and covering the directory itself — because a
+    surprising match on a shared file is worse than a missing feature. Read in three places
+    and enforced in one: `get_project` carries them, every run's canonical anchor names what
+    the run may NOT touch (high in the block, because a run that learns this after editing
+    has already done the thing the lease exists to stop), and the PUSH refuses — ruling 144's
+    own seam, the moment the change would become published history and the last at which
+    refusing is free. An unmeasurable diff refuses nothing and says so, keeping ruling 144's
+    distinction that `null` is "history could not answer", never "nothing changed".
+    Refused at authoring: a lease naming a task the project does not have (a refusal nobody
+    could act on), and two leases over one glob (list order would decide the owner, which is
+    the one question a lease answers).
+    (`file-leases.ts`, `project-file.schema.ts`, `settings-actions.server.ts`,
+    `push-workspace.server.ts`, `task-actions.server.ts`, `controller-toolkit.server.ts`.)
+
+246. **A refusal names the real limit, and says whether the door it points at is open
+    (2026-09-15, pass 37; F37-75).** Found by asking the controller to ATTEMPT four things it
+    cannot do and report the refusals verbatim, rather than reason about them from its tool
+    list.
+    `readStoreDoc` judged TYPE before EXISTENCE, so a path the store had never held was
+    refused for its file extension. The controller asked for `make/stack.mk` — a file in the
+    git repository, which that reader has no view of — and was told Viberr "only opens text
+    documents". It dutifully retried the same path as `.md` and was told the file "no longer
+    exists", which claims it once did. Two refusals, two causes that were not the reason, and
+    the real limit stated by neither. Existence is judged first now, and the miss says what
+    the reader IS: the org knowledge-base and skill store, not a git repository, with GitHub
+    and an agent on a task with a checkout named as the ways to read a repo file. The
+    editor's own type guard is unchanged for a file that IS there.
+    `move_task` into the terminal stage pointed at the task page and stopped, so a person
+    sent there on a task still waiting for a reviewer followed a correct pointer to a control
+    that would refuse them. It now carries `acceptanceRefusalFor`'s own sentence when one
+    stands — the same gate the task page shows — so the reply names the door AND says whether
+    it is open.
+    Recorded and deliberately NOT fixed: a tool that does not exist emits no refusal at all,
+    so asking the controller to resolve a packet or force-accept produces silence rather than
+    a pointer. The controller proposed refusing stubs. Leaving it: a stub is a tool that
+    exists to deny, and the honest answer to "can you do X" is the model saying no, which it
+    did. Revisit if a controller is ever seen improvising around the silence.
+    (`store-files.server.ts`, `controller-ops-mcp.server.ts`, `controller-toolkit.server.ts`.)
+
+247. **Ruling 245(b): a lease whose HOLDER is finished holds nothing (2026-09-15, pass 37;
+    F37-76).** Ruling 245 shipped with `FileLease.taskKey` documented as "released when it
+    reaches a terminal stage" and NOTHING implementing it. The controller read that contract,
+    believed it, and wrote it into the first real lease's own reason — "Lease releases when
+    SHOP-11 merges". SHOP-11 then merged, and the lease stood: `pnpm-lock.yaml` owned by a
+    completed task, refusing SHOP-5's delivery in the name of work that had already landed,
+    with two records promising the opposite. A comment claiming a mechanism nobody built is
+    the defect this pass has found more often than any other, and ruling 245's own finding
+    note had called a stale lease "its own stale-record problem" in the same breath.
+    Resolved at READ time (`activeFileLeases`), not swept on completion, for ruling 131(e)'s
+    reason: a sweep is a hook some completion path eventually misses, while a resolution
+    converges however the holder finished — accepted, force-accepted, archived, or edited on
+    disk. A holder that no longer EXISTS is spent too: it can neither deliver the file nor
+    release the lease, so binding on it would fence the path off forever in the name of a task
+    nobody can open. Every gate reads through the resolver: the push, and the canonical
+    anchor that tells a run what it may not touch.
+    The stored row stays until someone clears it, which is honest — the declaration was made
+    and is now spent — and `staleFileLeases` names exactly those so a surface can offer to
+    tidy them rather than leaving a person to notice.
+    (`file-leases.server.ts`, `push-workspace.server.ts`, `specialist-run.server.ts`.)
+
+248. **A run that could not read the work judges nothing (2026-09-15, pass 37; F37-77).**
+    Live on SHOP-5 the Code Reviewer's checkout failed to provision. Viberr told it so in
+    the prompt, in viberr's own words, and ordered it to quote them verbatim: *"The workspace
+    has NO checkout, and this is a server-side FAILURE, not something you can fix."* It did
+    exactly that, returned an envelope with `verdict: null` and wrote "No content verdict
+    recorded" in its summary. Viberr recorded `request_changes` against the revision, because
+    the prose fallback matched the word "failure" inside the sentence viberr itself composed.
+    Delete that one word and the classifier returns null; it was the entire verdict. The
+    fabricated objection was the second in a row from that reviewer, so ruling 237's counter
+    raised a review-deadlock packet asking a person to choose between interrogating a reviewer
+    that never judged, forcing acceptance past a verdict that did not exist, and another round
+    of rework. The operator read the reviewer's own report, said so on the task, and could not
+    withdraw a packet the policy engine had raised.
+    Two gates, because the incident had two causes. A run whose workspace could not be
+    provisioned records NO verdict at all, envelope or prose: the fact is stamped on the run
+    row (`no_checkout`) rather than kept in the completion closure, for `outcome_key`'s reason
+    — the closure dies with the process, and a recovered run would be re-classified. And the
+    prose fallback is a fallback for SILENCE, not an override of an answer: an agent that
+    filled the envelope, left the verdict empty and asked a QUESTION has said which of the two
+    it was doing. The no-verdict note already read a question as "a legitimate no-verdict
+    outcome" (pass 24, C-4); the classifier is its sibling and never learned it, which is this
+    pass's most-found shape. The note itself now names the real condition, because "re-run the
+    review" is bad advice for something a re-run reproduces.
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `run-store.server.ts`,
+    `sqlite.server.ts`, `0001_baseline.sql`.)
+
+249. **A checkout failure names the cause it knows, not one it guessed (2026-09-15, pass 37;
+    F37-78).** `cloneFailureSentence` had two credential states, and the specialist checkout
+    has three cases. A SUPPORTING run is cloned from the delivering checkout ALREADY ON DISK,
+    and the project token is fetched only in the arm after it — so a failure in the local arm
+    reported `hadCredential: false`, and viberr announced *"No GitHub credential is attached
+    to this project, so the clone ran anonymously"* about a project holding a working one
+    (`pat_esbY7-6IenWI`, health `connected`). The operator believed it and wrote "anonymous
+    clone, no GitHub credential attached to this project" onto SHOP-5.
+    That sentence exists, in its own doc comment, "to stop the failure being re-narrated
+    downstream as something it was not… by asking for a credential that already exists". It
+    did the exact thing it was written to prevent. The third state, `not_involved`, says the
+    true thing: this step never reached GitHub, so no credential was involved either way —
+    and the prompt's "do not ask for credentials" clause now fires for it too, because that
+    guess is a false lead in both directions.
+    (`git-clone-auth.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
+
+250. **A live controller turn says what it is doing (2026-09-15, pass 37; F37-79).** A turn
+    measured on this board ran 201 seconds over 11 turns for $4.11, and the conversation
+    showed `Controller is working...` and nothing else for all of it. The same page rendered
+    `Working` and `mcp__viberr_controller__get_task · {"taskKey":"SHOP-31","events":2}` in the
+    live-run panel below. The fact was already computed, already on the run row and already
+    streaming to that page; it simply never reached the place the person was waiting. The dock
+    is worse: it follows a person onto every page and carries no run panel, so there the step
+    had nowhere to appear at all. `ConversationTurnState` carries `phase` and `step`, and both
+    surfaces render them on the row that says it is working. `phase` is null while it is the
+    generic "Working", because the sentence beside it already says that, and one line only:
+    the step is a hint the adapter refreshes several times a minute, and a wrapping tool
+    payload would shove the conversation around under the reader.
+    (`controller-run.server.ts`, `turn-step.tsx`, `controller-page.tsx`, `controller-dock.tsx`.)
+
+251. **The human-decision boundary stays, and stops being a dead end (2026-09-15, pass 37;
+    F37-80; the owner's call).** Ruling 88 keeps merge, acceptance, force-accept, packet
+    resolution and the terminal move off the controller's tool surface. That line is right and
+    it was unnavigable. Live, a person told the controller "I want to lean on you to finish
+    this clone rather than clicking through task pages myself" and got, twice: "Resolving it is
+    yours on the task page - I have no tool for packet resolution", and "I tried to withdraw
+    it; it was raised by the policy engine, so only you can close it." Both true, neither
+    actionable. Nothing let the controller even SEE what was waiting: `get_task` shows one
+    task's packet, and only to someone who already suspected that task.
+    Asked whether to let the controller answer packets, the owner said no, and said to make it
+    navigable instead: a model between a person and the product's one explicit request to them
+    defeats the point of asking. So `list_decisions` reads the whole inbox - open packets with
+    every option spelled out and numbered, pending recommendations, completions ready to
+    accept - and hands over `answerAt`, the link that opens the control. It decides nothing,
+    and `list_` is the only verb it is allowed.
+    It reads through `decisionsRequiring`, the same source the home page's "N decisions waiting
+    on you" counts, so the controller and the page can never answer this question differently -
+    which is the entire reason to read rather than re-derive. Org-admin reach is reported
+    separately and never folded into the count: reach is not a personal inbox, and telling
+    someone it is would be false. The open-packet refusal on `run_agent_on_task` now names the
+    tool and the page, because a refusal that names no way out is the defect this pass keeps
+    finding.
+    (`controller-toolkit.server.ts`, `decisions.server.ts`.)
+
+252. **A comment that tags an agent says so, whoever wrote it (2026-09-15, pass 37; F37-81).**
+    Ruling 214 gave the operator this sentence after it put a completeness question to
+    "@Code Reviewer" in a comment, no reviewer ever read it, and the stranded backstop then
+    paused a task five others were waiting behind. The reasoning was never operator-specific:
+    a comment writes a timeline line and starts nothing, whoever writes it. It was applied to
+    one writer.
+    The CONTROLLER had the same hazard, none of the disclosure, and the worst blast radius,
+    because it is the surface a person drives a board from. Live on SHOP-26 it wrote
+    "@operator @platform-architect The funded amendment now exists as a task", then "Two
+    standing facts for the implementation run when this task is released", and closed with
+    nothing but "Posted by the controller for Arda". Its own tool text promised "@mentions
+    notify people" - true of people, silent for agents. And the asymmetry is sharp: the SAME
+    words typed by that person on the task page DO reach the agent, because `commentToAgent`
+    resolves the mention and starts a run. Typed by the controller on their behalf they reach
+    nobody. A mid-run agent tagging another agent had it too, at the same seam.
+    The disclosure now lives beside the resolver and both writers call it, so the wording
+    cannot drift; `postAgentComment` stamps it, which covers the controller and every agent at
+    once. `@operator` stays excluded exactly as in ruling 214: several writes in a controller
+    turn wake the operator on their own, so claiming nothing was sent to it could be the false
+    half of an honest sentence. The controller's tool text now says plainly that an agent
+    mention reaches nobody and names `run_agent_on_task`.
+    (`agent-reply.server.ts`, `agent-toolkit.server.ts`, `operator-actions.server.ts`,
+    `controller-toolkit.server.ts`.)
+
+253. **A knowledge base that arrived HALF says so, on the same channel as one that arrived
+    not at all (2026-09-15, pass 37; F37-82).** Measured on the live board: the controller
+    wrote three standing corrections into the project's rulings knowledge base, and the very
+    next operator run received the document clipped MID-SENTENCE — "Every workflow run on
+    every open pull request fails in about thr" — losing the other two rules entirely. The
+    marker said "this doc was clipped" and named nothing, and because the KB had delivered
+    SOME text it returned no `unresolved` row at all, so the run-input disclosure a human
+    reads (P19-G11) reported every grant as arrived.
+    Two halves of one rule, applied to one case each. `unresolved` existed so "the run's own
+    prompt names what it did not get", and it fired only from the delivered-NOTHING branch;
+    the marker counted docs and never named them, and chose ONE sentence, so a run that got
+    half a rule and lost two more docs was told about the two and never that the rule it did
+    read stops mid-sentence. Both now name the documents, both halves are said together, and
+    a partial delivery returns the same structured row a total miss does.
+    The exposure is structural rather than accidental: ruling 239 appends the project's
+    rulings KB LAST so it never displaces a profile's own grants, which makes it the first
+    thing starved on exactly the agents that hold the most grants — the operator among them.
+    The budget stays where it is; what changes is that nobody has to guess what fell out of
+    it. "Attached resources that did NOT reach this run" became "did NOT FULLY reach", because
+    a heading that is true of every row is worth more than a heading that was true when only
+    total misses could appear under it.
+    (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`.)
+
+254. **A packet option that names a model says WHEN that was true (2026-09-15, pass 37;
+    F37-83).** F36-8 put the model into the `retry_other_backend` option because the old text
+    said only "re-run the same agent there and continue", the retry ran on `sonnet`, and
+    nothing on the task named it. The sentence is composed when the option is AUTHORED and
+    frozen into the packet, and a packet can sit open for hours.
+    Live: four of these packets were open on SHOP-5, SHOP-13, SHOP-27 and SHOP-32 because
+    Codex refused every run on a spent usage window. The owner then moved all eight specialist
+    deployments from `gpt-5.6-luna` to `opus`, and each packet went on offering "re-run the
+    same agent there on `sonnet` (Claude's default: the profile's `gpt-5.6-luna` is a Codex
+    model)" — two claims, both false by then — to the person choosing between the options. The
+    controller caught it while briefing, said it could not verify the resolution rule from
+    where it sat, and asked for the first run's record to be checked. The record says `claude`
+    and `opus` on all four: the behaviour was right and only the promise was wrong.
+    The option pins a BACKEND, never a model, so the sentence now names today's model as
+    today's ("on `opus` as deployed right now") and states the rule that survives any edit:
+    if the deployment changes before you answer, the run follows the deployment. Re-deriving
+    it at render time was the alternative and was rejected — `mapPacket` is a pure mapping with
+    no project read, and plumbing one in to restate a fact the run already resolves correctly
+    buys less than a sentence that is true whenever it is read.
+    (`run-failure-remedy.server.ts`.)
+
+255. **One creation is one instant (2026-09-15, pass 37; F37-84).** A task created with a
+    `blockedBy` list writes two timeline events: the wait note, stamped with the frontmatter's
+    own `now`, and the ownership `assign`, which read the clock again. In a newest-first file
+    the note is unshifted above the assign, so when the second clock read landed a millisecond
+    later the file claimed an order its own stamps contradicted. Measured on SHOP-27: note at
+    `19:27:52.529Z` above assign at `19:27:52.530Z`. Small, and viberr ships a diagnostic that
+    scans every timeline for exactly this and duly reported the board as carrying an inversion,
+    so the cost is a person investigating an instrument that is working.
+    Every event one write puts on a timeline now carries that write's instant. Equal stamps are
+    the honest relation between two events of one act, and they leave the file's order as the
+    deliberate arrangement rather than a race between two `new Date()` calls.
+    The first version of the canary PASSED with the defect restored, because both clock reads
+    landed in the same millisecond on a fast machine — a test that could only fail on a slow
+    one. `CreateTaskInput.now` is a test seam for that reason, in the shape the reset-label
+    clock already uses.
+    (`task-actions.server.ts`.)
+
+256. **The controller reads what the gates read, and an anchor belongs to the project it was
+    anchored in (2026-09-15, pass 37; F37-85, F37-86).** Two defects in tools this pass shipped
+    the same day, both found by an adversarial audit of the controller and both the shape the
+    pass keeps confirming.
+    (a) Ruling 247 made a lease whose holder has finished bind nobody, and wired that into the
+    push and the canonical anchor — not into `get_project`, the read the CONTROLLER uses, which
+    kept handing back `fm.fileLeases` raw while its own description promised "which task owns
+    which shared paths **until it merges**". The controller said the consequence out loud
+    before anyone looked for it: *"I cannot tell you from a direct read whether SHOP-11's lease
+    had already self-released when it merged. I should have read `fileLeases` first."* It had;
+    the read was lying. `get_project` now resolves them, and names the spent rows separately so
+    they can be cleared rather than silently dropped.
+    (b) `list_decisions` took the conversation's anchored task and applied it to whatever
+    project it was asked about. Anchored to a task in one project and asked about another, it
+    filtered that other project's decisions by a key it does not contain and answered "Nothing
+    is waiting on a person here" — a false all-clear from the one tool whose entire job is to
+    say what is waiting, and a worse failure than the silence ruling 251 was written to end.
+    The anchor now applies only when the project asked about IS the project it was anchored in.
+    (`controller-toolkit.server.ts`.)
+
+257. **The controller writes on a person's behalf, and nothing may delete what a person wrote
+    (2026-09-15, pass 37; F37-87, F37-88).** Two ways the product destroyed the owner's own
+    words, found by an adversarial audit of the controller and both verified against the live
+    board.
+    (a) Timeline compaction folds any comment whose actor is not `human`. Ruling 99(b)
+    deliberately made a controller write a DIFFERENT actor kind — the person is the authority,
+    the controller is the instrument — and every other seam honours that: the audit row reads
+    "arda@viberr.dev · via controller", the comment is signed "Posted by the controller for
+    Arda", `auditActorDisplay` renders "Arda (via the controller)". Compaction was the one place
+    that read `kind` as a proxy for AUTHORSHIP, so the instrument disclosure turned a person's
+    publication into machine noise. Measured before the fix: **19 controller comments in the
+    audit log, 8 left in the files.** Eleven of the owner's own comments gone from canonical
+    `task.md`, from `task_events`, and from the audit payload — including the two on SHOP-5 that
+    explained a `pnpm-lock.yaml` lease the board was still enforcing. And the line that replaced
+    them reads "human comments are never compacted", so a reader who noticed the gap would not
+    look. A controller comment is now never folded, and the marker's promise is true of
+    everything it covers.
+    (b) `save_knowledge_base`'s `doc` passed `overwrite: true` unconditionally, so
+    `writeStoreDoc`'s own collision guard could never fire and its `replaced` flag was thrown
+    away: the reply read "Document conventions.md written" whether it created a file or
+    destroyed one. The HUMAN door for the same write refuses the collision unless a replace
+    confirmation says otherwise, and its toast says "replaced" or "saved" from that same flag
+    (P14-UI-59, which exists because this exact bug was fixed on the UI). It is also the ONLY
+    way into an existing KB, since a no-id create is refused once the folder has a metadata row
+    — so the project's rulings KB, injected into every run on the project, was one call away
+    from erasure by a model writing the obvious filename, which the tool's own example gives as
+    `conventions.md`. A collision is now refused without `replace: true`, the reply says which
+    happened and how many bytes a replace destroyed, `list_knowledge_bases` names the documents
+    rather than counting them, and `read_knowledge_base_doc` lets a write carry the text forward
+    instead of guessing at it. A tool that can only destroy blind is not a tool a model should
+    be handed.
+    (`timeline-compaction.server.ts`, `controller-toolkit.server.ts`.)
+
+258. **A chain that stopped because the work is FINISHED did not get stuck (2026-09-15, pass 37;
+    F37-89).** The operator react loop opens a "Work stalled: pick a recovery path" packet when
+    it hits the depth cap or sees a verbatim repeat. It never asked whether the task had
+    arrived. Live on SHOP-32: the Integration Verifier approved `f5470f05` at 05:14:33, both
+    required verdicts sat on the current head and validation read `healthy` — and two seconds
+    later the cap opened that packet, offering redirect the specialist, send it back for another
+    attempt, or hold for runtime debugging. Every option re-dispatches work that had passed.
+    Then the packet blocked the acceptance it should have been waiting for: the task page read
+    "Not acceptable yet. This task has an open blocked decision. Resolve the operator's packet
+    before accepting it." The doors left to a person were to redo finished work, or to
+    force-accept past a review gate that had PASSED — recording a bypass of a review that
+    happened and succeeded.
+    The packet's own sentence already claimed the test this adds: "hit its depth cap WITHOUT
+    REACHING A BOUNDARY". Acceptable at the review boundary IS reaching one. The gate is asked
+    before any packet exists, so it answers about the work rather than about the packet the
+    branch is deciding not to open, and the skip is logged so a quiet chain is still traceable.
+    (`task-actions.server.ts`.)
+
+259. **A composer keeps the words until the server takes them (2026-09-15, pass 37; F37-90).**
+    Both controller composers called `setText("")` synchronously after `fetcher.submit`, as if
+    the POST always succeeds, and nothing anywhere held the string — the fetcher's `formData` is
+    never read back, and neither result handler restored it. So an expired CSRF token, which is
+    refused BEFORE the controller engine runs and therefore leaves the text in no transcript at
+    all, destroyed what the person had written. So did a 404 on a scope not open to them, and
+    any transport failure. The only account of it was a toast that unmounts itself after
+    2,600 ms. Four of the five longest messages on the live board are 1,800 to 2,200 characters,
+    typed into a two-row textarea.
+    Cleared on SUCCESS now, and only when the box still holds exactly what went out, so somebody
+    who started typing the next message while this one was in flight keeps it. On a failure the
+    text and the Send button both stay, which is the difference between a retry and a rewrite.
+    (`controller-dock.tsx`, `controller-page.tsx`.)
+
+260. **A chain's own creator gets its controls (2026-09-15, pass 37; F37-91).** The goal-redirect
+    gate is a DISJUNCTION — `requireGoalAuthority` allows the creator, or anyone with
+    `run-agents`. The Goals panel computed ONE boolean from the viewer's project role and handed
+    it to every card, so the creator arm was never evaluated. A contributor may create a chain
+    (`create-task` is admin/maintainer/contributor) and is not `run-agents`
+    (admin/maintainer), so the person who started a chain was shown it with no Pause, Resume,
+    Cancel, Retry or Skip — and this panel is the only goal-redirect UI in the product. The
+    repository's own toolkit test already proved the server says yes: a contributor creates
+    goal-1 and then pauses it, both `[done]`. `createdBy` was on every row the loader already
+    handed the component. The server stays the authority; the page has stopped refusing on its
+    behalf.
+    (`controller-page.tsx`, `controller-query.server.ts`.)
+
+261. **A project's rulings are never the thing that gets starved (2026-09-15, pass 37; the
+    owner's call on F37-82's residue).** Ruling 239 appends the project's rulings knowledge base
+    AFTER a profile's own grants so it never displaces them. The cost of that ordering is that
+    the rules a project made binding on every run are structurally the FIRST thing trimmed, on
+    exactly the agents carrying the most grants — the operator, which writes the packets and
+    scoping notes every specialist works from, and the controller. It bit live: two project KBs
+    totalling 27,928 characters against a 24,000 budget, and the operator received
+    `standing-corrections.md` cut off mid-word at "fails in about thr", losing two of its three
+    rules. Ruling 253 made that visible; visible was not enough, because the controller kept
+    writing settled rules there, which is what it was asked to do, and was back at ~23,350
+    within hours.
+    Asked which side should give, the owner reserved a floor. `RULINGS_KB_FLOOR` (8,000) is a
+    CEILING ON WHAT THE OTHERS MAY TAKE, not an allocation the rulings must spend: the reserve
+    is the smaller of the floor and what the rulings actually need, so a short rulings KB costs
+    a profile's grants nothing, and a long one still takes everything the grants left over.
+    One read each; ruling 239's emission order is unchanged, so the rules are read after the
+    craft they qualify. What trims on a heavily-granted agent is now the optional craft rather
+    than the binding rules, and ruling 253 still names whatever fell out.
+    (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
+    `controller-run.server.ts`, `operator-actions.server.ts`.)
+
+    *(Corrected the same day by self-review, before any of it ran in anger: ruling 241's drain
+    lived only in `announceRelease`, and `setTaskDependencies` computes `releasing` as
+    `next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized`. The operator is
+    excluded on purpose — `announceRelease` re-invokes the operator and a write from inside
+    its own turn would loop — so the operator correcting a wait with `set_dependencies`, which
+    is the door ruling 240 names as the remedy for a wrong hold, cleared the hold without
+    draining. The question would have sat on the task forever under a wait panel still
+    promising it would be put when the wait cleared, on a task with nothing left to clear:
+    F37-68's own shape inside F37-68's own fix. The drain now runs wherever the hold GOES
+    AWAY, not only where a release is ANNOUNCED. The dispatch guard was corrected in the same
+    pass: it asked whether a queue entry EXISTS, which answers yes for one somebody else left
+    behind, and now carries the flag saying whether THIS resolution queued.)*
+
+    **SUPERSEDED BY RULING 283** (2026-09-15, hours later): there is no character budget to
+    reserve a floor out of any more. A knowledge base arrives as an INDEX the run pulls
+    documents from, and `RULINGS_KB_FLOOR` is gone from the source. The floor is kept here
+    because it is the measurement that produced 283 — the floor was itself eaten by the
+    alphabetically-first document inside the very knowledge base it was protecting, which is
+    what ruled out a second allocation rule.
+
+262. **A disclosure names everyone it left out, not the one a run would have gone to
+    (2026-09-15, pass 37; F37-92).** Ruling 252 stamped a comment that tagged an agent with the
+    sentence saying nothing was sent to it, and computed that stamp with
+    `resolveMentionedAgent` — a resolver written to pick exactly ONE target, because
+    `commentToAgent` needs one agent to start. Answering the dispatch question does not answer
+    the disclosure question, and reused as a completeness report it under-reported four ways.
+    The first one is ruling 252's own motivating example. Live on SHOP-26 the controller wrote
+    `@operator @platform-architect The funded amendment now exists as a task`; `@operator` is
+    precedence 1, the resolver returned the operator, the stamp was skipped for being the
+    operator (ruling 214, correctly — a controller turn's other writes wake the operator on
+    their own), and @platform-architect was never mentioned. Ruling 252 shipped without fixing
+    the comment it was written for. The other three: a second specialist tagged beside the
+    first is dropped by `specialists.find`; `@claude` on a board running two claude profiles
+    resolves to null (B-AG2) and so is silent; and `@agent` on a task with no delivering
+    engagement resolves to null and is silent. The last two are exactly the cases a HUMAN
+    writing the same words gets a policy-engine note for, so the person was told and the
+    controller doing it on their behalf was not.
+    `unreachedAgents` asks the disclosure question instead: which handles are in this text, and
+    which of them will read nothing. It needs no backend, session or model, so it is a pure
+    read of the project file and the task frontmatter, and it returns all of them — every named
+    specialist in the order the TEXT tags them, the ambiguous backend handle with the profiles
+    it covers, and `@agent` with no deliverer. `unreachedAgentNote` takes that report and
+    returns null when there is nothing to say, so the ordinary status comment that tagged only
+    people still grows no paragraph. Handles are stamped through `agentMentionHandle`
+    (P14-RT-12), so the sentence telling somebody to run an agent names a handle that routes.
+    (`agent-reply.server.ts`, `agent-toolkit.server.ts`, `operator-actions.server.ts`.)
+
+263. **A dispatch that returns is not a run that started (2026-09-15, pass 37; F37-93).**
+    `startRun` has three endings — launched, parked behind the concurrent-run cap, or refused
+    before any process could exist — and returned the same `{ runId }` for all three. So every
+    door that reports a dispatch to a person either guessed or said "started" and was wrong
+    twice. Measured in the repository's own fixture: `run_agent_on_task` on a task whose owner
+    has no Codex account answered `[done] Developer run started on VIB-142 (codex)`, under a
+    tool description promising it "reports honestly whether a run started", for a dispatch that
+    ruling 127 had already turned into a run ROW recording the refusal and nothing else. The
+    person reading the controller was told work had begun; the board showed an errored run.
+    The task page's toast said the same thing, and promised a stream of agent logs a refused
+    run never produces; the operator's own `run_agent` reply said "and started its run", which
+    is what the operator then plans its next move on.
+    `startRun` now returns `{ runId, outcome, refusal }`, `admitRun` returns whether it
+    launched or parked, and `StartAgentRunResult` carries both up. The three doors each say
+    which of the three happened, in their own voice, and a refusal quotes the run's OWN
+    sentence rather than restating it.
+    The same tool skipped R21-9's law on the way in. Every sibling dispatch door records the
+    human's directive on the timeline — the task page appends `@<agent> <prompt>` as the
+    dispatcher's own comment after the start, the operator writes one before it — so a
+    directive that reaches an agent is something supervision can read. Through the controller
+    the directive went into the agent's prompt and NOWHERE else: a run appeared on the task for
+    no stated reason, and the person who asked for it could not see what they had asked for.
+    It now writes the same comment, authored by the PERSON whose words they are (the controller
+    relayed them, it did not write them) and addressed to the agent, after the start so a
+    dispatch that throws leaves no orphan hand-off.
+    (`run-service.server.ts`, `specialist-run.server.ts`, `controller-toolkit.server.ts`,
+    `operator-actions.server.ts`, `task-actions.server.ts`, `project.task.tsx`.)
+
+264. **A deploy reports the delivery posture it stored, not the one it used to store
+    (2026-09-15, pass 37; F37-94).** `deploy_agent` ended every successful reply with
+    "Delivery starts withheld; open it up with update_agent_deployment when the profile should
+    write the repo", and its own description promised the same. That was true when a library
+    deploy wrote the conservative grant set. Ruling 156 made the deploy COPY the template's own
+    grants, and the shipped `developer` template carries `execute-code-or-write-repo: direct` —
+    so on this instance a deploy of it produced a profile that can push to the repo the moment
+    it is engaged, under a sentence saying the opposite, read by the one person whose next
+    decision (engage it as the deliverer, or not) turns on the answer.
+    The reply is now read off the grants that were actually written, through `deliveryWithheld`
+    — the same predicate `codexRepoWriteAdvisory` and the run's own gate use, so the sentence
+    cannot drift from what the run is held to. One derivation, one answer.
+    (`agent-profile-actions.server.ts`, `specialist-tool-policy.ts`,
+    `controller-toolkit.server.ts`.)
+
+265. **A tool whose only argument nothing can produce is not a tool (2026-09-15, pass 37;
+    F37-95).** `read_run_log` takes a `runId`, and its description could only say where to find
+    one: "e.g. from a task's console" — a screen. Neither the controller's toolkit nor
+    `viberr_ops` enumerated a run id anywhere, so the one tool for reading why a run failed
+    was reachable only by a person reading an id off a page and typing it into a conversation.
+    `instance_health` makes the gap visible without closing it: it reports `runs: {cap, lane,
+    live, queued}` — four integers, correctly carrying no name, because that reading is what
+    the UNAUTHENTICATED health probe already serves. Live, the controller read `live: 5`, could
+    not learn which five, and reconstructed them by reading every task on the board and
+    matching `waiting: "agent"` against timeline events.
+    `list_runs` closes it in `viberr_ops`, beside the tool that needed it. With no arguments it
+    answers every LIVE run (running, or queued behind the cap) the asker can see, newest first;
+    with `projectSlug` + `taskKey` it answers that task's runs with the finished ones included,
+    which is how the log of a run that already failed is reached. The live listing DROPS a row
+    in a project the asker cannot see rather than refusing — a refusal would disclose that the
+    run exists — while the task arm refuses out loud, because that listing was asked for a
+    named project. It stays read-only, and it audits like every other diagnostics read.
+    (`controller-ops-mcp.server.ts`, `run-store.server.ts`.)
+
+266. **A controller asked to judge a delivery can read it (owner, 2026-09-15, pass 37;
+    F37-96).** Asked to say, per PR, whether it would merge or send back three open pull
+    requests, the controller had `get_task`'s `pr.paths.changed` — a filename list — the commit
+    subjects, and `changed: {files: 4, add: 1528, del: 67}`. No tool in either of its servers
+    returned a diff, a hunk, or a file at a revision. It answered honestly and the answer was
+    the finding: "my judgement on PR #32 rests on a four-line filename list and a reviewer
+    verdict that had not arrived. I can commission a review; I cannot check one." A +1528/-67
+    rewrite of a process supervisor is a lot of surface for a false-green to hide in.
+    `read_pull_request` reads one task's PR: every changed file with its status, its counts and
+    its hunks. Membership gated, read-only, one endpoint.
+    Asked which shape it should take, the owner chose the NARROW one. Specialists already hold
+    `read-github-api`, a GET-only passthrough scoped to their task's repo, and mounting that
+    would have been fewer lines — but the controller runs with an END USER's permissions across
+    every project they can see, so it gets one named question with no caller-supplied path to
+    scope rather than an API surface to reason about. It is also the only controller tool that
+    reads outside the instance on somebody's behalf (the request is made by the server with the
+    project's sealed credential), so it audits, like the diagnostics reads E32-5 covered.
+    Bounded in the two ways a model cannot see: a patch withheld for the byte budget still
+    LISTS its file, flagged, because dropping the row reads as a PR that does not touch it; and
+    a file GitHub sent no patch for (binary, or too large for it to diff) is distinguished from
+    a budget cut, because those two call for different next moves. `path` reads one file's
+    hunks in full, including by its pre-rename name.
+    (`pr-diff.server.ts`, `controller-toolkit.server.ts`.)
+
+267. **A settled chain's name can still be corrected (2026-09-15, pass 37; F37-97, amends
+    ruling 192).** Ruling 192 gave `update_goal` a `rename` op "while it is not terminal",
+    matching every other op in that switch. Every other op there changes what the chain will
+    DO, and a completed or cancelled chain will do nothing, so the guard is right for all of
+    them; `rename` changes only what the chain is CALLED. And a chain is named before the work
+    is understood, which is the whole reason ruling 192 added the op.
+    So the guard closed the window on ruling 192's own motivating example. `goal-2` still read
+    "Identity and Catalog services" after catalog moved to goal-6, and `goal-4` read
+    "Storefront and Admin surfaces" after admin moved to goal-7; both completed while the
+    controller believed, wrongly, that goals could not be renamed at all. By the time it tried,
+    the answer was `[error] Goal goal-2 is completed`, and those two titles are now permanently
+    wrong on a record people read to learn what was built. Refusing an edit that changes no
+    state, starts nothing and loses no history bought nothing.
+    `rename` is now the one op a settled chain takes. It lands in the chain's history like any
+    other, so nothing is rewritten silently, and on a settled chain it says the whole truth
+    about its reach: every link task keeps the old name in its header, and nothing new will
+    ever carry the new one.
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
+268. **A guard calibrated to the wrong quantity is not a guard (2026-09-15, pass 37; F37-98
+    and F37-100, both raised by the controller against rulings 265 and 266 on the day they
+    shipped).** Ruling 266 bounded `read_pull_request` at 120,000 characters of patch, counted
+    RAW. The reply is JSON: every newline in a diff becomes `\n` and every quote `\"`, so a
+    hunk roughly doubles on the way out. The controller called it on PR #32 — four files — and
+    the guard never fired: `patchesWithheldForSize` false, every `patchOmitted` null, and an
+    83,196-byte reply. What caught it was the Agent SDK's own offload, which wrote the result
+    to a file under the run's home and instructed the model to read it in chunks. The
+    controller has no filesystem tool: "the safety net handed me a path I cannot open, and the
+    instructions attached to it are addressed to an agent with a Read tool that I am not."
+    The budget is now spent in ENCODED characters — the quantity that actually reaches the
+    ceiling — and the default is 40,000, set UNDER the measured trip point rather than above
+    it, because the caller cannot recover from the other side's truncation and can always ask
+    for another page.
+    The same report named the loop that made the failure unavoidable: `path` reads one file,
+    and the only way to learn the file names from this tool was to ask for every patch — the
+    call most likely to be too big. `patches: false` now lists every changed file with its
+    counts and no hunks, so the first call on a PR of unknown size is always safe, and it is
+    flagged `not-requested` rather than `budget`, because a caller who asked for no patches
+    had nothing cut from under them.
+    And `list_runs` reported a controller turn as `projectSlug: ""` with
+    `taskKey: "cnv_…"`. Ruling 99 stores a conversation id in the runs table's `task_key`
+    because that table has one identity column; a storage shape is not a reply shape, and
+    "anything filtering by task has to know to discard that row". A controller row now names
+    its `conversationId` and carries no task.
+    (`pr-diff.server.ts`, `controller-toolkit.server.ts`, `controller-ops-mcp.server.ts`.)
+
+269. **An option that instructs the reader is not a decision they can take (2026-09-15, pass
+    37; F37-101).** Rulings 164, 224, 230 and 237 each found the same defect in a different
+    verb: an operator writes a `custom` option describing an action, the person confirms it,
+    and the resolution does nothing but re-run the operator. The verb missing this time is the
+    most common structural remedy a multi-service board has — "this belongs in its own task".
+    Live on SHOP-26 the operator found `stockBatchResponseSchema` published on main with no
+    producer, and the project's own conventions say a reported gap has to end up owned by a
+    live task rather than sitting as a footnote. Its recommended option's text ends, verbatim:
+    "You create the task — no option here can." It was right: sixteen kinds, and not one makes
+    a task.
+    `create_task` carries `newTask` (title, goal, and optionally what the NEW task waits on and
+    its labels) and creates it through `createTask` — the same door the board and both toolkits
+    use — under the RESOLVING person's own authority. Every possible resolver already holds
+    `create-task` (packet resolution is admin, maintainer, or the task's human owner, and
+    owning a task is itself contributor-and-above), so the kind needs no new tier.
+    Three things it deliberately does NOT do. It does not amend this task's goal: ruling 189
+    binds a decision to the contract, and this decision is about work that is not this task —
+    the exclusion list gets its fifth entry for the reason the other four are there. It does
+    not touch this task's state at all (the one case in the switch whose mutation is a
+    deliberate no-op) and its event is a note rather than a transition, because nothing here
+    moved. And the join between the two is written on both records: the new key lands on this
+    task's timeline the moment it exists, so "which task came out of that decision" is
+    answerable without reading a goal chain.
+    The card shows what is about to be created — the new task's title and goal, on the selected
+    option — so the person confirms the task rather than the sentence describing it.
+    (`task-file.schema.ts`, `operator-actions.server.ts`, `operator-toolkit.server.ts`,
+    `task-actions.server.ts`, `decision-packet.tsx`.)
+
+270. **A kind whose payload the authoring tool does not carry is not offerable (2026-09-15,
+    pass 37; F37-102, amends rulings 224 and 230).** Ruling 230 gave `block_on_dependencies` a
+    `blockedBy` payload and two authoring refusals — one for an option that names nothing to
+    wait on, one for the field on any other kind. Ruling 224 did the same for
+    `wait_for_window` and `dueAt`. Neither added the field to `open_decision_packet`, the tool
+    that AUTHORS options. So an operator could name `block_on_dependencies`, receive "A
+    block_on_dependencies option needs the work it waits on", and have no way to say it — and
+    nothing else in the product writes that kind either, so ruling 230's whole mechanism was
+    unreachable from the moment it shipped. Its own words were that the mechanism "simply could
+    not be reached from the surface where the decision is actually made"; it stayed that way.
+    Both rulings' tests called `operatorOpenPacket` directly, which accepts both fields. The
+    writer was proven and the DOOR was never opened. The canary for this one goes through the
+    tool handler, which is the surface an operator actually authors from.
+    The lesson is the pass's third sighting of one shape: ruling 252's stamp skipped the live
+    comment that motivated it (262), ruling 192's terminal guard closed the window on the goal
+    it was written for (267), and here two rulings shipped payloads their only author could not
+    send. A ruling is not finished when the mechanism works; it is finished when the surface
+    that needs it can reach it.
+    (`operator-toolkit.server.ts`.)
+
+271. **The briefing includes the answer the card always offers (2026-09-15, pass 37;
+    F37-103).** A decision card offers one more choice than the packet stores: a free-text
+    directive in the person's own words, composed with the fixed options as their last choice
+    (`customOffered = canResolve`). It is not a stored option, so `list_decisions` — whose
+    whole stated purpose is "so you can brief the person fully" — listed the fixed choices and
+    nothing else, and the one answer that is ALWAYS available was the one it never mentioned.
+    What that cost, live: the controller was asked to have SHOP-26's decision re-raised,
+    because its recommended option's text was "You create the task — no option here can" and
+    ruling 269 had since made that possible. It found, correctly, that only the operator can
+    open a packet, that a manual operator run is refused while one is open (ruling 76/141), and
+    that it holds no withdraw of its own. From those three true facts it concluded a deadlock
+    and reported it in exactly these words: "there is no way to say 'these options are wrong'
+    except to pick one of them." There was, and it is the choice sitting directly under the
+    ones it could read: the free-text answer resolves the packet with the person's directive
+    and puts that directive to the operator, which is precisely "these options are wrong, put
+    the decision again". Three facts, each true, and a false conclusion — because the briefing
+    tool omitted the fourth.
+    `list_decisions` now carries `ownWords` on every packet, numbered where the card puts it
+    (`options.length + 1`, so a person reading the briefing finds the same choice), named apart
+    from `options` because it is not a `PacketOptionKind` and must never be relayed as one, and
+    the card's own test pins that position from the other side.
+    The refusals themselves are not loosened. An open packet SHOULD freeze its options — the
+    person answering must not have the question changed under them — and a manual operator run
+    with a packet open is the paid no-op ruling 76 refused for good reason. Nothing was
+    deadlocked; the map was incomplete.
+    (`controller-toolkit.server.ts`, `task-detail-components.test.tsx`.)
+
+272. **Two sentences that were wrong about what survives (2026-09-15, pass 37; F37-104 and
+    F37-105).** The Interrupt dialog on the task page said: "The agent stops where it is.
+    Anything it has not already committed or delivered is lost." Nothing is lost. An interrupt
+    kills the PROCESS and never touches the task's workspace — `cloneRepo`'s reuse path hands
+    the next run that same checkout and fast-forwards only a tree that is clean on the default
+    branch, so a dirty one is left exactly as the interrupted agent left it. The sentence was
+    wrong in the direction that costs most: it tells a person that stopping a stuck run
+    destroys work, discouraging the one action the product wants them to be able to take, and
+    it tells whoever runs next that the tree is clean when a half-written edit is sitting in
+    it. It now says what actually happens — the turn is lost, the edits are not, and the next
+    run continues from that tree rather than a fresh one. (The controller's own Interrupt
+    dialog was already right: a controller turn has no workspace, and it says so.)
+    And ruling 263 put R21-9's law — a directive that reaches an agent goes on the record — on
+    `run_agent_on_task`'s SPECIALIST arm, and returned above it for the operator. So the one
+    dispatch door still sending a human's words off the record was the operator half of the
+    door ruling 263 had just fixed. The controller caught it three minutes after the deploy, by
+    counting the task's own comments across two reads: "the three new events are the PR push,
+    the operator's own comment to the Backend Engineer, and the run start. My directive is
+    nowhere in the +1." The task page's Run-operator control has written that comment since
+    2026-08-21 for exactly the stated reason; the controller's arm now writes the same one,
+    only when the run was not refused, so a refused dispatch strands no hand-off. Every other
+    refusal value is named rather than falling through to "[done] Operator run started" —
+    the sentence ruling 263 exists to stop.
+    (`task-detail-page.tsx`, `controller-toolkit.server.ts`.)
+
+273. **A recovery option is not offered onto a backend already known to be spent (2026-09-15,
+    pass 37; F37-106).** `operatorOpenPacket` refuses to author an `accept_completion` away
+    from the acceptance boundary, a `resolve_remote_collision` with no collision recorded, and
+    a `discard_branch` on a revision that has left the workspace — all for one reason, in the
+    first guard's own words: "the human is left confirming a card that cannot succeed". The
+    kind whose entire job is RECOVERY had no such guard.
+    Live on SHOP-37: Codex was recorded exhausted for the task owner's credential at 03:26
+    ("try again at Sep 19th, 2026 9:36 AM"); the operator recommended "Re-run the Integration
+    Verifier on the Codex backend" six hours later; a person confirmed it; and the answer was
+    "The retry could not start: Held: Codex is out of quota until Sep 19 · 09:36 UTC;
+    Integration Verifier's run is scheduled for then." Nothing lied and nothing was lost — that
+    hold is ruling 152(c) working exactly as designed — but a decision was spent on a four-day
+    park that was knowable at the moment the option was written, and the task sat behind it.
+    Authoring now reads `backendDispatchHold` for the credential the run would bill (the task's
+    owner, ruling 127) and refuses a `retry_other_backend` onto a held backend, naming the hold
+    and the two kinds that fit instead: the other backend, or `wait_for_window` with the reopen
+    instant — which ruling 224 built for precisely this fact and which resumes by itself. The
+    hold is per (backend, credential), so a retry onto the backend that CAN run is untouched.
+    (`operator-actions.server.ts`.)
+
+274. **A deleted project releases its conversations (2026-09-15, pass 37; F37-107).**
+    `deleteProject` already clears three app-owned tables that no foreign key cascades and no
+    rebuild touches — notifications, the credential binding, the cached repo probe — each for a
+    named consequence. `controller_conversations` is the fourth, and it kept its binding.
+    The orphan is not merely stale. A conversation's `project_slug` is what the controller
+    toolkit's `slugOf()` DEFAULTS to, so a conversation bound to a deleted slug acts on
+    whatever comes back under it — and a slug comes back the ordinary way, because slugs are
+    derived from names: create a project called the same thing and the old conversation
+    silently becomes a conversation about the NEW board. Its transcript, about work that has
+    nothing to do with that project, is now listed under it, and every unqualified board tool
+    in it aims at a project its author never chose. The repo-health row had the same shape and
+    the same fix note already on it ("a new project reusing the slug inherited the dead one's
+    probe verdict"); the conversation was the one nobody came back for.
+    RELEASED, not deleted. The transcript is the record of what somebody asked and what the
+    controller did, and this product does not destroy records. The conversation becomes
+    instance-scoped — a real scope, with both columns cleared because a task key without a
+    project is not one — and carries a message naming the deleted project, so its author is not
+    left wondering where the board went.
+    (`controller-conversations.server.ts`, `settings-actions.server.ts`.)
+
+275. **A prompt does not contradict itself in silence (2026-09-15, pass 37; F37-108, extends
+    ruling 191).** Ruling 191 put the measured shell inventory into every specialist run,
+    operator run and controller turn, unasked, because "an inventory you must know to ask for
+    is not a fact the planner has". It says what the host lacks. It did not say "and the role
+    description above plans around three of them".
+    Found by the controller, reading personas it had twice reported it could not read. Four of
+    this instance's own agent templates carry a map of a machine that does not exist. The
+    Infrastructure Engineer — running two tasks at that moment — is told "you own the shared
+    surfaces: the workspace scaffolding, the Docker Compose stack", that "`make up` is your
+    headline deliverable and it must be honest: from a clean checkout it builds, starts
+    Postgres and Redis", and to "cache the pnpm store and Turborepo outputs". The Frontend
+    Engineer reports "the results of your component and Playwright runs". A persona is the
+    system prompt: read first, weighted heaviest, and written with more authority than a
+    measurement further down. A contradiction inside one prompt is resolved by the MODEL, and
+    the product had no opinion about which half was true.
+    The inventory now names them: "Your own role description above mentions `make`, `docker` —
+    not on this host. Where it plans around those, this measurement is the one that is true
+    today." Derived, never asserted — the scan runs over the labels the probe actually
+    measured, so it can only ever name a tool that was measured and found absent, and it says
+    nothing when the prose is clean. Word boundaries, because "curly braces" is not a plan
+    against `curl`; and `go` is excluded outright, because it is an ordinary English word and
+    "go and read the tests" is not a Go toolchain.
+    This does not rewrite anyone's persona. Whoever wrote it owns it; the product's job is to
+    stop a run acting on the wrong half of its own prompt without noticing.
+    (`toolchain.server.ts`, `specialist-run.server.ts`.)
+
+276. **A null that means two things says which (2026-09-15, pass 37; F37-109).** `prRefSchema`
+    keeps "never read" (the `checks` key is absent) apart from "read, and GitHub reported no
+    check runs" (`total: 0`), and its own comment says so: "an absent key is 'never read',
+    which is not the same as 'no checks'". `mapPrChecks` collapses both to null — correctly, a
+    display has nothing to draw either way — and every reader inherited that collapse,
+    including the one for whom the difference IS the answer. Live, the controller read
+    `checks: null` on all thirty pull requests, could not tell which, reconstructed review
+    state from task timelines instead, and learned only from prose an operator had written into
+    a task goal that this account's GitHub Actions are billing-blocked. "No CI is configured"
+    and "we have not looked" ask for opposite next moves.
+    `prChecksRead` is the one derivation, carried beside the render rather than folded into it,
+    so the GitHub page's "no pill for zero checks" is byte-for-byte unchanged and
+    `get_github_state` gains `checksRead`. Its description now also says what `review` is: it
+    is GITHUB's review verdict, null on a repository where humans do not review there, and
+    Viberr's own reviewer verdicts live on the task — which is the second thing the controller
+    had to work out for itself.
+    (`task.server.ts`, `github-query.server.ts`, `controller-toolkit.server.ts`.)
+
+277. **A drift report that compares one field answers about one field (2026-09-15, pass 37;
+    F37-110).** Ruling 156 built copy-drift detection for GRANTS, because that was the finding
+    it was written for. The same deployment record also snapshots the PERSONA — the run's whole
+    system prompt — and the `desc` the operator selects agents by, and nothing compared either.
+    P13-AP-07 had already settled the snapshot model and warned a human editing a copy that "a
+    later org-level rename, stage change, resource change or persona fix never reaches it";
+    what was missing was anyone saying so at the moment of the fix.
+    The cost, measured within the hour it shipped: the controller found four agent templates
+    whose personas describe a machine this host is not — the Infrastructure Engineer, running
+    two tasks at that moment, was told it owns "the Docker Compose stack" — rewrote all four,
+    checked the drift report afterwards, read `copiesDiffering: []`, and reported the job done.
+    Every one of those four runs still mounted the old text. A report that answers "no copy
+    differs" about a copy that differs is worse than no report, because it is believed.
+    `listTemplateTextDrift` is the second comparison, kept apart from the first because the two
+    facts are independent and the case that misled is exactly "grants in step, text behind":
+    `list_global_agents` gains `copiesWithOlderText` naming the project AND the field, and every
+    arm of `save_global_agent`'s reply carries the sentence — including the "every project copy
+    carries the template's grants" arm, which is the one that was read as all-clear. An ABSENT
+    key on a copy is not drift: it means the copy snapshotted nothing and resolves the template
+    live. The remedy named is the true one (P13-AP-07's): propagate rewrites grants only, so a
+    copy's text is fixed on that project's own Agents page.
+    (`template-propagation.server.ts`, `gagents.server.ts`, `controller-toolkit.server.ts`.)
+
+278. **An MCP pointed inside Viberr's own store is named as what it is (owner, 2026-09-15,
+    pass 37; F37-111).** Found by the controller, asked to use the instance tools nobody had
+    used. `kb-conventions` spawned `@modelcontextprotocol/server-filesystem` pointed at
+    `/data/kb/shopify-clone-conventions` — the project's rulings knowledge base, which
+    `set_project_rulings_kb` injects into every run on that board. Fourteen tools, nothing
+    withheld, granted to three profiles, two of them reviewers. A reviewer could rewrite the
+    rules it is judged against, and the operator reads those rules on every turn.
+    The sharp half is that ruling 176's marking would NOT have closed it. Marked write tools
+    are withheld only from a run that WITHHOLDS `execute-code-or-write-repo`, and every
+    realistic holder of a filesystem MCP has it — a reviewer needs it to run a test suite. The
+    guard is shaped for a read-only profile that barely exists on a working board, so the
+    protection existed and did not reach the case.
+    Asked what the product should do, the owner chose the warning over a new gate kind. Viberr
+    owns that directory, so it can see the overlap and say so, wherever a person configures or
+    reads the server: `save_mcp_server`'s reply at the moment the path is chosen, and every
+    `list_mcp_servers` row. The sentence names the path, what an agent can do with it, and
+    that the write-tool marking is not the answer — because an admin who thinks it is will
+    mark the tools and stop looking. It withholds nothing on its own; the decision stays a
+    person's.
+    Two corrections rode along, from the same report. `list_mcp_servers` reported `up` — a
+    CACHED verdict — without `lastCheckedAt` or `warmingSince`, so a server the controller
+    probed and found healthy in 10.3s was listed red with no way to judge the reading's age
+    (R19-18's whole point is that a first-run install is not a broken server). Both are now on
+    the row, and the description says to probe rather than relay a stale red.
+    (`resources.server.ts`, `controller-toolkit.server.ts`.)
+
+279. **A filter that matches nothing does not look like a quiet period (2026-09-15, pass 37;
+    F37-112).** `inspect_audit_log`'s headline said "filters (project, action PREFIX, actor,
+    time range)" and its `action` parameter said "Exact action id, e.g. task.created" — two
+    descriptions of one field, contradicting each other inside the same tool, and the behaviour
+    followed the stricter one. Live, the controller filtered `action: "task."` across 8,282
+    rows, received `total: 0` with no error, and wrote the finding itself: "a wrong filter is
+    indistinguishable from a quiet period."
+    The prefix is the useful reading and now the real one, through a separate `actionPrefix`
+    on the export filters so the CSV/JSON export's exact-match contract is untouched. The
+    wildcard is anchored at the end and the caller's own `%` and `_` are escaped, so a prefix
+    cannot become a pattern that matches the whole log.
+    Two more from the same report, both about an answer you cannot act on. An empty result
+    under an action filter now SAYS it matched nothing and points at the list; and every reply
+    carries `actions` — the vocabulary in that window with a count each. That was the other
+    half of the complaint: with no facets, "how many decisions happened" meant paging 8,282
+    rows at 200 a call, and the action ids were reachable only by already knowing them.
+    (`audit-export.server.ts`, `controller-toolkit.server.ts`.)
+
+280. **A toolkit sentence is not a product statement (2026-09-15, pass 37; F37-113).**
+    `deploy_agent`'s description said "No removal exists here." True of that toolkit and false
+    of the product: `deleteAgentProfile` removes a deployment from the project's Agents page,
+    and has since the agents surface existed. A sentence in a tool's own description is read as
+    a statement about what CAN be done, not about which door offers it — and it was believed.
+    Auditing this instance, the controller found two deployed profiles used by nothing, scoped
+    to stages this board does not have, and wrote: "deploy_agent has no inverse — its own
+    description says 'No removal exists here.' I cannot un-deploy them. The only lever is
+    neutering a live deployment, which is a workaround, not a fix." It was about to do the
+    workaround.
+    Ruling 85's rule, on a new surface: a refusal that lists only workarounds hides the fix.
+    The sentence now says which door removes a deployment, names the one profile that is never
+    removable, and says outright not to offer the neutering instead.
+    (`controller-toolkit.server.ts`.)
+
+    *(And one flake, in this repository's own suite, of exactly the kind SHOP-35 is fixing in
+    the clone: `controller-page.test.tsx` asserts an elapsed cell to the second against a
+    `startedAt` stamped once when the describe body evaluates — so every test that ran before
+    it spent part of that assertion's budget, and under a full suite the clock read 01:07
+    against a window written for 01:05. Stamped per render instead. A gate that cries wolf
+    trains everyone to discount red, which is SHOP-35's own premise.)*
+
+281. **An agent can check a task it is told about (owner, 2026-09-15, pass 37; F37-114).** A
+    specialist could read its REPOSITORY — `github_read` returns pull requests, reviews, checks
+    and file contents — and not the BOARD it works on. Its whole Viberr toolkit was
+    `post_comment`, `ask_human` and `report_outcome`. So a task key it was told about, in a
+    document or a directive or another agent's report, could not be checked.
+    The cost, measured on SHOP-26. `services/cart/DESIGN.md:458` claimed "SHOP-39 was created
+    for this gap on 2026-09-15". Two agents read it, correctly refused to trust a document's
+    claim about the board — "a task named in a document is not a task until someone checks",
+    which is precisely the discipline the project's conventions ask for — and had no way to
+    check. So the mismatch was reported as open, the operator re-raised a decision that had
+    already been answered, and its recommended option carried a `create_task` whose title was
+    SHOP-39's word for word. Nothing on the card could have told the person confirming it.
+    `read_board` answers one key or lists the project: title, stage, readiness, what it waits
+    on, whether it is archived, and (for one task) its goal. THIS project only, read-only, and
+    no field a member could not read on the task page. Archived tasks are included, because
+    "SHOP-8 was archived" is a real answer to "does SHOP-8 exist" and an agent told about a
+    retired key must be able to learn that rather than read it as never having existed. A key
+    that is not on the board answers plainly that the claim was wrong.
+    It carries no capability grant — every one of these facts is already in the agent's own
+    prompt for its OWN task, so the gap was never permission, only the tasks beside it. It is
+    mounted only where a Viberr server is mounted anyway: a profile holding no collaboration
+    grant at all still gets nothing, which is the gate U11 pinned.
+    (`agent-toolkit.server.ts`, `board-read.server.ts`.)
+
+282. **The actor that plans across the board can read it (2026-09-15, pass 37; F37-115,
+    extends 281).** The operator's `get_task` takes NO arguments: it answers the task it is
+    coordinating and only that one. Nothing else in its toolkit listed a task. So the one actor
+    that writes `blockedBy` through `set_dependencies`, that decides ordering, and that is the
+    ONLY author of a `create_task` option (ruling 269) planned across a board it could not read.
+    Two duplicates in one hour, from that single cause. On SHOP-26 it proposed creating
+    "Inventory: serve the published stock batch contract on GET /stock" — SHOP-39's title, word
+    for word, created by its OWN earlier packet on the same task. On SHOP-27 it proposed
+    "Gateway routes for orders, cart and inventory" while SHOP-29, "Gateway routes for
+    inventory, cart and checkout", already stood and already waited on SHOP-27. Both times a
+    person was one confirm away from a second task for work that had an owner, and nothing on
+    either card could have said so. Ruling 269 handed a new verb to the actor least able to
+    check whether it was needed.
+    `read_board` is the same tool ruling 281 gave a specialist, on the same implementation, so
+    "is SHOP-39 real" has one answer whoever asks. `get_task` stays the deep read of the task
+    being coordinated; this is the shallow read of everything beside it.
+    It joins the read-only FLOOR an undeployed operator keeps (A4): seeing a board it holds no
+    authority over takes nothing away, and reading has never been the thing withheld there. It
+    is a read, so it is not part of the governed vocabulary the Claude toolkit and the Codex
+    plan enum must agree on — like `get_task` and `read_default_branch_file` before it.
+    (`board-read.server.ts`, `operator-toolkit.server.ts`.)
+
+283. **A knowledge base arrives as an INDEX, and the run reads the documents it wants
+    (owner, 2026-09-15, pass 37; F37-118, supersedes 261).** Injecting the text was an
+    allocation problem with no good answer. A KB's documents were served in ALPHABETICAL
+    order out of a shared 24,000-character budget, first-come-first-served, so whichever
+    document sorted first took everything it could and every document behind it got
+    nothing. Measured live against this instance's store with the production reader:
+    `conventions.md` (20,632 chars) took all 15,817 chars the budget had left, cut itself
+    off mid-sentence inside its own §9 — "The gateway is a stronger boundary than a
+    service, no" — and left ZERO for `published-history.md` (185 chars) and
+    `standing-corrections.md` (281 chars). SHOP-27's own goal says "See
+    published-history.md in the project's rulings knowledge base"; no run on that board
+    could ever receive it, and the deliverer on SHOP-37 reported exactly that from inside
+    the run.
+    THE COST, corrected by the controller the hour this shipped, because the first account
+    of it — the two small documents — was the visible half and the cheap half. Both of
+    them turned out to be tombstones: "Merged into conventions.md §2 on 2026-09-15 to fit
+    the shared KB budget. Nothing was lost." They held no rules, and SHOP-27's dangling
+    pointer was harmless because §2 sits near the top and arrived by the surviving route.
+    What was actually lost was the OTHER end — the tail of the document that won. Past the
+    cut sat the project's definition of DONE ("deliverable at the declared paths and
+    nothing outside them; lint, typecheck and tests pass for the touched workspaces; new
+    behaviour has tests that fail without it"), "close a finding by mutation, not by the
+    deliverer's summary", and the whole of §10: one task = one branch = one PR, keep the
+    diff inside the declared path set, raise conflicts at DESIGN. No run on this board had
+    ever read any of it. SHOP-42 sat blocked that same afternoon because a delivery left
+    the suite red — the first clause of a definition of Done no deliverer could read. A
+    budget does not drop the least important thing; it drops whatever is last, and rules
+    accrete at the end of a document.
+    Ruling 261 had already raised a floor for this, because `standing-corrections.md` was
+    arriving cut off mid-word — and the floor was then eaten by the alphabetically-first
+    document inside the very knowledge base it was protecting. It is the pass's own pattern
+    a third time: a rule applied at one level and not the one below it. A second allocation
+    rule would have had the same shape, so there is no allocation now.
+    The prompt carries each KB's index — every document, its size, its heading outline and
+    the folder's path on disk — which costs a few hundred characters whatever the folder
+    weighs. `read_knowledge_doc` returns one document whole, and is mounted for the
+    specialist, the operator and the controller alike; a run may read the knowledge bases
+    attached to IT and no others, because the index it was given names those and only those.
+    The specialist toolkit mounts it on its OWN gate, not U11's collaboration gate: an agent
+    granted a knowledge base and nothing else still has to be able to read it. A Codex run
+    mounts no in-process Viberr tools at all, which is why the index prints the folder path
+    and the note names both channels.
+    Three things follow. The org-settings row that has always read "N docs · agents read the
+    live folder" is true again — it was counting documents a run could not receive. A rulings
+    knowledge base can grow without silently pushing its own rules out of every prompt. And
+    a run that ignores its index is visibly choosing not to read, where a run starved by a
+    budget could not tell it had been.
+    (`kb-injection.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
+    `controller-run.server.ts`, and the three toolkits.)
+
+284. **A typed directive answers the packet; it does not amend the contract (owner,
+    2026-09-15, pass 37; F37-119, amends 189).** Ruling 189 welded a free-text answer into
+    the task's goal "because a person wrote it". One text box takes two different things,
+    though: a decision about the work, and a word to the operator about how it should work.
+    Live within the hour the rule was re-read: SHOP-27's packet was answered with a directive
+    that was mostly "you now have `read_board` — call it before you offer a create_task
+    option", and that sentence is now part of the contract of the orders service, where every
+    future run on it re-anchors. The very accumulation ruling 189 exists to stop, arriving
+    through the one door it held open.
+    The line is drawn by CHANNEL now. Choosing a structured option is a decision and amends
+    the goal, with `PROCESS_ONLY_OPTION_KINDS` still excluding the recovery choices. Typing
+    free text is conversation and never does. Nothing is lost: the directive is written to the
+    timeline verbatim, where the person and the operator both read it, and it reaches the
+    operator's next turn in its own `note` field on the re-queue — which is the channel it was
+    always actually for. A free-text answer that IS meant to bind the work is an edit to the
+    goal, which is its own action and says so. (`task-actions.server.ts`.)
+
+285. **The coordinator can read a report it was handed half of (2026-09-15, pass 37;
+    F37-120, same shape as 283).** An agent's report reaches the operator's prompt cut at
+    4,000 characters and `get_task`'s `recentTimeline` cuts every entry at 1,500, and no
+    tool in the operator's toolkit returned one whole. Both cuts were HONEST — the prompt
+    header said "first 4,000 chars" — and honesty about a dead end is still a dead end.
+    Live on SHOP-42 the operator raised a decision packet to a person carrying its own
+    disclosure: "The reviewer's report reached me truncated at `### Item 3 —`, so I have
+    not read its cross-service audit conclusion; the full text is on the timeline." Every
+    part of that was true, including that the text was somewhere it could not go. What it
+    could not read was the half where that reviewer put the work nobody asked it for — two
+    unowned defects on `main`, a red `services/orders` suite and a stale `.env.example` —
+    and neither would have reached a person if the reviewer had not also written them into
+    the summary that did fit.
+    The cut stays: a prompt carrying every 20,000-character report in full is the problem
+    the cut exists to prevent. What is new is somewhere to go. `recentTimeline` rows now
+    carry the `occurredAt` stamp and, when cut, a line naming the tool; `read_timeline_entry`
+    takes that stamp and returns the entry whole. The clipped prompt block says the same in
+    its own words, and says WHEN it matters: before summarising a report for a person,
+    before raising a packet about one, and before concluding a report did not mention
+    something.
+    It joins the read-only FLOOR an undeployed operator keeps (A4), more plainly than
+    `read_board` did: the task page already shows any member the whole comment this
+    returns, so withholding it from the coordinator withheld it from nobody else. Like the
+    other reads it is not part of the governed vocabulary the Claude toolkit and the Codex
+    plan enum must agree on.
+    This is ruling 283's shape one level over — a budget with no pull channel — found the
+    same afternoon, in the operator's own words, in a packet raised for a different reason.
+    (`board-read.server.ts`, `operator-toolkit.server.ts`, `operator-actions.server.ts`,
+    `operator-run.server.ts`.)
+
+286. **An index needs teeth when the documents behind it BIND (owner, 2026-09-15, pass 37;
+    F37-121, completes 283).** Ruling 283 made every knowledge base a pull, and the
+    controller named the regression that creates within the hour, with evidence from the
+    board it coordinates: "Under injection, reading is not a decision. Under
+    index-and-fetch it becomes one, and it competes with the agent's own turns — which on
+    this board are scarce and frequently interrupted." And the structural half, which is
+    the part that decided it: "An optional craft KB is consulted when an agent recognises
+    a need. A rulings KB binds decisions the agent does not know it is making. Nobody
+    fetches the never-rebase rule while about to rebase — at that moment they feel
+    certain, not uncertain. The failure mode is not laziness, it is the absence of a
+    trigger." Its evidence that these rules are load-bearing rather than decorative:
+    SHOP-42's Code Reviewer cited §1, §4 and §7 by number in its verdict, and the operator
+    cited §3 as its reason for raising two defects as TASKS rather than footnotes — and
+    every one of those citations came from a run where the text was still injected.
+    So a project's RULINGS knowledge base (ruling 239) gets three things a profile's
+    optional craft knowledge base does not. Its index says **BINDING on this run**, as an
+    obligation rather than an invitation, on the index itself where it is read with the
+    document list. A note names the TRIGGERS rather than only the contents — before
+    choosing a branch or merge strategy, before widening a path set, before reporting a
+    check as passed, before calling work done or judging someone else's — because the
+    index says what exists and never says when a rule applies. And the run is asked to
+    state in its report which rulings sections it relied on, and to say plainly if it
+    opened none: a delivery contradicting a rule its author never read should be something
+    a reviewer can SEE rather than rediscover.
+    Machinery, not a directive — also the controller's call, and its reason is the pass's
+    own lesson: a rule living in the coordinator's directive covers only the tasks whose
+    directives it writes, and misses reviewer engagements, verifier runs, chain-created
+    tasks and every project it is not in, which makes it "a deferral recorded in a
+    document with no mechanism behind it".
+    What this deliberately is NOT is a gate refusing delivery until the document is
+    fetched. The controller ruled that out and was right: "that is the serialisation
+    answer — it works today and rots, and it taxes every run that legitimately did not
+    need it."
+    The obligation ships only when a rulings KB actually RESOLVED. A run told its project's
+    rules bind it, on a project that names none or whose folder is gone, is handed an
+    obligation it cannot discharge and sent looking for a document that reached it in no
+    form at all. (`kb-injection.server.ts` and the three runtimes.)
+
+287. **A created task can be connected in the direction the work runs (2026-09-15, pass 37;
+    F37-122, completes 269).** Ruling 269 let a decision CREATE a task and say what the NEW
+    task waits on. But a task is normally created to UNBLOCK something, so the dependency
+    points the other way — from the existing work to the new task — and that direction could
+    not be expressed by anything in the product except a person editing the other task's
+    page, or the controller, which the operator cannot call.
+    Live on SHOP-28, in the operator's own packet prose: "Two things it asks for are edits to
+    OTHER tasks, which no packet option can perform — they need you on those task pages: add
+    the new amendment key to SHOP-41's waits… I will set SHOP-28's own wait myself as soon as
+    the amendment task has a key." Every part of that was right. A person had routed three
+    frozen contract shapes to a narrow amendment task; the operator created it and then
+    handed back a chore. Nothing on SHOP-41 said an edit was owed, so a forgotten one would
+    have left SHOP-41 free to start building against contracts that did not exist — the exact
+    divergence the amendment task was created to prevent. The ordering was settled, recorded,
+    and delivered into a human's memory.
+    `newTask.blocks` is the reverse edge: existing task keys that get the new key written into
+    their OWN `blockedBy` when the person confirms. It goes through `setTaskDependencies`, so
+    the cycle check, the archived-task refusal, the projection and the release engine are the
+    ones every other caller gets; it is authored by the operator and written only because a
+    person confirmed the option, which is the same authority `create_task` already runs under.
+    Three honesty properties, each of which had to be built rather than assumed. The
+    provenance note lands on the task whose wait GREW — a wait appearing with no reason on a
+    task nobody was looking at reads as Viberr deciding something on its own. A key that
+    cannot be written (missing, archived, cyclic) is reported on the deciding task WITH the
+    remedy, and never undoes the decision or the task it already produced: one unwritable
+    edge is not a reason to discard work a person confirmed. And the option card names the
+    tasks that will start waiting, BEFORE the confirm — it is the one consequence of a
+    `create_task` decision a person cannot see anywhere else on the page they are confirming
+    from. (`task-file.schema.ts`, `task-actions.server.ts`, `operator-toolkit.server.ts`,
+    `operator-actions.server.ts`, `decision-packet.tsx`.)
+
+288. **A goal too long to carry is refused, never cut (2026-09-15, pass 37; F37-123,
+    amends 138).** `goalDraft` and `newTask.goal` are the two texts a packet option can
+    turn into a task's GOAL, and a goal is the contract every future run on that task
+    re-anchors on (ruling 189). Both were a bare `.slice(0, GOAL_DRAFT_MAX_CHARS)`, and
+    the test that pinned it said so in its own title: "caps an over-long goalDraft …
+    instead of refusing it".
+    Live on SHOP-29 this afternoon. A person's decision asked the operator to correct an
+    acceptance criterion and to write the REASONING into it — explicitly so that a later
+    reader would not read the bare rule as sloppiness and undo it. The draft came back
+    4,000 characters long to the character, ending "…a 403 there would be", and the
+    sentence carrying the reason was gone. The editor rendered it as ordinary text with
+    nothing marking a cut; only counting the characters revealed it. By then the
+    operator's own words were unrecoverable, because the slice ran at WRITE time and what
+    it removed was never stored anywhere. A person had to finish the sentence by hand,
+    guessing at what had been meant.
+    This is the write-side member of the family ruling 283 and ruling 285 close on the
+    read side, and it is the worst of the three: those clipped what a run could SEE, this
+    one clipped what a task permanently SAYS. So it is refused at authoring time instead —
+    ruling 139's rule applied to prose. The refusal names the field, both numbers, and
+    that nothing was written, and it says what to cut first: narrative and worked examples
+    before a deliverable or an acceptance criterion, with the overflow belonging in the
+    packet's own text or a comment, neither of which has a limit. The operator can shorten
+    and re-offer inside the same turn; a truncated contract cannot be repaired by anyone
+    who does not already know what it said.
+    Ruling 138's cap itself stands — an unbounded goal is its own problem. What changes is
+    what happens at the boundary, and a goal exactly AT the limit is accepted whole.
+    (`operator-actions.server.ts`.)
+
+289. **`read_board`'s excerpt says it is one (2026-09-15, pass 37; F37-124, completes 281).**
+    The board read handed back another task's goal as a bare `.slice(0,
+    BOARD_READ_GOAL_CHARS)`, so a long contract came back ending mid-word and read as the
+    whole of it. Found by the controller, which reported a goal arriving "cut off mid-word"
+    and — correctly — said it could not tell from where it sat whether the READ was
+    truncating or the stored text was damaged. The stored text was intact; the reader was
+    the one clipping, and it said nothing.
+    Worth recording plainly because of where it was: in the reader ruling 281 shipped
+    THIS MORNING, written by the same author who spent the afternoon closing exactly this
+    shape on a knowledge base (283), an agent report (285) and a goal draft (288). The
+    habit of capping a field and moving on is not a thing other people do.
+    The cap stays — this is the SHALLOW read of the tasks beside your own, and a second
+    task's whole contract competing with the reader's own prompt is what it prevents. What
+    it now says is how long the goal really is, that what was returned is its opening, and
+    where the whole of it lives: the task's own page. No "read the rest" tool is named,
+    because there deliberately is not one. A goal that FITS carries no marker at all — a
+    whole contract claiming to be an excerpt sends a reader looking for text that does not
+    exist. (`board-read.server.ts`.)
+
+290. **A card that counts exceptions names them (2026-09-15, pass 37; F37-125, ruling 253
+    for a dashboard).** Three cards on `/insights` report a count of EXCEPTIONS —
+    delivered work that cannot be traced, active work with no definite next actor, records
+    past their project's readability guardrail — and each named none of them. Live this
+    pass, on a real board: "98% · Branch & PR traceability · 41 of 42 delivered tasks carry
+    branch + PR". The whole point of that number is to find work nobody can trace, and it
+    would not say which task. The query already had the rows; it counted them and threw the
+    identities away.
+    Ruling 253 settled this exact shape for a knowledge base — "the NAMES, not just the
+    counts. An agent cannot ask for a rule it cannot name, and a human debugging 'why did
+    the run ignore the standing correction' had nothing to read." A dashboard is that rule
+    with a person reading it, and a metric a person cannot act on is a metric that only
+    grades them.
+    Each of the three now carries its exceptions by key, linked to the task page, capped at
+    {@link INSIGHTS_NAMED_EXCEPTIONS} so one card cannot become a wall on a drifted
+    instance — and past the cap the card says how many more, so a capped list never reads
+    as the whole set. A card that names everything it counts shows no remainder.
+    (`insights-query.server.ts`, `insights-page.tsx`.)
+
+
+191. **Everyone who plans against the shell is told what the shell contains (owner,
+    2026-09-13, pass 37; F37-13).** Pass 37's host had `node`, `npm` and `git` and
+    nothing else. The controller chose a pnpm + turbo monorepo with a root `Makefile`
+    and a Docker Compose stack, wrote that into the project's architecture knowledge
+    base ("`make up` must: build the workspace, start Postgres + Redis, run every
+    service's migrations…"), and chartered a REQUIRED reviewer whose pass opens "Cold
+    start. Clean checkout of the task branch, `make up`, everything healthy" and ends
+    "Report `approve` only when the stack came up cold". On that host the reviewer could
+    not return anything but `request_changes` — and it did, twice, on a document-only
+    task the Code Reviewer had already approved, after which the coordinator sent the
+    DELIVERER back to edit a document that was never the problem. Agents rediscovered the
+    same absences one at a time: 75 `command not found` lines in a single pass
+    (`pnpm`, `corepack`, `make`, `curl`). Viberr had measured the inventory since ruling
+    182 — G36-2 asked it for exactly this, "what an agent's shell would actually find
+    here" — but the reading covered five tools (node, npm, git, python3, go), omitted
+    every one the build contract was written around, and was reachable ONLY through the
+    controller's opt-in `instance_health`, which it never called. The agents whose shell
+    it is could not see it at all, and neither could the operator. So: the probe grows
+    `make`, `docker`, `pnpm`, `yarn` and `curl` — the ones a run reaches for first and
+    cannot install — and the reading goes into the system prompt of every specialist run,
+    every operator run and every controller turn, unasked. The advice half is not
+    decoration: `npx` genuinely rescues an npm-published tool and nothing rescues one the
+    operating system was meant to provide, so the two must not read alike, and the
+    paragraph closes by telling a reviewer that an unrun check is not a pass and is not
+    the deliverable's fault. BOTH halves of that advice are derived from the reading rather
+    than written down — a hardcoded pair of sentences lies twice over, once by promising
+    `npx` on a host with no npm, and once by naming an installed tool as its example of
+    something uninstallable, which is exactly what ruling 196 made of `make` and `curl` the
+    same day. An inventory you must know to ask for is not a fact the planner has.
+    (`toolchain.server.ts`, `specialist-run.server.ts`, `operator-run.server.ts`,
+    `controller-run.server.ts`.)
+
+192. **A retry rebuilds the work from the task that failed, not from the link's frozen
+    copy (owner, 2026-09-13, pass 37; F37-15, amends ruling 155).** Ruling 155 settles an
+    ACTIVE link's title and goal in the goal file the moment work starts — correctly: a
+    goal edit must not redirect work in flight. The TASK's title and goal are not settled
+    by anything: a decision packet (ruling 189), an operator's `set_goal`, or a person
+    rewrites them whenever the contract moves. So the two copies drift, and pass 37's
+    board drifted far: `goal-2` link 1 still said SHOP-2 owns `packages/contracts` and
+    publishes the identity schemas there, while SHOP-2's own goal — rewritten when the
+    controller gave that ownership to SHOP-9 — said it must not edit `packages/contracts`
+    at all. `retry_link` then rebuilt the task from the link, so the correction everyone
+    had been working to was dropped, silently, at the worst possible moment. A retry now
+    carries the failed task's own title and goal, with the chain header rebuilt rather
+    than stacked (the link count and the previous link's carrier have both moved on), and
+    the goal's timeline says when it did: a silent substitution is the defect in either
+    direction. A FIRST start is unchanged — there is nothing to carry. Two more arms on the
+    same drift: `getGoalView` — the DETAIL read a planner acts on, and `get_goal`'s payload —
+    carries `liveGoal`, the task's current goal, whenever it has moved past the declared text
+    (the declared text stays: it is what the chain declared and what the history means; only
+    the goal, because a task's TITLE is immutable and a `title` half would be a field nothing
+    can set). And a chain can now be RENAMED, title and description, while it is not terminal:
+    pass 37's `goal-2` still read "Identity and Catalog services" hours after catalog moved to
+    its own chain, and the only correction on offer was to cancel the chain and rebuild every
+    link. The rename says what it does not reach — link tasks created before it keep the old
+    name in their chain header, written at create time and never re-read.
+    (`goal-actions.server.ts`, `controller-toolkit.server.ts`.)
+
+    *(Corrected 2026-09-15 by ruling 267: "while it is not terminal" was symmetry with the
+    other ops, not a reason, and it left this ruling's own motivating example unfixable —
+    see 267.)*
+
+193. **A reviewer that cannot pass is a decision, not a defect (owner, 2026-09-13, pass 37;
+    F37-14).** The turn doctrine had exactly one answer to a request-changes: "the deliverer
+    owes NEW work — `run_agent` the delivering profile with that steer as its prompt." A
+    reviewer can request changes for a reason no revision can satisfy, and pass 37's did:
+    a required Integration Verifier chartered to bring a Docker stack up, on a host with
+    neither `make` nor Docker, reporting in its own words "an environment/repository-baseline
+    blocker, not a discovered document-scope defect". The coordinator followed the doctrine
+    and sent the deliverer back to rework a one-file document, round after round, past the
+    point where a second reviewer had already approved the same revision. Two things were
+    missing. The operator's snapshot showed only the CURRENT revision's verdicts, so every
+    round looked like the first — it now carries `consecutiveRequestChanges` per reviewer,
+    counting REVISIONS and not verdict rows (a reviewer re-run on the same revision has
+    objected once, and inflating that would read a retry as an escalation), reset by that
+    reviewer's first `approve`. And the doctrine gains the arm it lacked: at two or more,
+    ask whether the deliverable can satisfy the objection AT ALL, and when the reviewer
+    names something outside the work — a tool the shell inventory says is absent (ruling
+    191), a baseline the repository does not have, a decision nobody has made — say so in
+    one comment and `open_packet`, naming the three real exits: drop or replace the
+    required reviewer, accept past the gate, or fund the missing baseline as its own task.
+    (`operator-actions.server.ts`, `operator-run.server.ts`.)
+    **Reversed in part by ruling 204** (2026-09-13, the same pass): the escalation stands, but
+    its counter no longer keys on DISTINCT REVISIONS. In a deadlock the deliverer commits
+    nothing, so a revision count sits at one forever and the escalation this ruling exists for
+    never fires; a round is counted by the deliverer having RUN. Do not restore the
+    revision-counting or the test that defended it.
+
+194. **A retry that starts nothing says so (owner, 2026-09-13, pass 37; F37-16).**
+    `startLinkTask` declines silently when the chain is no longer active, and the reconcile
+    fired by the very archive that failed the link is fire-and-forget — so it lands in that
+    window as a matter of course. The redirect had already committed "Link N retried by X"
+    to the goal's timeline. The result was a record of a retry that created no task, over a
+    link still marked failed, with the creator never told; the sibling THROW arm had carried
+    exactly that correction since it was written, and the decline had no arm at all. A
+    declined retry now re-parks the chain to `attention`, notes the link ("The retry did not
+    start: the chain was redirected while it ran."), records the decline in the goal's
+    timeline naming what to do (retry it again), and notifies the creator. Found while
+    proving ruling 192, not by reading the code: the ruling-192 test could not get a retry to
+    produce a task until the archive hook was allowed to settle first.
+    (`goal-actions.server.ts`.)
+
+195. **A refusal always leaves `waiting` honest — the packet arm included (owner,
+    2026-09-13, pass 37; F37-17).** The open-packet refusal skipped its settle on a stated
+    invariant: "The packet already owns `waiting: "human"`, so there is no settle to do
+    here." It is not an invariant. A packet opened MID-WORK does not stop the machine
+    triggers — by design, ruling 17 and the `agent-reply` arm depend on that — so on SHOP-6
+    the operator kept coordinating after its architect asked "Lockfile ownership", moved the
+    task through review and back, and dispatched the deliverer again: `waiting: agent`. Then
+    the server restarted. Boot finalized that orphaned run and re-invoked the operator with
+    the `manual` trigger, straight into this refusal, which returned without settling. The
+    result was a task at `waiting: agent` with no run alive, every trigger refused ("Operator
+    not started · resolve the open decision to continue"), a decision nobody had been told
+    about, and ten downstream tasks held behind it — for 75 minutes, while the board said an
+    agent was working. The closed and blocked-by arms have always settled for exactly this
+    reason; this one does too. The call is a no-op unless the flag is `agent` with nothing
+    live, and with a packet open `clearWaitingToHuman` settles to `human`, which is the
+    packet's own owner.
+    (`operator-run.server.ts`.)
+
+196. **The image ships `make`, `curl` and a pinned `pnpm`; Docker stays out (owner,
+    2026-09-13, pass 37; answers F37-13's other half).** Ruling 191 stopped agents
+    rediscovering the toolchain one exit-127 at a time. This closes the part of the gap
+    that is cheap to close: the three a run reaches for first and cannot install for
+    itself. `pnpm` comes from npm, not corepack — Node unbundled corepack and pass 37
+    logged `corepack: command not found` beside the pnpm one — and it is ONE pinned
+    version; a repository pinning a different one in `packageManager` reaches it through
+    `npx pnpm@<version>`. Docker is deliberately absent and this ruling does not open that
+    door: an agent holding the daemon socket controls every container on the host, and
+    docker-in-docker is a posture change that needs its own pass with its own ruling. So a
+    Compose stack still cannot come up in this image, every run is told so by the shell
+    inventory, and a reviewer chartered to bring one up is a charter that needs rewriting
+    (ruling 193's arm is what surfaces that to a human rather than looping the deliverer).
+    The owner chose this over re-platforming the pass-37 clone onto npm workspaces.
+    (`Dockerfile`, pinned by `toolchain.server.test.ts`.)
+
+197. **A template's persona is readable, and the tool says which fields an omission keeps
+    (owner, 2026-09-13, pass 37; F37-18, completes F33-7).** F33-7 put the resource GRANTS
+    into `list_global_agents` for a stated reason — "`save_global_agent` rewrites every field
+    it is given and this was the only read of a template; the model had no way to see what an
+    edit was about to replace, and the controller (rightly) refused to edit blind" — and left
+    out the largest field of all. Two rulings later the same thing happened for the same
+    reason: the controller needed to correct three template summaries that advertised
+    Testcontainers, a Docker Compose stack and Playwright journeys on a host with none of
+    them — text the OPERATOR selects agents by — and refused, saying "`save_global_agent`
+    gives me no way to edit a summary without also supplying a persona, and I cannot read the
+    personas I'd be replacing." The writer was innocent: a blank persona has always kept the
+    stored one (`description: persona || existing.description`). The tool never said so, while
+    the same paragraph spelled the merge rule out for skills, mcps and kbs — so the one field
+    whose loss destroys an agent's whole system prompt was the one field left to inference, and
+    a careful caller correctly refused to guess. `list_global_agents` now returns the persona,
+    and both descriptions state the rule. Silence about a destructive default is not a neutral
+    omission: it is the difference between an edit and a refusal.
+    (`controller-toolkit.server.ts`.)
+
+198. **Boot recovery does not promise a turn it has already decided not to take (owner,
+    2026-09-13, pass 37; F37-19, the other door into ruling 195's defect).** The restart note
+    was written for every orphaned task and ended "and the operator is re-invoked to decide
+    what to do next" — written BEFORE the crash-loop cap (F7-BOOT1) had even been evaluated.
+    So a capped task carried a promise Viberr had structurally decided not to keep, kept
+    `waiting: "agent"` with no agent alive, and nothing ever revisited it: the cap logged a
+    warning to the server's own log and stopped. Live, SHOP-7 sat exactly there for **two
+    hours** — `readiness: ready`, `waiting: agent`, zero runs — while the board card and the
+    review queue both said "agent working" and the timeline said a turn was coming. The cap
+    itself is right; it exists so a boot→orphan→crash loop cannot re-run paid coordination on
+    every restart. What was wrong is that firing it was invisible. The decision is now taken
+    first, and a capped task gets the honest half of the sentence (what Viberr decided, why,
+    and that running the operator from the page is the way on), a `waiting` flag settled off
+    `agent` by the same `clearWaitingToHuman` ruling 195 uses, and a notification to its owner.
+    A guard that fires in silence is indistinguishable from a system that forgot.
+    (`run-recovery.server.ts`.)
+
+199. **A settled run's transcripts stay findable: Viberr re-points the index it invalidated
+    (owner, 2026-09-13, pass 37; F37-20, amends ruling 181).** The Codex CLI writes each
+    rollout THROUGH the run home's `sessions` symlink, so the bytes land in the person's
+    shared home and survive the run — exactly as ruling 181 intended. But the CLI records in
+    its own thread index the path it SAW, `…/codex-home/runs/<runId>/sessions/…`, and ruling
+    181 removes that directory when the run settles. So every later `thread/resume` answers
+    `no rollout found for thread id … (code -32600)`, and Viberr passed that to a human as
+    "**the agent's stored Codex session no longer exists**" — about a transcript sitting one
+    path segment away, in a directory Viberr had deliberately preserved. Measured on the live
+    instance: **137 of 137** threads recorded under a per-run home, **135** of those paths
+    gone, and **135 of 135** of their files present at the shared path. Every Codex
+    conversation the instance had ever held was unresumable; all three of the pass's run
+    errors were resume attempts, each costing a run, an error state, an operator turn, and
+    twice a decision packet put to a person. Viberr's OWN graceful recovery never fired, and
+    the reason is the finding in miniature: `resumeRun` probes the stored id with
+    `probeSessionContinuity` first and, on `missing`, starts fresh with a canonical anchor and
+    tells nobody — but the probe looks in the SHARED `sessions/` tree, where the bytes really
+    are, so it answers `present` every time. Two halves of Viberr disagreed about where a Codex
+    transcript lives: the probe and the exporter were right, and the CLI's index was pointing at
+    a path Viberr had deleted. The repair belongs in the path that broke the agreement. Ruling 181 fixed a real race (F36-3) and broke
+    conversation continuity for every Codex agent on the way past, invisibly, because the
+    failure wore the provider's name. The settle now re-points that run's threads at the
+    shared path before the directory goes, and a boot pass repairs the ones already stranded.
+    Both are fail-soft against a vendor artefact whose file name carries a schema version
+    (`state_5.sqlite`): the shape is PARSED, never asserted, an unrecognised one is skipped
+    whole, a path is only ever moved onto a file that is really there, and a run still in
+    flight owns its own path until it settles.
+    (`user-homes.server.ts`, `boot.server.ts`.)
+
+200. **Seven corrections the pass's own adversarial self-review found in rulings 186–199
+    (owner, 2026-09-13, pass 37).** A 12-cluster, 136-agent review of this pass's diff, each
+    finding put to three diverse skeptics prompted to REFUTE it, produced seven that survived
+    — all in the fixes, none in the original findings. They are recorded as one numbered
+    ruling because they share a lesson: a fix written to stop a lie can tell a smaller one.
+    (a) **Ruling 187(b)** — `compare` is an AHEAD-only list, so a MERGED branch answers with
+    an empty one and `droppedCommits: 0`, and the carve-out then stamped every cached commit
+    `pushed: false`: the record announcing that origin lacks commits sitting in `main`, this
+    ruling's own prohibited lie inverted. It never fired live only because Viberr deletes the
+    branch after merging, and that delete is best-effort. A landing now ends judgement —
+    stamps already written stand, nothing new is claimed — and the file's own `pr.state`
+    counts, because a failed API read knows less than the record does.
+    (b) **Ruling 192(b)** — `edit_link` explicitly accepts a FAILED link, and ruling 192's
+    retry carried the failed task's text straight over that edit, so the edit-then-retry
+    sequence `update_goal` advertises in one breath silently discarded the correction. A
+    `redeclared` flag makes the explicit re-declaration win, and the timeline says which
+    source a retry used in BOTH directions.
+    (c) **Ruling 194 was dead code.** A failed link keeps its task key — `reconcileGoal` names
+    that task in its own note — so the `taskKey !== null` guard returned before doing anything
+    on every real path, and the test that "proved" it built a null-key failed link the product
+    cannot produce. The arm now compares against the key the link had BEFORE the retry, and
+    its test uses the state the product actually reaches.
+    (d) `liveGoal` compared against `link.goal` while the task was built from
+    `link.goal || link.title`, so a title-only link read as permanently drifted.
+    (e) The rename clause fired whenever a caller RESENT the current title, claiming a rename
+    that never happened — the same defect its own earlier fix had half-closed.
+    (f) Ruling 198's note said "Nothing further happens on its own", which is not this loop's
+    to promise: `recoverUnreactedAgentRuns` can still run an `agent-reply` turn on that task
+    later in the same boot, under its own cap.
+    (g) Ruling 199's comment promised a log line for an unrecognised vendor schema and emitted
+    none, and its test passed with the guard deleted. Both skips now say so, and the test
+    asserts the sentence rather than the return value.
+    Two of the seven were VACUOUS TESTS that had "gone red" on demand — (c) and (g) — which is
+    the sharper lesson: a canary is only evidence when the state it constructs is one the
+    product can actually reach.
+    Three more came from findings the panel REFUTED **on scope** — the review's base commit sat
+    after rulings 186–189, so day-one code read as "not in the diff" even where the correctness
+    lens upheld the claim. A vote is not a verdict, and re-checking them by hand found two real:
+    (h) ruling 189's stated exclusion is "a resolution that ENDS the task", and `acceptsInto`
+    catches only ONE of the two doors that do — `force_accept` closes the task through
+    `forceAcceptCompletion` and never assigns it, so a task being closed in the same breath
+    still collected a contract amendment binding work it will never have; and `block_on_policy`
+    ("the label promises an UNBLOCK … 'I fixed the credential, carry on'") is a recovery choice
+    that belongs beside `redirect` in the process-only set and was missed when that set was
+    written. (i) The ruling-193 arm named `open_packet` — the CODEX plan action — while the
+    SHARED doctrine says `open_decision_packet` in every one of its four other places, so a
+    Claude operator was told to call a tool it does not have. The third, "the @mention resume
+    door bypasses the hold gate", was correctly refuted: `commentToAgent`'s resume arm already
+    carries `assertDispatchNotHeld`, added with ruling 186 for exactly that reason.
+    (`github-reconciler.server.ts`, `goal-actions.server.ts`, `goal-file.schema.ts`,
+    `run-recovery.server.ts`, `user-homes.server.ts`, `task-actions.server.ts`,
+    `operator-run.server.ts`, `runbook.md`, `deployment.md`.)
+
+201. **A share is a measurement only when every run it claims to describe reported one;
+    short of that, the card says so and offers the unit both backends DO report (owner,
+    2026-09-13, pass 37; F37-21).** Ruling 190 guards the EMPTY case — a side that ran and
+    reported nothing — and its test is satisfied the moment ONE run on each side reports.
+    The partial case is the same defect and it is the ORDINARY one, because cost is a
+    Claude-only observation: `costUsd` is assigned off the Claude result envelope, and the
+    Codex envelope carries token counts with no price. On the live instance when this was
+    written, 209 of 215 runs and 94% of the tokens reported no dollar figure; the card was
+    honest only because the delivery fleet happened to be silent *entirely*. Put one Claude
+    deliverer on that instance — an ordinary act — and the card divides 6 costed
+    coordination runs by a denominator the other 137 never entered and prints a confident
+    **27%** where the truth is likely north of 90%. That is worse than ruling 190's 100% in
+    one specific way: a degenerate quotient can be spotted by noticing it is degenerate,
+    and this one varies with the data and is wrong anyway. It is not even a bound —
+    unreported delivery spend pushes the ratio down, unreported coordination spend pushes
+    it up. So the dollar share is null unless EVERY run on both sides reported a cost, and
+    the suppressed card gives the dollars that are real plus the count and the BACKEND of
+    the runs that are not ("169 of 215 runs report no cost (169 on Codex)") — F35-1 already
+    counts the rows its token sums leave out so the card can name them, and `agent_runs.backend`
+    makes the same disclosure specific here. The hedge it replaces, "reported by
+    cost-reporting runs", names no quantity and reads as "all". Suppression alone would
+    leave an ordinary instance with a permanently blank card, so the owner's call pairs it
+    with a second card: **coordination's share of TOKENS**, the unit both backends report,
+    labelled as tokens on its face because a luna-max token and an opus token are not the
+    same money. The token share carries ruling 190's test at its own level — a side that
+    ran and landed no final provider figure at all has no token share either — and it
+    discloses F35-1's excluded rows rather than suppressing on them, because that gap is
+    incidental (an interrupted run) rather than systematic to one backend.
+    **Ruling 190 is amended, not reversed:** its distinction between *reported nothing* and
+    *never ran* still decides both cards, and a side that never ran still contributes a real
+    zero. What goes is its `unobserved` enum, which could not express "partly"; the card now
+    reads per-side run and uncosted counts and writes the sentence from them.
+    (`insights-query.server.ts`, `insights-page.tsx`.)
 
 F36-6 (pass 36, amends F19-1): Viberr's own delivery next-step card is written only for
 a verdict-clean revision (`healthy`, or a project with no verdict-capable specialist); a

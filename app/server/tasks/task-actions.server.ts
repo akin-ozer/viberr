@@ -1,3 +1,5 @@
+import { holdRefusal } from "~/shared/dependencies";
+import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
@@ -10,8 +12,12 @@ import type {
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { isMissingRefAnswer } from "~/server/github/github-client.server";
 import {
+  isMissingCommitAnswer,
+  isMissingRefAnswer,
+} from "~/server/github/github-client.server";
+import {
+  DIVERGED_BRANCH_REMEDY,
   acceptanceBlockedReason,
   archivedTaskBlockedReason,
   archivedTaskMoveBlockedReason,
@@ -19,7 +25,10 @@ import {
   conflictingPrBlockedReason,
   unpushedRevisionBlockedReason,
   unpushedRevisionOf,
+  revisionLeftWorkspace,
+  type RevisionDeparture,
   activeWorkRevision,
+  consecutiveRequestChanges,
   deliveringEngagement,
   type Engagement,
   deriveValidation,
@@ -39,6 +48,8 @@ import {
   PRIORITY_VALUES,
   isValidDueDate,
   normalizeTaskLabels,
+  PACKET_NOTE_MAX,
+  VERDICT_REPORT_TITLE,
 } from "~/schemas/task-file.schema";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
@@ -61,12 +72,22 @@ import type {
   OperatorPacketOptionInput,
 } from "./operator-actions.server";
 import {
+  agentNamesOf,
+  buildReviewDeadlockPacket,
+  delivererNameOf,
+  REVIEW_DEADLOCK_QUESTION,
+  type ReviewDeadlockEscalation,
+  reviewDeadlockOf,
+} from "./review-deadlock.server";
+import {
   describeRunFailure,
   type DescribeRunFailureInput,
 } from "./run-failure-remedy.server";
+import type { FanOutOutcome } from "./packet-fanout.server";
 import {
   maybeReleaseDependents,
   noteDeadDependency,
+  setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
 import type { DependencyReleasePayload } from "~/shared/dependencies";
@@ -152,11 +173,13 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
+import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
   agentNamesByProfile,
   getRun,
   listRunsForTaskRows,
   patchRun,
+  profileRanSince,
 } from "~/server/runtimes/run-store.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
@@ -168,6 +191,7 @@ import type {
   RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { startAgentRun, StartAgentRunResult } from "./specialist-run.server";
 import type {
   openTaskPr,
   OpenTaskPrContext,
@@ -200,6 +224,7 @@ import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
+import { userDisplayName } from "./user-display-name.server";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
@@ -283,6 +308,11 @@ export interface TaskActionDeps {
    *  merge the operator's `update_branch_from_base` performs), injectable so a
    *  test can assert the ceremony's call sequence: one refresh, one merge. */
   updateBranchFromBase?: typeof updateWorkspaceBranchFromBase;
+  /** Ruling 241: the dispatch the dependency release drains a queued reviewer
+   *  question through. Injected for the same reason `runOperator` is — the
+   *  drain's contract is WHAT it sends and in what order, and both are
+   *  unobservable through a real run. */
+  startAgentRun?: typeof startAgentRun;
 }
 
 /** The mutation ctx plus the test seams: the impls above, and the mock
@@ -436,7 +466,7 @@ function requireDecisionAuthority(
 
 /** `.get()` hands back an undeclared row, so each reader decodes the one column
  *  it selected and falls back when the user (or the column) is not there. */
-const userNameRowSchema = z.object({ name: z.string() });
+
 const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
 
 /** The user's DISPLAY name — what the `@operator` mention path passes as
@@ -444,10 +474,7 @@ const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
  *  knows (NEW-4: an email tag chips nothing and notifies nobody). Exported for
  *  the steered manual run, which must speak the same name. */
 export function userName(db: DatabaseSync, userId: string): string {
-  const row = userNameRowSchema.safeParse(
-    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
-  );
-  return row.success ? row.data.name : userId;
+  return userDisplayName(db, userId);
 }
 
 /** The user's avatar tint for a notification's `from` render; "" when the user
@@ -481,9 +508,16 @@ function ownerAssignEvent(
   db: DatabaseSync,
   actor: TaskActor,
   text: string,
+  /**
+   * Ruling 255 (pass 37, F37-84): the instant to stamp, when the caller is
+   * writing SEVERAL events for one act and the clock would otherwise put them
+   * in an order the arrangement contradicts. Creation passes its own `now`;
+   * every other caller keeps reading the clock here.
+   */
+  occurredAt: string = new Date().toISOString(),
 ): TaskFileEvent {
   return {
-    occurredAt: new Date().toISOString(),
+    occurredAt,
     type: "assign",
     actor: humanActorRef(db, actor),
     title: null,
@@ -547,6 +581,11 @@ export interface CreateTaskInput {
    *  task.md write, before the operator's `create` trigger. Absent: the
    *  creator is seated (ruling 127). */
   ownerUserId?: string | null;
+  /** Ruling 255: the instant this creation happened. Every field and every
+   *  timeline event it writes carries it, so the file's order is the
+   *  arrangement and not a race between clock reads. Test seam only — the
+   *  routes never pass it, and it defaults to now. */
+  now?: string;
 }
 
 /**
@@ -651,7 +690,7 @@ export async function createTask(
     dataRoot: ctx.dataRoot,
   };
   const key = await allocateTaskKey(projectRef);
-  const now = new Date().toISOString();
+  const now = input.now ?? new Date().toISOString();
 
   const frontmatter: TaskFrontmatter = {
     key,
@@ -679,6 +718,7 @@ export async function createTask(
     engagements: [],
     recommendations: [],
     schedules: [],
+    queuedQuestions: [],
     // R19-14: creation is gated to the entry stage above, and a task in triage
     // has no operator until it advances (contracts §1.1) — always null at birth.
     operator: null,
@@ -711,12 +751,16 @@ export async function createTask(
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
+  // Ruling 255: ONE creation is one instant. Every event this write puts on the
+  // timeline carries the frontmatter's own `now`, so the file's order is the
+  // deliberate arrangement and not a race between two `new Date()` calls.
   if (creator && seat === "named" && namedOwner) {
     createInput.timeline = [
       ownerAssignEvent(
         db,
         creator,
         `Seated ${namedOwner.name} as owner at creation. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
+        now,
       ),
     ];
   } else if (creator) {
@@ -725,6 +769,7 @@ export async function createTask(
         db,
         creator,
         "Took task ownership by creating the task. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.",
+        now,
       ),
     ];
   }
@@ -1117,6 +1162,103 @@ export interface AutoInvokeOptions {
  *  change (`pr-diverged`) is a coordination event like any other, so the
  *  reconciler wakes the operator through the same seam instead of leaving the
  *  divergence as prose only a human ever acts on. */
+/**
+ * Ruling 330: the record that a task had stopped.
+ *
+ * Written BEFORE the operator is invoked and unconditionally, because it has to
+ * survive an operator that refuses, is not deployed, or throws — the whole
+ * point of the sweep is that this state used to leave no trace at all. It is
+ * also the sweep's idempotence key: while this note is the newest event, the
+ * sweep has already spoken and stays quiet.
+ */
+export async function noteStranded(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  task: { projectSlug: string; taskKey: string; waiting: string | null; quietForMs: number },
+): Promise<void> {
+  const { STRANDED_NOTE_TITLE, strandedNoteText } = await import("./stranded-sweep.server");
+  await updateTaskFile(taskRef(ctx, task.projectSlug, task.taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: STRANDED_NOTE_TITLE,
+      text: strandedNoteText(task),
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, task.projectSlug, task.taskKey);
+}
+
+/**
+ * Ruling 333 — "No changes were delivered" was a literal, over runs that had
+ * been working for up to two and a half hours.
+ *
+ * Every classified provider refusal appended it, and so did every unclassified
+ * failure except the two cut-off kinds. Nothing was consulted before the
+ * assertion. `max_turns` and `max_budget` were exempted precisely BECAUSE a cut
+ * run can leave work in the tree — the canary comment on that exemption says so
+ * outright — and a provider refusal on turn 48 is the same cut-off and was not
+ * exempt.
+ *
+ * Measured on the shopify-clone board: the clause was written 34 times across
+ * 27 tasks. 28 of them followed the run's own start by more than two minutes,
+ * the longest by 145 minutes. FOUR were written onto the very event that
+ * attaches the files that run produced — SHOP-16, SHOP-18, SHOP-2 and SHOP-41 —
+ * because `runAttachments` is stamped onto the same event eleven lines below,
+ * under a comment reading "Files the run saved before it died still get their
+ * producer named".
+ *
+ * The cost is not cosmetic, because the sentence is fed forward:
+ * `canonicalTaskAnchor` puts recent timeline events into the NEXT run's prompt,
+ * and 124 run logs under the data root contain the phrase. Live on SHOP-28 the
+ * owner had to hand-write the correction eighteen minutes later: *"Your previous
+ * run did not fail on the work — it ran 48 turns … That file is on disk and
+ * uncommitted. … Do not regenerate work that is already in the tree."*
+ *
+ * The delivery half of the old sentence was true and is kept: a failed run
+ * pushes nothing and opens no PR. What it may no longer claim is that nothing
+ * survived.
+ */
+export function runOutcomeClause(input: {
+  /** Turns the run had taken when it stopped; 0 when it never got going. */
+  turns: number;
+  /** Files it saved into the task's attachments before it stopped. */
+  attachments: number;
+}): string {
+  if (input.turns <= 0 && input.attachments <= 0) return " No changes were delivered.";
+  const turnPart =
+    input.turns > 0 ? `${input.turns} turn${input.turns === 1 ? "" : "s"}` : "";
+  const filePart =
+    input.attachments > 0
+      ? `${input.attachments} file${input.attachments === 1 ? "" : "s"} saved to this task`
+      : "";
+  const did = [turnPart, filePart].filter(Boolean).join(" and ");
+  return (
+    ` Nothing was delivered to a pull request, but the run had ${did} behind it when it ` +
+    `stopped — read the workspace before starting anything over, because work that is already ` +
+    `in the tree is easy to regenerate and hard to notice.`
+  );
+}
+
+/**
+ * Ruling 334: a transport reason flattened to fit inside a prose sentence.
+ *
+ * The same shape as `push-workspace.server.ts`'s `oneLine`, kept local rather
+ * than exported across the module boundary: a `fetch` failure's message is one
+ * line already in the common case, and the cap exists so a stack-shaped one
+ * cannot shred the sentence it is quoted inside.
+ */
+function oneLineDetail(excerpt: string): string {
+  const flat = excerpt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" · ");
+  return flat.length > 200 ? `${flat.slice(0, 199)}…` : flat;
+}
+
 export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -1129,7 +1271,20 @@ export async function autoInvokeOperator(
     | "pr-diverged"
     | "delivered"
     | "packet-resolved"
-    | "dependencies-released",
+    | "dependencies-released"
+    // Ruling 235: a refused acceptance whose cause is an unpushed reviewed
+    // revision. Only the operator may push it, so the refusal is handed here.
+    | "head-unpushed"
+    // Ruling 330: the periodic sweep found a task nothing was going to move —
+    // no packet, no recommendation, no queued question, no schedule, no run and
+    // no hold. The operator is invoked to decide what happens next, which is
+    // what a person ends up doing by hand.
+    | "stranded"
+    // Ruling 332: a person pressed Accept and the acceptance-time refresh found
+    // the branch in conflict. Only the operator can run the workspace merge
+    // that resolves it, so the refusal is handed here rather than left as a
+    // sentence telling a person to do git they have no checkout for.
+    | "pr-conflicting",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
@@ -1176,7 +1331,22 @@ export async function autoInvokeOperator(
           type: "note",
           actor: { kind: "system", systemId: "operator" },
           title: null,
-          text: `The operator could not be started automatically (${error instanceof AppError ? error.userMessage : "an internal error"}). Coordination is paused for this task; run the operator manually when you're ready.`,
+          // Ruling 331: the reason, and no claim about what happens next.
+          //
+          // This said "(an internal error)" over an `error` the line above was
+          // already logging, and then asserted "Coordination is paused for this
+          // task" — live on SHOP-38 the operator was re-invoked automatically
+          // eleven seconds later, so the one durable sentence on the timeline
+          // was the only thing still saying the task was stopped. What this
+          // knows is that ONE invocation failed; it does not know that nothing
+          // else will run, and ruling 330's sweep now guarantees something will
+          // look again.
+          text:
+            `The operator could not be started automatically: ` +
+            `${endSentence(error instanceof AppError ? error.userMessage : error instanceof Error ? error.message : String(error))} ` +
+            `That was one attempt on a \`${trigger}\` trigger, not a decision to stop: anything ` +
+            `that happens on this task invokes the operator again, and Viberr sweeps for tasks ` +
+            `nothing is moving. Run the operator yourself if you would rather not wait.`,
           toAgent: false,
           evidence: null,
         });
@@ -1435,6 +1605,12 @@ function anchorClamp(text: string, max: number): string {
  * Pure + exported for the directive-content test.
  */
 export function canonicalTaskAnchor(input: {
+  /** Ruling 245: the project's file leases, so a run learns what it may not
+   *  touch from STATE rather than re-deriving it from convention prose every
+   *  turn. Only leases held by OTHER tasks are rendered — a holder needs no
+   *  warning about the file it was given to own. Absent on a hand-built
+   *  anchor; the real producers always pass the project's list. */
+  fileLeases?: readonly FileLease[];
   parsed: ParsedTaskFile;
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
@@ -1462,6 +1638,23 @@ export function canonicalTaskAnchor(input: {
   lines.push(`${fm.key} — "${fm.title}"`);
   lines.push(refs.join(" · "));
   lines.push("");
+  // Ruling 245: what another task owns right now. High in the anchor, because a
+  // run that learns this after it has edited the file has already done the
+  // thing the lease exists to stop, and the delivery refusal is then a wasted
+  // turn rather than a guard.
+  const foreign = (input.fileLeases ?? []).filter((l) => l.taskKey !== fm.key);
+  if (foreign.length > 0) {
+    lines.push("### Files another task owns right now (ruling 245)");
+    lines.push(
+      "Do NOT change these. They are leased until their holder merges, and a delivery " +
+        "that touches one is refused before it reaches GitHub.",
+    );
+    for (const lease of foreign) {
+      const why = lease.reason ? ` — ${lease.reason}` : "";
+      lines.push(`- ${lease.paths.map((p) => `\`${p}\``).join(", ")} → **${lease.taskKey}**${why}`);
+    }
+    lines.push("");
+  }
   lines.push("### Goal (canonical)");
   lines.push(goal.trim() ? anchorClamp(goal, ANCHOR_GOAL_MAX_CHARS) : "_No goal recorded._");
   if (packet) {
@@ -1513,7 +1706,7 @@ export function specialistReplyDirective(input: {
     input.delivers === false
       ? "You do not modify the repository at all."
       : "Do not push, and do not open a pull request — Viberr performs delivery " +
-        "on the Review transition.";
+        "when the operator decides to deliver.";
   return (
     (input.anchor ? `${input.anchor}\n\n---\n\n` : "") +
     `A human (${input.commenterName}) commented on task ${input.taskKey} ` +
@@ -1587,6 +1780,12 @@ export async function commentToAgent(
      *  (it falls back to the operator), so no "Mention not started" note is
      *  written for it. Never set by a route. */
     relayed?: boolean;
+    /** Ruling 203: this comment is ALREADY on the timeline — viberr is keeping
+     *  the promise it made when the agent was busy, not recording a new one.
+     *  Skips the append (and its mention fan-out, which already happened) and
+     *  skips the "Mention not started" note on a second failure, because the
+     *  first attempt's note already says why. Never set by a route. */
+    redelivered?: boolean;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -1612,12 +1811,18 @@ export async function commentToAgent(
 
   // 1. Record the comment (existing behavior, incl. mention fan-out). Flag
   //    the routed tint when an agent was resolved.
-  const base = await appendComment(
-    db,
-    target ? { ...input, forceToAgent: true } : input,
-    actor,
-    ctx,
-  );
+  const base = input.redelivered
+    ? {
+        task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+        toAgent: true,
+        mentionedUserIds: [],
+      }
+    : await appendComment(
+        db,
+        target ? { ...input, forceToAgent: true } : input,
+        actor,
+        ctx,
+      );
 
   if (!target) {
     // B-AG2: `@claude` on a project running two claude profiles engages NOBODY
@@ -1867,8 +2072,15 @@ export async function commentToAgent(
       throw new AppError({
         code: ERROR_CODES.CONFLICT,
         status: 409,
+        // Ruling 203: this used to promise that the agent "will see the comment
+        // when it next re-anchors". It carried no such comment: the anchor
+        // holds the last five timeline events, clamped, and only a FRESH run
+        // builds one — live, an owner's correction was eight events back
+        // within 75 seconds and the agent it named never ran on that task
+        // again. Viberr now keeps the promise instead of making it
+        // (`deliverDeferredMention`, on that run's completion).
         userMessage:
-          "This agent already has a run in progress on this task — it will see the comment when it next re-anchors, or mention it again once the run finishes.",
+          "This agent already has a run in progress on this task — Viberr starts it on this comment as soon as that run finishes. The comment stays on the record.",
       });
     }
     if (target.session) {
@@ -1937,7 +2149,9 @@ export async function commentToAgent(
     // resumed (@mention) specialist runs unconfined (XS-1). A refused resume
     // has no run to confine: `resumeRun` hands it to `startRun`, which records
     // the refusal and starts nothing.
-    const { resolveResumeConfinement } = await import("./specialist-run.server");
+    const { resolveResumeConfinement, recordRunInputs } = await import(
+      "./specialist-run.server"
+    );
     const confinement = resumePrincipal.ok
       ? await resolveResumeConfinement(db, ctx, {
           projectSlug: input.projectSlug,
@@ -1994,6 +2208,36 @@ export async function commentToAgent(
     runId = resumed.runId;
     resumeOutcomeKey = confinement?.outcomeKey;
     triggered = "resumed";
+    // Ruling 343: the disclosure the fresh path writes, on the resumed run too.
+    // `resolveResumeConfinement` has always returned `runInputs` for exactly
+    // this and its docstring has always said the caller "passes the whole thing
+    // to `recordRunInputs` once `resumeRun` has minted the run id" — nobody
+    // did, and the field had no reader anywhere in the app. The four fields it
+    // does not own are all in scope here, because this function composes the
+    // prompt.
+    if (confinement) {
+      const resumedRow = getRun(db, runId);
+      if (resumedRow) {
+        recordRunInputs(db, {
+          runId,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          threadId: resumedRow.thread_id,
+          backend: resumeBackend,
+          dataRoot: ctx.dataRoot,
+          inputs: {
+            ...confinement.runInputs,
+            promptChars: followUp.length,
+            anchor: anchor ?? null,
+            spendCapUsd: getMaxRunSpendUsd(db),
+            directive: {
+              from: commenterName,
+              chars: input.text.trim().length,
+            },
+          },
+        });
+      }
+    }
   } else {
     // 4b. No prior session for THIS agent — start a FRESH run. The
     //     dynamic-dispatch auto-engage (startAgentRun) routes the posture: an
@@ -2043,7 +2287,10 @@ export async function commentToAgent(
     // now carries the same note + audit shape the ambiguous-handle branch
     // writes. A packet decision the server RELAYS through this door reports
     // to its resolver instead (`relayed`), which owns the follow-up.
-    if (!input.relayed) {
+    // Ruling 203: a REDELIVERY that fails needs no second note — the first
+    // attempt's note already names the agent and the reason, and repeating it
+    // on every completion would turn one honest refusal into a drumbeat.
+    if (!input.relayed && !input.redelivered) {
       await noteMentionNotStarted(db, ctx, input, actor, target.name, target.profileId, reason);
     }
     return {
@@ -2685,6 +2932,10 @@ function endSentence(text: string): string {
 }
 
 /** Open one recovery packet when the bounded operator loop stalls. */
+/** Ruling 326: the same function, exported under a test-only name so the
+ *  fallback can be driven directly. Production callers use the private one. */
+export { openStuckLoopPacket as openStuckLoopPacketForTest };
+
 async function openStuckLoopPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2709,6 +2960,9 @@ async function openStuckLoopPacket(
      *  "Provider said" observation beside the Signal so the human reads the
      *  actual cause on the packet, not only in the timeline. */
     providerText?: string;
+    /** Ruling 315: the account-level cause, when this failure is one. Packets
+     *  sharing it are resolved together — see `taskPacketSchema.cause`. */
+    cause?: string;
   },
 ): Promise<StuckLoopEscalation> {
   try {
@@ -2749,22 +3003,74 @@ async function openStuckLoopPacket(
     if (input.providerText) {
       observations.push({ k: "Provider said", v: input.providerText, code: true });
     }
-    const result = await operatorOpenPacket(
-      db,
-      ctx,
-      {
-        projectSlug: input.projectSlug,
+    const open: OperatorOpenPacketInput = {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      packetType: "blocked",
+      title: `Work stalled: pick a recovery path`,
+      body:
+        `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
+        "Coordination is paused until a human chooses how to proceed.",
+      observations,
+      options,
+    };
+    // Ruling 315: when the failure belongs to an ACCOUNT rather than this task,
+    // the packet carries that, so the N identical siblings one quota or
+    // credential failure raises can be answered once.
+    if (input.cause) open.cause = input.cause;
+    let result = await operatorOpenPacket(db, ctx, open, authority);
+    /**
+     * Ruling 326: an escalation the server composed for ITSELF must not be
+     * abandoned because a guard written to coach a model rejected one option.
+     *
+     * `operatorOpenPacket`'s authoring guards exist for the operator, which
+     * reads the refusal, revises its options and tries again — their messages
+     * are written that way ("Offer the OTHER backend, or offer wait_for_window
+     * with dueAt set to the reopen instant"). This function has no such loop:
+     * it built the options itself from `describeRunFailure`, so a refusal ends
+     * with a stalled task and NO packet, which is strictly worse than a packet
+     * with one fewer option.
+     *
+     * So it falls back to the stock set — redirect, send back, hold — whose
+     * kinds carry no conditional guard at all, and says on the packet what was
+     * dropped and why. Only when the failure supplied its own options: the
+     * stock set IS the other callers' set, and retrying it unchanged would be
+     * a loop.
+     */
+    if (result.outcome !== "done" && input.options) {
+      logger.info("stuck-loop packet refused its composed options; retrying with the stock set", {
         taskKey: input.taskKey,
-        packetType: "blocked",
-        title: `Work stalled: pick a recovery path`,
-        body:
-          `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
-          "Coordination is paused until a human chooses how to proceed.",
-        observations,
-        options,
-      },
-      authority,
-    );
+        reason: result.message,
+      });
+      const fallback: OperatorOpenPacketInput = {
+        ...open,
+        observations: [
+          ...observations,
+          {
+            k: "Tailored options withheld",
+            v:
+              `Viberr composed options for this failure and refused its own packet: ` +
+              `${endSentence(result.message)} The general recovery options are offered instead.`,
+          },
+        ],
+        options: [
+          {
+            kind: "redirect",
+            title: "Redirect with sharper guidance",
+            detail:
+              "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+            recommended: true,
+          },
+          {
+            kind: "request_edit",
+            title: "Send back for another attempt",
+            detail: "Ask the same specialist to try again from its last report.",
+          },
+          hold,
+        ],
+      };
+      result = await operatorOpenPacket(db, ctx, fallback, authority);
+    }
     if (result.outcome !== "done") {
       logger.info("stuck-loop packet not opened", {
         taskKey: input.taskKey,
@@ -2774,7 +3080,10 @@ async function openStuckLoopPacket(
       // past the already-escalated early-return when it is), but the escalation
       // packet was refused — so without a note the task sits waiting on a human
       // with no card saying why. Leave one.
-      await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+      await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey, {
+        kind: "refused",
+        reason: result.message,
+      });
       return { status: "failed" };
     }
     return { status: "opened", notifiedUserIds: result.notifiedUserIds ?? [] };
@@ -2783,21 +3092,53 @@ async function openStuckLoopPacket(
       taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey);
+    await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey, {
+      kind: "failed",
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return { status: "failed" };
   }
 }
 
-/** C10.4 (pass 25): a visible fallback when a stuck-loop escalation can't open
- *  its packet — so a task that has stopped making progress never sits waiting on
- *  a human with nothing on the timeline explaining why. Guarded: never throws. */
+/**
+ * C10.4 (pass 25): a visible fallback when a stuck-loop escalation can't open
+ * its packet — so a task that has stopped making progress never sits waiting on
+ * a human with nothing on the timeline explaining why. Guarded: never throws.
+ *
+ * Ruling 325 — and it has to say WHY, because that was the whole point.
+ *
+ * Both callers hold the reason. One has `operatorOpenPacket`'s own refusal
+ * message, the other has a thrown `Error`. Both LOG it and neither passed it,
+ * so the card C10.4 added to explain a stuck task explained nothing: "the
+ * recovery packet could not be opened" is the observation a person has already
+ * made by the time they are reading it.
+ *
+ * It also told them to "resolve it". There is no packet — that is the entire
+ * subject of the note — so a person following that sentence goes looking for a
+ * card that does not exist. The two arms differ too: a REFUSAL is a governance
+ * answer with a remedy in it (an authority, an archived project, a packet
+ * already open), and a THROW is a fault. Telling them apart is most of the
+ * help.
+ *
+ * Same shape as ruling 317(b), one file over: a fixed sentence standing where
+ * the system had the specific fact.
+ */
 async function noteStuckLoopEscalationFailed(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
+  why: { kind: "refused" | "failed"; reason: string },
 ): Promise<void> {
   try {
+    const reason = why.reason.trim();
+    const said = reason
+      ? why.kind === "refused"
+        ? `Viberr refused it: ${endSentence(reason)}`
+        : `Writing it failed: ${endSentence(reason)}`
+      : why.kind === "refused"
+        ? "Viberr refused it and gave no reason."
+        : "Writing it failed and the error carried no message.";
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -2805,9 +3146,14 @@ async function noteStuckLoopEscalationFailed(
         actor: { kind: "system", systemId: "policy-engine" },
         title: null,
         text:
-          "This task's operator turns stopped making progress, but the recovery " +
-          "packet could not be opened. It is waiting on a human: run the operator " +
-          "manually or intervene, then resolve it.",
+          "This task's operator turns stopped making progress, and the recovery packet that " +
+          `would have asked you how to proceed was not opened. ${said} ` +
+          "There is no packet on this task to resolve — it is waiting on a person. " +
+          (why.kind === "refused"
+            ? "Clear what the refusal names and the next operator turn escalates on its own, " +
+              "or run the operator yourself and decide from there."
+            : "Run the operator yourself and decide from there; the next turn will try the " +
+              "escalation again."),
         toAgent: false,
         evidence: null,
       });
@@ -2876,6 +3222,13 @@ async function withdrawSupersededStuckPacket(
     if (!withdrawn) return;
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    // Ruling 328: the automatic clear. The verdict that just landed was written
+    // while this packet stood, so ruling 237's escalation was skipped; seconds
+    // later the same run's success withdraws the packet, and the escalation
+    // would be gone with nothing having decided it should be. This path has
+    // never fired on a real board — the live misses came through the human
+    // resolution — but it is the same defect and gets the same retry.
+    await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
     recordAudit(db, {
       action: "task.packet.withdrawn_superseded",
       actor: OPERATOR_AUDIT_ACTOR,
@@ -3091,6 +3444,45 @@ export function deliveredWorkEvidence(fm: {
 }
 
 /** Atomically record a finished run's reply, verdict, and human question. */
+/**
+ * Ruling 237 (F37-57): display names for the escalation card, read from the
+ * project file so a handle is a NAME even on a project whose run history was
+ * pruned. Empty when the project cannot be read — the card then falls back to
+ * the role, which is worse copy but never a crash inside a locked write.
+ */
+function deadlockAgentNames(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): ReadonlyMap<string, string> {
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  return file ? agentNamesOf(file.parsed.frontmatter) : new Map();
+}
+
+/**
+ * Ruling 292: the longest verdict justification stored on a task, and the
+ * sentence that ships when it does not fit.
+ *
+ * 2,000 characters is a generous paragraph and a short essay, which is the
+ * right size for the reason a reviewer gives beside its verdict. What was
+ * wrong was the silence: a bare `.slice` meant a long justification was stored
+ * ending mid-word and read, on the task page, as the whole of what the reviewer
+ * said. The full text is never lost - the agent's own report is on the same
+ * timeline, untruncated - so the marker's job is to send the reader there.
+ */
+export const VERDICT_REASON_MAX_CHARS = 2_000;
+
+function clipVerdictReason(text: string): string {
+  const reason = text.trim();
+  if (reason.length <= VERDICT_REASON_MAX_CHARS) return reason;
+  return (
+    `${reason.slice(0, VERDICT_REASON_MAX_CHARS)}\n\n` +
+    `[cut here - the reviewer's justification ran to ` +
+    `${reason.length.toLocaleString("en-US")} characters and this is its first ` +
+    `${VERDICT_REASON_MAX_CHARS.toLocaleString("en-US")}. Its full report is on this ` +
+    `task's timeline, whole.]`
+  );
+}
+
 export async function recordAgentCompletion(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -3112,7 +3504,10 @@ export async function recordAgentCompletion(
      *  the producing message names its own files. */
     attachments?: string[] | null;
   },
-): Promise<void> {
+  /** Ruling 237: reports whether this completion RAISED the review-deadlock
+   *  packet. The caller needs it to decide whether to hand the task back to the
+   *  operator — see the escalation arm in `applyAgentCompletionEffects`. */
+): Promise<{ escalated: boolean }> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
   const attachments = sanitizeEventAttachmentNames(input.attachments);
@@ -3161,7 +3556,7 @@ export async function recordAgentCompletion(
     if (suppressedReason) {
       recordAgentRepliedAudit(db, projectSlug, taskKey, runId, suppressedReason);
     }
-    return;
+    return { escalated: false };
   }
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
@@ -3178,6 +3573,21 @@ export async function recordAgentCompletion(
   /** Set when the envelope's question could not open a packet (one already is)
    *  — recorded as a timeline note instead of being dropped (P13-RT-06). */
   let questionDeferred: string | null = null;
+  /** Ruling 237 (F37-57): the consecutive-objection escalation, written inside
+   *  the verdict's own lock and announced after it. A SLOT, the same idiom
+   *  `questionWithdrawal` uses below, because a plain `let` assigned only
+   *  inside the mutator reads to the compiler as never assigned at all — the
+   *  announcement block would type-check as dead code and quietly stop being
+   *  checked. */
+  const deadlockEscalation: ReviewDeadlockEscalation = { packet: null, deadlock: null };
+  /** The project's stages, read once and only when a verdict is being written:
+   *  `taskClosure` needs them, and every other verdict-less completion must not
+   *  pay a project read for a guard it never reaches. */
+  let deadlockStagesCache: ProjectContext["stages"] | null = null;
+  const deadlockStages = (): ProjectContext["stages"] => {
+    deadlockStagesCache ??= loadProjectContext(ctx, projectSlug).stages;
+    return deadlockStagesCache;
+  };
   let validation: TaskFrontmatter["validation"] = "healthy";
   // The title/summary are computed from the RESOLVED (derived) validation, not
   // the raw verdict, so the event can never read "Review passed / Validation:
@@ -3262,6 +3672,37 @@ export async function recordAgentCompletion(
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
         if (rev && reviewerProfileId) {
+          // Ruling 204: the overwrite keeps the latest verdict and would keep
+          // nothing else. A reviewer that returns the SAME result on the SAME
+          // revision has reviewed twice, and that is the only signal saying the
+          // deliverer could not move — precisely the case where no new revision
+          // is ever minted, so a count of distinct revisions stays at 1 forever.
+          const prior = parsed.frontmatter.verdicts.find(
+            (v) => v.profileId === reviewerProfileId && v.revisionId === rev.id,
+          );
+          // Ruling 242 (F37-69): a repeat verdict counts as a new ROUND only if
+          // a round was actually fought — the DELIVERER RAN between the two.
+          //
+          // Ruling 204 is right that a deadlock mints no new revision, so the
+          // count cannot key on revisions. It is the deliverer's RUN, not its
+          // commit, that says a round happened: on SHOP-9 the deliverer ran and
+          // reported it had nothing in scope to change, which is a round. What
+          // ruling 204 could not see is a repeat objection with no rework behind
+          // it at all — and ruling 237's own escalation question provokes
+          // exactly that. Live on SHOP-25 the reviewer was asked to name
+          // everything it would still block on, answered completely, and
+          // attached a `request_changes` to the same untouched revision 8ms
+          // later. That took the count from 2 to 3 with nobody having reworked
+          // anything, and re-raised the packet on top of the answer a person had
+          // just paid for. Ruling 237 forbids that verdict in its prompt, which
+          // is the construction ruling 186 refused; this is the part that
+          // notices when the model does something else.
+          const deliverer = deliveringEngagement(parsed.frontmatter);
+          const reworked =
+            !prior ||
+            !deliverer ||
+            profileRanSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
+          const rounds = prior?.result === verdict && reworked ? prior.rounds + 1 : 1;
           parsed.frontmatter.verdicts = [
             ...parsed.frontmatter.verdicts.filter(
               (v) =>
@@ -3272,10 +3713,78 @@ export async function recordAgentCompletion(
               revisionId: rev.id,
               headSha: rev.headSha,
               result: verdict,
-              reason: (replyText ?? "").trim().slice(0, 2000),
+              // Ruling 292: a verdict's justification is a STORED record a
+              // person reads on the task page, and it was a bare `.slice` -
+              // the write-side shape ruling 288 closed for a goal. The cut
+              // stays (a verdict reason is a paragraph, not a report), and it
+              // now says it was cut and where the whole of it is: the agent's
+              // own report, on the same timeline, which is never truncated.
+              reason: clipVerdictReason(replyText ?? ""),
               at: new Date().toISOString(),
+              rounds,
             },
           ];
+          // Ruling 237 (F37-57): a SECOND consecutive objection from this same
+          // reviewer is a decision for a person, and viberr raises it rather
+          // than asking the operator to. Read inside the lock, from the array
+          // just written, and acted on after it — a packet write cannot happen
+          // inside another file lock.
+          // Ruling 177 (F36-5): never a packet on a CLOSED task. A reviewer run
+          // that finishes after its task was accepted, force-accepted or
+          // archived still records its verdict — evidence is evidence — and
+          // ruling 177's own arm below says no coordination follows it. An
+          // escalation asking a person to decide something about a shipped task
+          // is exactly the packet that ruling refused, and `operatorOpenPacket`
+          // refuses it by name; writing the packet here rather than through
+          // that door means carrying its guard too.
+          if (
+            verdict === "request_changes" &&
+            !parsed.packet &&
+            !taskClosure(parsed.frontmatter, deadlockStages()).closed
+          ) {
+            const deadlock = reviewDeadlockOf(
+              parsed.frontmatter,
+              reviewerProfileId,
+              consecutiveRequestChanges(parsed.frontmatter, reviewerProfileId),
+            );
+            if (deadlock) {
+              const names = deadlockAgentNames(ctx, projectSlug);
+              parsed.packet = buildReviewDeadlockPacket({
+                taskKey,
+                packetId: newId("pkt"),
+                deadlock,
+                // The agent's NAME, never `roleDisplay`: the card writes it as
+                // an @handle, and ruling 232 is the standing rule that a handle
+                // is a name. "@Review & validation" names nobody and matches
+                // nothing a person can search for.
+                reviewerName: names.get(reviewerProfileId) ?? roleDisplay,
+                delivererName: delivererNameOf(parsed.frontmatter, names),
+                // Ruling 241: read inside the same locked write that raises the
+                // packet, so the card's promise is built from the hold the
+                // resolution will meet — not one read a moment earlier.
+                heldBy: parsed.frontmatter.blockedBy,
+              });
+              parsed.frontmatter.waiting = "human";
+              // Ruling 137 says a packet withdraws the standing acceptance
+              // offers, and this packet needs no code for it: a
+              // `request_changes` always derives `validation: "failing"`, and
+              // the filter a few lines below already drops every
+              // `accept_completion` and, while failing, every `transition`
+              // card. Calling `withdrawAcceptanceOffers` here as its siblings
+              // do would withdraw nothing and write a second "the offer was
+              // withdrawn" line into the decision log for one disappearance.
+              deadlockEscalation.packet = parsed.packet;
+              deadlockEscalation.deadlock = deadlock;
+              // The NOTE is unshifted further down, after the verdict event,
+              // not here. The timeline is newest-first and this note is the
+              // consequence of that verdict, so it has to sit above it — but
+              // the reply comment carries the timestamp it was PREPARED with,
+              // which is older than anything stamped in this write. Unshifting
+              // here put a note 5ms newer than the reviewer's comment BELOW it,
+              // and viberr's own `timeline.out_of_order` diagnostic caught it
+              // on SHOP-24 within the hour.
+            }
+          }
         }
         validation = deriveValidation(parsed.frontmatter);
         parsed.frontmatter.validation = validation;
@@ -3341,6 +3850,20 @@ export async function recordAgentCompletion(
         let replyEvent = prepared.event;
         if (evidence && !verdict) replyEvent = { ...replyEvent, evidence };
         if (attachments && !verdict) replyEvent = { ...replyEvent, attachments };
+        /**
+         * Ruling 317: TITLE it, because this comment is the only complete copy
+         * of a justification the stored record is a clip of — and the two
+         * fields that protect a comment from compaction were just moved OFF it,
+         * three lines up, precisely BECAUSE there is a verdict.
+         *
+         * So the protection was exactly inverted: a deliverer's report carries
+         * evidence and is immune, while the verdict report — which ruling 292's
+         * own marker calls "on this task's timeline, whole" — was the first
+         * thing folded away. Live on SHOP-76 three of four rounds of review
+         * reasoning were unrecoverable from canonical `task.md` while every
+         * `verdicts[].reason` still pointed at them.
+         */
+        if (verdict) replyEvent = { ...replyEvent, title: VERDICT_REPORT_TITLE };
         parsed.timeline.unshift(replyEvent);
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
@@ -3376,6 +3899,20 @@ export async function recordAgentCompletion(
         };
         if (attachments) verdictEvent.attachments = attachments;
         parsed.timeline.unshift(verdictEvent);
+        // Ruling 237: the escalation note goes ABOVE the verdict that caused
+        // it, which means last, and with a stamp that cannot be older than what
+        // it sits on.
+        if (deadlockEscalation.packet) {
+          parsed.timeline.unshift({
+            occurredAt: new Date().toISOString(),
+            type: "comment",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: deadlockEscalation.packet.title,
+            text: `**Decision packet:** ${deadlockEscalation.packet.title}. Awaiting a human decision.`,
+            toAgent: false,
+            evidence: null,
+          });
+        }
       }
       // Ask-human question from the outcome envelope (Codex transport; the
       // Claude toolkit opens its packet live mid-run). One packet slot per
@@ -3425,6 +3962,43 @@ export async function recordAgentCompletion(
       }
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
+    // Ruling 237 (F37-57): the packet itself was written inside the verdict's
+    // own lock above, so the objection and the escalation it raised can never
+    // land apart. What is left is telling people — a decision nobody is
+    // notified about waits exactly as long as it takes someone to open the task
+    // by chance.
+    if (deadlockEscalation.packet && deadlockEscalation.deadlock) {
+      recordAudit(db, {
+        action: "task.review.deadlock",
+        actor: SYSTEM_ACTOR,
+        subjectKind: "task",
+        subjectId: taskKey,
+        projectSlug,
+        taskKey,
+        details: {
+          profileId: deadlockEscalation.deadlock.profileId,
+          rounds: deadlockEscalation.deadlock.rounds,
+        },
+      });
+      notifyTaskWatchers(
+        db,
+        {
+          projectSlug,
+          taskKey,
+          kind: "packet",
+          ptype: "input",
+          title: `Decision needed: ${deadlockEscalation.packet.title}`,
+          text: deadlockEscalation.packet.body,
+          // Ruling 237: `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any
+          // notice that names nobody, so leaving this off told the inbox the
+          // Operator raised it — contradicting the card, which says
+          // `from: policy-engine`, and contradicting the ruling, whose whole
+          // point is that this is not the operator's judgement.
+          from: { kind: "system", name: "Policy engine" },
+        },
+        ctx,
+      );
+    }
     // P13-RT-01 (NEW-4, broken on its PRIMARY path): a FINISHED agent's report
     // that tags a human ("@Arda …") must reach their inbox. Only the
     // interrupted/errored path (postAgentReplyComment) and Claude's mid-run
@@ -3486,17 +4060,35 @@ export async function recordAgentCompletion(
           actorRef: encodeActorRef(actorRef),
         },
       });
-      notifyTaskWatchers(
-        db,
-        {
-          projectSlug,
-          taskKey,
-          kind: "approval",
-          title: `${roleDisplay} asks: ${question!.title.trim()}`,
-          text: question!.body ?? "An engaged agent needs a human decision.",
-        },
-        ctx,
-      );
+      // F37-64: ruling 222 fixed ONE of the two question doors. Its words are
+      // "the notification says WHO is asking … an agent's own question reached
+      // the owner's inbox under the Operator's name and avatar, on the one
+      // surface whose chip IS the 'who wants something from you' signal" — and
+      // it was applied in `agent-toolkit.server.ts`, the CLAUDE `ask_human`
+      // tool. This is the CODEX outcome-envelope door, which copies that
+      // ruling's title format and never set `from`, so `notifyTaskWatchers`
+      // stamped `OPERATOR_NOTIFY_FROM` over it.
+      //
+      // Live on SHOP-5 at 16:52:12: title "Infrastructure Engineer asks:
+      // Gateway route proof", sender `{"kind":"agent","name":"Operator"}`, on a
+      // packet whose own `from` reads
+      // `agent:codex/infrastructure-engineer (Infrastructure Engineer)`.
+      const askNotice: TaskWatcherNotice = {
+        projectSlug,
+        taskKey,
+        kind: "approval",
+        title: `${roleDisplay} asks: ${question!.title.trim()}`,
+        text: question!.body ?? "An engaged agent needs a human decision.",
+      };
+      if (actorRef.kind === "agent") {
+        askNotice.from = {
+          kind: "agent",
+          backend: actorRef.backend,
+          name: roleDisplay,
+          role: roleDisplay,
+        };
+      }
+      notifyTaskWatchers(db, askNotice, ctx);
     } else if (questionDeferred) {
       logger.info("agent question held — a decision packet is already open", {
         taskKey,
@@ -3526,6 +4118,155 @@ export async function recordAgentCompletion(
   } catch (error) {
     logger.warn("agent completion recording failed", {
       taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  // Ruling 237: when the write above threw, nothing was escalated and the
+  // caller reacts exactly as it always did.
+  return { escalated: deadlockEscalation.packet !== null };
+}
+
+/**
+ * Ruling 203 (F37-23): deliver the @mention that could not start while this
+ * agent was running.
+ *
+ * The single-flight guard refuses a mention of an agent that already has a live
+ * run on the task — correctly; two processes in one checkout is the thing it
+ * exists to prevent. What was wrong was what viberr said next: "it will see the
+ * comment when it next re-anchors". The anchor carries the last five timeline
+ * events, clamped, and only a FRESH run builds one, so the promise held only if
+ * that agent happened to run again on that task before five more events landed.
+ * Live on SHOP-6 neither held: an owner's correction was eight events back
+ * within 75 seconds, and the Platform Architect it named never ran on the task
+ * again before it was accepted.
+ *
+ * Nothing is queued in memory. The comment IS the record, and "undelivered"
+ * is derivable from it: a human comment addressed to this agent, posted after
+ * this run started, cannot have started a run of its own — the single-flight
+ * guard is the only thing that could have refused it.
+ *
+ * Ruling 205: EVERY such comment goes into ONE directive, not the oldest one
+ * into one run. The first draft delivered the oldest and claimed the rest would
+ * "ride the next completion"; they cannot. The window is "newer than the run
+ * that was busy", so the moment the oldest starts a redelivery run, the others
+ * are older than THAT run's start and no later completion can see them again —
+ * a two-message burst lost its second message, silently, which is the failure
+ * this whole function exists to stop. Merging also matches what the operator
+ * lease already does with a person's consecutive comments: one burst is one
+ * question, not N governed drives.
+ *
+ * Returns true when a run started, and the caller then leaves the operator's
+ * own react trigger alone: a person's instruction goes first.
+ */
+export async function deliverDeferredMention(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    profileId: string;
+    /** The completed run's start, the window's lower bound. Null (no recorded
+     *  start) means there is no honest window, so nothing is claimed. */
+    runStartedAt: string | null;
+  },
+): Promise<{ started: boolean; pending: number }> {
+  const none = { started: false, pending: 0 };
+  const startedAt = input.runStartedAt;
+  if (!startedAt) return none;
+  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!file) return none;
+  const { resolveMentionedAgent } = await import("./agent-reply.server");
+  const mine: { at: string; text: string; userId: string }[] = [];
+  for (const event of file.parsed.timeline
+    .filter((e) => e.type === "comment" && e.toAgent && e.actor.kind === "human")
+    .filter((e) => e.occurredAt > startedAt)
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))) {
+    if (event.actor.kind !== "human") continue;
+    const target = resolveMentionedAgent(
+      db,
+      ctx,
+      input.projectSlug,
+      input.taskKey,
+      event.text,
+    );
+    if (target?.profileId === input.profileId) {
+      mine.push({ at: event.occurredAt, text: event.text, userId: event.actor.userId });
+    }
+  }
+  const oldest = mine[0];
+  if (!oldest) return none;
+  // One author (the ordinary case: one person typing twice) reads as one
+  // message. Several authors keep their names inline, because the directive
+  // can only tell the agent to tag ONE person back (NEW-4) and the others must
+  // at least be visible in what it is answering.
+  const authors = new Set(mine.map((m) => m.userId));
+  const text =
+    mine.length === 1
+      ? oldest.text
+      : mine
+          .map((m) => (authors.size > 1 ? `${userName(db, m.userId)}: ${m.text}` : m.text))
+          .join("\n\n");
+  logger.info("delivering the @mention(s) refused while the agent was running", {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    profileId: input.profileId,
+    comments: mine.length,
+    oldestAt: oldest.at,
+  });
+  const result = await commentToAgent(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      text,
+      redelivered: true,
+    },
+    // The person who has been waiting longest is the one the agent is told to
+    // tag back.
+    { userId: oldest.userId, label: userName(db, oldest.userId) },
+    ctx,
+  );
+  // Ruling 211(b): the caller needs to know a delivery was OWED, not only
+  // whether one started — a refused redelivery leaves a written promise on the
+  // record and, before this, nothing anywhere contradicted it.
+  return { started: result.triggered !== null, pending: mine.length };
+}
+
+/**
+ * Ruling 211(b): withdraw, on the record, a delivery promise that cannot be
+ * kept. `commentToAgent`'s single-flight refusal writes "Viberr starts it on
+ * this comment as soon as that run finishes" onto the timeline; when the
+ * completion hop cannot start that run — the task closed underneath it, the
+ * stage stopped admitting the profile, a credential went away — the person is
+ * owed the correction in the same place they were given the promise.
+ */
+async function appendUndeliveredMentionNote(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; agentHandle: string },
+  owed: number,
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Mention still not delivered",
+        text:
+          `**Not delivered:** ${owed === 1 ? "a comment" : `${owed} comments`} addressed to ` +
+          `@${input.agentHandle} could not be started when its run finished, so the delivery ` +
+          `promised when the comment was refused has not happened. ` +
+          `${owed === 1 ? "It stays" : "They stay"} on the record; mention the agent again once ` +
+          `the task can run one.`,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.warn("undelivered-mention note failed", {
+      taskKey: input.taskKey,
       err: error instanceof Error ? error : new Error(String(error)),
     });
   }
@@ -3575,6 +4316,12 @@ export async function registerAgentCompletion(
     dispatchedByUserId?: string;
     /** Present when started inside an operator react loop (continue the chain). */
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    /** Ruling 248 (F37-77): the workspace checkout could not be provisioned, so
+     *  this run executed with NO working tree. PERSISTED on the run row for the
+     *  same reason as `outcomeKey` — the closure that would otherwise carry it
+     *  dies with the process, and a recovered reviewer would have its report
+     *  re-classified into a verdict it never gave. */
+    noCheckout?: boolean;
   },
 ): Promise<void> {
   // Persist on the run row what boot recovery must re-find after a restart —
@@ -3583,6 +4330,7 @@ export async function registerAgentCompletion(
   // (AO-1) and the dispatcher of the dispatch-completion contract (C02-R11).
   const persisted: Parameters<typeof patchRun>[2] = {};
   if (input.outcomeKey) persisted.outcomeKey = input.outcomeKey;
+  if (input.noCheckout) persisted.noCheckout = 1;
   if (input.dispatchedByName) {
     persisted.dispatchedByName = input.dispatchedByName;
     if (input.dispatchedByUserId) persisted.dispatchedByUserId = input.dispatchedByUserId;
@@ -3716,10 +4464,20 @@ export async function applyAgentCompletionEffects(
     dispatchedByName?: string;
     dispatchedByUserId?: string;
     operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    /** Ruling 211(c): set by boot recovery, which replays a run's lost effects
+     *  possibly days later. The deferred-@mention redelivery is a promise made
+     *  by the LIVE refusal and belongs to the live completion; replaying it from
+     *  an old run's window would re-deliver a comment a human has since had
+     *  answered, starting a duplicate paid run on a stale instruction. */
+    replayed?: boolean;
   },
   finished: { id: string; state: string },
 ): Promise<void> {
   const { fullReplyTextForRun } = await import("./agent-reply.server");
+  /** Ruling 237: this completion's own verdict raised the review-deadlock
+   *  packet, so the operator react at the end of this function is suppressed —
+   *  see the arm that reads it. */
+  let raisedDeadlockPacket = false;
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
@@ -3734,7 +4492,15 @@ export async function applyAgentCompletionEffects(
   const fullText = fullReplyTextForRun(db, finished.id);
   // The prior reply must predate THIS run so a mid-run post_comment from this
   // same run can't be mistaken for it (corrupting no-progress detection).
-  const thisRunStartedAt = getRun(db, finished.id)?.started_at ?? null;
+  const thisRunRow = getRun(db, finished.id);
+  const thisRunStartedAt = thisRunRow?.started_at ?? null;
+  // Ruling 211(a): the redelivery window must open when the single-flight guard
+  // STARTED refusing, not when the provider process launched. That guard keys on
+  // `state IN ('running','queued')` (commentToAgent), which begins at the row's
+  // INSERT — and a run admitted behind a concurrency cap sits queued for minutes
+  // with no `started_at` at all. Using the launch instant dropped every comment
+  // refused during that wait, silently, under a note promising delivery.
+  const deferredWindowFrom = thisRunRow?.created_at ?? thisRunStartedAt;
   // Files this run saved into the task's attachments/ dir (browser captures):
   // everything written at-or-after the run started. Stamped onto the producing
   // event below so the panel can say who added each file and from which
@@ -3932,10 +4698,22 @@ export async function applyAgentCompletionEffects(
   }
   const runAttachments = attachmentsPrune.kept;
   if (finished.state === "finished") {
+    // Ruling 248 (pass 37, F37-77): a run whose workspace could not be
+    // provisioned READ NOTHING, so it judged nothing. Live on SHOP-5 the Code
+    // Reviewer reported exactly that — envelope `verdict: null`, summary "No
+    // content verdict recorded" — and viberr wrote `request_changes` onto the
+    // task anyway, because the prose fallback matched the word "failure" inside
+    // VIBERR'S OWN sentence, the one the prompt tells the agent to quote
+    // verbatim. That fabricated objection was the second in a row, so the
+    // policy engine raised a review-deadlock packet asking a person to choose
+    // between interrogating a reviewer that never judged and forcing acceptance
+    // past a verdict that did not exist. The operator caught it, said so on the
+    // task, and could not withdraw a packet the policy engine had raised.
+    const readNothing = thisRunRow?.no_checkout === 1;
     // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
     // back to the prose classifier (G4). The regex NEVER runs without authority
     // (R1 — a developer's "tests pass" can't flip validation).
-    let verdict = verdictAuthorized ? (outcome?.verdict ?? null) : null;
+    let verdict = verdictAuthorized && !readNothing ? (outcome?.verdict ?? null) : null;
     if (!verdictAuthorized && outcome?.verdict) {
       // B-5 (pass 24): a Codex agent CAN fill the `verdict` field of its outcome
       // envelope even without the `report-validation-verdict` grant — the JSON
@@ -3950,7 +4728,44 @@ export async function applyAgentCompletionEffects(
         verdict: outcome.verdict,
       });
     }
-    if (!verdict && verdictAuthorized) {
+    if (readNothing && verdictAuthorized) {
+      // Loud, because the review did NOT happen: validation is untouched, and
+      // the note below tells the humans on the task so nobody reads a completed
+      // review run as a judgement.
+      logger.warn("verdict-capable run had NO checkout — no verdict recorded from it", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        profileId: input.profileId,
+        envelopeVerdict: outcome?.verdict ?? null,
+      });
+    }
+    // The fallback is for SILENCE, not for overruling an answer. An agent that
+    // filled the envelope and ASKED A QUESTION with the verdict field empty has
+    // said which of the two it was doing; running a regex over its prose then
+    // converts "here is what I need before I can judge" into a judgement. The
+    // no-verdict NOTE below already reads a question as "a legitimate no-verdict
+    // outcome" (pass 24, C-4) — the classifier is its sibling and never learned
+    // it, which is this pass's most-found defect shape.
+    /**
+     * Ruling 316: a run told NOT to judge did not fall silent, so there is
+     * nothing here for the fallback to repair.
+     *
+     * Ruling 313 withheld the verdict TOOL on the deadlock question and stopped
+     * there, which closed nothing: `verdictAuthorized` reads the ENGAGEMENT
+     * snapshot (correctly — a required reviewer whose live grant was removed
+     * must still be able to record), so the prose fallback ran anyway and
+     * manufactured the verdict the tool had just been taken away to prevent.
+     *
+     * Live on SHOP-68 the reviewer said so in words, and viberr wrote the
+     * verdict under its name 70 milliseconds later: "No verdict recorded — the
+     * directive said not to... I deliberately skipped `report_outcome` rather
+     * than omitting it. (Note: last turn the system appears to have derived a
+     * `request_changes` entry from my comment anyway; I can't control that, but
+     * nothing new was authored by me.)" The person answered the same deadlock
+     * packet three times for one question.
+     */
+    const verdictSilenced = getRun(db, finished.id)?.verdict_withheld === 1;
+    if (!verdict && verdictAuthorized && !readNothing && !outcome?.question && !verdictSilenced) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {
         logger.info("agent verdict resolved by prose fallback (no envelope)", {
@@ -3994,7 +4809,7 @@ export async function applyAgentCompletionEffects(
       ...(collab.evidence ? (outcome?.evidence ?? []) : []),
       ...(completionFm ? deliveredWorkEvidence(completionFm) : []),
     ];
-    await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
+    const recorded = await recordAgentCompletion(db, ctx, input.projectSlug, input.taskKey, {
       actorRef,
       runId: finished.id,
       replyText,
@@ -4003,6 +4818,7 @@ export async function applyAgentCompletionEffects(
       evidence,
       attachments: runAttachments,
     });
+    if (recorded.escalated) raisedDeadlockPacket = true;
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
     // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
     // verdict (no envelope, no classifiable prose). Validation is left unchanged
@@ -4037,10 +4853,18 @@ export async function applyAgentCompletionEffects(
       !!completionFm &&
       !!reviewStageId &&
       completionFm.stage === reviewStageId;
+    // Ruling 248: when the run had no working tree the note says THAT, because
+    // "re-run the review" is bad advice for a condition a re-run reproduces.
+    // It fires even for a run that asked a question: the question reaches a
+    // person as a packet, and the task's own record should still say plainly
+    // that the review did not happen and why.
+    const noteText = readNothing
+      ? "This review run had no checkout of the repository, so it read nothing and recorded no verdict. Validation is unchanged and acceptance stays gated. The workspace failure is on the server, not on the agent: fix that first, then run the review again."
+      : "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.";
     if (
       verdictAuthorized &&
       !verdict &&
-      !question &&
+      (!question || readNothing) &&
       atReviewStage &&
       !input.fromHumanDirective
     ) {
@@ -4053,7 +4877,7 @@ export async function applyAgentCompletionEffects(
               type: "note",
               actor: { kind: "system", systemId: "policy-engine" },
               title: null,
-              text: "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.",
+              text: noteText,
               toAgent: false,
               evidence: null,
             });
@@ -4087,6 +4911,55 @@ export async function applyAgentCompletionEffects(
   //     event, escalate a recovery packet so it reaches a human's queue, and stop
   //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
   //     human action and are handled elsewhere, so only `error` lands here.
+  // Ruling 203, moved EARLIER by ruling 211(b): a person's @mention refused by
+  // the single-flight guard is delivered when the busy run completes —
+  // whatever state it completed in. The call used to sit after the `error`
+  // branch's return and after the closed-task branch's return, so a run that
+  // ended in error (or a task that closed underneath it) dropped the person's
+  // instruction silently, under a note promising the opposite. It runs here
+  // instead, and the operator react below is still skipped only when a run
+  // actually started.
+  let deferredStarted = false;
+  let deferredOwed = 0;
+  try {
+    const outcome = await deliverDeferredMention(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      runStartedAt: input.replayed === true ? null : deferredWindowFrom,
+    });
+    deferredStarted = outcome.started;
+    deferredOwed = outcome.pending;
+  } catch (error) {
+    // A delivery that cannot start must never swallow the completion pipeline.
+    // `deferredOwed` stays 0 here, so no withdrawal note follows — deliberate:
+    // a THROW means the count is unknown, and every cause ruling 211(b) names
+    // (closure, stage, credential) is a refusal, which returns `triggered:
+    // null` with a real count instead of throwing. A throw here is a broken
+    // disk or database, and this log line is the honest record of it.
+    logger.warn("deferred @mention delivery failed", {
+      taskKey: input.taskKey,
+      profileId: input.profileId,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  // F37-66: ruling 211(b)'s withdrawal, written HERE — beside the attempt it
+  // reports on, and above every early return below it.
+  //
+  // The refusal wrote "Viberr starts it on this comment as soon as that run
+  // finishes" onto the canonical record. When that cannot happen — the causes
+  // ruling 211(b) itself names: the task closed underneath it, the stage no
+  // longer admits the profile, a credential is gone — the promise has to be
+  // withdrawn where it was made. It used to sit below the error branch's
+  // return, the closed-task branch's return and ruling 237's, which is the same
+  // placement bug ruling 211(b) had already fixed for the ATTEMPT and for the
+  // same two branches: a task archived under a live run took the closed branch,
+  // returned, and left the person's promise standing with nothing anywhere
+  // contradicting it.
+  if (deferredOwed > 0 && !deferredStarted) {
+    await appendUndeliveredMentionNote(db, ctx, input, deferredOwed);
+  }
+
   if (finished.state === "error") {
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
@@ -4173,11 +5046,19 @@ export async function applyAgentCompletionEffects(
       // supported when using Codex with a ChatGPT account" instead of only
       // the generic runtime advice above.
       providerText ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\`` : "";
+    // Ruling 333: EVIDENCE, not kind. The two cut-off kinds were exempted
+    // because a cut run leaves work behind; a provider refusal on turn 48 is
+    // the same cut-off, and the facts that prove it are already in scope.
+    const outcomeClause =
+      failure?.kind === "max_turns" || failure?.kind === "max_budget"
+        ? ""
+        : runOutcomeClause({
+            turns: thisRunRow?.turns ?? 0,
+            attachments: runAttachments.length,
+          });
     const failureText = classified
-      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason} No changes were delivered. ${described.remedy}${providerBlock}`
-      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${
-          failure?.kind === "max_turns" || failure?.kind === "max_budget" ? "" : " No changes were delivered."
-        }${
+      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason}${outcomeClause} ${described.remedy}${providerBlock}`
+      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${outcomeClause}${
           failure?.kind === "max_turns"
             ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
             : failure?.kind === "max_budget"
@@ -4228,6 +5109,23 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "auth" ||
       failure?.kind === "unavailable" ||
       failure?.kind === "overloaded";
+    /**
+     * Ruling 315: a backend failure is an ACCOUNT's failure, not this task's.
+     * Quota, auth and a missing credential take out every task running on the
+     * same account at the same instant, and each one used to raise its own
+     * identical packet. The key is what actually failed — the backend, the kind
+     * of failure, and whose account paid for the run (ruling 127's principal) —
+     * so two tasks that failed for one reason agree on it with nothing
+     * coordinating them.
+     *
+     * `overloaded` is deliberately NOT grouped: it is the provider being busy
+     * for a moment, not a state of the account, and two tasks hitting it are
+     * two separate transients that can want different answers.
+     */
+    const accountCause =
+      failure?.kind === "quota" || failure?.kind === "auth" || failure?.kind === "unavailable"
+        ? `backend:${input.backend}:${failure.kind}:${getRun(db, finished.id)?.credential_user_id ?? "none"}`
+        : null;
     const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
@@ -4238,6 +5136,7 @@ export async function applyAgentCompletionEffects(
     };
     if (classified) stuck.remedy = described.remedy;
     if (backendFailure) stuck.options = described.options;
+    if (accountCause) stuck.cause = accountCause;
     if (providerText) stuck.providerText = providerText;
     const escalation = await openStuckLoopPacket(
       db,
@@ -4335,19 +5234,39 @@ export async function applyAgentCompletionEffects(
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
   const { resolveOperatorAuthority } = await import("./operator-actions.server");
-  let reactBackend: RealBackend;
   let reactAutonomy: OperatorAutonomy;
   let currentDepth: number;
   if (input.operatorRun) {
-    reactBackend = input.operatorRun.backend;
     reactAutonomy = input.operatorRun.autonomy;
     currentDepth = input.operatorRun.reactDepth;
   } else {
-    const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
-    reactBackend = authority.backend;
-    reactAutonomy = authority.autonomy;
+    reactAutonomy = resolveOperatorAuthority(ctx, input.projectSlug, {}).autonomy;
     currentDepth = 0;
   }
+  // Ruling 231 (F37-51): the react chain carries its DEPTH and its autonomy,
+  // and no longer carries a BACKEND.
+  //
+  // It used to pin `input.operatorRun.backend` — the backend of the drive that
+  // prompted the agent — and pass it as an override, which beats the live
+  // deployment. R22 removed exactly that pin from schedules, on exactly this
+  // reasoning: "A schedule fires unattended, so following the profile that is
+  // actually deployed then matters MORE than freezing whatever was configured
+  // hours earlier." A react is the same shape. The agent it is reacting to may
+  // have been running for an hour, and live on pass 37 an owner moved the
+  // operator from Codex to `opus[1m]` at 04:19:56 and a react chain started a
+  // CODEX operator run at 04:31:44 — twelve minutes later, against a deployment
+  // that said `claude`.
+  //
+  // Safe to drop because the operator re-anchors on `task.md` rather than on a
+  // provider transcript (its continuity mode), so a chain that changes backend
+  // between turns loses nothing it was relying on. Autonomy stays carried: it
+  // is clamped by the deployment's configured ceiling inside the resolver
+  // (R19-A), so a chain cannot hold a ceiling the project has since lowered.
+  const reactBackend: RealBackend = resolveOperatorAuthority(
+    ctx,
+    input.projectSlug,
+    {},
+  ).backend;
   // No-progress detection compares the STORED comment forms (adversarial-
   // review #4): both sides must be the same form or a repeat never matches.
   // Comments now store the FULL reply, so compare `fullText` against
@@ -4421,12 +5340,39 @@ export async function applyAgentCompletionEffects(
       return;
     }
   }
+  // Ruling 237: the verdict recorded above raised the deadlock packet, so the
+  // task belongs to a person now. The react below is a MACHINE trigger
+  // (`agent-reply`), which ruling 195 records as deliberately NOT refused by an
+  // open packet: "a packet opened mid-work does NOT stop the machine triggers,
+  // so the operator kept coordinating and dispatched a deliverer". That
+  // carve-out is right for a packet the operator opened mid-run and can
+  // withdraw, and exactly wrong for this one — the next thing the operator does
+  // is the re-dispatch the packet exists to interrupt, while the card tells a
+  // person coordination is paused. Same shape as the closed-task arm above: the
+  // report is on the record, and nothing follows it.
+  if (raisedDeadlockPacket) {
+    logger.info("operator react skipped — this completion raised the review-deadlock packet", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+    });
+    return;
+  }
   const shouldReact = operatorShouldReactToReply(
     finished.state,
     stripCcLine(replyForCompare),
     stripCcLine(prevReply),
     currentDepth,
   );
+  // Ruling 203 (F37-23): a person's @mention that landed while this agent was
+  // running was refused by the single-flight guard, and viberr told them the
+  // agent would see it. This is where that promise is kept — ahead of the
+  // operator's own react trigger below, for the same reason a queued human
+  // `@operator` comment drains ahead of the machine trigger (B-OP2): the
+  // question exists nowhere else, and coordination can wait one hop. The
+  // operator is re-invoked by THAT run's completion, so nothing is skipped,
+  // only ordered.
+  if (deferredStarted) return;
+
   // Dispatch-completion contract (2026-08-29): a manually/schedule-dispatched
   // run's completion ALWAYS hands back to the operator — that is the "to let the
   // operator run again" half of the owner's contract, so the react heuristic
@@ -4454,7 +5400,40 @@ export async function applyAgentCompletionEffects(
         runId: finished.id,
       });
     }
-    if (noProgress || depthCapped) {
+    // Ruling 258 (pass 37, F37-89): a chain that stopped because the work is
+    // FINISHED did not get stuck, and must not be handed to a person as three
+    // ways to redo it.
+    //
+    // Live on SHOP-32: the Integration Verifier approved `f5470f05` at
+    // 05:14:33, both required verdicts sat on the current head, validation read
+    // `healthy` — and two seconds later the depth cap opened "Work stalled:
+    // pick a recovery path", whose options are redirect the specialist, send it
+    // back for another attempt, or hold for runtime debugging. Every one of
+    // them re-dispatches work that had passed. The packet then BLOCKED the
+    // acceptance it should have been waiting for ("This task has an open
+    // blocked decision. Resolve the operator's packet before accepting it"), so
+    // the only doors left were to redo finished work or to force-accept past a
+    // review gate that had passed — recording a bypass that never happened.
+    //
+    // The packet's own sentence already claimed the test this adds: "hit its
+    // depth cap WITHOUT REACHING A BOUNDARY". Acceptable at the review boundary
+    // IS reaching one. Asked here, before any packet exists, so the gate answers
+    // about the work rather than about the packet this branch is deciding not to
+    // open.
+    const acceptableNow =
+      (noProgress || depthCapped) &&
+      acceptanceRefusalFor(
+        { projectSlug: input.projectSlug, taskKey: input.taskKey },
+        ctx,
+      ) === null;
+    if (acceptableNow) {
+      logger.info("stuck-loop packet skipped — the task is acceptable, so the chain reached a boundary", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        why: noProgress ? "no_progress" : "depth_capped",
+      });
+    }
+    if ((noProgress || depthCapped) && !acceptableNow) {
       await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
@@ -4669,6 +5648,84 @@ export async function liftHoldForRun(
   }
 }
 
+/**
+ * Ruling 216 (F37-36): a person's own operator run re-litigates the DELIBERATE
+ * STAGE hold, the way every other human re-litigation already does.
+ *
+ * `heldAtStage` is the stranded backstop's durable marker (V18): the operator
+ * held this stage twice running, so stop paying nudges for it. Its note tells
+ * the human "run the operator manually when the hold should end" — and running
+ * the operator was the one listed remedy that did not end it. Goal edits,
+ * packet resolutions, transitions and acceptance all clear the marker; a person
+ * pressing Run operator did not, so the board kept saying "Coordination is
+ * paused here" while that person was manually coordinating it, and the drive
+ * they paid for got no nudge if it stranded.
+ *
+ * Deliberately NOT lifted by a schedule or by any machine trigger: V18 exists
+ * because an hourly schedule and a stray `@operator` re-armed the nudge forever.
+ * The caller's own discriminator is reused unchanged — a `manual` trigger
+ * carrying an `actor` is a person and nothing else is.
+ */
+export async function liftStageHoldForPerson(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  cause: { byName: string | null; by: AuditActor },
+): Promise<boolean> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const held = existing?.parsed.frontmatter.heldAtStage ?? null;
+    if (!held) return false;
+    const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+    const stageName =
+      project?.parsed.frontmatter.stages.find((st) => st.id === held)?.name ?? held;
+    let lifted = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked under the lock: a transition since the read above already
+      // cleared it, and this must not resurrect a note for a hold that is gone.
+      if (parsed.frontmatter.heldAtStage !== held) return;
+      parsed.frontmatter.heldAtStage = null;
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: "Hold lifted",
+        text:
+          `**Hold lifted:** ${cause.byName ?? "A person"} started an operator run, so the ` +
+          `hold recorded at ${stageName} no longer stands. Coordination resumes here. If the ` +
+          `operator holds this stage twice in a row again, Viberr records a new hold.`,
+        toAgent: false,
+        evidence: null,
+      });
+      lifted = true;
+    });
+    if (!lifted) return false;
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.hold.lifted",
+      actor: cause.by,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: {
+        cause: "operator-run",
+        previous: "stage-hold",
+        stage: held,
+        byUserId: cause.by.userId ?? null,
+      },
+    });
+    return true;
+  } catch (error) {
+    logger.warn("liftStageHoldForPerson failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return false;
+  }
+}
+
 export async function operatorPromptAgent(
   db: DatabaseSync,
   input: {
@@ -4687,7 +5744,7 @@ export async function operatorPromptAgent(
     handle: string;
   },
   ctx: TaskMutationContext = {},
-): Promise<{ runId: string }> {
+): Promise<StartAgentRunResult> {
   const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
   const directive = withMention(input.handle, input.directive);
 
@@ -4698,7 +5755,10 @@ export async function operatorPromptAgent(
   // The POSTED form carries the ambiguity disclosure; the run's directive stays
   // exactly what the operator wrote (S5-G3 — the note addresses the humans
   // reading the timeline, not the agent about to work).
-  const commentText = withAmbiguityDisclosure(db, directive);
+  // Ruling 232 amendment: no disclosure on a directive. It notifies nobody by
+  // declared audience, so a note whose remedy is "spell the tag differently"
+  // points at the wrong cause.
+  const commentText = withAmbiguityDisclosure(db, directive, undefined, "agent");
   const comment: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "comment",
@@ -4712,21 +5772,29 @@ export async function operatorPromptAgent(
     parsed.timeline.unshift(comment);
   });
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
-  // P14-GV-06 (NEW-4 gap): this was the ONE comment writer that wrote the
-  // timeline directly and skipped the mention fan-out, so a human @tagged inside
-  // an operator directive ("…coordinate with @Arda") was never notified. The
-  // agent's own @handle is a reserved handle and routes without notifying.
+  // P14-GV-06 added this fan-out so a human @tagged inside an operator directive
+  // ("…coordinate with @Arda") was not silently dropped. Ruling 232 (owner,
+  // 2026-09-14) reverses that for THIS writer: the comment's declared audience is
+  // the agent, and pass 37 measured what the tags in it actually are — 19 of 49
+  // mention notifications on the live instance came from directives whose @handle
+  // was the operator SPECIFYING a deliverable ("end with an explicit @Arda
+  // question naming Stripe, Adyen, and Mock-only"), re-issued on every rework
+  // round. The call stays, carrying the audience, so the rule lives at the one
+  // fan-out seam and the non-delivery report is still computed for the timeline.
   notifyMentionedUsers(db, {
     text: commentText,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     from: OPERATOR_NOTIFY_FROM,
     occurredAt: comment.occurredAt,
+    audience: "agent",
   });
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
-  let runId: string;
+  // Ruling 263: the dispatch's own verdict travels back to the operator's tool
+  // reply, which used to say "started its run" for a refused one too.
+  let started: StartAgentRunResult;
   try {
     const dispatch: Parameters<typeof startAgentRun>[1] = {
       projectSlug: input.projectSlug,
@@ -4735,8 +5803,7 @@ export async function operatorPromptAgent(
       directive,
     };
     if (input.delivers !== undefined) dispatch.delivers = input.delivers;
-    const started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
-    runId = started.runId;
+    started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
     // REFUSES (stage eligibility, backend down, policy) must not leave it
@@ -4780,7 +5847,7 @@ export async function operatorPromptAgent(
   //    `ctx.operatorRun` from opCtx (preserved from this operator run) and pass
   //    the real workspace clone dir. So the chain continues at depth+1 with the
   //    correct workdir — no separate registration here.
-  return { runId };
+  return started;
 }
 
 /** Prepend an `@handle` mention to a directive if it does not already lead with
@@ -5829,6 +6896,90 @@ export function closedByHumanDeliveryText(
   );
 }
 
+/** Ruling 321: what the branch is, read at the moment the push was refused.
+ *  Guarded — a remedy sentence must never be the thing that throws a delivery. */
+function conflictDeparture(
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): RevisionDeparture | null {
+  try {
+    const fm = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter;
+    return fm ? revisionLeftWorkspace(fm) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ruling 321 — what a push conflict costs, by what is actually on the branch.
+ *
+ * A non-fast-forward push used to end in one fixed sentence: *"Resolve the
+ * remote branch `X` (delete or rename it, or force-push deliberately), then
+ * deliver again."* It is the same advice whether the branch is an abandoned
+ * ref, a stranger's pull request, or the head of THIS task's own open review
+ * PR — and in that last case both of the acts it names are destructive:
+ * deleting the branch closes the pull request under review, and force-pushing
+ * rewrites the commits the reviewers already judged.
+ *
+ * Live on SHOP-11, twice. A backend engineer rebased a branch that had an open
+ * pull request; the delivery push was refused; this sentence told the owner to
+ * delete `shop-11` — and forty-seven milliseconds later Viberr's own collision
+ * ceremony wrote *"No collision to clear: PR #15 on `shop-11` is SHOP-11's own
+ * review PR."* The product had the fact in the same second and the remedy did
+ * not use it. The owner then spent a long decision note pricing the loss by
+ * hand ("closing PR #15 loses a thread whose conclusion we already have") and
+ * wrote the rule that would have prevented it into the project's KB — a merge,
+ * never a rebase, once a pull request tracks the branch.
+ *
+ * So the remedy reads `revisionLeftWorkspace` — the shared answer to "has this
+ * revision left the workspace, and by what" — and says what the branch IS
+ * before it says what to do to it.
+ */
+export function pushConflictRemedy(input: {
+  taskKey: string;
+  branch: string;
+  reason: string;
+  departure: RevisionDeparture | null;
+}): string {
+  const branch = `\`${input.branch}\``;
+  const lede =
+    `${input.taskKey}'s delivery was not pushed: ${input.reason}. This is a branch-history ` +
+    `conflict, not a credential problem. No review PR was opened; it would review the stale ` +
+    `remote content instead of the delivery.`;
+  const departure = input.departure;
+  if (departure?.kind === "pr") {
+    return (
+      `${lede} ${branch} is the head of ${input.taskKey}'s OWN review PR #${departure.number}: ` +
+      `deleting that branch closes the pull request, and force-pushing it rewrites the commits ` +
+      `the reviewers judged. Neither is the move. ${DIVERGED_BRANCH_REMEDY} If those commits are ` +
+      `genuinely unwanted, discarding them is a deliberate force-push by a person, and it ` +
+      `destroys them.`
+    );
+  }
+  if (departure?.kind === "unowned_pr") {
+    return (
+      `${lede} ${branch} carries PR #${departure.number}, which ${input.taskKey} did not open. ` +
+      `Viberr clears that itself: the recovery packet's "clear the branch collision" option ` +
+      `closes that pull request, deletes the stale remote branch and re-delivers this task's ` +
+      `work on one confirm. Do it there rather than by hand, so what it destroys is stated first.`
+    );
+  }
+  if (departure?.kind === "pushed") {
+    return (
+      `${lede} No pull request tracks ${branch}, but ${input.taskKey} published ` +
+      `\`${departure.headSha.slice(0, 7)}\` to it, so its commits are this task's own earlier ` +
+      `delivery. Merge them into the branch and deliver again, or delete the branch on GitHub ` +
+      `if that work is superseded — which loses it.`
+    );
+  }
+  return (
+    `${lede} No pull request tracks ${branch} and no delivery of ${input.taskKey} published to ` +
+    `it, so what is on it is whatever pushed it last. Delete or rename it on GitHub and deliver ` +
+    `again; merge its commits into the branch first if they are wanted.`
+  );
+}
+
 /**
  * Perform delivery: push the deliverer's workspace branch, re-reconcile the
  * work revision, and open (or reuse) the review PR (R15-2 — the shared core
@@ -5849,6 +7000,27 @@ export async function performDelivery(
 ): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
   try {
+    // Ruling 240 (F37-61): a HELD task refuses delivery, for ruling 186's own
+    // reason and against its own live case. Ruling 186 gated every DISPATCH
+    // door after SHOP-2 "pushed a branch cut from a base that predated the
+    // foundation it waited on" — and publishing that branch to a review PR is
+    // this function, which had no `blockedBy` check at all. The operator's
+    // turn instruction asserted the gate existed for a pass and a half before
+    // anyone read the delivery path.
+    //
+    // Before anything else in the delivery, so a held task never reaches the
+    // push, the PR open, or the branch bootstrap: the same shape as the
+    // closure and hold gates in `startAgentRun`, and the same refusal sentence,
+    // so a person sees one wording wherever a hold stops them.
+    {
+      const heldFile = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+      const held = heldFile?.parsed.frontmatter.blockedBy ?? [];
+      if (held.length > 0) {
+        const message = holdRefusal(taskKey, held, "delivering it for review");
+        await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
+        return { status: "failed", message };
+      }
+    }
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
     // 0. Ruling 128 (F34-4): the base branch must exist BEFORE the push, or a
@@ -5881,6 +7053,21 @@ export async function performDelivery(
       canCommitPush,
       ...dataCtx,
     });
+    // Ruling 202, corrected by ruling 211(d): the drive DELIVERED — stamped
+    // once the push has actually been attempted, not on entry. Stamping on
+    // entry counted the arms that do nothing at all as progress
+    // (`grant_withheld`, `no_workspace`, `bootstrap_failed`), so a nudged drive
+    // whose only action was a delivery that could never leave the machine
+    // looked like it had moved, the stranded backstop skipped its durable
+    // `heldAtStage` marker, and every later trigger re-armed the nudge from
+    // scratch — F31-11's fourteen-drives loop, reached through the fix for
+    // ruling 202. It still stamps BEFORE the PR call and before the result is
+    // classified, because a refused push is a drive that acted; what it no
+    // longer covers is a refusal that never reached the remote.
+    if (ctx.operatorRun && push.status !== "grant_withheld" && push.status !== "no_workspace") {
+      ctx.operatorRun.delivered = true;
+    }
+
     // Ruling 134: `up_to_date` is an ordinary delivery (origin already carries
     // the head); only a real non-push is worth a log line.
     if (push.status !== "pushed" && push.status !== "up_to_date") {
@@ -5888,6 +7075,23 @@ export async function performDelivery(
         taskKey,
         status: push.status,
       });
+    }
+
+    // Ruling 245 (F37-74): a file another task LEASES. Surfaced and returned
+    // here, before anything reads the push further: nothing was pushed, no PR
+    // was opened, and the branch is exactly as it was — so this is a refusal a
+    // person acts on, not a failure to diagnose. The sentence is the shared
+    // `leaseRefusal` one, so a lease reads the same wherever it stops someone.
+    if (push.status === "lease_held") {
+      await surfaceDeliveryEvent(
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        "Delivery refused: a file is leased",
+        push.reason,
+      );
+      return { status: "failed", message: push.reason };
     }
 
     // P11-12: a capability-policy refusal is NOT an empty delivery — surface it
@@ -5920,10 +7124,14 @@ export async function performDelivery(
         projectSlug,
         taskKey,
         "Delivery push conflicted",
-        `${taskKey}'s delivery was not pushed: ${push.reason}. This is a branch-history ` +
-          `conflict, not a credential problem. No review PR was opened; it would review ` +
-          `the stale remote content instead of the delivery. Resolve the remote branch ` +
-          `\`${push.branch}\` (delete or rename it, or force-push deliberately), then deliver again.`,
+        // Ruling 321: the branch is not an anonymous ref. Read what is on it
+        // before telling a person to destroy it.
+        pushConflictRemedy({
+          taskKey,
+          branch: push.branch,
+          reason: push.reason,
+          departure: conflictDeparture(ctx, projectSlug, taskKey),
+        }),
       );
       return { status: "push_conflict", branch: push.branch, message: push.reason };
     }
@@ -6473,22 +7681,63 @@ export async function performDelivery(
       result.status === "no_pat_configured" ||
       result.status === "no_repo_configured"
     ) {
+      /**
+       * Ruling 334: four statuses shared one remedy, and for the transport one
+       * that remedy accuses a configuration that is provably fine.
+       *
+       * Ruling 128's own comment twelve lines above states the rule — a GitHub
+       * outcome must be "named as what they are, never as 'unreachable' and
+       * never with 'fix the credential settings' (nothing is wrong with them)"
+       * — and it fixed the `base_branch_missing` arm while leaving the arm that
+       * really IS a network failure sharing the credential sentence.
+       *
+       * Live on SHOP-48, and the record disproves it 58 seconds later: at
+       * 23:45:36 "GitHub was unreachable (network error). Fix the
+       * repository/credential settings, then deliver again", and at 23:46:34
+       * "Opened PR #52 for review" — same credential, same repo, nothing
+       * touched, and the retry was the operator's own. A successful push to the
+       * same origin is recorded two minutes BEFORE the refusal.
+       *
+       * `result.message` — the transport reason GitHub's client handed back —
+       * was dropped on the floor by every one of the four arms. Viberr already
+       * has the right words for this case in `codex-runtime.server.ts`:
+       * "Nothing about the account or the task is wrong; check this
+       * deployment's network path (TLS, DNS, proxy) and retry in a few
+       * minutes."
+       *
+       * The two `no_*_configured` arms keep the settings remedy, because for
+       * them it is the true one.
+       */
+      // Only the two transport/credential arms carry a message; the two
+      // "nothing is configured" arms have nothing to quote and need nothing.
+      const said =
+        (result.status === "auth_failed" || result.status === "network_unavailable") &&
+        result.message.trim()
+          ? ` (${oneLineDetail(result.message)})`
+          : "";
       const why =
         result.status === "auth_failed"
-          ? "GitHub rejected the credential (authentication failed)"
+          ? `GitHub rejected the credential (authentication failed)${said}`
           : result.status === "network_unavailable"
-            ? "GitHub was unreachable (network error)"
+            ? `GitHub was unreachable${said}`
             : result.status === "no_pat_configured"
               ? "no GitHub credential is configured for this project"
               : "no GitHub repository is configured for this task";
+      const remedy =
+        result.status === "network_unavailable"
+          ? "Nothing about this project's repository or credential is wrong — the branch is " +
+            "pushed and the work is safe. Deliver again in a few minutes, or check this " +
+            "deployment's network path (TLS, DNS, a proxy) if it keeps failing."
+          : result.status === "auth_failed"
+            ? "Fix the credential on the project's GitHub settings, then deliver again."
+            : "Fix the repository/credential settings, then deliver again.";
       await surfaceDeliveryEvent(
         db,
         ctx,
         projectSlug,
         taskKey,
         "Review PR could not be opened",
-        `No pull request could be opened for ${taskKey}: ${why}. ` +
-          "Fix the repository/credential settings, then deliver again.",
+        `No pull request could be opened for ${taskKey}: ${why}. ${remedy}`,
       );
       return { status: "failed", message: why };
     }
@@ -7058,14 +8307,53 @@ async function refreshBranchForAcceptance(
     });
   });
   reprojectTask(db, ctx, projectSlug, taskKey);
+  /**
+   * Ruling 332: hand it to the operator. This refusal used to wake nobody.
+   *
+   * It stamps `pr.mergeable = "conflicting"`, writes a note, and returns a 409
+   * — and that is all. No packet, no run, no notification. Meanwhile the
+   * operator's byte-identical door (`update_branch_from_base` meeting the same
+   * `conflict` status) opens a blocking decision packet whose recommended
+   * option is the deliverer's own workspace merge.
+   *
+   * Two things make the silence worse than it looks. That stamp is exactly the
+   * key to the operator's door — `acceptanceBoundaryRefusal` denies the branch
+   * tool at the acceptance boundary EXCEPT while `mergeable === "conflicting"`
+   * — so this path creates the one state in which the in-product resolver is
+   * permitted and then schedules nothing. And because the flag is already set,
+   * the reconciler's `flippedToConflict` can never fire afterwards, so ruling
+   * 162(d)'s withdrawal of the standing `accept_completion` offer never runs:
+   * the card invites a click its own gate refuses, for as long as the task
+   * sits.
+   *
+   * Live, twice, and they are the two longest dead stops on the board. SHOP-12:
+   * refused 08:06:45, then NOTHING for 10h45m while the board logged 8-66
+   * events an hour elsewhere, until the owner typed "@operator SHOP-12 is the
+   * last thing standing between this board and a runnable catalog service, and
+   * it is stuck on me rather than on anyone doing work" — packet 28 seconds
+   * later, and the operator's own reply: "It was never a click you were
+   * withholding." SHOP-3: the same shape, 7h45m, same exit.
+   *
+   * Ruling 226's words sit sixty lines below this arm: "A refusal with no exit
+   * is its own defect." Ruling 235 gave exactly this hand-off to the sibling
+   * refusal (an unpushed reviewed revision) because only the operator may push;
+   * the same is true of the merge, and this arm was left out.
+   *
+   * Fire-and-forget, like every other `autoInvokeOperator` caller: the person's
+   * 409 is the answer to their click and must not wait on a coordination turn.
+   */
+  void autoInvokeOperator(db, ctx, projectSlug, taskKey, "pr-conflicting").catch(() => {});
   const after = readTaskFile(ref)?.parsed.frontmatter ?? null;
   const reason = after ? mergeReadinessRefusal(after, taskKey) : null;
   return {
     kind: "unmergeable",
     reason:
       reason ??
-      `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Rebase the branch and re-review, or archive the task.`,
-    cause: "the PR conflicts with the base branch; rebase it, then merge",
+      // Ruling 291: the same sentence as `conflictingPrBlockedReason`, and for
+      // the same reason — the remedy viberr actually implements is a merge.
+      `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`,
+    // Ruling 291: the short cause, in the same voice as the long reason above.
+    cause: "the PR conflicts with the base branch; merge the base into it, then merge",
   };
 }
 
@@ -7165,7 +8453,8 @@ async function attemptAcceptanceMerge(
             reason: gateReason,
             cause: unpushed
               ? "the delivered revision is not on the PR; deliver the branch to push it, then merge"
-              : "the PR conflicts with the base branch; rebase it, then merge",
+              // Ruling 291: never "rebase it" — see `conflictingPrBlockedReason`.
+              : "the PR conflicts with the base branch; merge the base into it, then merge",
           };
         }
         return {
@@ -7489,6 +8778,230 @@ export async function setTaskArchived(
   };
 }
 
+/**
+ * Ruling 322 — does this `create_task` option also make the DECIDING task wait
+ * on what it creates?
+ *
+ * Ruling 269 built the option and wrote, in the resolver and again in the note
+ * it leaves, that *"`<KEY>` is unchanged; the new task carries the work"* — with
+ * a comment beside it calling the mutation "a deliberate NO-OP… this option
+ * says something about work that is NOT this task". Both were true when they
+ * were written.
+ *
+ * Ruling 287 then added `newTask.blocks`, the reverse edge: the EXISTING tasks
+ * that must wait on the new one. Nothing excludes the deciding task from that
+ * list, and it is the most natural entry on it — a task is usually created
+ * because the work in front of you cannot proceed without it. When it is
+ * there, the resolution writes the new key into this task's own `blockedBy`
+ * seconds after telling the person this task was untouched, and the board flips
+ * it to blocked.
+ *
+ * Neither sentence was updated. This is the reader that keeps them honest.
+ */
+export function createTaskHoldsDecider(
+  spec: PacketOption["newTask"] | undefined,
+  taskKey: string,
+): boolean {
+  const key = taskKey.trim().toUpperCase();
+  return (spec?.blocks ?? []).some((b) => b.trim().toUpperCase() === key);
+}
+
+/**
+ * Ruling 328 — the deadlock escalation is retried when the packet that blocked
+ * it clears.
+ *
+ * Ruling 237 raises the "N times running" packet from inside the locked write
+ * that records the verdict, and skips it when a packet is already open — which
+ * it must, since a task holds one packet. What nothing did was come back.
+ *
+ * The escalation was attempted EXACTLY ONCE, at the instant the objection was
+ * written, and any unrelated packet standing at that instant killed it for good.
+ * Ruling 326 established what those packets usually are: a quota or credential
+ * failure, raised in bursts across several tasks at once and nothing to do with
+ * the review.
+ *
+ * Measured on the shopify-clone board: five tasks reached a second consecutive
+ * `request_changes`; **two never got the packet**. SHOP-18's second objection
+ * landed at 03:44:44 with a backend-failure packet open (resolved at 04:38:38);
+ * the task then ran another eight hours and ended in a force-accept over a
+ * wedged Verify gate, with the person writing the routing by hand. SHOP-10
+ * reached three rounds the same way.
+ *
+ * And the operator's own turn instruction told it the opposite: "a task you are
+ * reading with such a reviewer and no packet is one where the escalation COULD
+ * NOT BE WRITTEN" — a write failure, when in fact it was skipped by design and
+ * would never be attempted again.
+ *
+ * Called after a resolution clears a packet. Best-effort and silent when there
+ * is no deadlock: this runs on every packet resolution, and most of them have
+ * nothing to do with a review.
+ */
+export async function retryReviewDeadlockEscalation(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+): Promise<void> {
+  try {
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!existing || existing.parsed.packet) return;
+    const fm = existing.parsed.frontmatter;
+    if (taskClosure(fm, loadProjectContext(ctx, projectSlug).stages).closed) return;
+    // Only an engagement that can actually record a verdict can deadlock a
+    // review; a stale verdict from a profile nobody has engaged is history.
+    const candidates = fm.engagements.filter((e) => e.verdictCapable);
+    let found: { deadlock: ReturnType<typeof reviewDeadlockOf>; profileId: string } | null = null;
+    for (const e of candidates) {
+      const deadlock = reviewDeadlockOf(fm, e.profileId, consecutiveRequestChanges(fm, e.profileId));
+      if (deadlock) {
+        found = { deadlock, profileId: e.profileId };
+        break;
+      }
+    }
+    if (!found || !found.deadlock) return;
+    const deadlock = found.deadlock;
+    const names = deadlockAgentNames(ctx, projectSlug);
+    /**
+     * The retry is for an escalation that was NEVER MADE — not for one a person
+     * has just answered.
+     *
+     * Without this, resolving the deadlock packet itself re-raises it on the
+     * spot: the reviewer is still at N consecutive objections the instant the
+     * card closes. That is the loop the owner called out on SHOP-76 — "that
+     * shop-76 constantly bringing up ask what else would block on packet" —
+     * and ruling 313 is the whole file about not rebuilding it.
+     *
+     * The packet's own title carries the round count, and raising it writes
+     * that title onto the timeline ("**Decision packet:** …"). So a timeline
+     * that already names this reviewer at this count has had its escalation;
+     * silence there is what makes one owed. A LATER objection raises the count
+     * and is a new escalation, which is ruling 237's own rule.
+     */
+    const alreadyEscalated = existing.parsed.timeline.some((e) =>
+      (e.text ?? "").includes(`requested changes ${deadlock.rounds} times running`),
+    );
+    if (alreadyEscalated) return;
+    const packet = buildReviewDeadlockPacket({
+      taskKey,
+      packetId: newId("pkt"),
+      deadlock,
+      reviewerName: names.get(found.profileId) ?? found.profileId,
+      delivererName: delivererNameOf(fm, names),
+      heldBy: fm.blockedBy,
+    });
+    let raised = false;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Re-checked inside the lock: the read above is outside it, and the
+      // resolution that just ran may have opened one of its own.
+      if (parsed.packet) return;
+      parsed.packet = packet;
+      parsed.frontmatter.waiting = "human";
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          `${packet.title}. This escalation was due when that verdict landed and could not be ` +
+          "raised then, because another decision was already open on this task. It is raised now " +
+          "that the other one is answered.",
+        toAgent: false,
+        evidence: null,
+      });
+      raised = true;
+    });
+    if (!raised) return;
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    /**
+     * Everything ruling 237's own raise does after its lock, because a packet
+     * that arrives with nobody told is not an escalation.
+     *
+     * The first draft of this retry wrote the packet and stopped there: no
+     * inbox row, no audit. It would have put a decision on a task and left the
+     * person to find it, which is a quieter version of the defect it exists to
+     * fix — the escalation reaching nobody. `notifyTaskWatchers` stamps the
+     * OPERATOR as the sender on any notice that names none, so the policy
+     * engine names itself here exactly as ruling 237 does: this is not the
+     * operator's judgement.
+     */
+    recordAudit(db, {
+      action: "task.review.deadlock",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: { profileId: found.profileId, rounds: deadlock.rounds, retried: true },
+    });
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug,
+        taskKey,
+        kind: "packet",
+        ptype: "input",
+        title: `Decision needed: ${packet.title}`,
+        text: packet.body,
+        from: { kind: "system", name: "Policy engine" },
+      },
+      ctx,
+    );
+  } catch (error) {
+    logger.warn("review-deadlock escalation retry failed", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+/**
+ * Ruling 329: EXPORTED, because it is the line between a sentence a person
+ * reads once on a card and a sentence that becomes permanent contract.
+ *
+ * `resolvePacket` appends `${option.t} \u2014 ${option.d}` to the task's goal for
+ * every option kind NOT in here (and not ending the task). A server-authored
+ * option on the wrong side of that line writes its own UI copy into the record
+ * \u2014 which is how an instruction to type in a textarea ended up in three tasks'
+ * goals, addressed to agents that have no textarea. The guard test reads this
+ * set to know which authored options it must hold to that bar.
+ */
+export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
+  "request_edit",
+  "hold_runtime_debug",
+  "redirect",
+  "retry_other_backend",
+  "archive_task",
+  "discard_branch",
+  "resolve_remote_collision",
+  "move_stage",
+  // Ruling 200(h): "the label promises an UNBLOCK, so this records one … 'I
+  // fixed the credential, carry on' is the recovery the human means". That is
+  // what happens NEXT, not what the work IS — the same reason `redirect` and
+  // `hold_runtime_debug` are here, and it was missed when the list was first
+  // written.
+  "block_on_policy",
+  // F37-60: both of these POSTDATE ruling 189, so neither was ever added, and
+  // the defect the ruling exists to stop came straight back through them.
+  // Ruling 224's own words are "the decision IS the wait" and ruling 230's are
+  // "hold this until those land" — pure recovery, deciding what happens NEXT
+  // rather than what the work IS. Live on SHOP-18: its goal carried FIVE
+  // decision blocks, three of them "pick a recovery path → Wait for the window
+  // and pick the task back up automatically", which is the same sentence
+  // ruling 189 quotes from SHOP-7 as the thing that must not be there.
+  "wait_for_window",
+  "block_on_dependencies",
+  // Ruling 237: "ask the reviewer what else it would block on" decides who
+  // runs next, and the answer that comes back is the reviewer's, not the
+  // person's. Nothing about the deliverable changed.
+  "question_reviewer",
+  // Ruling 269: the decision is about work that is NOT this task — it names
+  // a gap and puts it on the board somewhere else. Amending THIS contract
+  // with it would bind every future run here to a paragraph about another
+  // task's job, which is exactly the accumulation ruling 189 exists to stop.
+  // The two timeline lines name the new key; that is the join.
+  "create_task",
+]);
+
 // ------------------------------------------------------------ resolvePacket
 
 /** Resolve the active packet by stable option kind and mark its notifications read. */
@@ -7535,6 +9048,11 @@ export async function resolvePacket(
      *  NOT a substitute: it proves the decision is the one that was opened, not
      *  that the human saw what merges. */
     ack?: AcceptanceDisclosure | null;
+    /** Ruling 319: INTERNAL. Set when this resolution is itself the fan-out of
+     *  a decision a person made on another task, naming that task. It stops the
+     *  fan-out below recursing — a sibling answers for itself and for nobody
+     *  else — and no door sets it; only the loop at the end of this function. */
+    fanOutOrigin?: string;
   },
   actor: TaskActor,
   ctx: TaskActionContext = {},
@@ -7546,8 +9064,38 @@ export async function resolvePacket(
   if (!packet) {
     throw AppError.conflict("This packet was already resolved.");
   }
+  /**
+   * Ruling 315: the note REFUSES like its neighbour instead of being cut.
+   *
+   * `project.task.tsx` used to slice it to 2,000 characters in the route,
+   * before this function ever saw it — no `maxLength` on the textarea, no
+   * counter, no marker on the record and no error, and nothing anywhere holds
+   * the discarded tail. Ruling 292 allowed a cut on a VERDICT because "the full
+   * text is never lost — the agent's own report is on the same timeline,
+   * untruncated". A person's typed note has no second copy, so the same cut is
+   * actual loss.
+   *
+   * Live on SHOP-76: a 4,454-character decision was stored at exactly 2,000,
+   * ending mid-word, and a rework round ran on the operator's reconstruction of
+   * the sentence viberr had deleted. The card had promised the opposite —
+   * "anything you type below is recorded on the task's contract and every later
+   * run reads it".
+   *
+   * The limit is the same 4,000 the directive field beside it already refuses
+   * at, because two fields on one card differing by a factor of two, and by
+   * refuse-versus-truncate, is the thing that made this survivable to write.
+   */
+  const noteText = input.note ?? "";
+  if (noteText.length > PACKET_NOTE_MAX) {
+    throw AppError.validation(
+      `That note is too long: ${PACKET_NOTE_MAX.toLocaleString("en-US")} characters max, ` +
+        `and you wrote ${noteText.length.toLocaleString("en-US")}. ` +
+        "Nothing was recorded — shorten it and confirm again, or put the long version " +
+        "in a comment on the task and refer to it here.",
+    );
+  }
   const customDirective = input.custom?.trim() ?? "";
-  if (customDirective.length > 4000) {
+  if (customDirective.length > PACKET_NOTE_MAX) {
     throw AppError.validation(
       "Custom directive is too long: 4,000 characters max.",
     );
@@ -7621,6 +9169,12 @@ export async function resolvePacket(
    *  `accept_completion` arm — the shared write below re-reads the stage under
    *  the lock and skips itself when the task is already there. */
   let acceptsInto: string | null = null;
+  /** Ruling 241: THIS resolution queued the reviewer's question instead of
+   *  dispatching it, because the task is held. A flag rather than a read of the
+   *  written file: "did I queue" and "does a queue entry exist" are different
+   *  questions, and the second one answers yes for an entry somebody else left
+   *  behind — which would silently skip the dispatch this decision promised. */
+  let queuedTheQuestion = false;
   /** OBS-11: the empty branch this resolution closes over. Decided by the
    *  `accept_completion` arm from the PRE-acceptance frontmatter, but acted on
    *  only after the write lands, so the decision has to outlive that arm's
@@ -7690,7 +9244,9 @@ export async function resolvePacket(
         input.projectSlug,
         input.taskKey,
       );
-      if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+      if (headCheck.refusal) {
+        await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
+      }
       // R19-8: the packet path is a writer to Done like the other two, so the
       // no-change basis is re-proved live HERE as well — otherwise the
       // operator's own acceptance packet becomes the one door a stale
@@ -7750,20 +9306,63 @@ export async function resolvePacket(
       const reallyMerged = merge.kind === "merged";
       const hasPr = !!existing.parsed.frontmatter.pr;
       // R17-1: name any reviewed-revision drift on the completion record.
-      const driftNote = revisionDriftNote(existing.parsed.frontmatter);
+  /**
+   * Ruling 318: computed AFTER the merge, because the merge is what moves the
+   * branch. `existing` was read before `attemptAcceptanceMerge`, which runs
+   * `refreshBranchForAcceptance` → `recordBranchRefresh`: it brings the branch
+   * up to date with the base, pushes that merge commit, re-measures the drift
+   * and REWRITES the file. So on every task whose ceremony refreshed the base,
+   * the permanent Done record either named a head that was never merged or
+   * omitted the refresh the acceptance itself created.
+   *
+   * Live on SHOP-81, three consecutive entries: the github note says "base
+   * refreshed · 2 merge commits · 9 base commits", the branch-deletion note
+   * says the head was `75786d012de9`, and the completion record — the permanent
+   * one — names the pre-refresh head instead.
+   *
+   * R17-1's whole purpose is that the permanent record names the commits that
+   * shipped outside the reviewed revision, and the acceptance is the thing that
+   * ships them.
+   */
+      const driftNote = revisionDriftNote(
+        readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ??
+          existing.parsed.frontmatter,
+      );
+      /**
+       * Ruling 327: stamped when it is WRITTEN, not when the ceremony began.
+       *
+       * `now` is captured at the top of `resolvePacket`, 114 lines and one
+       * GitHub round-trip above this — and `attemptAcceptanceMerge` can refresh
+       * the base, push, merge and reconcile before it returns. So the permanent
+       * Done record was dated BEFORE the merge it describes.
+       *
+       * Live on SHOP-77: the completion reads 05:33:35.903Z, the merge it
+       * announces is 05:33:43.377Z and the branch deletion 05:33:44.631Z. The
+       * timeline is newest-first, so the file puts the completion at the top
+       * while its own timestamp is the oldest of the three — whichever a reader
+       * trusts, the other is wrong. And its text is ruling 318's drift note,
+       * correctly measured after the refresh, describing a state that did not
+       * exist at the instant the record claims.
+       *
+       * The direct acceptance path (`acceptCompletion`) already stamps at write
+       * time; this is the packet door catching up, so one ceremony does not date
+       * itself two ways depending on which control a person used. The rest of
+       * this switch keeps `now`: every other arm writes before any remote call.
+       */
+      const acceptedAt = new Date().toISOString();
       // R19-8: the ONE shared no-change completion event, same as the other two
       // writers to Done.
       event = noChange.applies
         ? noChangeCompletionEvent({
             taskKey: input.taskKey,
             actor: human,
-            occurredAt: now,
+            occurredAt: acceptedAt,
             by: "human",
             verification: noChange.verification,
             autoDetected: noChange.autoDetected,
           })
         : {
-            occurredAt: now,
+            occurredAt: acceptedAt,
             type: "completion",
             actor: human,
             title: "Completion accepted",
@@ -7889,7 +9488,15 @@ export async function resolvePacket(
           option.ev ??
           `**Decision:** hold for runtime debug. ${key} stays blocked while the provider-native ` +
             `session is inspected. Coordination is paused and no operator run was started. ` +
-            `Use **Run operator** on the task page when the inspection is done.`,
+            // Ruling 207(i): `run-agents` is admin/maintainer only (shared/rbac),
+            // so a CONTRIBUTOR who owns the task — who may resolve this packet
+            // through the owner exception — never sees that control, and the
+            // @operator door is gated on the same role. Naming the control
+            // without naming who holds it left an owner looking for a button
+            // that is not rendered for them, on a task now blocked with the
+            // packet cleared.
+            `**Run operator** on the task page restarts it — that control belongs to a ` +
+            `maintainer or an admin, so ask one if you do not see it.`,
         toAgent: false,
         evidence: null,
       };
@@ -7943,6 +9550,62 @@ export async function resolvePacket(
       mutate = (fm) => {
         fm.waiting = "agent";
         fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
+    case "question_reviewer": {
+      // Ruling 237 (F37-57): the decision is that the REVIEWER answers before
+      // anyone reworks anything. The run starts below; `waiting: agent` is
+      // honest about who the task is on, and the stage does not move — the
+      // reviewer is being asked a question about the revision where it stands,
+      // not sent to judge a new one.
+      //
+      // Ruling 241 (F37-68): unless a dependency hold refuses it. Ruling 186
+      // refuses every agent dispatch on a held task, and live on SHOP-5 this
+      // arm wrote the decision, cleared the packet and then discovered the
+      // refusal — leaving the contract saying "no rework until the reviewer has
+      // answered" about a reviewer nobody would ever ask. The hold is read
+      // HERE, before the resolution write, for the reason `force_accept`'s own
+      // arm states: "a refusal discovered after it would leave the decision
+      // recorded with no acceptance behind it."
+      //
+      // The owner's call was to queue rather than refuse, so the decision still
+      // stands and the question rides on the task until the wait clears.
+      const heldFor = existing.parsed.frontmatter.blockedBy;
+      const queueing = heldFor.length > 0 && !!option.profileId;
+      queuedTheQuestion = queueing;
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          (queueing
+            ? `**Decision:** ${option.t}. ${holdRefusal(input.taskKey, heldFor, "asking it now")} ` +
+              "The question is queued with the task and put the moment the wait clears. " +
+              "No rework until the reviewer has answered."
+            : `**Decision:** ${option.t}. No rework until the reviewer has answered.`),
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        // A queued question is not an agent working: `waiting` stays with the
+        // hold's own answer rather than claiming a run nobody started (F37-33).
+        fm.waiting = queueing ? "human" : "agent";
+        fm.readiness = "ready";
+        if (queueing && option.profileId) {
+          fm.queuedQuestions.push({
+            id: newId("qq"),
+            profileId: option.profileId,
+            directive: REVIEW_DEADLOCK_QUESTION,
+            decidedBy: actor.userId,
+            decidedByLabel: actor.label,
+            decidedAt: now,
+            heldBy: [...heldFor],
+          });
+        }
       };
       clearPacket = true;
       break;
@@ -8140,6 +9803,218 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "create_task": {
+      // Ruling 269 (F37-101): the decision IS the new task. Everything the
+      // resolution needs is on the option; the creation itself runs AFTER this
+      // write, through `createTask` — the same door the board and both
+      // toolkits use, so the key allocation, the goal-header shape, the
+      // dependency validation and the auto-invoke are the ones every other
+      // caller gets (ruling 164: an option performs the real action through
+      // the real door).
+      const spec = option.newTask;
+      if (!spec || spec.title.trim() === "" || spec.goal.trim() === "") {
+        throw AppError.conflict(
+          `"${option.t}" carries no task to create, so confirming it would create nothing. ` +
+            `Ask the operator to offer the option again with the task's title and goal.`,
+        );
+      }
+      event = {
+        occurredAt: now,
+        type: "note",
+        actor: human,
+        title: null,
+        // Ruling 322: the second sentence used to say `${key} is unchanged`
+        // unconditionally, and `newTask.blocks` may name this very task.
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. A new task is being created for it: "${spec.title}". ` +
+            (createTaskHoldsDecider(spec, key)
+              ? `${key} will wait on it, and is released when it is done.`
+              : `${key} is unchanged; the new task carries the work.`),
+        toAgent: false,
+        evidence: null,
+      };
+      // A deliberate NO-OP mutation HERE. Every sibling flips a field — the
+      // `waiting` stamp, a stage, a disposition — and flipping one would be
+      // this write claiming a reach it does not have.
+      //
+      // Ruling 322: that is not the same as "this task is unchanged". When
+      // `newTask.blocks` names this task (ruling 287's reverse edge), the
+      // resolution below writes the new key into its `blockedBy` through
+      // `setTaskDependencies` — the task's own editor — which is where a wait
+      // belongs. What this arm must not do is pretend the wait is not coming;
+      // the sentence above says which of the two happened.
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
+    case "block_on_dependencies": {
+      // Ruling 230 (F37-50): the decision IS the wait. `blockedBy` is ruling
+      // 131's mechanism and it is already good — the board renders it, the
+      // schedule runner refuses on it, and the dependency release re-triggers
+      // the operator when the last entry finishes. It simply could not be
+      // reached from a packet, so an operator wanting a hold picked
+      // `block_on_policy`, whose resolution UNBLOCKS, and the record read
+      // "SHOP-11 is unblocked" under an option titled "Hold SHOP-11 while…".
+      //
+      // The list is written AFTER this write, through `setTaskDependencies` —
+      // the same door the operator's own tool and the task page use, so the
+      // canonicalisation, the goal-link mirror and the "Dependencies updated"
+      // note are the ones every other caller gets (ruling 164: an option
+      // performs the real action through the real door).
+      const entries = (option.blockedBy ?? []).filter((e) => e.trim() !== "");
+      if (entries.length === 0) {
+        throw AppError.conflict(
+          `"${option.t}" names nothing to wait on, so there is no hold to record. ` +
+            `Ask the operator to offer the option again with the tasks this one waits on.`,
+        );
+      }
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. ${key} waits on ${entries.join(", ")} — nothing runs on it ` +
+            `until every entry is done, and Viberr releases it then.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        // Deliberately `human`, not `none`: the dependency write below is what
+        // earns `none` (it settles the flag itself once nothing is pending). If
+        // it fails, the task is left visibly on a person rather than silently
+        // idle with no hold and no owner.
+        fm.waiting = "human";
+      };
+      clearPacket = true;
+      break;
+    }
+    case "wait_for_window": {
+      // Ruling 224 (F37-44): the decision IS the wait. The packet closes and
+      // the task settles on a human, because nothing is running and nothing
+      // should look like it is; the schedule written after this write is what
+      // brings the agent back. Authored only on a quota refusal whose reset
+      // instant the provider gave us.
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          option.ev ??
+          `**Decision:** ${option.t}. Nothing runs until the window reopens; the scheduled run brings the agent back.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        // Not `waiting: agent`: no agent is coming for the next few hours, and
+        // a board that claims one is the F37-33 lie by another road.
+        fm.waiting = "human";
+        if (fm.readiness === "blocked") fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
+    case "accept_unverified_head": {
+      // Ruling 226 (F37-43): the deliberate way past a head GitHub would not
+      // compare. It is NOT force-accept and must not borrow its door — that one
+      // bypasses the VERDICT gate and cannot touch this one. This waives a
+      // single containment check, for a single (PR, delivered revision, live
+      // head) triple, and the authority it asks for is the acceptance it is
+      // about to make possible.
+      requireAction(
+        db,
+        project,
+        actor,
+        "accept-completion",
+        "accept a completion whose PR head could not be checked",
+      );
+      // Re-read live before granting anything. The refusal this packet answers
+      // is a transient-shaped failure, and the honest outcome when it has
+      // cleared is to grant NO waiver and say the check ran — a waiver written
+      // on a check that would now pass is a permission nobody needed.
+      const recheck = await acceptancePrHeadCheck(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+      );
+      if (!recheck.refusal) {
+        event = {
+          occurredAt: now,
+          type: "transition",
+          actor: human,
+          title: null,
+          text:
+            `**Decision:** ${option.t}. On re-reading, GitHub answered the comparison this ` +
+            `time, so no override was recorded and ${key} can be accepted normally.`,
+          toAgent: false,
+          evidence: null,
+        };
+        mutate = (fm) => {
+          fm.waiting = "human";
+          if (fm.readiness === "blocked") fm.readiness = "ready";
+        };
+        clearPacket = true;
+        break;
+      }
+      // Still refusing, but without the three facts there is nothing to pin a
+      // waiver to, and an unpinned one would be a standing permission to merge
+      // whatever that branch later carries.
+      if (
+        !recheck.liveHeadSha ||
+        recheck.prNumber === null ||
+        !recheck.revisionHeadSha
+      ) {
+        throw AppError.conflict(
+          `${key}'s pull request or delivered revision is no longer readable, so there is ` +
+            `nothing to record this override against. Refresh the task and try again.`,
+        );
+      }
+      const waivedHead = recheck.liveHeadSha;
+      const waivedRevision = recheck.revisionHeadSha;
+      const waivedPr = recheck.prNumber;
+      const waiverUserId = actor.userId ?? null;
+      if (!waiverUserId) {
+        throw AppError.conflict(
+          `Only a signed-in person can accept ${key} without the containment check.`,
+        );
+      }
+      const waiverLabel = userName(db, waiverUserId) ?? "";
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        // The record states the CONSEQUENCE, not the check. A9's note named
+        // the check that did not run, which reads as a formality; what this
+        // decision actually admits is that unreviewed code may land.
+        text:
+          `**Decision:** ${option.t}. PR #${waivedPr} may be merged at head ` +
+          `\`${waivedHead.slice(0, 7)}\` without confirming it contains the reviewed ` +
+          `revision \`${waivedRevision.slice(0, 7)}\`. Code no reviewer approved may reach ` +
+          `the base branch. The override applies to this head only: if the branch moves, ` +
+          `the check is required again.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.headCheckWaiver = {
+          prNumber: waivedPr,
+          revisionHeadSha: waivedRevision,
+          liveHeadSha: waivedHead,
+          at: now,
+          byUserId: waiverUserId,
+          byLabel: waiverLabel,
+        };
+        fm.waiting = "human";
+        if (fm.readiness === "blocked") fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       // Ruling 163 (pass 35, F35-13 (b)): a redirect the branch-conflict
@@ -8197,6 +10072,67 @@ export async function resolvePacket(
     }
   }
 
+  // Ruling 189 (pass 37, F37-10): the sentence a person's decision adds to the
+  // task's goal, or null when this resolution is not an answer that binds
+  // future work.
+  //
+  // Skipped for a resolution that ENDS the task (an acceptance, an archive):
+  // there is no future run to bind, and a closed task's goal should read as it
+  // did when the work was done. Skipped for the operator's own withdrawal,
+  // which is not a person's answer. Everything else — a chosen option, a custom
+  // directive — is an instruction the next run must see, and the last clause
+  // says which way the contradiction it may create resolves.
+  //
+  // Only an answer that binds future WORK belongs in the contract. A recovery
+  // choice — "try again", "redirect", "retry on the other backend", "hold while
+  // I debug", "clear the stale remote branch" — decides what happens NEXT, not
+  // what the work IS, and appending those accumulates process noise in the text
+  // every future run re-anchors on. Live on SHOP-7 the goal collected two
+  // blocks: the provider decision (contract) and "Work stalled: pick a recovery
+  // path → Redirect with sharper guidance" (not).
+  //
+  // Ruling 284 (owner's call, 2026-09-15) draws the second line by CHANNEL:
+  // choosing a structured option is a decision and amends the contract; typing
+  // free text is conversation and does not. The old rule was the opposite — a
+  // typed directive "always binds, whatever packet it was typed on, because a
+  // person wrote it" — and it made the kind of the answer unknowable, because
+  // one text box takes both a scope decision and a word to the operator about
+  // its own tooling. Live the same hour it was written: SHOP-27's packet was
+  // answered with a directive that was mostly "call read_board before you offer
+  // a create_task option", and that sentence is now welded into the goal of the
+  // orders service, where every future run on it re-anchors on a note about
+  // another actor's tools. Nothing is lost by leaving it out: the directive is
+  // written verbatim to the timeline, and it reaches the operator in its own
+  // `note` field on the re-queue, which is the channel it was actually for.
+  // Ruling 189 / 284: the list is module-scope and exported now (ruling 329).
+
+  // Ruling 189 excludes "a resolution that ENDS the task", and `acceptsInto`
+  // catches only ONE of the two doors that do: `force_accept` closes the task
+  // through `forceAcceptCompletion` and never assigns it (ruling 200(h)). A
+  // contract amendment on a task being closed in the same breath binds no
+  // future run's work, which is the whole test the exclusion applies.
+  const endsTheTask = acceptsInto !== null || option.kind === "force_accept";
+  const goalAmendment: string | null =
+    endsTheTask ||
+    !clearPacket ||
+    customDirective !== "" ||
+    PROCESS_ONLY_OPTION_KINDS.has(option.kind)
+      ? null
+      : (() => {
+          const when = now.slice(0, 10);
+          const answer = [option.t, option.d]
+            .filter((part) => part.trim())
+            .join(" — ");
+          return (
+            `---\n\n` +
+            `**Decision — ${when}, ${human.nameHint} answered “${packet.title}”:**\n\n` +
+            `${answer}\n\n` +
+            `This decision is part of the task's contract from here on. Where anything ` +
+            `above contradicts it, the decision wins — it was made by the person the ` +
+            `question was put to, and it is not an agent overstepping.`
+          );
+        })();
+
   // U3 (NFR16): set when the acceptance arm found the task already terminal
   // under the lock — the write, and the audit row that belongs to it, are the
   // racing acceptance's, not this call's.
@@ -8229,6 +10165,23 @@ export async function resolvePacket(
       );
     }
     mutate(parsed.frontmatter);
+    // Ruling 189 (pass 37, F37-10): a person's decision joins the task's
+    // CONTRACT, not just its timeline.
+    //
+    // Live on SHOP-7: the goal said "the agent must not select a provider …
+    // ask Arda to choose". Arda chose. The agent recorded the choice, the
+    // required reviewer re-anchored on the canonical file — as its prompt tells
+    // it to — found the deliverable contradicting the goal, and requested
+    // changes; the operator then told the agent to "remove every claim that
+    // mock-only was selected", and a second packet asked Arda the same question
+    // again. Answer → act → rejected against the stale goal → reverted → asked
+    // again, with no exit inside the mechanism.
+    //
+    // The timeline is where the decision LIVED and the goal is what every fresh
+    // run READS, so the goal won. Appending it here, in the same locked write
+    // that clears the packet, needs no model judgement and cannot be forgotten
+    // by a turn that fails or is interrupted.
+    if (goalAmendment) parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
     if (clearPacket) parsed.packet = null;
     // Ruling 160 (pass 35, F35-11): a PERSON answering a packet while the
     // task's pull request stands closed without merging is the answer to that
@@ -8336,6 +10289,11 @@ export async function resolvePacket(
     "archive_task", // the task left the board
     "edit_goal", // the packet is still open, awaiting the goal
     "hold_runtime_debug", // the human explicitly asked for no run (§1.2)
+    // Ruling 230: the decision is that nothing runs until the dependencies
+    // clear. Re-invoking the operator would only pay a drive to rediscover the
+    // wait it was just told about — JC-9's five runs, and the same reason
+    // ruling 131(d) refuses the held triggers at the door.
+    "block_on_dependencies",
     "retry_other_backend", // starts a specialist run above; its completion re-invokes
     "discard_branch", // cleanup only, no coordination change
     "resolve_remote_collision", // the re-delivery's own machinery owns the follow-up
@@ -8345,6 +10303,19 @@ export async function resolvePacket(
     // turn on the stage the first one is already reading.
     "force_accept",
     "move_stage",
+    // Ruling 224 (F37-44): the decision IS that nothing runs until the window
+    // reopens, and the schedule written above is what brings the operator
+    // back. Re-invoking it here spends a run against the very quota the human
+    // just chose to wait out, gets refused, and opens a NEW packet asking the
+    // same question — so answering the packet re-created it, in a loop. Live
+    // on SHOP-18 at 00:05:50, seven seconds after the decision was recorded.
+    "wait_for_window",
+    // Ruling 237 (F37-57): starts the reviewer's run below, exactly like
+    // `retry_other_backend`; its completion re-invokes the operator with the
+    // answer in hand. Re-invoking here would put the operator on the task
+    // while the question it is supposed to wait for is still unanswered, which
+    // is the behaviour this packet exists to interrupt.
+    "question_reviewer",
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
@@ -8750,7 +10721,11 @@ export async function resolvePacket(
         : null;
       if (record?.relation === "diverged") {
         const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "its head";
-        noteText = `${premise} Its remote copy (${head}) holds commits this workspace does not, so the delivered revision \`${record.revisionSha.slice(0, 7)}\` cannot be pushed as it stands. A person resolves the branch history, or archives the task; the block stays until then.`;
+        // Ruling 321: "a person resolves the branch history" names no act. The
+        // one that works is the one the owner had to write into the project's
+        // KB by hand after SHOP-11 — merge, never rewrite, once a pull request
+        // tracks the branch.
+        noteText = `${premise} Its remote copy (${head}) holds commits this workspace does not, so the delivered revision \`${record.revisionSha.slice(0, 7)}\` cannot be pushed as it stands. ${DIVERGED_BRANCH_REMEDY} Archiving the task is the other way out; the block stays until one of them happens.`;
         serverOutcome = outcomeOf("own_pr_diverged", {
           prNumber: ownPr,
           reason: "the remote branch holds commits this workspace does not",
@@ -8892,6 +10867,259 @@ export async function resolvePacket(
     await forceAcceptCompletion(db, forced, actor, ctx);
   }
 
+  // block_on_dependencies (ruling 230, pass 37, F37-50): write the hold the
+  // decision promised, through the same door every other dependency edit uses.
+  // Best-effort like its siblings: a refused write never un-resolves a decision
+  // a human already made, and its outcome lands on the timeline in plain words.
+  if (option.kind === "block_on_dependencies") {
+    const entries = (option.blockedBy ?? []).filter((e) => e.trim() !== "");
+    try {
+      const { setTaskDependencies } = await import("./dependencies.server");
+      await setTaskDependencies(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          blockedBy: entries,
+        },
+        actor,
+        ctx,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("block_on_dependencies resolution could not record the hold", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
+            `The decision stands and nothing was started, but nothing releases this task either — ` +
+            `set what it waits on from the task page.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
+  }
+
+  // create_task (ruling 269, pass 37, F37-101): make the task the decision
+  // promised, through the door every other creator uses, under the RESOLVING
+  // person's own authority (`createTask` runs its own `create-task` gate on
+  // `actor`). Best-effort like its siblings: a refused create never
+  // un-resolves a decision a human already made, and its outcome lands on the
+  // timeline in plain words — which on this option matters more than most,
+  // because the whole promise was that a task would exist.
+  if (option.kind === "create_task" && option.newTask) {
+    const spec = option.newTask;
+    try {
+      const createInput: CreateTaskInput = {
+        projectSlug: input.projectSlug,
+        title: spec.title,
+        goal: spec.goal,
+      };
+      if (spec.blockedBy?.length) createInput.blockedBy = [...spec.blockedBy];
+      if (spec.labels?.length) createInput.labels = [...spec.labels];
+      const made = await createTask(db, createInput, actor, ctx);
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Task created from a decision",
+          // Ruling 322: same correction as the decision event's own sentence.
+          // The wait itself is written by the `blocks` loop below, through the
+          // task's own dependency editor; this note is what a person reads.
+          text:
+            `**${made.key}** — ${spec.title} — was created by this decision. ` +
+            (createTaskHoldsDecider(spec, input.taskKey)
+              ? `${input.taskKey} now waits on it and is released when it is done.`
+              : `It carries the work; ${input.taskKey} is unchanged.`),
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      // Ruling 287 (F37-122): connect it in the direction the work runs. A task
+      // is usually created to UNBLOCK something, so the dependency points from
+      // the EXISTING work to the new task — and that is the one direction
+      // ruling 269 could not express, because `newTask.blockedBy` only says
+      // what the new task waits on.
+      //
+      // Live on SHOP-28: the person's decision routed three frozen contract
+      // shapes to a narrow amendment task, the operator created it, and then
+      // had to write "add the new amendment key to SHOP-41's waits… only you
+      // can add it; I can only set SHOP-28's own" into the packet's own prose.
+      // The ordering was settled, recorded, and delivered as a chore in a
+      // human's head — nothing on SHOP-41 said an edit was owed, so a forgotten
+      // one would have set SHOP-41 building against contracts that did not
+      // exist, which is the divergence the amendment task existed to prevent.
+      //
+      // Best-effort per key, like the create above: one refusal must not undo
+      // a decision a person made or the task it already produced, and each
+      // outcome lands on the timeline in plain words. The write goes through
+      // `setTaskDependencies`, so the cycle check, the archived-task refusal,
+      // the board projection and the release engine are the ones every other
+      // caller gets.
+      for (const blocked of spec.blocks ?? []) {
+        const other = blocked.trim();
+        if (!other) continue;
+        try {
+          const target = readTaskFile(taskRef(ctx, input.projectSlug, other));
+          if (!target) throw AppError.notFound(`Task ${other} not found.`);
+          const already = target.parsed.frontmatter.blockedBy.includes(made.key);
+          if (!already) {
+            await setTaskDependencies(
+              db,
+              {
+                projectSlug: input.projectSlug,
+                taskKey: other,
+                blockedBy: [...target.parsed.frontmatter.blockedBy, made.key],
+              },
+              actor,
+              ctx,
+            );
+          }
+          // The provenance note lands on the task whose wait GREW. A wait that
+          // appears with no reason on a task nobody was looking at reads as
+          // Viberr deciding something on its own.
+          //
+          // Ruling 322: except when that task is the one being decided on —
+          // the note directly above already told this reader, in this task's
+          // own voice, that it now waits on what the decision created. A
+          // second card saying it again in the third person is noise on the
+          // one timeline where the fact is least surprising.
+          if (other.trim().toUpperCase() === input.taskKey.trim().toUpperCase()) {
+            reprojectTask(db, ctx, input.projectSlug, other);
+            continue;
+          }
+          await updateTaskFile(taskRef(ctx, input.projectSlug, other), (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: already ? "Already waiting on that task" : "Now waits on a new task",
+              text: already
+                ? `A decision on **${input.taskKey}** created **${made.key}** — ${spec.title} — ` +
+                  `to unblock this task, which already waited on it. Nothing changed here.`
+                : `A decision on **${input.taskKey}** created **${made.key}** — ${spec.title} — ` +
+                  `to unblock this task. This task now waits on it and is released when it is done.`,
+              toAgent: false,
+              evidence: null,
+            });
+          });
+          reprojectTask(db, ctx, input.projectSlug, other);
+        } catch (error) {
+          const why = error instanceof Error ? error.message : String(error);
+          logger.warn("create_task resolution could not record the reverse wait", {
+            taskKey: input.taskKey,
+            blocked: other,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+          await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+            parsed.timeline.unshift({
+              occurredAt: new Date().toISOString(),
+              type: "note",
+              actor: { kind: "system", systemId: "policy-engine" },
+              title: null,
+              text:
+                `**${made.key}** was created, but **${other}** was NOT set to wait on it: ${why} ` +
+                `Add the wait on ${other}'s own page, or ${other} may start work the new task ` +
+                `was created to come first.`,
+              toAgent: false,
+              evidence: null,
+            });
+          });
+          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("create_task resolution could not create the task", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `The task "${spec.title}" was **not** created: ${message} The decision stands and ` +
+            `${input.taskKey} is unchanged, but the work it named has no task — create it from ` +
+            `the board, or ask the operator to offer the decision again.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
+  }
+
+  // wait_for_window (ruling 224, pass 37, F37-44): write the schedule the
+  // decision promised. Best-effort like every sibling ceremony — a refused
+  // schedule never un-resolves the packet, and its outcome lands on the
+  // timeline in plain words instead of as a thrown error over a decision that
+  // already stands. A minute past the provider's own instant, because a window
+  // that reopens "at 02:27" is not open at 02:27:00.
+  if (option.kind === "wait_for_window" && option.dueAt) {
+    const dueMs = Date.parse(option.dueAt);
+    const runAt = new Date(
+      Math.max(Number.isFinite(dueMs) ? dueMs : Date.now(), Date.now()) + 60_000,
+    ).toISOString();
+    try {
+      const { scheduleTaskAction } = await import("./schedule.server");
+      // The OPERATOR, never the agent directly: a gap of hours is exactly when
+      // the board may have moved — a dependency landed, a reviewer changed, the
+      // work was superseded — and re-dispatching the same agent blind would
+      // resume a decision nobody re-made. Every other timed resume viberr has
+      // (the dependency release, the restart recoveries) re-invokes the
+      // operator for the same reason.
+      await scheduleTaskAction(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          dueAt: runAt,
+          action: "run-operator",
+          prompt:
+            `The usage window that stopped this task has reopened. Pick it back up from where it ` +
+            `stopped; nothing about the task or the guidance changed while it waited, but re-read ` +
+            `the board before you dispatch — hours passed.`,
+        },
+        actor,
+        ctx,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("wait_for_window resolution could not schedule the resume", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text:
+            `${input.taskKey} was **not** scheduled to resume when the window reopens: ${message} ` +
+            `Nothing is waiting on this task automatically — run it yourself when the window is back.`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
+  }
+
   // move_stage (ruling 164, pass 35, F35-14): the decision IS the move, made
   // through `transitionStage` with `manual: true` — the stage picker's path,
   // which re-checks `approve-transition`, writes the transition event and the
@@ -8939,6 +11167,71 @@ export async function resolvePacket(
     }
   }
 
+  // question_reviewer (ruling 237, F37-57): actually put the question. Same
+  // shape as the retry below and for the same reason — the packet is the human
+  // decision, the dispatch is coordination machinery — with one difference that
+  // matters: the directive is the WHOLE point of the option, so a start failure
+  // means the promise on the card was not kept and has to say so.
+  if (
+    option.kind === "question_reviewer" &&
+    option.profileId &&
+    // Ruling 241: a question THIS resolution queued is not dispatched now — the
+    // moment the hold goes away puts it instead.
+    !queuedTheQuestion
+  ) {
+    const opCtx: TaskMutationContext = { ...ctx, operatorAuthorized: true };
+    try {
+      const { startAgentRun } = await import("./specialist-run.server");
+      await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          // No `delivers` and no posture change: the reviewer is already
+          // engaged as a non-delivering reviewer, and this re-runs it exactly
+          // as it stands. A question that arrived with delivery rights would
+          // invite the reviewer to fix the thing itself.
+          profileId: option.profileId,
+          directive: REVIEW_DEADLOCK_QUESTION,
+          directiveFrom: actor.label,
+          // Ruling 313: the directive above says "do NOT return a verdict"
+          // because one here binds to the same revision and counts as another
+          // objection — the loop this option exists to end. Withhold the channel
+          // so the sentence is enforced rather than requested. The engagement
+          // keeps its verdict grant: the reviewer is still a required reviewer
+          // and acceptance still waits for its approve.
+          withholdVerdict: true,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("question_reviewer start failed", {
+        taskKey: input.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        // `waiting` goes back to a person: the decision promised a reviewer run
+        // and there is none, so a board reading "waiting: agent" would be the
+        // F37-33 lie — claiming an agent nobody started.
+        parsed.frontmatter.waiting = "human";
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: { kind: "operator" },
+          title: null,
+          text:
+            `The question could not be put to the reviewer: ${message} ` +
+            "Nothing was asked and nothing is running.",
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    }
+  }
+
   // retry_other_backend: actually start the promised run. Operator-authorized
   // like the redirect path's re-engage (the packet is the human decision; the
   // execution is coordination machinery — an owner-contributor may resolve).
@@ -8977,10 +11270,181 @@ export async function resolvePacket(
     }
   }
 
+  // ------------------------------------------------- ruling 319: the fan-out
+  //
+  // `packet.cause` (ruling 315) names what actually failed when the failure
+  // belongs to an ACCOUNT rather than to this task: a quota that runs out, a
+  // credential that is revoked, a backend that goes away. It takes out every
+  // task that account is paying for at the same instant, and each one raised
+  // its own identical packet — same reason, same remedy, same options, N times
+  // in one person's queue.
+  //
+  // Ruling 315 wrote the stamp and stopped there, and the field's own comment
+  // went on promising that "packets that share a cause resolve together". They
+  // did not. This is that loop.
+  //
+  // Best-effort, and LOUD about what it missed: every sibling it could not
+  // answer is named on this task's timeline with the reason, because the person
+  // who just cleared four packets with one click is the one who has to know
+  // that the fifth is still open.
+  // Ruling 328: an escalation ruling 237 had to skip — because THIS packet was
+  // the one already open — is raised now that it is answered. Before the
+  // fan-out, so a sibling resolution meets the same state this one leaves.
+  if (clearPacket) {
+    await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
+  }
+
+  await fanOutByCause(db, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    cause: packet.cause,
+    suppressed: input.fanOutOrigin !== undefined,
+    option,
+    note: noteText,
+  }, actor, ctx);
+
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     option,
   };
+}
+
+/**
+ * Ruling 319 — apply a resolution to every packet raised by the SAME cause.
+ *
+ * Each sibling goes through the real `resolvePacket`, not a cheaper write: a
+ * decision that reaches another task has to pass that task's authority check,
+ * write that task's decision event, notify that task's watchers and run that
+ * task's dispatch arm. Anything less would be a second, quieter resolution path
+ * that can disagree with the first.
+ *
+ * Separated from `resolvePacket` only so the recursion is visible; the guard is
+ * `suppressed`, set from `fanOutOrigin` by the sibling call below.
+ */
+async function fanOutByCause(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    cause: string | undefined;
+    suppressed: boolean;
+    option: PacketOption;
+    note: string;
+  },
+  actor: TaskActor,
+  ctx: TaskActionContext,
+): Promise<void> {
+  if (!input.cause || input.suppressed) return;
+  const {
+    FANNED_OUT_OPTION_KINDS,
+    siblingPacketsSharingCause,
+    siblingOptionIndex,
+    fanOutArrivalText,
+    fanOutOutcomeText,
+  } = await import("./packet-fanout.server");
+  const outcomes: FanOutOutcome[] = [];
+  // A person's own directive answers the task they wrote it on. Every other
+  // non-fannable kind says the same thing for the same reason.
+  const fannable = FANNED_OUT_OPTION_KINDS.has(input.option.kind);
+  let siblings: ReturnType<typeof siblingPacketsSharingCause>;
+  try {
+    siblings = siblingPacketsSharingCause(db, input.cause, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+    });
+  } catch (error) {
+    logger.warn("packet cause fan-out could not be searched", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+    return;
+  }
+
+  for (const sibling of siblings) {
+    // The projection is an index, not the record. A sibling answered between
+    // that read and this write is not a miss and is not reported as one.
+    const live = readTaskFile(taskRef(ctx, sibling.projectSlug, sibling.taskKey));
+    const livePacket = live?.parsed.packet;
+    if (
+      !livePacket ||
+      livePacket.cause !== input.cause ||
+      livePacket.awaiting ||
+      livePacket.decided
+    ) {
+      continue;
+    }
+    const at = fannable ? siblingOptionIndex(livePacket, input.option) : null;
+    if (at === null) {
+      outcomes.push({
+        taskKey: sibling.taskKey,
+        applied: false,
+        why: fannable
+          ? `its packet does not offer "${input.option.t}".`
+          : `"${input.option.t}" answers only the task it was chosen on.`,
+      });
+      continue;
+    }
+    try {
+      await resolvePacket(
+        db,
+        {
+          projectSlug: sibling.projectSlug,
+          taskKey: sibling.taskKey,
+          optionIndex: at,
+          note: input.note,
+          fanOutOrigin: input.taskKey,
+        },
+        actor,
+        ctx,
+      );
+      await updateTaskFile(taskRef(ctx, sibling.projectSlug, sibling.taskKey), (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: null,
+          text: fanOutArrivalText({
+            fromTaskKey: input.taskKey,
+            byName: actor.label,
+            optionTitle: input.option.t,
+          }),
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      reprojectTask(db, ctx, sibling.projectSlug, sibling.taskKey);
+      outcomes.push({ taskKey: sibling.taskKey, applied: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("packet cause fan-out could not answer a sibling", {
+        taskKey: sibling.taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+      outcomes.push({ taskKey: sibling.taskKey, applied: false, why: endSentence(message) });
+    }
+  }
+
+  const text = fanOutOutcomeText(outcomes);
+  if (!text) return;
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.warn("packet cause fan-out outcome could not be recorded", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
 }
 
 /**
@@ -9430,21 +11894,34 @@ function forceIrreducibleRefusal(
  * during the await refuses instead of riding a stale verification through.
  */
 export interface AcceptancePrHeadCheck {
-  /** The refusal sentence, or null when the head is verified or unverifiable. */
+  /** The refusal sentence, or null when the head is verified or unverifiable
+   *  in a way that cannot reach the base branch (see `verification`). */
   refusal: string | null;
   /**
    * A9 (pass 23): WHY `refusal` is null — the two cases used to be
    * indistinguishable. `verified` = a live read confirmed the PR head contains
    * the delivered revision. `unverifiable` = the check could not run (GitHub
-   * unreachable, the PR read or compare failed) — acceptance is still ALLOWED
-   * (the merge's own honesty covers unreachability), but the record must SAY the
-   * containment check did not run or a verified accept and an unverified one read
-   * identically. `not-applicable` = nothing to verify (no PR, no revision, or the
-   * PR is already merged).
+   * unreachable, the PR read or compare failed). `not-applicable` = nothing to
+   * verify (no PR, no revision, or the PR is already merged).
+   *
+   * Ruling 226 amends what `unverifiable` permits. A9 allowed it through on the
+   * reasoning that "the merge's own honesty covers unreachability" — true when
+   * GitHub is unreachable, because then the merge fails too. It is false in the
+   * one case where GitHub answered the pull request and refused only the
+   * comparison: the repository is reachable, the merge will succeed, and the
+   * containment check simply did not run. That case now carries a `refusal` and
+   * a `liveHeadSha`; the rest still pass with the A9 disclosure on the record.
    */
   verification: "verified" | "unverifiable" | "not-applicable";
   prNumber: number | null;
   revisionHeadSha: string | null;
+  /**
+   * Ruling 226: the head GitHub reported for the PR, when it reported one.
+   * Present only on the refusing `unverifiable` case — the packet that offers
+   * the way out names both SHAs, and the waiver that takes it is pinned to this
+   * exact head so it cannot be spent on a different one.
+   */
+  liveHeadSha: string | null;
 }
 
 /**
@@ -9460,6 +11937,211 @@ export interface AcceptancePrHeadCheck {
  * so a full-autonomy operator accept followed by a human "Complete merge"
  * merged a stale-head PR through the two doors that skipped it.
  */
+/**
+ * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
+ *
+ * A refusal with no exit is its own defect, and this one could otherwise strand
+ * a task permanently — the cause is GitHub declining a comparison, which no
+ * amount of re-delivering necessarily fixes. So the gate does not just throw a
+ * sentence into a toast: it records the question on the task, with both shas in
+ * it, and the three real answers.
+ *
+ * Written from the ONE gate all four Done writers share, so the packet appears
+ * whichever door was tried. Never clobbers an open decision (one packet slot per
+ * task), and never re-writes itself while its own packet is standing — a human
+ * pressing Accept twice gets one question, not two.
+ */
+/** The timeline title ruling 235's record carries, and the idempotence key. */
+const UNPUSHED_HEAD_TITLE = "Acceptance refused: the reviewed revision is not on the pull request";
+
+/**
+ * Ruling 235 (F37-55) — record a refused acceptance whose cause is a KNOWN head
+ * mismatch, and hand the delivery to the operator.
+ *
+ * Measured live: SHOP-2's two required reviewers approved `ea5f2ffd7493`, PR #13's
+ * head was `913ce9d`, and pressing Accept refused with an exact sentence naming
+ * both. That sentence went to one browser's toast and nowhere else — no audit
+ * row, no timeline event, nothing in `task.md`. The person then pressed "Run
+ * operator" to get the branch pushed; the operator re-anchored on a file that
+ * said nothing about any refusal and filed the SAME acceptance recommendation
+ * again. Accept, refuse, run operator, be re-recommended the same accept.
+ *
+ * Idempotent by note text, like `noteDeadDependency`: pressing Accept five times
+ * writes one note and hands off once, because the second press finds its own
+ * sentence already newest and does neither again.
+ */
+async function recordUnpushedHeadRefusal(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  check: AcceptancePrHeadCheck,
+  refusal: string,
+): Promise<void> {
+  try {
+    // The TITLE already says "Acceptance refused"; the renderer prints both, so
+    // a prefix here reads as "Acceptance refused: ... Acceptance refused: ...".
+    // Seen on the live Activity feed the first time this row rendered.
+    const text = refusal;
+    const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const newest = existing?.parsed.timeline.find(
+      (e) => e.type === "github" && e.title === UNPUSHED_HEAD_TITLE,
+    );
+    // Already on the record for this exact pair: say nothing and, crucially,
+    // do not start another paid operator run for a button pressed twice.
+    if (newest?.text === text) return;
+    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: UNPUSHED_HEAD_TITLE,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    recordAudit(db, {
+      action: "task.acceptance.head_unpushed",
+      actor: SYSTEM_ACTOR,
+      subjectKind: "task",
+      subjectId: taskKey,
+      projectSlug,
+      taskKey,
+      details: {
+        prNumber: check.prNumber,
+        revisionHeadSha: check.revisionHeadSha,
+        liveHeadSha: check.liveHeadSha,
+      },
+    });
+    // Fire-and-forget, like every other operator hand-off in this module: the
+    // refusal is the caller's answer and must not wait on a paid run, nor be
+    // turned into a 500 by one that fails.
+    void autoInvokeOperator(db, ctx, projectSlug, taskKey, "head-unpushed").catch((error) => {
+      logger.error("head-unpushed operator handoff failed", {
+        taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  } catch (error) {
+    // The refusal is the point; failing to record it must not turn a refused
+    // acceptance into a thrown-away one.
+    logger.warn("could not record the unpushed-head acceptance refusal", {
+      taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+}
+
+async function refuseUnverifiedHead(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  check: AcceptancePrHeadCheck,
+): Promise<never> {
+  const refusal = check.refusal ?? "";
+  // Ruling 235 (F37-55): a KNOWN mismatch is not a decision. The reviewed
+  // revision simply is not on the pull request, the only remedy is to push it,
+  // and ruling 134 reserves pushing for the operator — so there is nothing to
+  // ask a person. It gets a record and a hand-off instead of a packet; only the
+  // UNVERIFIABLE case (ruling 226), where a maintainer really must choose
+  // between re-delivering and merging unchecked, opens one.
+  if (
+    check.verification !== "unverifiable" &&
+    check.liveHeadSha &&
+    check.prNumber !== null &&
+    check.revisionHeadSha
+  ) {
+    await recordUnpushedHeadRefusal(db, ctx, projectSlug, taskKey, check, refusal);
+    throw AppError.conflict(refusal);
+  }
+  if (check.liveHeadSha && check.prNumber !== null && check.revisionHeadSha) {
+    try {
+      await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+        if (parsed.packet) return;
+        const head = check.liveHeadSha!.slice(0, 7);
+        const delivered = check.revisionHeadSha!.slice(0, 7);
+        parsed.packet = {
+          id: newId("pkt"),
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "policy-engine",
+          title: `PR #${check.prNumber}'s head could not be checked before merging`,
+          body:
+            `Press Accept again to re-run the check; this decision does not block it.\n\n` +
+            `GitHub answered the pull request and then refused to compare its head ` +
+            `\`${head}\` against the delivered revision \`${delivered}\` that your reviewers ` +
+            `were pinned to.\n\nThe repository is reachable, so the merge itself would ` +
+            `succeed. What is unknown is WHAT would be merged: if the PR carries something ` +
+            `other than the reviewed revision, accepting puts code no reviewer approved on ` +
+            `the base branch. That is not hypothetical — it is how SHOP-17 merged a revision ` +
+            `its Code Reviewer had rejected.`,
+          observations: [],
+          // Two options, and deliberately NOT a third "try the check again".
+          // That one would have to be a `custom`, whose resolution sends the
+          // task back to the agent side and re-queues the operator — which
+          // would re-run this very gate, refuse again, and open this very
+          // packet again. Answering the decision would re-create it, which is
+          // ruling 224's fourth half repeating. Re-checking needs no option at
+          // all: this packet does not block acceptance, so pressing Accept is
+          // the re-check, and a successful acceptance withdraws the packet on
+          // its own.
+          options: [
+            {
+              kind: "request_edit",
+              t: "Send it back to be re-delivered",
+              d:
+                "Returns the task for rework so the branch is pushed again from the " +
+                "workspace. Use this when you suspect the remote branch is not what was " +
+                "reviewed. To simply re-run the check instead, press Accept again: a " +
+                "refused comparison is usually transient, and this decision does not " +
+                "block the acceptance.",
+              rec: true,
+            },
+            {
+              kind: "accept_unverified_head",
+              t: "Merge it anyway, without the check",
+              d:
+                `Records, with your name on it, that PR #${check.prNumber} may be merged at ` +
+                `head \`${head}\` without confirming it contains \`${delivered}\`. Then press ` +
+                `Accept again: the merge stays your act, not a side effect of answering this. ` +
+                `It applies to this head only, so if the branch moves the check is required ` +
+                `again. Code no reviewer approved may reach the base branch.`,
+              rec: false,
+            },
+          ],
+        };
+        parsed.frontmatter.waiting = "human";
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "blocked",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: `PR #${check.prNumber}'s head could not be checked before merging`,
+          text: `**Acceptance refused:** ${refusal}`,
+          toAgent: false,
+          evidence: null,
+        });
+      });
+      // `updateTaskFile` writes the file and nothing else — every other writer
+      // in this module reprojects after it, and a packet that exists only in
+      // the markdown is one the board does not show until the watcher happens
+      // to notice. The person is being told, in the same breath, that a
+      // decision is waiting for them.
+      reprojectTask(db, ctx, projectSlug, taskKey);
+    } catch (error) {
+      // The refusal is the point; failing to RECORD it must not turn a refused
+      // merge into a thrown-away one. Log and refuse anyway.
+      logger.warn("could not record the unverified-head decision packet", {
+        taskKey,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+  throw AppError.conflict(refusal);
+}
+
 export async function acceptancePrHeadCheck(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -9474,6 +12156,7 @@ export async function acceptancePrHeadCheck(
     verification: verdict.verification,
     prNumber: fm?.pr?.number ?? null,
     revisionHeadSha: activeWorkRevision(fm?.workRevision)?.headSha ?? null,
+    liveHeadSha: verdict.liveHeadSha ?? null,
   };
 }
 
@@ -9538,6 +12221,8 @@ async function evaluateAcceptancePrHead(
 ): Promise<{
   refusal: string | null;
   verification: "verified" | "unverifiable" | "not-applicable";
+  /** Ruling 226: the live PR head, when GitHub reported one. */
+  liveHeadSha?: string | null;
 }> {
   try {
     const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
@@ -9586,18 +12271,65 @@ async function evaluateAcceptancePrHead(
           `/repos/${gh.repo}/commits/${rev.headSha}`,
           commitShaSchema,
         );
-        if (!probe.ok && isMissingRefAnswer(probe)) {
+        // Ruling 223: the COMMIT read's own vocabulary — GitHub answers a
+        // well-formed but unknown 40-char SHA with 422 "No commit found for
+        // SHA", never 404, so `isMissingRefAnswer` here confirmed nothing and
+        // this refusal was unreachable on the real API.
+        if (!probe.ok && isMissingCommitAnswer(probe)) {
           return {
             refusal:
               `${taskKey}'s delivered revision \`${rev.headSha.slice(0, 7)}\` is not on GitHub: ` +
               `PR #${pr.number}'s head is \`${headSha.slice(0, 7)}\`. Deliver the branch to push it; ` +
               `it cannot be accepted until the PR carries the reviewed revision.`,
             verification: "verified",
+            // Ruling 235 (F37-55): the live head travels with the refusal so the
+            // recorder below can write what was refused and why. Without it
+            // `refuseUnverifiedHead`'s guard saw a null and recorded NOTHING —
+            // the refusal reached one browser's toast and never the task file,
+            // so the operator (the only actor allowed to push) could not learn
+            // it and re-filed the same acceptance recommendation.
+            liveHeadSha: headSha,
           };
         }
       }
-      // Could not compare — unknown, not a refusal, but NOT a verification either.
-      return { refusal: null, verification: "unverifiable" };
+      // Ruling 226 (F37-43's surviving half): GitHub ANSWERED the pull request
+      // and then would not answer the comparison. Both SHAs are in hand, the
+      // repository is reachable, and the merge that follows this check would
+      // therefore succeed — so "unknown" here is not the offline case A9's
+      // disclosure was written for. It is the case where viberr is about to
+      // merge a head it cannot tell apart from one its reviewers rejected,
+      // which is what it did to SHOP-17 live: two reviewers approved
+      // `1f99f68`, that revision was never pushed, and PR #12 merged at
+      // `9104562` with a note saying only that the head "could not be
+      // verified".
+      //
+      // So it refuses, and the sentence names the consequence rather than the
+      // check. The way out is the packet the refused acceptance opens
+      // (`unverified_head`), where a maintainer can re-check, send the branch
+      // back, or take the merge deliberately with their name on it.
+      // The waiver a maintainer granted for exactly this triple (ruling 226).
+      // Re-read live, never trusted from the moment it was written: the head
+      // below is what GitHub reports NOW, so a branch that moved after the
+      // waiver no longer matches and the refusal returns.
+      const waiver = fm?.headCheckWaiver ?? null;
+      if (
+        waiver &&
+        waiver.prNumber === pr.number &&
+        waiver.revisionHeadSha === rev.headSha &&
+        waiver.liveHeadSha === headSha
+      ) {
+        return { refusal: null, verification: "unverifiable", liveHeadSha: headSha };
+      }
+      return {
+        refusal:
+          `PR #${pr.number}'s head (${headSha.slice(0, 7)}) could not be checked against the ` +
+          `delivered revision ${rev.headSha.slice(0, 7)}: GitHub answered the pull request and ` +
+          `then refused the comparison. Accepting now would merge without knowing whether the ` +
+          `PR carries the revision your reviewers approved, so code no reviewer approved could ` +
+          `reach the base branch. Re-check it, or re-deliver the branch.`,
+        verification: "unverifiable",
+        liveHeadSha: headSha,
+      };
     }
     if (cmp.data.status === "ahead" || cmp.data.status === "identical") {
       return { refusal: null, verification: "verified" };
@@ -10022,7 +12754,9 @@ export async function applyAcceptanceWrite(
   const headCheck =
     input.headCheck ??
     (await acceptancePrHeadCheck(db, ctx, input.projectSlug, input.taskKey));
-  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  if (headCheck.refusal) {
+    await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
+  }
   // R19-8: the SECOND layer of the no-change gate. Every writer to Done funnels
   // through here, so a caller that forgets the check still cannot close a task
   // on a stale `noChanges` flag (F19-21).
@@ -10163,10 +12897,27 @@ export async function applyAcceptanceWrite(
       headCheck.prNumber !== null &&
       parsed.frontmatter.pr?.state === "merged"
     ) {
-      input.event.text +=
-        `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
-        `delivered revision before the merge (GitHub could not be reached for the check). ` +
-        `It was accepted without that containment check.`;
+      // Ruling 226: two different things reach this line now, and they are not
+      // the same admission. A9's original case is GitHub being unreachable, and
+      // its sentence is right for that. The other is a maintainer who was shown
+      // the refusal and took the merge anyway — there the record must name what
+      // was risked, not the procedure that was skipped, and it must name who
+      // decided. "The check did not run" reads as a formality; "code no
+      // reviewer approved may be on the base branch" is what it means.
+      const waiver = parsed.frontmatter.headCheckWaiver ?? null;
+      const waived =
+        waiver !== null &&
+        waiver.prNumber === headCheck.prNumber &&
+        waiver.liveHeadSha === headCheck.liveHeadSha;
+      input.event.text += waived
+        ? `\n\nNote: PR #${headCheck.prNumber} was merged at head ` +
+          `\`${(headCheck.liveHeadSha ?? "").slice(0, 7)}\` without confirming it contains the ` +
+          `reviewed revision \`${(headCheck.revisionHeadSha ?? "").slice(0, 7)}\` — GitHub ` +
+          `refused the comparison and ${waiver.byLabel || waiver.byUserId} accepted it anyway. ` +
+          `Code no reviewer approved may be on the base branch.`
+        : `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
+          `delivered revision before the merge (GitHub could not be reached for the check). ` +
+          `It was accepted without that containment check.`;
     }
     parsed.timeline.unshift(input.event);
     accepted = true;
@@ -10394,7 +13145,9 @@ async function acceptCompletion(
     input.projectSlug,
     input.taskKey,
   );
-  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  if (headCheck.refusal) {
+    await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
+  }
 
   // R19-8: a `noChanges` task closes WITHOUT a merge, so its basis is re-proved
   // LIVE — a flag set at some past delivery attempt must never close a task whose
@@ -10460,7 +13213,28 @@ async function acceptCompletion(
   const hasPr = !!existing.parsed.frontmatter.pr;
 
   // R17-1: name any reviewed-revision drift on the completion record.
-  const driftNote = revisionDriftNote(existing.parsed.frontmatter);
+  /**
+   * Ruling 318: computed AFTER the merge, because the merge is what moves the
+   * branch. `existing` was read before `attemptAcceptanceMerge`, which runs
+   * `refreshBranchForAcceptance` → `recordBranchRefresh`: it brings the branch
+   * up to date with the base, pushes that merge commit, re-measures the drift
+   * and REWRITES the file. So on every task whose ceremony refreshed the base,
+   * the permanent Done record either named a head that was never merged or
+   * omitted the refresh the acceptance itself created.
+   *
+   * Live on SHOP-81, three consecutive entries: the github note says "base
+   * refreshed · 2 merge commits · 9 base commits", the branch-deletion note
+   * says the head was `75786d012de9`, and the completion record — the permanent
+   * one — names the pre-refresh head instead.
+   *
+   * R17-1's whole purpose is that the permanent record names the commits that
+   * shipped outside the reviewed revision, and the acceptance is the thing that
+   * ships them.
+   */
+  const driftNote = revisionDriftNote(
+    readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter ??
+      existing.parsed.frontmatter,
+  );
   // OBS-11 / OBS-13: decided BEFORE the write (it reads the pre-acceptance
   // frontmatter and the project policy) so the completion event can state the
   // branch's fate; the deletion itself runs after the task is really Done.
@@ -10834,7 +13608,9 @@ export async function completeTaskMerge(
     input.projectSlug,
     input.taskKey,
   );
-  if (headCheck.refusal) throw AppError.conflict(headCheck.refusal);
+  if (headCheck.refusal) {
+    await refuseUnverifiedHead(db, ctx, input.projectSlug, input.taskKey, headCheck);
+  }
 
   const mergeTaskPr =
     ctx.deps?.mergeTaskPr ??
@@ -11173,4 +13949,101 @@ export async function dismissRecommendation(
   });
 
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), label: rec.label };
+}
+
+/**
+ * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
+ *
+ * It could not be, by anyone. `updateTaskGoal` writes the goal — the contract
+ * every future run re-anchors on (ruling 189) — and nothing anywhere wrote the
+ * one-line summary of it. Not the controller, not the task page, not an
+ * operator. A title was whatever it was at creation, permanently.
+ *
+ * The controller found it and put the cost plainly, about a title it had
+ * written itself: "Its own run measured both halves of its title false … What I
+ * wanted: change six words in the title I wrote. What I did instead: rewrote the
+ * entire 6,000-character goal to say the premise is contested, and then told you
+ * 'that one needs you on the task page' — twice, in two consecutive turns …
+ * The title is what every person scanning the board reads; the correction lives
+ * in a body almost nobody opens. A false claim I authored is still on the board
+ * an hour after being disproved."
+ *
+ * There was no safety in the omission. A title is display prose: the KEY is the
+ * stable reference (`SHOP-50`), the branch is derived from the key at first
+ * dispatch (ruling 122), and a pull request is titled from the commit subject.
+ * Nothing downstream is pinned to these words. So the gate is the goal's own —
+ * a title and a goal are the same claim at two lengths, and it would be strange
+ * for the shorter one to be harder to correct than the longer.
+ *
+ * The rename is NOTED, and that is not ceremony: a title is how people refer to
+ * a task out loud and in other documents, so a silent rename makes every
+ * existing reference to the old words look like a reference to something else.
+ * The note carries both, which is what lets a reader join them.
+ */
+/**
+ * Ruling 295: the longest task title, and the length a refusal names.
+ *
+ * 200 characters is well past any title a person writes and short of the point
+ * where a board card stops being scannable. There is no cap on creation today,
+ * so this bounds only what a RENAME may set: a task that arrived with a longer
+ * title keeps it until someone edits it, and is then held to this.
+ */
+export const TASK_TITLE_MAX_CHARS = 200;
+
+export async function updateTaskTitle(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; title: string },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ task: TaskSummary; changed: boolean }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "update-goal", "edit the task title");
+  const title = input.title.trim().replace(/\s+/g, " ");
+  if (title.length < 3) {
+    throw AppError.validation("A title of at least 3 characters is required.");
+  }
+  if (title.length > TASK_TITLE_MAX_CHARS) {
+    // Ruling 288's rule, one field over: a contract Viberr will not write half
+    // of. A title is the one string every board card, every review-queue row
+    // and every goal-chain link renders, so a silently cut one is wrong in more
+    // places than a cut goal.
+    throw AppError.validation(
+      `A title is at most ${TASK_TITLE_MAX_CHARS} characters and this one is ${title.length}. ` +
+        "Nothing was written. Shorten it: the detail belongs in the goal, which has room.",
+    );
+  }
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const before = existing.parsed.frontmatter.title;
+  if (before.trim() === title) {
+    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false };
+  }
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.frontmatter.title = title;
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Title updated",
+      // BOTH titles, because the old one is what every existing reference to
+      // this task says — in a comment, another task's goal, a person's memory.
+      text:
+        `Renamed from "${before}" to "${title}". The task key is unchanged, so ` +
+        `references to ${input.taskKey} still resolve; references by the old ` +
+        `wording are this task.`,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.title.updated",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { from: before, to: title },
+  });
+  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true };
 }

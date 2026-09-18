@@ -1,6 +1,11 @@
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
+  causeFanOutDisclosure,
+  siblingPacketsSharingCause,
+} from "~/server/tasks/packet-fanout.server";
+import { similarOpenTasks } from "~/server/tasks/similar-tasks.server";
+import {
   data,
   isRouteErrorResponse,
   Link,
@@ -75,6 +80,7 @@ import { userBackendHealth } from "~/server/runtimes/backend-credentials.server"
 import { findUserById } from "~/server/auth/user-store.server";
 import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import {
+  operatorAcceptsDirectly,
   operatorAutonomyFor,
   operatorBackendFor,
 } from "~/server/tasks/operator-actions.server";
@@ -292,6 +298,46 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const schedules = (taskFile?.parsed.frontmatter.schedules ?? []).filter(
     (s) => s.status === "pending",
   );
+  // Ruling 241: reviewer questions a dependency hold refused, waiting for the
+  // release. Read from the FILE beside the recommendations and for the same
+  // reason (no projection column). Surfaced because a promise a person made and
+  // cannot see is the defect this pass kept finding: the card said the question
+  // would be put when the wait clears, and until then the only trace was one
+  // timeline note that scrolls.
+  const queuedQuestions = (taskFile?.parsed.frontmatter.queuedQuestions ?? []).map((q) => ({
+    id: q.id,
+    profileId: q.profileId,
+    decidedByLabel: q.decidedByLabel,
+  }));
+
+  /**
+   * Ruling 319: this packet's `cause` says the failure that raised it belongs
+   * to an ACCOUNT, not to this task — so confirming here also answers every
+   * sibling packet the same failure raised. A decision that reaches four other
+   * tasks and says nothing about it on the card is precisely the un-disclosed
+   * one-way write ruling 20 exists to stop; the disclosure is computed here,
+   * beside the acceptance disclosure, and rendered above the options.
+   *
+   * Guarded: a search that fails must not 500 the task page over a sentence.
+   */
+  const packetCause = taskFile?.parsed.packet?.cause;
+  let packetAlsoAnswers: string | null = null;
+  if (packetCause) {
+    try {
+      packetAlsoAnswers = causeFanOutDisclosure(
+        siblingPacketsSharingCause(db, packetCause, {
+          projectSlug: params.slug,
+          taskKey: params.key,
+        }),
+      );
+    } catch (error) {
+      logger.warn("ruling 319 fan-out disclosure failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
 
   // R15-1: the accept confirm names exactly what merges — the delivered
   // revision (task file) and the merge target (project default branch).
@@ -302,6 +348,40 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
   const project = getProject(db, params.slug);
   const defaultBranch = project?.defaultBranch || "main";
+
+  /**
+   * Ruling 324: a `create_task` option creates a real task on the person's
+   * confirm, and the card says what it will create without saying what already
+   * looks like it. Twice on the shopify-clone board a confirm was one click
+   * from a second owner for work a live task already held.
+   *
+   * Per option index, because a packet can carry more than one, and the person
+   * is choosing between them. Guarded for the same reason the fan-out
+   * disclosure is: a search must not 500 the task page.
+   */
+  const packetCreateTaskEchoes: Record<number, { key: string; title: string; stage: string }[]> =
+    {};
+  for (const [i, opt] of (taskFile?.parsed.packet?.options ?? []).entries()) {
+    if (opt.kind !== "create_task" || !opt.newTask) continue;
+    try {
+      const echoes = similarOpenTasks(db, params.slug, opt.newTask.title, [params.key]);
+      if (echoes.length > 0) {
+        packetCreateTaskEchoes[i] = echoes.map((e) => ({
+          key: e.key,
+          title: e.title,
+          stage:
+            project?.stages.find((st) => st.id === e.stageId)?.name ?? e.stageId,
+        }));
+      }
+    } catch (error) {
+      logger.warn("ruling 324 similar-task disclosure failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
   const myProjectRole =
@@ -339,6 +419,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       : {},
     recommendations,
     schedules,
+    queuedQuestions,
+    /** Ruling 319: what else this packet's confirm answers, or null. */
+    packetAlsoAnswers,
+    /** Ruling 324: per create_task option, the tasks that already look like it. */
+    packetCreateTaskEchoes,
     archived,
     // P14-LV-06: the review queue counted this viewer under "Waiting on your
     // acceptance" while the page rendered acceptance ONLY as an operator
@@ -361,6 +446,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     operatorBackend: operatorBackendFor({}, params.slug),
     // R19-A: the ceiling, so the run picker offers only what will actually run.
     operatorAutonomy: operatorAutonomyFor({}, params.slug),
+    // F37-65: autonomy alone does not say whether the operator can accept
+    // completion — `gate()` keeps that capability at `recommend` unless the
+    // grant is explicitly `direct`. The caption used to read autonomy only.
+    operatorAcceptsDirectly: operatorAcceptsDirectly({}, params.slug),
     // Ruling 127: every agent run on this task bills its OWNER's accounts, so
     // "which backends can run here" is a question about the owner — not about
     // this deployment and not about the viewer. `null` means the task has no
@@ -565,11 +654,21 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
-        const note = String(formData.get("note") ?? "").slice(0, 2000);
+        // Ruling 315: NOT a slice. This field holds a person's own words on the
+        // highest-stakes card in the product, and the route used to cut it to
+        // 2,000 characters before the request reached the server — no
+        // `maxLength`, no counter, no marker, no error, and the tail exists nowhere
+        // afterwards. The server refuses over-long input instead, exactly as
+        // the `custom` field beside it already does, and as ruling 288 does for
+        // a goal and a title ("a contract Viberr will not write half of").
+        const note = String(formData.get("note") ?? "");
         // Questionnaire packets (owner request 2026-08-20): the human's own
         // directive instead of a canned option. Non-empty ⇒ the server ignores
         // the option index and resolves through the synthetic `custom` kind.
-        const custom = String(formData.get("custom") ?? "").slice(0, 4000);
+        // Ruling 315: same reason — the server refuses this one already, so the
+        // route must stop quietly cutting it to the exact length that would slip
+        // past the refusal.
+        const custom = String(formData.get("custom") ?? "");
         // UI-43: the "Retrying on X · streaming to agent logs" toast was
         // computed from the option KIND alone. `resolvePacket` catches a failed
         // `startAgentRun` and merely appends a timeline note ("The retry could
@@ -943,6 +1042,24 @@ export async function action({ request, params }: Route.ActionArgs) {
             actor,
           );
         }
+        // Ruling 263 (F37-93): the toast said "run started" for a run refused
+        // before any process existed, and for one parked behind the cap. The
+        // agent-logs half of that sentence is a promise of a stream that a
+        // refused run never produces.
+        if (result.outcome === "refused") {
+          return {
+            ok: true as const,
+            intent,
+            toast: `No run started for ${result.name}: ${result.refusal ?? "it was refused before any process started."}`,
+          };
+        }
+        if (result.outcome === "queued") {
+          return {
+            ok: true as const,
+            intent,
+            toast: `${result.name} is queued behind the concurrent-run cap · it starts when a slot frees`,
+          };
+        }
         return {
           ok: true as const,
           intent,
@@ -1213,6 +1330,7 @@ export default function TaskDetailRoute({
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
       operatorAutonomy={loaderData.operatorAutonomy}
+      operatorAcceptsDirectly={loaderData.operatorAcceptsDirectly}
       // Ruling 127: the run picker's "would fail fast" gate answers for the
       // task OWNER (whose accounts a run bills), and an unowned task can run
       // nothing at all. The panels render the refusal that names the person,
@@ -1231,6 +1349,15 @@ export default function TaskDetailRoute({
       mentionables={loaderData.mentionables}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
+      // Ruling 320: the loader has read these since ruling 241 and the panel
+      // has rendered them since ruling 241, and the two were never joined —
+      // the prop defaults to `[]` at both ends, so the row simply never
+      // appeared. See the wire test in task-detail-route.server.test.ts.
+      queuedQuestions={loaderData.queuedQuestions}
+      // Ruling 319: what else this packet's confirm answers.
+      packetAlsoAnswers={loaderData.packetAlsoAnswers}
+      // Ruling 324: what already looks like what a create_task option would make.
+      packetCreateTaskEchoes={loaderData.packetCreateTaskEchoes}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}

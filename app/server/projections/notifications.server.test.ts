@@ -572,6 +572,7 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
             result: "approve",
             reason: "looks good",
             at: "2026-07-04T01:00:00.000Z",
+            rounds: 1,
           },
         ],
       }),

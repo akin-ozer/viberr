@@ -12,7 +12,7 @@ import {
   sealSecret,
 } from "~/server/secrets/secret-box.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { retireBackendRefusalsFor } from "./backend-quota.server";
+import { retireBackendRecordsFor } from "./backend-quota.server";
 import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
 import {
   claudeLoginCredentialPath,
@@ -355,7 +355,7 @@ async function clearExistingCredential(
   existing: BackendCredentialRow | null,
   deps: VendorDeps,
 ): Promise<void> {
-  retireBackendRefusalsFor(db, backend, userId);
+  retireBackendRecordsFor(db, backend, userId);
   if (!existing) return;
   if (existing.kind === "login") {
     if (deps.binary) {
@@ -617,7 +617,7 @@ export function recordBackendLogin(
   // Ruling 165: this writer bypasses `clearExistingCredential` on purpose (no
   // vendor logout over a credential the binary has just written), so it
   // retires the refusal observed on the previous account itself.
-  retireBackendRefusalsFor(db, backend, actor.userId);
+  retireBackendRecordsFor(db, backend, actor.userId);
   const row = getBackendCredential(db, actor.userId, backend);
   if (!row) throw AppError.internal(`backend credential ${id} vanished after insert`);
   return row;

@@ -1287,7 +1287,7 @@ describe("resumeRun — continuity recovery", () => {
    * (one fresh run re-anchored on task.md) is the honest outcome.
    */
   it("a resume for a DIFFERENT principal re-anchors instead of borrowing the session", async () => {
-    const { specs, resume } = await startThenResume();
+    const { specs, resume, firstRunId } = await startThenResume();
     // The session IS on disk — in the ORIGINAL owner's home.
     await withTranscriptStore("sess-gone");
     // This new owner HAS run agents here before (their store exists). The
@@ -1308,6 +1308,29 @@ describe("resumeRun — continuity recovery", () => {
       store.users.murat.id,
     );
     expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.murat.id);
+
+    // Ruling 207(j): and the record says WHY. The owner-change branch decides
+    // continuity before any filesystem is consulted, so the transcript is
+    // intact in the previous owner's home — reporting it as "no longer has a
+    // provider transcript … retention sweep or a wiped runtime volume" sent an
+    // admin hunting a storage fault that does not exist, for a condition viberr
+    // chose.
+    // CANARY: emit the single transcript-gone sentence (the shipped note) and
+    // both of these fail.
+    const { readTaskFile: readTask } = await import("~/server/files/task-writer.server");
+    const note = readTask({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline.find((e) => e.type === "continuity");
+    expect(note!.text).toContain("belongs to the account that held the seat");
+    expect(note!.text).toContain("The transcript is not missing");
+    expect(note!.text).not.toMatch(/retention sweep|wiped runtime volume/);
+
+    const marker = listRunLines(store.db, firstRunId).find(
+      (l) => l.display.tag === "run·session_missing",
+    );
+    expect(marker!.display.text).toMatch(/belongs to the account that owned this task/);
   });
 
   /**
@@ -1979,6 +2002,52 @@ describe("run phase throttling (R21-4)", () => {
 });
 
 describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
+  /** A task being worked, and a finished primary run on it whose completion
+   *  effects are about to be reported lost. */
+  function seedLostRun(taskKey: string, runId: string): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(taskKey, {
+        stage: "impl",
+        waiting: "agent",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey,
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+  }
+
+  async function noteOn(taskKey: string) {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    return readTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot })!
+      .parsed.timeline[0]!;
+  }
+
+  async function sweep(): Promise<void> {
+    const { recoverUnreactedAgentRuns } = await import("./run-recovery.server");
+    await recoverUnreactedAgentRuns(store.db, { dataRoot: store.dataRoot });
+  }
+
+  /** The sweep records this row BEFORE running the effects, so it is the one
+   *  observable that means "picked up" rather than "picked up and succeeded". */
+  function replayAttempted(runId: string): boolean {
+    return listAuditEvents(store.db, { action: "run.recovery.reply_replayed" }).some((a) =>
+      JSON.stringify(a.details ?? {}).includes(runId),
+    );
+  }
+
   it("stamps a continuity warning and flips the task off 'agent working'", async () => {
     // The task was being worked (waiting: agent) when its run finished, but the
     // completion callback threw so nothing flipped it back — the board would show
@@ -2020,5 +2089,116 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
     // A visible continuity warning (not a neutral note buried mid-timeline).
     expect(parsed.timeline[0]).toMatchObject({ type: "continuity" });
     expect(parsed.timeline[0]!.text).toContain("completion effects");
+  });
+
+  /**
+   * F37-67 (pass 37): the note makes two claims, and both are false in the case
+   * that actually produces it.
+   *
+   * The real failure path is `applyAgentCompletionEffects` REJECTING (the C4
+   * pass-24 comment in `registerAgentCompletion` says so: the synchronous guard
+   * in `fireIfAlreadyTerminal` "can never catch an async rejection here"). That
+   * function posts the reply, the verdict and any question ATOMICALLY in step 1,
+   * then reconciles delivery in step 2 and reacts in step 4. A rejection in
+   * steps 2 or 4 leaves step 1's writes on the record — so "none of them landed"
+   * is false about the one effect a person can see.
+   *
+   * And step 1's write is what makes the second claim false: it records the
+   * `task.agent.replied` audit row, and `recoverUnreactedAgentRuns` selects
+   * `NOT EXISTS` that row. The run is excluded from the sweep forever. "Run
+   * recovery replays the effects on the next restart" names a mechanism that
+   * has already decided, permanently, not to.
+   */
+  it("F37-67: does not promise a replay the recovery sweep will never run", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        stage: "impl",
+        waiting: "agent",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: "run_replied_then_lost",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    // Step 1 happened: the reply is on the record, and its idempotency row with
+    // it. This is the exact row `recoverUnreactedAgentRuns` excludes on.
+    const { recordAudit } = await import("~/server/audit/audit-recorder.server");
+    recordAudit(store.db, {
+      action: "task.agent.replied",
+      actor: { userId: null, label: "operator" },
+      subjectKind: "task",
+      subjectId: "VIB-3",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      details: { runId: "run_replied_then_lost" },
+    });
+    const run = getRun(store.db, "run_replied_then_lost")!;
+
+    await noteCompletionEffectsLost(store.db, run, store.dataRoot);
+
+    // The sweep's own verdict on this run, run for real rather than asserted.
+    await sweep();
+    // Never even picked up: the sweep records its attempt row BEFORE replaying
+    // anything, so no row for this run means it was never replayed.
+    expect(replayAttempted("run_replied_then_lost")).toBe(false);
+
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const note = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      dataRoot: store.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: restore either sentence and the note is telling a person to wait
+    // for a restart that will skip this run, about effects it says never landed.
+    expect(note.text).not.toContain("none of them landed");
+    expect(note.text).not.toContain("recovery replays the effects");
+    // It has to say something true instead, not merely say less: the reply is
+    // there, the rest is not, and re-running the agent is the way forward.
+    expect(note.text).toContain("re-run the agent");
+  });
+
+  it("F37-67: a run the sweep WILL replay still gets the promise", async () => {
+    // The other arm. Honesty must not be bought by deleting a true promise:
+    // this run's reply never landed and it has readable reply text, which is
+    // every condition the sweep acts on.
+    seedLostRun("VIB-4", "run_never_replied");
+    insertRunLine(store.db, {
+      runId: "run_never_replied",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: { t: "1", ev: "text", tag: "assistant", text: "Implemented the parser." },
+    });
+    await noteCompletionEffectsLost(store.db, getRun(store.db, "run_never_replied")!, store.dataRoot);
+
+    expect((await noteOn("VIB-4")).text).toContain("Run recovery replays the effects");
+    await sweep();
+    expect(replayAttempted("run_never_replied")).toBe(true);
+  });
+
+  it("F37-67: a run with no readable reply is selected and then dropped, and says so", async () => {
+    // The sweep's SELECT takes this run — the "recovering dropped agent-reply
+    // reactions" log line counts it — and its loop then `continue`s on the
+    // missing reply text before recording any attempt. A promise keyed on the
+    // query alone would be wrong here with nothing downstream to correct it.
+    seedLostRun("VIB-5", "run_no_reply_text");
+    await noteCompletionEffectsLost(store.db, getRun(store.db, "run_no_reply_text")!, store.dataRoot);
+
+    expect((await noteOn("VIB-5")).text).not.toContain("recovery replays the effects");
+    expect((await noteOn("VIB-5")).text).toContain("re-run the agent");
+    await sweep();
+    expect(replayAttempted("run_no_reply_text")).toBe(false);
   });
 });

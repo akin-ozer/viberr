@@ -10,6 +10,7 @@ import type {
   TaskFileEvent,
   TaskFrontmatter, UnpushedRevision } from "~/schemas/task-file.schema";
 import {
+  DIVERGED_BRANCH_REMEDY,
   activeWorkRevision,
   deriveValidation,
   nextWorkRevision,
@@ -261,7 +262,7 @@ function unpushedRevisionEventText(pr: PrRef): string {
   const rev = record.revisionSha.slice(0, 7);
   const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "an older head";
   if (record.relation === "diverged") {
-    return `Revision \`${rev}\` from the specialist workspace is not on **PR #${pr.number}**: its head ${head} holds commits this workspace does not. Resolve the branch history, then deliver the branch to push it.`;
+    return `Revision \`${rev}\` from the specialist workspace is not on **PR #${pr.number}**: its head ${head} holds commits this workspace does not. ${DIVERGED_BRANCH_REMEDY} Then deliver the branch to push it.`;
   }
   return `Revision \`${rev}\` from the specialist workspace is not on **PR #${pr.number}** (its head is ${head}). Delivering the branch pushes it.`;
 }

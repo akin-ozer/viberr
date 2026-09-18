@@ -25,7 +25,11 @@ import {
   type RuntimeAdapter,
 } from "./adapter.server";
 import { withProviderText } from "~/shared/provider-marker";
-import { SESSION_MISSING_RE } from "./session-export.server";
+import {
+  SESSION_MISSING_RE,
+  SESSION_STORE_UNREADABLE_MARK,
+  SESSION_STORE_UNREADABLE_RE,
+} from "./session-export.server";
 import {
   finishCodexRunHome,
   prepareCodexRunHome,
@@ -565,6 +569,23 @@ function classifyCodexFailure(
   // P13-D-2 before the auth branch: a missing rollout is not a credential
   // problem, and telling a human to "review the configured subscription
   // credential" for it sends them to the one place that is definitely fine.
+  // Ruling 221 (F37-41): the store is THERE and unreadable — same class, same
+  // remedy, different sentence. Before the auth branch for the same reason the
+  // vanished-rollout check is: live, "file is not a database" was reported as
+  // "review the configured subscription credential", with "redirect with
+  // sharper guidance" recommended, for a corrupt file on this host's disk.
+  if (SESSION_STORE_UNREADABLE_RE.test(raw)) {
+    return {
+      kind: "session_missing",
+      message:
+        `The Codex session could not be resumed — the CLI's own ${SESSION_STORE_UNREADABLE_MARK}. ` +
+        "Nothing is wrong with the credential and no rewritten directive changes it: every resume " +
+        "fails until that file is repaired or removed, while fresh runs still work. Re-run the " +
+        "agent to start a fresh session anchored on task.md.",
+      providerText,
+      origin: null,
+    };
+  }
   if (SESSION_MISSING_RE.test(raw)) {
     return {
       kind: "session_missing",

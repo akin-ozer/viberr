@@ -582,7 +582,15 @@ export function parseTaskFileContent(
       diagnostics.push(
         diagInfo(
           "timeline.out_of_order",
-          "Timeline entries are not strictly newest-first — display sorts by timestamp.",
+          // The message used to end "display sorts by timestamp". Nothing sorts:
+          // `listTaskEvents` is ORDER BY position ASC (the verbatim file index
+          // the rebuilder writes), `sliceTimeline` takes the first N off the
+          // front of that array, and the task timeline component only filters
+          // it. So the reader of a task whose file HAS an inversion was told the
+          // page had compensated, on the one panel whose job is to tell them the
+          // truth about the record. Ruling 237's own note-ordering fix was made
+          // in the WRITE for exactly this reason.
+          "Timeline entries are not strictly newest-first. The page renders file order, so an entry may sit out of place until the file is rewritten.",
           "timeline",
         ),
       );

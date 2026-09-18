@@ -23,7 +23,7 @@ import {
   updateGoalFile,
   withGoalsLock,
 } from "~/server/files/goal-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
@@ -32,6 +32,7 @@ import { rolesForAction } from "~/shared/rbac";
 import {
   createTask,
   loadProjectContext,
+  reprojectTask,
   requireAction,
   requireProjectMutable,
   type ProjectContext,
@@ -112,13 +113,26 @@ function linkGoalText(
   goal: GoalFrontmatter,
   link: GoalLink,
   previous: GoalLink | null,
+  /** Ruling 192: the body to carry forward instead of the link's frozen copy —
+   *  a retry's own task text, which is the contract everyone has been working
+   *  to. Absent (a first start) leaves the declared text. */
+  body?: string,
 ): string {
   const head =
     `Part of goal ${goal.id} (${goal.title}), link ${link.index} of ${goal.links.length}.` +
     (previous?.taskKey
       ? ` The previous link was carried by ${previous.taskKey} (${previous.status}).`
       : "");
-  return `${head}\n\n${link.goal.trim() || link.title}`;
+  return `${head}\n\n${(body ?? "").trim() || link.goal.trim() || link.title}`;
+}
+
+/** The chain header `linkGoalText` prepends, so a task's goal can be carried
+ *  into a NEW task without stacking a second one (the count, and which task
+ *  carried the previous link, have both moved on). */
+const CHAIN_HEADER_RE = /^Part of goal [^\n]*\n\n/;
+
+export function stripChainHeader(goal: string): string {
+  return goal.replace(CHAIN_HEADER_RE, "").trim();
 }
 
 // ------------------------------------------------------------------ create
@@ -199,6 +213,7 @@ export async function createGoal(
         taskKey: null,
         status: "pending",
         note: null,
+            redeclared: false,
         blockedBy: l.blockedBy ?? [],
       }),
     );
@@ -285,6 +300,13 @@ export async function createGoal(
 // ------------------------------------------------------------------ update
 
 export type UpdateGoalOp =
+  /** Ruling 192: rename the CHAIN (and re-describe it). A chain outlives the
+   *  sentence it was created with — pass 37's `goal-2` still read "Identity and
+   *  Catalog services" hours after catalog moved to its own chain — and until
+   *  now the only way to correct that was to cancel the chain and rebuild every
+   *  link. Neither field steers any work: the title appears in each link task's
+   *  chain header at CREATE time and is never re-read. */
+  | { op: "rename"; title?: string; description?: string }
   | { op: "pause" }
   | { op: "resume" }
   | { op: "cancel"; reason?: string }
@@ -296,7 +318,9 @@ export type UpdateGoalOp =
    *  task, which mirrors it back onto the link (ruling 155). */
   | { op: "edit_link"; index: number; title?: string; goal?: string; blockedBy?: string[] }
   | { op: "add_link"; title: string; goal: string; blockedBy?: string[] }
-  | { op: "remove_pending_link"; index: number };
+  | { op: "remove_pending_link"; index: number }
+  /** Ruling 243 (F37-72): bind an EXISTING task to a pending link. */
+  | { op: "adopt_task"; index: number; taskKey: string };
 
 export interface UpdateGoalInput {
   projectSlug: string;
@@ -313,6 +337,9 @@ interface ForwardedLinkWait {
 }
 interface LinkWaitForward {
   wait: ForwardedLinkWait | null;
+  /** Ruling 243: the task an `adopt_task` bound, written back after the goal
+   *  file commits so the two records point at each other or neither does. */
+  adopted: { taskKey: string; goalId: string; linkIndex: number } | null;
 }
 
 /** Creator-or-steering-tier gate for redirecting a chain. */
@@ -411,7 +438,7 @@ export async function updateGoal(
   // Ruling 155: an active link's wait lives on its task. The goal-file lock
   // below is not re-entrant, and the task writer mirrors the list back onto
   // this very file, so the forward runs AFTER the lock is released.
-  const forward: LinkWaitForward = { wait: null };
+  const forward: LinkWaitForward = { wait: null, adopted: null };
 
   const parsed = await updateGoalFile(
     goalRef(ctx, input.projectSlug, input.goalId),
@@ -420,6 +447,61 @@ export async function updateGoal(
       const terminal = fm.status === "completed" || fm.status === "cancelled";
       const by = actor.label;
       switch (op.op) {
+        case "rename": {
+          // Ruling 267 (pass 37, F37-97): the ONE op a settled chain still
+          // takes. Every other op here changes what the chain will DO, and a
+          // completed or cancelled chain will do nothing — so the terminal
+          // guard is right for all of them. `rename` changes only what the
+          // chain is CALLED, and a chain is named before the work is
+          // understood: live, `goal-2` stayed "Identity and Catalog services"
+          // after catalog moved to goal-6, and `goal-4` stayed "Storefront and
+          // Admin surfaces" after admin moved to goal-7. Both completed, so
+          // both are permanently wrong on a record people read to learn what
+          // was built, with no door anywhere to fix them. Refusing an edit that
+          // changes no state and loses no history buys nothing and costs the
+          // truth of the record; the rename lands in the chain's history like
+          // any other, so nothing is rewritten silently.
+          const title = op.title?.trim();
+          const description = op.description?.trim();
+          if (title === undefined && description === undefined) {
+            throw AppError.validation("rename needs a title or a description.");
+          }
+          if (title !== undefined && title.length === 0) {
+            throw AppError.validation("A goal title cannot be empty.");
+          }
+          const parts: string[] = [];
+          // Tracked here, not re-derived after the write: comparing `fm.title`
+          // to `title` afterwards is true both when the name moved AND when the
+          // caller resent the name it already had, so a description-only edit
+          // claimed link tasks were keeping "the old name".
+          let titleMoved = false;
+          if (title !== undefined && title !== fm.title) {
+            parts.push(`renamed from "${fm.title}" to "${title}"`);
+            fm.title = title;
+            titleMoved = true;
+          }
+          if (description !== undefined && description !== goal.description) {
+            parts.push("description rewritten");
+            goal.description = description;
+          }
+          if (parts.length === 0) {
+            message = `Goal ${fm.id} is unchanged.`;
+            return;
+          }
+          message = `Goal ${fm.id} ${parts.join(" and ")}.`;
+          // Every link task already carries the OLD title in its chain header,
+          // written at create time. Say so rather than implying a rename
+          // reaches back into work that has already started — and say it only
+          // when the NAME moved, because a description edit reaches nothing.
+          return (
+            `Goal ${parts.join(" and ")} by ${by}.` +
+            (titleMoved
+              ? terminal
+                ? " Every link task keeps the old name in its chain header; this chain is settled, so nothing new will carry the new one."
+                : " Link tasks created before now keep the old name in their chain header."
+              : "")
+          );
+        }
         case "pause": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           if (fm.status === "paused") {
@@ -519,6 +601,13 @@ export async function updateGoal(
               `Only a pending or failed link can be edited; link ${op.index} is ${link.status}.`,
             );
           }
+          // Ruling 192(b): an edit to a FAILED link is a deliberate
+          // re-declaration of the work, and it must outrank the text the retry
+          // would otherwise carry from the task that failed. Only the failed
+          // arm sets it — a pending link has no task to carry from.
+          if (link.status === "failed" && (op.title?.trim() || op.goal?.trim())) {
+            link.redeclared = true;
+          }
           if (op.title?.trim()) link.title = op.title.trim();
           if (op.goal?.trim()) link.goal = op.goal.trim();
           // Ruling 131(c): absent leaves the list; `[]` clears it. Validated
@@ -554,11 +643,70 @@ export async function updateGoal(
             taskKey: null,
             status: "pending",
             note: null,
+            redeclared: false,
             blockedBy: validateLinkWait(db, input.projectSlug, fm.id, nextIndex, fm.links, op.blockedBy ?? []),
           });
           advanceAfter = true;
           message = `Link ${fm.links.length} added.`;
           return `Link ${fm.links.length} (${title}) added by ${by}.`;
+        }
+        case "adopt_task": {
+          // Ruling 243 (F37-72): a chain normally MAKES its link's task when it
+          // advances, and nothing could point a link at a task that already
+          // exists. So a person who asked the controller to build out the work
+          // for pending links got real tasks the chain did not know about, and
+          // the chain would later create its own duplicates. The only escape was
+          // `remove_pending_link`, which destroys the link's authored text —
+          // live on this pass those texts carried the orders service's port, its
+          // whole migration schema and a crash-resumption assertion, and they
+          // had to be hand-copied into the new tasks before the links could go.
+          if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
+          const link = fm.links.find((l) => l.index === op.index);
+          if (!link) throw AppError.validation(`No link ${op.index}.`);
+          if (link.status !== "pending" || link.taskKey) {
+            throw AppError.conflict(
+              `Link ${op.index} already has a task (${link.taskKey ?? link.status}). ` +
+                "Only a pending link with no task can adopt one.",
+            );
+          }
+          const adoptee = readTaskFile({
+            projectSlug: input.projectSlug,
+            taskKey: op.taskKey,
+            dataRoot: ctx.dataRoot,
+          });
+          if (!adoptee) {
+            throw AppError.validation(`${op.taskKey} is not a task in this project.`);
+          }
+          if (adoptee.parsed.frontmatter.archived) {
+            throw AppError.conflict(
+              `${op.taskKey} is archived; restore it before a chain can carry it.`,
+            );
+          }
+          // A task carries at most ONE link. Two chains pointing at one task
+          // would each advance on its completion and each claim it as theirs,
+          // and the task's own `goalRef` can only name one of them.
+          const held = adoptee.parsed.frontmatter.goalRef;
+          if (held) {
+            throw AppError.conflict(
+              `${op.taskKey} is already carried by ${held.goalId} link ${held.linkIndex}. ` +
+                "A task belongs to one chain.",
+            );
+          }
+          link.taskKey = op.taskKey;
+          link.status = "active";
+          link.note = null;
+          link.redeclared = false;
+          // Ruling 155 runs the other way here than on an advance: the task
+          // already exists and OWNS its wait, so the link mirrors what the task
+          // says rather than overwriting it with the link's declared list.
+          link.blockedBy = [...adoptee.parsed.frontmatter.blockedBy];
+          forward.adopted = {
+            taskKey: op.taskKey,
+            goalId: fm.id,
+            linkIndex: op.index,
+          };
+          message = `Link ${op.index} is now carried by ${op.taskKey}.`;
+          return `Link ${op.index} (${link.title}) adopted existing task ${op.taskKey}, by ${by}.`;
         }
         case "remove_pending_link": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
@@ -605,6 +753,30 @@ export async function updateGoal(
     const list = wait.blockedBy.length > 0 ? wait.blockedBy.join(", ") : "nothing";
     message = `Link ${forward.wait.linkIndex} waits on ${list}, through ${forward.wait.taskKey}${wait.changed ? "" : " (unchanged)"}.`;
   }
+  if (forward.adopted) {
+    // The task's own back-reference, written AFTER the link commits: the link
+    // is the record a person reads on the chain, and a task claiming a link
+    // that does not claim it back is the worse of the two half-states.
+    const adopted = forward.adopted;
+    await updateTaskFile(
+      { projectSlug: input.projectSlug, taskKey: adopted.taskKey, dataRoot: ctx.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.goalRef = { goalId: adopted.goalId, linkIndex: adopted.linkIndex };
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: { kind: "system", systemId: "policy-engine" },
+          title: "Adopted into a goal chain",
+          text:
+            `This task now carries **${adopted.goalId} link ${adopted.linkIndex}**. The chain ` +
+            "advances when it completes, and no separate task is created for that link.",
+          toAgent: false,
+          evidence: null,
+        });
+      },
+    );
+    reprojectTask(db, ctx, input.projectSlug, adopted.taskKey);
+  }
   rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
   recordAudit(db, {
     action: "goal.updated",
@@ -623,8 +795,17 @@ export async function updateGoal(
   // flaps it back, re-notifying and recording a retry that never started. Same
   // shape as reconcileGoal's advance path.
   if (retryLinkIndex !== null) {
+    // Ruling 194, corrected: a FAILED link keeps its task key — `reconcileGoal`
+    // sets `status = "failed"` and names that task in the note — so the first
+    // draft's `link.taskKey !== null` guard returned before doing anything, on
+    // every path, and the test that "proved" it built a null-taskKey failed
+    // link the product cannot produce. The real question is whether the retry
+    // REPLACED the task, so the answer is the key it had before.
+    const priorTaskKey =
+      readGoalFile(goalRef(ctx, input.projectSlug, input.goalId))
+        ?.parsed.frontmatter.links.find((l) => l.index === retryLinkIndex)?.taskKey ?? null;
     try {
-      await startLinkTask(
+      const started = await startLinkTask(
         db,
         input.projectSlug,
         input.goalId,
@@ -633,6 +814,38 @@ export async function updateGoal(
         ctx,
         "retry",
       );
+      if (started === null) {
+        // Ruling 194 (F37-16): `startLinkTask` declines silently when the
+        // chain is no longer active — and a reconcile fired by the very
+        // archive that failed this link lands exactly there, because it is
+        // fire-and-forget. The timeline already carries "Link N retried by X";
+        // without this the record claims a retry that started nothing, no task
+        // exists, and nobody is told. The THROW arm below has said so since it
+        // was written; the decline had no arm at all.
+        await updateGoalFile(goalRef(ctx, input.projectSlug, input.goalId), (goal) => {
+          const link = goal.frontmatter.links.find((l) => l.index === retryLinkIndex);
+          // Unchanged key ⇒ nothing replaced it ⇒ the retry really started
+          // nothing. A key that moved means a task exists and this arm is not
+          // its business.
+          if (!link || link.taskKey !== priorTaskKey) return;
+          if (goal.frontmatter.status === "active") goal.frontmatter.status = "attention";
+          link.note = "The retry did not start: the chain was redirected while it ran.";
+          return (
+            `Retry of link ${retryLinkIndex} did NOT start a task — the chain stopped being ` +
+            `active while the retry ran. The link is still failed; retry it again.`
+          );
+        });
+        const declined = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
+        if (declined) {
+          notifyCreator(
+            db,
+            declined.parsed.frontmatter,
+            input.projectSlug,
+            "A link retry did not start its task. Retry the link again.",
+          );
+        }
+        rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
+      }
     } catch (error) {
       logger.error("goal link retry task creation failed", {
         goalId: input.goalId,
@@ -780,10 +993,30 @@ async function startLinkTaskLocked(
   const previous =
     fm.links.filter((l) => l.index < linkIndex).sort((a, b) => b.index - a.index)[0] ??
     null;
+  // Ruling 192: a RETRY re-materialises the work from the task that just
+  // failed, not from the link's frozen copy. An active link's title and goal
+  // are settled in the goal file (ruling 155) while the TASK's are not — a
+  // decision packet, an operator edit or a person can rewrite them — so on a
+  // board where those diverge the old behaviour handed the retry a contract
+  // everyone had moved past, silently, with nothing in the timeline saying a
+  // correction had been dropped. Live pass 37 the two copies of SHOP-2's
+  // contract disagreed about which task owns `packages/contracts`.
+  //
+  // Ruling 192(b): unless the link was RE-DECLARED. `edit_link` explicitly
+  // accepts a failed link — "edit a pending or failed link" is in the tool's
+  // own description — and ruling 192's first draft carried the task's text over
+  // that edit without a word, so "edit the failed link, then retry it" silently
+  // did nothing. An explicit re-declaration is the later, deliberate
+  // instruction and outranks the text the failed task happened to end with.
+  const priorTask =
+    mode === "retry" && link.taskKey && !link.redeclared
+      ? readTaskFile({ projectSlug, taskKey: link.taskKey, dataRoot: ctx.dataRoot })
+      : null;
+  const carried = priorTask ? stripChainHeader(priorTask.parsed.goal) : "";
   const linkInput: CreateTaskInput = {
     projectSlug,
-    title: link.title,
-    goal: linkGoalText(fm, link, previous),
+    title: priorTask ? priorTask.parsed.frontmatter.title : link.title,
+    goal: linkGoalText(fm, link, previous, carried),
     goalRef: { goalId, linkIndex },
   };
   // Ruling 131(c): the link's declared wait is copied onto the task and
@@ -804,7 +1037,17 @@ async function startLinkTaskLocked(
     target.taskKey = created.key;
     target.status = "active";
     target.note = null;
-    return `Link ${linkIndex} (${target.title}) started as ${created.key}${target.blockedBy.length > 0 ? `, waiting on ${target.blockedBy.join(", ")}` : ""}.`;
+    // Ruling 192(b): the re-declaration has been consumed by this start.
+    target.redeclared = false;
+    // Ruling 192: say so when the retry carried the failed task's own text
+    // rather than the link's — a silent substitution either way is the defect.
+    const carriedNote =
+      priorTask && carried && carried !== link.goal.trim()
+        ? `, carrying ${priorTask.parsed.frontmatter.key}'s own text rather than the link's original`
+        : link.redeclared
+          ? ", from the link's re-declared text rather than the failed task's"
+          : "";
+    return `Link ${linkIndex} (${target.title}) started as ${created.key}${target.blockedBy.length > 0 ? `, waiting on ${target.blockedBy.join(", ")}` : ""}${carriedNote}.`;
   });
   if (!attached) {
     // The chain went non-active mid-create. The task exists and carries a
@@ -1168,6 +1411,48 @@ export function startGoalRunner(db: DatabaseSync): void {
 
 // -------------------------------------------------------------------- views
 
+/**
+ * Ruling 192: a link as READ, which is not always a link as stored. Ruling 155
+ * settles an active link's `title` and `goal` in the goal file while the task's
+ * are still editable, so the stored copy can be a contract the work has moved
+ * past — live, `goal-2` link 1 said SHOP-2 owns `packages/contracts` while
+ * SHOP-2's own goal said it must not touch it. The stored text stays (it is
+ * what the chain declared, and the history means it); `liveGoal` is the task's
+ * current goal, present only when it has actually moved. Only the goal: a
+ * task's TITLE is immutable — nothing in the product writes one after create,
+ * `update_task` says so in as many words — so a `title` half here would be a
+ * field that can never be set.
+ */
+export type GoalLinkView = GoalLink & {
+  /**
+   * Ruling 335: what the CHAIN DECLARED, present only when the task has moved
+   * past it. `goal` above always carries the truth.
+   *
+   * Ruling 192 had these the other way round — `goal` kept the frozen
+   * declaration and `liveGoal` appeared beside it when they differed — and the
+   * controller measured what that costs: on one goal, FOUR of seven links'
+   * `goal` fields were superseded, and it said so in its own words: *"the safe
+   * field carries the qualifier and the unsafe one has the plain name —
+   * `link.goal` is the trap, `link.liveGoal` is the truth, and that is
+   * backwards. I only ever noticed because `liveGoal` happened to sit adjacent
+   * in the payload; nothing in the reply says the two differ."*
+   *
+   * Live and load-bearing at the time it was found: goal-5's link 7 is SHOP-82,
+   * the release candidate, actively building. Its declared goal instructs a
+   * builder to generate a CHANGELOG "from conventional commits" — which that
+   * task's own design pass proved impossible, 0 of 583 commits being
+   * conventional-shaped — and to own `scripts/seed/demo.ts`, proven unreachable.
+   * The task's real goal, corrected by the owner, says the opposite.
+   *
+   * Ruling 192's substance stands and is why the declaration is still here: the
+   * stored text is what the chain declared and the history means it. What
+   * changes is which name a reader reaches for first. A retry was never at risk
+   * — ruling 192's own `body` argument already rebuilds from the task's current
+   * text — so this is entirely about the read.
+   */
+  declaredGoal?: string;
+};
+
 export interface GoalView {
   id: string;
   title: string;
@@ -1176,7 +1461,7 @@ export interface GoalView {
   createdByLabel: string;
   onFailure: "pause" | "continue";
   description: string;
-  links: GoalLink[];
+  links: GoalLinkView[];
   currentIndex: number | null;
   createdAt: string | null;
   updatedAt: string | null;
@@ -1191,7 +1476,30 @@ export function getGoalView(
 ): GoalView | null {
   const read = readGoalFile(goalRef(ctx, projectSlug, goalId));
   if (!read) return null;
-  return toGoalView(read.parsed);
+  const view = toGoalView(read.parsed);
+  // Ruling 192: the DETAIL read is the one a planner acts on, so it carries the
+  // live contract beside the declared one. `listGoals` (the board card) shows
+  // titles and waits only and reads the projection, so it is left alone.
+  view.links = view.links.map((link) => {
+    if (!link.taskKey) return link;
+    const task = readTaskFile({
+      projectSlug,
+      taskKey: link.taskKey,
+      dataRoot: ctx.dataRoot,
+    });
+    if (!task) return link;
+    const goal = stripChainHeader(task.parsed.goal);
+    // Compare against what the task was BUILT from, not against `link.goal`
+    // alone: `linkGoalText` falls back to the title when a link declares no
+    // goal, so a title-only link read as permanently drifted and the drift
+    // field announced a change that never happened.
+    const declared = link.goal.trim() || link.title;
+    if (goal === declared) return link;
+    // Ruling 335: the plain name carries the truth; the declaration keeps a
+    // name that says what it is.
+    return { ...link, goal, declaredGoal: link.goal };
+  });
+  return view;
 }
 
 export function toGoalView(parsed: ParsedGoalFile): GoalView {

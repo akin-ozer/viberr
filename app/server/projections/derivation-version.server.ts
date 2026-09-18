@@ -25,8 +25,16 @@ import type { RescanSummary } from "./rebuilder.server";
  * `goal_projections.links_json` is only rewritten when the goal file's content
  * hash changes — an existing store's rows carry links with no such key, which
  * the Controller page reads. This stamp forces the one rebuild that fills them.
+ * 4 = ruling 225 (pass 37) derives a FOURTH `waiting` value, `schedule`, from
+ * the same task file: a task resting on a pending occurrence with nothing
+ * pending on a person. Every row written under the old rule says `human`
+ * forever otherwise — which is exactly what happened. Ruling 225 deployed at
+ * 03:32 UTC, the boot rescan reported `changed=0` because no file had changed,
+ * and SHOP-21's card and rail went on reading "waiting on a human" over a
+ * schedule pending for 07:29. This file's whole first paragraph describes that
+ * failure, and I shipped the ruling without bumping the stamp it describes.
  */
-export const PROJECTION_DERIVATION_VERSION = 3;
+export const PROJECTION_DERIVATION_VERSION = 4;
 
 const SETTING_KEY = "projection.derivationVersion";
 

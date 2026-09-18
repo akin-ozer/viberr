@@ -113,6 +113,7 @@ export function TaskDetailPage({
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
+  operatorAcceptsDirectly = false,
   runPrincipal,
   liveAgentRuns,
   runsVisible = true,
@@ -126,6 +127,9 @@ export function TaskDetailPage({
   mentionables,
   recommendations,
   schedules,
+  queuedQuestions = [],
+  packetAlsoAnswers = null,
+  packetCreateTaskEchoes = {},
   archived = false,
   acceptance,
   githubHost,
@@ -162,6 +166,9 @@ export function TaskDetailPage({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
+  /** F37-65: whether the operator's `completion-for-acceptance` grant actually
+   *  resolves to `direct` at this autonomy. Autonomy alone does not say. */
+  operatorAcceptsDirectly?: boolean;
   /** Ruling 127: whose accounts this task's agent runs bill (the OWNER's) and
    *  what those accounts can run. `null` = unowned, so nothing runs here.
    *  P11-41's "would fail fast" gate, answered per person. */
@@ -187,6 +194,15 @@ export function TaskDetailPage({
   /** Pending scheduled runs (O-3 generalized, loader — from the task file).
    *  Rendered inside the execution profile's run controls. */
   schedules: TaskSchedule[];
+  /** Ruling 241: reviewer questions a dependency hold refused. Optional with
+   *  an empty default, like `labelSuggestions`: all but a handful of tasks have
+   *  none, and a render built by hand should not have to say so. */
+  queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
+  /** Ruling 319: what else the open packet's confirm answers, or null. */
+  packetAlsoAnswers?: string | null;
+  /** Ruling 324: per create_task option index, the tasks that already look
+   *  like the one it would create. */
+  packetCreateTaskEchoes?: Record<number, { key: string; title: string; stage: string }[]>;
   /** R14-3: the task's archive disposition (loader — from the task file, which
    *  is where it lives; the projection has no column for it). */
   archived?: boolean;
@@ -697,6 +713,11 @@ export function TaskDetailPage({
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
+            // Ruling 319: a packet keyed to an account failure answers its
+            // siblings too — the card says so before the confirm, not after.
+            alsoAnswers={packetAlsoAnswers}
+            // Ruling 324: a create_task confirm names what already looks like it.
+            createTaskEchoes={packetCreateTaskEchoes}
             canResolve={canResolvePacket}
             canResolveCompletion={canDecideOwned}
             // UI-42: an owner-only resolver must not be offered a decision they
@@ -786,6 +807,7 @@ export function TaskDetailPage({
           dispositionBusy={archiveBusy}
         />
         <TaskDetailsPanel
+          queuedQuestions={queuedQuestions}
           task={task}
           canEdit={canEditMeta}
           labelSuggestions={labelSuggestions}
@@ -847,6 +869,7 @@ export function TaskDetailPage({
           deployedSpecialists={deployedSpecialists}
           operatorBackend={operatorBackend}
           operatorAutonomy={operatorAutonomy}
+          operatorAcceptsDirectly={operatorAcceptsDirectly}
           runPrincipal={runPrincipal}
           canRunAgents={canRunAgents}
           liveAgentRuns={liveAgentRuns}
@@ -1062,7 +1085,18 @@ export function TaskDetailPage({
         <ConfirmDialog
           screenLabel="Interrupt run dialog"
           title="Interrupt this run?"
-          body="The agent stops where it is. Anything it has not already committed or delivered is lost. You can start a new run afterward."
+          /* Ruling 272 (pass 37, F37-104): this said "Anything it has not
+             already committed or delivered is lost", and nothing is. An
+             interrupt kills the PROCESS; it never touches the task's
+             workspace, and the next run reuses that checkout as it stands
+             (`cloneRepo`'s reuse path fast-forwards only a tree that is clean
+             on the default branch, so a dirty one is left exactly alone). The
+             sentence was wrong in the direction that costs most: it tells a
+             person that stopping a stuck run destroys work — discouraging the
+             one action the product wants them to be able to take — and it
+             tells whoever runs next that the tree is clean when a half-written
+             edit is sitting in it. */
+          body="The agent stops mid-turn. It never reports, so nothing it was about to deliver, record or answer lands. Its edits stay in the task's workspace exactly as it left them, which may be half-finished, and the next run continues from that tree rather than a fresh one."
           confirmLabel="Interrupt run"
           busy={runBusy}
           onCancel={() => setConfirmInterrupt(null)}

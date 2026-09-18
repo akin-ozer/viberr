@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -33,6 +33,7 @@ import {
   repairProjectRepo,
   repoFootprintTasks,
   setBranchCleanup,
+  setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
   NEW_STAGE_COLORS,
@@ -892,6 +893,69 @@ describe("deleteProject leaves no app-owned rows behind", () => {
   });
 });
 
+/**
+ * Ruling 274 (pass 37, F37-107): `controller_conversations` is the fourth
+ * app-owned table with no FK cascade, and the only one whose orphan is worse
+ * than stale. A conversation's `project_slug` is what the controller
+ * toolkit's `slugOf()` DEFAULTS to, so a conversation left bound to a deleted
+ * slug acts on whatever comes back under it — and a slug comes back the
+ * ordinary way, by creating a project with the same name.
+ */
+describe("deleteProject releases the conversations bound to it (ruling 274)", () => {
+  it("unbinds them to instance scope, keeps the transcript, and says why", async () => {
+    const store = setupTestStore(ctx);
+    const actor = admin(store);
+    const { createConversation, appendMessage, getConversation, listMessages } =
+      await import("~/server/controller/controller-conversations.server");
+    const bound = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: "arda@viberr.dev",
+      projectSlug: store.slug,
+    });
+    appendMessage(store.db, {
+      conversationId: bound.id,
+      author: "user",
+      userId: store.users.arda.id,
+      text: "What is on this board?",
+    });
+    // An instance conversation must not be touched by a project's delete.
+    const instance = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: "arda@viberr.dev",
+      projectSlug: null,
+    });
+
+    const name = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter.name;
+    await deleteProject(
+      store.db,
+      { projectSlug: store.slug, confirmName: name },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+
+    // CANARY: drop `releaseProjectConversations` from deleteProject and this
+    // conversation keeps pointing at the dead slug — so recreating a project
+    // under that name silently hands it this transcript AND makes every
+    // unqualified board tool in it act on the new project.
+    const after = getConversation(store.db, bound.id)!;
+    expect(after.projectSlug).toBeNull();
+    expect(after.taskKey).toBeNull();
+    // The record is kept: this product does not destroy transcripts.
+    const messages = listMessages(store.db, bound.id);
+    expect(messages.some((m) => m.text === "What is on this board?")).toBe(true);
+    // …and its author is told where the board went.
+    const last = messages[messages.length - 1]!;
+    expect(last.author).toBe("controller");
+    expect(last.text).toContain(`"${name}" was deleted`);
+    expect(last.text).toContain("instance conversation");
+    // Untouched, because it was never bound to this project.
+    expect(listMessages(store.db, instance.id)).toEqual([]);
+  });
+});
+
 describe("deleteProject stops the agents it is deleting", () => {
   it("interrupts in-flight runs before the files go", async () => {
     // Nothing stopped them, so a delete left every running agent going against
@@ -1096,5 +1160,179 @@ describe("setRequiredReviewers (ruling 178)", () => {
       ).rejects.toMatchObject({ status: 403 });
     }
     expect(rulesOf(store)).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 239 (pass 37): the project's rulings knowledge base — the one KB every
+ * run on the project reads, whether or not a profile grants it.
+ */
+/**
+ * Ruling 245 (pass 37, F37-74): a lease says which task owns a shared path
+ * until it merges — the statement `blockedBy` cannot make, because `blockedBy`
+ * means "do not START until done" and what is wanted is "both may proceed, this
+ * one owns the lockfile until it lands".
+ */
+describe("setProjectFileLeases (ruling 245)", () => {
+  let store: TestStore;
+  let holderA = "";
+  let holderB = "";
+  const leases = () =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter
+      .fileLeases;
+  beforeEach(async () => {
+    store = setupTestStore(ctx);
+    const { createTask } = await import("~/server/tasks/task-actions.server");
+    // The real keys, not assumed ones: the project's own prefix and counter
+    // decide them, and a lease is validated against the board.
+    holderA = (
+      await createTask(store.db, { projectSlug: store.slug, title: "Holder one" }, admin(store), {
+        dataRoot: store.dataRoot,
+      })
+    ).key;
+    holderB = (
+      await createTask(store.db, { projectSlug: store.slug, title: "Holder two" }, admin(store), {
+        dataRoot: store.dataRoot,
+      })
+    ).key;
+  });
+
+  it("writes the list, and reads it back off the project file", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    const saved = await setProjectFileLeases(
+      store.db,
+      {
+        projectSlug: store.slug,
+        leases: [{ paths: ["pnpm-lock.yaml", " make/** "], taskKey: holderA, reason: " the fragments " }],
+      },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(saved.changed).toBe(true);
+    // Trimmed and deduped on the way in: a lease is matched by string, so a
+    // stray space is a lease that silently covers nothing.
+    expect(leases()).toEqual([
+      { paths: ["pnpm-lock.yaml", "make/**"], taskKey: holderA, reason: "the fragments" },
+    ]);
+    expect(saved.toast).toContain(holderA);
+  });
+
+  it("refuses a holder this project does not have, and writes nothing", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    await expect(
+      setProjectFileLeases(
+        store.db,
+        { projectSlug: store.slug, leases: [{ paths: ["Makefile"], taskKey: "VIB-999", reason: "x" }] },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/VIB-999 is not a task in this project/);
+    // CANARY: drop the holder check and a refusal names a task nobody can open.
+    expect(leases()).toEqual([]);
+  });
+
+  it("refuses two leases over the same glob, because order would decide the owner", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    await expect(
+      setProjectFileLeases(
+        store.db,
+        {
+          projectSlug: store.slug,
+          leases: [
+            { paths: ["pnpm-lock.yaml"], taskKey: holderA, reason: "a" },
+            { paths: ["pnpm-lock.yaml"], taskKey: holderB, reason: "b" },
+          ],
+        },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Two leases both cover/);
+    expect(leases()).toEqual([]);
+  });
+
+  it("clears with an empty list, and reports an unchanged write as unchanged", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    const args = {
+      projectSlug: store.slug,
+      leases: [{ paths: ["Makefile"], taskKey: holderA, reason: "splitting it" }],
+    };
+    await setProjectFileLeases(store.db, args, admin(store), { dataRoot: store.dataRoot });
+    const again = await setProjectFileLeases(store.db, args, admin(store), {
+      dataRoot: store.dataRoot,
+    });
+    expect(again.changed).toBe(false);
+    const cleared = await setProjectFileLeases(
+      store.db,
+      { projectSlug: store.slug, leases: [] },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(cleared.changed).toBe(true);
+    expect(leases()).toEqual([]);
+  });
+});
+
+describe("setProjectRulingsKb (ruling 239)", () => {
+  let store: TestStore;
+  const projectFm = () =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+  async function seedKb(name: string): Promise<string> {
+    const { saveKnowledgeBase } = await import("~/server/org/resources.server");
+    const saved = await saveKnowledgeBase(
+      store.db,
+      { name, refresh: "on change" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    return saved.kb.dir;
+  }
+  beforeEach(() => {
+    store = setupTestStore(ctx);
+  });
+
+  it("refuses a directory no knowledge base occupies, and writes nothing", async () => {
+    // A rulings KB that resolves to nothing injects silently-empty context into
+    // every run and reads on every surface as though the project had settled
+    // rules it has not. CANARY: drop the `listKnowledgeBases` check.
+    await expect(
+      setProjectRulingsKb(
+        store.db,
+        { projectSlug: store.slug, dir: "no-such-kb" },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/No knowledge base lives at "no-such-kb"/);
+    expect(projectFm().rulingsKb ?? null).toBeNull();
+  });
+
+  it("names a real one, reports it, and clears back to null", async () => {
+    const dir = await seedKb("team-rulings");
+    const set = await setProjectRulingsKb(
+      store.db,
+      { projectSlug: store.slug, dir },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(set.changed).toBe(true);
+    expect(set.dir).toBe(dir);
+    expect(projectFm().rulingsKb).toBe(dir);
+
+    // Idempotent: the same value is not a change and writes no audit row.
+    const again = await setProjectRulingsKb(
+      store.db,
+      { projectSlug: store.slug, dir },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(again.changed).toBe(false);
+
+    const cleared = await setProjectRulingsKb(
+      store.db,
+      { projectSlug: store.slug, dir: null },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(cleared.changed).toBe(true);
+    expect(projectFm().rulingsKb ?? null).toBeNull();
   });
 });

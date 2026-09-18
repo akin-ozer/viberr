@@ -8,10 +8,15 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import {
+  projectionFaultCount,
+  resetProjectionFaultsForTests,
+} from "~/server/projections/store-health.server";
 import { projectDir, taskDir } from "./file-store-root.server";
 import {
   isFileWatcherAlive,
   shouldIgnoreWatchPath,
+  RETRY_BACKOFF_MS,
   startFileWatcher,
   stopFileWatcher,
 } from "./file-watch.service.server";
@@ -19,6 +24,7 @@ import {
 const ctx = createTestDbContext();
 afterEach(() => {
   stopFileWatcher();
+  resetProjectionFaultsForTests();
   ctx.cleanup();
 });
 
@@ -36,8 +42,10 @@ async function waitFor(
   cond: () => boolean,
   what: string,
   nudge?: () => void,
+  /** Ruling 218's retry test needs its own budget — see the call site. */
+  budgetMs: number = WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
   let lastNudge = Date.now();
   while (Date.now() < deadline) {
     if (cond()) return;
@@ -58,8 +66,16 @@ function pokeDir(dir: string): void {
   writeFileSync(path.join(dir, "poke-marker"), String(Date.now()));
 }
 
-async function startWatcherReady(store: ReturnType<typeof setupTestStore>) {
-  const watcher = startFileWatcher({ dataRoot: store.dataRoot, db: store.db });
+async function startWatcherReady(
+  store: ReturnType<typeof setupTestStore>,
+  retryBackoffMs?: readonly number[],
+) {
+  const options: Parameters<typeof startFileWatcher>[0] = {
+    dataRoot: store.dataRoot,
+    db: store.db,
+  };
+  if (retryBackoffMs) options.retryBackoffMs = retryBackoffMs;
+  const watcher = startFileWatcher(options);
   // Chokidar arms asynchronously — `ready` marks the initial scan complete.
   // The listener attaches in the same synchronous frame as the start, so the
   // event cannot have fired before it.
@@ -164,6 +180,135 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
       "task.md reprojected after edit",
     );
   }, 15000);
+});
+
+/**
+ * Ruling 218 (F37-38). A projection is rebuilt when its file CHANGES. If that
+ * one rebuild fails, the file does not change again — so the row keeps whatever
+ * it held before, forever. Live: ninety seconds of `disk I/O error` left
+ * SHOP-4's card reading "waiting on you" while its own file said `waiting:
+ * agent`, and it stayed wrong until a human pressed Re-scan. Nobody would have,
+ * because nothing on any surface said to.
+ */
+describe("a failed rebuild is retried (ruling 218)", () => {
+  it("heals a stale projection whose ONE rebuild failed, with no further file change", async () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.arda.id;
+    const comment = (at: string, text: string) => ({
+      occurredAt: at,
+      type: "comment" as const,
+      actor: { kind: "human" as const, userId: uid, nameHint: null },
+      title: null,
+      toAgent: false,
+      evidence: null,
+      text,
+    });
+    const events = (): number =>
+      Number(
+        store.db
+          .prepare(
+            `SELECT count(*) AS c FROM task_events WHERE project_slug = ? AND task_key = ?`,
+          )
+          .get(store.slug, "VIB-1")!.c,
+      );
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [comment("2026-08-26T10:00:00.000Z", "first")],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(events()).toBe(1);
+
+    // Ruling 218's real ladder is 2s / 5s / 15s. This test has to WAIT for a
+    // retry, so with the production numbers a repair landing just after the
+    // second attempt waits fifteen more seconds for the third — and the budget
+    // then has to beat full-suite scheduling noise on top. It was raised to 12s
+    // and failed at 12,087ms; raised to 26s and failed at 26,052ms. The ladder
+    // is the variable, not the budget, so the canary drives a fast one: the
+    // BEHAVIOUR under test is "a failed rebuild is retried at all", which the
+    // interval does not change.
+    //
+    // The LENGTH matters as much as the delays, and getting it wrong is how
+    // this test was made flaky a third time. Every failed attempt consumes a
+    // rung, and `scheduleRetry` gives up after the last one. The latch wait
+    // below pokes until the fault is recorded, and each poke is another failed
+    // attempt — so a five-rung ladder was spent in about 300ms, long before the
+    // table came back, and the heal then waited on a retry that would never be
+    // scheduled. It passed alone and failed at 12,035ms under load, which is
+    // the same shape as the bug it replaced. The rungs are therefore many and
+    // short: ~20s of retry capacity at 40ms granularity outlasts any plausible
+    // latch delay while keeping the heal itself near-instant.
+    await startWatcherReady(
+      store,
+      Array.from({ length: 500 }, () => 40),
+    );
+
+    // The store cannot take the events rewrite for the whole first attempt —
+    // the shape a transient `disk I/O error` has. `content_hash` is written
+    // LAST (F28-D3), so the row is left stale AND re-readable.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [
+        comment("2026-08-26T10:00:00.000Z", "first"),
+        comment("2026-08-26T10:01:00.000Z", "second"),
+      ],
+    });
+    // The nudge REWRITES `task.md`, and that is the fix for this test's third
+    // flake. `pokeDir` writes `poke-marker`, whose name is deliberately not a
+    // canonical basename — by its own contract the add "never [reaches] the
+    // projection handlers". So the latch depended on catching the ONE change
+    // event from the `writeTask` above, and when full-suite load let chokidar
+    // coalesce or miss it, no amount of poking could produce another: the file
+    // had not changed since. The failure was always "timed out waiting for: the
+    // failing rebuild to be latched", never the heal, which is why raising
+    // budgets and shortening the retry ladder both missed it.
+    //
+    // Rewriting the same bytes gives chokidar a `change` on a canonical
+    // basename, so the latch becomes recoverable instead of one-shot. It does
+    // not weaken the test: the "nothing touches the file again" invariant
+    // belongs to the HEAL below, which still passes no nudge at all.
+    const rewriteTask = () => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+        timeline: [
+          comment("2026-08-26T10:00:00.000Z", "first"),
+          comment("2026-08-26T10:01:00.000Z", "second"),
+        ],
+      });
+    };
+    await waitFor(
+      () => projectionFaultCount() > 0,
+      "the failing rebuild to be latched",
+      rewriteTask,
+      12_000,
+    );
+
+    // The store recovers. NOTHING touches the file again — that is the whole
+    // point: only the retry can bring this row back to the record.
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    // CANARY: delete `scheduleRetry` from `rebuildFile` and this never
+    // converges — the timeline stays one comment behind its own file, which is
+    // exactly what SHOP-4 did until a human pressed Re-scan.
+    await waitFor(
+      () => events() === 2,
+      "the retry to heal the stale projection",
+      undefined,
+      12_000,
+    );
+    expect(projectionFaultCount()).toBe(0);
+  }, 30_000);
+
+  /**
+   * The rung-exhaustion guard, pinned separately so the reason the ladder above
+   * is 500 long does not live only in a comment. `scheduleRetry` gives up after
+   * the last rung; a test ladder that runs out mid-wait stops retrying and the
+   * canary fails for a reason that has nothing to do with ruling 218.
+   */
+  it("ruling 218's ladder gives up after its last rung, which is why the test ladder is long", () => {
+    expect(RETRY_BACKOFF_MS).toEqual([2_000, 5_000, 15_000, 45_000, 120_000]);
+    expect(RETRY_BACKOFF_MS).toHaveLength(5);
+  });
 });
 
 describe("watcher liveness (E8)", () => {

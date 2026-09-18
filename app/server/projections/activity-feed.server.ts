@@ -280,8 +280,17 @@ const AUDIT_ACTION_KINDS = {
   // nowhere — reconstructing "who bypassed the required reviewer" used to need
   // raw SQLite access, the exact thing this panel exists to make unnecessary.
   "task.acceptance.forced": "audit",
+  // Ruling 235: a human pressed Accept and the gate refused because the
+  // reviewed revision is not on the pull request. It belongs on the feed for
+  // the same reason the forced acceptance does - it is a governance-relevant
+  // thing a person did that the record must be able to answer for.
+  "task.acceptance.head_unpushed": "blockedact",
   // Ruling 177 (pass 36): acceptance ended the task's live runs.
   "task.acceptance.interrupted_runs": "audit",
+  // Ruling 237 (F37-57): a reviewer objected twice running and Viberr put the
+  // decision in front of a person. On the feed because the alternative is that
+  // "why did this task sit for a day" is only answerable by opening the task.
+  "task.review.deadlock": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
@@ -353,6 +362,16 @@ const auditDetailsSchema = z.object({
   rules: z
     .array(z.object({ stageName: z.string().catch("?"), agentName: z.string().catch("?") }))
     .catch([]),
+  // Ruling 235: the two SHAs and the pull request a refused acceptance named.
+  // Without these the row falls back to the humanised action id, which is the
+  // one line on the audit panel that reads like a machine label instead of a
+  // sentence a person can act on.
+  prNumber: z.number().optional().catch(undefined),
+  revisionHeadSha: detailText,
+  liveHeadSha: detailText,
+  // Ruling 237: the reviewer whose objections deadlocked, and how many rounds.
+  rounds: z.number().optional().catch(undefined),
+  profileId: detailText,
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -501,6 +520,23 @@ function auditText(
     // force-accept" is advice for a decision nobody still has to make. The
     // reason/remediation halves are split by a sentence boundary; rows recorded
     // before the copy was de-dashed used an em dash, so both are handled.
+    case "task.acceptance.head_unpushed": {
+      // Ruling 235. Deliberately not "<actor> did X": the actor on this row is
+      // the policy engine, and what a reader needs is WHICH revision was
+      // reviewed against WHICH head, in the same shape the refusal itself used.
+      const pr = d.prNumber ? `**PR #${d.prNumber}**` : "the review PR";
+      const reviewed = d.revisionHeadSha ? `\`${d.revisionHeadSha.slice(0, 7)}\`` : "the reviewed revision";
+      const live = d.liveHeadSha ? ` (head \`${d.liveHeadSha.slice(0, 7)}\`)` : "";
+      return `Acceptance refused: ${reviewed} is not on ${pr}${live}, so the merge would not have carried the reviewed work, on`;
+    }
+    case "task.review.deadlock": {
+      // Ruling 237. The actor is the policy engine, so this says what happened,
+      // not who did it. The reviewer is named by profile id, which is what the
+      // row stores; the task link beside it carries the rest.
+      const who = d.profileId ? `\`${d.profileId}\`` : "a reviewer";
+      const rounds = d.rounds ?? 0;
+      return `${who} requested changes ${rounds} times running, so a decision was raised on`;
+    }
     case "task.acceptance.forced": {
       const bypassed = d.bypassed;
       if (!bypassed || bypassed.startsWith("no gate")) {

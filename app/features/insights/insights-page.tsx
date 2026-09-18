@@ -1,8 +1,9 @@
 import type {
-  CountRow,
+  Breakdown,
   OversightSummary,
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
+import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
@@ -148,10 +149,12 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
           <OversightCards oversight={summary.oversight} />
 
           <div className="insights-cols">
-            <BreakdownCard title="By backend" rows={summary.byBackend} />
-            <BreakdownCard title="By run kind" rows={summary.byKind} />
-            <BreakdownCard title="By project" rows={summary.byProject} />
-            <BreakdownCard title="By model" rows={summary.byModel} />
+            <BreakdownCard title="By backend" data={summary.byBackend} />
+            <BreakdownCard title="By run kind" data={summary.byKind} />
+            <BreakdownCard title="By project" data={summary.byProject} />
+            <BreakdownCard title="By model" data={summary.byModel} />
+            <BreakdownCard title="By agent profile" data={summary.byProfile} />
+            <BreakdownCard title="By task" data={summary.byTask} />
           </div>
 
           <BackendQuotaPanel quota={summary.backendQuota} />
@@ -205,6 +208,8 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
             ? `${g.clarity.clearTasks} of ${g.clarity.activeTasks} active tasks have a definite next actor`
             : "no active tasks"
         }
+        names={g.clarity.unclear}
+        more={g.clarity.activeTasks - g.clarity.clearTasks - g.clarity.unclear.length}
       />
       <StatCard
         label="Branch & PR traceability"
@@ -214,6 +219,12 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
           g.traceability.deliveredTasks
             ? `${g.traceability.tracedTasks} of ${g.traceability.deliveredTasks} delivered tasks carry branch + PR`
             : "no delivered tasks yet"
+        }
+        names={g.traceability.untraced}
+        more={
+          g.traceability.deliveredTasks -
+          g.traceability.tracedTasks -
+          g.traceability.untraced.length
         }
       />
       <StatCard
@@ -246,29 +257,112 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         value={fmtCount(g.longTimelines)}
         icon="memory"
         sub="tasks past their project's compression threshold"
+        names={g.longTimelineKeys}
+        more={g.longTimelines - g.longTimelineKeys.length}
       />
       {/* F31-D6: pass 31 measured coordination at 63% of all run spend with
           no card saying so — coordination cost was invisible next to the
           work it coordinated. "Coordination" is the operator AND the
           controller: both decide what the working agents do rather than doing
           the work, so the sub-text names both instead of implying the
-          controller's turns are free. Share over COST-REPORTING runs only;
-          null when nothing reported a cost (never a fake 0%). */}
+          controller's turns are free.
+
+          Ruling 190 → 201: the share is shown only when EVERY run on both
+          sides reported a cost. Anything less and the figure is a ratio of
+          whichever runs happened to bill — on a mixed-backend instance that is
+          a small minority, because only Claude's result envelope carries a
+          price. The suppressed case gives the dollars that ARE real and names
+          the silent runs by their count and their backend; the token card
+          beside it carries the share that survives the blind spot. */}
       <StatCard
         label="Coordination overhead"
         value={fmtPercent(g.coordination.share)}
         icon="shield"
         sub={
-          g.coordination.totalCostUsd > 0
-            ? // D04-U12 (pass 32): name the denominator — cost-REPORTING runs
-              // only, the way "Total cost" above discloses its subset.
-              `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)} reported by cost-reporting runs`
-            : "no run has reported a cost yet"
+          g.coordination.totalCostUsd <= 0
+            ? "no run has reported a cost yet"
+            : g.coordination.share === null
+              ? `operator and controller runs reported $${g.coordination.coordinationCostUsd.toFixed(2)}; ${costSilence(g.coordination)}, so there is no share to take`
+              : // D04-U12 (pass 32): name the denominator. It is now every run
+                // in scope, which is what makes the quotient a measurement.
+                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)}; every run reported a cost`
+        }
+      />
+      {/* Ruling 201: the owner's call on F37-21 — suppress the dollar share
+          when it cannot be measured, and put a real number beside it rather
+          than a gap. Tokens are the unit BOTH backends report. Its own unit is
+          stated on the card, because a token is not a dollar and the models on
+          either side of this ratio are not priced alike. */}
+      <StatCard
+        label="Coordination tokens"
+        value={fmtPercent(g.coordination.tokenShare)}
+        icon="memory"
+        sub={
+          g.coordination.totalTokens <= 0
+            ? "no run has reported a provider token total yet"
+            : g.coordination.tokenShare === null
+              ? `operator and controller runs processed ${fmtTokens(g.coordination.coordinationTokens)} tokens; ${tokenSilence(g.coordination)}, so there is no share to take`
+              : `${fmtTokens(g.coordination.coordinationTokens)} of ${fmtTokens(g.coordination.totalTokens)} tokens processed; tokens, not dollars` +
+                (g.coordination.tokenless.delivery + g.coordination.tokenless.coordination > 0
+                  ? ` · ${fmtCount(g.coordination.tokenless.delivery + g.coordination.tokenless.coordination)} of ${fmtCount(g.coordination.runs.delivery + g.coordination.runs.coordination)} runs report no provider total`
+                  : "")
         }
       />
       </div>
     </section>
   );
+}
+
+/** Ruling 201: which runs left the dollar share unmeasurable, in the reader's
+ *  terms. A side that reported NOTHING and a side that reported SOME are
+ *  different facts and get different sentences; the backend clause comes off
+ *  the rows, so it names whatever actually went silent rather than a backend
+ *  this file guessed at. */
+function costSilence(c: OversightSummary["coordination"]): string {
+  const backends = c.uncostedByBackend
+    // Title-cased from the row, not matched against a list of backend names
+    // this file knows: ruling 191's lesson is that copy which hardcodes what
+    // the environment contains goes stale the day the environment changes.
+    .map((b) => `${fmtCount(b.runs)} on ${b.backend.charAt(0).toUpperCase()}${b.backend.slice(1)}`)
+    .join(" and ");
+  const silent = c.uncosted.delivery + c.uncosted.coordination;
+  const total = c.runs.delivery + c.runs.coordination;
+  // Ruling 211(g): the parenthetical counts the WHOLE cost-silent population,
+  // so it may only ride a clause that names the whole population. Attached to
+  // "no delivery run reported a cost" it told the reader a number that belongs
+  // to both sides while blaming one — and hid that coordination was partly
+  // silent too, which is the very thing ruling 201 exists to disclose.
+  const wholeSideSilent =
+    c.runs.delivery > 0 && c.uncosted.delivery === c.runs.delivery
+      ? "no delivery run reported a cost"
+      : c.runs.coordination > 0 && c.uncosted.coordination === c.runs.coordination
+        ? "no operator or controller run reported a cost"
+        : null;
+  // Only when the OTHER side is partly silent too does the count span more than
+  // the clause names; when the named side owns every silent run, the original
+  // single clause is exact.
+  const otherPartlySilent =
+    wholeSideSilent === "no delivery run reported a cost"
+      ? c.uncosted.coordination > 0
+      : c.uncosted.delivery > 0;
+  if (wholeSideSilent !== null && otherPartlySilent) {
+    // One side is entirely silent AND the other is partly silent: say both, and
+    // keep the backend breakdown on the total where it belongs.
+    const rest = `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost in total`;
+    return backends
+      ? `${wholeSideSilent}, and ${rest} (${backends})`
+      : `${wholeSideSilent}, and ${rest}`;
+  }
+  const counted = wholeSideSilent ?? `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost`;
+  return backends ? `${counted} (${backends})` : counted;
+}
+
+/** The same sentence for the token share, whose gap is a side that landed no
+ *  provider figure at all (F35-1's excluded rows, concentrated on one side). */
+function tokenSilence(c: OversightSummary["coordination"]): string {
+  return c.runs.delivery > 0 && c.tokenless.delivery === c.runs.delivery
+    ? "no delivery run reported a provider token total"
+    : "no operator or controller run reported a provider token total";
 }
 
 /** Is `iso` strictly newer than `thanIso`? False when either is missing or
@@ -497,11 +591,20 @@ function StatCard({
   value,
   icon,
   sub,
+  /** Ruling 290: the exceptions this number counts, BY NAME. A card that
+   *  reports "41 of 42 delivered tasks carry branch + PR" and will not say
+   *  which one cannot be traced has withheld the only fact a reader needs. */
+  names,
+  /** How many more there are than the card names, so a capped list never reads
+   *  as the whole set. */
+  more,
 }: {
   label: string;
   value: string;
   icon: Parameters<typeof Icon>[0]["name"];
   sub?: string;
+  names?: readonly string[];
+  more?: number;
 }) {
   // An absent reading must not be the loudest thing on the card: "n/a" at
   // full stat emphasis reads like a data point.
@@ -514,13 +617,31 @@ function StatCard({
       <span className={"stat-val" + (absent ? " na" : "")}>{value}</span>
       <span className="stat-label">{label}</span>
       {sub && <span className="stat-sub">{sub}</span>}
+      {names && names.length > 0 && (
+        <span className="stat-sub stat-names">
+          {names.map((n) => (
+            <Link key={n} to={taskHref(n)} className="linkish">
+              {n.split("/")[1] ?? n}
+            </Link>
+          ))}
+          {more != null && more > 0 && <span className="dim">+{more} more</span>}
+        </span>
+      )}
     </div>
   );
 }
 
+/** `PROJ/KEY` → the task page. The query hands back the pair precisely so the
+ *  card can link rather than leave a reader searching for the key. */
+function taskHref(projectAndKey: string): string {
+  const [slug, key] = projectAndKey.split("/");
+  return `/projects/${slug}/tasks/${key}`;
+}
+
 /** A labelled horizontal bar list, each bar sized to the row's share of the
  *  busiest row (by runs). Cost rides the value column. */
-function BreakdownCard({ title, rows }: { title: string; rows: CountRow[] }) {
+function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
+  const rows = data.rows;
   const max = rows.reduce((m, r) => Math.max(m, r.runs), 0) || 1;
   return (
     <section className="panel breakdown">
@@ -561,6 +682,18 @@ function BreakdownCard({ title, rows }: { title: string; rows: CountRow[] }) {
           ))}
         </ul>
       )}
+      {/* Ruling 308: the window says what it left out. Eight of thirty groups
+          with nothing said reads as the whole instance, on the surface a
+          person opens to decide where their money goes. The cost follows
+          `CountRow`'s own rule: absent is "not reported", never $0. */}
+      {data.hidden > 0 ? (
+        <p className="fine dim">
+          {fmtCount(data.hidden)} more {data.hidden === 1 ? "group" : "groups"} not
+          shown, {fmtCount(data.hiddenRuns)}{" "}
+          {data.hiddenRuns === 1 ? "run" : "runs"} between them
+          {data.hiddenCost == null ? ", cost not reported" : `, ${fmtCost(data.hiddenCost)}`}.
+        </p>
+      ) : null}
     </section>
   );
 }

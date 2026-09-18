@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -33,7 +34,6 @@ import {
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import {
-  KB_INJECTION_BUDGET,
   KB_PRECEDENCE_NOTE,
 } from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -74,6 +74,7 @@ import {
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
+  runDispatchLine,
   startAgentRun,
   buildSpecialistPersona,
   githubReadForRun,
@@ -627,6 +628,49 @@ describe("startSpecialistRun", () => {
     expect(started?.details).toMatchObject({ profileId: "dev", delivers: true, stageEligibility: "engaged-deliverer" });
   });
 
+  /**
+   * Ruling 207(e) (claim audit). The dispatch-completion contract tells the
+   * agent to close its report by tagging "@<dispatcher>" "so they are
+   * notified". A schedule carries `createdByLabel`, which is whatever
+   * `TaskActor.label` was when it was created — documented as "e.g. the email"
+   * — and the mention ladder matches an email's LOCAL PART, a full name or a
+   * first name, never a whole address. The agent tagged `@a.kaya@hepapi.com`,
+   * which chips nothing, notifies nobody, and leaves no trace that the person
+   * who scheduled the run was never told it finished.
+   */
+  it("ruling 207(e): a dispatcher passed as an EMAIL is tagged by the name the mention ladder can resolve", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+        ],
+      }),
+      goal: "Report back to whoever scheduled this.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // Exactly what schedule.server.ts hands over: the label, plus the id.
+    await startAgentRun(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        triggeredByName: store.users.arda.email,
+        triggeredByUserId: store.users.arda.id,
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const prompt = startedRunSpecs().at(-1)!.prompt;
+    // CANARY: pass `input.triggeredByName` straight through (the shipped code)
+    // and the prompt instructs a tag on the raw address.
+    expect(prompt).toContain(`"@${store.users.arda.name}"`);
+    expect(prompt).not.toContain(store.users.arda.email);
+  });
+
   it("ruling 133: a SUPPORTING engagement stays stage-scoped at the run boundary, and a NEW delivering engagement is still gated", async () => {
     // Canaries: return ok for every engaged profile in `runEligibilityFor`
     // (the supporting run starts); delete the `assertStageEligible` call in
@@ -745,19 +789,103 @@ describe("startSpecialistRun", () => {
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
     await stop(second.runId);
 
-    // A dependency list is ruling 131's own floor.
+    // A dependency list is ruling 131's own floor — and since ruling 186 that
+    // floor is a GATE, not just a readiness that refuses to lift. This arm used
+    // to let the dispatch through and assert only that the readiness stayed
+    // `blocked`; the dispatch succeeding was the ambient behaviour of the day
+    // (nothing checked the list), never ruling 157's subject, which is a
+    // packet-less, LIST-less stored hold. That subject is untouched: the two
+    // arms above still pass unchanged.
     seedHeld({ engagements: [], blockedBy: ["VIB-2"] });
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const third = await startAgentRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
     expect(fm().frontmatter.readiness).toBe("blocked");
+    // Nothing ran, so nothing lifted: still the one row from the first arm.
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
-    await stop(third.runId);
+  });
+
+  /**
+   * Ruling 311. `startRun` answers `outcome: "started" | "queued"` and the
+   * timeline sentence discarded it, so a run parked behind the concurrent-run
+   * cap wrote "Started a Claude run … streaming to the agent logs" — both
+   * halves false for as long as the queue held it.
+   *
+   * Live on SHOP-55 the operator read that entry, told a person the run "was
+   * already in flight", and the controller relayed it as fact; a `list_runs`
+   * read then showed it queued with zero turns, eleven minutes after the
+   * timeline said it had started. The operator's own tool reply has said
+   * "queued … starts when a slot frees" since B10 — the durable record that
+   * everybody else reads said the opposite.
+   */
+  describe("ruling 311: the dispatch line says which of the three things happened", () => {
+    const base = {
+      refusal: null,
+      backendLabel: "Claude",
+      role: "developer",
+      switchedFrom: null,
+      notes: "",
+    } as const;
+
+    it("a queued run is not described as started, or as streaming", () => {
+      const line = runDispatchLine({ ...base, outcome: "queued" });
+      // CANARY: drop the `outcome` branch and every one of these flips.
+      expect(line).toContain("Queued a Claude run for the developer agent");
+      expect(line).not.toContain("Started");
+      expect(line).toContain("concurrent-run cap");
+      expect(line).toContain("starts when a slot frees");
+      expect(line).toContain("Nothing is streaming yet");
+      expect(line).not.toContain("streaming to the agent logs");
+    });
+
+    it("a started run keeps the sentence it always had", () => {
+      const line = runDispatchLine({ ...base, outcome: "started" });
+      expect(line).toBe(
+        "Started a Claude run for the developer agent — streaming to the agent logs.",
+      );
+    });
+
+    it("a refused run is not described as started either — the third outcome", () => {
+      // A refused dispatch still becomes a run row (`startRun` records it as an
+      // honest terminal error) and `dispatchAgentRun` does not return between
+      // `startRun` and this line, so the ruling-311 defect had a third case.
+      // CANARY: fold `refused` back into the non-queued branch and this reads
+      // "Started … streaming".
+      const line = runDispatchLine({
+        ...base,
+        outcome: "refused",
+        refusal: "Arda has not connected Claude. No agent process was started.",
+      });
+      expect(line).toBe(
+        "Refused a Claude run for the developer agent — Arda has not connected Claude. No agent process was started.",
+      );
+      expect(line).not.toContain("Started");
+      expect(line).not.toContain("streaming");
+    });
+
+    it("the switch note and the substitution notes survive every branch", () => {
+      for (const outcome of ["started", "queued", "refused"] as const) {
+        const line = runDispatchLine({
+          ...base,
+          outcome,
+          switchedFrom: "Codex",
+          notes: " (pinned)",
+        });
+        expect(line).toContain("(switched from Codex)");
+        expect(line).toContain("(pinned)");
+        // The notes sit between the switch note and the tail, as before.
+        expect(line.indexOf("(switched from Codex)")).toBeLessThan(
+          line.indexOf("(pinned)"),
+        );
+      }
+    });
   });
 
   it("creates a run row with the specialist backend and streams output", async () => {
@@ -1184,6 +1312,7 @@ describe("assignReviewer / removeReviewer", () => {
               result: "approve",
               reason: "",
               at: "2026-09-02T10:00:00.000Z",
+              rounds: 1,
             },
           ],
           validation: "healthy",
@@ -1348,6 +1477,7 @@ describe("assignReviewer / removeReviewer", () => {
               result: "approve",
               reason: "",
               at: "2026-08-06T10:00:00.000Z",
+              rounds: 1,
             },
           ],
           validation: "healthy",
@@ -1858,6 +1988,54 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * approval entries now, so this holds for fresh runs, resumes and the
    * continuity reset alike.
    */
+  /**
+   * Ruling 210 (owner). Viberr's doctrine addressed a reviewer whose objection
+   * SURVIVES a rework (ruling 193/204) and said nothing about one that answers
+   * every round and returns a NEW valid objection each time — which costs
+   * exactly as many rounds. Live on this board twice: SHOP-6 took seven, SHOP-10
+   * five, every round correct on its own terms, and nobody ever asked the
+   * reviewer what ELSE it would block on. The reviewer's own contract now does.
+   */
+  it("ruling 210: a verdict-capable reviewer is told a request_changes is a COMPLETE list", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "reviewer",
+            backends: ["claude"],
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const prompt = specs.at(-1)!.prompt;
+    // CANARY: drop the ruling-210 sentences and the contract asks only for "a
+    // one-paragraph justification", which a first-finding-only review satisfies.
+    expect(prompt).toContain("A `request_changes` is a COMPLETE list, not the first thing you found");
+    expect(prompt).toContain("name EVERY change you would block on");
+    expect(prompt).toContain("this is the complete set for this revision");
+    // …and the escape hatch for a genuinely new problem, so the rule does not
+    // push a reviewer into hiding one.
+    expect(prompt).toContain("say THAT explicitly and why it could not have been named before");
+  });
+
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
@@ -2027,7 +2205,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments",
     );
     expect(path.isAbsolute(attachments)).toBe(true);
-    expect(sys).toContain("Posting files on the task thread");
+    expect(sys).toContain("Files on the task thread");
     expect(sys).toContain(`\`${attachments}\``);
     expect(sys).not.toContain(`\`projects/${store.slug}/tasks/VIB-1/attachments\``);
     expect(sys).not.toContain("reachable from your working directory");
@@ -2160,6 +2338,38 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("open a pull request");
   });
 
+  /**
+   * Ruling 191 (F37-13, live): every agent discovered its own shell one
+   * exit-127 at a time — `pnpm`, `corepack`, `make`, `curl`, Docker, 75
+   * `command not found` lines across one pass — while Viberr had measured the
+   * inventory since ruling 182 and offered it only through the controller's
+   * opt-in `instance_health`. The people whose shell it is now get it.
+   */
+  it("ruling 191: the prompt names what this host's shell has and has not", () => {
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+    });
+    // CANARY: drop the `shellInventoryPrompt` line and an agent plans a
+    // `make up` it cannot run, exactly as pass 37's board did.
+    expect(prompt).toContain("## Shell inventory (measured on this host, not a guess)");
+    expect(prompt).toContain("NOT installed: make, docker, pnpm, yarn, curl, python3, go.");
+    expect(prompt).toContain("npx <tool>");
+  });
+
+  it("ruling 191: a task with NO repository still gets the inventory", () => {
+    // A docs/advisory task runs commands too — and pass 37's live example was
+    // exactly that: a document-only task whose REQUIRED reviewer failed it for
+    // not bringing a Docker stack up.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      repo: null,
+      cloned: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+    });
+    expect(prompt).toContain("## Shell inventory (measured on this host, not a guess)");
+  });
+
   it("a failed checkout names the REAL reason and forbids the credential guess", () => {
     // Live-caught on a fresh instance. The server's clone hit its 60s ceiling on
     // a 55 MB repo, the run continued against an empty workspace, and this
@@ -2176,7 +2386,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       cloneFailure: {
         sentence:
           "The workspace checkout was cancelled after 900s — the clone ran past its time limit rather than failing. The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem.",
-        hadCredential: true,
+        credential: "supplied",
       },
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
     });
@@ -2190,6 +2400,28 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("Do NOT try to clone");
     expect(prompt).toContain("provision credentials");
     expect(prompt).toContain("wastes a human's time on a false lead");
+  });
+
+  it("ruling 249: the prompt forbids the credential guess for a LOCAL checkout failure too", () => {
+    // F37-78: the supporting checkout is cloned from the delivering one on
+    // disk, so a failure there is never about a credential. The prompt used to
+    // append its "do not ask for credentials" clause only when a token HAD been
+    // supplied, so on this arm the agent was left free to report the one cause
+    // it could see. CANARY: drop the `not_involved` arm and the last assertion
+    // fails while the agent is sent to ask for a credential nobody needs.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      cloned: false,
+      cloneFailure: {
+        sentence:
+          "The workspace checkout failed (git exit 128). This step never reached GitHub at all: the checkout is copied from a clone already on this server, so no credential was involved either way.",
+        credential: "not_involved",
+      },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+    });
+    expect(prompt).toContain("Do NOT try to clone");
+    expect(prompt).toContain("never reached GitHub, so no credential is involved in it");
+    expect(prompt).toContain("false lead");
   });
 
   it("F19-6: git's own (redacted) words reach the prompt, with an order to quote them", () => {
@@ -2206,7 +2438,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       cloned: false,
       cloneFailure: {
         sentence: "The workspace checkout failed (git exit 128).",
-        hadCredential: true,
+        credential: "supplied",
         stderrExcerpt: "remote: Repository not found.\nfatal: repository not found",
       },
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
@@ -2220,7 +2452,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
         cloned: false,
         cloneFailure: {
           sentence: "The workspace checkout failed (git exit 128).",
-          hadCredential: true,
+          credential: "supplied",
         },
         delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
       }),
@@ -2435,7 +2667,9 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       profileId: "scout",
       skills: [],
       mcps: ["everything-http"],
-      unresolvedMcps: ["vm-memory"],
+      unresolvedMcps: [
+        { name: "vm-memory", reason: "the server exited before it listed any tools" },
+      ],
     });
     // What mounted is offered…
     expect(persona).toContain("everything-http");
@@ -2443,6 +2677,12 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(persona).toContain("Unavailable MCP servers");
     expect(persona).toContain("vm-memory");
     expect(persona).toContain("NOT mounted on this run");
+    // Ruling 310: with the reason the server itself gave. The prompt used to
+    // assert one cause for every miss — "no such server is in the org
+    // registry" — which it had never checked; live on SHOP-55 that sentence
+    // was false and an agent relayed it to a human as fact.
+    expect(persona).toContain("the server exited before it listed any tools");
+    expect(persona).not.toContain("no such server is in the org registry");
   });
 
   it("the workspace contract names the attachments-drop exception when granted", () => {
@@ -2480,7 +2720,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(without).toContain("Work ONLY inside the current working directory");
   });
 
-  it("the posting-files drop section rides the evidence grant (owner ask 2026-08-20)", () => {
+  it("the task-files section rides the evidence grant (owner ask 2026-08-20)", () => {
     // The live gap: an agent committed its screenshot into the PR because
     // nothing told it the task thread could carry files. The section names the
     // real directory and the contract (files landing there during the run are
@@ -2490,7 +2730,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       skills: [],
       attachmentsDrop: { attachmentsDir: "/data/projects/p/tasks/T-1/attachments" },
     });
-    expect(withDrop).toContain("Posting files on the task thread");
+    expect(withDrop).toContain("Files on the task thread");
     expect(withDrop).toContain("`/data/projects/p/tasks/T-1/attachments`");
     expect(withDrop).toContain("posted on your reply");
     // Ruling 159: an absolute path, outside the checkout, never committed.
@@ -2500,7 +2740,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     // pipeline would still stamp the files, but the prompt must not invite a
     // mechanic the capability matrix withholds.
     const without = buildSpecialistPersona({ profileId: "dev", skills: [] });
-    expect(without).not.toContain("Posting files on the task thread");
+    expect(without).not.toContain("Files on the task thread");
   });
 
   it("F4: renders the github_read guardrails only when the reader mounted (grant + repo)", () => {
@@ -2592,50 +2832,109 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
 });
 
 describe("directiveRequestsDelivery (F10-31)", () => {
+  /** The detector returns the matched phrase now (ruling 323); these read it as
+   *  the yes/no the older assertions were written against. */
+  const asks = (d: string) => directiveRequestsDelivery(d) !== null;
+
   it("detects push / open-PR / merge imperatives in operator directives", () => {
-    expect(directiveRequestsDelivery("push the branch when done")).toBe(true);
-    expect(directiveRequestsDelivery("run git push origin HEAD")).toBe(true);
-    expect(directiveRequestsDelivery("open a PR for review")).toBe(true);
-    expect(directiveRequestsDelivery("please open a pull request")).toBe(true);
-    expect(directiveRequestsDelivery("gh pr create --fill")).toBe(true);
-    expect(directiveRequestsDelivery("merge the pull request")).toBe(true);
+    expect(asks("push the branch when done")).toBe(true);
+    expect(asks("run git push origin HEAD")).toBe(true);
+    expect(asks("open a PR for review")).toBe(true);
+    expect(asks("please open a pull request")).toBe(true);
+    expect(asks("gh pr create --fill")).toBe(true);
+    expect(asks("merge the pull request")).toBe(true);
+    // ...and it names what it matched, because the event it drives is a
+    // permanent accusation and a heuristic has to show its evidence.
+    expect(directiveRequestsDelivery("push the branch when done")).toBe("push the branch");
   });
 
   it("does not flag ordinary work directives", () => {
-    expect(directiveRequestsDelivery("add a glossary section to the docs")).toBe(false);
-    expect(directiveRequestsDelivery("refactor the parser and add tests")).toBe(false);
-    expect(directiveRequestsDelivery("investigate the failing build")).toBe(false);
+    expect(asks("add a glossary section to the docs")).toBe(false);
+    expect(asks("refactor the parser and add tests")).toBe(false);
+    expect(asks("investigate the failing build")).toBe(false);
   });
 
-  // P14-LV-10: the event this drives says "the operator directive ASKED the
-  // specialist to push or open/merge a pull request", and it is permanent
-  // timeline. A prohibition is the opposite of a request — live, the operator's
-  // own ANTI-injection directive ("Do not push the branch, open a PR, approve,
-  // or merge") produced an event accusing it of demanding exactly that.
+  // P14-LV-10: the event this drives says the directive ASKED the specialist to
+  // push or open/merge a pull request, and it is permanent timeline. A
+  // prohibition is the opposite of a request — live, the operator's own
+  // ANTI-injection directive ("Do not push the branch, open a PR, approve, or
+  // merge") produced an event accusing it of demanding exactly that.
   it("P14-LV-10: does not flag a PROHIBITION against delivering", () => {
     expect(
-      directiveRequestsDelivery(
-        "Do not push the branch, open a PR, approve, or merge — Viberr handles delivery.",
-      ),
+      asks("Do not push the branch, open a PR, approve, or merge — Viberr handles delivery."),
     ).toBe(false);
-    expect(directiveRequestsDelivery("don't open a pull request yourself")).toBe(false);
-    expect(directiveRequestsDelivery("never merge the pull request")).toBe(false);
-    expect(
-      directiveRequestsDelivery("commit locally, without pushing the branch"),
-    ).toBe(false);
+    expect(asks("don't open a pull request yourself")).toBe(false);
+    expect(asks("never merge the pull request")).toBe(false);
+    expect(asks("commit locally, without pushing the branch")).toBe(false);
   });
 
   it("P14-LV-10: does not flag a QUESTION about delivery", () => {
-    expect(
-      directiveRequestsDelivery("Does your prompt tell you to open a pull request?"),
-    ).toBe(false);
+    expect(asks("Does your prompt tell you to open a pull request?")).toBe(false);
   });
 
   it("P14-LV-10: a real request after a prohibited clause still flags", () => {
     // A clause boundary ends the negation's scope — this one genuinely asks.
+    expect(asks("Do not touch the tests. Then push the branch.")).toBe(true);
+  });
+
+  /**
+   * Ruling 323 — the fourteen live firings, all wrong.
+   *
+   * Across 81 tasks of a real board this detector fired fourteen times and was
+   * wrong every one. Thirteen were the ADJECTIVE: "this branch has an open PR",
+   * which in every case was the operator's own preamble to "merge, never
+   * rebase" — the opposite instruction. The fourteenth was a prohibition whose
+   * `not` was wearing bold.
+   *
+   * These are the real sentences, from the real tasks.
+   */
+  it("ruling 323: an OPEN pull request is a fact about the branch, not an instruction", () => {
+    // CANARY: drop the ADJECTIVE_LEAD_RE check.
+    for (const directive of [
+      "Code Reviewer's request-changes finding on the open PR", // SHOP-12
+      "**This branch has an open pull request**, so merge never rebase.", // SHOP-14
+      "Rules for this round: `shop-34` has an open PR.", // SHOP-34
+      "The no-history rule (ruling 2): this branch has an open PR.", // SHOP-36
+      "Working on published history, this branch has an open PR.", // SHOP-49
+      "§2 governs: `shop-54` has an open PR. **Merge, never rebase.**", // SHOP-54
+      "this branch is published history behind an open PR", // SHOP-54
+      "§2 (this branch has an open PR)", // SHOP-75
+      // SHOP-83, forty minutes after the fix was written and while it sat
+      // undeployed: the rule against rewriting published history, recorded as
+      // a demand to push and merge.
+      "if it ever carries an open PR, merge, never rebase", // SHOP-83
+    ]) {
+      expect(directiveRequestsDelivery(directive), directive).toBeNull();
+    }
+    // The verb, in the same shape, still flags: the guard keys on the word
+    // before `open`, and an imperative has no determiner in front of it.
+    expect(asks("When the gate is green, open a PR against main.")).toBe(true);
+  });
+
+  it("ruling 323: markdown emphasis is not part of the sentence, in either direction", () => {
+    // Live on SHOP-35, the negation guard P14-LV-10 added was defeated by the
+    // operator's own bold: `do **not** open a PR` is `do ` + `**not**`, which
+    // `\bdo\s+not\b` cannot match across.
+    // CANARY: drop `withoutEmphasis`.
     expect(
-      directiveRequestsDelivery("Do not touch the tests. Then push the branch."),
-    ).toBe(true);
+      directiveRequestsDelivery("Report your findings. Do **not** push and do **not** open a PR."),
+    ).toBeNull();
+    // ...and the same strip fixes the miss the other way: a bolded imperative
+    // was never detected at all, which is the half nobody would have noticed.
+    expect(asks("**Push the branch** when you are done.")).toBe(true);
+    expect(asks("`git push` origin HEAD")).toBe(true);
+  });
+
+  it("ruling 323: the operator saying delivery is ITS job is not a demand on the agent", () => {
+    // SHOP-47, verbatim in shape: the operator telling the specialist to write
+    // the body into its report BECAUSE the operator is the one who opens the PR.
+    // CANARY: drop the OTHER_SUBJECT_RE check.
+    expect(
+      directiveRequestsDelivery(
+        "Do not write body content (write it into your report; I open the PR).",
+      ),
+    ).toBeNull();
+    expect(directiveRequestsDelivery("Your work lands on the open PR; the server pushes it.")).toBeNull();
   });
 });
 
@@ -2649,7 +2948,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     mkdirSync(path.join(dataRoot, "kb", "release-facts"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "release-facts", "facts.md"),
-      "# Facts\n\nSENTINEL-KB-1",
+      "# Facts SENTINEL-KB-1\n\nbody text",
     );
     const persona = buildSpecialistPersona({
       profileId: "docs-writer",
@@ -2686,7 +2985,7 @@ describe("buildSpecialistPersona — attached resources", () => {
       mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
       writeFileSync(
         path.join(dataRoot, "kb", name, "conventions.md"),
-        `# ${name}\n\n${sentinel}`,
+        `# ${name} ${sentinel}\n\nbody text`,
       );
     }
 
@@ -2702,7 +3001,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(
       persona.split("Which source wins (knowledge bases vs the repository)").length - 1,
     ).toBe(1);
-    // Both bodies arrived, and BOTH sit after the rule that ranks them.
+    // Both indexes arrived, and BOTH sit after the rule that ranks them.
     expect(persona.indexOf("Which source wins")).toBeLessThan(
       persona.indexOf("SENTINEL-KB-HOUSE"),
     );
@@ -2731,10 +3030,10 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("was-renamed-away (knowledge base)");
     expect(persona).not.toContain("Attached resources (trusted");
     // …but the run is told what it did NOT get, and why.
-    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("was-renamed-away");
     expect(persona).toContain("no knowledge-base folder by that name in the store");
-    expect(persona).toContain("do not treat their absence as your own failure");
+    expect(persona).toContain("do not treat the gap as your own failure");
   });
 
   it("a skill that resolves to nothing is NAMED in the prompt too (C1)", () => {
@@ -2744,7 +3043,7 @@ describe("buildSpecialistPersona — attached resources", () => {
       skills: ["typo-expertise"],
       dataRoot,
     });
-    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("typo-expertise");
     expect(persona).toContain("no skill folder by that name in the store");
   });
@@ -2759,7 +3058,7 @@ describe("buildSpecialistPersona — attached resources", () => {
       kb: ["release-facts"],
       dataRoot,
     });
-    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+    expect(persona).not.toContain("Attached resources that did NOT fully reach this run");
   });
 
   /**
@@ -2779,7 +3078,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     mkdirSync(path.join(dataRoot, "kb", "pass31-qa-conventions"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "pass31-qa-conventions", "conventions.md"),
-      "# QA conventions\n\nPASS31-KB-LOADED",
+      "# QA conventions PASS31-KB-LOADED\n\nbody text",
     );
     for (const [name, sentinel] of [
       ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
@@ -2807,32 +3106,30 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
     expect(persona).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
     // An empty grant list is not a MISS either — nothing was promised.
-    expect(persona).not.toContain("Attached resources that did NOT reach this run");
+    expect(persona).not.toContain("Attached resources that did NOT fully reach this run");
   });
 
   /**
-   * T5 (pass 31) — the KB budget is shared across the whole grant list, and the
-   * squeezed-out KB says so IN THE PROMPT. `kb-injection.server.test.ts` proves
-   * `readKbBodies` returns the marker; nothing proved the persona then carries
-   * it, and the persona hardcodes the budget so this is the only layer where a
-   * regression (a fresh budget per KB, or the marker filtered out of the
-   * assembled sections) is visible. The skill twin of this is
-   * "many granted skills share ONE budget instead of N × the cap" above.
+   * Ruling 283 replaced this test's subject. T5 (pass 31) pinned the honest
+   * behaviour of a SHARED character budget: the squeezed-out KB said so in the
+   * prompt. That budget is gone — it had no allocation worth defending, because
+   * the docs inside one KB spent it in alphabetical order — so what this layer
+   * must now prove is that the persona carries INDEXES and that a huge KB costs
+   * the next one nothing. The skill budget above is untouched and still shared.
    */
-  it("T5/F9: KBs share ONE budget — a KB squeezed out by the one before it SAYS so in the prompt", () => {
-    // Canary: pass a fresh `KB_INJECTION_BUDGET` per name inside `readKbBodies`
-    // (drop the running `budget -= injection.body.length`) and SENTINEL-KB-SECOND
-    // arrives while both markers disappear.
+  it("ruling 283: a huge KB is indexed, not injected, and costs the next one nothing", () => {
+    // Canary: swap `readKbIndexes` back for a budgeted body reader in
+    // `buildSpecialistPersona` and SENTINEL-KB-SECOND.md stops being named.
     const dataRoot = tempRoot();
     mkdirSync(path.join(dataRoot, "kb", "big-kb"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "big-kb", "huge.md"),
-      "B".repeat(KB_INJECTION_BUDGET + 6_000),
+      `# Huge\n\n${"B".repeat(30_000)}`,
     );
     mkdirSync(path.join(dataRoot, "kb", "second-kb"), { recursive: true });
     writeFileSync(
-      path.join(dataRoot, "kb", "second-kb", "facts.md"),
-      `SENTINEL-KB-SECOND ${"S".repeat(5_000)}`,
+      path.join(dataRoot, "kb", "second-kb", "SENTINEL-KB-SECOND.md"),
+      "# Second\n\nfacts",
     );
 
     const persona = buildSpecialistPersona({
@@ -2842,16 +3139,15 @@ describe("buildSpecialistPersona — attached resources", () => {
       dataRoot,
     });
 
-    // The first KB spends the shared budget and says it was clipped …
-    expect(persona).toContain("knowledge base truncated");
-    // … the second contributes NO content, only the honest marker …
-    expect(persona).not.toContain("SENTINEL-KB-SECOND");
-    expect(persona).toContain("knowledge base omitted entirely");
-    // … and C1 rides along: what was dropped is named, with the reason.
-    expect(persona).toContain("**second-kb**");
-    expect(persona).toContain("did not fit the shared");
-    // One budget was spent, not two.
-    expect(persona.length).toBeLessThan(KB_INJECTION_BUDGET * 2);
+    // Both KBs are named in full, and neither is reported as having lost text.
+    expect(persona).toContain("`huge.md`");
+    expect(persona).toContain("SENTINEL-KB-SECOND.md");
+    expect(persona).not.toContain("**second-kb**");
+    // The 30,000-char document itself is not in the prompt — that is the point
+    // of an index, and it is why there is nothing left to ration.
+    expect(persona).not.toContain("B".repeat(200));
+    // …and the run is told how to turn a name into the text.
+    expect(persona).toContain("read_knowledge_doc");
   });
 
   /**
@@ -3207,7 +3503,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
 
   it("a reviewer with kb:[] resolves the delivering engagement's KB bodies", async () => {
     deployKbPair(["foo"], []);
-    writeKb("foo", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+    writeKb("foo", "# Conventions SENTINEL-DELIVERER-KB\n\nbody text");
     const sys = await engageAndRunCritic();
     expect(sys).toContain("foo (knowledge base)");
     expect(sys).toContain("SENTINEL-DELIVERER-KB");
@@ -3261,7 +3557,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
       path.join(store.dataRoot, "skills", "deliverer-craft", "SKILL.md"),
       "# Craft\n\nSENTINEL-DELIVERER-SKILL",
     );
-    writeKb("shared-kb", "# Conventions\n\nSENTINEL-DELIVERER-KB");
+    writeKb("shared-kb", "# Conventions SENTINEL-DELIVERER-KB\n\nbody text");
 
     const sys = await engageAndRunCritic();
 
@@ -3283,7 +3579,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildSpecialistPersona and
     // the first two assertions fail.
     deployKbPair(["house"], []);
-    writeKb("house", "# House style\n\nSENTINEL-DELIVERER-KB");
+    writeKb("house", "# House style SENTINEL-DELIVERER-KB\n\nbody text");
     const sys = await engageAndRunCritic();
     expect(sys).toContain("Which source wins (knowledge bases vs the repository)");
     expect(sys).toContain("outrank the knowledge bases");
@@ -3619,7 +3915,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(existsSync(attachments)).toBe(true);
     // The persona carries the same drop section the fresh run gets, and
     // (ruling 159) it names the ABSOLUTE dir, never the store-relative form.
-    expect(confinement.systemPrompt ?? "").toContain("Posting files on the task thread");
+    expect(confinement.systemPrompt ?? "").toContain("Files on the task thread");
     expect(confinement.systemPrompt ?? "").toContain(`\`${attachments}\``);
     expect(confinement.systemPrompt ?? "").not.toContain(
       `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
@@ -3968,7 +4264,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       mkdirSync(path.join(store.dataRoot, "kb", "house-kb"), { recursive: true });
       writeFileSync(
         path.join(store.dataRoot, "kb", "house-kb", "conventions.md"),
-        "# House\n\nSENTINEL-DELIVERER-KB",
+        "# House SENTINEL-DELIVERER-KB\n\nbody text",
       );
 
       await assignSpecialist(store.db,
@@ -4008,7 +4304,16 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
       expect(existsSync(path.join(criticWs, ".claude"))).toBe(false);
       expect(existsSync(path.join(path.dirname(ws), ".viberr-plugins"))).toBe(false);
-      const assembled = JSON.stringify(spec);
+      // The MCP servers are replaced by their NAMES before serialising: since
+      // ruling 283 this reviewer mounts a `viberr_agent` server (its inherited
+      // KB grant needs `read_knowledge_doc`) and an SDK server instance holds a
+      // reference back to itself, which `JSON.stringify` cannot walk. The names
+      // are what this assertion is about anyway — a skill leaking through a
+      // mounted server would leak through its NAME.
+      const assembled = JSON.stringify({
+        ...spec,
+        mcpServers: Object.keys(spec.mcpServers ?? {}),
+      });
       expect(assembled).not.toContain("deliverer-craft");
       expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
     });
@@ -4074,6 +4379,73 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // delivering tree, so delivery's `git add -A` can never sweep it into the PR.
       writeFileSync(path.join(criticWs, "reviewer-scratch.txt"), "leaked?");
       expect(existsSync(path.join(ws, "reviewer-scratch.txt"))).toBe(false);
+    });
+
+    /**
+     * Rulings 248 + 249 (pass 37, F37-77 / F37-78), both live on SHOP-5 in one
+     * evening.
+     *
+     * The supporting checkout is cloned from the delivering one ON DISK, and
+     * the project token is fetched only in the arm after it — so when that
+     * local clone failed, viberr told the reviewer and the operator "No GitHub
+     * credential is attached to this project, so the clone ran anonymously"
+     * about a project holding a working credential. The operator believed it
+     * and wrote it onto the task.
+     *
+     * And the run was marked as having no working tree, which is what closes
+     * its verdict path: without that fact on the row, the reviewer's honest
+     * report ("No content verdict recorded") was re-classified into a blocking
+     * `request_changes` by the prose fallback.
+     */
+    it("rulings 248/249: a failed LOCAL support clone marks the run checkout-less and blames no credential", async () => {
+      const ws = await workspaceCheckout();
+      // The delivering checkout is THERE (so the local arm is the one taken)
+      // and unusable, so `git clone --local` fails the way it did live.
+      rmSync(path.join(ws, ".git"), { recursive: true, force: true });
+      writeFileSync(path.join(ws, ".git"), "not a git directory\n");
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actor(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actor(store.users.arda));
+
+      const prompt = lastRunSpec()?.prompt ?? "";
+      // The run really did lose its checkout.
+      expect(prompt).toContain("The workspace has NO checkout");
+      // Ruling 249 CANARY: move `credential = "not_involved"` out of the local
+      // arm and this reads "No GitHub credential is attached to this project",
+      // which is what sent the operator to re-provision a working one.
+      expect(prompt).not.toContain("No GitHub credential is attached");
+      expect(prompt).not.toContain("ran anonymously");
+      expect(prompt).toContain("never reached GitHub");
+
+      // Ruling 248 CANARY: drop `noCheckout: !!cloneFailure` from the
+      // completion contract and this is 0 — the verdict path stays open for a
+      // run that read nothing.
+      const { getRun } = await import("~/server/runtimes/run-store.server");
+      expect(getRun(store.db, run.runId)!.no_checkout).toBe(1);
     });
 
     it("refuses a second run of the SAME supporting engagement while one is in flight (its isolated dir is re-cloned fresh)", async () => {
@@ -4306,7 +4678,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
  * — which knowledge bases it carried, which granted skills actually mounted,
  * which MCP grants resolved to nothing, what canonical state it re-anchored on
  * — could not be checked by the human the disclosures exist for. The
- * "Attached resources that did NOT reach this run" honesty in particular
+ * "Attached resources that did NOT fully reach this run" honesty in particular
  * reached the AGENT only: a human learned about a KB grant that resolved to
  * nothing solely if the agent chose to repeat it.
  */
@@ -4434,7 +4806,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputs!.knowledge).toEqual(["house-style"]);
     expect(inputs!.unresolvedResources.map((r) => r.name)).toContain("house-style");
     // The persona still tells the agent too — both audiences, one resolution.
-    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT reach this run");
+    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT fully reach this run");
   });
 
   it("ruling 176: a read-only agent's run withholds the org server's marked write tools, on the spec, the prompt and the record", async () => {
@@ -4524,9 +4896,14 @@ describe("P19-G11 — the run records what it was given", () => {
     // it. So both paths build this record through `resolvedResourceInputs`,
     // from their own resolution.
     //
-    // The caller (task-actions' @mention resume) owns the remaining three
-    // fields and hands the whole thing to `recordRunInputs`; TypeScript makes
-    // that omission explicit rather than lettings a placeholder ship.
+    // The caller (task-actions' @mention resume) owns the remaining four
+    // fields and hands the whole thing to `recordRunInputs`.
+    //
+    // Ruling 343: for two days it did not, and THIS test is why that lasted —
+    // it asserted the record was BUILT and nothing asserted it was WRITTEN, so
+    // `runInputs` had no reader anywhere in the app and eleven resumed runs
+    // disclosed nothing. The canary for the write lives where the write is, in
+    // `canonical-anchor.server.test.ts`, which drives the real @mention door.
     //
     // Canary: drop `runInputs` from the returned object and this fails to
     // compile, then fails here.
@@ -5049,7 +5426,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     // `checkout --detach` and the first HEAD assertion fails — which is the
     // live state: the reviewer read the delivering tree while its contract
     // named another sha.
-    const moved = await pinSupportCheckout(dir, first);
+    const moved = await pinSupportCheckout(dir, { sha: first, rePinned: null });
     expect(await head()).toBe(first);
     expect(moved).toContain(`detached at the revision under review \`${first.slice(0, 7)}\``);
     expect(moved).toContain(`the delivering tree stood at \`${second.slice(0, 7)}\``);
@@ -5059,7 +5436,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     ).rejects.toBeTruthy();
     expect(existsSync(path.join(dir, "B.md"))).toBe(false);
 
-    const already = await pinSupportCheckout(dir, first);
+    const already = await pinSupportCheckout(dir, { sha: first, rePinned: null });
     expect(already).toBe(`checked out at the revision under review \`${first.slice(0, 7)}\``);
     expect(await head()).toBe(first);
 
@@ -5068,26 +5445,170 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     expect(await head()).toBe(first);
   });
 
+  it("ruling 238: a base-refreshed subject is checked out AND the sentence says which revision the verdict binds to", async () => {
+    // The reviewer is standing on a different commit from the one its verdict
+    // will be recorded against. A sentence that still said "the revision under
+    // review `<sha>`" would name a tree it never read.
+    // CANARY: pass `subject.sha` and drop the `rePinned` clause, and the
+    // disclosure reads exactly like an ordinary pin while the tree is someone
+    // else's base.
+    const said = await pinSupportCheckout(dir, {
+      sha: second,
+      rePinned: { reviewedSha: first, baseRefresh: { merges: 1, commits: 20 } },
+    });
+    expect(await head()).toBe(second);
+    expect(said).toContain(`the reviewed revision \`${first.slice(0, 7)}\` on its refreshed base`);
+    expect(said).toContain(`at \`${second.slice(0, 7)}\``);
+    expect(said).toContain("1 merge commit, 20 base commits");
+    expect(said).toContain("no authored work since the review");
+    // The base refresh brought a file the reviewed revision did not have; the
+    // point of the re-pin is that the reviewer can now see it.
+    expect(existsSync(path.join(dir, "B.md"))).toBe(true);
+  });
+
   it("a revision the clone does not carry is DISCLOSED, never thrown, and HEAD is left as it stands", async () => {
     // Canary: drop the `cat-file -e` probe and the call throws instead — a
     // reviewer that cannot be pinned must still run and say so.
     const missing = "b".repeat(40);
-    const said = await pinSupportCheckout(dir, missing);
+    const said = await pinSupportCheckout(dir, { sha: missing, rePinned: null });
     expect(said).toContain(`the revision under review \`${missing.slice(0, 7)}\` is not in this checkout`);
     expect(said).toContain("HEAD was left as it is");
     expect(await head()).toBe(second);
   });
 
   it("the supporting dispatch passes the task's ACTIVE work revision, and the delivering one passes none", () => {
-    // Canary: delete the `pinRevision` argument at the dispatch call site and
+    // Canary: delete the `pinSubject` argument at the dispatch call site and
     // the helper goes back to having no production caller — the state this
     // pass found live.
     const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(source).toContain("pinRevision: support");
+    expect(source).toContain("pinSubject: support");
     expect(source).toContain("activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha");
-    expect(source).toContain("await pinSupportCheckout(dir, input.pinRevision ?? null)");
+    expect(source).toContain("await pinSupportCheckout(dir, input.pinSubject ?? null)");
     // ...and the disclosure rides the same `refreshed` field the run contract
     // already renders ("Before this run Viberr ...").
     expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");
+  });
+});
+
+/**
+ * Ruling 186 (pass 37, F37-2). The hold was enforced by ASKING the model: three
+ * operator triggers were refused and a prompt paragraph told every reactive
+ * turn not to "dispatch delivery work", while `startAgentRun` checked nothing.
+ * Live, SHOP-2 was marked "Held until every entry is done; Viberr releases it
+ * then" and a Codex run started 1.9 seconds later, designed and committed a
+ * whole service, and pushed a branch cut from a base predating its dependency.
+ */
+describe("ruling 186: a held task refuses every agent dispatch", () => {
+  /** Make VIB-1 wait on a second task that is nowhere near done. */
+  async function hold(entries: string[] = ["VIB-2"]): Promise<void> {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        title: "The work VIB-1 waits on",
+      }),
+      goal: "Unfinished, so the wait stands.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { setTaskDependencies } = await import("./dependencies.server");
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: entries },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+  }
+
+  it("refuses the dispatch, and starts no process", async () => {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await hold();
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // The whole point: no billable run, no workspace, no commit that outlives it.
+    expect(startedRunSpecs()).toHaveLength(0);
+  });
+
+  it("names what it waits on, so the refusal is actionable", async () => {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await hold();
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("VIB-2"),
+    });
+  });
+
+  it("refuses an AUTO-ENGAGING dispatch too — the hold is not a posture question", async () => {
+    // No prior engagement: this is the dispatch that would create one. A gate
+    // placed after the auto-engage would leave a seat on a held task.
+    await hold();
+
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(startedRunSpecs()).toHaveLength(0);
+    const fm = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.engagements).toHaveLength(0);
+  });
+
+  it("dispatches again once the wait is cleared", async () => {
+    await assignSpecialist(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await hold();
+    // Clearing the list is the release; the gate must read the LIVE file.
+    const { setTaskDependencies } = await import("./dependencies.server");
+    await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: [] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    queueFakeRun({ lines: [], backend: "claude" });
+    const runId = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(runId).toBeTruthy();
   });
 });

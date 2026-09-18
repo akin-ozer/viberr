@@ -148,6 +148,19 @@ requiredReviewers:                # ruling 178: reviewers the project REQUIRES p
                                   # controller's set_required_reviewers; read on Policy.
   - stageId: review
     profileId: reviewer
+fileLeases:                       # ruling 245: which TASK owns which shared paths
+                                  # until it merges — the ordering statement
+                                  # `blockedBy` cannot make (`blockedBy` says "do not
+                                  # START until done"). Enforced at DELIVERY: another
+                                  # task whose push changes a leased path is refused
+                                  # before anything reaches GitHub, and every run's
+                                  # canonical anchor names what it may not touch.
+                                  # Globs: `*` within one segment, `**` spans segments
+                                  # and covers the directory itself. `[]` is the default.
+                                  # Set by set_file_leases (edit-policy).
+  - paths: ["pnpm-lock.yaml"]
+    taskKey: SHOP-11
+    reason: regenerating it for the cart importer
 ---
 
 Project description prose (markdown body).
@@ -201,6 +214,10 @@ readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
                                   # ready | input_required |
                                   # inconsistency_risk_detected | blocked
 waiting: human                    # human | agent | none (secondary signal)
+                                  # ruling 225: the PROJECTION also derives a
+                                  # fourth value, `schedule`, for a task resting
+                                  # on a pending occurrence with nothing pending
+                                  # on a person. Never written to a task file.
 ownerUserId: u_abc123             # ONE human owner; null when unowned
 engagements:                      # ONE uniform list of engaged agents (G1),
   - profileId: developer          # written by the DISPATCH since ruling 98 —
@@ -222,6 +239,14 @@ recommendations: []               # pending operator recommendation cards; an
 schedules: []                     # pending/fired scheduled runs (O-3, ruling 98:
                                   # run-operator | run-agent; the agent arm pins
                                   # profileId + prompt, nothing else)
+queuedQuestions: []               # ruling 241: reviewer questions a dependency
+                                  # hold refused (ruling 186 refuses every agent
+                                  # dispatch while `blockedBy` is non-empty).
+                                  # Each entry pins profileId + the directive
+                                  # text + who decided; `announceRelease` drains
+                                  # the list before it re-invokes the operator,
+                                  # emptying it first so no reviewer is asked
+                                  # the same question twice.
 urgent: true                      # optional; absent ≡ false
 validation: changed               # healthy | changed | failing | none | bypassed
                                   # (`bypassed` = a human force-accepted past the
@@ -327,6 +352,13 @@ blockedBy:                        # ruling 131: what this task WAITS ON, in exac
                                   # reserved taskPrefix: `GOAL-1` would read as
                                   # a goal reference missing its link
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
+headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
+  prNumber: 114                   # containment check GitHub refused to run. Pinned to all
+  revisionHeadSha: a1b2c3d…       # three: the gate re-reads the LIVE head and honours it only
+  liveHeadSha: f9e8d7c…           # while the triple still matches, so it cannot outlive the
+  at: 2026-09-14T02:40:00.000Z    # head it was granted for and become a standing permission.
+  byUserId: u_abc123
+  byLabel: Arda
 goalRef: null                     # ruling 99: { goalId, linkIndex } for a chained-goal task
 createdAt: 2026-07-03T06:00:00.000Z
 updatedAt: 2026-07-04T06:58:00.000Z
@@ -351,8 +383,11 @@ F35-14 added `force_accept` (the admin override, run through the same path as th
 page's Force accept button) and `move_stage` (a manual board move to the option's own
 `toStage`, run through the stage picker's path), because an option title is a promise the
 resolution keeps and both acts were being written as `custom` and `redirect` titles that
-performed nothing. Thirteen is the count today — re-derive it from the schema rather than
-from here.)*
+performed nothing. Updated 2026-09-13, pass 37 — F37-44 added `wait_for_window`: a spent
+usage window the provider dated has a remedy that is neither a permanent model change nor a
+human asserting the window reopened three hours early, and viberr already had the schedule
+runner for it. Fourteen is the count today — re-derive it from the schema rather than from
+here.)*
 
 *(Corrected 2026-08-31, pass 31 — A3. The option sample below carried an `accept: true` field
 annotated "acceptance path marker — human-only". `packetOptionSchema` has no such field:
@@ -365,7 +400,10 @@ an `edit_goal` option, since pass 35 (ruling 163) `rework` on a `redirect` optio
 branch-conflict packet sets it when the task stands past the stage where its reviewers can
 run, and `resolvePacket` then returns the task to that stage in the same write), and since
 pass 35 (ruling 164) `toStage` on a `move_stage` option: the stage id the resolution moves
-the task to, required on that kind and refused on every other.)*
+the task to, required on that kind and refused on every other, and since pass 37 (ruling 224)
+`dueAt` on a `wait_for_window` option: the instant the provider said its window reopens, which
+the resolution turns into a scheduled operator run — required on that kind and refused on
+every other.)*
 
 ```yaml
 type: input                       # input | blocked (card tint)
@@ -378,13 +416,16 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 13 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 18 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
                                   #   edit_goal | archive_task | discard_branch |
                                   #   resolve_remote_collision | force_accept |
-                                  #   move_stage | custom
+                                  #   move_stage | wait_for_window |
+                                  #   accept_unverified_head |
+                                  #   block_on_dependencies |
+                                  #   question_reviewer | create_task | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
@@ -488,9 +529,13 @@ Notes:
 ### Timeline entry grammar (append contract for agents)
 
 - Entries are NEWEST FIRST. To append an event, prepend a block directly
-  under `## Timeline` (writers do this; external appenders that append at
-  the bottom are tolerated — display sorts by timestamp and an
-  `timeline.out_of_order` info diagnostic is recorded).
+  under `## Timeline`. Appending at the BOTTOM is parsed without error, but
+  nothing repairs it: every reader is file order (`listTaskEvents` is
+  `ORDER BY position ASC`, and the task page slices the first N off the
+  front), so a bottom-appended entry renders as the OLDEST thing on the task
+  and falls outside the initial slice. A `timeline.out_of_order` info
+  diagnostic is recorded when it happens; that diagnostic reports the damage,
+  it does not undo it.
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
   `<space>·<space>` (U+00B7). `type` is one of the 11 contract types
   (`comment completion github policy note quality transition blocked agent

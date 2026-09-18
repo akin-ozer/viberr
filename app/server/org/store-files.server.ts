@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { StoreNode } from "~/features/kb-browser/tree";
@@ -430,6 +431,22 @@ export interface StoreDocResult {
  *  editor cannot round-trip safely is refused by TYPE rather than reported as
  *  missing (P14-KM-08 — this reader had no production caller at all until the
  *  editor could open existing files). */
+/**
+ * Ruling 305: the version of a store document, for an optimistic write.
+ *
+ * Hashed from the FILE, not from `readStoreDoc`'s text, because that reader
+ * caps at 256 KB and a version computed from a truncated read would say two
+ * different documents were the same one.
+ */
+export function storeDocVersion(target: StoreTarget, nodePath: string[]): string | null {
+  const parts = sanitizeDirPath(nodePath);
+  if (parts.length === 0) return null;
+  const abs = path.join(target.rootAbs, ...parts);
+  assertInsideRoot(target.rootAbs, abs);
+  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
+  return createHash("sha256").update(readFileSync(abs)).digest("hex").slice(0, 12);
+}
+
 export function readStoreDoc(
   target: StoreTarget,
   nodePath: string[],
@@ -439,12 +456,20 @@ export function readStoreDoc(
   if (parts.length === 0) return null;
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
+  // Ruling 246 (F37-75): EXISTENCE before TYPE. The other order answers a path
+  // this store has never held with a complaint about its file extension, which
+  // names a cause that is not the reason and invites the caller to rename the
+  // thing and try again. Live, the controller asked for `make/stack.mk` — a
+  // file in the git repository, which this reader has no view of at all — and
+  // was told Viberr "only opens text documents"; it dutifully retried as `.md`
+  // and was then told the file "no longer exists", which implies it once did.
+  // Two refusals, two wrong causes, and the real limit stated by neither.
+  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
   if (!STORE_TEXT_EXTENSIONS.has(path.extname(abs).toLowerCase())) {
     throw AppError.validation(
       `Viberr only opens text documents (${STORE_TEXT_EXTENSION_LIST.join(", ")}).`,
     );
   }
-  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
   const size = statSync(abs).size;
   const text = readFileSync(abs, "utf8").slice(0, maxBytes);
   return { text, truncated: size > maxBytes };

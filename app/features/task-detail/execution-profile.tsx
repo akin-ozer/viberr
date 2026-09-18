@@ -5,7 +5,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
-import type { DependencyRender } from "~/shared/dependencies";
+import { holdRefusal, type DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -397,6 +397,7 @@ function OperatorRunControl({
   holdNote,
   defaultBackend,
   configuredAutonomy,
+  acceptsDirectly = false,
   runRefusal,
   schedules,
   scheduleBusy,
@@ -421,6 +422,10 @@ function OperatorRunControl({
   /** R19-A: the project's configured operator autonomy — what this run WILL
    *  use. Full announces itself below; supervised is the quiet default. */
   configuredAutonomy: "supervised" | "full";
+  /** F37-65: whether `completion-for-acceptance` really resolves to `direct`.
+   *  `gate()` holds it at `recommend` whatever the autonomy unless the grant
+   *  says direct (owner ruling Q1), so autonomy alone cannot answer it. */
+  acceptsDirectly?: boolean;
   /** P11-41, now per-person (ruling 127): why a run on the operator's backend
    *  would refuse, or null when it would start. An operator drive bills the
    *  task OWNER, so this sentence names them; it disables Run and renders,
@@ -500,11 +505,19 @@ function OperatorRunControl({
       )}
       {configuredAutonomy === "full" && !disabled && (
         // F20-9's mirror, kept: full autonomy is the state that lets this run
-        // transition stages and accept completion itself — it must be visible
-        // on the surface that launches it. Supervised needs no caption.
+        // transition stages — it must be visible on the surface that launches
+        // it. Supervised needs no caption.
+        //
+        // F37-65: but it does NOT by itself let the run accept completion.
+        // `gate()` holds `completion-for-acceptance` at `recommend` whatever
+        // the autonomy unless the grant is explicitly `direct` (owner ruling
+        // Q1). This caption claimed otherwise on every task of a board whose
+        // operator is `full` + `recommend`, while every acceptance on it was a
+        // person pressing the button.
         <span className="sub xs dim">
-          Full autonomy: this run can move the task and accept completion
-          itself.
+          {acceptsDirectly
+            ? "Full autonomy: this run can move the task and accept completion itself."
+            : "Full autonomy: this run can move the task. Accepting completion still needs a person, because the operator's acceptance grant is not direct."}
         </span>
       )}
       {/* P14 ruling: a `title` is unreachable on a DISABLED control, so the
@@ -542,6 +555,8 @@ function OperatorRunControl({
  */
 function AgentRunControl({
   agents,
+  taskKey,
+  blockedBy,
   stage,
   stages,
   workflow,
@@ -558,6 +573,11 @@ function AgentRunControl({
   onCancelSchedule,
 }: {
   agents: DeployedSpecialistView[];
+  /** Ruling 186 (pass 37): the task key and what it waits on, so a dispatch
+   *  onto a HELD task is refused before the click with the server's own
+   *  sentence — `holdRefusal` is shared and client-safe for exactly this. */
+  taskKey: string;
+  blockedBy: readonly DependencyRender[];
   /** U36-10 (pass 36): the task's stage and the board it sits on, so a
    *  stage-ineligible pick is refused BEFORE the click with the server's
    *  own sentence (ruling 133), and never promises a delivering posture. */
@@ -663,14 +683,30 @@ function AgentRunControl({
             .join(", "),
         )
       : null;
+  // Ruling 186 (pass 37, F37-2): a held task refuses EVERY dispatch server-side,
+  // so the control says so before the click. Unlike the per-pick refusals this
+  // one does not depend on which agent is chosen — the hold is a fact about the
+  // task — so it stands even with nothing picked.
+  const held =
+    blockedBy.length > 0
+      ? holdRefusal(
+          taskKey,
+          blockedBy.map((e) => e.label),
+          "running an agent on it",
+        )
+      : null;
   const runRefusal = selected
-    ? (ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
-    : null;
+    ? (held ?? ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
+    : held;
   // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
   // live run on this very profile, or the owner-credential refusal (ruling 127),
   // each of which renders its own reason. An empty pick is validation, so it is
   // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
   // are both false with nothing picked, so this collapses to `busy` there.
+  // `held` rides `runRefusal`, which only bites for a run NOW: a hold can clear
+  // on its own (Viberr releases it when the entries finish), so a SCHEDULED run
+  // stays offerable exactly as it does for an unconnected backend. If the hold
+  // still stands when it fires, `startAgentRun` refuses it there.
   const off = busy || selectedRunning || (delay === "now" && !!runRefusal) || !!ineligible;
   const pickRefused = refused > 0 && !selected;
   const run = () => {
@@ -932,6 +968,7 @@ export function ExecutionProfile({
   workflow,
   operatorBackend,
   operatorAutonomy,
+  acceptsDirectly = false,
   runPrincipal,
   canRunAgents,
   liveAgentRuns,
@@ -960,6 +997,9 @@ export function ExecutionProfile({
   operatorBackend: "claude" | "codex";
   /** R19-A: the project's configured operator autonomy (the run ceiling). */
   operatorAutonomy: "supervised" | "full";
+  /** F37-65: threaded down to the caption, which must not infer acceptance
+   *  authority from autonomy alone. */
+  acceptsDirectly?: boolean;
   /** Ruling 127: whose accounts this task's runs bill, and what those accounts
    *  can run. `null` = no owner (or a seat pointing at a disabled/deleted
    *  account), so nothing can run here at all. P11-41's fail-fast honesty, now
@@ -1068,6 +1108,7 @@ export function ExecutionProfile({
                   : {})}
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}
+                acceptsDirectly={acceptsDirectly}
                 runRefusal={backendRunRefusal(
                   runPrincipal,
                   operatorBackend,
@@ -1087,6 +1128,8 @@ export function ExecutionProfile({
             {canRunAgents ? (
               <AgentRunControl
                 agents={deployedSpecialists}
+                taskKey={task.key}
+                blockedBy={task.blockedBy}
                 stage={task.stage}
                 stages={stages}
                 workflow={workflow}

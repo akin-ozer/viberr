@@ -157,7 +157,7 @@ describe("buildSpecialistPersona", () => {
     // a declared resource did not arrive, so the agent reports the gap instead
     // of treating the missing context as its own failure.
     expect(persona).not.toContain("Attached resources (trusted");
-    expect(persona).toContain("Attached resources that did NOT reach this run");
+    expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("also-nonexistent");
   });
 });

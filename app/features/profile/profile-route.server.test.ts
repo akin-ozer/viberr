@@ -461,11 +461,91 @@ describe("/profile agent accounts (ruling 127)", () => {
     }
   });
 
+  /**
+   * Ruling 294 (pass 37, F37-129): the usage reading on this card is the
+   * VIEWER's own or it is absent.
+   *
+   * The store keeps ONE reading per backend for the whole instance, stamped
+   * with whichever run reported it. /insights renders that unscoped on purpose
+   * and is org-admin gated (`requireRole(request, "admin")`); this card is the
+   * first NON-admin surface to carry a utilization figure at all, so an
+   * unscoped field here would not duplicate an existing disclosure, it would
+   * put one member's account consumption in front of every member under their
+   * own name. Ruling 146(a) settled the principle in the owner's words: the
+   * readings belong "per person on Insights ... and on Profile".
+   */
+  it("ruling 294: a reading billed to somebody else never reaches this card", async () => {
+    const quota = await import("~/server/runtimes/backend-quota.server");
+    quota.recordBackendRateLimit(app.db, "claude", {
+      credentialUserId: murId,
+      credentialLabel: "Murat",
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      utilization: 0.91,
+      resetsAt: Math.floor((Date.now() + 60 * 60_000) / 1000),
+      isUsingOverage: false,
+      observedAt: new Date().toISOString(),
+    });
+    try {
+      // CANARY: drop the `credentialUserId !== userId` guard in `ownReading`
+      // and Arda's card reports Murat's 91% as Arda's own.
+      const arda = await backendsOf(ardaId);
+      expect(arda.map((b) => b.usage ?? null)).toEqual([null, null]);
+    } finally {
+      quota.retireBackendRecordsFor(app.db, "claude", murId);
+    }
+  });
+
+  it("ruling 294: a reading older than the connection describes the account it replaced", async () => {
+    // The second gate, and the moment it matters: the panel revalidates the
+    // loader the instant a sign-in SUCCEEDS, which is exactly when a surviving
+    // reading from the account just replaced would be re-rendered as the new
+    // one's. The principal check cannot catch it, because the same person owns
+    // both accounts. CANARY: drop the `connectedAt` comparison in `ownReading`.
+    const quota = await import("~/server/runtimes/backend-quota.server");
+    const { recordBackendLogin } = await import(
+      "~/server/runtimes/backend-credentials.server"
+    );
+    // ORDER MATTERS, and it is the whole reason this test exists separately
+    // from the retirement one. Connecting FIRST means `retireBackendRecordsFor`
+    // has already run and has nothing to delete, so the reading recorded after
+    // it survives in the store and only the `connectedAt` comparison can
+    // suppress it. Recording the reading first would be deleted by the connect
+    // and the test would pass with the gate removed.
+    recordBackendLogin(
+      app.db,
+      { userId: ardaId, label: "arda@viberr.dev" },
+      "claude",
+      "claudeai",
+      { email: "the-new-account@example.com" },
+    );
+    quota.recordBackendRateLimit(app.db, "claude", {
+      credentialUserId: ardaId,
+      credentialLabel: "Arda Test",
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      utilization: 0.95,
+      resetsAt: Math.floor((Date.now() + 60 * 60_000) / 1000),
+      isUsingOverage: false,
+      // Observed an hour BEFORE the connection above: this figure is about the
+      // account that one replaced.
+      observedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+    });
+    try {
+      const arda = await backendsOf(ardaId);
+      const claude = arda.find((b) => b.backend === "claude")!;
+      expect(claude.usage ?? null).toBeNull();
+    } finally {
+      quota.retireBackendRecordsFor(app.db, "claude", ardaId);
+      await reset();
+    }
+  });
+
   it("ruling 165: the viewer's own notice is gone once they connect a different account on that backend", async () => {
     // Live (2026-09-07): "usage window spent · reopens 21:30" stayed on the
     // Claude card after the owner signed it into another account, while the
     // runs on the new account went through. Canary: drop the
-    // `retireBackendRefusalsFor` call from `recordBackendLogin`.
+    // `retireBackendRecordsFor` call from `recordBackendLogin`.
     const quota = await import("~/server/runtimes/backend-quota.server");
     const { recordBackendLogin } = await import(
       "~/server/runtimes/backend-credentials.server"

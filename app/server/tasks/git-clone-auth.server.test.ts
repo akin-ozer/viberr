@@ -198,7 +198,7 @@ describe("clone timeout + failure sentence", () => {
     // Canary: return a generic "clone failed" string for every reason.
     const sentence = cloneFailureSentence(
       { reason: "clone_terminated", signal: "SIGTERM" },
-      { hadCredential: true, timeoutMs: 900_000 },
+      { credential: "supplied", timeoutMs: 900_000 },
     );
     expect(sentence).toContain("900s");
     expect(sentence).toContain("ran past its time limit");
@@ -208,16 +208,48 @@ describe("clone timeout + failure sentence", () => {
   it("says the opposite when the clone really did run anonymously", () => {
     const sentence = cloneFailureSentence(
       { reason: "clone_failed", exitCode: 128 },
-      { hadCredential: false },
+      { credential: "absent" },
     );
     expect(sentence).toContain("No GitHub credential is attached");
     expect(sentence).toContain("git exit 128");
     expect(sentence).not.toContain("not a missing-credential problem");
   });
 
+  /**
+   * Ruling 249 (pass 37, F37-78): two values were not enough.
+   *
+   * The specialist checkout has an arm that never touches the network — a
+   * SUPPORTING run is cloned from the delivering checkout already on disk — and
+   * the project token is fetched only in the arm AFTER it. So a failure in the
+   * local arm reported `hadCredential: false` and this sentence announced "No
+   * GitHub credential is attached to this project" about a project holding a
+   * working one. Live on SHOP-5 the operator believed it and wrote "anonymous
+   * clone, no GitHub credential attached to this project" onto the task, while
+   * `project_github_credentials` held `pat_esbY7-6IenWI` and the health row read
+   * `connected`.
+   *
+   * The whole purpose of this sentence, in its own doc comment, is to stop a
+   * failure being re-narrated as something it was not "by asking for a
+   * credential that already exists".
+   *
+   * CANARY: collapse `not_involved` back into the `absent` arm and the first
+   * two assertions fail — the sentence claims a missing credential for a step
+   * that never reached GitHub.
+   */
+  it("ruling 249: a local checkout failure claims nothing about a credential", () => {
+    const sentence = cloneFailureSentence(
+      { reason: "clone_failed", exitCode: 128 },
+      { credential: "not_involved" },
+    );
+    expect(sentence).not.toContain("No GitHub credential is attached");
+    expect(sentence).not.toContain("ran anonymously");
+    expect(sentence).toContain("never reached GitHub");
+    expect(sentence).toContain("git exit 128");
+  });
+
   it("names a missing git binary as the server's problem, not the repo's", () => {
     expect(
-      cloneFailureSentence({ reason: "git_unavailable" }, { hadCredential: true }),
+      cloneFailureSentence({ reason: "git_unavailable" }, { credential: "supplied" }),
     ).toContain("git is not installed on the Viberr server");
   });
 
@@ -228,7 +260,7 @@ describe("clone timeout + failure sentence", () => {
       { token },
     );
     expect(
-      cloneFailureSentence(details, { hadCredential: true }),
+      cloneFailureSentence(details, { credential: "supplied" }),
     ).not.toContain(token);
     // F19-6: the detail rides its OWN field. The sentence stays one plain
     // sentence because the agent prompt tells the agent to quote it verbatim —
@@ -237,7 +269,7 @@ describe("clone timeout + failure sentence", () => {
     // Canary: append details.detail into cloneFailureSentence → this fails.
     expect(details.detail).toBeTruthy();
     expect(
-      cloneFailureSentence(details, { hadCredential: true }),
+      cloneFailureSentence(details, { credential: "supplied" }),
     ).not.toContain(details.detail!);
   });
 });

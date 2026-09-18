@@ -488,7 +488,7 @@ export function clearBackendCredentialRefusal(
  * Best-effort, like every writer here: a credential change must never fail on
  * observation housekeeping.
  */
-export function retireBackendRefusalsFor(
+export function retireBackendRecordsFor(
   db: DatabaseSync,
   backend: QuotaBackend,
   credentialUserId: string,
@@ -505,6 +505,29 @@ export function retireBackendRefusalsFor(
     );
     if (refused?.credentialUserId === credentialUserId) {
       deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
+    }
+    // Ruling 294 (F37-129): the UTILIZATION READING goes with the account too,
+    // and it did not. Ruling 165's own sentence is "the refusal Viberr observed
+    // on the slot goes with it" — and a reading is an observation ABOUT that
+    // slot in exactly the same way. It was applied to two of the three records
+    // this module keeps and not the third, which is this pass's shape a fourth
+    // time.
+    //
+    // What that cost, live and visible while this was written: the owner
+    // connected a Claude account with a fresh window, and /insights went on
+    // reading "claude · 95% of seven day · resets Sep 17" — a number about an
+    // account no longer connected, on the surface a person checks precisely to
+    // decide whether there is room to run. The refusal beside it retired
+    // correctly; only the percentage lied.
+    //
+    // A reading is never "stale but roughly right" after a credential change:
+    // a new account's window has no relationship to the old one's. There is
+    // nothing to degrade to, so it is deleted rather than aged — the card and
+    // the panel both read an ABSENT reading as "nothing observed yet", which is
+    // the truth until the first run on the new account reports one.
+    const reading = getSetting(db, `${KEY_PREFIX}${backend}`, readingSchema);
+    if (reading?.credentialUserId === credentialUserId) {
+      deleteSetting(db, `${KEY_PREFIX}${backend}`);
     }
   } catch (error) {
     logger.warn("backend refusal records not retired on credential change", {

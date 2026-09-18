@@ -243,8 +243,20 @@ export function codexRepoWriteAdvisory(
   // P13-AP-06 parity: a deployment with NO grants runs FULLY withheld
   // (`deploymentGrants` → `withheldAgentGrants()`), which is still withheld —
   // and still advisory on Codex, for the same reason.
-  const modeById = specialistGrantModes(grants);
-  return isWithheld(modeById, "execute-code-or-write-repo");
+  return deliveryWithheld(grants);
+}
+
+/**
+ * Ruling 264 (pass 37, F37-94): can this set of grants write the repo at all?
+ *
+ * The one derivation, so a SENTENCE about a deployment cannot drift from the
+ * gate the run is held to. `deploy_agent` promised "Delivery starts withheld"
+ * on every deploy, which stopped being true when ruling 156 made a library
+ * deploy COPY the template's grants — so a repo-write template deployed with
+ * repo write and the reply said the opposite.
+ */
+export function deliveryWithheld(grants: readonly CapabilityGrant[]): boolean {
+  return isWithheld(specialistGrantModes(grants), "execute-code-or-write-repo");
 }
 
 /** The one sentence every surface uses for the Codex posture (see

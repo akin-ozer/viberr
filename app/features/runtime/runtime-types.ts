@@ -171,7 +171,8 @@ export interface RunInputs {
   mcp: {
     /** Servers mounted on the run (profile grants + the viberr toolkit). */
     mounted: string[];
-    /** Granted, but no such server is in the org registry — mounted nowhere. */
+    /** Granted, but mounted nowhere. Names only: the reason each server gave
+     *  rides the run's prompt (ruling 310), not this record. */
     unresolved: string[];
     /** Mounted, but the last connection check failed. */
     unhealthy: string[];

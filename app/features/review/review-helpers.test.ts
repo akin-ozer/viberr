@@ -328,7 +328,7 @@ describe("U35-5: reviewRowSub for review work before the boundary", () => {
         pr: { number: 8, state: "review", mergeable: "conflicting" },
       }),
     ).toBe(
-      "Review in progress at Validation · PR #8 conflicts with the base branch. GitHub can't merge it until the branch is rebased.",
+      "Review in progress at Validation · PR #8 conflicts with the base branch. GitHub can't merge it until the base is merged INTO the branch (not rebased).",
     );
     expect(
       reviewRowSub({

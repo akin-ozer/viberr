@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import type { PacketOptionKind } from "~/schemas/task-file.schema";
+import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
@@ -786,6 +786,8 @@ export function DecisionPacket({
   canForceAccept = false,
   canMoveStage = false,
   archiveDisclosure,
+  alsoAnswers = null,
+  createTaskEchoes = {},
   onResolve,
   onResolveCustom,
   onRequestMaintainer,
@@ -828,6 +830,32 @@ export function DecisionPacket({
   canMoveStage?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
+  /**
+   * Ruling 319: the other tasks this confirm also answers, in one sentence, or
+   * null when it answers only this one.
+   *
+   * A packet raised by a backend failure carries a `cause` naming the ACCOUNT
+   * that failed, and resolving it applies the same option to every sibling
+   * packet that cause raised. That is what the person wants — one quota outage
+   * should not be five identical decisions — but a confirm whose reach is wider
+   * than its card is an undisclosed write, and this card is the only place the
+   * reach can be stated before the click rather than reported after it.
+   */
+  alsoAnswers?: string | null;
+  /**
+   * Ruling 324: per `create_task` option index, the tasks on this project whose
+   * title already looks like the one that option would create.
+   *
+   * A confirm here makes a real task under the person's own authority, and the
+   * card discloses what it will create while saying nothing about what already
+   * exists. Twice on one board that confirm was a click away from standing up a
+   * second owner for work a live task already held — caught both times only
+   * because a person read the packet and recognised it.
+   *
+   * Shown under the option it belongs to and only while that option is
+   * selected: it is information about THAT choice, not about the packet.
+   */
+  createTaskEchoes?: Record<number, { key: string; title: string; stage: string }[]>;
   onResolve: (optionIndex: number, note: string) => void;
   /** Ruling 138: a DECIDED `edit_goal` packet has one way out — the goal
    *  editor, opened prefilled with the chosen option's draft. */
@@ -1132,6 +1160,15 @@ export function DecisionPacket({
             })}
         </div>
 
+        {/* Ruling 319: stated ABOVE the options, because it changes what
+            picking one of them means. */}
+        {alsoAnswers && (
+          <p className="deny-note spaced" data-also-answers="">
+            <Icon name="alert" />
+            {alsoAnswers}
+          </p>
+        )}
+
         <div
           className="options"
           role="radiogroup"
@@ -1198,6 +1235,39 @@ export function DecisionPacket({
                     {o.d}
                     {refusal ? refusal.note : ""}
                   </div>
+                  {/* Ruling 269: a create_task option writes a NEW task, and
+                    until it is confirmed that task exists only inside the
+                    option's payload. Show what is about to be created — the
+                    title and the goal it will be worked to — so the person is
+                    confirming the task rather than the sentence describing it.
+                    Selected only: unselected, four options each carrying a
+                    goal would bury the choice. */}
+                  {o.kind === "create_task" && o.newTask && sel === i && (
+                    <span className="od pkt-new-task">
+                      <strong>Creates {o.newTask.title}</strong>
+                      {/* A task goal is a contract, and a good one runs to
+                          paragraphs — it scrolls in place rather than pushing
+                          the other choices off the card. */}
+                      <span className="fine pkt-new-task-goal">{o.newTask.goal}</span>
+                      {o.newTask.blockedBy && o.newTask.blockedBy.length > 0 && (
+                        <span className="fine dim">
+                          waits on {o.newTask.blockedBy.join(", ")}
+                        </span>
+                      )}
+                      {/* Ruling 287: confirming this option also edits tasks
+                          that are NOT on this page — it adds the new key to
+                          each of these tasks' own waits. That is the one part
+                          of a create_task decision a person cannot see the
+                          consequence of anywhere else, so it is shown before
+                          the confirm rather than discovered on another board
+                          card afterwards. */}
+                      {o.newTask.blocks && o.newTask.blocks.length > 0 && (
+                        <span className="fine dim">
+                          {o.newTask.blocks.join(", ")} will wait on it
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </span>
                 {/* The destructive half of archive_task is loud: this option
                     doesn't just file the task away, it deletes the remote
@@ -1268,7 +1338,11 @@ export function DecisionPacket({
               onChange={(e) => setCustomText(e.target.value)}
               aria-invalid={customInvalid || undefined}
               aria-describedby={customInvalid ? CUSTOM_ERR_ID : undefined}
-              placeholder="e.g. Hold the merge, rebase onto main first, and re-run the reviewer on the new head."
+              // Ruling 291: the placeholder is Viberr TEACHING what a good
+              // directive looks like, at the moment a person is writing one —
+              // so it must not model the operation the product forbids. It
+              // used to model the very operation the product forbids.
+              placeholder="e.g. Hold the merge, bring the branch up to date with main first, and re-run the reviewer on the new head."
               rows={2}
               data-autofocus=""
             />
@@ -1312,7 +1386,15 @@ export function DecisionPacket({
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
               Note for the operator
-              <span className="fhint">optional · recorded on the decision</span>
+              <span className="fhint">
+                {/* Ruling 315: the length is stated BEFORE it matters. The route
+                    used to cut this to 2,000 characters with nothing on the box
+                    saying so, and the server now refuses instead — a refusal a
+                    person could not see coming is a worse trade than the cut it
+                    replaced unless the box says the number. */}
+                optional · recorded on the decision · {PACKET_NOTE_MAX.toLocaleString("en-US")}{" "}
+                characters max
+              </span>
             </label>
             <textarea
               id="pkt-note"
@@ -1321,7 +1403,39 @@ export function DecisionPacket({
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. what to change before reopening"
               rows={1}
+              // The browser stops the paste at the cap rather than letting the
+              // server refuse a confirm the person has already committed to.
+              maxLength={PACKET_NOTE_MAX}
             />
+            {note.length > PACKET_NOTE_MAX - 200 && (
+              <p className="fine xs dim">
+                {note.length.toLocaleString("en-US")} of{" "}
+                {PACKET_NOTE_MAX.toLocaleString("en-US")} characters.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Ruling 324: the echoes of the SELECTED option, under the choice they
+            are about. Silent when the selection creates nothing, and silent
+            when nothing on the board resembles it — a disclosure a person
+            learns to skip is worse than no disclosure. */}
+        {(createTaskEchoes[sel] ?? []).length > 0 && (
+          <div className="deny-note spaced" data-create-task-echoes={sel}>
+            <Icon name="board" />
+            <span>
+              This project already has{" "}
+              {(createTaskEchoes[sel] ?? []).length === 1 ? "a task" : "tasks"} that look like
+              this:{" "}
+              {(createTaskEchoes[sel] ?? []).map((t, i, all) => (
+                <span key={t.key}>
+                  <strong>{t.key}</strong> &ldquo;{t.title}&rdquo; ({t.stage})
+                  {i < all.length - 1 ? ", " : ""}
+                </span>
+              ))}
+              . Confirming still creates a new one &mdash; check it is not a second owner for
+              work one of these already holds.
+            </span>
           </div>
         )}
 

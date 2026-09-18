@@ -24,6 +24,7 @@ import {
 } from "./reconcile-poller.server";
 import * as reconciler from "./github-reconciler.server";
 import type { ProjectReconcileSummary } from "./github-reconciler.server";
+import { listNotifications } from "~/server/projections/notifications.server";
 
 /** The registry symbol `reconcile-poller.server.ts` parks its interval handle
  *  under, and the shape of that process-global slot — mirrored here so the test
@@ -136,6 +137,38 @@ describe("pollGithubReconcile (P11-14)", () => {
     // The poller must NOT spam the audit log with a per-project summary each tick.
     const audits = listAuditEvents(store.db, {}).map((a) => a.action);
     expect(audits).not.toContain("github.reconcile.project");
+  });
+
+  /**
+   * Ruling 207(l) (claim audit). The merge-pending nudge asserted "PR #N is
+   * still open on GitHub" — a live fact — out of `task_projections.pr_json`,
+   * which is a CACHE. What kept that cache honest was the 5-minute reconcile
+   * poll, and ruling 177 excludes terminal-stage tasks from every budgeted
+   * pass: an accepted task IS terminal, so the exact rows this nudge describes
+   * are the rows nothing refreshes. The number is still worth sending; it has
+   * to say whose reading it is.
+   */
+  it("ruling 207(l): the merge-pending nudge reports its own last reading, not live GitHub state", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "done",
+        branch: "vib-1",
+        pr: { number: 42, state: "accepted", title: "[VIB-1] t" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
+
+    const note = listNotifications(store.db, store.users.arda.id).find(
+      (n) => n.taskKey === "VIB-1",
+    );
+    // CANARY: restore "but PR #42 is still open on GitHub" and this fails —
+    // that sentence claims a reading viberr is barred from taking.
+    expect(note!.text).toContain("The last state Viberr read for PR #42 was open");
+    expect(note!.text).toContain("stops polling a task once it reaches Done");
+    expect(note!.text).not.toContain("is still open on GitHub");
   });
 
   it("skips an ARCHIVED project", async () => {

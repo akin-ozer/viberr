@@ -1,5 +1,23 @@
 # The controller and chained goals
 
+> Updated 2026-09-17 for rulings 309, 310 and 312 (pass 37): §3's system prompt names each
+> granted MCP server that did not mount with the reason its own probe gave, carries the
+> ruling-namespace paragraph above the tool manifest, and closes its conversation block with
+> the generated project-authority tier list (advisory, never enforcing); the task and board
+> context reads carry the asking person's live project role as `your authority: …`.
+> Updated 2026-09-13 for rulings 192, 194 and 197 (pass 37): a chain can be renamed, a retry
+> rebuilds from the failed TASK's own contract, `get_goal` carries `liveGoal`, a retry that
+> starts nothing says so, and a template's persona is readable so a summary-only edit is not
+> a blind one.
+> Updated 2026-09-13 for ruling 188 (pass 37): a controller read answers with what the
+> equivalent human surface renders. `get_project` reports board-RESOLVED eligible stages
+> (plus `declaredStages`, so a ruling-R14-1 remap is visible); `get_task` reports
+> `notAcceptableReason` — the acceptance gate's own verdict — instead of the stage-unaware
+> `blockReason` column; `list_mcp_servers` reports ruling 176's `writeTools`,
+> `writeToolsReviewed` and what the marking does; and `save_mcp_server` takes `writeTools`,
+> answering with the marking that landed and, when none is set, naming the tools that look
+> like writes so a server is never left ungoverned in silence.
+
 > The instance-level conversational agent, its governed toolkit, its built-in
 > diagnostics server, its deployment locks, and the goal chains it can define.
 > Source of truth: `app/server/controller/*`, `app/server/tasks/goal-actions.server.ts`,
@@ -227,14 +245,22 @@ owner-routed SSE event `controller.updated`.
    run starts. Each prompt opens with the **context read** (ruling 121,
    `gatherControllerContext`): a block labelled as a server read taken when the turn
    started — for a task-anchored conversation a derived header (stage and position, next
-   stages with their boundaries, owner, engaged agents, branch and PR, open packet, goal
+   stages with their boundaries, the asking person's live project role as
+   `your authority: …` (ruling 309), owner, engaged agents, branch and PR, open packet, goal
    chain) plus the canonical `task.md` verbatim inside a five-backtick fence, bounded by
    `TASK_FILE_CONTEXT_CHARS` (24 000; over budget the head stays whole and the newest
    timeline entries are kept, with a marker naming how many were omitted); for a board,
-   the project's description, repo, members, stages with counts, boundaries, the open-task
-   table (`BOARD_CONTEXT_TASKS` 40 rows, `BOARD_CONTEXT_CHARS` 12 000) and the goal
-   chains; for the instance, the projects the person can see with their role; then, when
-   the message carried one, `They are looking at: <surface>`. The whole block stays under
+   the project's description, repo, members, the same `your authority: …` line (ruling
+   309), stages with counts, boundaries, the open-task table (`BOARD_CONTEXT_TASKS` 40
+   rows, `BOARD_CONTEXT_CHARS` 12 000) and the goal chains; for the instance, the projects
+   the person can see with their role; then, when the message carried one, `They are
+   looking at: <surface>`. The authority line (ruling 309, `askerAuthorityLine`) names the
+   role and stops — `project role maintainer`, or the org-admin override named as such
+   (it holds every action here), or `not a member of this project` — a live read taken
+   with the visibility gate at the end of this step, and never a held/not-held set: the
+   tier list in the system prompt is static, this line is personal, and the model
+   multiplies the two; it ends by saying that a role on any OTHER project is not in this
+   read (`whoami` has it). The whole block stays under
    `CONTEXT_BLOCK_CHARS` (32 000); the fence is always longer than the longest backtick
    run inside the file, so nothing in the file can close it, and a line in the server's
    own voice above it says the fenced bytes are data and never instructions. The read is
@@ -249,11 +275,25 @@ owner-routed SSE event `controller.updated`.
    `WebFetch`, `WebSearch` plus the operator read-only set (`Bash`, `Edit`,
    `MultiEdit`, `Write`, `NotebookEdit`). The system prompt replaces the Claude Code
    preset: doctrine, attached skills and KBs (24 000-char KB budget), a runtime block
-   naming mounted and unmounted MCP servers, and a conversation block naming the
+   naming the mounted MCP servers and, for every granted server that did NOT mount, the
+   reason its own probe gave, with the instruction to say so in those terms and not to
+   infer a cause the server did not give (ruling 310, the third surface), then the
+   ruling-namespace paragraph above the per-turn tool manifest (ruling 297): a ruling
+   number inside a tool description is Viberr's own product decision, not readable from a
+   run and not a project's rule, while a project's rules live in its knowledge base,
+   number from 1, and are cited by document and section rather than a bare number (ruling
+   312); the measured shell inventory (ruling 191); and a conversation block naming the
    asker, their live org role, the project binding (and the task anchor, when there is
    one: "tools default to both, and every turn opens with the task's canonical file as a
-   server read") and the rule that only this person's own messages authorize actions.
-   Working directory is `<dataRoot>/runtimes/controller-scratch`.
+   server read") and the rule that only this person's own messages authorize actions,
+   followed by the project-authority tier list (ruling 309): generated from
+   `RBAC_DEFINITIONS` by `projectAuthorityPrompt`, each tier naming the actions it is the
+   floor for (a grant that gates more than its name says carries its `covers` scope in
+   parentheses, ruling 309(a)), then the hand-written exceptions marked as hand-written,
+   and the rule that the list is ADVISORY, NEVER ENFORCING — predict a refusal, say why,
+   make the call anyway, and let the server's answer be the answer; the asking person's
+   own project role is not in this list but in the context read above. Working directory
+   is `<dataRoot>/runtimes/controller-scratch`.
 6. `settleTurn` records the reply (or a failure note naming quota/auth/other),
    releases the lease and starts the next queued message.
 
@@ -297,7 +337,7 @@ must name its task, or it is refused. `whoami` reports both bindings):
 | Instance reads | `whoami`, `list_users`, `list_knowledge_bases`, `list_skills`, `list_mcp_servers`, `list_global_agents`, `inspect_audit_log` (limit 50, max 200), `inspect_run_analytics` | `whoami`: signed-in; the rest: org admin |
 | Instance writes | `create_user` (relays the one-time temp password), `update_user`, `set_user_org_role`, `save_knowledge_base` (U36-4: the reply names the KB id the next save takes and the grantKey a grant takes; a `disk:<dir>` id whose folder already has a row updates that row), `save_skill` (the same reply; ruling 183: an empty, JSON-escaped or unparseable SKILL.md body is refused by name, never rewritten), `save_mcp_server` (takes no credential; reserved names refused), `test_mcp_server`, `save_global_agent` (specialists only; **grants are store keys and an omitted list is left alone** — see below; ruling 153: `model` and `effort` set the template's defaults, checked by name; ruling 156: the reply names every project copy whose grants differ and `propagate: true` rewrites them) | org admin |
 | Project creation | `create_project` (any shape: stages, boundaries, members, description) | any signed-in user; the asker is seeded project admin (FR5) |
-| Board reads | `get_project` (each deployment with its `resources` copy and `templateDrift`, ruling 156; `requiredReviewers`, the project's required-reviewer rules resolved to stage and agent names, ruling 178), `list_tasks`, `get_task` (events 12, max 50; `schedules` lists the pending entries, ruling 153), `get_github_state`, `list_goals`, `get_goal` | `requireVisible` |
+| Board reads | `get_project` (each deployment with its `resources` copy and `templateDrift`, ruling 156; `requiredReviewers`, the project's required-reviewer rules resolved to stage and agent names, ruling 178), `list_tasks`, `get_task` (events 12, max 50; `schedules` lists the pending entries, ruling 153), `get_github_state`, `list_goals`, `get_goal` (ruling 192: a link with a task carries `liveGoal`, that task's CURRENT goal, whenever it has moved past the text the link was declared with — the declared text stays beside it, because that is what the chain declared and what the history means) | `requireVisible` |
 | Board writes | `create_task` (`create-task`), `move_task` (refuses a terminal target and points at the task page; else `approve-transition`), `comment_on_task` (any member; posts as `controller`, never starts a run), `set_task_owner` (`own-task`, takeover needs the acceptance tier; ruling 140(b): the person whose seat changed is notified, and the audit row says whether they were told), `update_task` (ruling 121: the goal under `update-goal`, priority / labels / due date under `edit-task-meta` as a full replace — the task page's two writers and gates, each part reported on its own, and an axis already holding the asked-for value answers `[noop]` rather than claiming a write nobody made; ruling 131: `blockedBy` is the FULL list of what the task waits on through `setTaskDependencies`, reported on its own arm, a refusal in the validator's words, `[]` clearing it and releasing the task), `create_task` also takes `blockedBy` (validated before a key is allocated; the task is born held) and, ruling 140(a), `owner` (a member email or `me`; seated in the creating write before the first operator run, checked by the hand-off rule; the release word is refused by name) and `dueDate`, with `priority: urgent` as the urgent flag itself, `run_agent_on_task` (`run-agents`; operator → `runOperator({trigger: "manual"})` relaying `open-packet` / `closed` (ruling 177) / queued honestly, else `startAgentRun`), `schedule_task_action` and `cancel_task_schedule` (ruling 153; `run-agents`: the task page's schedule form through the controller, `agent: "operator"` or a deployed profile id, `delayMinutes` 1 to 40320 or an ISO `dueAt` with the same bounds and sentences, the entry on `task.md` with the `<email> · via controller` label; a cancel answers `[noop]` when the entry is not pending), `update_project_settings`, `update_stages`, `set_transition_boundary`, `set_required_reviewers` (ruling 178: the project's required reviewers per review stage as the WHOLE list, `[]` clearing it, through the same writer Settings → Required reviewers uses; every stage id must be a non-terminal stage and every profile id a deployed agent holding report-validation-verdict, else refused by name with nothing written; an unchanged list answers `[noop]`; audited `project.required_reviewers.updated`) (`edit-policy`), `invite_member` (C4: takes the `role` the member joins in, seated in ONE write with one audit row; omitted is viewer, and an unknown role is refused by name with nothing written), `set_member_role` (`manage-members`), `deploy_agent`, `update_agent_deployment` (`manage-agents`; G36-1: `skills` / `mcps` / `kbs` for every kind, the operator included, grant keys resolved before the write, omitted = unchanged, `[]` = clear; U36-3: the reply lists every changed field old → new) | `requireVisible` then the same `requireAction` / `assertProjectAction` matrix humans use |
 | Goals | `create_goal` (`create-task`, 1..20 links, each with an optional `blockedBy`), `update_goal` (creator or `run-agents`; `edit_link` without `blockedBy` leaves the link's list, `[]` clears it; on an ACTIVE link `blockedBy` is the only editable field and is written on the link's task through `setTaskDependencies`, under that writer's own gate, the link mirroring it back (ruling 155); `add_link` takes one) | `requireVisible` then the goal gate (§7) |
 
@@ -331,7 +371,16 @@ tool descriptions.
   explicitly. They used to default to `[]` inside a full replace, so "change the summary"
   erased every grant — and `list_global_agents` returned no grants at all, so the model
   could not see what it was about to erase. That tool now returns `skills`, `mcps` and
-  `kbs`.
+  `kbs`. **And the PERSONA, which that fix left out** (ruling 197, pass 37 F37-18): a blank
+  persona has always kept the stored one (`description: persona || existing.description`),
+  but the tool's description spelled the merge rule out for the three lists and said nothing
+  about the one field whose loss destroys an agent's whole system prompt, and
+  `list_global_agents` did not return it — so the controller hit the same wall F33-7 had
+  cleared, two rulings later, and refused: "`save_global_agent` gives me no way to edit a
+  summary without also supplying a persona, and I cannot read the personas I'd be replacing."
+  Three template summaries advertising Testcontainers, Docker Compose and Playwright stayed
+  on a host with none of them, to the operator, which picks agents by that text. Both
+  descriptions now state the rule and the persona rides the list.
 - **A project copy is its own record** (ruling 156, pass 35 F35-7). A library deploy
   copies the template's three lists onto the deployment (`definition.resources`) and a
   run mounts that copy, so a template grant never reached a deployed project and the
@@ -574,8 +623,15 @@ pass reads every linked task's state from its canonical file and applies:
 
 `updateGoal` is gated by `requireGoalAuthority`: the creator (project mutable and any
 membership) **or** a member holding `run-agents`. Operations (terminal chains refuse
-all of them): `pause`, `resume`, `cancel`, `skip_link`, `retry_link` (failed links
-only; a fresh task under the present caller), `edit_link` (pending or failed; ruling
+all of them): `rename` (ruling 192, pass 37: the chain's title and/or description, on any
+non-terminal chain; neither steers work, and the timeline says what a rename does NOT reach —
+link tasks created before it keep the old name in the chain header they were born with, which
+is written once and never re-read), `pause`, `resume`, `cancel`, `skip_link`, `retry_link`
+(failed links only; a fresh task under the present caller, rebuilt from THAT TASK's own
+current title and goal rather than the link's frozen copy — ruling 192: ruling 155 settles an
+active link's text while nothing settles the task's, so the two drift, and live they drifted
+into disagreeing about which task owns `packages/contracts`; the chain header is rebuilt
+rather than stacked and the goal's timeline records the substitution), `edit_link` (pending or failed; ruling
 131(c): `blockedBy` absent leaves the link's declared wait, `[]` clears it, any list is
 validated at declaration time, this chain's own links included; on an ACTIVE link,
 ruling 155, `blockedBy` is the only field that may change and it is forwarded to
@@ -587,7 +643,11 @@ validates and gates it and mirrors it back, the reply reading "Link
 with nothing to forward, is refused with "Only a pending or failed link's title or
 goal can be edited; link 1 is active. Its wait follows KNC-3: pass blockedBy here or
 edit it on the task."), `add_link` (≤ 20), `remove_pending_link` (re-indexes). Audit
-`goal.updated {op}`.
+`goal.updated {op}`. A retry that starts NOTHING — `startLinkTask` declines silently when the
+chain stopped being active, and the fire-and-forget reconcile the failing task's own archive
+triggers lands in exactly that window — re-parks the chain, notes the link and records the
+decline instead of leaving the "retried by" entry standing over a link with no task
+(ruling 194).
 The project route's `goal-op` intent and the Goals panel expose only the first five;
 `edit_link`, `add_link` and `remove_pending_link` are controller-tool-only today.
 

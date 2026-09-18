@@ -123,6 +123,48 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
   });
 
+  /**
+   * Ruling 222 (F37-42): the audit row above has named the agent since P11-23.
+   * The NOTIFICATION for the same event did not — `notifyTaskWatchers` stamps
+   * `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so the owner's
+   * inbox announced an agent's question under the Operator's name and avatar,
+   * on the one surface whose chip IS "who wants something from you". Live on
+   * SHOP-18, the Frontend Engineer's question about a missing catalog contract
+   * arrived as "Operator·SHOP-18 cannot satisfy its required filter/facet
+   * sidebar…" — the agent's own words, over the operator's name.
+   */
+  it("attributes the question NOTIFICATION to the agent too, not the operator (ruling 222)", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-9",
+        actorRef: AGENT_REF,
+        title: "Publish the catalog facet contract",
+        body: "The frozen contract has no facet endpoint.",
+      },
+    );
+
+    const note = listNotifications(store.db, store.users.arda.id).find(
+      (n) => n.kind === "approval" && n.taskKey === "VIB-9",
+    );
+    expect(note, "the owner must hear about a question put to them").toBeTruthy();
+    // CANARY: drop the `notice.from` and this is { kind: "agent", name:
+    // "Operator" } — the default every un-attributed notice falls back to.
+    expect(note!.from).toMatchObject({ kind: "agent", name: "Security review" });
+    expect(note!.from).not.toMatchObject({ name: "Operator" });
+  });
+
   it("ruling 137: an agent's question withdraws the standing acceptance offers on the record", async () => {
     // Canary: remove the `withdrawAcceptanceOffers` call in
     // openAgentQuestionPacket and the accept card outlives the question.
@@ -280,10 +322,81 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       actorRef: AGENT_REF,
       outcomeKey,
       collab: { ...collab, githubRead: collab.githubRead ?? false },
+      kb: [],
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
   }
+
+  /** The live server for one build, so a call crosses real validation. */
+  function mountFor(collab: { comment: boolean; ask: boolean; verdict: boolean; evidence?: boolean; githubRead?: boolean }) {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const built = buildAgentToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      actorRef: AGENT_REF,
+      outcomeKey: "ok_max_options",
+      collab: {
+        ...collab,
+        evidence: collab.evidence ?? false,
+        githubRead: collab.githubRead ?? false,
+      },
+      kb: [],
+    })!;
+    lastStore = store;
+    return built.mcpServers.viberr_agent;
+  }
+
+  /**
+   * Ruling 298 (pass 37, F37-133). The cap was always four; it used to be
+   * applied by a silent `.slice(0, 4)` in the packet builder, so an agent that
+   * offered five got a decision card with four and nobody -- agent or person --
+   * was told a choice had been removed. It is declared on the schema now, so a
+   * fifth is refused by name, nothing is written, and the agent re-asks inside
+   * the same run at no cost.
+   */
+  it("ruling 298: a fifth answer choice is refused by name, not trimmed away", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, ask: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+
+    const five = ["a", "b", "c", "d", "e"].map((t) => ({ title: t }));
+    const refused = await client.callTool({
+      name: "ask_human",
+      arguments: { title: "Which DB?", options: five },
+    });
+    const text = z
+      .object({ content: z.array(z.object({ text: z.string() })) })
+      .parse(refused)
+      .content.map((c) => c.text)
+      .join("\n");
+    // CANARY: drop `.max(ASK_HUMAN_MAX_OPTIONS)` and this answers "[done]".
+    expect(text).toMatch(/too big|at most|maximum|expected array to have/i);
+    // Nothing was written: no packet reached the task.
+    const after = readTaskFile({
+      projectSlug: lastStore.slug,
+      taskKey: "VIB-3",
+      dataRoot: lastStore.dataRoot,
+    })!;
+    expect(after.parsed.packet).toBeFalsy();
+
+    // And four still works, so this is a bound and not a wall.
+    const ok = await client.callTool({
+      name: "ask_human",
+      arguments: { title: "Which DB?", options: five.slice(0, 4) },
+    });
+    expect(JSON.stringify(ok)).not.toMatch(/too big|at most|maximum/i);
+  });
 
   let lastStore: ReturnType<typeof setupTestStore>;
 
@@ -300,12 +413,123 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       actorRef: AGENT_REF,
       outcomeKey: "oc_load",
       collab: { comment: true, ask: true, verdict: true, evidence: true, githubRead: true },
+      kb: [],
     })!;
     const loading = toolLoading(built.mcpServers.viberr_agent);
     expect(loading.deferred).toEqual([]);
     expect(loading.loaded).toEqual(
       expect.arrayContaining(["report_outcome", "post_comment", "github_read"]),
     );
+  });
+
+  /**
+   * Ruling 339 (pass 37, F37-175): the run record disclosed a toolkit it had
+   * derived a SECOND time, from three of the six gates, and so under-reported
+   * what it mounted on 460 of the 834 specialist runs of the shopify-clone
+   * pass: `github_read` on 460, `read_board` on 307, `read_knowledge_doc` on
+   * 294, `report_outcome` on 227 (its real gate is `verdict || evidence`, and
+   * the record read `verdict` alone).
+   *
+   * `toolNames` comes off the definitions the builder just pushed, so the only
+   * way to make this red again is to restate the gates somewhere.
+   */
+  it("ruling 339: the toolkit reports exactly the tools it mounted", () => {
+    // Canary: return a hand-built list from `buildAgentToolkit` instead of
+    // `tools.map((t) => t.name)`.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const built = buildAgentToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      actorRef: AGENT_REF,
+      outcomeKey: "oc_names",
+      // The exact combination the old record got wrong: no comment, no ask, and
+      // `evidence` rather than `verdict` carrying `report_outcome`.
+      collab: {
+        comment: false,
+        ask: false,
+        verdict: false,
+        evidence: true,
+        githubRead: true,
+      },
+      kb: ["shopify-clone-conventions"],
+    })!;
+    const mounted = Object.keys(
+      mountedTools.parse(built.mcpServers.viberr_agent),
+    ).sort();
+    expect([...built.toolNames].sort()).toEqual(mounted);
+    // Named, so a gate that stops mounting its tool is a failure here and not
+    // a silently shorter list agreeing with itself.
+    expect(mounted).toEqual([
+      "github_read",
+      "read_board",
+      "read_knowledge_doc",
+      "report_outcome",
+    ]);
+  });
+
+  /**
+   * Ruling 281 (pass 37, F37-114): an agent could read its repository and not
+   * the board it works on. A task key it was TOLD about — in a document, a
+   * directive, another agent's report — could not be checked.
+   *
+   * The cost, measured: `services/cart/DESIGN.md:458` claimed "SHOP-39 was
+   * created for this gap". Two agents on SHOP-26 read it, correctly refused to
+   * trust a document's claim about the board ("a task named in a document is
+   * not a task until someone checks"), and had no way to check. The operator
+   * re-raised a decision already made, and its recommended option would have
+   * created a second task carrying SHOP-39's title word for word.
+   */
+  it("ruling 281: read_board answers a key, lists the board, and denies a key that is not there", async () => {
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_board");
+    const read = tools.read_board!;
+    // Ungranted: every fact here is already in the agent's own prompt for its
+    // OWN task, so the gap was never permission — it was the tasks beside it.
+    // CANARY: put it behind a `collab` flag and the profiles that hit this
+    // (a reviewer, a builder reading a DESIGN.md) are the ones without it.
+    expect(read).toBeTruthy();
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl" }),
+      goal: "Serve the published batch contract.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const call = async (args: { taskKey?: string }) => {
+      // SAFETY: every tool in this toolkit answers the text shape
+      // `{ content: [{ type: "text", text }] }`; a change fails the parse
+      // below rather than reading undefined.
+      const out = (await read.handler(
+        args as never,
+        {} as never,
+      )) as { content: { text: string }[] };
+      return out.content[0]!.text;
+    };
+
+    const one = await call({ taskKey: "VIB-9" });
+    expect(one).toContain('"key": "VIB-9"');
+    expect(one).toContain("Serve the published batch contract");
+    // CANARY: drop the `stage`/`waitsOn` fields and "is this live, and is it
+    // waiting on me" stops being answerable, which is the question.
+    expect(one).toContain('"stage"');
+    expect(one).toContain('"waitsOn"');
+
+    const all = await call({});
+    expect(all).toContain('"key": "VIB-3"');
+    expect(all).toContain('"key": "VIB-9"');
+
+    // The answer that prompted the whole tool: a key that is not on this board
+    // is a claim that was wrong, said plainly.
+    // CANARY: return an empty object for a miss and the agent cannot tell
+    // "not here" from "here with nothing in it".
+    const missing = await call({ taskKey: "VIB-404" });
+    expect(missing).toContain("[noop] No task VIB-404 in this project");
+    expect(missing).toContain("that claim is wrong");
   });
 
   it("declares `evidence` only when the profile holds attach-evidence-references", () => {
@@ -489,8 +713,43 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             evidence: false,
             githubRead: false,
           },
+          kb: [],
         }),
       ).toBeNull();
+
+    });
+
+    /**
+     * Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,
+     * so the grant only half-arrives without a way to pull a document. Its gate
+     * is the KB grant, not U11's collaboration grants — an agent granted a
+     * knowledge base and nothing else still has to be able to read it.
+     */
+    it("ruling 283: a KB grant alone mounts read_knowledge_doc, and nothing else", () => {
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const built = buildAgentToolkit({
+        db: store.db,
+        ctx: { dataRoot: store.dataRoot },
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        actorRef: AGENT_REF,
+        outcomeKey: "oc_kb",
+        collab: {
+          comment: false,
+          ask: false,
+          verdict: false,
+          evidence: false,
+          githubRead: false,
+        },
+        kb: ["shop-rulings"],
+      });
+      expect(built).not.toBeNull();
+      const names = mountedTools.parse(built!.mcpServers.viberr_agent);
+      expect(Object.keys(names)).toEqual(["read_knowledge_doc"]);
     });
   });
 
@@ -558,6 +817,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         actorRef: AGENT_REF,
         outcomeKey: "oc_gr_ok",
         collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
+        kb: [],
       })!;
       return { store, tools: mountedTools.parse(built.mcpServers.viberr_agent) };
     }

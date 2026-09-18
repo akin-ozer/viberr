@@ -81,6 +81,21 @@ export interface TaskMutationContext {
      *  drive left the task at instead of treating the move as "owned by a
      *  re-trigger" that no longer fires. */
     movedToStageId?: string;
+    /** Ruling 202: this drive DELIVERED — it entered `performDelivery`, which
+     *  pushes the branch and opens or updates the review PR. Progress, exactly
+     *  as a transition is, and stamped on ENTRY rather than on the GitHub
+     *  answer: the push and the PR call can land after the run row is already
+     *  `finished`, and the settle-time backstop runs in that window. Live, it
+     *  did: a drive whose single action was `deliver_for_review` was called a
+     *  deliberate hold 111ms before its own PR event reached the timeline. */
+    delivered?: boolean;
+    /**
+     * Ruling 228 (F37-47): EVERY action this drive planned was refused, so the
+     * drive did nothing at all. Not the same as an operator that decided to
+     * wait — it decided to act and was stopped — and the difference is what
+     * the settle-time backstop needs to tell them apart.
+     */
+    planWhollyRefused?: boolean;
   };
 }
 

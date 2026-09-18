@@ -1,5 +1,14 @@
 # The operator
 
+> Updated 2026-09-13 for rulings 193 and 195 (pass 37): reviewers carry
+> `consecutiveRequestChanges` and the stage rule has an answer for an objection no revision
+> can satisfy; the open-packet refusal settles `waiting` like the other two refusals do.
+> Updated 2026-09-13 for F37-11 (pass 37): the operator's snapshot carries `baseBehindBy` —
+> how far the base is ahead of the task's branch, from the reconciler's last compare, the same
+> reading the GitHub page's sync pill renders. `0` is level, `null` is "nothing has compared
+> them yet" and is never a reason to skip `update_branch_from_base`. The call-when-unsure
+> posture is unchanged; the operator can now simply be less unsure.
+
 > The per-task coordination agent: what wakes it, what it may do, how its
 > authority is gated, and the packets it opens. Source of truth:
 > `app/server/runtimes/operator-run.server.ts`, `app/server/tasks/operator-actions.server.ts`,
@@ -129,7 +138,12 @@ again), `open-packet` (a **human-pressed** Run operator, or the same turn a pers
 reaction triggers such as `pr-diverged` and `agent-reply` are not refused; a scheduled
 occurrence is retired `fired` with a "Scheduled action skipped" note and outcome
 `skipped-packet`, and a trigger refused at the front of the lease queue says so on the
-task through `noteQueuedTriggerRefused`, which settles nothing), and `blocked-by` (ruling 131(d): while the
+task through `noteQueuedTriggerRefused`, which settles nothing; ruling 195, pass 37: the
+refusal itself DOES settle `waiting` now — it used to skip that on the stated belief that
+"the packet already owns `waiting: human`", which is not an invariant, because a packet opened
+mid-work does not stop the machine triggers, so the operator can dispatch a deliverer with one
+open and a restart then leaves `waiting: agent` with no agent alive; live, SHOP-6 sat that way
+for 75 minutes holding ten tasks while the board said an agent was working), and `blocked-by` (ruling 131(d): while the
 task's `blockedBy` list is non-empty the `create`, `transition` and `scheduled`
 triggers are refused before any run row exists, no run and no cost; the refusal
 settles the waiting flag itself, to `none` when nothing else is pending, so a
@@ -196,7 +210,23 @@ acceptance whether or not anyone engaged it — `reviewers` lists only who the o
 has engaged. Every ordinary turn and the post-delivery turn open with "Required
 reviewers (project rule): <Agent> at <Stage>" and tell the operator to engage each
 one with `run_agent` (`delivers: false`) at its stage before offering or performing
-`accept_completion`.
+`accept_completion`. Each ENGAGED reviewer also carries `consecutiveRequestChanges`
+(ruling 193, pass 37): how many successive delivered REVISIONS it has requested changes
+on, counting revisions rather than verdict rows so a re-run on one revision is one
+objection, and reset by that reviewer's own first approve.
+
+The stage rule's answer to a request-changes used to be one line — "the deliverer owes
+NEW work" — and a reviewer can request changes for a reason no revision can satisfy:
+pass 37 chartered a required Integration Verifier to bring a Docker stack up on a host
+with neither `make` nor Docker, and the coordinator re-prompted the deliverer ten times
+over a one-file document, past a second reviewer's approval of the same revision,
+because that is what the doctrine said. At `consecutiveRequestChanges >= 2` the turn now
+asks first whether the deliverable can satisfy the objection AT ALL, and when the
+reviewer names something outside the work — a tool the shell inventory (ruling 191) says
+is absent, a baseline the repository does not have yet, a decision nobody has made — the
+deliverer owes nothing: say so in one comment and `open_packet`, naming the three real
+exits (drop or replace the required reviewer, accept past the gate, fund the baseline as
+its own task). A reviewer that cannot pass is a decision, not a defect.
 
 Before triage the operator gets a **full read-only clone** of the project repository
 (ruling 55), the same per-task checkout a specialist run reuses; on the shared

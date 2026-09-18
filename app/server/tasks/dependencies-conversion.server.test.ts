@@ -15,7 +15,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { RunCallbacks, RunHandle, RunSpec, RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
-import { insertRunLine } from "~/server/runtimes/run-store.server";
+import { insertRunLine, nextSeq } from "~/server/runtimes/run-store.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.server";
 import { resolvePacket } from "./task-actions.server";
@@ -53,7 +53,11 @@ class ControlledAdapter implements RuntimeAdapter {
     const text = JSON.stringify(plan);
     insertRunLine(store.db, {
       runId: pending.spec.runId,
-      seq: 0,
+      // Ruling 344: the numbering the real sink uses. A run now carries
+      // Viberr's own `run·inputs` disclosure at its head, and `insertRunLine`
+      // is `ON CONFLICT DO NOTHING` — a fixture claiming seq 0 drops its own
+      // line and the drive looks like it planned nothing.
+      seq: nextSeq(store.db, pending.spec.runId),
       occurredAt: new Date().toISOString(),
       raw: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }),
       display: { t: "12:00:00", ev: "text", tag: "agent_message", text },

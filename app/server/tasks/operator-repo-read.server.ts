@@ -230,3 +230,98 @@ export async function readDefaultBranchFile(
     };
   }
 }
+
+/**
+ * Ruling 299: the same read, for an actor with no checkout.
+ *
+ * `readDefaultBranchFile` takes a task workspace, because the operator always
+ * has one. The CONTROLLER never does, and it is the actor that writes the
+ * architecture, the knowledge bases and the goals that every agent is then
+ * measured against, and that reviews the packets those agents raise. It found
+ * this the way these are found: it endorsed an option on a security-scoped
+ * decision whose central factual claim ("the goal names four routes,
+ * `origin/main` has nine") it could only take second-hand, and reported that
+ * "verify the claim against the repository yourself is the most-repeated rule
+ * in this project's own rulings, and I am structurally unable to follow it."
+ *
+ * The checkout was never the source anyway: `resolveReadSource` prefers the
+ * project MIRROR and only falls back to a checkout's clone-time ref. This
+ * takes the repo and the branch from the PROJECT, so there is nothing to fall
+ * back from -- and when the mirror cannot be built, it says so rather than
+ * answering from somewhere else.
+ */
+export async function readProjectDefaultBranchFile(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    /** `owner/name`, from the project's own frontmatter. */
+    repo: string;
+    defaultBranch: string;
+    /** Repository-relative path, e.g. `docs/guide.md`. */
+    path: string;
+    dataRoot?: string;
+  },
+): Promise<DefaultBranchRead> {
+  const repoPath = input.path.trim();
+  if (!pathIsReadable(repoPath)) {
+    return {
+      kind: "unavailable",
+      reason:
+        "that is not a repository-relative file path — pass a path like `docs/guide.md`, " +
+        "with no leading slash, no `..` segment and no `ref:path` prefix",
+    };
+  }
+  const request: Parameters<typeof refreshProjectMirror>[0] = {
+    projectSlug: input.projectSlug,
+    repo: input.repo,
+    token: null,
+    // The operator's read leaves this false because it can fall back to the
+    // checkout's clone-time ref. There is no checkout here, so a missing
+    // mirror would make the tool permanently unanswerable on exactly the
+    // project where nothing has run yet -- which is when the controller is
+    // doing the architecture work that most needs to read the repository.
+    create: true,
+  };
+  // The residual, stated: on a project whose repository has never been cloned
+  // on this instance, this builds the mirror inside the tool call, bounded by
+  // the clone timeout (15 minutes by default). The controller's tool text says
+  // so. The alternative was a tool that can never answer on exactly the
+  // project where the architecture work happens, which is worse, and every
+  // call after the first is a fetch.
+  const cred = getProjectCredential(db, input.projectSlug);
+  if (cred) request.token = getPatToken(db, cred.id);
+  if (input.dataRoot) request.dataRoot = input.dataRoot;
+  const mirror = await refreshProjectMirror(request);
+  if (!mirror) {
+    // No checkout to fall back to, and inventing one would be the exact error
+    // this module exists to stop: answering about the default branch from a
+    // tree that is not it.
+    return {
+      kind: "unavailable",
+      reason:
+        `no mirror of \`${input.repo}\` could be built for this project, so there is no copy of ` +
+        `\`${input.defaultBranch}\` to read. Check the project's GitHub credential`,
+    };
+  }
+  try {
+    // The mirror is BARE: its branch heads are local refs, not `origin/…`.
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", mirror.dir, "show", `${input.defaultBranch}:${repoPath}`],
+      { timeout: GIT_SHOW_TIMEOUT_MS, maxBuffer: DEFAULT_BRANCH_READ_MAX_BYTES * 4 },
+    );
+    const truncated = stdout.length > DEFAULT_BRANCH_READ_MAX_BYTES;
+    return {
+      kind: "found",
+      text: truncated ? stdout.slice(0, DEFAULT_BRANCH_READ_MAX_BYTES) : stdout,
+      truncated,
+      refreshed: mirror.refreshed,
+    };
+  } catch (error) {
+    const detail = redactGitOutput(gitErrorText(error));
+    if (/does not exist in|exists on disk, but not in/i.test(detail)) {
+      return { kind: "absent" };
+    }
+    return { kind: "unavailable", reason: detail || "git could not read that ref" };
+  }
+}

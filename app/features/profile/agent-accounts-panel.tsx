@@ -294,7 +294,11 @@ function SignInSteps({
   const errId = `${codeId}-err`;
   const [code, setCode] = useState("");
   const [refused, setRefused] = useState(0);
-  const [copied, setCopied] = useState(false);
+  // Ruling 294: WHICH button just copied, not merely that one did. Step 1 now
+  // has a copy-link button and step 2 (on codex) still has the copy-code one,
+  // inside the same component — one boolean made both read "Copied" at once,
+  // and the later reset would have blanked the other's confirmation early.
+  const [copied, setCopied] = useState<"link" | "code" | null>(null);
   const group = useRef<HTMLDivElement | null>(null);
   const codeField = useRef<HTMLInputElement | null>(null);
 
@@ -307,7 +311,11 @@ function SignInSteps({
   const codeReady =
     backend === "codex" ? login.userCode !== null : login.needsCode;
   const codeStep: StepState = past ? "done" : codeReady ? "current" : "pending";
-  const host = login.url ? hostOf(login.url) : null;
+  // Hoisted so the copy closure narrows: TS drops property narrowing at a
+  // function boundary, which is why the code button below reads
+  // `login.userCode ?? ""` inside its own handler.
+  const url = login.url;
+  const host = url ? hostOf(url) : null;
   const codeEmpty = code.trim() === "";
   const codeInvalid = refused > 0 && codeEmpty;
 
@@ -319,14 +327,19 @@ function SignInSteps({
     }
     submit({ intent: "backend-login-code", backend, code });
   };
-  const copyCode = async (value: string) => {
+  const copyValue = async (what: "link" | "code", value: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      setCopied(what);
+      // Clears only its OWN key: copying the code and then the link must not
+      // cancel the link's confirmation when the code's timer comes due.
+      window.setTimeout(() => {
+        setCopied((cur) => (cur === what ? null : cur));
+      }, 1400);
     } catch {
-      // Clipboard denied (permissions, insecure origin). The code is on screen
-      // and a click selects it, which is the fallback that always works.
+      // Clipboard denied (permissions, insecure origin). The link and the code
+      // are both on screen and a click selects either, which is the fallback
+      // that always works.
     }
   };
 
@@ -347,16 +360,34 @@ function SignInSteps({
               Sign in on {VENDOR[backend]}&apos;s page
             </div>
             <div className="signin-act">
-              {login.url ? (
-                <a
-                  className="btn sm"
-                  href={login.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open sign-in page
-                  <Icon name="ext" />
-                </a>
+              {url ? (
+                <>
+                  <a className="btn sm" href={url} target="_blank" rel="noreferrer">
+                    Open sign-in page
+                    <Icon name="ext" />
+                  </a>
+                  {/* Ruling 294 (owner's ask): the LINK, copyable. Opening it
+                      here only works when the browser reading this page is the
+                      one holding the vendor session, and often it is not: the
+                      instance runs on a server, a person is on a second
+                      machine, or the sign-in has to finish in a different
+                      profile. Until now the only way to move the URL was to
+                      right-click an anchor whose href is a 300-character OAuth
+                      redirect. Same fixture as the code button below, which is
+                      the point: one gesture on this card, learned once.
+                      The label deliberately does NOT embed the URL — a screen
+                      reader reading those 300 characters is exactly what
+                      `hostOf` exists to prevent. */}
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    aria-label={`Copy the ${VENDOR[backend]} sign-in link`}
+                    onClick={() => void copyValue("link", url)}
+                  >
+                    <Icon name={copied === "link" ? "check" : "copy"} />
+                    {copied === "link" ? "Copied" : "Copy link"}
+                  </button>
+                </>
               ) : (
                 <button type="button" className="btn sm" disabled>
                   Open sign-in page
@@ -381,10 +412,10 @@ function SignInSteps({
                       type="button"
                       className="btn ghost sm"
                       aria-label={`Copy the sign-in code ${login.userCode}`}
-                      onClick={() => void copyCode(login.userCode ?? "")}
+                      onClick={() => void copyValue("code", login.userCode ?? "")}
                     >
-                      <Icon name={copied ? "check" : "copy"} />
-                      {copied ? "Copied" : "Copy"}
+                      <Icon name={copied === "code" ? "check" : "copy"} />
+                      {copied === "code" ? "Copied" : "Copy"}
                     </button>
                   </>
                 ) : (
@@ -458,6 +489,49 @@ function SignInSteps({
 
 // -------------------------------------------------------------- one backend
 
+/**
+ * Ruling 294: a reading's percentage, clamped.
+ *
+ * The clamp is not defensive noise: a provider on OVERAGE reports a utilization
+ * above 1, and rounding that unclamped renders "118% of seven day" on a card
+ * whose whole job is to be a number a person trusts. /insights clamps for the
+ * same reason (`pctOf`, insights-page.tsx); this is the same expression rather
+ * than a second one that can drift from it.
+ */
+function usagePct(utilization: number | null): number | null {
+  if (utilization == null) return null;
+  return Math.max(0, Math.min(100, Math.round(utilization * 100)));
+}
+
+/**
+ * The pill's text. Two absences are handled and neither is faked:
+ *
+ * A null `utilization` reads "not reported", never 0% — `wire-format.server`
+ * states the rule for the same field ("a missing utilization must read as 'not
+ * reported', never as a fabricated 0% that looks like a fresh quota"), and a
+ * fabricated zero on this card would read as a completely fresh window.
+ *
+ * An EMPTY `rateLimitType` falls back to "window". The wire format turns a
+ * missing provider string into `""` rather than null, so `${type}` composes to
+ * "62% of " with a dangling preposition. `wire-format.server` already solved
+ * this with `info.rateLimitType || "window"`; this is that fallback, not a new
+ * one. (/insights composes the raw field and has the same latent defect; it is
+ * not cloned here.)
+ */
+function usageText(usage: NonNullable<ProfileBackend["usage"]>): string {
+  const window = (usage.rateLimitType || "window").replaceAll("_", " ");
+  const pct = usagePct(usage.utilization);
+  if (pct === null) return `${window} usage not reported`;
+  return `${pct}% of ${window}`;
+}
+
+/** Warn only on the provider's OWN warning word or on overage. Viberr does not
+ *  invent a threshold: a percentage it decided was alarming would be Viberr's
+ *  opinion wearing the provider's authority. */
+function usagePillKind(usage: NonNullable<ProfileBackend["usage"]>): "neutral" | "risk" {
+  return usage.isUsingOverage || usage.status.includes("warning") ? "risk" : "neutral";
+}
+
 function AgentAccountCard({
   data,
   fetcher,
@@ -473,6 +547,9 @@ function AgentAccountCard({
   // person's own account. The card used to say "connected · verified" while
   // every run on the account was refused with a 403.
   const lastRefusal = data.lastRefusal ?? null;
+  // Ruling 294: optional on the interface so fixtures predating it stay valid;
+  // the loader always sets it.
+  const usage = data.usage ?? null;
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
@@ -637,7 +714,42 @@ function AgentAccountCard({
                 ) : null}
               </Pill>
             ) : null}
+            {/* Ruling 294: the reading this person's own runs reported. Ruling
+                146(a) already said readings "are already rendered per person on
+                Insights ... and on Profile, which is where a fact about
+                somebody's account belongs" — Profile never rendered one, so
+                this closes a drift rather than opening a disclosure. Scoped to
+                the viewer in `ownReading`, which matters more here than on
+                Insights: that page is org-admin gated, and this card is the
+                first non-admin surface to carry a utilization figure at all. */}
+            {usage ? (
+              <Pill kind={usagePillKind(usage)} sm>
+                {usageText(usage)}
+              </Pill>
+            ) : null}
           </div>
+          {usage ? (
+            <div className="pol-note after" data-usage={usage.rateLimitType || "window"}>
+              <Icon name="clock" />
+              <span>
+                <strong>Usage</strong>
+                {" · "}
+                Observed <LocalDayDotTime iso={usage.observedAt} />, from the last{" "}
+                {label} run billed to this account. Viberr cannot ask{" "}
+                {VENDOR[backend]} how much of a window is left, so this is the
+                last figure a run reported and not a live reading: it moves only
+                when another run finishes.
+                {usage.resetsAt ? (
+                  <>
+                    {" "}The window resets <LocalDayDotTime iso={usage.resetsAt} />.
+                  </>
+                ) : null}
+                {usage.isUsingOverage
+                  ? " This account is running on overage."
+                  : ""}
+              </span>
+            </div>
+          ) : null}
           {/* Design pass 2026-09-08: a forty-word sentence is prose, not a
               datum — as a `.kv-row` value it sat right-aligned across the
               card's width with no measure. It is the sheet's note idiom now

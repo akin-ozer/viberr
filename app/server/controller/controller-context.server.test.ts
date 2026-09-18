@@ -4,6 +4,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
+import type { HomeProjectCard } from "~/features/home/home-query.server";
 
 /**
  * Ruling 121 — the per-turn context READ.
@@ -18,6 +19,7 @@ import type { ControllerToolUser } from "./controller-tool-guards.server";
 
 let app: AppTestContext;
 let arda: ControllerToolUser;
+let selin: ControllerToolUser;
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
@@ -27,6 +29,9 @@ beforeAll(async () => {
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   const found = findUserByEmail(app.db, "arda@viberr.dev")!;
   arda = { id: found.id, email: found.email, name: found.name };
+  // A plain member, contributor on this board: the case ruling 309 is about.
+  const s = findUserByEmail(app.db, "selin@viberr.dev")!;
+  selin = { id: s.id, email: s.email, name: s.name };
 });
 afterAll(() => app.cleanup());
 
@@ -236,6 +241,69 @@ describe("gatherControllerContext", () => {
     expect(read.text).toContain(`- ${SLUG} · Viberr Core · your role admin`);
   });
 
+  /**
+   * Ruling 307 (pass 37, F37-142). The controller found this by describing what
+   * talking to it is actually like: "the turn's context block gives me your
+   * visible PROJECTS, not the board. So every board question starts from zero.
+   * On the turn where you said 'drive it', you waited through `list_runs`,
+   * `list_decisions`, `list_tasks` and three `get_task`s before I did one
+   * useful thing. For a person who just wants 'what is blocked?', that latency
+   * is the entire experience of talking to me."
+   *
+   * The numbers were never missing. `listHomeProjectsForUser` computes them for
+   * the home page's own cards, and this read called it and discarded them.
+   */
+  it("ruling 307: each project carries its state, not only its name", async () => {
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const read = gatherControllerContext(app.db, {
+      projectSlug: null,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: drop the second line and every board question starts from zero.
+    expect(read.text).toMatch(/\d+ tasks, \d+ not done · \d+ running/);
+    expect(read.text).toMatch(/waiting on YOU/);
+  });
+
+  it("ruling 307: a project with nothing waiting says so in words, never a blank", async () => {
+    const { projectStateLines } = await import("./controller-context.server");
+    const base: HomeProjectCard = {
+      slug: "p",
+      name: "P",
+      archived: false,
+      key: "P",
+      repo: null,
+      desc: "",
+      stages: [
+        { id: "build", name: "Build", color: "#111" },
+        { id: "done", name: "Done", color: "#222" },
+      ],
+      dist: { build: 3, done: 7 },
+      total: 10,
+      running: 1,
+      waiting: 0,
+      overrideWaiting: 0,
+      members: [],
+      updatedAt: "2026-09-16T00:00:00.000Z",
+      accent: "#5b76fe",
+      repoAccess: null,
+    };
+    // CANARY: render "" for the no-decisions case and this reads as either
+    // "none" or "not computed", which is the thing it exists to prevent.
+    const quiet = projectStateLines(base, "admin");
+    expect(quiet).toContain("10 tasks, 3 not done · 1 running · nothing waiting on you");
+
+    // The org-admin override is named as its own case, never folded into
+    // "waiting on YOU" — the home page's own rule (R8-3).
+    const viaOverride = projectStateLines(
+      { ...base, waiting: 0, overrideWaiting: 2 },
+      "org admin override",
+    );
+    expect(viaOverride).toContain("2 waiting on a member");
+    expect(viaOverride).not.toContain("waiting on YOU");
+  });
+
   it("appends the surface hint when the dock supplied one, and never otherwise", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const withHint = gatherControllerContext(app.db, {
@@ -353,6 +421,115 @@ describe("gatherControllerContext", () => {
     const rows = read.text.split("\n").filter((l) => /^- [A-Z]+-\d+ · /.test(l));
     expect(rows.length).toBeLessThanOrEqual(BOARD_CONTEXT_TASKS);
     expect(read.text).toMatch(/- \.\.\. \d+ more open tasks; list_tasks reads them/);
+  });
+
+  /**
+   * Ruling 309 (pass 37). The instance scope has named the person's role per
+   * project since ruling 307; the two BOUND scopes — the ones a person is
+   * standing in when they ask for something — named nothing about them at all.
+   * The controller, asked on a live task what the person in front of it could
+   * do, answered right and then said how: "your project role was not in
+   * anything I had... I bridged that gap with a rule from my playbook", having
+   * spent a `whoami` round trip before it could help with anything.
+   */
+  it("ruling 309: task and board scope name the asking person's live authority", async () => {
+    const { gatherControllerContext } = await import("./controller-context.server");
+    // CANARY: drop `authority` from either header and a bound conversation is
+    // back to inferring what the person may do from their ORG role.
+    const task = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(task.text).toContain("your authority: project role contributor");
+    const board = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(board.text).toContain("your authority: project role contributor");
+  });
+
+  it("ruling 309: the role is the ASKER's, not the board's strongest member", async () => {
+    // The board roster was already in the board block ("members: … (admin)"),
+    // which is why this looked covered and was not: the roster says who is on
+    // the project, never which of them is asking. Two people, one board, one
+    // turn-shaped read each.
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const mine = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    const theirs = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(mine.text).toContain("your authority: project role admin");
+    expect(theirs.text).toContain("your authority: project role contributor");
+    expect(theirs.text).not.toContain("project role admin");
+  });
+
+  it("ruling 309: a live demotion reaches the next turn", async () => {
+    // The whole premise of putting this in the context read rather than the
+    // system preamble: it is taken again every turn, so it cannot go stale
+    // inside a long conversation.
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const { setMemberRole } = await import("~/features/policy/policy-actions.server");
+    const before = gatherControllerContext(app.db, {
+      projectSlug: SLUG, taskKey: "VIB-142", user: selin, dataRoot: app.dataRoot,
+    });
+    expect(before.text).toContain("project role contributor");
+    await setMemberRole(
+      app.db,
+      { projectSlug: SLUG, targetUserId: selin.id, role: "viewer" },
+      { userId: arda.id, label: arda.email },
+      { dataRoot: app.dataRoot },
+    );
+    try {
+      const after = gatherControllerContext(app.db, {
+        projectSlug: SLUG, taskKey: "VIB-142", user: selin, dataRoot: app.dataRoot,
+      });
+      expect(after.text).toContain("your authority: project role viewer");
+    } finally {
+      await setMemberRole(
+        app.db,
+        { projectSlug: SLUG, targetUserId: selin.id, role: "contributor" },
+        { userId: arda.id, label: arda.email },
+        { dataRoot: app.dataRoot },
+      );
+    }
+  });
+
+  it("task scope says when the PROJECT is archived, not only the task", async () => {
+    // The authority line promises "every action"; the prompt's own exceptions
+    // say an archived project refuses every action first. `taskContext` had
+    // `project.archived` in hand and printed only the task's own flag, so a
+    // task-scoped turn on a project archived mid-conversation had no fact for
+    // that clause to bind to. CANARY: drop the project marker and this fails.
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const { setProjectArchived } = await import(
+      "~/features/project-settings/settings-actions.server"
+    );
+    const actor = { userId: arda.id, label: arda.email };
+    await setProjectArchived(app.db, { projectSlug: SLUG, archived: true }, actor, {
+      dataRoot: app.dataRoot,
+    });
+    try {
+      const read = gatherControllerContext(app.db, {
+        projectSlug: SLUG, taskKey: "VIB-142", user: arda, dataRoot: app.dataRoot,
+      });
+      expect(read.text).toContain("project ARCHIVED (read-only)");
+    } finally {
+      await setProjectArchived(app.db, { projectSlug: SLUG, archived: false }, actor, {
+        dataRoot: app.dataRoot,
+      });
+    }
   });
 
   it("never exceeds the block budget", async () => {

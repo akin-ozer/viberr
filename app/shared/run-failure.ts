@@ -115,8 +115,21 @@ export interface RunFailureFacts {
  * never local, whatever its prose says. Client-safe (a regex), shared so the
  * two classifiers cannot drift.
  */
+/**
+ * Ruling 212: the patterns here are what decides whether a failed run is
+ * reported as "this deployment could not reach the provider" or as "review its
+ * authentication and runtime configuration" — and the second sentence sends a
+ * person to re-issue a credential that was never at fault.
+ *
+ * The list was written against Node's error codes and Node's prose. The Codex
+ * CLI is Rust and says it differently, so a name-resolution failure matched
+ * nothing: live on SHOP-10, `failed to lookup address information: Name does
+ * not resolve` was classified `unknown` and the packet told the owner to check
+ * authentication. Its TLS sibling matched only by accident, through `\btls\b`
+ * inside a `close_notify` message.
+ */
 export const LOCAL_NETWORK_FAILURE_RE =
-  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns/i;
+  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify/i;
 
 /** The machine code such a failure carries, when it names one
  *  (`UNKNOWN_CERTIFICATE_VERIFICATION_ERROR`, `ECONNRESET`, `ERR_TLS_...`),

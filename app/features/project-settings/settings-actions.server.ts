@@ -1,4 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
+import { readTaskFile } from "~/server/files/task-writer.server";
+import type { FileLeaseRow } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, ROLE_LABEL } from "~/shared/rbac";
 import {
   isReservedTaskPrefix,
@@ -39,6 +41,7 @@ import {
   getProjectGithubContext,
   type GithubContextOptions,
 } from "~/server/github/github-context.server";
+import { releaseProjectConversations } from "~/server/controller/controller-conversations.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -456,6 +459,158 @@ export async function setRequiredReviewers(
   return {
     toast: views.length === 0 ? "Required reviewers cleared" : `Required reviewers saved: ${named}`,
     rules: views,
+    changed: true,
+  };
+}
+
+const RULINGS_KB_AUDIT_ACTION = "project.rulings_kb.updated";
+
+/**
+ * Ruling 239 (pass 37): name the project's RULINGS knowledge base, or clear it
+ * with `dir: null`.
+ *
+ * Same authority as every other project policy (`edit-policy`), and validated
+ * against the store the same way a required reviewer is validated against the
+ * deployed agents: a directory no knowledge base occupies is refused by name
+ * with nothing written, because a rulings KB that resolves to nothing would
+ * inject silently-empty context into every run on the project and read, on
+ * every surface, as though the project had settled rules it has not.
+ */
+export async function setProjectRulingsKb(
+  db: DatabaseSync,
+  input: { projectSlug: string; dir: string | null },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; dir: string | null; changed: boolean }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
+  const wanted = input.dir?.trim() ? input.dir.trim() : null;
+  if (wanted !== null) {
+    const { listKnowledgeBases } = await import("~/server/org/resources.server");
+    const known = listKnowledgeBases(db, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});
+    const match = known.find((kb) => kb.dir === wanted);
+    if (!match) {
+      throw AppError.validation(
+        `No knowledge base lives at "${wanted}". ` +
+          (known.length
+            ? `The store has: ${known.map((kb) => kb.dir).join(", ")}.`
+            : "The store has none yet, so create one first.") +
+          " Name the store DIRECTORY, not the knowledge base's display name or id.",
+      );
+    }
+  }
+  let changed = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const before = parsed.frontmatter.rulingsKb ?? null;
+    changed = before !== wanted;
+    if (!changed) return;
+    parsed.frontmatter.rulingsKb = wanted;
+  });
+  if (!changed) {
+    return {
+      toast: wanted
+        ? `Rulings knowledge base unchanged: ${wanted}`
+        : "This project already has no rulings knowledge base",
+      dir: wanted,
+      changed: false,
+    };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: RULINGS_KB_AUDIT_ACTION,
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { dir: wanted },
+  });
+  return {
+    toast: wanted
+      ? `Rulings knowledge base set to ${wanted}. Every agent on this project reads it, and so does the controller while it works here`
+      : "Rulings knowledge base cleared",
+    dir: wanted,
+    changed: true,
+  };
+}
+
+const FILE_LEASES_AUDIT_ACTION = "project.file_leases.updated";
+
+/**
+ * Ruling 245 (pass 37, F37-74): set the project's per-file LEASES, or clear
+ * them with an empty list.
+ *
+ * Same authority as every other project policy (`edit-policy`), and validated
+ * against the board the same way a rulings KB is validated against the store: a
+ * lease naming a task that does not exist would refuse deliveries in the name of
+ * nobody, and a person meeting that refusal could not act on it.
+ *
+ * Two leases may not cover the same glob. Which of them owns a file would then
+ * depend on list order, and "who owns this file" is the one question a lease
+ * exists to answer.
+ */
+export async function setProjectFileLeases(
+  db: DatabaseSync,
+  input: { projectSlug: string; leases: { paths: string[]; taskKey: string; reason: string }[] },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; leases: FileLeaseRow[]; changed: boolean }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
+  const cleaned: FileLeaseRow[] = [];
+  const claimed = new Map<string, string>();
+  for (const raw of input.leases) {
+    const paths = [...new Set(raw.paths.map((p) => p.trim()).filter(Boolean))];
+    if (paths.length === 0) {
+      throw AppError.validation("A lease needs at least one path. Drop the row, or give it a path.");
+    }
+    const taskKey = raw.taskKey.trim();
+    const task = readTaskFile(
+      ctx.dataRoot
+        ? { projectSlug: input.projectSlug, taskKey, dataRoot: ctx.dataRoot }
+        : { projectSlug: input.projectSlug, taskKey },
+    );
+    if (!task) {
+      throw AppError.validation(
+        `${taskKey} is not a task in this project, so it cannot hold a lease. ` +
+          "A lease refuses other tasks' deliveries in its holder's name, and a holder nobody " +
+          "can open is a refusal nobody can act on.",
+      );
+    }
+    for (const glob of paths) {
+      const already = claimed.get(glob);
+      if (already && already !== taskKey) {
+        throw AppError.validation(
+          `Two leases both cover \`${glob}\` (${already} and ${taskKey}). ` +
+            "Which one owns it would depend on list order, and that is the one question a lease answers.",
+        );
+      }
+      claimed.set(glob, taskKey);
+    }
+    cleaned.push({ paths, taskKey, reason: raw.reason.trim() });
+  }
+  let changed = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const before = JSON.stringify(parsed.frontmatter.fileLeases ?? []);
+    changed = before !== JSON.stringify(cleaned);
+    if (!changed) return;
+    parsed.frontmatter.fileLeases = cleaned;
+  });
+  if (!changed) {
+    return { toast: "File leases unchanged", leases: cleaned, changed: false };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: FILE_LEASES_AUDIT_ACTION,
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { leases: cleaned.map((l) => `${l.taskKey}: ${l.paths.join(", ")}`).join(" | ") },
+  });
+  return {
+    toast:
+      cleaned.length === 0
+        ? "File leases cleared"
+        : `File leases saved: ${cleaned.map((l) => `${l.paths.join(", ")} to ${l.taskKey}`).join("; ")}`,
+    leases: cleaned,
     changed: true,
   };
 }
@@ -1262,6 +1417,13 @@ export async function deleteProject(
     label: actor.label,
   });
   deleteRepoHealth(db, input.projectSlug);
+  // Ruling 274 (F37-107): the fourth app-owned table, and the one whose orphan
+  // is not merely stale. A conversation's `project_slug` is what `slugOf()`
+  // defaults to, so a conversation left bound to a deleted slug acts on
+  // whatever comes back under it — and a slug comes back the ordinary way, by
+  // creating a project with the same name. The transcript is kept; only the
+  // binding is released, with a message on the conversation saying why.
+  releaseProjectConversations(db, input.projectSlug, projectName);
 
   recordAudit(db, {
     action: "project.deleted",

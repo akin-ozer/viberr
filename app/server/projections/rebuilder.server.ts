@@ -4,6 +4,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
+import { isAtAcceptanceBoundary } from "~/shared/mapping/task.server";
 import {
   acceptanceBlockedReason,
   activeWorkRevision,
@@ -15,6 +16,7 @@ import {
   supportingEngagements,
   type TaskFrontmatter,
   type Validation,
+  type Waiting,
 } from "~/schemas/task-file.schema";
 import { verdictGateReason } from "~/server/github/pr-human-approval.server";
 import {
@@ -23,6 +25,10 @@ import {
   type RequiredReviewerView,
 } from "~/server/tasks/required-reviewers.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
+import {
+  clearProjectionFault,
+  recordProjectionFault,
+} from "./store-health.server";
 import {
   getDataRoot,
   goalFilePath,
@@ -152,6 +158,9 @@ interface ProjectContextRow {
   slug: string;
   repo: string | null;
   stages_json: string;
+  /** Ruling 225 (amended): the stage graph, for the acceptance-boundary test —
+   *  the one acceptance gate `acceptanceBlockReason` deliberately leaves out. */
+  workflow_json: string;
   required_reviewers_json: string;
 }
 
@@ -472,12 +481,14 @@ export function rebuildTaskFile(
 
   // Project context (already-projected row): stages for reference checks,
   // default repo, member ids for guest flags.
-  // SAFETY: the SELECT names exactly ProjectContextRow's four members;
-  // 0001_baseline declares `slug`, `stages_json` and `required_reviewers_json`
-  // NOT NULL and `repo` nullable, which is how the row types them.
+  // SAFETY: the SELECT names exactly ProjectContextRow's five members;
+  // 0001_baseline declares `slug`, `stages_json`, `workflow_json` and
+  // `required_reviewers_json` NOT NULL and `repo` nullable, which is how the
+  // row types them.
   const project = db
     .prepare(
-      `SELECT slug, repo, stages_json, required_reviewers_json FROM projects WHERE slug = ?`,
+      `SELECT slug, repo, stages_json, workflow_json, required_reviewers_json
+         FROM projects WHERE slug = ?`,
     )
     .get(slug) as ProjectContextRow | undefined;
   // SAFETY: `stages_json` has ONE writer — rebuildProjectFile above stores
@@ -485,6 +496,12 @@ export function rebuildTaskFile(
   // carries an `id`. Only the ids are read here.
   const stageIds: string[] = project
     ? (JSON.parse(project.stages_json) as { id: string }[]).map((s) => s.id)
+    : [];
+  // SAFETY: same single writer as `stages_json` — `rebuildProjectFile` stores
+  // `JSON.stringify(fm.workflow)`, whose entries the project-file schema
+  // guarantees carry `from`/`to`. Only those two are read here.
+  const projectWorkflow: { from: string; to: string }[] = project
+    ? (JSON.parse(project.workflow_json) as { from: string; to: string }[])
     : [];
   // SAFETY: same single writer — `JSON.stringify(resolveRequiredReviewers(fm))`.
   const requiredReviewers: RequiredReviewerView[] = project
@@ -509,12 +526,115 @@ export function rebuildTaskFile(
   // — reads `task_projections`, so normalizing once here fixes all of them
   // consistently. The canonical task file is untouched: move the task back out
   // of the terminal stage and its stored `waiting` applies again.
-  const projectedWaiting = isTerminalStage(
+  // Why the acceptance gate is computed HERE and not inline in the upsert: the
+  // waiting derivation below needs to know whether a human could accept this
+  // task right now, and the projected column needs the same answer. One call,
+  // one answer — two calls could drift.
+  const acceptanceRefusal = acceptanceBlockReason(fm, {
+    validation: derivedValidation,
+    blockedPacket,
+    requiredReviewers,
+  });
+
+  // Ruling 225 (F37-45): a task resting on a CLOCK is not waiting on a person.
+  //
+  // `waiting: "human"` in a task file means "no agent is working; a human is
+  // next" — it is what `clearWaitingToHuman` writes when the last run ends.
+  // Every waiting-sensitive surface renders that as the sentence "waiting on a
+  // human", which was true while the only way forward was a person. Ruling 224
+  // made it false: a task whose quota window is shut now resolves its packet by
+  // writing a `run-operator` schedule and picks ITSELF back up when the window
+  // reopens. Live on pass 37 four tasks sat exactly there — packet resolved,
+  // schedule pending for 02:28 UTC, nothing asked of anybody — and the board
+  // said "waiting on a human" on all four cards while its header counted "5
+  // waiting on a human in this project". The packet that put them there had
+  // promised, in viberr's own words, "Nothing runs until then and the board
+  // says so." It did not.
+  //
+  // The narrow reading — only quota waits count — would be a second lie the
+  // day something else writes a schedule, so the predicate is about the STATE,
+  // not its cause: a pending occurrence exists, and nothing else is pending on
+  // a person.
+  //
+  // That last clause is the one that matters. A human-actionable decision
+  // OUTRANKS the clock: a task with an open packet, a live recommendation, or
+  // a completion a human could accept right now still reads "waiting on you",
+  // because the schedule does not take that work off anybody's hands — it only
+  // says the task will also move on its own if nobody gets to it. Getting this
+  // backwards would not soften a lie, it would HIDE a decision, and
+  // `decisionsRequiring` reads this very column.
+  //
+  // Derived, never stored: like LV-20's terminal-stage `"none"` above and
+  // `validation: "bypassed"`, the canonical file keeps saying `human`. Nothing
+  // authors `waiting: schedule`, so a file that somehow carries one projects as
+  // whatever it has actually earned here.
+  /**
+   * Ruling 225, amended again — and this one was caught on the live board, not
+   * by reading.
+   *
+   * `acceptanceRefusal === null` is NOT "a human could accept this". The stage
+   * gate is the ONE acceptance refusal `acceptanceBlockReason` deliberately
+   * leaves out, because it turns on the project's workflow graph rather than on
+   * anything in the task file (see that function's own note). So a task sitting
+   * at an early stage with nothing delivered has no refusal to report — not
+   * because it is acceptable, but because the only thing refusing it was not
+   * consulted.
+   *
+   * Live: SHOP-21 at Build, no revision, no PR, a `run-operator` schedule
+   * pending for 07:29, and its card and rail still read "waiting on a human"
+   * after this ruling shipped. Nobody can accept a task at Build, and the
+   * decisions inbox was not counting it either — the board's own "Waiting on
+   * me" tally read zero while the card named a person.
+   */
+  const couldBeAcceptedNow =
+    acceptanceRefusal === null &&
+    isAtAcceptanceBoundary(
+      fm.stage,
+      stageIds.map((id) => ({ id })),
+      projectWorkflow,
+    );
+
+  const restsOnSchedule =
+    // Only the state that actually says the false sentence. `waiting: "none"`
+    // renders NO wait tag at all, so it tells nobody anything and needs no
+    // correcting; `"agent"` is a run in flight. Narrowing this to the one
+    // stored value the ruling is about is what keeps the derivation from
+    // inventing a claim where there was none.
+    fm.waiting === "human" &&
+    !parsed.packet &&
+    fm.recommendations.length === 0 &&
+    // Ruling 225 (amended): "nothing a human could accept right now" — the
+    // stage gate included, which `acceptanceRefusal` alone omits.
+    !couldBeAcceptedNow &&
+    // Ruling 131(d): a task that waits on other work is HELD, and the schedule
+    // runner refuses its occurrence on exactly those grounds — "waits on other
+    // work (…) — no operator run was started; Viberr releases the task when
+    // every entry is done." A card reading "resumes Sep 14 · 02:28" over an
+    // occurrence the runner will refuse is the very lie this ruling removes,
+    // reintroduced by it. What holds such a task is the dependency, and the
+    // board already says so.
+    fm.blockedBy.length === 0 &&
+    // And the same again for an archived task. The schedule runner refuses its
+    // occurrence with its own outcome (`skipped-archived`, kept distinct from
+    // `skipped-done` so the note does not tell an archived task it was
+    // "already Done"), so a resume time on that card promises a run that will
+    // not happen. The terminal-stage case is already handled above, by LV-20's
+    // `none`. R14-3 archiving removes a task from every view but the Archived
+    // filter — and that filter still draws the card, and the card still draws
+    // this tag, so "a consumer filters it out" is not true here.
+    !fm.archived &&
+    fm.schedules.some((occurrence) => occurrence.status === "pending");
+
+  const projectedWaiting: Waiting = isTerminalStage(
     fm.stage,
     stageIds.map((id) => ({ id })),
   )
     ? "none"
-    : fm.waiting;
+    : restsOnSchedule
+      ? "schedule"
+      : fm.waiting === "schedule"
+        ? "human"
+        : fm.waiting;
 
   // Stored readiness is NULL when the field was missing/invalid in the file
   // (a readiness-path diagnostic exists in that case).
@@ -563,12 +683,12 @@ export function rebuildTaskFile(
        (project_slug, task_key, title, stage, readiness, stored_readiness,
         waiting, urgent, priority, labels_json, due_date, blocked_by_json, archived, validation, validation_block_reason, acceptance, continuity, owner_user_id, specialist_json,
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
-        work_revision_sha, goal, packet_json, recommendation_count,
+        work_revision_sha, goal, packet_json, recommendation_count, recommendation_kinds,
         schedules_json, event_count, comment_count,
         goal_id, goal_link_index,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -591,6 +711,7 @@ export function rebuildTaskFile(
        goal = excluded.goal,
        packet_json = excluded.packet_json,
        recommendation_count = excluded.recommendation_count,
+       recommendation_kinds = excluded.recommendation_kinds,
        schedules_json = excluded.schedules_json,
        event_count = excluded.event_count,
        comment_count = excluded.comment_count,
@@ -617,11 +738,7 @@ export function rebuildTaskFile(
     JSON.stringify(fm.blockedBy),
     fm.archived ? 1 : 0,
     derivedValidation,
-    acceptanceBlockReason(fm, {
-      validation: derivedValidation,
-      blockedPacket,
-      requiredReviewers,
-    }),
+    acceptanceRefusal,
     // N20-14 (§5c): the durable force-accept fact, projected for the display arm.
     fm.acceptance ?? null,
     // D4: runtime-continuity health, derived from the timeline above.
@@ -648,6 +765,10 @@ export function rebuildTaskFile(
     parsed.goal,
     parsed.packet ? JSON.stringify(parsed.packet) : null,
     fm.recommendations.length,
+    // Sorted + deduped so the SQL below can ask "is this ONLY acceptances?"
+    // with a plain equality test rather than a LIKE that would also match
+    // `accept_completion,transition`.
+    [...new Set(fm.recommendations.map((r) => r.kind))].sort().join(","),
     JSON.stringify(fm.schedules),
     parsed.timeline.length,
     commentCount,
@@ -668,6 +789,8 @@ export function rebuildTaskFile(
     "",
     nowIso(),
   );
+
+
 
   db.prepare(
     `DELETE FROM task_events WHERE project_slug = ? AND task_key = ?`,
@@ -995,30 +1118,64 @@ export function rebuildPath(
   try {
     const taskMatch = TASK_PATH_RE.exec(rel);
     if (taskMatch) {
-      return rebuildTaskFile(db, taskMatch[1]!, taskMatch[2]!, options);
+      return succeeded(rel, rebuildTaskFile(db, taskMatch[1]!, taskMatch[2]!, options));
     }
     const projectMatch = PROJECT_PATH_RE.exec(rel);
     if (projectMatch) {
-      return rebuildProjectFile(db, projectMatch[1]!, options);
+      return succeeded(rel, rebuildProjectFile(db, projectMatch[1]!, options));
     }
     const goalMatch = GOAL_PATH_RE.exec(rel);
     if (goalMatch) {
-      return rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options);
+      return succeeded(rel, rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options));
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     logger.error("projection rebuild failed", {
       sourcePath: rel,
       err: error instanceof Error ? error : new Error(String(error)),
     });
-    recordProvenance(db, {
-      sourcePath: rel,
-      contentHash: null,
-      action: "error",
-      details: { message: error instanceof Error ? error.message : String(error) },
-    });
+    // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
+    // cannot take the process down — and for the twelve minutes the store was
+    // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
+    // `degraded: []`. The log line stays; the FACT now has somewhere to live.
+    recordProjectionFault(rel, message);
+    // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
+    // it is written to the same store that just failed — so when the store
+    // itself is the fault, this threw out of the catch and `rebuildPath` raised
+    // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
+    // `waiting: agent`), called `reprojectTask`, and died here — so the operator
+    // re-invoke that the resolution owes never ran, and the task sat at
+    // "agent working" with nothing running for eleven minutes. The canonical
+    // write had already succeeded; only the MIRROR failed, and a mirror must
+    // never take down the action that already told the truth.
+    try {
+      recordProvenance(db, {
+        sourcePath: rel,
+        contentHash: null,
+        action: "error",
+        details: { message },
+      });
+    } catch (provenanceError) {
+      logger.warn("could not record the rebuild failure's provenance row either", {
+        sourcePath: rel,
+        err:
+          provenanceError instanceof Error
+            ? provenanceError
+            : new Error(String(provenanceError)),
+      });
+    }
     return { action: "error", kind: "other" };
   }
+}
+
+/** Ruling 217/218: a rebuild that WROTE clears THIS FILE's fault — the mirror
+ *  tracks it again. An `ignored` path is not a projection source and says
+ *  nothing either way, so it never clears. Nor does a success here speak for
+ *  any other file: that was ruling 217's own defect, fixed by 218. */
+function succeeded(rel: string, result: RebuildFileResult): RebuildFileResult {
+  if (result.action !== "error") clearProjectionFault(rel);
+  return result;
 }
 
 // --------------------------------------------------------- scoped rescan

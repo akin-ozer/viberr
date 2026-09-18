@@ -1,4 +1,4 @@
-import { readdirSync, statSync, unlinkSync, type Dirent } from "node:fs";
+import { readFileSync, readdirSync, statSync, unlinkSync, type Dirent } from "node:fs";
 import path from "node:path";
 import {
   resolveStoreSegment,
@@ -297,4 +297,97 @@ export function attachmentContentType(name: string): {
   return type
     ? { type, inline: true }
     : { type: "application/octet-stream", inline: false };
+}
+
+/**
+ * Ruling 293 (pass 37, F37-128): the evidence a reviewer was ASKED to attach,
+ * read as text.
+ *
+ * A task's attachments are where the proof lives. On this board the SHOP-37
+ * deliverer put its mutation proof in one (`mutation-proof-…txt`: the mutant
+ * diff and both vitest runs, raw); the SHOP-42 reviewer put "full before/after
+ * captures and audit table" in `shop-42-review-evidence.md`; the SHOP-28
+ * architect wrote two follow-up task specs into one, "including the literal
+ * code to land". Every project convention on this instance tells agents to
+ * attach their evidence rather than assert it.
+ *
+ * And the actor a PERSON asks "did it actually prove that?" could read the
+ * sentence claiming the proof and never the proof. The distinction between an
+ * inherited claim and a verified one is the one this whole pass turns on — the
+ * controller made the point itself, about itself, on a run it had sampled:
+ * "the citation is inherited, not verified".
+ *
+ * Text only, and by name. A PNG is not something a reader can take in through
+ * this channel, and saying so is better than handing back bytes it will
+ * describe as if it had looked.
+ */
+export const ATTACHMENT_READ_CHARS = 40_000;
+
+/** Extensions this returns as text. The inline set above is about what a
+ *  BROWSER may render on the app origin, which is a different question. */
+const READABLE_TEXT = new Set([
+  ".txt",
+  ".log",
+  ".md",
+  ".json",
+  ".yml",
+  ".yaml",
+  ".csv",
+  ".diff",
+  ".patch",
+]);
+
+export interface TaskAttachmentRead {
+  name: string;
+  bytes: number;
+  /** Reported, never hidden: a clipped file that reads as complete is how a
+   *  model states half an evidence log as the whole of it. */
+  truncated: boolean;
+  text: string;
+}
+
+/**
+ * One attachment as text, or `null` when this task has no such file. Throws
+ * nothing for a binary: the caller is told what the file IS and that this
+ * channel does not carry it.
+ */
+export function readTaskAttachmentText(
+  slug: string,
+  key: string,
+  name: string,
+  dataRoot?: string,
+): TaskAttachmentRead | { unreadable: string } | null {
+  const wanted = name.trim();
+  if (!wanted) return null;
+  let abs: string;
+  try {
+    // `resolveStoreSegment` is the containment check every store path uses —
+    // a name with a separator or a `..` never leaves the task's own folder.
+    abs = resolveTaskAttachment(slug, key, wanted, dataRoot);
+  } catch {
+    return null;
+  }
+  let st;
+  try {
+    st = statSync(abs);
+  } catch {
+    return null;
+  }
+  if (!st.isFile()) return null;
+  const ext = path.extname(wanted).toLowerCase();
+  if (!READABLE_TEXT.has(ext)) {
+    return {
+      unreadable:
+        `\`${wanted}\` is a ${ext || "typeless"} file (${st.size.toLocaleString("en-US")} bytes). ` +
+        `This reads TEXT attachments only (${[...READABLE_TEXT].join(", ")}). ` +
+        `Open it on the task page rather than describing it from its name.`,
+    };
+  }
+  const raw = readFileSync(abs, "utf8");
+  return {
+    name: wanted,
+    bytes: st.size,
+    truncated: raw.length > ATTACHMENT_READ_CHARS,
+    text: raw.slice(0, ATTACHMENT_READ_CHARS),
+  };
 }

@@ -59,6 +59,68 @@ describe("describeRunFailure", () => {
     expect(spec.options.some((o) => o.kind === "retry_other_backend")).toBe(false);
   });
 
+  /**
+   * Ruling 326 — CONNECTED is not RUNNABLE NOW, and for four days that cost
+   * this board every escalation it tried to raise.
+   *
+   * `ownerHasOther` asked only whether the owner has the other backend
+   * connected, and every option built on it promises a retry that happens NOW
+   * ("Retry @developer on Codex now"). When that backend is itself out of
+   * quota the promise is false — and `operatorOpenPacket` says exactly that and
+   * REFUSES THE WHOLE PACKET: "the dispatch would be HELD and re-scheduled
+   * rather than run, so the person would spend a decision on a wait."
+   *
+   * Two parts of the same server disagreed. Measured on the shopify-clone
+   * board: Codex was recorded out of quota from 2026-09-15 03:26 until
+   * 2026-09-19, and every Claude failure in that window composed a packet the
+   * guard then refused — eleven times, in three bursts, each burst one account
+   * failure taking several tasks out at once. Not one of them produced a
+   * packet.
+   */
+  it("ruling 326: the other backend being OUT OF QUOTA is not an alternative", async () => {
+    const store = setupTestStore(ctx);
+    await connectFakeBackend(store.db, store.users.arda.id, "codex");
+    await connectFakeBackend(store.db, store.users.arda.id, "claude");
+    const spec = {
+      role: "specialist" as const,
+      agentHandle: "developer",
+      profileId: "developer",
+      // A reset the provider DATED in the future, so the wait is on the table —
+      // which is the case that matters: the real remedy for a dated window was
+      // never the other account.
+      failure: failure("quota", {
+        resetsAt: new Date(Date.now() + 3 * 3600_000).toISOString(),
+      }),
+    };
+
+    // Connected and free: the retry is offered, as it always was.
+    const free = describe_(store, spec);
+    expect(free.options.some((o) => o.kind === "retry_other_backend")).toBe(true);
+
+    // The same board, with Codex recorded out of quota for this owner.
+    // CANARY: drop the `otherHold === null` term from `ownerHasOther`.
+    const { recordBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
+    );
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      resetsAtPrecision: "exact",
+      providerText: "You've hit your usage limit",
+      runId: "run_x",
+      observedAt: new Date().toISOString(),
+    });
+    const held = describe_(store, spec);
+    expect(held.options.some((o) => o.kind === "retry_other_backend")).toBe(false);
+    // ...and the prose stops promising it too: the sentence and the option are
+    // built from the same flag, which is why one fix covers both.
+    expect(held.remedy).not.toContain("retried on Codex");
+    // The wait is still there and still recommended — the real remedy for a
+    // dated window was never the other account.
+    expect(held.options.find((o) => o.recommended)?.kind).toBe("wait_for_window");
+  });
+
   it("formats the reset instant absolutely, in UTC", () => {
     expect(formatResetLabel(RESET)).toMatch(/Sep 3, 2026 · 11:50 UTC$/);
     expect(formatResetLabel(null)).toBeNull();
@@ -223,6 +285,23 @@ describe("describeRunFailure", () => {
     const keep = native.options.find((o) => o.kind === "retry_other_backend")!;
     expect(keep.detail).toContain(`on its own \`${defaultModelFor("codex")}\``);
     expect(keep.detail).not.toContain("is a Claude model");
+
+    /**
+     * Ruling 254 (pass 37, F37-83): F36-8 named the model, and the sentence is
+     * FROZEN into the packet when the option is authored. Live, the owner moved
+     * eight profiles from `gpt-5.6-luna` to `opus` while four of these packets
+     * sat open, and every one went on offering "on `sonnet` (Claude's default:
+     * the profile's `gpt-5.6-luna` is a Codex model)" — two now-false claims —
+     * to the person choosing between them. The runs used `opus`, correctly; the
+     * promise was the only wrong thing.
+     *
+     * CANARY: drop "as deployed right now" and the caveat and the sentence goes
+     * back to asserting a model it cannot know will still be deployed.
+     */
+    expect(retry.detail).toContain("as deployed right now");
+    expect(retry.detail).toContain("pins the backend, not the model");
+    expect(retry.detail).toContain("the run follows the deployment");
+    expect(keep.detail).toContain("as deployed right now");
   });
 
   /**
@@ -319,7 +398,17 @@ describe("describeRunFailure", () => {
     expect(op.options[0]).toMatchObject({ kind: "block_on_policy", title: "Re-run the operator now", recommended: true });
 
     const sp = describe_(store, { failure: local(), role: "specialist", agentHandle: "jc-developer", profileId: "jc-developer" });
-    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex", recommended: true });
+    // Ruling 212: the other backend is still OFFERED — the owner has it — but it
+    // is no longer the recommendation, because this fault was on the
+    // deployment's own network path and the other provider is reached over the
+    // same path. Taking it would change the task's model permanently to work
+    // around a DNS or TLS problem that is still there.
+    // CANARY: restore `recommended: true` on the retry_other_backend arm and
+    // viberr's default answer to a local network fault is a model change.
+    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex" });
+    expect(sp.options[0]!.recommended).toBeUndefined();
+    expect(sp.options[0]!.detail).toContain("a change of model rather than a fix");
+    expect(sp.options[1]).toMatchObject({ recommended: true });
     expect(sp.options[1]).toMatchObject({
       kind: "request_edit",
       title: "Retry @jc-developer on Claude now: this deployment could not reach the provider, nothing was changed",
@@ -338,6 +427,185 @@ describe("describeRunFailure", () => {
     expect(d.reason).toContain("the task owner's");
     expect(d.remedy).toContain("no owner to bill");
     expect(d.options.map((o) => o.kind)).toEqual(["request_edit", "redirect"]);
+  });
+
+  /**
+   * Ruling 224 (F37-44). Live on pass 37 the Codex window went at 23:28 with
+   * the provider naming its own reopening ("try again at Sep 14th, 2026 2:27
+   * AM"), and every option on the packet was wrong at the moment it was
+   * offered: the RECOMMENDED one moved the task permanently off the model its
+   * profile declares ("Later runs on this task stay on Claude"), and the
+   * alternative asked a human to assert the window had reset three hours
+   * before it would. Six tasks stalled that way at once.
+   */
+  describe("a spent window the provider dated (ruling 224)", () => {
+    const FUTURE = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+
+    it("offers the wait first, takes the recommendation, and carries the instant", () => {
+      const store = setupTestStore(ctx);
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        profileId: "developer",
+        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: FUTURE }),
+      });
+      // CANARY: drop the wait arm and the recommendation falls back to an
+      // option that changes the deployment's model policy in one click.
+      expect(d.options[0]).toMatchObject({
+        kind: "wait_for_window",
+        recommended: true,
+        dueAt: FUTURE,
+      });
+      expect(d.options[0]!.detail).toContain("the same account and the same model");
+      // The resume is an OPERATOR run, not a blind re-dispatch: hours pass,
+      // and the board may have moved while the task waited.
+      expect(d.options[0]!.detail).toContain("operator run");
+      expect(d.options[0]!.profileId).toBeUndefined();
+      // Exactly one recommendation, and nothing else holds it.
+      expect(d.options.filter((o) => o.recommended)).toHaveLength(1);
+      const sendBack = d.options.find((o) => o.kind === "request_edit");
+      expect(sendBack?.recommended).not.toBe(true);
+      const retry = d.options.find((o) => o.kind === "retry_other_backend");
+      expect(retry?.recommended).not.toBe(true);
+    });
+
+    it("does the same on the OPERATOR's own packet", () => {
+      const store = setupTestStore(ctx);
+      // The operator packet is a different builder with the same defect: its
+      // recommended option asked the human to assert the window had reset.
+      const d = describe_(store, {
+        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: FUTURE }),
+      });
+      expect(d.options[0]).toMatchObject({
+        kind: "wait_for_window",
+        recommended: true,
+        dueAt: FUTURE,
+      });
+      const assertReset = d.options.find((o) => o.kind === "block_on_policy");
+      expect(assertReset).toBeTruthy();
+      // CANARY: leave `recommended: true` on it and viberr recommends the one
+      // statement on this packet that is false at the moment it is offered.
+      expect(assertReset!.recommended).not.toBe(true);
+      expect(d.options.filter((o) => o.recommended)).toHaveLength(1);
+    });
+
+    it("reads the instant off the quota STORE when the run's facts carry none (ruling 224)", async () => {
+      const store = setupTestStore(ctx);
+      // The shape that actually stalls a board: Codex refuses at spawn time, so
+      // no machine rate_limit_event reaches the run and `facts.resetsAt` is
+      // null — while the provider's SENTENCE named the date and the quota store
+      // parsed it. Before this, the wait never appeared on the one packet it
+      // was written for, which the first deploy proved live.
+      const { recordBackendQuotaExhaustion } = await import(
+        "~/server/runtimes/backend-quota.server"
+      );
+      recordBackendQuotaExhaustion(store.db, "claude", {
+        credentialUserId: null,
+        credentialLabel: null,
+        resetsAt: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
+        resetsAtPrecision: "prose",
+        providerText: "You've hit your usage limit… try again at 2:27 AM.",
+        runId: "run_x",
+        observedAt: new Date().toISOString(),
+      });
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        // No resetsAt on the facts at all.
+        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+      });
+      // CANARY: drop `storedQuotaResetIso` and this is false — the fix is inert
+      // on the only failure that produces it.
+      expect(d.options[0]).toMatchObject({ kind: "wait_for_window", recommended: true });
+      expect(d.reason).toContain("reopens at");
+    });
+
+    it("leaves the operator packet alone when the window has no dated reopening", () => {
+      const store = setupTestStore(ctx);
+      const d = describe_(store, {
+        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+      expect(d.options.find((o) => o.recommended)).toMatchObject({
+        kind: "block_on_policy",
+      });
+    });
+
+    it("offers nothing of the kind when the window has no dated reopening", () => {
+      const store = setupTestStore(ctx);
+      // A quota refusal with no reset instant: there is no moment to schedule,
+      // so the old options and the old recommendation stand unchanged.
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+      expect(d.options.find((o) => o.recommended)).toBeTruthy();
+    });
+
+    it("offers nothing of the kind for a window that has already reopened", () => {
+      const store = setupTestStore(ctx);
+      // RESET is in the past: waiting for it is not a remedy, it is a no-op.
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+    });
+
+    it("offers nothing of the kind for a failure that is not a spent window", () => {
+      const store = setupTestStore(ctx);
+      // An auth refusal has a reset instant on its facts too in principle, and
+      // waiting fixes nothing about a rejected credential.
+      const d = describe_(store, {
+        role: "specialist",
+        agentHandle: "jc-developer",
+        failure: failure("auth", { resetsAt: FUTURE }),
+      });
+      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
+    });
+  });
+
+  /**
+   * Ruling 221 (F37-41): `session_missing` now has two roads into it, and the
+   * difference is what a human does next. A vanished session heals itself on
+   * the next fresh run; a session STORE that cannot be opened keeps failing
+   * every resume on this host until the file is repaired, so the sentence has
+   * to say which one happened.
+   */
+  it("names the unreadable STORE rather than a vanished session (ruling 221)", () => {
+    const store = setupTestStore(ctx);
+    const d = describe_(store, {
+      role: "specialist",
+      agentHandle: "developer",
+      failure: {
+        kind: "session_missing",
+        text: "The Codex session could not be resumed — the CLI's own session store on this host could not be opened.",
+        facts: emptyRunFailureFacts("session_missing"),
+      },
+    });
+    // CANARY: drop the branch and a human reads "no longer exists" about a
+    // file that is right there and will break the next resume too.
+    expect(d.reason).toContain("session store on this host could not be opened");
+    expect(d.reason).not.toContain("no longer exists");
+    expect(d.remedy).toContain("repaired or removed");
+  });
+
+  it("keeps the vanished-session sentence for a vanished session (ruling 221)", () => {
+    const store = setupTestStore(ctx);
+    const d = describe_(store, {
+      role: "specialist",
+      agentHandle: "developer",
+      failure: {
+        kind: "session_missing",
+        text: "rollout not found",
+        facts: emptyRunFailureFacts("session_missing"),
+      },
+    });
+    expect(d.reason).toContain("no longer exists");
+    expect(d.remedy).not.toContain("repaired or removed");
   });
 });
 

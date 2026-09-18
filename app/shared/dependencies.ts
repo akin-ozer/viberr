@@ -23,7 +23,17 @@ export type DependencyRef =
 /** The state a reference resolves to at read time. `failed` covers an
  *  archived task and a failed goal link — a wait that can never complete;
  *  `missing` is a reference nothing in the project answers to. */
-export type DependencyState = "open" | "done" | "failed" | "missing";
+/**
+ * F37-63: `cancelled` is its own state, not folded into `failed`.
+ *
+ * A link on a CANCELLED goal that never acquired a task can never acquire one
+ * (`reconcileGoal` early-returns on a terminal chain) and cannot be skipped
+ * (every goal-side remedy refuses with "Goal X is cancelled"), so the wait is
+ * dead. It resolved as `open` before, which is why nothing noticed it. It is
+ * not `failed`, because the surfaces render that as "archived" and a cancelled
+ * chain is a different cause a person needs to read correctly.
+ */
+export type DependencyState = "open" | "done" | "failed" | "missing" | "cancelled";
 
 /** One entry as a surface renders it. */
 export interface DependencyRender {
@@ -136,4 +146,43 @@ export function splitDependencyText(text: string): string[] {
 export interface DependencyReleasePayload {
   entries: string[];
   clearedBy: string | null;
+}
+
+/**
+ * Ruling 186 (pass 37, F37-2): ONE spelling of "this task is held".
+ *
+ * A task with a non-empty `blockedBy` refuses every agent dispatch, the same
+ * way ruling 177's closure refuses one — and for the same reason. Before this,
+ * the hold was enforced by ASKING the model: `runOperator` refused three
+ * triggers (`create`, `transition`, `scheduled`) and every reactive trigger ran
+ * on with a prompt paragraph telling it not to "dispatch delivery work", while
+ * `startAgentRun` checked nothing at all. Live (pass 37, SHOP-2) Viberr wrote
+ * "Held until every entry is done; Viberr releases it then", started a Codex
+ * run 1.9 seconds later, and let it design and commit a whole service onto a
+ * branch cut from a base that predated the work it waited on.
+ *
+ * Every door reads the list and refuses with THIS wording: the operator's
+ * `run_agent`, the controller's `run_agent`, and the task page's Run-an-agent
+ * control (which renders the same sentence before the click, so the words a
+ * person meets are the words the server answers with).
+ *
+ * `verb` completes "…so <verb> is refused", e.g. "running an agent on it".
+ */
+export function holdRefusal(
+  taskKey: string,
+  entries: readonly string[],
+  verb: string,
+): string {
+  return (
+    `${taskKey} waits on ${joinDependencyEntries(entries)} and Viberr is holding it, ` +
+    `so ${verb} is refused. Viberr releases it when every entry is done; ` +
+    `to release it sooner, change what it waits on.`
+  );
+}
+
+/** "A", "A and B", "A, B and C" — the list as a sentence reads it. */
+export function joinDependencyEntries(entries: readonly string[]): string {
+  if (entries.length === 0) return "other work";
+  if (entries.length === 1) return entries[0]!;
+  return `${entries.slice(0, -1).join(", ")} and ${entries[entries.length - 1]!}`;
 }

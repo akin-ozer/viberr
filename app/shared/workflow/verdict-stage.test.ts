@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Engagement } from "~/schemas/task-file.schema";
+import type { Engagement, ReviewVerdict, WorkRevision } from "~/schemas/task-file.schema";
 import { verdictStageFor } from "./verdict-stage";
 
 /**
@@ -46,6 +46,117 @@ const reviewer: Engagement = {
   delivers: false,
   verdictCapable: true,
 };
+
+/**
+ * Ruling 208 (F37-29, live on SHOP-15). A board may declare required reviewers
+ * at DIFFERENT stages — here a code reviewer at Review and an integration
+ * verifier at Verify, which is exactly the shape the controller designed for
+ * the shopify-clone board. Asking whether ANY required reviewer is eligible at
+ * the current stage then answers for the wrong one: the verifier had approved
+ * the delivered revision and is eligible at Verify, so the scan returned null,
+ * `reworkStages` was empty, and `transitionStage` refused "No allowed
+ * transition from Verify to Review" — leaving the task unable to reach the only
+ * stage where the reviewer it is actually waiting on can run.
+ */
+describe("ruling 208: the reviewers who still OWE a verdict decide, not the ones who approved", () => {
+  const TWO_STAGE_BOARD = {
+    stages: [
+      { id: "triage" },
+      { id: "design" },
+      { id: "build" },
+      { id: "review" },
+      { id: "verify" },
+      { id: "done" },
+    ],
+    workflow: [
+      { from: "triage", to: "design" },
+      { from: "design", to: "build" },
+      { from: "build", to: "review" },
+      { from: "review", to: "verify" },
+      { from: "verify", to: "done" },
+    ],
+  };
+  const DEPLOYED_TWO = [
+    { id: "code-reviewer", stages: ["build", "review"], spanAll: false },
+    { id: "integration-verifier", stages: ["review", "verify"], spanAll: false },
+  ];
+  const engagement = (profileId: string): Engagement => ({
+    profileId,
+    backend: "codex",
+    role: profileId,
+    delivers: false,
+    verdictCapable: true,
+  });
+  const rev: WorkRevision = {
+    id: "rev_2",
+    headSha: "b".repeat(40),
+    treeSha: "c".repeat(40),
+    branch: "shop-15",
+    createdAt: "2026-09-13T16:40:00.000Z",
+    sourceProfileId: "infra",
+    kind: "delivered",
+  };
+  const approve = (profileId: string): ReviewVerdict => ({
+    profileId,
+    revisionId: rev.id,
+    headSha: rev.headSha,
+    result: "approve",
+    reason: "ok",
+    at: "2026-09-13T16:45:00.000Z",
+    rounds: 1,
+  });
+
+  it("sends the task back to the stage the MISSING reviewer can run at", () => {
+    // CANARY: ask `eligibleAt(fm.stage)` over ALL required reviewers (the
+    // shipped rule) and this returns null — the verifier's own eligibility at
+    // Verify answers for the code reviewer, and the task is stuck there.
+    expect(
+      verdictStageFor(
+        TWO_STAGE_BOARD,
+        {
+          stage: "verify",
+          engagements: [engagement("code-reviewer"), engagement("integration-verifier")],
+          workRevision: rev,
+          verdicts: [approve("integration-verifier")],
+        },
+        DEPLOYED_TWO,
+      ),
+    ).toBe("review");
+  });
+
+  it("moves nothing once every required reviewer has approved the current revision", () => {
+    expect(
+      verdictStageFor(
+        TWO_STAGE_BOARD,
+        {
+          stage: "verify",
+          engagements: [engagement("code-reviewer"), engagement("integration-verifier")],
+          workRevision: rev,
+          verdicts: [approve("integration-verifier"), approve("code-reviewer")],
+        },
+        DEPLOYED_TWO,
+      ),
+    ).toBeNull();
+  });
+
+  it("moves nothing while the reviewer that owes the verdict CAN run where the task stands", () => {
+    // The verifier owes it and is eligible at Verify: the re-verdict happens
+    // here, so there is no move to make. The old rule got this case right and
+    // it must keep getting it right.
+    expect(
+      verdictStageFor(
+        TWO_STAGE_BOARD,
+        {
+          stage: "verify",
+          engagements: [engagement("code-reviewer"), engagement("integration-verifier")],
+          workRevision: rev,
+          verdicts: [approve("code-reviewer")],
+        },
+        DEPLOYED_TWO,
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("verdictStageFor: only a task at or past the review stage is returned", () => {
   it("moves nothing from a WORK stage, however the reviewers declared their stages", () => {

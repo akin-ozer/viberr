@@ -180,6 +180,11 @@ describe("loader", () => {
       // check-runs or reviews — the row now CARRIES the facts instead of
       // narrowing them away, which is what the finding was about.
       checks: null,
+      // Ruling 276: which KIND of null. The fixture's ref carries no `checks`
+      // key at all, so this is "never read" rather than "GitHub reported no
+      // check runs" — two facts the row now keeps apart for the readers that
+      // act on them differently.
+      checksRead: false,
       review: null,
       // F17-L6: the demo fixture's PR carries no reconciled mergeability.
       mergeable: null,

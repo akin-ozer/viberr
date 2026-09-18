@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   createSdkMcpServer,
-  tool,
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+// Ruling 296: every tool on this server refuses arguments it does not
+// declare, instead of silently dropping them and answering anyway.
+import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import {
   recordAudit,
   type AuditDetails,
@@ -19,8 +21,18 @@ import {
 } from "~/server/ops/health-snapshot.server";
 import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
-import { getRun, runLineStats } from "~/server/runtimes/run-store.server";
+import {
+  getRun,
+  listLiveRunRows,
+  listRunsForTaskRows,
+  runLineStats,
+} from "~/server/runtimes/run-store.server";
 import type { AgentRunRow } from "~/server/runtimes/run-store.server";
+import type {
+  RunBackend,
+  RunKind,
+  RunState,
+} from "~/features/runtime/runtime-types";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   countConnectedUsers,
@@ -105,6 +117,18 @@ export const CONTROLLER_OPS_INSTRUCTIONS =
  */
 const DEFAULT_LOG_LINES = 200;
 const MAX_LOG_LINES = 500;
+
+/** Ruling 265: page bounds for `list_runs`. A live listing on a busy instance
+ *  is tens of rows, not thousands, and a task's whole run history is the other
+ *  arm — both are summaries, so the default is generous and the max is a stop. */
+const DEFAULT_RUN_ROWS = 50;
+const MAX_RUN_ROWS = 200;
+
+/** Ruling 302: present on a `list_runs` reply ONLY when rows were left out,
+ *  naming how many and the argument that returns them. */
+interface RunWindowNote {
+  truncated?: string;
+}
 
 /** Uniform not-visible copy for a run: a run that does not exist and one the
  *  asker may not read answer identically, so a probe cannot walk run ids
@@ -194,16 +218,79 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
    * that matches nothing — answer the same sentence, so the reply never
    * discloses that a run exists or which project it belongs to.
    */
-  function requireRunVisible(row: AgentRunRow): void {
+  function runVisible(row: AgentRunRow): boolean {
     if (row.kind === "controller") {
-      if (canReadControllerRunLog(db, row, { id: user.id })) return;
-      throw new NotVisibleError(notVisibleRun(row.id));
+      return canReadControllerRunLog(db, row, { id: user.id });
     }
     try {
       requireVisible(row.project_slug, "read this run's log");
+      return true;
     } catch {
-      throw new NotVisibleError(notVisibleRun(row.id));
+      return false;
     }
+  }
+
+  function requireRunVisible(row: AgentRunRow): void {
+    if (!runVisible(row)) throw new NotVisibleError(notVisibleRun(row.id));
+  }
+
+  /** One `list_runs` row. Named, because ruling 268 adds a key that is present
+   *  on exactly one kind of run and the shape has to say so. */
+  interface RunRowView {
+    runId: string;
+    /** Null on a CONTROLLER turn: it belongs to a conversation, not a board. */
+    projectSlug: string | null;
+    taskKey: string | null;
+    /** Present only on a controller turn (ruling 268). */
+    conversationId?: string;
+    kind: RunKind;
+    agent: string;
+    agentProfileId: string;
+    role: string;
+    backend: RunBackend;
+    model: string;
+    state: RunState;
+    phase: string | null;
+    step: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+    turns: number;
+    logLines: number;
+  }
+
+  /** Ruling 265: one run, as `list_runs` reports it. Enough to decide which log
+   *  to read and what a run is doing, and nothing a `get_task` read would not
+   *  already tell the same asker. */
+  function runRow(row: AgentRunRow): RunRowView {
+    // Ruling 268 (F37-100): a CONTROLLER turn has no project and no task —
+    // ruling 99 stores the conversation id in `task_key` because the runs
+    // table has one identity column. Reporting that raw put a `cnv_…` in a
+    // field named `taskKey` with `projectSlug: ""`, so "anything filtering by
+    // task has to know to discard that row". A storage shape is not a reply
+    // shape: a controller row names its conversation and carries no task.
+    const controllerTurn = row.kind === "controller";
+    const view: RunRowView = {
+      runId: row.id,
+      projectSlug: controllerTurn ? null : row.project_slug,
+      taskKey: controllerTurn ? null : row.task_key,
+      kind: row.kind,
+      agent: row.agent_name ?? row.agent_profile_id,
+      agentProfileId: row.agent_profile_id,
+      role: row.role,
+      backend: row.backend,
+      model: row.model,
+      state: row.state,
+      // Ruling 250's pair: the phase is the strip's header and the step is what
+      // the run is doing this second.
+      phase: row.phase,
+      step: row.step,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      turns: row.turns,
+      logLines: runLineStats(db, row.id).count,
+    };
+    if (controllerTurn) view.conversationId = row.task_key;
+    return view;
   }
 
   add(
@@ -258,12 +345,97 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     "instance_health",
   );
 
+  /**
+   * Ruling 302, third sibling. `list_runs` clipped at `limit` and said nothing:
+   * a caller asking "which runs are live right now" got a list that looked
+   * complete, and could not reconcile it with the count `instance_health`
+   * reports for the same instant. `read_run_log` beside it has carried
+   * `olderExist`/`newerExist` and recovery cursors since pass 32, and
+   * `inspect_audit_log` has carried `total`/`shown` since ruling 279. This is
+   * the one that did not.
+   */
+  const windowNote = (total: number, shown: number): RunWindowNote => {
+    if (total <= shown) return {};
+    return {
+      truncated:
+        `${total - shown} more run${total - shown === 1 ? "" : "s"} matched and ` +
+        `${shown} are shown, newest first. Pass limit up to ${MAX_RUN_ROWS} for the rest.`,
+    };
+  };
+
+  add(
+    tool(
+      "list_runs",
+      "Agent runs you can see, as run ids `read_run_log` takes. With no arguments: every run that is LIVE right now across every project visible to you (running, or queued behind the concurrency cap), newest first — the answer to \"which runs are those\" when instance_health reports a live count. With `projectSlug` and `taskKey` together: that task's runs instead, finished ones included, newest first, which is how you reach the log of a run that already failed. Read-only, membership gated; a run in a project you cannot see is simply absent.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z
+          .string()
+          .optional()
+          .describe(
+            "List this task's runs (finished included) instead of the live ones. Needs projectSlug: this server holds no project binding.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .optional()
+          .describe(`Most rows to return, clamped to 1..${MAX_RUN_ROWS} (default ${DEFAULT_RUN_ROWS}).`),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string; limit?: number }) => {
+        const limit = Math.min(
+          Math.max(args.limit ?? DEFAULT_RUN_ROWS, 1),
+          MAX_RUN_ROWS,
+        );
+        if (args.taskKey) {
+          const slug = (args.projectSlug ?? "").trim();
+          if (!slug) {
+            // This server is not bound to a project (its other tools are
+            // instance-wide), so there is no slug to default to. Say which
+            // argument is missing rather than answering an empty list.
+            throw AppError.validation(
+              "Name projectSlug alongside taskKey: list_runs holds no project binding.",
+            );
+          }
+          // The project gate answers first and out loud: a task listing is
+          // asked FOR a project, so "you cannot see this project" is the true
+          // and useful refusal, not an empty list.
+          requireVisible(slug, "read this task's runs");
+          const visible = listRunsForTaskRows(db, slug, args.taskKey)
+            .filter(runVisible)
+            .reverse();
+          const rows = visible.slice(0, limit);
+          auditRead("list_runs", `${slug}/${args.taskKey}`);
+          return json({
+            scope: `${slug}/${args.taskKey}`,
+            total: visible.length,
+            ...windowNote(visible.length, rows.length),
+            runs: rows.map(runRow),
+          });
+        }
+        // The LIVE listing spans every project, so an invisible row is dropped
+        // rather than refused — the same posture `list_projects` takes.
+        const visible = listLiveRunRows(db).filter(runVisible);
+        const rows = visible.slice(0, limit);
+        auditRead("list_runs", "live");
+        return json({
+          scope: "live",
+          total: visible.length,
+          ...windowNote(visible.length, rows.length),
+          runs: rows.map(runRow),
+        });
+      }),
+    ),
+    "list_runs",
+  );
+
   add(
     tool(
       "read_run_log",
       `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
       {
-        runId: z.string().describe("The run id, e.g. from a task's console."),
+        runId: z
+          .string()
+          .describe("The run id, from list_runs (or a task's console)."),
         since: z
           .number()
           .int()
@@ -423,7 +595,20 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         const target = resolveStoreTarget(db, args.kind, args.id, { dataRoot });
         if (!target) throw AppError.notFound("That resource no longer exists.");
         const doc = readStoreDoc(target, args.path);
-        if (!doc) throw AppError.notFound("That file no longer exists.");
+        if (!doc) {
+          // Ruling 246 (F37-75): say what this reader IS, not that the file
+          // "no longer exists" — which claims it once did, and sent the
+          // controller looking for a deletion that never happened. The store
+          // and the git repository are different places, and the caller most
+          // likely to hit this is one that confused them.
+          throw AppError.notFound(
+            `${target.kind === "kb" ? "Knowledge base" : "Skill"} "${target.name}" has no ` +
+              `\`${args.path.join("/")}\`. This reads the org KNOWLEDGE-BASE and SKILL store, ` +
+              "not a git repository — Viberr has no tool that returns repository file contents, " +
+              "so a path from the project's repo will never be found here. Open it on GitHub, or " +
+              "ask an agent on a task with a checkout.",
+          );
+        }
         auditRead("read_store_doc", `${target.kind}/${target.id}`, {
           path: args.path.join("/"),
           truncated: doc.truncated,
@@ -444,6 +629,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   const server = createSdkMcpServer({
     name: CONTROLLER_OPS_MCP_NAME,
     version: "1.0.0",
+    // Ruling 297, corrected: the manifest rides in the system prompt, which
+    // is rebuilt per turn, not here, which is captured once per session.
     instructions: CONTROLLER_OPS_INSTRUCTIONS,
     tools,
   });

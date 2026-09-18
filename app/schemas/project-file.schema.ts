@@ -260,6 +260,24 @@ const projectCredentialPolicySchema = credentialPolicySchema.nullable();
 const guardrailsSchema = z.array(guardrailSchema);
 const requiredReviewersSchema = z.array(requiredReviewerSchema);
 
+/**
+ * Ruling 245: the lease rows, named so the tolerant parser can reach
+ * `.element` — the same shape `requiredReviewersSchema` is extracted for.
+ */
+export const fileLeasesSchema = z.array(
+  z
+    .object({
+      paths: z.array(z.string().min(1)).min(1),
+      taskKey: z.string().min(1),
+      reason: z.string().default(""),
+    })
+    .loose(),
+);
+
+/** The stored lease row, `.loose()` like every other frontmatter row so a
+ *  later version's keys survive a read/write cycle. */
+export type FileLeaseRow = z.infer<typeof fileLeasesSchema>[number];
+
 export const projectFrontmatterSchema = z.object({
   name: projectNameSchema,
   slug: projectSlugSchema,
@@ -275,6 +293,35 @@ export const projectFrontmatterSchema = z.object({
   credentialPolicy: projectCredentialPolicySchema,
   guardrails: guardrailsSchema,
   requiredReviewers: requiredReviewersSchema,
+  /**
+   * Ruling 239 (pass 37): the project's RULINGS knowledge base, by store
+   * directory, or null when the project has not named one.
+   *
+   * Unlike `agents[].resources.kb`, which is a per-profile grant a controller
+   * can forget on the one profile that needed it, this KB reaches EVERY agent
+   * on the project — deliverer, reviewer and operator alike — and the
+   * controller itself while it is scoped to the project. It is the channel for
+   * a rule the project has settled, so the next task does not re-litigate it.
+   *
+   * `nullish().catch(null)` for the same reason every other late field uses it:
+   * a project.md written before this existed parses unchanged.
+   */
+  rulingsKb: z.string().nullish().catch(null),
+  /**
+   * Ruling 245 (pass 37, F37-74): per-file LEASES — which task owns a shared
+   * path until it merges.
+   *
+   * `blockedBy` says "do not START until done" and is the only ordering
+   * primitive the product had, so "both may proceed, this one owns
+   * `pnpm-lock.yaml` until it lands" was unsayable and lived in prose that every
+   * agent re-derived. Live on this pass that cost two decision packets in one
+   * evening and a human decision that could not take effect.
+   *
+   * Empty on every project that declares none, and `catch([])` for the same
+   * reason the field above uses its own catch: a project.md written before this
+   * existed parses unchanged.
+   */
+  fileLeases: fileLeasesSchema.default([]).catch([]),
 });
 export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 
@@ -293,6 +340,8 @@ export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "credentialPolicy",
   "guardrails",
   "requiredReviewers",
+  "rulingsKb",
+  "fileLeases",
 ];
 
 /** Widened to `string` so the raw-key scan below can test membership without
@@ -513,6 +562,17 @@ export function parseProjectFrontmatter(
       "requiredReviewers",
       requiredReviewersSchema,
     ),
+    // Ruling 239: the project's rulings KB. `tolerant` with a null fallback,
+    // like `credentialPolicy` — a garbled value must read as "no rulings KB"
+    // rather than failing the whole project parse, and a project.md written
+    // before this field existed has none.
+    rulingsKb: tolerant(diagnostics, data, "rulingsKb", z.string().nullish(), null) ?? null,
+    // Per-ROW, like every other list this parser reads: one malformed lease must
+    // not drop the others, because a dropped lease silently unblocks a delivery
+    // that a person deliberately fenced off. The field-by-field build is why
+    // this line has to exist at all — `rulingsKb` shipped without it earlier in
+    // this same pass and wrote fine while reading back undefined.
+    fileLeases: tolerantArray(diagnostics, data, "fileLeases", fileLeasesSchema),
   };
 
   if (frontmatter.stages.length === 0) {

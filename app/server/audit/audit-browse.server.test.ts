@@ -45,6 +45,78 @@ function insert(
 }
 
 describe("listRecentAuditEvents", () => {
+  /**
+   * Ruling 234 (F37-52) — the reconcile heartbeat is not a browse row.
+   *
+   * `github.reconcile.task` is written on every completed poller pass per
+   * delivered task, changed or not (F19-22, deliberately). On pass 37's live
+   * instance that was 91 of the panel's 150 rows, with the window spanning 53
+   * minutes. It is excluded HERE and nowhere else: the table, the retention
+   * sweep, the export and `latestTaskReconcileCheckAt` all still see it.
+   */
+  it("excludes the per-tick reconcile heartbeat from the browse", () => {
+    const db = ctx.makeDb();
+    for (let i = 0; i < 5; i++) {
+      insert(db, {
+        id: `h${i}`,
+        occurredAt: `2026-08-22T10:0${i}:00.000Z`,
+        actorLabel: "system",
+        action: "github.reconcile.task",
+        subjectId: "VIB-1",
+        projectSlug: "viberr-core",
+      });
+    }
+    insert(db, {
+      id: "real",
+      occurredAt: "2026-08-22T09:00:00.000Z",
+      actorLabel: "arda@viberr.dev",
+      action: "github.pat.created",
+      subjectId: "pat_1",
+      projectSlug: null,
+    });
+    // The heartbeats are newer, so a plain newest-first window would be all
+    // heartbeat and the PAT change would be the row pushed out.
+    expect(listRecentAuditEvents(db).map((r) => r.action)).toEqual([
+      "github.pat.created",
+    ]);
+  });
+
+  /**
+   * Ruling 234, second half — "Org-scoped" is a QUERY, not a filter over
+   * whatever the unscoped window happened to return. Live, the toggle showed 2
+   * rows against 96 org-scoped events on file, because a busy project filled
+   * the window it was narrowing.
+   */
+  it("orgOnly gets its own window, reaching rows the unscoped one cannot", () => {
+    const db = ctx.makeDb();
+    for (let i = 0; i < 30; i++) {
+      insert(db, {
+        id: `t${i}`,
+        occurredAt: `2026-08-22T11:${String(i).padStart(2, "0")}:00.000Z`,
+        actorLabel: "arda@viberr.dev",
+        action: "task.metadata.updated",
+        subjectId: "VIB-1",
+        projectSlug: "viberr-core",
+      });
+    }
+    insert(db, {
+      id: "signin",
+      occurredAt: "2026-08-21T08:00:00.000Z",
+      actorLabel: "arda@viberr.dev",
+      action: "auth.sign_in",
+      subjectId: "u1",
+      projectSlug: null,
+    });
+    // A window small enough that the sign-in is nowhere near it.
+    const unscoped = listRecentAuditEvents(db, { limit: 5 });
+    expect(unscoped).toHaveLength(5);
+    expect(unscoped.map((r) => r.action)).not.toContain("auth.sign_in");
+    // The scoped query reaches it regardless of how busy the project is.
+    expect(listRecentAuditEvents(db, { limit: 5, orgOnly: true }).map((r) => r.action)).toEqual([
+      "auth.sign_in",
+    ]);
+  });
+
   it("returns events newest-first with org-scoped rows carried through", () => {
     const db = ctx.makeDb();
     insert(db, {

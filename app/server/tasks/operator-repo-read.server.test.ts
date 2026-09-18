@@ -5,7 +5,10 @@ import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
-import { readDefaultBranchFile } from "./operator-repo-read.server";
+import {
+  readDefaultBranchFile,
+  readProjectDefaultBranchFile,
+} from "./operator-repo-read.server";
 import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
 
 /**
@@ -221,5 +224,123 @@ describe("readDefaultBranchFile", () => {
       const result = await read(bad);
       expect(result.kind).toBe("unavailable");
     }
+  });
+});
+
+/**
+ * Ruling 299 (pass 37, F37-134): the CONTROLLER reads the default branch too.
+ *
+ * `read_default_branch_file` was mounted on the operator and nowhere else. The
+ * controller writes the architecture, the knowledge bases and the goals every
+ * agent is measured against, and reviews the packets those agents raise, and it
+ * could not open a file in the repository all of that is about. It found the
+ * gap inside a live security-scoped decision whose central factual claim it had
+ * to take second-hand, and named the cost exactly: "verify the claim against
+ * the repository yourself is the most-repeated rule in this project's own
+ * rulings, and I am structurally unable to follow it."
+ */
+describe("readProjectDefaultBranchFile (ruling 299)", () => {
+  const exec = promisify(execFile);
+  const SLUG = "viberr-core";
+  const REPO = "acme/widgets";
+
+  let ctx: TestDbContext;
+  let db: DatabaseSync;
+  let dataRoot: string;
+  let origins: string;
+
+  async function makeOrigin(): Promise<void> {
+    const bare = path.join(origins, "acme", "widgets.git");
+    mkdirSync(path.dirname(bare), { recursive: true });
+    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
+    const seed = path.join(origins, "seed");
+    mkdirSync(path.join(seed, "services"), { recursive: true });
+    writeFileSync(path.join(seed, "services", "catalog.ts"), "nine routes live here\n");
+    await exec("git", ["init", "-q", "-b", "main", seed]);
+    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", seed, "config", "user.name", "T"]);
+    await exec("git", ["-C", seed, "add", "-A"]);
+    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
+    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
+  }
+
+  async function withOrigin<T>(work: () => Promise<T>): Promise<T> {
+    const configPath = path.join(origins, "gitconfig");
+    writeFileSync(
+      configPath,
+      `[url "${origins}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
+    );
+    const saved = {
+      global: process.env.GIT_CONFIG_GLOBAL,
+      system: process.env.GIT_CONFIG_SYSTEM,
+    };
+    process.env.GIT_CONFIG_GLOBAL = configPath;
+    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+    try {
+      return await work();
+    } finally {
+      for (const [key, value] of [
+        ["GIT_CONFIG_GLOBAL", saved.global],
+        ["GIT_CONFIG_SYSTEM", saved.system],
+      ] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  const readIt = (repoPath: string, repo = REPO) =>
+    withOrigin(() =>
+      readProjectDefaultBranchFile(db, {
+        projectSlug: SLUG,
+        repo,
+        defaultBranch: "main",
+        path: repoPath,
+        dataRoot,
+      }),
+    );
+
+  beforeEach(async () => {
+    ctx = createTestDbContext();
+    db = ctx.makeDb();
+    dataRoot = ctx.makeTempDir();
+    origins = ctx.makeTempDir();
+    await makeOrigin();
+  });
+  afterEach(() => {
+    const dir = projectRepoMirrorDir(SLUG, REPO, dataRoot);
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    ctx.cleanup();
+  });
+
+  it("reads the branch with NO checkout anywhere, building the mirror itself", async () => {
+    // CANARY: require a workspace dir and the controller is back to
+    // second-hand claims about the tree.
+    const read = await readIt("services/catalog.ts");
+    expect(read.kind).toBe("found");
+    expect(read.kind === "found" && read.text).toContain("nine routes live here");
+  });
+
+  it("a path that is not on the branch is ABSENT, which is an answer", async () => {
+    const read = await readIt("services/never-written.ts");
+    // Ruling 246: existence before type. "Not there" must not arrive as a
+    // failure the caller reports as "I could not check".
+    expect(read.kind).toBe("absent");
+  });
+
+  it("refuses a path that is not a repository-relative path, naming the shape it wanted", async () => {
+    for (const bad of ["/etc/passwd", "../outside.md", "main:docs/guide.md"]) {
+      const read = await readIt(bad);
+      expect(read.kind, bad).toBe("unavailable");
+      expect(read.kind === "unavailable" && read.reason).toContain("repository-relative");
+    }
+  });
+
+  it("says WHICH branch it could not reach when no mirror can be built, and never answers from elsewhere", async () => {
+    const read = await readIt("services/catalog.ts", "acme/does-not-exist");
+    expect(read.kind).toBe("unavailable");
+    // CANARY: fall back to some other tree. There is no checkout to fall back
+    // to here, and inventing one is the error this module exists to stop.
+    expect(read.kind === "unavailable" && read.reason).toMatch(/mirror|could not/i);
   });
 });

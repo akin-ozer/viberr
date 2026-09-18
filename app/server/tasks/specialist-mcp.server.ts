@@ -113,6 +113,41 @@ export interface UnresolvedMcpGrant {
   mounted?: boolean;
 }
 
+/**
+ * Ruling 310: what a run is told about a grant that did not arrive.
+ *
+ * Both prompts used to say the same hardcoded sentence — "no such server is in
+ * the org registry" — for every unresolved grant, which is an assertion about a
+ * CAUSE that neither of them checked. `verifyStdioMcpMountsForRun` had already
+ * computed the real one and `UnresolvedMcpGrant.reason` already carried it "in
+ * words a human can act on"; six call sites then did `.map((u) => u.name)` and
+ * dropped it on the floor.
+ *
+ * Caught live. On SHOP-55 the Platform Architect reported that a knowledge-base
+ * MCP server "is not in the org registry" — faithfully relaying what viberr told
+ * it — and the operator checked and corrected the record: the server IS
+ * registered and IS granted to that profile, it simply had not mounted on that
+ * run. The manufactured cause sent a reader after a registration bug that did
+ * not exist, while the real cause went unreported.
+ *
+ * One renderer, because the two prompts saying different things about the same
+ * fact is how the first version drifted into stating a cause at all.
+ */
+export function unavailableMcpSection(grants: readonly UnresolvedMcpGrant[]): string {
+  if (grants.length === 0) return "";
+  const [it, they] = grants.length === 1 ? ["it is", "it"] : ["they are", "them"];
+  const lines = grants.map((g) => `- ${g.name}: ${g.reason}`).join("\n");
+  return (
+    "\n\n---\n# Unavailable MCP servers\n\n" +
+    `Your profile grants ${grants.map((g) => g.name).join(", ")}, but ${it} NOT ` +
+    `mounted on this run. Why, per server, as the server reported it:\n\n` +
+    `${lines}\n\n` +
+    `Do not claim or attempt tools from ${they}; report the gap, and report ` +
+    `THAT reason — do not infer one, and do not assume the grant or the ` +
+    `registration is missing unless the reason says so.`
+  );
+}
+
 export interface SpecialistMcpResolution {
   /** Portable `mcpServers` configs, keyed by server name. */
   servers: Record<string, SpecialistMcpServerConfig>;
@@ -198,9 +233,18 @@ export function resolveSpecialistMcpServersDetailed(
   for (const name of mcpNames) {
     // Built in-process, not a grant: the toolkit/browser/controller servers
     // mount by capability, so a grant naming one changes nothing in either
-    // direction and is NOT reported as unresolved — the persona's "unavailable
-    // servers" copy ("no such server in the org registry") would be false for
-    // a server that IS mounted (C02-R5, pass 32: deliberate, pinned in tests).
+    // direction and is NOT reported as unresolved — reporting a server that IS
+    // mounted as unavailable would be false (C02-R5, pass 32: deliberate,
+    // pinned in tests).
+    //
+    // Ruling 310: pass 32 wrote this exclusion because it saw that the
+    // persona's one hardcoded sentence — "no such server is in the org
+    // registry" — would be a lie here, and it fixed the case rather than the
+    // sentence. The sentence was already a lie for two other reasons this same
+    // loop produces (an unreadable credential, a server that fails to start),
+    // and it stayed one until an agent relayed it to a human as fact. The
+    // prompt now carries whatever `drop` was told, so this exclusion stands on
+    // its own merits and no longer props up a false sentence.
     if (RESERVED_MCP_NAMES.has(name)) continue;
     const row = byName.get(name);
     if (!row || !row.target) {
@@ -340,7 +384,7 @@ export async function verifyStdioMcpMountsForRun(
       if (credProbe.kind === "up") {
         corruptsSharedHealth = false;
         disclosedReason =
-          "it needs a credential to start, which Codex runs do not receive — Codex mounts it unauthenticated; it is healthy for Claude runs";
+          "it needs its stored credential just to start, and a Codex run is pre-flighted without one, so it is not mounted for this run; it is healthy for Claude runs, which receive the credential";
       }
     }
     if (corruptsSharedHealth) {

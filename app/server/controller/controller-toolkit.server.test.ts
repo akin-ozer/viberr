@@ -1,9 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { publishedSchemas } from "../../../test-support/mcp-tool-meta";
 import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
@@ -157,6 +160,380 @@ describe("the tool surface itself encodes the invariants", () => {
 });
 
 /**
+ * Ruling 251 (pass 37, F37-80): the human-decision boundary stays, and stops
+ * being a dead end.
+ *
+ * Live, the owner told the controller "I want to lean on you to finish this
+ * clone rather than clicking through task pages myself". It answered, twice and
+ * correctly, that it could do nothing: "Resolving it is yours on the task page
+ * — I have no tool for packet resolution", and "I tried to withdraw it; it was
+ * raised by the policy engine, so only you can close it." Both true, neither
+ * actionable — nothing let it even SEE what was waiting without calling
+ * `get_task` on a task someone already suspected.
+ */
+describe("list_decisions briefs the person and decides nothing (ruling 251)", () => {
+  const PACKET_TASK = "VIB-142";
+
+  async function openPacketOn(taskKey: string): Promise<void> {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot }, (f) => {
+      f.packet = {
+        id: "pkt_test_001",
+        type: "input",
+        kind: "Decision required",
+        from: "policy-engine",
+        title: "Code Reviewer has requested changes 2 times running",
+        body: "Two rounds is where another rework stops being the obvious move.",
+        observations: [],
+        options: [
+          {
+            kind: "question_reviewer",
+            t: "Ask Code Reviewer what else it would block on",
+            d: "One question, no rework behind it.",
+            rec: true,
+            profileId: "reviewer",
+          },
+          {
+            kind: "custom",
+            t: "Let the rework continue",
+            d: "Hands the task back to the operator.",
+            rec: false,
+          },
+        ],
+      };
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+  }
+
+  async function clearPacket(taskKey: string): Promise<void> {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot }, (f) => {
+      f.packet = null;
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+  }
+
+  it("still has no tool that ANSWERS a decision", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const names = toolkit.tools.map((t) => t.name);
+    // The owner's call (2026-09-15): brief and link, never decide. `list_` is
+    // the whole permitted verb here.
+    expect(names).toContain("list_decisions");
+    expect(names.filter((n) => /resolve_packet|answer_packet|decide/.test(n))).toEqual([]);
+  });
+
+  /**
+   * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
+   * out by hand, across two turns, that five tasks sat behind them: "the one
+   * number that should order a decision queue does not exist, so the ordering
+   * depends on whoever happens to have walked the graph recently."
+   */
+  /**
+   * Ruling 302, extended to the sibling it was first written without.
+   *
+   * It fixed the OPERATOR's timeline window and left the controller's, which
+   * is the defect shape ruling 292's own comment had already named inside this
+   * pass's own fix: "a rule applied to one actor and not its sibling, which is
+   * this pass's own defect shape inside this pass's own fix." The controller
+   * found it within the hour, on live work: "I read 5 of 121 entries on
+   * SHOP-36 and 4 of 111 on SHOP-27, and coordinated from them. I can derive
+   * the gap from `eventCount` minus what I got, but nothing prompts me to."
+   */
+  it("ruling 302: get_task says how many entries the timeline HAS and how to widen the window", async () => {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile(
+      { projectSlug: SLUG, taskKey: "VIB-148", dataRoot: app.dataRoot },
+      (parsed) => {
+        for (let i = 0; i < 20; i += 1) {
+          parsed.timeline.unshift({
+            occurredAt: new Date(Date.UTC(2026, 8, 16, 2, i)).toISOString(),
+            type: "note",
+            actor: { kind: "operator" },
+            title: `Entry ${i}`,
+            text: `entry ${i}`,
+            toAgent: false,
+            evidence: null,
+          });
+        }
+      },
+    );
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+
+    const narrow = JSON.parse(
+      await callAnchored(ids.maintainer, "get_task", { events: 3 }, "VIB-148"),
+    );
+    // CANARY: drop `timelineTotal` and a window looks like a history.
+    expect(narrow.newestEvents).toHaveLength(3);
+    expect(narrow.timelineTotal).toBeGreaterThan(20);
+    // CANARY: drop the note. The count AND both ways out.
+    expect(narrow.timelineOlder).toContain("older");
+    expect(narrow.timelineOlder).toContain("events");
+    expect(narrow.timelineOlder).toContain("read_timeline_entry");
+    expect(narrow.timelineOlder).toContain(String(narrow.timelineTotal - 3));
+
+    // Widened to cover everything, the note is absent rather than claiming zero.
+    const wide = JSON.parse(
+      await callAnchored(ids.maintainer, "get_task", { events: 50 }, "VIB-148"),
+    );
+    expect(wide.newestEvents.length).toBe(wide.timelineTotal);
+    expect(wide.timelineOlder).toBeUndefined();
+  });
+
+  it("ruling 300 (+336): every decision says what answering it releases, and when", async () => {
+    await openPacketOn(PACKET_TASK);
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const waiters: [string, string[]][] = [
+      ["VIB-148", [PACKET_TASK]],
+      ["VIB-151", ["VIB-148"]],
+    ];
+    for (const [key, blockedBy] of waiters) {
+      await updateTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.blockedBy = blockedBy;
+      });
+    }
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
+      const row = out.forYou.find(
+        (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
+      );
+      // CANARY: drop `releases` and the queue has no number to order by.
+      //
+      // Ruling 336: still the whole chain, but split by WHEN. VIB-148's last
+      // wait is this packet's task, so it moves when that completes; VIB-151
+      // waits on VIB-148, which must then be built, reviewed and accepted. The
+      // controller predicted this over-count and named the check that settled
+      // it: SHOP-28 merged at 21:40:32, its two direct dependents released two
+      // seconds later, and the downstream one at 22:33:53 — fifty-three minutes
+      // on, after SHOP-29's own merge. One click freed two, not three.
+      // CANARY: flatten them back into one array.
+      expect(row.releases).toEqual({ direct: ["VIB-148"], downstream: ["VIB-151"] });
+    } finally {
+      for (const [key] of waiters) {
+        await updateTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot }, (p) => {
+          p.frontmatter.blockedBy = [];
+        });
+      }
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
+
+  it("reads the packet's own options and hands over the link", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
+      const row = out.forYou.find(
+        (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
+      );
+      // CANARY: drop the `packet` block and the controller can say a decision
+      // exists but not what it asks or what the choices are — which is the
+      // state this ruling exists to end.
+      expect(row).toBeTruthy();
+      expect(row.packet.id).toBe("pkt_test_001");
+      expect(row.packet.title).toContain("requested changes 2 times running");
+      expect(row.packet.options).toEqual([
+        {
+          n: 1,
+          kind: "question_reviewer",
+          title: "Ask Code Reviewer what else it would block on",
+          detail: "One question, no rework behind it.",
+          recommended: true,
+        },
+        {
+          n: 2,
+          kind: "custom",
+          title: "Let the rework continue",
+          detail: "Hands the task back to the operator.",
+          recommended: false,
+        },
+      ]);
+      // The one thing the tool exists to give a person.
+      expect(row.answerAt).toBe(`projects/${SLUG}/tasks/${PACKET_TASK}`);
+      expect(out.howToAnswer).toContain("answerAt");
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  /**
+   * Ruling 271 (pass 37, F37-103): the card ALWAYS offers one more answer than
+   * the packet stores — a free-text directive, composed with the fixed choices
+   * as their last choice. This tool listed the stored options and nothing
+   * else, so the one tool whose job is to "brief the person fully" left out
+   * the only answer that is always available. Live, the controller read a
+   * packet whose recommended option said "You create the task — no option here
+   * can", found (correctly) that a manual operator run is refused while a
+   * packet is open, and reported a deadlock: "there is no way to say 'these
+   * options are wrong' except to pick one of them." There was; it was the
+   * choice under the ones it could see.
+   */
+  it("briefs the free-text answer the card always offers (ruling 271)", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
+      const row = out.forYou.find(
+        (d: { task: string; kind: string }) => d.task === PACKET_TASK && d.kind === "packet",
+      );
+      // CANARY: drop `ownWords` and a person told "these are your options" is
+      // told something untrue about the card in front of them.
+      expect(row.packet.ownWords).toMatchObject({
+        // Numbered where the card puts it: after the stored options, because
+        // the reader has to find the same choice there.
+        n: row.packet.options.length + 1,
+        title: "Write your own directive",
+      });
+      expect(row.packet.ownWords.detail).toContain("instead of picking an option");
+      expect(row.packet.ownWords.detail).toContain("options are wrong");
+      // It is NOT a stored option kind and must never be relayed as one.
+      expect(row.packet.options.map((o: { kind: string }) => o.kind)).not.toContain("own_words");
+      expect(row.packet.ownWords.kind).toBeUndefined();
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  it("a viewer is told nothing is theirs, rather than shown someone else's inbox", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.viewer, "list_decisions"));
+      // CANARY: read the packets straight off the projection instead of
+      // through `decisionsRequiring` and a viewer sees the whole board's
+      // decisions listed as waiting on them.
+      expect(out.forYou).toEqual([]);
+      expect(out.onlyViaOrgAdminOverride).toEqual([]);
+      expect(out.howToAnswer).toContain("Nothing is waiting");
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  it("an org admin outside the project gets it as OVERRIDE reach, never as their inbox", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const out = JSON.parse(await call(ids.orgAdminOutsider, "list_decisions"));
+      // `decisionsRequiring` draws this line and the tool must not blur it:
+      // reach as an org admin is not a personal inbox. CANARY: merge
+      // `overrideEligible` into `forYou`.
+      expect(out.forYou).toEqual([]);
+      expect(
+        out.onlyViaOrgAdminOverride.map((d: { task: string }) => d.task),
+      ).toContain(PACKET_TASK);
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  it("a non-member is refused without learning the project exists", async () => {
+    await expect(
+      call(ids.nonMember, "list_decisions", { projectSlug: SLUG }, null),
+    ).resolves.toMatch(/\[denied\]/);
+  });
+
+  /**
+   * Ruling 256 (pass 37, F37-86): the anchor belongs to the project it was
+   * anchored IN.
+   *
+   * A conversation anchored to a task, asked about a DIFFERENT project, filtered
+   * that project's decisions by a task key it does not contain and answered
+   * "Nothing is waiting on a person here" — a false all-clear, from the one tool
+   * whose entire job is to say what is waiting.
+   */
+  it("ruling 256: an anchored task never filters another project's decisions", async () => {
+    await openPacketOn(PACKET_TASK);
+    try {
+      const { buildControllerToolkit } = await import("./controller-toolkit.server");
+      const { findUserById } = await import("~/server/auth/user-store.server");
+      const user = findUserById(app.db, ids.orgAdmin)!;
+      const read = async (
+        bound: { projectSlug: string | null; taskKey: string | null },
+        args: Record<string, JsonValue>,
+      ) => {
+        const toolkit = buildControllerToolkit({
+          db: app.db,
+          ctx: { dataRoot: app.dataRoot },
+          user: { id: user.id, email: user.email, name: user.name },
+          projectSlug: bound.projectSlug,
+          taskKey: bound.taskKey,
+        });
+        const tool = toolkit.tools.find((t) => t.name === "list_decisions")!;
+        // SAFETY: every toolkit handler returns the `textResult` shape.
+        const result = (await tool.handler(args, {})) as { content: { text: string }[] };
+        return JSON.parse(result.content[0]!.text);
+      };
+
+      // Anchored to VIB-1 in THIS project: the anchor applies, and VIB-142's
+      // packet is correctly filtered out.
+      const anchored = await read({ projectSlug: SLUG, taskKey: "VIB-1" }, {});
+      expect(anchored.forYou).toEqual([]);
+      expect(anchored.howToAnswer).toContain("Nothing is waiting");
+
+      // Same conversation, asked about a project it is NOT anchored in. The
+      // anchor belongs to the project it was anchored in, so it must not filter
+      // here — and VIB-142's packet is waiting.
+      //
+      // CANARY: drop the `explicit === boundSlug` guard and this reads
+      // "Nothing is waiting on a person here": a false all-clear from the one
+      // tool whose entire job is to say what is waiting.
+      const elsewhere = await read(
+        { projectSlug: "some-other-board", taskKey: "VIB-1" },
+        { projectSlug: SLUG },
+      );
+      expect(elsewhere.forYou.map((d: { task: string }) => d.task)).toContain(PACKET_TASK);
+      expect(elsewhere.howToAnswer).toContain("answerAt");
+    } finally {
+      await clearPacket(PACKET_TASK);
+    }
+  });
+
+  /**
+   * Ruling 256 (F37-85): `get_project` reads leases the way the GATES read them.
+   *
+   * Ruling 247 made a lease whose holder has finished bind nobody, and wired it
+   * into the push and the canonical anchor — not into the read the controller
+   * uses. Live, the controller said so itself: "I cannot tell you from a direct
+   * read whether SHOP-11's lease had already self-released when it merged."
+   */
+  it("ruling 256: get_project resolves leases and names the spent ones apart", async () => {
+    const { updateProjectFile, readProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const before = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.fileLeases;
+    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+      p.frontmatter.fileLeases = [
+        { paths: ["pnpm-lock.yaml"], taskKey: "VIB-142", reason: "still working" },
+        { paths: ["Makefile"], taskKey: "VIB-404", reason: "holder does not exist" },
+      ];
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const view = JSON.parse(await call(ids.orgAdmin, "get_project"));
+      // CANARY: return `fm.fileLeases` raw and BOTH rows appear as binding,
+      // which is what made the controller unable to tell live leases from spent
+      // ones.
+      expect(view.fileLeases.map((l: { taskKey: string }) => l.taskKey)).toEqual(["VIB-142"]);
+      expect(view.spentFileLeases.map((l: { taskKey: string }) => l.taskKey)).toEqual(["VIB-404"]);
+    } finally {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.fileLeases = before ?? [];
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
+});
+
+/**
  * Ruling 153 (pass 35, G35-1): the controller had no schedule tool at all, so
  * the one agent meant to set a project up could not do the wall-clock half of
  * it ("There is no scheduling tool in my set"). Both tools take the tier the
@@ -263,6 +640,79 @@ describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
         delayMinutes: 5,
       }),
     ).toContain('"ghost-profile" is not deployed on this project.');
+  });
+});
+
+/**
+ * Ruling 279 (pass 37, F37-112): `inspect_audit_log`'s headline said "action
+ * prefix" and its parameter said "Exact action id" — two descriptions of one
+ * field, contradicting each other in the same tool, and the behaviour followed
+ * the stricter one. Live, the controller filtered `action: "task."`, received
+ * `total: 0` with no error, and wrote: "a wrong filter is indistinguishable
+ * from a quiet period."
+ */
+describe("inspect_audit_log: the action filter is a prefix, and an empty result says so", () => {
+  it("matches by prefix, names the vocabulary, and explains a no-match", async () => {
+    // SAFETY: the tool answers the JSON it built; every field read here is its
+    // own, and a shape change fails the assertions rather than passing.
+    const all = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { limit: 1 }),
+    ) as { total: number; actions: string[]; noMatch: string | null };
+    // The vocabulary rides every reply, so an id never has to be guessed. It
+    // also answers "how many of X happened" without paging the whole log,
+    // which is what the controller had to do at 200 rows a call.
+    expect(all.actions.length).toBeGreaterThan(0);
+    expect(all.actions.every((a) => /\(\d+\)$/.test(a))).toBe(true);
+    expect(all.noMatch).toBeNull();
+
+    // SAFETY: `actions` is non-empty (asserted above) and every id this
+    // instance records is dotted (`task.created`, `runtime.run.started`), so
+    // both lookups below resolve; the assertions fail loudly if that changes.
+    const someTaskAction = all.actions
+      .map((a) => a.replace(/ \(\d+\)$/, ""))
+      .find((a) => a.includes("."))!;
+    // SAFETY: the id was just matched on containing a dot, so split yields at
+    // least two parts and the first is defined.
+    const prefix = `${someTaskAction.split(".")[0]!}.`;
+    // SAFETY: as above — the tool's own reply shape.
+    const byPrefix = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { action: prefix, limit: 1 }),
+    ) as { total: number; rows: { action: string }[] };
+    // CANARY: map `action` back onto the EXACT filter and this is 0 — the
+    // reading that told the controller nothing had happened.
+    expect(byPrefix.total).toBeGreaterThan(0);
+    expect(byPrefix.rows[0]!.action.startsWith(prefix)).toBe(true);
+
+    // A whole id still matches exactly that action.
+    // SAFETY: as above — the tool answers the JSON it built, and these are its
+    // own fields; a shape change fails the assertions rather than passing.
+    const exact = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { action: someTaskAction, limit: 1 }),
+    ) as { total: number };
+    expect(exact.total).toBeGreaterThan(0);
+
+    // …and a spelling nothing matches is NAMED, not answered with a bare zero.
+    // SAFETY: the same tool answer, read for the same tool-owned fields.
+    const miss = JSON.parse(
+      await call(ids.orgAdmin, "inspect_audit_log", { action: "taks.", limit: 1 }),
+    ) as { total: number; noMatch: string | null; actions: string[] };
+    // CANARY: drop the `noMatch` arm and a typo reads exactly like a quiet
+    // window, which is the whole finding.
+    expect(miss.total).toBe(0);
+    expect(miss.noMatch).toContain('starting with "taks."');
+    expect(miss.actions.length).toBeGreaterThan(0);
+  });
+
+  it("a prefix cannot smuggle a LIKE pattern", async () => {
+    // SAFETY: the tool answers the JSON it built and `total` is its own field;
+    // a shape change fails the assertions below rather than passing silently.
+    const totalOf = (text: string) => (JSON.parse(text) as { total: number }).total;
+    // CANARY: drop the escape and `%` matches everything, so a filter that
+    // should find nothing returns the whole log.
+    expect(totalOf(await call(ids.orgAdmin, "inspect_audit_log", { action: "%", limit: 1 }))).toBe(0);
+    expect(
+      totalOf(await call(ids.orgAdmin, "inspect_audit_log", { action: "task_", limit: 1 })),
+    ).toBe(0);
   });
 });
 
@@ -611,6 +1061,99 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(denied).toContain("is visible to you");
   });
 
+  /**
+   * Ruling 252 (pass 37, F37-81). Ruling 214 gave the OPERATOR this sentence
+   * after it put a completeness question to "@Code Reviewer" in a comment that
+   * no reviewer ever read, and the stranded backstop paused a task five others
+   * were waiting behind. The controller had the identical hazard and none of
+   * the disclosure — live on SHOP-26 it wrote "@operator @platform-architect
+   * The funded amendment now exists as a task", then "Two standing facts for
+   * the implementation run", and closed with nothing but "Posted by the
+   * controller for Arda". The same words typed by that person on the task page
+   * DO reach the agent.
+   */
+  it("comment_on_task: an @tagged AGENT is disclosed as unreached (ruling 252)", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@reviewer Two standing facts for your next pass on this task.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: drop the `unreachedAgentNote` arm from `postAgentComment` and the
+    // tag goes nowhere in silence, which is the live shape.
+    expect(top.text).toContain("is an agent, and a controller comment starts no run");
+    expect(top.text).toContain("nothing was sent to it");
+    // Named as the controller's OWN tool, so the sentence is actionable by the
+    // reader it is addressed to rather than a generic instruction.
+    expect(top.text).toContain("run_agent_on_task");
+  });
+
+  /**
+   * Ruling 262 (pass 37, F37-92). This is the LIVE text from SHOP-26 that
+   * motivated ruling 252 — and under ruling 252 alone it still carried no
+   * stamp. `resolveMentionedAgent` answers "which ONE agent would a run go
+   * to", and `@operator` is precedence 1, so it returned the operator, the
+   * stamp was skipped for being the operator, and @platform-architect was
+   * never mentioned. A ruling has to fix the case it was written for.
+   */
+  it("comment_on_task: @operator alongside an agent still discloses the agent (ruling 262)", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@operator @reviewer The funded amendment now exists as a task.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: resolve the stamp through `resolveMentionedAgent` again and this
+    // goes back to silence, which is the shape that shipped live.
+    expect(top.text).toContain("@reviewer is an agent");
+    expect(top.text).toContain("nothing was sent to it");
+    // The operator is still excluded by name (ruling 214): a controller turn's
+    // other writes wake it on their own.
+    expect(top.text).not.toContain("@operator is an agent");
+  });
+
+  it("comment_on_task: EVERY tagged agent is named, not the first (ruling 262)", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@reviewer @developer both of you should see the amendment.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: swap `specialists.filter` back to `.find` in `unreachedAgents`
+    // and the second agent drops out of a sentence that claims to list them.
+    expect(top.text).toContain("@reviewer, @developer are agents");
+    expect(top.text).toContain("nothing was sent to them");
+  });
+
+  it("comment_on_task: a comment that tags only PEOPLE carries no such note", async () => {
+    await call(ids.projectAdmin, "comment_on_task", {
+      taskKey: "VIB-142",
+      text: "@Arda status published, nothing needed from an agent here.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    // CANARY: stamp the note unconditionally and every ordinary status comment
+    // grows a paragraph telling a person an agent was not reached, on a
+    // comment that named no agent.
+    expect(top.text).not.toContain("starts no run");
+  });
+
   it("set_task_owner: a viewer is refused; a contributor takes an unowned seat", async () => {
     // A fresh, UNOWNED task: VIB-142 ships owned, and taking an occupied seat
     // is a different (acceptance-tier) authority than self-assigning.
@@ -647,6 +1190,163 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     // reply reports the real outcome, never a permission refusal.
     expect(reply).not.toContain("maintainer role");
     expect(reply).toMatch(/\[(done|denied|error)\]/);
+  });
+
+  /**
+   * Ruling 263 (pass 37, F37-93). The tool's own description promises it
+   * "reports honestly whether a run started", and it answered `[done] … run
+   * started on VIB-142 (codex)` for a dispatch that started nothing: the task
+   * owner has no Codex account, so ruling 127 turns the dispatch into a run ROW
+   * recording the refusal and no process at all. The person reading the
+   * controller was told work had begun; the board showed an errored run.
+   */
+  it("run_agent_on_task: a refused run is reported as refused, with the reason (ruling 263)", async () => {
+    const reply = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+      prompt: "Pick this up and report what you find.",
+    });
+    // CANARY: return `[done] … run started` unconditionally again (drop the
+    // `outcome` arms) and this reads as work that began.
+    expect(reply).toContain("[refused]");
+    expect(reply).not.toContain("run started");
+    // The reason is the run's own sentence, not a restatement: the owner has no
+    // Codex account and this task's runs bill the owner (ruling 127).
+    expect(reply).toContain("the task owner");
+    expect(reply).toContain("Run it again once that is resolved.");
+  });
+
+  /**
+   * Ruling 263's second half: R21-9's law on the one dispatch door that skipped
+   * it. The task page writes `@<agent> <prompt>` after the start and the
+   * operator's `run_agent` writes one before it; through the controller the
+   * directive went into the agent's prompt and nowhere else, so the timeline
+   * showed a run appearing for no stated reason.
+   */
+  it("run_agent_on_task: the directive is recorded on the timeline (ruling 263)", async () => {
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+      prompt: "Pick this up and report what you find.",
+    });
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const timeline = readTaskFile({
+      projectSlug: SLUG,
+      taskKey: "VIB-142",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline;
+    // Found, not indexed. The dispatched run writes its OWN events
+    // asynchronously — on a host where the profile's backend is not connected
+    // it lands a `blocked` entry — and whether that beats this read is a race
+    // the assertion has no business depending on. It did: asserting
+    // `timeline[0]` passed alone and failed inside the file, which is the
+    // timing-fragile shape rather than a fact about the directive.
+    const top = timeline.find((e) => e.type === "comment")!;
+    // CANARY: drop the `appendComment` call and the directive exists only
+    // inside the agent's prompt, where supervision cannot read it.
+    expect(top, "no comment carried the directive").toBeTruthy();
+    expect(top.text).toBe("@Developer Pick this up and report what you find.");
+    // Addressed to the agent (the routed tint), and authored by the PERSON
+    // whose directive it is — the controller relayed it, it did not write it.
+    expect(top.toAgent).toBe(true);
+    expect(top.actor).toMatchObject({ kind: "human", userId: ids.maintainer });
+  });
+
+  /**
+   * Ruling 272 (pass 37, F37-105): ruling 263 put R21-9's law on the SPECIALIST
+   * arm of `run_agent_on_task` and returned above it for the operator, so the
+   * one dispatch door still sending a human's words off the record was the
+   * operator half of the door ruling 263 had just fixed. The controller caught
+   * it three minutes after the deploy by counting the task's own comments
+   * across two reads: "my directive is nowhere in the +1".
+   */
+  it("run_agent_on_task: an OPERATOR directive is recorded too, not just a specialist's (ruling 272)", async () => {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const handOffs = (key: string): string[] =>
+      readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
+        .parsed.timeline.filter(
+          (e) => e.type === "comment" && e.text.trim().startsWith("@operator"),
+        )
+        .map((e) => e.text);
+    // VIB-148 carries no decision packet, so the operator run is not refused.
+    const before = handOffs("VIB-148").length;
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-148",
+      agent: "operator",
+      prompt: "Check in on this task and say what is blocking it.",
+    });
+    const after = handOffs("VIB-148");
+    // CANARY: return above the appendComment for the operator arm again (as
+    // ruling 263 shipped) and the directive exists only inside the operator's
+    // prompt, where nobody watching the task can read it.
+    expect(after.length).toBe(before + 1);
+    expect(after[0]).toBe("@operator Check in on this task and say what is blocking it.");
+
+    // …and a REFUSED run strands no comment: VIB-142 has an open packet, so
+    // the operator is not run and there is nothing for a directive to address.
+    // Two things hold this: the refusal arms return before the write, and the
+    // write's own `!result.refused` guard. Either alone is enough today, which
+    // is why this pins the OUTCOME rather than one mechanism — remove both and
+    // a refused dispatch leaves an "@operator …" hand-off with no run behind
+    // it, the orphaned hand-off `operatorPromptAgent` learned to avoid.
+    const refusedBefore = handOffs("VIB-142").length;
+    const denied = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "operator",
+      prompt: "This one cannot start.",
+    });
+    expect(denied).toContain("[denied]");
+    expect(handOffs("VIB-142").length).toBe(refusedBefore);
+  });
+
+  it("run_agent_on_task: a dispatch with no directive writes no hand-off comment", async () => {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const handOffsNow = (): unknown[] =>
+      readTaskFile({
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        dataRoot: app.dataRoot,
+      })!.parsed.timeline.filter(
+        (e) => e.type === "comment" && e.text.trim().startsWith("@Developer"),
+      );
+    // Sibling tests in this describe share the task, so measure the DELTA.
+    const before = handOffsNow().length;
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+    });
+    // CANARY: append the comment unconditionally and a bare re-run grows an
+    // empty "@Developer" line addressed to nobody about nothing. (The refused
+    // run writes its OWN lines here, so this counts hand-off comments rather
+    // than events.)
+    expect(handOffsNow().length).toBe(before);
+  });
+
+  /**
+   * Ruling 266 (pass 37, F37-96). Asked to say whether three open PRs should
+   * merge, the controller had `get_task`'s filename list and
+   * `changed: {files: 4, add: 1528, del: 67}` and nothing else, and said so:
+   * "my judgement on PR #32 rests on a four-line filename list… I can
+   * commission a review; I cannot check one."
+   */
+  it("read_pull_request: membership gated, and a task with no PR says so rather than erroring", async () => {
+    const denied = await call(ids.nonMember, "read_pull_request", { taskKey: "VIB-142" });
+    // The members-only posture (R15-4): a non-member must not learn the
+    // project exists, so the gate answers before the task is resolved.
+    expect(denied).toContain("is visible to you");
+    // CANARY: drop the `revisionLeftWorkspace` arm and a task with no PR
+    // reaches GitHub with a bogus number and comes back as an [error] about a
+    // request nobody should have made. VIB-148 has none.
+    const none = await call(ids.projectAdmin, "read_pull_request", { taskKey: "VIB-148" });
+    expect(none).toContain("[noop]");
+    expect(none).toContain("has no pull request to read");
+    expect(none).toContain("prNumber");
+    // VIB-142 carries PR #318, so the resolution reaches GitHub and stops on
+    // the fixture's real obstacle — named, with the PR it resolved, rather
+    // than a bare failure. (This project has no credential configured.)
+    const configured = await call(ids.projectAdmin, "read_pull_request", { taskKey: "VIB-142" });
+    expect(configured).toContain("VIB-142 (#318)");
+    expect(configured).toContain("no GitHub credential is configured");
   });
 
   it("project settings, stages, boundaries, members, deployments: MAINTAINER refused, project ADMIN granted", async () => {
@@ -811,7 +1511,7 @@ describe("task anchoring (ruling 121)", () => {
     const { getTaskSummary } = await import("~/server/projections/task-query.server");
     // Nothing to do is an error, not a silent no-op.
     expect(await callAnchored(ids.maintainer, "update_task", {}, "VIB-148")).toContain(
-      "[error] Pass a goal and/or at least one metadata field",
+      "[error] Pass a title and/or a goal and/or at least one metadata field",
     );
     // A viewer edits nothing.
     expect(
@@ -851,6 +1551,54 @@ describe("task anchoring (ruling 121)", () => {
     expect(
       await callAnchored(ids.maintainer, "update_task", { dueDate: "not-a-date" }, "VIB-148"),
     ).toMatch(/^\[error\]/);
+  });
+
+  /**
+   * Ruling 295 (pass 37, F37-130), from the controller's own top-ranked gap:
+   * "I cannot edit a task title - and the board is wrong right now because of
+   * it. What I wanted: change six words in the title I wrote. What I did
+   * instead: rewrote the entire 6,000-character goal." Nothing anywhere wrote
+   * a title after creation, so the shorter of a task's two claims was the
+   * harder to correct.
+   */
+  it("ruling 295: update_task corrects the title on its own axis, and a refused title never hides a goal that wrote", async () => {
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    // CANARY: drop the `title` branch and this is "[error] unknown field".
+    expect(
+      await callAnchored(
+        ids.maintainer,
+        "update_task",
+        { title: "Cart checkout: establish whether the timeout is real" },
+        "VIB-148",
+      ),
+    ).toBe("[done] VIB-148 updated: title.");
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.title).toBe(
+      "Cart checkout: establish whether the timeout is real",
+    );
+    // Same words again is not an edit, and says so rather than claiming a write.
+    expect(
+      await callAnchored(
+        ids.maintainer,
+        "update_task",
+        { title: "Cart checkout: establish whether the timeout is real" },
+        "VIB-148",
+      ),
+    ).toBe("[noop] VIB-148: title already had that value; nothing was written.");
+    // The title rides the goal's gate, so a contributor is refused it - and the
+    // metadata beside it still lands, reported separately. CANARY: fold the
+    // title into the goal's try block and the label write disappears with it.
+    const partial = await callAnchored(
+      ids.contributor,
+      "update_task",
+      { title: "A title a contributor may not set at all", labels: ["triaged"] },
+      "VIB-148",
+    );
+    expect(partial).toContain("[done] VIB-148 updated: labels.");
+    expect(partial).toContain("Not applied: title:");
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.title).toBe(
+      "Cart checkout: establish whether the timeout is real",
+    );
+    expect(getTaskSummary(app.db, SLUG, "VIB-148")!.labels).toEqual(["triaged"]);
   });
 
   /**
@@ -1054,6 +1802,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     const rows = await listJson<{
       id: string;
       summary: string;
+      persona: string;
       skills: string[];
       mcps: string[];
       kbs: string[];
@@ -1091,6 +1840,81 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(catalog.skill.key).toBe("grant-probe-expertise");
     expect(catalog.skill.key).not.toBe(catalog.skill.id);
     expect(catalog.mcp.key).toBe("grant-probe-server");
+  });
+
+  /**
+   * Ruling 264 (pass 37, F37-94): the deploy reply says which delivery posture
+   * it stored, because since ruling 156 the deploy COPIES the template's own
+   * grants. Live, the shipped `developer` template carries
+   * `execute-code-or-write-repo: direct`, so every deploy of it produced a
+   * profile that can push to the repo under a reply promising the opposite.
+   */
+  /**
+   * Ruling 280 (pass 37, F37-113): `deploy_agent` said "No removal exists
+   * here." It is true of this toolkit and false of the product —
+   * `deleteAgentProfile` removes a deployment from the project's Agents page.
+   * A toolkit sentence that reads as a product statement is believed: the
+   * controller, auditing this instance, found two dead deployments and wrote
+   * "I cannot un-deploy them. The only lever is neutering a live deployment,
+   * which is a workaround, not a fix." Ruling 85's rule, on a new surface: a
+   * refusal that lists only workarounds hides the fix.
+   */
+  it("ruling 280: deploy_agent names the removal path instead of denying one exists", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.projectAdmin, email: "elif@viberr.dev", name: "Elif" },
+      projectSlug: SLUG,
+    });
+    // SAFETY: `deploy_agent` is unconditionally registered on this toolkit —
+    // the gate is on the CALL, not on whether the tool exists.
+    const def = toolkit.tools.find((t) => t.name === "deploy_agent")!;
+    // CANARY: restore "No removal exists here." and the reader is told the
+    // product cannot do something it does.
+    expect(def.description).not.toContain("No removal exists here");
+    expect(def.description).toContain("Agents page");
+    expect(def.description).toContain("Operator is a system profile");
+  });
+
+  it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
+    // A template with repo write. `save_global_agent` has no capability field,
+    // so the grants have to be written the way a shipped template carries them.
+    writeFileSync(
+      path.join(app.dataRoot, "agents", "profiles", "delivery-probe.md"),
+      [
+        "---",
+        "id: delivery-probe",
+        "kind: specialist",
+        "name: Delivery Probe",
+        "role: Implementation",
+        "backends:",
+        "  - claude",
+        "model: sonnet",
+        "stages:",
+        "  - impl",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb: []",
+        "capabilities:",
+        "  - capabilityId: execute-code-or-write-repo",
+        "    mode: direct",
+        "---",
+        "",
+        "A probe.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const deployed = await call(ids.projectAdmin, "deploy_agent", {
+      profileId: "delivery-probe",
+    });
+    // CANARY: restore the unconditional "Delivery starts withheld" tail and
+    // this reads as a profile that cannot touch the repo, on one that can.
+    expect(deployed).toContain("[done] Delivery Probe deployed");
+    expect(deployed).toContain("It carries repo write from the template");
+    expect(deployed).not.toContain("Delivery starts withheld");
   });
 
   it("granting by the id a read tool returned stores the KEY, not the id", async () => {
@@ -1269,6 +2093,60 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(audit).toMatchObject({ projectSlug: SLUG, subjectId: AGENT_ID });
     expect(audit.actorLabel).toContain("via controller");
   });
+
+  /**
+   * Ruling 277 (pass 37, F37-110): a deployment SNAPSHOTS the persona and the
+   * summary as well as the grants (P13-AP-07), `propagate` rewrites only the
+   * grants, and nothing compared the text — so `copiesDiffering: []` read as
+   * "every copy is current" about copies that were not. Live: the controller
+   * rewrote four templates whose personas described a machine this host is
+   * not, checked the drift afterwards, read `[]`, and reported the job done
+   * while the four agents running at that moment still mounted the old text.
+   */
+  it("ruling 277: a persona edit that reaches no deployed copy says so", async () => {
+    // Self-contained: its own template, with a body, deployed before the edit.
+    const ID = "persona-drift-probe";
+    const created = await call(ids.orgAdmin, "save_global_agent", {
+      name: "Persona Drift Probe",
+      backend: "claude",
+      summary: "Probes whether a persona edit reaches a deployed copy.",
+      persona: "You own the Docker Compose stack.",
+      stages: ["impl"],
+    });
+    expect(created).toContain("[done]");
+    expect(await call(ids.projectAdmin, "deploy_agent", { profileId: ID })).toContain("[done]");
+
+    // The grants are untouched, so the RESOURCE drift stays empty — which is
+    // precisely the reading that misled: nothing about the grants changed.
+    const edited = await call(ids.orgAdmin, "save_global_agent", {
+      id: ID,
+      name: "Persona Drift Probe",
+      backend: "claude",
+      summary: "Probes whether a persona edit reaches a deployed copy.",
+      persona: "This host has no Docker. You own the local stack supervisor.",
+      stages: ["impl"],
+    });
+    // CANARY: drop the text-drift clause and this edit reports success with no
+    // mention that the project running this profile still has the old prompt.
+    expect(edited).toContain("still runs the older persona");
+    expect(edited).toContain(SLUG);
+    expect(edited).toContain("Agents page");
+
+    interface Listed {
+      id: string;
+      copiesDiffering: string[];
+      copiesWithOlderText: string[];
+    }
+    const listed = await listJson<Listed>("list_global_agents");
+    const row = listed.find((r) => r.id === ID)!;
+    // CANARY: report only `copiesDiffering` and a reader checking whether the
+    // edit landed is told "no copy differs" about a copy that does.
+    expect(row.copiesWithOlderText).toEqual([`${SLUG} (persona)`]);
+    // The grants really are in step — the two fields mean different things and
+    // must not be merged.
+    expect(row.copiesDiffering).toEqual([]);
+  });
+
 });
 
 /**
@@ -1900,6 +2778,169 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     expect(rows[0]).toMatchObject({ id, refresh: "on change" });
   });
 
+  /**
+   * Ruling 257 (pass 37, F37-88): a `doc` write REPLACES a whole file, so it
+   * says so and refuses a silent clobber.
+   *
+   * `overwrite: true` was hardcoded, so `writeStoreDoc`'s own collision guard
+   * could never fire and its `replaced` flag was discarded — the reply read
+   * "Document conventions.md written" whether it created a file or destroyed
+   * one. The HUMAN door for the same write refuses the collision unless a
+   * replace confirmation says otherwise, and its toast says "replaced" or
+   * "saved" from that same flag. Live, this is the ONLY way into an existing KB
+   * (a no-id create is refused once the folder has a metadata row), and the
+   * shopify-clone board's rulings KB — injected into every run on the project —
+   * was one call away from erasure by a model writing the obvious filename.
+   */
+  it("ruling 257: a doc that would overwrite is refused, names itself, and says REPLACED when told to", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "ORIGINAL RULES, 20 bytes+" },
+    });
+    expect(created).toContain("saved (");
+    expect(created).not.toContain("REPLACED");
+    const id = /id (kb_[A-Za-z0-9_-]+)/.exec(created)![1]!;
+
+    // The model can SEE the collision coming: names, not just a count.
+    // CANARY: drop `documents` from list_knowledge_bases and the model has no
+    // way to know the name it is about to write is taken.
+    // SAFETY: `list_knowledge_bases` answers `json()` over rows that always
+    // carry `id` and, since ruling 257, `documents`.
+    const kbs = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as {
+      id: string;
+      documents: string[];
+    }[];
+    expect(kbs.find((k) => k.id === id)!.documents).toContain("conventions.md");
+
+    // …and it can read it, so a write can carry the text forward.
+    // SAFETY: `read_knowledge_base_doc` answers `json()` over an object that
+    // always carries `text` when it does not return a `[denied]` string, and the
+    // document was just written by the call above.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "conventions.md" }),
+    ) as { text: string; version: string };
+    expect(read.text).toBe("ORIGINAL RULES, 20 bytes+");
+    // Ruling 305: the read hands back the version this text IS.
+    expect(read.version).toMatch(/^[0-9a-f]{12}$/);
+
+    // Writing the same name WITHOUT `replace` is refused by the writer's own
+    // sentence, and the original survives.
+    // CANARY: restore `overwrite: true` and this call reports "[done] … written"
+    // while the original is gone.
+    const refused = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "the model's new note" },
+    });
+    expect(refused).toContain("already exists");
+    // SAFETY: same reader, same document, and the refusal above means it is
+    // still there.
+    const after = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "conventions.md" }),
+    ) as { text: string };
+    expect(after.text).toBe("ORIGINAL RULES, 20 bytes+");
+
+    // Ruling 305: `replace: true` is no longer enough on its own. Naming the
+    // version you read is what makes the write safe, and the refusal says
+    // which version to pass.
+    const unversioned = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Clobber Probe",
+      doc: { path: "conventions.md", content: "no version named", replace: true },
+    });
+    expect(unversioned).toContain("Nothing was written");
+    expect(unversioned).toContain(`replaces: "${read.version}"`);
+
+    // Told to replace AND naming the version it read, it does — and says what
+    // it destroyed.
+    const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Clobber Probe",
+      doc: {
+        path: "conventions.md",
+        content: "ORIGINAL RULES, 20 bytes+\n\nand the new note",
+        replace: true,
+        replaces: read.version,
+      },
+    });
+    expect(replaced).toContain("REPLACED");
+    expect(replaced).toContain("previous 25 bytes are gone");
+  });
+
+  /**
+   * Ruling 305 (pass 37, F37-140): a whole-document replace names the version
+   * it read, and a document that moved underneath it is refused.
+   *
+   * Ruling 257's guard asks whether the file EXISTS. This asks whether it is
+   * still the one you read. The controller hit the difference live, correcting
+   * one paragraph of the 26,693-character rulings document that is injected
+   * into every run on the board: it re-read first and found that "§9 had grown
+   * a whole existence-oracle section I had not written". A blind replace would
+   * have deleted that section and reported only how many bytes it destroyed.
+   */
+  it("ruling 305: a replace whose base moved is refused, names both versions, and writes nothing", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "Stale Base Probe",
+      doc: { path: "rules.md", content: "one\ntwo\nthree" },
+    });
+    const id = /id (kb_[A-Za-z0-9_-]+)/.exec(created)![1]!;
+    // SAFETY: `read_knowledge_base_doc` answers `json()` carrying `version`
+    // for a document the call above just wrote, so it is not the denial string.
+    const first = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "rules.md" }),
+    ) as { version: string };
+
+    // Somebody else lands a change between that read and our write.
+    await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Stale Base Probe",
+      doc: {
+        path: "rules.md",
+        content: "one\ntwo\nthree\nfour, added by somebody else",
+        replace: true,
+        replaces: first.version,
+      },
+    });
+
+    // Our write, built on the version we read, is refused whole.
+    // CANARY: drop the version comparison and this overwrites the other edit.
+    const stale = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Stale Base Probe",
+      doc: {
+        path: "rules.md",
+        content: "one\ntwo\nthree, with my correction",
+        replace: true,
+        replaces: first.version,
+      },
+    });
+    expect(stale).toContain("Nothing was written");
+    expect(stale).toContain("has changed since you read it");
+    expect(stale).toContain(first.version);
+    expect(stale).toContain("Somebody else's edit is in there");
+
+    // And the other person's line is still there.
+    // SAFETY: same reader, same document, and the refusal above means it is
+    // still there.
+    const survived = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "rules.md" }),
+    ) as { text: string; version: string };
+    expect(survived.text).toContain("four, added by somebody else");
+
+    // Re-reading and redoing the change on top of it lands.
+    const ok = await call(ids.orgAdmin, "save_knowledge_base", {
+      id,
+      name: "Stale Base Probe",
+      doc: {
+        path: "rules.md",
+        content: `${survived.text}\nfive, mine`,
+        replace: true,
+        replaces: survived.version,
+      },
+    });
+    expect(ok).toContain("REPLACED");
+  });
+
   it("save_skill's reply carries the skill id and grant key the same way", async () => {
     const created = await call(ids.orgAdmin, "save_skill", {
       name: "reply-probe-craft",
@@ -2011,12 +3052,16 @@ describe("the effort descriptions are generated from the catalog (U36-5)", () =>
       user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
       projectSlug: SLUG,
     });
+    // Ruling 296 made a tool's schema a whole strict Zod object, so the field
+    // texts are read where the model reads them: off the PUBLISHED JSON
+    // schema, which is the only copy that matters.
+    const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
     for (const name of ["save_global_agent", "deploy_agent", "update_agent_deployment"]) {
-      const def = toolkit.tools.find((t) => t.name === name)!;
-      // SAFETY: `tool()` keeps the raw zod shape it was given, and `effort` is
-      // the `z.string().optional().describe(…)` field each of the three declares.
-      const declared = def.inputSchema as Record<string, { description?: string }>;
-      const description = declared.effort?.description ?? "";
+      const description = z
+        .object({
+          properties: z.object({ effort: z.object({ description: z.string() }) }),
+        })
+        .parse(published.get(name)).properties.effort.description;
       for (const backend of ["claude", "codex"] as const) {
         const label = backend === "codex" ? "Codex" : "Claude";
         expect(description, `${name}.effort names the ${label} tiers`).toContain(
@@ -2206,5 +3251,263 @@ describe("set_required_reviewers (ruling 178)", () => {
     );
     expect(row?.kind).toBe("change");
     expect(row?.text).toContain("(via the controller) set the required reviewers to **Reviewer at Review**.");
+  });
+});
+
+/**
+ * Ruling 188 (pass 37): a controller read returns what the equivalent HUMAN
+ * surface renders. Three reads returned less-resolved data than the UI with no
+ * marker saying so, and live in pass 37 each one changed what the controller
+ * said or did: it told its owner two live profiles were "effectively
+ * unselectable" (F37-3), it repeated a Review-stage acceptance sentence about a
+ * Design-stage task (F37-5), and it refused an MCP grant that was in fact safe
+ * because it could not observe ruling 176's marking (F37-6/F37-7).
+ */
+describe("ruling 188: the controller reads what the human surfaces render", () => {
+  interface AgentRow {
+    profileId: string;
+    stages: string[];
+    declaredStages: string[];
+  }
+  interface ProjectRead {
+    agents: AgentRow[];
+  }
+
+  it("F37-3: get_project resolves declared stages onto THIS board, and keeps the raw declaration beside them", async () => {
+    // `billing-service` is the demo's CUSTOM 3-stage board (todo / doing /
+    // done) carrying the stock deployments, whose declared stages come from the
+    // governed-5 template — `impl` and `review`, NEITHER of which exists there.
+    // This is the exact shape pass 37 met live: a project whose stages were
+    // changed after the stock profiles were seeded. Ruling R14-1 remaps by
+    // structural role rather than disabling the profile, and the Agents page
+    // renders the resolved list; this read used to hand the model the raw ids,
+    // and the controller duly reported to its owner that the profile was
+    // "effectively unselectable" while the audit trail showed it being selected.
+    // SAFETY: `get_project` always answers `json(...)` and its `agents` array
+    // is built from the roster with these exact keys; a shape change breaks the
+    // assertions below rather than passing silently.
+    const read = JSON.parse(
+      await call(ids.orgAdminOutsider, "get_project", {}, "billing-service"),
+    ) as ProjectRead;
+    const row = read.agents.find((a) => a.profileId === "reviewer")!;
+    // The raw declaration is preserved, so a remap is visible rather than silent.
+    expect(row.declaredStages).toEqual(["impl", "review"]);
+    // …and the resolved list is this board's own ids, never the template's.
+    expect(row.stages).not.toContain("impl");
+    expect(row.stages).not.toContain("review");
+    for (const id of row.stages) expect(["todo", "doing", "done"]).toContain(id);
+    expect(row.stages.length).toBeGreaterThan(0);
+  });
+
+  it("F37-5: get_task answers the acceptance gate's own verdict, not the stage-unaware column", async () => {
+    // SAFETY: `get_task` always answers `json({ task, schedules, newestEvents })`;
+    // the two property assertions below are the whole point of the test, so a
+    // shape change fails here rather than passing.
+    const read = JSON.parse(
+      await call(ids.projectAdmin, "get_task", { taskKey: "VIB-142" }),
+    ) as { task: { notAcceptableReason?: string | null; blockReason?: unknown } };
+    // The projected `validation_block_reason` is documented as stage-unaware —
+    // "every consumer filters rows on `archived = 0` and on the resolved review
+    // stage before it ever looks at this column" — so it must not reach a model
+    // raw. `notAcceptableReason` carries every gate, the stage one included.
+    expect(read.task).not.toHaveProperty("blockReason");
+    expect(read.task).toHaveProperty("notAcceptableReason");
+  });
+
+  it("F37-6: list_mcp_servers reports ruling 176's marking and what it means", async () => {
+    await call(ids.orgAdminOutsider, "save_mcp_server", {
+      name: "policy-probe",
+      transport: "HTTP",
+      target: "https://mcp.invalid/sse",
+      writeTools: ["write_file", "edit_file"],
+    });
+    // SAFETY: `list_mcp_servers` answers a JSON array of the row shape mapped
+    // immediately above it in the toolkit; the row is asserted to exist below.
+    const listed = JSON.parse(
+      await call(ids.orgAdminOutsider, "list_mcp_servers"),
+    ) as { name: string; writeTools: string[]; writeToolsNote: string }[];
+    const row = listed.find((m) => m.name === "policy-probe")!;
+    expect(row.writeTools).toEqual(["write_file", "edit_file"]);
+    expect(row.writeToolsNote).toContain("withheld");
+    expect(row.writeToolsNote).toContain("ruling 176");
+  });
+
+  it("F37-7: save_mcp_server can mark write tools, and says which marking landed", async () => {
+    const reply = await call(ids.orgAdminOutsider, "save_mcp_server", {
+      name: "marked-probe",
+      transport: "HTTP",
+      target: "https://mcp.invalid/sse",
+      writeTools: ["create_directory"],
+    });
+    expect(reply).toContain("[done]");
+    // The reply states the marking that actually landed, so a model never has
+    // to assert an enforcement it cannot observe.
+    expect(reply).toContain("create_directory");
+    expect(reply).toContain("withheld from every run without execute-code-or-write-repo");
+    expect(reply).toContain("ruling 176");
+  });
+});
+
+/**
+ * Ruling 197 (F37-18, live): F33-7 put the GRANTS into `list_global_agents`
+ * because "the model had no way to see what an edit was about to replace, and
+ * the controller (rightly) refused to edit blind" — and left out the biggest
+ * field of all. Pass 37 the controller needed to correct three stale template
+ * summaries (they advertised Testcontainers, a Docker Compose stack and
+ * Playwright journeys on a host with none of those, to the operator, which
+ * selects agents by that text) and refused, for the same reason, two rulings
+ * later: "`save_global_agent` gives me no way to edit a summary without also
+ * supplying a persona, and I cannot read the personas I'd be replacing."
+ *
+ * The writer was innocent — a blank persona has always kept the stored one —
+ * but nothing said so while the same paragraph spelled the rule out for three
+ * other fields, and nothing let the caller check. Both halves are fixed here.
+ */
+describe("ruling 197: a template's persona is readable, and a summary-only edit keeps it", () => {
+  it("returns the persona from list_global_agents and keeps it across a summary edit", async () => {
+    await call(ids.orgAdmin, "save_global_agent", {
+      name: "Persona Probe",
+      backend: "codex",
+      summary: "Verifies with Testcontainers and a Docker Compose stack.",
+      persona: "PERSONA-MARKER-11: you are the probe. Do the probing.",
+      stages: ["impl"],
+    });
+
+    const listed = async () => {
+      const text = await call(ids.orgAdmin, "list_global_agents");
+      // SAFETY: `list_global_agents` answers through the toolkit's `json()`
+      // over the object literal its `.map` builds; these are its fields.
+      const rows = JSON.parse(text) as {
+        id: string;
+        name: string;
+        summary: string;
+        persona: string;
+      }[];
+      return rows.find((r) => r.name === "Persona Probe");
+    };
+
+    // CANARY: drop `persona: g.persona` from the list mapping and this is
+    // undefined — which is the state that made the controller refuse.
+    expect((await listed())?.persona).toContain("PERSONA-MARKER-11");
+
+    // The whole point: correct the stale blurb WITHOUT restating the persona.
+    const existingId = (await listed())!.id;
+    await call(ids.orgAdmin, "save_global_agent", {
+      id: existingId,
+      name: "Persona Probe",
+      backend: "codex",
+      summary: "Verifies real processes over real TCP. No containers on this host.",
+      stages: ["impl"],
+    });
+
+    const after = await listed();
+    expect(after?.summary).toContain("real processes over real TCP");
+    // CANARY: make an omitted persona write "" through and this is empty — an
+    // agent whose entire system prompt was flattened by a blurb edit.
+    expect(after?.persona).toContain("PERSONA-MARKER-11");
+  });
+
+  // The description is this door's only contract for the model calling it, and
+  // the silence beside three spelled-out merge rules is what made a careful
+  // caller refuse the edit entirely.
+  it("says the merge rule in the tool's own description, beside the grants' rule", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const admin = findUserById(app.db, ids.orgAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: admin.id, email: admin.email, name: admin.name },
+      projectSlug: SLUG,
+    });
+    const save = toolkit.tools.find((t) => t.name === "save_global_agent")!;
+    expect(save.description).toContain(
+      "an omitted or empty PERSONA leaves the stored persona unchanged",
+    );
+    const list = toolkit.tools.find((t) => t.name === "list_global_agents")!;
+    expect(list.description).toContain("its full persona");
+  });
+});
+
+/**
+ * Ruling 296's live half: what the SERVERS actually publish, not what a probe
+ * of the wrapper proves.
+ *
+ * strict-tool.server.test.ts proves `strictTool` refuses unknown keys and
+ * that every surface routes through it. Neither one looks at a real toolkit,
+ * and a nested object declared with plain `z.object` strips unknown keys
+ * while the file around it looks correct. This walks every schema Viberr
+ * hands the controller and finds any object that would still strip.
+ */
+describe("ruling 296: every published controller schema refuses unknown keys", () => {
+  /** The two JSON Schema nodes a walk can descend into. Parsed rather than
+   *  `typeof`-checked, so each branch is a contract and not a representation
+   *  guess. */
+  const jsonNode: z.ZodType<JsonValue> = z.lazy(() =>
+    z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.null(),
+      z.array(jsonNode),
+      z.record(z.string(), jsonNode),
+    ]),
+  );
+  const listNode = z.array(jsonNode);
+  const mapNode = z.record(z.string(), jsonNode);
+
+  /** Each object in a JSON Schema that does NOT refuse unknown keys, named by
+   *  the path a reader would follow to reach it. */
+  function stripping(node: JsonValue, at: string, found: string[] = []): string[] {
+    const list = listNode.safeParse(node);
+    if (list.success) {
+      list.data.forEach((item, i) => stripping(item, `${at}[${i}]`, found));
+      return found;
+    }
+    const map = mapNode.safeParse(node);
+    if (!map.success) return found;
+    const entries = Object.entries(map.data);
+    if (
+      entries.some(([k, v]) => k === "type" && v === "object") &&
+      !entries.some(([k, v]) => k === "additionalProperties" && v === false)
+    ) {
+      found.push(at);
+    }
+    for (const [key, value] of entries) stripping(value, `${at}.${key}`, found);
+    return found;
+  }
+
+  it("finds no stripping object in any tool the controller mounts", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { buildControllerOpsMcp } = await import("./controller-ops-mcp.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const me = findUserById(app.db, ids.orgAdmin)!;
+    const user = { id: me.id, email: me.email, name: me.name };
+
+    const servers = [
+      buildControllerToolkit({
+        db: app.db,
+        ctx: { dataRoot: app.dataRoot },
+        user,
+        projectSlug: SLUG,
+      }).mcpServers.viberr_controller,
+      ...Object.values(
+        buildControllerOpsMcp({ db: app.db, ctx: { dataRoot: app.dataRoot }, user }).mcpServers,
+      ),
+    ];
+
+    const leaky: string[] = [];
+    let published = 0;
+    for (const server of servers) {
+      for (const [name, schema] of await publishedSchemas(server)) {
+        published += 1;
+        leaky.push(...stripping(schema, name));
+      }
+    }
+
+    // A vacuous pass is the exact failure this ruling is about.
+    expect(published).toBeGreaterThan(40);
+    // CANARY: change one nested `z.strictObject` back to `z.object`.
+    expect(leaky, `these still strip unknown keys: ${leaky.join(", ")}`).toEqual([]);
   });
 });
