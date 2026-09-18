@@ -2969,8 +2969,30 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
    * location commits — the gap the two clicks fell into. A stub with no loader
    * lands the navigation inside the click and reproduces nothing, so this one
    * holds every navigation after the first until the test lets it land.
+   *
+   * It hands back a SETTLED page, and the awaited act() below is what settles
+   * it. These tests used to open with `await waitFor(… hero is "Operator")`,
+   * and a waitFor returns on a RENDER: RTL turns the act environment off while
+   * it polls, so the commit it sees leaves that commit's passive effects still
+   * queued on React's scheduler. One of them is this page's own `[urlSel]`
+   * effect — the one that drops a pending pick once the URL is the authority
+   * again. React flushes it inside the next act(), which is the ROSTER CLICK's,
+   * where it lands after that click's `setPendingSel` and clears the very pick
+   * the test is about: the page falls back to the committed `?profile=`, and
+   * the editor opens "Edit Operator". That is the 2026-09-15 full-suite
+   * failure, and it is timing-only — the effect usually flushes inside the
+   * trailing setTimeout(0) of RTL's own async wrapper, which is why the file
+   * alone never showed it.
+   *
+   * An awaited act() has no such gap: the act environment stays ON, so the
+   * loader landing, the commit it causes and that commit's effects all run
+   * inside it, and every read after it is a plain synchronous one (the recipe
+   * e0953f7f settled on for the dock poll test). Measured by holding React's
+   * scheduler callback back — what a loaded machine does to it — the waitFor
+   * shape failed this test and the one below it on every run at a 40 ms hold,
+   * and this shape passed at 40 ms and 200 ms alike.
    */
-  function renderPage() {
+  async function renderPage() {
     let opened = false;
     let land = () => {};
     const Stub = createRoutesStub([
@@ -3006,6 +3028,7 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
       },
     ]);
     const view = render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+    await act(async () => {});
     return { ...view, land: () => land() };
   }
 
@@ -3030,6 +3053,11 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     // and changes nothing about what is under test: the two clicks still fire
     // in the same beat, with no wait between them.
     await act(async () => {});
+    const { container, getByText, getByTestId } = await renderPage();
+    // The page opens on the operator (the `?profile=` default) — and reading
+    // that synchronously is the point: the page is settled, not merely
+    // rendered, so nothing of the mount is left to land between the clicks.
+    expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator");
 
     // No wait between the two clicks — the live sequence that misfired. The
     // navigation the first click started is still in flight…
@@ -3046,10 +3074,8 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
   });
 
   it("the roster highlight and the detail pane move on the same click", async () => {
-    const { container } = renderPage();
-    await waitFor(() =>
-      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
-    );
+    const { container } = await renderPage();
+    expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator");
     fireEvent.click(rosterItem(container, "Developer"));
     expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Developer");
     expect(rosterItem(container, "Developer").className).toContain("on");
@@ -3057,13 +3083,11 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
   });
 
   it("the pick still reaches the URL, so the selection stays linkable", async () => {
-    const { container, getByTestId, land } = renderPage();
+    const { container, getByTestId, land } = await renderPage();
     // The synchronous pick is a shortcut PAST the pending navigation, never
     // instead of it: P13-UI-58 put the selection in the URL so it is linkable
     // and survives a reload, and that has to keep happening.
-    await waitFor(() =>
-      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
-    );
+    expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator");
     fireEvent.click(rosterItem(container, "Developer"));
     land();
     await waitFor(() =>

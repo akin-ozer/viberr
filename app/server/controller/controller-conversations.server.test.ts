@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import {
   setupAppTest,
@@ -860,19 +860,32 @@ describe("conversation scope (ruling 121)", () => {
     const { createConversation, listConversations } = await import(
       "./controller-conversations.server"
     );
+    // The tie is CONSTRUCTED, not hoped for. Six real inserts straddle a
+    // millisecond boundary on a loaded machine, every stamp comes back
+    // distinct, and the precondition below fails without the ordering
+    // assertion it guards ever running. Only `Date` is faked: the store's
+    // inserts are synchronous, so nothing here waits on a timer.
+    vi.useFakeTimers({ toFake: ["Date"] });
     const made = [];
-    for (let i = 0; i < 6; i += 1) {
-      made.push(
-        createConversation(app.db, {
-          userId: ownerId,
-          userLabel: "selin@viberr.dev",
-          projectSlug: "viberr-core",
-          taskKey: "VIB-160",
-        }),
-      );
+    try {
+      for (let i = 0; i < 6; i += 1) {
+        made.push(
+          createConversation(app.db, {
+            userId: ownerId,
+            userLabel: "selin@viberr.dev",
+            projectSlug: "viberr-core",
+            taskKey: "VIB-160",
+          }),
+        );
+      }
+    } finally {
+      vi.useRealTimers();
     }
-    // The precondition the finding rests on: they really do share a stamp.
-    expect(new Set(made.map((c) => c.createdAt)).size).toBeLessThan(made.length);
+    // The precondition the finding rests on: six DISTINCT rows sharing ONE
+    // stamp, so every pair of them ties and the sort below has nothing but
+    // the tie-break to go on.
+    expect(new Set(made.map((c) => c.id)).size).toBe(made.length);
+    expect(new Set(made.map((c) => c.createdAt)).size).toBe(1);
     const listed = listConversations(app.db, {
       userId: ownerId,
       projectSlug: "viberr-core",
