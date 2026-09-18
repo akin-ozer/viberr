@@ -172,6 +172,7 @@ README change used as a stimulus.
 | 11:51 | BNB-18 Review → Verify (verifier queued); BNB-20's engineer reported the timezone amendment after 12 minutes. **Ruling 361 holds on every notification since the deploy**: four "can move again" rows name `Dependency release`, four "Review passed" rows name the reviewer; the two rows named `Operator` are its own "Knowledge base disagrees with the repository" notes on BNB-19 |
 | 11:52 | BNB-20 delivered as **PR #18** (the timezone amendment, 29 minutes from mint to PR) and moved to Review. Five PRs open: #14 (Verify), #15 (Verify), #16 (Verify), #17 (Review), #18 (Review); three reviewers running, three queued |
 | 11:59 | BNB-7's PR #17 **approved** by the code reviewer (apps/web). Lens-1 probe on the hold: BNB-21 was created waiting on BNB-19 — "Created waiting on BNB-19. Held until every entry is done; Viberr releases it then", no create-drive attempted (ruling 131(d) refuses held triggers at the door), `waiting: none`, no phantom "waiting on a human" |
+| 12:02 | BNB-4's PR #14 **approved by the integration verifier** (listings service: both verdicts on `de28169`); BNB-7 Review → Verify. The first of the four parallel chains reaches acceptance; the lockfile and manifest collisions, if any, show on the merges that follow |
 
 ## Questions for the owner (saved for the end, as asked)
 
