@@ -244,6 +244,7 @@ README change used as a stimulus.
 | 15:44 | Insights after the burst: 2,576 runs, $2,799.58 instance-wide (the clone's share is most of today's), 2,258 finished / 53 error / 259 stopped / 3 running / 3 queued — every figure equals the projection's; "9 of 9 active tasks have a definite next actor" |
 | 15:50 | BNB-27's architect reported the host-onboarding design after 19 minutes; the operator reacts. BNB-20's reviewer got a slot for the re-review of `62a95cd` |
 | 15:51 | BNB-27 delivered as **PR #25** (become a host: the host profile schema and its public surface) 100 s after the architect's report. Open PRs: #18, #19, #22, #24, #25; BNB-25 building; BNB-24/26 held |
+| 15:56 | BNB-27 holds at Design on the architect's open question (PR #25 is design only: the migration and README sections; handlers are Build) — read and answered next. BNB-20's PR #18 **approved** by the code reviewer on `62a95cd`, its third pass through Review |
 
 ## Questions for the owner (saved for the end, as asked)
 
