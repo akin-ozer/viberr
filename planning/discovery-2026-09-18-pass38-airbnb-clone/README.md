@@ -187,6 +187,7 @@ README change used as a stimulus.
 | 12:32 | BNB-3's backend engineer reported the identity service after 43 minutes; the operator is delivering. Three engineers queued behind three builds (BNB-21 citations, BNB-5 and BNB-7 conflict resolutions); BNB-20's rework running |
 | 12:32 | **Third conflict**, 26 s after BNB-3's report: the operator's base refresh of `bnb-3` conflicts on `.env.example`, `pnpm-lock.yaml` and the gateway test files (`composition.test.ts`, `stack-registry.test.mjs`, …) — every parallel service chain regenerates the same derived files; the conflict packet opened at once (engineer resolves / resolve yourself / archive). Viberr's part is right each time: the merge aborted, the branch untouched, a person asked; the clone's own convention (derived shared files regenerated per chain) is what collides |
 | 12:34 | Answered BNB-3's conflict packet (engineer resolves). Four engineers now queue behind the three live builds: BNB-21 (citations), and the three conflict resolutions BNB-5, BNB-7, BNB-3 — the cap of 3 turns the parallel burst into a serial tail |
+| 12:41 | Board lanes vs projection: Triage 1 · Design 1 · Build 5 · Review 0 · Verify 1 · Done 14 on both (22 tasks). BNB-20's rework reported after 9 minutes; its operator re-delivers next |
 
 ## Questions for the owner (saved for the end, as asked)
 
