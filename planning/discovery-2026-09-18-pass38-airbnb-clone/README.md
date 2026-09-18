@@ -240,6 +240,7 @@ README change used as a stimulus.
 | 15:32 | All three resumed: BNB-25's engineer logged 28 lines within four minutes of the wake, BNB-20's architect finished its conflict fix and reported at 15:32:44, BNB-6's engineer reported the messaging service at 15:32:52 (2 h 18 min of run time, 168 turns, five `make test` passes for flakiness). Nothing was lost, nothing hung, the idle guard never had to fire; the two queued runs still wait for slots |
 | 15:33 | BNB-20 re-delivered PR #18 on `62a95cd` (the conflict-resolved head with the widened listings fix). The freed slots went to BNB-23's reviewer and BNB-5's conflict fix, queued since 13:41 — 1 h 52 min in the queue, 100 of them asleep |
 | 15:35 | **Fifth conflict**: BNB-6's delivery-time refresh met `.env.example` again (every chain regenerates it from `stack/`); packet answered — engineer resolves. BNB-23's PR #24 **approved** by the code reviewer at 15:36 |
+| 15:37 | BNB-23 Review → Verify (verifier queued). Three builds hold the slots (BNB-25 wishlists, BNB-5 conflict fix, BNB-27 host onboarding design); three runs queued (BNB-20's and BNB-23's reviewers, BNB-6's conflict fix) |
 
 ## Questions for the owner (saved for the end, as asked)
 
