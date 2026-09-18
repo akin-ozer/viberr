@@ -109,3 +109,4 @@ README change used as a stimulus.
 | 09:04 | BNB-16: design done, Build handed to the backend engineer; the operator raised an input packet on the architect's behalf (two out-of-scope gaps: no session-introspection contract; the shared HTTP client drops an upstream error's typed details), recommending a contracts amendment task for session introspection with BNB-3 waiting on it |
 | 09:06 | I chose BNB-16's packet's recommended option: the session-introspection contracts amendment task is created under my authority (BNB-3 to wait on it); BNB-16's build continues untouched |
 | 09:06 | BNB-15's PR #11 approved by the integration verifier too; acceptance recommendation expected. BNB-17 ("Contract amendment: session introspection for the gateway trust edge") created from BNB-16's packet; BNB-3 now also waits on it |
+| 09:08 | **BNB-15 accepted by me**: PR #11 merged (the first decision-created amendment task, end to end in 26 minutes) |
