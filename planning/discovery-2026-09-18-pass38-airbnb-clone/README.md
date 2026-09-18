@@ -196,6 +196,7 @@ README change used as a stimulus.
 | 12:53 | BNB-5's engineer resolved its four-file conflict and reported after 8 minutes; its operator queued behind BNB-6's in the coordination lane |
 | 12:55 | BNB-6 (messaging) delivered as **PR #22**. Open PRs: #17 (BNB-7, re-review), #18 (BNB-20, rework), #19 (BNB-5, re-delivery pending), #20 (BNB-21), #21 (BNB-22), #22 (BNB-6); BNB-3 still building |
 | 12:56 | BNB-21's PR #20 **approved** by the code reviewer; BNB-6's operator opened an input packet right after its delivery (read and answered next) |
+| 12:58 | BNB-5 back at Review on its conflict-resolved head (reviewer queued). BNB-6's packet: the gateway takes one route per file, messaging needs six, and the responsiveness route has no published contract shape — widen to `messaging-*.route.ts` and defer the internal route (recommended, `edit_goal`) or raise the amendment first. Answered with the recommended option; goal editor next |
 
 ## Questions for the owner (saved for the end, as asked)
 
