@@ -230,6 +230,7 @@ README change used as a stimulus.
 | 13:32 | BNB-25's re-scoped goal saved from the 3,209-char draft (rename out of scope, unavailability as the contract expresses it). **Fourth conflict**: `bnb-20` vs `main` on `services/listings/src/repo/rows.ts` — the first content conflict inside a service rather than a derived file (BNB-20's widened listings fix meets BNB-4's merged listings); blocked packet opened, architect resolves (recommended) |
 | 13:33 | Answered BNB-20's conflict packet (architect resolves, queued); BNB-25 Triage → Build on the re-scoped goal (engineer queued). **Ruling 356(b)** written, red-proven (raw join → "VIB-1, VIB-2") and committed as `3d87e197`; deploys when at most two tasks have live runs (five do now) |
 | 13:35 | BNB-5's PR #19 **approved by the integration verifier** — the night ledger, the product's defining invariant (one transaction, one primary key, 20 concurrent holds → one winner), acceptable after a design packet, a widening, a conflict and a re-review; accepted next |
+| 13:37 | **Acceptance-time conflict** on BNB-5: my "Accept → Done & merge" ran ruling 162's base refresh, which met a conflict on `.env.example` (BNB-7's and BNB-22's merges had regenerated it since the review); the merge was NOT made, and 24 s later the operator opened the conflict packet. BNB-3's PR #23 **approved by the integration verifier** at 13:38. What the accept dialog told me, and what the page says now, checked next |
 
 ## Questions for the owner (saved for the end, as asked)
 
