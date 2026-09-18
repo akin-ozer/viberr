@@ -78,3 +78,4 @@ README change used as a stimulus.
 | 06:52 | First run parked behind the concurrency cap: BNB-2's reviewer queued at 06:52:07 while BNB-2's own operator drive still streamed, so its card read "agent working" — true, an agent of the task was streaming (ruling 349 turns the card to "agent queued" only when no run of the task streams); the queue drained in under a minute when that drive ended |
 | 06:54 | BNB-2's rework approved by the code reviewer; Verify |
 | 07:02 | BNB-11's rework (ctx.caller removed, per my note) delivered as a **fresh PR #7**; PR #5 stays closed |
+| 07:05 | **BNB-2 accepted by me** (contracts: identity and listings; PR #6 merged, revision `8065fba`); goal-2 link 2 minted next |
