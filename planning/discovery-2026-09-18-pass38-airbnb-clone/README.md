@@ -218,6 +218,7 @@ README change used as a stimulus.
 | 13:20 | BNB-3 Review → Verify (verifier queued). BNB-7's code reviewer **approved the resolved head** `e6f8024` — both verdicts now on one revision, acceptable; the operator's turn follows |
 | 13:21 | BNB-7 Review → Verify and acceptance recommended for `e6f8024` 26 s after the re-approval — the conflict cycle closed in 55 minutes without a human step beyond the packet answer. BNB-21's packet answered (follow-up task for the four remaining citations); accepting BNB-21 and BNB-7 next |
 | 13:21 | **BNB-23** created by the BNB-21 decision ("clear the last four stale 0003 citations") — the sixth task minted from a review finding today |
+| 13:21 | **BNB-21 accepted by me**: PR #20 merged (`642b3f3`), the citations refreshed; 15 PRs merged today. The recommendation had been re-filed 30 s earlier, once the packet resolved |
 
 ## Questions for the owner (saved for the end, as asked)
 
