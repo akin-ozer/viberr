@@ -105,3 +105,6 @@ README change used as a stimulus.
 | 08:55 | PR #11 opened for BNB-15 (the contract amendment) by the operator's own delivery; Review next. BNB-16 (the gateway) still building |
 | 08:57 | F38-15: the inbox named the Operator as the author of every reviewer verdict and dependency release (816 rows) → ruling 361 (a notice must name its actor; no default author), two canaries red, one test rewritten that required the default |
 | 09:01 | BNB-15's PR #11 approved by the code reviewer; Verify next. BNB-16's architect reported; its operator reacts (delivery expected) |
+| 09:05 | hermetic e2e re-run on the branch head (rulings 356–361, UI included): **70 passed** in 38.6 s |
+| 09:04 | BNB-16: design done, Build handed to the backend engineer; the operator raised an input packet on the architect's behalf (two out-of-scope gaps: no session-introspection contract; the shared HTTP client drops an upstream error's typed details), recommending a contracts amendment task for session introspection with BNB-3 waiting on it |
+| 09:06 | I chose BNB-16's packet's recommended option: the session-introspection contracts amendment task is created under my authority (BNB-3 to wait on it); BNB-16's build continues untouched |
