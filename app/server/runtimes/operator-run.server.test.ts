@@ -4672,10 +4672,10 @@ describe("F37-61 / ruling 240: the held-task doctrine names two gates, and both 
     expect(src).toContain("`run_agent` and `deliver_for_review` are BOTH REFUSED");
 
     const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(specialist).toContain('holdRefusal(input.taskKey, held, "running an agent on it")');
+    expect(specialist).toContain('holdRefusalFor(db, input.projectSlug, input.taskKey, held, "running an agent on it")');
     // CANARY: delete the hold gate from `performDelivery` and this fails — the
     // prompt would be back to asserting a gate that was never built.
     const actions = readFileSync("app/server/tasks/task-actions.server.ts", "utf8");
-    expect(actions).toContain('holdRefusal(taskKey, held, "delivering it for review")');
+    expect(actions).toContain('holdRefusalFor(db, projectSlug, taskKey, held, "delivering it for review")');
   });
 });
