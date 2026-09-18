@@ -81,3 +81,5 @@ README change used as a stimulus.
 | 07:05 | **BNB-2 accepted by me** (contracts: identity and listings; PR #6 merged, revision `8065fba`); goal-2 link 2 minted next |
 | 07:04 | goal-2 link 2 minted as BNB-13 (contracts: booking, availability, payments); its architect started at once — three specialists live (BNB-11, BNB-12, BNB-13) |
 | 07:09 | BNB-11's fresh PR #7 approved by the code reviewer; Verify next |
+| 07:16 | PR #8 opened for BNB-12 (the local stack: supervisor, manifests, make targets, plus the health-only gateway placeholder I widened it to); Review |
+| 07:19 | BNB-11's PR #7 approved by the integration verifier too — acceptable |
