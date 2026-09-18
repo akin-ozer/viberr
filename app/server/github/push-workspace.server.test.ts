@@ -112,6 +112,9 @@ function fakeGit(opts: {
    *  distinct from the workflow list because the two calls differ only by their
    *  pathspec and a shared fixture would make one stand in for the other. */
   changedFilesByRange?: Record<string, string[]>;
+  /** Ruling 353: what `git merge-base origin/<default> HEAD` answers — the
+   *  fork point the lease gate measures the BRANCH from. Defaults to FORK. */
+  mergeBase?: string | null;
   /** Pass 34 review: the `git log` that measures those files FAILS (a shallow
    *  clone with no `origin/<default>`, a truncated history). */
   workflowLogFails?: boolean;
@@ -129,6 +132,7 @@ function fakeGit(opts: {
   const envs: { args: string[]; env: NodeJS.ProcessEnv | undefined }[] = [];
   let committed = false;
   const HEAD = "a".repeat(40);
+  const FORK = "d".repeat(40);
   const exec = vi.fn(async (_file: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
     calls.push(args);
     envs.push({ args, env: options?.env });
@@ -154,6 +158,10 @@ function fakeGit(opts: {
       return args.includes("-z")
         ? { ok: true, stdout: files.map((f) => `${f}\0`).join(""), stderr: "" }
         : { ok: true, stdout: files.map(gitQuotePath).join("\n"), stderr: "" };
+    }
+    if (args.includes("merge-base") && !args.includes("--is-ancestor")) {
+      if (opts.mergeBase === null) return { ok: false, stdout: "", stderr: "fatal: no merge base" };
+      return { ok: true, stdout: opts.mergeBase ?? FORK, stderr: "" };
     }
     if (args.includes("--name-only")) {
       if (opts.workflowLogFails) {
@@ -1130,7 +1138,9 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
  */
 describe("ruling 245: a leased file refuses the push", () => {
   const REMOTE = "c".repeat(40);
-  const range = `${REMOTE}..HEAD`;
+  // Ruling 353: the gate measures the branch from its fork point, not the push.
+  const FORK = "d".repeat(40);
+  const range = `${FORK}..HEAD`;
   const leaseTo = async (taskKey: string, paths: string[]) => {
     // Ruling 245(b): the holder must be a LIVE task. A lease naming a task that
     // is done, archived or absent binds nobody, so a fixture that skipped
@@ -1276,5 +1286,64 @@ describe("ruling 159: the store layout never reaches origin", () => {
     expect(clean).toMatchObject({ status: "pushed" });
     const unread = await push(fakeGit({ branch: "vib-1-work", ahead: 1, lsTreeFails: true }));
     expect(unread).toMatchObject({ status: "pushed" });
+  });
+});
+
+/**
+ * Ruling 353 (pass 38, F38-7): a lease binds the BRANCH, so a leased path that
+ * reached origin before the lease was declared is still refused on the next
+ * push — ruling 245's delta read let it through, and the acceptance ceremony
+ * (no lease read) merged it ahead of the holder.
+ */
+describe("ruling 353: the lease gate measures the branch from its fork point", () => {
+  const REMOTE = "c".repeat(40);
+  const FORK = "d".repeat(40);
+  const leaseTo = async (taskKey: string, paths: string[]) => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(taskKey, { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.fileLeases = [{ paths, taskKey, reason: "one owner at a time" }];
+    });
+  };
+  const push = (git: ReturnType<typeof fakeGit>) => {
+    bindPat();
+    return pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
+  };
+
+  it("refuses a leased path the branch changed BEFORE the lease existed, on a push that does not touch it", async () => {
+    await leaseTo("VIB-9", ["Makefile"]);
+    const git = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      changedFilesByRange: {
+        // This push's delta is docs only…
+        [`${REMOTE}..HEAD`]: ["docs/notes.md"],
+        // …but the branch as a whole carries the leased file.
+        [`${FORK}..HEAD`]: ["docs/notes.md", "Makefile"],
+      },
+    });
+    const res = await push(git);
+    // CANARY: measure `remoteHead..HEAD` again and this pushes.
+    expect(res).toMatchObject({ status: "lease_held", path: "Makefile", holder: "VIB-9" });
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    // Merges are excluded, so a base refresh is never charged to the branch.
+    const log = git.calls.find((c) => c.includes("--name-only") && c.includes(`${FORK}..HEAD`))!;
+    expect(log).toContain("--no-merges");
+  });
+
+  it("an unreadable fork point measures nothing and, as before, refuses nothing", async () => {
+    await leaseTo("VIB-9", ["Makefile"]);
+    const res = await push(fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      remoteHead: REMOTE,
+      mergeBase: null,
+      changedFilesByRange: { [`${REMOTE}..HEAD`]: ["Makefile"] },
+    }));
+    expect(res.status).toBe("pushed");
   });
 });

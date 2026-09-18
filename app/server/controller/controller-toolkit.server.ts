@@ -2723,7 +2723,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_file_leases",
-      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY — another task whose push changes a leased path is refused by name, before anything reaches GitHub. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass. A lease naming a task this project does not have is refused, and two leases may not cover the same glob.",
+      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY — another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 353). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass. A lease naming a task this project does not have is refused, and two leases may not cover the same glob.",
       {
         projectSlug: z.string().optional(),
         leases: z

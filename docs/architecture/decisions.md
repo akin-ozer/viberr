@@ -6032,6 +6032,24 @@ by rewriting those paragraphs:*
     so before the call. Stored values are left as they are: the fix is at the door, not a
     rewrite of a person's file. (`project-create.server.ts`, `controller-toolkit.server.ts`.)
 
+353. **A lease binds the branch, so the gate measures the branch (2026-09-18, pass 38; F38-7;
+    amends 245).** Ruling 245's push gate read the push's delta — `remoteHead..HEAD`, ruling
+    144's shape for workflow files — so a leased path that had already reached origin before
+    the lease was declared was never examined again: the next docs-only push on that branch
+    passed, and the acceptance ceremony, which reads no lease, merged the leased change ahead
+    of its holder. The `set_file_leases` text ("another task whose push changes a leased
+    path is refused") was narrowly true and `get_project`'s "which task owns which shared
+    paths until it merges" was not. On this board the ordering is the normal case: the
+    controller declares leases while work is in flight and moves them chain by chain.
+    The gate now lists the files the branch changed from its fork point,
+    `merge-base(origin/<default>, HEAD)..HEAD` with merge commits excluded — commits a base
+    refresh absorbed sit below the fork point whatever the local `origin/<default>` ref says,
+    so they are never charged to the branch. An unreadable fork point still measures nothing
+    and, as ruling 245 chose, refuses nothing and says so in the log; whether an
+    unmeasurable branch should refuse while leases exist is a question for the owner.
+    (`push-workspace.server.ts`, `push-workspace.server.test.ts`, `controller-toolkit.server.ts`,
+    `file-formats.md`.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
@@ -7299,6 +7317,9 @@ by rewriting those paragraphs:*
     the one question a lease answers).
     (`file-leases.ts`, `project-file.schema.ts`, `settings-actions.server.ts`,
     `push-workspace.server.ts`, `task-actions.server.ts`, `controller-toolkit.server.ts`.)
+    *Amended by ruling 353 (2026-09-18): the gate measures the BRANCH from its fork point,
+    not the push's delta, so a leased path that reached origin before the lease was declared
+    still binds.*
 
 246. **A refusal names the real limit, and says whether the door it points at is open
     (2026-09-15, pass 37; F37-75).** Found by asking the controller to ATTEMPT four things it

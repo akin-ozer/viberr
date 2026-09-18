@@ -319,6 +319,45 @@ async function changedWorkflowFiles(
 }
 
 /**
+ * Ruling 353 (pass 38, F38-7): every file this BRANCH changes relative to where
+ * it forked from the default branch — `merge-base(origin/<default>, HEAD)..HEAD`,
+ * merge commits excluded — which is what a lease is about ("one task owns a
+ * shared file until it merges"). Ruling 245 read the PUSH's delta
+ * (`remoteHead..HEAD`, ruling 144's shape), so a leased path that had already
+ * reached origin before the lease was declared was never examined again: the
+ * next docs-only push passed, and the acceptance ceremony, which has no lease
+ * read, merged it. On this instance leases are declared while work is in
+ * flight — the controller moves them chain by chain — so that ordering is the
+ * normal case, not the corner. The merge base, not `origin/<default>..HEAD`:
+ * commits absorbed from the base by a refresh sit below the fork point
+ * whatever the local `origin/<default>` ref currently says, so they are
+ * never charged to the branch.
+ *
+ * `null` keeps its meaning: history could not answer.
+ */
+async function changedFilesOnBranch(
+  exec: Exec,
+  repoDir: string,
+  defaultBranch: string,
+): Promise<string[] | null> {
+  const base = await exec(
+    "git",
+    ["-C", repoDir, "merge-base", `origin/${defaultBranch}`, "HEAD"],
+    { cwd: repoDir, timeoutMs: 10_000 },
+  );
+  if (!base.ok) return null;
+  const fork = base.stdout.trim();
+  if (!/^[0-9a-f]{40}$/i.test(fork)) return null;
+  const res = await exec(
+    "git",
+    ["-C", repoDir, "log", "--format=", "--name-only", `${fork}..HEAD`, "--no-merges"],
+    { cwd: repoDir, timeoutMs: 10_000 },
+  );
+  if (!res.ok) return null;
+  return [...new Set(res.stdout.split("\n").map((l) => l.trim()).filter(Boolean))];
+}
+
+/**
  * Ruling 245: every file this push would change, measured the same way ruling
  * 144 measures the workflow subset — origin's head for the branch, the base
  * only on a first push. `pathspec` narrows it; omitted, it is the whole diff.
@@ -935,12 +974,9 @@ export async function pushWorkspaceBranch(
         // a completed task fence off a file forever.
         const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
         if (leases.length > 0) {
-          const changed = await changedFilesForPush(
-            exec,
-            repoDir,
-            pushedRemoteBefore,
-            defaultBranch,
-          );
+          // Ruling 353: the BRANCH's files, not this push's delta — a lease
+          // declared after the path first reached origin still binds.
+          const changed = await changedFilesOnBranch(exec, repoDir, defaultBranch);
           if (changed === null) {
             logger.info("could not measure the files this push changes; no lease gate", {
               taskKey,

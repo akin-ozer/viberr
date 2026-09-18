@@ -138,3 +138,18 @@ is a missing dot cosmetic? Yes, which is why it is LOW; it is kept because the t
 value the product could never render and no later door could fix it. **Fix:** refuse at the
 door, naming the value and the accepted forms; the tool's description says so up front.
 **Red-proof:** with `isCssStageColor` returning true, the new test fails; restored, 134 green.
+
+## F38-7 — The lease gate measured the push, not the branch (LOW-MEDIUM; ruling 353, amends 245)
+
+**Found by** the lens-1 sweep (#15), verified in `push-workspace.server.ts`: `changedFilesForPush`
+lists `remoteHead..HEAD`, so a leased path pushed before the lease was declared is never
+re-examined; the acceptance merge reads no lease. **Measured:** 0 refusals ever on this instance
+(one lease was ever declared before this pass, and it was the holder's own); on the airbnb board
+the controller declares leases mid-flight and said it will move them chain by chain, which is
+exactly the ordering the delta read misses. **Refutation tried:** is a delta read what GitHub
+enforces anyway? For the `workflow` scope, yes (ruling 144); a lease is about ownership of a
+file until merge, and ownership is not a property of one push. Kept LOW-MEDIUM: the
+enforcement claim the controller repeated to me ("another task's push touching those is refused
+before it reaches GitHub") is true only for the first push. **Fix:** the gate measures
+`merge-base(origin/<default>, HEAD)..HEAD --no-merges`. **Red-proof:** with the delta read
+restored, the new test fails; 57 green restored.

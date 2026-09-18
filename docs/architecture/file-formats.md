@@ -152,7 +152,7 @@ fileLeases:                       # ruling 245: which TASK owns which shared pat
                                   # until it merges — the ordering statement
                                   # `blockedBy` cannot make (`blockedBy` says "do not
                                   # START until done"). Enforced at DELIVERY: another
-                                  # task whose push changes a leased path is refused
+                                  # task whose branch changes a leased path is refused
                                   # before anything reaches GitHub, and every run's
                                   # canonical anchor names what it may not touch.
                                   # Globs: `*` within one segment, `**` spans segments
