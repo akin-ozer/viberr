@@ -104,3 +104,4 @@ README change used as a stimulus.
 | 08:42 | **BNB-14 accepted by me**: PR #10 merged (`4bbbd90`); BNB-15 released (it waited on BNB-14); goal-2 link 4 minted as **BNB-16** ("The gateway: the only public entry") and — **ruling 358 held live** — released 126 ms after its creation in the same ceremony (before the ruling, BNB-14 had waited 57 s for the tick with its `create` drive refused); both operators started at once |
 | 08:55 | PR #11 opened for BNB-15 (the contract amendment) by the operator's own delivery; Review next. BNB-16 (the gateway) still building |
 | 08:57 | F38-15: the inbox named the Operator as the author of every reviewer verdict and dependency release (816 rows) → ruling 361 (a notice must name its actor; no default author), two canaries red, one test rewritten that required the default |
+| 09:01 | BNB-15's PR #11 approved by the code reviewer; Verify next. BNB-16's architect reported; its operator reacts (delivery expected) |
