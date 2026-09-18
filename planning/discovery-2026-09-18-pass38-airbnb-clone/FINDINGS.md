@@ -293,3 +293,28 @@ the agent's, so a reader takes it as the author. Kept LOW-MEDIUM: no loss, but a
 every verdict and release notification, forever. **Fix:** `from` is required; every site names
 the actor its timeline entry names. **Red-proof:** naming the Operator at the release site or
 the verdict site fails the row assertions; naming nobody no longer compiles.
+
+## F38-16 — "Work stalled: pick a recovery path" 0.1 s after the reviewer approved (MEDIUM; ruling 362)
+
+**Found by** watching BNB-16 live: the code reviewer approved the rework on `70f92db` at
+10:09:33.126Z and at 10:09:33.218Z the operator opened a blocked packet — "The coordination
+loop hit its 4-cycle depth cap without reaching a boundary. Coordination is paused until a
+human chooses how to proceed" — offering redirect / send back / hold, each of which re-runs
+work that had just passed. **Measured:** 25 "Work stalled" packets on the instance; 20 followed
+a run that errored (a real stall), and all 5 that followed a run that finished followed an
+approve (SHOP-5 at Review, SHOP-32 at Verify, SHOP-54 at Verify and at Review, BNB-16 at Review).
+Every one was answered "nothing is stalled" (redirect with a note, or a custom directive), the
+approved work waited 6 minutes, 22 minutes, 3.6 hours and 6.8 hours for that answer, and on
+SHOP-54 the redirect made the operator ask the engineer to push — a policy violation on work
+that had passed. Ruling 258 (pass 37) had covered the two cases where the task was already
+acceptable and left the three at a non-final review stage. **Refutation tried:** is the cap
+right to bind here — could an approve be part of a runaway loop? No: an approve moves the
+stage, and a stage cannot be approved twice, so counting from the approve cannot loop; the
+loop the cap exists for (request_changes → rework → delivery → review) still counts every hop.
+Is the packet harmless because the task page still offers the next step? No: "Coordination is
+paused", the packet blocks acceptance later, and every option re-dispatches. Kept MEDIUM: a
+false sentence, a blocked path, and a person made to pick a "recovery" for passed work, five
+times. **Fix:** a reply whose recorded verdict is `approve` resets the react depth before the
+react decision, so the operator takes the step behind the gate (Review → Verify; or the
+acceptance recommendation, which also closes candidate C3's 15-minute wait). **Red-proof:**
+dropping the reset opens the packet in the new test and no operator turn follows the approve.

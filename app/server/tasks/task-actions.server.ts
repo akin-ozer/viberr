@@ -4712,6 +4712,9 @@ export async function applyAgentCompletionEffects(
     });
   }
   const runAttachments = attachmentsPrune.kept;
+  /** Ruling 362: this completion's RECORDED verdict was `approve` — a boundary
+   *  for the react chain's depth count (the arm before the react decision). */
+  let approvedThisReply = false;
   if (finished.state === "finished") {
     // Ruling 248 (pass 37, F37-77): a run whose workspace could not be
     // provisioned READ NOTHING, so it judged nothing. Live on SHOP-5 the Code
@@ -4834,6 +4837,7 @@ export async function applyAgentCompletionEffects(
       attachments: runAttachments,
     });
     if (recorded.escalated) raisedDeadlockPacket = true;
+    approvedThisReply = verdict === "approve";
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
     // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
     // verdict (no envelope, no classifiable prose). Validation is left unchanged
@@ -5374,6 +5378,35 @@ export async function applyAgentCompletionEffects(
       runId: finished.id,
     });
     return;
+  }
+  // Ruling 362 (pass 38, F38-16): an APPROVE is a boundary, so the depth count
+  // starts over at it.
+  //
+  // The cap exists for a chain that goes round without getting anywhere — the
+  // operator re-prompting a specialist that keeps coming back with the same
+  // objection. A reviewer's approve is the opposite: the gate it guards has
+  // opened, and the operator's next move is the step behind it (Review → Verify
+  // and the verifier's dispatch, or the acceptance recommendation). Ruling 258
+  // recognised one such boundary — the task being ACCEPTABLE — and skipped the
+  // packet there, leaving the recommendation to the 15-minute sweep. Live on
+  // BNB-16 the code reviewer approved the rework at Review with Verify still
+  // ahead, and 0.1 s later the cap opened "Work stalled: pick a recovery path"
+  // ("hit its 4-cycle depth cap without reaching a boundary"), whose three
+  // options all re-dispatch work that had just passed. Every one of the five
+  // such packets on this instance followed an approve (SHOP-5, SHOP-32, SHOP-54
+  // twice, BNB-16); the person answered each with "nothing is stalled", and
+  // the approved work waited between six minutes and 6.8 hours for that answer.
+  //
+  // Counting from the approve keeps the cap for the loop it was written for: a
+  // rework cycle (request_changes → rework → delivery → review) still counts
+  // every hop, and a stage cannot be approved twice — the chain moves on.
+  if (approvedThisReply && currentDepth > 0) {
+    logger.info("react depth reset — this reply's approve is a boundary, the chain continues", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+      depthBefore: currentDepth,
+    });
+    currentDepth = 0;
   }
   const shouldReact = operatorShouldReactToReply(
     finished.state,
