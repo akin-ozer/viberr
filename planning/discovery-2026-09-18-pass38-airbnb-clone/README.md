@@ -54,3 +54,6 @@ later revision, push one external commit to that PR branch through the GitHub AP
 ruling 179's "Revision moved after review" disclosure void the verdict and return the task
 to the review stage. Neither is clone code: one is a click on GitHub, the other a one-line
 README change used as a stimulus.
+| 03:11 | integration verifier approved; the operator's react chain had hit its depth cap, so no recommendation was filed (ruling 258 skipped the stuck packet correctly; noted in CANDIDATES) |
+| 03:15 | rulings 347–355 deployed (`cd74ec667455`, verified by the deploy script) |
+| 03:17 | **BNB-1 accepted by me** in the UI: PR #1 merged by Viberr's acceptance ceremony; the dialog named the revision, the verdicts and the base refresh |
