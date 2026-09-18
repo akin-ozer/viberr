@@ -50,3 +50,22 @@ grants the controller set.
 ## The bell (lens-2 C7) — HELD
 
 Bell "40 unread", popover header "40 unread" (03:00Z).
+
+## Ruling 350, live (05:05Z)
+
+The acceptance of BNB-9 interrupted a live operator drive (`reason: task-closed, cause:
+accept`). On the deployed build the Agent-logs footer for that run reads "interrupted by
+Arda; the thread can be resumed where the task still takes a run" — a closed task takes
+none, and the old sentence would have promised "the thread stays resumable".
+
+## Rejection 1 and its recovery — HELD (04:27Z → 05:03Z)
+
+Closing PR #2 on GitHub with both approvals standing: the next 5-minute reconcile recorded the
+closure, the policy engine wrote the divergence note, the operator was woken and opened a
+three-option recovery packet naming the head, the verdicts, the acceptance refusal and the
+absence of unreviewed drift; the acceptance control read "Acceptance is closed … Rework and
+reopen the PR, or archive the task"; the rework, steered by my note, was delivered as a
+fresh PR #3 (the closed PR was never resurrected); the verifier re-approved first (at Verify),
+the operator moved the task back to Review for the code reviewer's verdict on the new
+revision, then to Verify with the acceptance recommendation; the merge went through. Nothing
+was lost and no door was closed without a named way out.
