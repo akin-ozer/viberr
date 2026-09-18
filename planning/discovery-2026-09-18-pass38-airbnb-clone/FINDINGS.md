@@ -253,3 +253,27 @@ the state; the task page made the same argument before ruling 356. Kept LOW. **F
 read resolves the states beside the declaration and the row prints ruling 356's sentence.
 **Red-proof:** the page canary (print the raw list) and the server canary (drop the states) each
 fail their own test.
+
+## F38-14 — Every merge on this instance passed a dialog silent about CI, because the check-runs read fails and a failed read rendered as nothing (MEDIUM; ruling 360)
+
+**Found by** comparing PR #10 on GitHub with its task page: GitHub reported `mergeable_state:
+unstable` and six check-runs, four failed; Viberr's card read "PR #10 · in review" and
+"mergeable: clean" and nothing about checks. **Measured:** all seven merged airbnb PRs (#1, #3,
+#4, #6, #7, #8, #9) and `main` itself carry 4 failing + 2 skipped check-runs — the clone ships
+`ci.yml` and the jobs die within three seconds of starting, the account's Actions billing block;
+0 of the 97 task files with a PR block on this instance (14 airbnb, 83 shopify) ever received a
+`pr.checks` value; 6 of 6 agent reads of `commits/<sha>/check-runs` through the project's token
+answered `ok: false` (69 of 76 other reads succeeded), so the reconciler's own read — which
+swallows a non-ok answer with no log line — fails every pass; every accept dialog on this
+instance (89 merges) rendered no checks row. **Refutation tried:** is the design's "a failed
+read is unknown, keep the cached value" enough? It presumes a value once existed; here none
+ever did, and `mapPrChecks`, the PR card, the dialog and the GitHub list all treat "never read"
+as "nothing to say". Is the CI failure the code's? No — a billing block — but the person merging
+cannot know that from Viberr, and the same silence would cover a real red suite. Is a checks
+gate wanted? No: ruling 304 says checks are not a gate, the verdicts are, "which is exactly why
+the person deciding has to be told". Kept MEDIUM: an irreversible-merge dialog that had a row
+for this fact and never drew it, 89 times. **Fix:** the refusal is carried, persisted, flagged
+on the credential (`checks:read`, resolved by the first successful read), and printed as "checks
+not readable" with GitHub's reason on the PR card, the accept dialog and the GitHub page.
+**Red-proof:** eight canaries (linker, reconciler write, reconciler flag, mapping guard, dialog,
+card, list, advisory), each failing exactly its own test.

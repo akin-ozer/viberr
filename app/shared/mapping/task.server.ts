@@ -315,6 +315,10 @@ export interface TaskSummary {
   /** P13-D-28: CI health for the PR head commit — feeds the checks pill next to
    *  the PR pill. Null = no PR / never read / no CI on the commit. */
   prChecks: PrChecksRender | null;
+  /** Ruling 360: the check-runs read GitHub refused, while no summary has ever
+   *  been read for this PR. Null when checks were read (see `prChecks`), when
+   *  nothing was ever attempted, or when there is no PR. */
+  prChecksUnread?: PrChecksUnread | null;
   /** P13-D-28: GitHub review verdict on an OPEN PR — feeds the review pill.
    *  Null = no PR / settled PR / never read / nothing outstanding. */
   prReview: PrReviewState | null;
@@ -445,6 +449,20 @@ function unaccountedChecks(checks: PrChecks): number {
  */
 export function prChecksRead(pr: PrRef | null): boolean {
   return pr?.checks !== undefined && pr.checks !== null;
+}
+
+/** Ruling 360: the refused read, as the surfaces print it. */
+export interface PrChecksUnread {
+  status: number | null;
+  message: string;
+  at: string;
+}
+
+/** Ruling 360: the refusal stands only while nothing was ever read; a summary
+ *  (even `total: 0`) outranks it, and the reconciler drops the key then. */
+export function mapPrChecksUnread(pr: PrRef | null): PrChecksUnread | null {
+  if (!pr || prChecksRead(pr) || !pr.checksUnread) return null;
+  return { status: pr.checksUnread.status, message: pr.checksUnread.message, at: pr.checksUnread.at };
 }
 
 export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
@@ -820,6 +838,7 @@ export function mapTaskProjectionRow(
     repo: row.repo,
     pr,
     prChecks: mapPrChecks(pr),
+    prChecksUnread: mapPrChecksUnread(pr),
     prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
     otherCommits: github?.otherCommits ?? [],

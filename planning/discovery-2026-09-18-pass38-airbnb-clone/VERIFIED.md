@@ -108,3 +108,11 @@ moved Design → Build → Review and engaged the code reviewer; it ended at 08:
 lease release logged "drive delivered and kept going — no follow-up operator turn owed". No
 second operator run started (the only live run is the reviewer's). Before the ruling, every
 one of the board's 13 deliveries had been followed within 0.1 s by a two-turn no-op drive.
+
+## Ruling 358 live (08:42Z, BNB-16)
+
+BNB-14's acceptance minted goal-2 link 4 as BNB-16 at 08:42:45.723; the mint's own release
+check cleared its wait ("goal-2 link 3, goal-1 link 4") at 08:42:45.849 and the operator
+started at 08:42:48. No "operator run refused — the task waits on other work" line in the
+app log this time; BNB-14, minted the same way at 07:54:45, had waited 57 s for the minute
+tick with its `create` drive refused.

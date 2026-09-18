@@ -333,6 +333,18 @@ describe("credentialAdvisories (ruling 144)", () => {
     expect(credentialAdvisories(validation("fine_grained", null), [])).toEqual([]);
     expect(credentialAdvisories(null, [])).toEqual([]);
   });
+  it("ruling 360: an open `checks:read` violation is an advisory naming the task and the consequence", () => {
+    // CANARY: drop the checks:read arm.
+    const advisories = credentialAdvisories(validation("fine_grained", null), [{ scope: "checks:read", taskKey: "BNB-14" }]);
+    expect(advisories).toHaveLength(1);
+    expect(advisories[0]).toMatchObject({ id: "checks_read", scope: "checks:read", source: "violation" });
+    expect(advisories[0]!.text).toContain("(BNB-14)");
+    expect(advisories[0]!.text).toContain("Checks: read");
+    expect(advisories[0]!.text).toContain("accept dialogs");
+    // Beside a workflow advisory, both stand.
+    expect(credentialAdvisories(validation("classic", ["repo"]), [{ scope: "checks:read", taskKey: null }])).toHaveLength(2);
+  });
+
   it("an open `workflow` violation names the task and outranks the header", () => {
     const [advisory] = credentialAdvisories(validation("classic", ["repo", "workflow"]), [{ scope: "workflow", taskKey: "JC-6" }]);
     expect(advisory).toMatchObject({ source: "violation" });

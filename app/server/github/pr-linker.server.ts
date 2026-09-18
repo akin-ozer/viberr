@@ -78,6 +78,13 @@ export interface PrFacts {
    * that were reported but not readable are counted in `unknown`, never left to
    * pass as green (F21-7). */
   checks: PrChecksSummary | null;
+  /** Ruling 360 (pass 38, F38-14): the check-runs read for this head was
+   *  ATTEMPTED and GitHub refused or failed it, so `checks` is null for THAT
+   *  reason. Absent when the read succeeded or was never attempted (no head).
+   *  A 403 here is the credential: a fine-grained token without Checks: read
+   *  answers every check-runs read with it, and this instance merged 89
+   *  red-CI heads with nothing said on the dialog that authorizes a merge. */
+  checksUnread?: { status: number | null; message: string };
   /** P13-D-28: GitHub review state. The key is ABSENT when the reviews were not
    * read this pass (terminal PR, or the call failed) — UNKNOWN, so callers keep
    * the cached value; `null` means read-and-nothing-outstanding. */
@@ -510,6 +517,7 @@ export async function findPrForBranch(
   }
 
   let checks: PrChecksSummary | null = null;
+  let checksUnread: { status: number | null; message: string } | null = null;
   if (headSha) {
     const checkRuns = await client.request(
       "GET",
@@ -532,6 +540,12 @@ export async function findPrForBranch(
           unknown: checks.unknown,
         });
       }
+    } else if (checkRuns.kind === "network") {
+      checksUnread = { status: null, message: checkRuns.message };
+    } else if (checkRuns.kind !== "not_modified") {
+      // Ruling 360: the refusal is carried, not swallowed — it used to leave
+      // `checks: null` indistinguishable from "never looked".
+      checksUnread = { status: checkRuns.status, message: checkRuns.message };
     }
   }
 
@@ -582,6 +596,7 @@ export async function findPrForBranch(
       : null,
     checks,
   };
+  if (checksUnread) facts.checksUnread = checksUnread;
   // `review` and `approvals` are set only when the reviews call actually ran —
   // an ABSENT key means "not read this pass", which is what makes the caller
   // keep its cached value instead of erasing it.

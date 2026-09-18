@@ -1744,6 +1744,44 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
     expect(row.textContent).toContain("not this task");
   });
 
+  it("ruling 360: the PR card names a read GitHub refused, and a summary outranks it", () => {
+    // CANARY: drop the `prChecksUnread` pill from the card.
+    const refused = {
+      status: 403,
+      message: "Resource not accessible by personal access token",
+      at: "2026-09-18T08:00:00.000Z",
+    };
+    const pr = { number: 10, state: "review" as const, title: "[VIB-151] work" };
+    const { container } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ pr, prChecks: null, prChecksUnread: refused })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    const pill = container.querySelector("[data-checks-unread]");
+    expect(pill).not.toBeNull();
+    expect(pill!.textContent).toContain("checks not readable");
+    expect(pill!.getAttribute("title")).toContain("(HTTP 403)");
+
+    const { container: read } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({
+            pr,
+            prChecks: { total: 2, passing: 2, failing: 0, pending: 0, state: "passing" },
+            prChecksUnread: refused,
+          })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    expect(read.querySelector("[data-checks-unread]")).toBeNull();
+  });
+
   it("renders no collision row when nothing squats on the branch", () => {
     const { container } = render(
       <MemoryRouter>

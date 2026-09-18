@@ -375,8 +375,8 @@ export interface ScopeChip {
  * publish nothing to read, so they get no advisory.
  */
 export interface CredentialAdvisory {
-  id: "workflow_scope";
-  scope: "workflow";
+  id: "workflow_scope" | "checks_read";
+  scope: "workflow" | "checks:read";
   source: "header" | "violation";
   text: string;
 }
@@ -386,29 +386,37 @@ export function credentialAdvisories(
   validation: PatValidation | null,
   openViolations: readonly { scope: string; taskKey: string | null }[],
 ): CredentialAdvisory[] {
+  const advisories: CredentialAdvisory[] = [];
   const violation = openViolations.find((v) => v.scope === "workflow");
-  if (violation) {
-    return [
-      {
-        id: "workflow_scope",
-        scope: "workflow",
-        source: "violation",
-        text: `GitHub refused a push under .github/workflows/ with this token${violation.taskKey ? ` (${violation.taskKey})` : ""}: it lacks the workflow scope. Grant it on GitHub, then Re-check the credential.`,
-      },
-    ];
-  }
   const header = validation?.headerScopes ?? null;
-  if (header && validation?.tokenKind === "classic" && !header.includes("workflow")) {
-    return [
-      {
-        id: "workflow_scope",
-        scope: "workflow",
-        source: "header",
-        text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/. Grant it on GitHub if a task will ship CI, then Re-check the credential.",
-      },
-    ];
+  if (violation) {
+    advisories.push({
+      id: "workflow_scope",
+      scope: "workflow",
+      source: "violation",
+      text: `GitHub refused a push under .github/workflows/ with this token${violation.taskKey ? ` (${violation.taskKey})` : ""}: it lacks the workflow scope. Grant it on GitHub, then Re-check the credential.`,
+    });
+  } else if (header && validation?.tokenKind === "classic" && !header.includes("workflow")) {
+    advisories.push({
+      id: "workflow_scope",
+      scope: "workflow",
+      source: "header",
+      text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/. Grant it on GitHub if a task will ship CI, then Re-check the credential.",
+    });
   }
-  return [];
+  // Ruling 360 (pass 38, F38-14): the check-runs read GitHub refused with this
+  // token. Not a missing REQUIRED scope — merging never needed it — but the
+  // reason every task page and accept dialog says "checks not readable".
+  const checks = openViolations.find((v) => v.scope === "checks:read");
+  if (checks) {
+    advisories.push({
+      id: "checks_read",
+      scope: "checks:read",
+      source: "violation",
+      text: `GitHub refused this token's read of pull-request check results${checks.taskKey ? ` (${checks.taskKey})` : ""}: it lacks Checks: read, so CI status is not shown on task pages or accept dialogs, and merges proceed without it. Grant it on GitHub, then Re-check the credential.`,
+    });
+  }
+  return advisories;
 }
 
 export interface ProjectCredentialHealth {

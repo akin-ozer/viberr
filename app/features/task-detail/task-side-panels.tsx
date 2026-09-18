@@ -19,7 +19,7 @@ import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { checksPill, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import { checksPill, checksUnreadPill, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -281,6 +281,20 @@ export function GithubTrace({
           <Pill kind={checksPill(task.prChecks).kind} sm>
             {checksPill(task.prChecks).label}
           </Pill>
+        )}
+        {/* Ruling 360 (pass 38, F38-14): the read GitHub refused, said rather
+            than blanked. This card read "PR #10 · in review" beside a head
+            whose every check had failed, because the credential could not
+            read them and a failed read rendered as nothing. */}
+        {!task.prChecks && task.prChecksUnread && (
+          <span
+            data-checks-unread
+            title={`GitHub refused the check-runs read${task.prChecksUnread.status ? ` (HTTP ${task.prChecksUnread.status})` : ""}: ${task.prChecksUnread.message}`}
+          >
+            <Pill kind={checksUnreadPill().kind} sm>
+              {checksUnreadPill().label}
+            </Pill>
+          </span>
         )}
         {task.prReview && (
           <Pill kind={reviewPill(task.prReview).kind} sm>

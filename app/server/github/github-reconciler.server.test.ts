@@ -1927,6 +1927,42 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     });
   });
 
+  it("ruling 360: a REFUSED check-runs read is persisted, flags `checks:read`, and the first successful read clears both", async () => {
+    // CANARY: drop `owned.checksUnread` (the file stays silent) or the flag
+    // (the credential never learns why CI is invisible).
+    const { store, actor } = setup();
+    const refused = happyRoutes();
+    refused[`GET ${REPO_PATH}/commits/headsha318/check-runs`] = {
+      status: 403,
+      body: { message: "Resource not accessible by personal access token" },
+    };
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(refused).fetchImpl },
+    );
+    const pr = readPr(store);
+    expect(pr?.checks).toBeUndefined();
+    expect(pr?.checksUnread).toMatchObject({
+      status: 403,
+      message: "Resource not accessible by personal access token",
+    });
+    expect(findOpenScopeViolation(store.db, store.slug, "checks:read", "VIB-301")).not.toBeNull();
+
+    // The read succeeds: the summary lands, the refusal goes, the violation resolves.
+    await reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
+    );
+    const after = readPr(store);
+    expect(after?.checks).toMatchObject({ total: 2, passing: 2 });
+    expect(after?.checksUnread).toBeUndefined();
+    expect(findOpenScopeViolation(store.db, store.slug, "checks:read", "VIB-301")).toBeNull();
+  });
+
   it("a real CI/review change overwrites the cache (preservation is not stickiness)", async () => {
     const { store, actor } = setup();
     const first = happyRoutes();

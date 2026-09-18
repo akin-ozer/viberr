@@ -6154,6 +6154,28 @@ by rewriting those paragraphs:*
     to the declaration in the same sentence form. (`goal-actions.server.ts`,
     `controller-page.tsx`, and their tests.)
 
+360. **A check-runs read GitHub refuses is a stated fact on every surface that would have
+    shown the checks (2026-09-18, pass 38; F38-14).** Ruling 304 put the checks on the accept
+    dialog's Merges row and ruling 276 kept "never read" apart from "no CI" for the
+    controller — and on this instance the check-runs read failed on every one of 97 pull
+    requests: the project's fine-grained token has no Checks: read, GitHub answers 403, the
+    linker turned each refusal into `checks: null`, the reconciler wrote nothing, and every
+    human surface rendered that nothing as nothing. Seven airbnb PRs and main itself carried
+    four failing check-runs each (the clone ships `ci.yml`; the jobs die within three
+    seconds under the account's Actions billing block) and the dialog that authorizes the
+    irreversible merge said only "Verdict · validation healthy". No sentence lied; the
+    silence did. So: the linker carries the refusal (`checksUnread`: status and message); the
+    reconciler persists it on the PR while no summary was ever read (`pr.checksUnread`, dropped
+    by the first successful read) and, on a 403, opens a `checks:read` violation on the task —
+    the same door a refused PR create (`pull_request:write`) or compare (`repo`) uses — which a
+    later successful read resolves; the credential card carries it as an advisory (ruling
+    144(a)); and the PR card, the accept dialog and the GitHub page print "checks not readable"
+    with GitHub's reason, next to the same sentence ruling 304 uses for failing checks: merging
+    does not wait for them, and the person deciding is told so. (`pr-linker.server.ts`,
+    `github-reconciler.server.ts`, `task-file.schema.ts`, `mapping/task.server.ts`,
+    `github-query.server.ts`, `github-pills.ts`, `task-side-panels.tsx`, `accept-confirm.tsx`,
+    `board-page.tsx`, `github-view.tsx`, `pat-store.server.ts`, and their tests.)
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed

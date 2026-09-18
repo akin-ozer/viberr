@@ -185,6 +185,8 @@ describe("loader", () => {
       // check runs" — two facts the row now keeps apart for the readers that
       // act on them differently.
       checksRead: false,
+      // Ruling 360: the refused read, absent here (nothing refused in the seed).
+      checksUnread: null,
       review: null,
       // F17-L6: the demo fixture's PR carries no reconciled mergeability.
       mergeable: null,
@@ -226,6 +228,7 @@ describe("loader", () => {
       number: 318,
       state: "review",
       checks: null, // P13-D-28: carried, not narrowed away
+      checksUnread: null, // Ruling 360: nothing refused in the seed
       review: null,
       mergeable: null, // F17-L6: carried, not narrowed away
     });

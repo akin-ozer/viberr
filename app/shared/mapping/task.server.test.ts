@@ -6,6 +6,7 @@ import {
   isAtAcceptanceBoundary,
   mapOperatorRef,
   mapPrChecks,
+  mapPrChecksUnread,
   prChecksRead,
   mapPrReview,
   mapTaskProjectionRow,
@@ -461,6 +462,23 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
     // persist one, so a null that reaches here came from outside.
     expect(prChecksRead(pr({ checks: null }))).toBe(false);
     expect(prChecksRead(null)).toBe(false);
+  });
+
+  it("ruling 360: a refused read is mapped only while nothing was ever read", () => {
+    // CANARY: return the refusal regardless of `prChecksRead`.
+    const refusal = {
+      status: 403,
+      message: "Resource not accessible by personal access token",
+      at: "2026-09-18T08:00:00.000Z",
+    };
+    expect(mapPrChecksUnread(pr({ checksUnread: refusal }))).toEqual(refusal);
+    expect(
+      mapPrChecksUnread(
+        pr({ checksUnread: refusal, checks: { total: 0, passing: 0, failing: 0, pending: 0 } }),
+      ),
+    ).toBeNull();
+    expect(mapPrChecksUnread(pr())).toBeNull();
+    expect(mapPrChecksUnread(null)).toBeNull();
   });
 
   it("F21-7: runs nobody could read degrade to unknown — never to passing", () => {

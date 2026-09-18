@@ -70,6 +70,12 @@ export function prStatePill(state: string): PillView {
  * could not account for get their own grey pill, so the green one keeps meaning
  * "every run concluded well".
  */
+/** Ruling 360: the read GitHub refused — neither green nor red, and never
+ *  silence on a surface that would have shown the checks. */
+export function checksUnreadPill(): PillView {
+  return { kind: "neutral", label: "checks not readable" };
+}
+
 export function checksPill(checks: {
   total: number;
   passing: number;

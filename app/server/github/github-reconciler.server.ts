@@ -465,6 +465,42 @@ async function reconcileTaskUnlocked(
   //     the reviews call once the PR is terminal.
   const cachedPr = pr && fm.pr?.number === pr.number ? fm.pr : null;
   const checks = pr ? (pr.checks ?? cachedPr?.checks ?? null) : null;
+  // Ruling 360: a refused read is a fact of its own. It rides through a pass
+  // that read nothing like every other cached PR fact, and the first read that
+  // succeeds drops it.
+  const checksUnread = checks
+    ? null
+    : pr?.checksUnread
+      ? {
+          status: pr.checksUnread.status,
+          message: pr.checksUnread.message,
+          at: new Date().toISOString(),
+        }
+      : (cachedPr?.checksUnread ?? null);
+  // Ruling 360: a 403 on the check-runs read is the credential, exactly as a
+  // 403 on the PR create is (pull_request:write) or on the compare (repo). It
+  // opens the `checks:read` violation on the task — the connection card and
+  // the task's timeline then say why CI is invisible — and a read that later
+  // succeeds resolves it.
+  if (pr?.checksUnread?.status === 403) {
+    await flagScopeViolation(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        scope: "checks:read",
+        detail: policyViolationText(
+          "checks:read",
+          "Reading the pull request's check results was refused during reconcile, so the PR card and the accept dialog say the checks could not be read, and a merge proceeds without them.",
+        ),
+        actor,
+      },
+      { dataRoot: ctx.dataRoot },
+    );
+  } else if (pr?.checks) {
+    const open = findOpenScopeViolation(db, input.projectSlug, "checks:read", input.taskKey);
+    if (open) await resolveScopeViolationWithEvent(db, open.id, actor, { dataRoot: ctx.dataRoot });
+  }
   const reviewLive = pr?.review !== undefined ? pr.review : (cachedPr?.review ?? null);
   const review = prState === "review" || prState === "accepted" ? reviewLive : null;
   // P14-LV-07: mergeability follows the SAME two rules as review state — an
@@ -630,6 +666,7 @@ async function reconcileTaskUnlocked(
       title: pr.title,
     };
     if (checks) owned.checks = checks;
+    if (!checks && checksUnread) owned.checksUnread = checksUnread;
     if (review) owned.review = review;
     if (mergeable) owned.mergeable = mergeable;
     // Ruling 236: measured this pass wins; otherwise the SAME PR's cached list
