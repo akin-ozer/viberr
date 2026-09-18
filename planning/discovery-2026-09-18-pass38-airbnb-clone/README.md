@@ -140,3 +140,4 @@ README change used as a stimulus.
 | 09:08 | **BNB-15 accepted by me**: PR #11 merged (the first decision-created amendment task, end to end in 26 minutes) |
 | 09:17 | PR #12 opened for BNB-17 (session-introspection contract amendment; the architect designed and wrote it in ten minutes); Review next. BNB-16's backend engineer still building the gateway |
 | 09:22 | BNB-17's PR #12 approved by the code reviewer; Verify next |
+| 09:30 | BNB-17's PR #12 approved by the integration verifier; acceptance recommended for `1fe1996` (the second decision-created amendment, minted at 09:05, acceptable at 09:30) |
