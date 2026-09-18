@@ -57,3 +57,6 @@ README change used as a stimulus.
 | 03:11 | integration verifier approved; the operator's react chain had hit its depth cap, so no recommendation was filed (ruling 258 skipped the stuck packet correctly; noted in CANDIDATES) |
 | 03:15 | rulings 347–355 deployed (`cd74ec667455`, verified by the deploy script) |
 | 03:17 | **BNB-1 accepted by me** in the UI: PR #1 merged by Viberr's acceptance ceremony; the dialog named the revision, the verdicts and the base refresh |
+| 03:18 | BNB-9 (goal-1 link 2, shared packages db/http/testing) dispatched; the controller's `run_agent_on_task` on the held BNB-2 was refused with the hold sentence verbatim (VERIFIED.md) |
+| 03:43 | PR #2 opened for BNB-9 (`3263230`, 4 commits); Review |
+| 03:50 | BNB-9 **request_changes** from the code reviewer: three defects it reproduced on this host, after verifying 89 tests green and path ownership clean; back to Build for rework |
