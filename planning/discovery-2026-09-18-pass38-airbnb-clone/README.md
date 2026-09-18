@@ -166,6 +166,7 @@ README change used as a stimulus.
 | 11:28 | **BNB-21** created by the BNB-19 decision (refresh six stale citations, waits on BNB-19's merge). BNB-18's engineer reported at 11:30 and the operator delivered **PR #16** (packages/http `details` + parent-span) at 11:31. Lens-2 probes: Review queue "2 in review · 0 waiting on your acceptance" (BNB-4 #14, BNB-19 #15, both awaiting verdict) = DB; GitHub page "13 linked to tasks", #14 and #15 "checks not readable" from their first reconcile |
 | 11:33 | BNB-4's PR #14 **approved** by the code reviewer (validation healthy); BNB-18 Build → Review. Three reviewers now queue behind the three live builds (cap 3): BNB-19, BNB-18 and, once dispatched, BNB-4's verifier |
 | 11:38 | BNB-7's frontend engineer reported after 64 minutes (apps/web); the freed slot went to the oldest queued run, BNB-19's reviewer. Lens-1 probe of the queue's FIFO promise (ruling 152(b)): 16 queued runs today (9 delivery, 7 coordination), 0 started ahead of an older run in its lane |
+| 11:39 | BNB-7 delivered as **PR #17** (apps/web) from the Design stage, then Design → Build → Review in 9 s; four PRs in review (#14 at Verify, #15, #16, #17), three reviewers queued behind two builds and one review |
 
 ## Questions for the owner (saved for the end, as asked)
 
