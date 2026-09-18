@@ -223,6 +223,7 @@ README change used as a stimulus.
 | 13:23 | **BNB-7 accepted by me**: acceptance-time base refresh (2 commits, merge `88e5fef`), PR #17 merged (`0b2e684`), the web shell is in — the first chain to go conflict → engineer fix → re-review → merge, 57 minutes end to end. Its completion minted **BNB-24** (goal-7 link 2), released 0.3 s later. 16 PRs merged today |
 | 13:24 | BNB-22's PR #21 (search) **approved by the integration verifier**; acceptable, accepted next. BNB-24's create-drive running, BNB-23's engineer queued |
 | 13:27 | **BNB-22 accepted by me**: base refresh brought 11 commits in (merge `d238e7c`), PR #21 merged (`7e41b05`), search is in; **BNB-25** (goal-4 link 3) minted and released 0.3 s later. 17 PRs merged today. BNB-24's operator opened an input packet at 13:26 (read and answered next) |
+| 13:28 | BNB-24's packet came from the operator's own triage check of the goal's premises (rulings.md rule 7, before any dispatch): no gateway search route on `main`, no frozen contract for the composed dated search or its availability-unknown response, and the goal's owned paths named `apps/web/app/**` where the repo has `apps/web/src/app/**`. Recommended: fund the composed search as its own task (waits on BNB-5 and BNB-22, blocks BNB-24). Answered with it |
 
 ## Questions for the owner (saved for the end, as asked)
 
