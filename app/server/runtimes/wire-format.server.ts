@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  ARGUMENT_CLIP,
   TOOL_PROGRESS_TAG,
   waitClock,
   type JsonValue,
@@ -665,14 +666,16 @@ function summarizeToolInput(name: string, input: LogLine["input"]): string {
   if (summary.pattern !== undefined) {
     return summary.pattern + (summary.path !== undefined ? " " + summary.path : "");
   }
-  return JSON.stringify(input);
+  // Every other built-in (Agent, WebFetch, TodoWrite, …) reads as the same
+  // arguments line an MCP call does, instead of one JSON blob.
+  return summarizeArguments(input);
 }
 
-/** Longest a single argument value prints on the arguments line. Measured on
- *  this instance's 6,574 stored MCP calls: a `run_agent` prompt or a
- *  `post_comment` body runs to thousands of characters, and the whole object
- *  used to print as one JSON blob. The raw view keeps every character. */
-const ARGUMENT_CLIP = 160;
+/* `ARGUMENT_CLIP` (runtime-types.ts) bounds a single value on the arguments
+ * line. Measured on this instance's 6,574 stored MCP calls: a `run_agent`
+ * prompt or a `post_comment` body runs to thousands of characters, and the
+ * whole object used to print as one JSON blob. The raw view keeps every
+ * character, and the row links to a clipped value in full. */
 
 /** One argument value, classified for the arguments line: text prints
  *  flattened and clipped, a collection by its size — never its body — and any

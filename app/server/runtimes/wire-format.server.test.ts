@@ -544,5 +544,12 @@ describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
       message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test", description: "run tests" } }] },
     });
     expect(bash.display?.text).toBe("npm test");
+    // A built-in with no bespoke summary reads as the arguments line too,
+    // never as one JSON blob.
+    const todo = projectEnvelope("claude", {
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "TodoWrite", input: { todos: [{ content: "a" }, { content: "b" }] } }] },
+    });
+    expect(todo.display?.text).toBe("todos: [2 items]");
   });
 });
