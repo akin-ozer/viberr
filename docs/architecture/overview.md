@@ -33,7 +33,7 @@ is vertical; run one instance per data root.
 | Files | `yaml` frontmatter, chokidar 5 watchers (250 ms debounce) |
 | Auth | better-auth 1.6.25 behind `app/lib/auth.server.ts`; no plugins |
 | Agents | `@anthropic-ai/claude-agent-sdk` 0.3.261, `@openai/codex-sdk` 0.153.4, `@playwright/mcp` 0.0.79 with Debian chromium; `uv`/`uvx` in the image for Python stdio MCP servers |
-| UI | one stylesheet `app/app.css` (ported `viberr.css`, no Tailwind), Inter / JetBrains Mono (ruling 365), lexical (comment composer), dnd-kit (board), thinking-orbs (the run console's wait row, ruling 366), react-markdown + remark-gfm |
+| UI | one stylesheet `app/app.css` (ported `viberr.css`, no Tailwind), Inter / JetBrains Mono (ruling 365), lexical (comment composer), dnd-kit (board), thinking-orbs + @number-flow/react (the run console's wait row and rolling counts, ruling 366), react-markdown + remark-gfm |
 | Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation |
 
 ## 3. Layers and the rules between them

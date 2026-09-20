@@ -119,7 +119,15 @@ export interface LogLine {
    *  of one call shares (the console folds them into one wait row); `elapsed`
    *  is the provider's own figure in seconds, null when it sent none — never
    *  counted here. Absent on every other line. */
-  progress?: { call: string; elapsed: number | null; heartbeat: boolean };
+  progress?: {
+    call: string;
+    elapsed: number | null;
+    heartbeat: boolean;
+    /** The heartbeat's own instant (ISO), so a live count can run on from the
+     *  provider's figure and the next heartbeat resyncs it instead of jumping.
+     *  Null when the line was projected without one. */
+    at: string | null;
+  };
 }
 
 /**

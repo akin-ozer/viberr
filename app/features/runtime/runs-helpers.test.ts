@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentMessageProse,
+  argumentRows,
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
@@ -8,6 +9,9 @@ import {
   fmtTok,
   foldWaits,
   groupThoughts,
+  HEARTBEAT_NOTE,
+  heartbeatLabel,
+  hiddenArguments,
   hoistRunInputs,
   roleShort,
   runInputRows,
@@ -16,8 +20,8 @@ import {
   RUN_STATE,
   thoughtLabel,
   toolChip,
+  waitCountTitle,
   waitText,
-  waitTitle,
 } from "./runs-helpers";
 import {
   runBoundaryLine,
@@ -591,7 +595,7 @@ describe("foldWaits + waitText (ruling 366)", () => {
       tag: TOOL_PROGRESS_TAG,
       name: "mcp__viberr__run_agent",
       text: "mcp__viberr__run_agent still running",
-      progress: { call, elapsed, heartbeat: true },
+      progress: { call, elapsed, heartbeat: true, at: "2026-09-20T10:00:30.000Z" },
     });
 
   it("folds one call's heartbeats into one wait row and keeps two calls apart", () => {
@@ -625,15 +629,57 @@ describe("foldWaits + waitText (ruling 366)", () => {
     expect(waitText(lines, false)).toBe("ran past 2m 30s");
     expect(waitText([R(beat("a", null))], true)).toBe("still running");
     expect(waitText([R(beat("a", null))], false)).toBe("was still running");
-    expect(waitTitle(lines)).toBe(
-      "2 heartbeats from the runtime, about one every 30 s. The elapsed figure is its last report, not a clock.",
+    // 366(e): the live count's tooltip says where its figure comes from.
+    expect(waitCountTitle(lines, "13:02:30")).toBe(
+      "Counting on from the runtime's last heartbeat: 2m 30s at 13:02:30. " +
+        "A heartbeat lands about every 30 s and resets the count.",
     );
-    expect(waitTitle([R(beat("a", 30))])).toMatch(/^1 heartbeat from/);
+  });
+
+  it("discloses each folded heartbeat by number and figure, under a note that says what one is (366(d))", () => {
+    expect(heartbeatLabel(beat("a", 30), 1)).toBe("heartbeat 1 · 30s in");
+    expect(heartbeatLabel(beat("a", 90), 3)).toBe("heartbeat 3 · 1m 30s in");
+    expect(heartbeatLabel(beat("a", null), 2)).toBe("heartbeat 2");
+    expect(HEARTBEAT_NOTE).toBe(
+      "A heartbeat is the runtime saying the call is still open: about one every 30 s, " +
+        "carrying no output. Nothing here changed the run.",
+    );
   });
 
   it("waitClock keeps whole units and never goes negative", () => {
     expect([29, 60, 150, 3600, 6039, 7200, -5].map(waitClock)).toEqual([
       "29s", "1m", "2m 30s", "1h", "1h 40m", "2h", "0s",
+    ]);
+  });
+});
+
+/**
+ * Ruling 366(d): a tool row opens to its full arguments exactly when its
+ * one-line summary left some unseen. Canary: return true for every tool row
+ * and the single-string case below fails; return false and Bash's description
+ * is only ever reachable through `{ } raw`.
+ */
+describe("hiddenArguments + argumentRows (ruling 366(d))", () => {
+  it("says yes for a second key, a non-string value, or a string the summary clipped", () => {
+    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "npm test", input: { command: "npm test", description: "run" } }))).toBe(true);
+    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__get_task", text: "12", input: { events: 12 } }))).toBe(true);
+    const long = "x".repeat(200);
+    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__post_comment", text: `${"x".repeat(159)}…`, input: { text: long } }))).toBe(true);
+  });
+
+  it("says no when the row already shows the one string, whitespace aside, and for rows with no input", () => {
+    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__read_default_branch_file", text: "a/b.ts", input: { path: "a/b.ts" } }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "git  status\n", input: { command: "git status" } }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "tool", name: "exec", text: "ls" }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "", input: {} }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "out", text: "x", input: { a: 1, b: 2 } }))).toBe(false);
+  });
+
+  it("lists every argument in full: strings as themselves, the rest as readable JSON", () => {
+    expect(argumentRows({ command: "npm test", timeout: 60000, tags: ["a", "b"] })).toEqual([
+      { key: "command", text: "npm test" },
+      { key: "timeout", text: "60000" },
+      { key: "tags", text: '[\n  "a",\n  "b"\n]' },
     ]);
   });
 });

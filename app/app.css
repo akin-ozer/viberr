@@ -4975,6 +4975,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   font: inherit; font-weight: 600;
   border: 0; background: none; padding: 0;
   color: #8fb2ff; cursor: pointer;
+  white-space: nowrap;
   transition: color .14s ease;
 }
 .log-more:hover:not(:disabled) { color: #c9d1e3; text-decoration: underline; }
@@ -5524,6 +5525,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .log-wait { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .375rem; max-width: 100%; }
 .log-wait .log-orb { flex: none; }
 .log-line.wait .ico { flex: none; width: 14px; height: 14px; color: #8a95b1; }
+/* Ruling 366(e): the counts that climb while a run waits roll their digits
+   (`@number-flow/react`). Tabular, so a tick never shifts the words beside it;
+   the digit mask trimmed to the row's line height. */
+.lw-clock { font-variant-numeric: tabular-nums; }
+.lw-clock number-flow-react { --number-flow-mask-height: .2em; }
 
 /* Files a run touched, from the `file_change` envelope. Kind is carried by a
    GLYPH as well as a colour (WCAG 1.4.1) — the +/~/− reads without hue. No

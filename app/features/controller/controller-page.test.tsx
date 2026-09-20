@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRoutesStub, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, surfaceLabel } from "./controller-page";
@@ -541,8 +541,17 @@ describe("the open conversation's execution", () => {
     expect(screen.getByText("viberr_controller · list_tasks")).toBeTruthy();
     // Elapsed derives from the run's own startedAt (~65 s), never a counter;
     // `useElapsed` reads the clock after mount, so wait for its first tick.
-    await screen.findByText(/^01:0[56]$/);
-    const cells = [...container.querySelectorAll(".run-cell")].map((c) => c.textContent);
+    await waitFor(() =>
+      expect(container.querySelector(".run-cell .lw-clock")?.getAttribute("data-clock")).toMatch(/^01:0[56]$/),
+    );
+    // Ruling 366(e): Elapsed and Tokens roll their digits, and carry the plain
+    // figure on the wrapper's `data-` attribute; the cell is read through it.
+    const plain = (c: Element) =>
+      c.querySelector(".lbl")!.textContent +
+      (c.querySelector(".lw-clock")?.getAttribute("data-clock") ??
+        c.querySelector(".lw-clock")?.getAttribute("data-tokens") ??
+        c.querySelector(".val")!.textContent);
+    const cells = [...container.querySelectorAll(".run-cell")].map(plain);
     expect(cells[0]).toMatch(/^Elapsed01:0[56]$/);
     expect(cells.slice(1)).toEqual(["Turns3", "Tokens1.2k", "Runtimeclaude-opus-4-8"]);
     expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();

@@ -413,7 +413,7 @@ export function projectEnvelope(
     return projectCodex(e, t) ?? unknownEnvelope(e.type, wireText.parse(raw), t);
   }
   const e = claudeEnvelope.parse(raw);
-  return projectClaude(e, t) ?? unknownEnvelope(e.type, wireText.parse(raw), t);
+  return projectClaude(e, t, occurredAtIso ?? null) ?? unknownEnvelope(e.type, wireText.parse(raw), t);
 }
 
 /** An envelope type this build does not know — shown verbatim, never dropped. */
@@ -421,8 +421,9 @@ function unknownEnvelope(type: string, text: string, t: string): ProjectedEnvelo
   return { display: { t, ev: "meta", tag: type || "unknown", text }, facts: {} };
 }
 
-/** `null` → the envelope type is unrecognized; the caller renders it raw. */
-function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
+/** `null` → the envelope type is unrecognized; the caller renders it raw.
+ *  `at` is the envelope's own instant, which only the heartbeat line keeps. */
+function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): ProjectedEnvelope | null {
   switch (e.type) {
     case "rate_limit_event": {
       // The SDK's live quota report. Previously fell through to the
@@ -522,6 +523,7 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
             call: e.parent_tool_use_id || e.tool_use_id,
             elapsed,
             heartbeat: e.heartbeat,
+            at,
           },
         },
         facts: {},

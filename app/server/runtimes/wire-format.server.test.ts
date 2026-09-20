@@ -440,25 +440,34 @@ describe("ruling 175: the result fold reads modelUsage", () => {
  */
 describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
   it("tool_progress → a meta heartbeat naming the tool, its call and the provider's figure", () => {
-    const { display, facts } = projectEnvelope("claude", {
-      type: "tool_progress",
-      tool_use_id: "toolu_01-heartbeat-2",
-      tool_name: "mcp__viberr__run_agent",
-      parent_tool_use_id: "toolu_01",
-      elapsed_time_seconds: 90,
-      heartbeat: true,
-      session_id: "s",
-      uuid: "u",
-    });
+    const { display, facts } = projectEnvelope(
+      "claude",
+      {
+        type: "tool_progress",
+        tool_use_id: "toolu_01-heartbeat-2",
+        tool_name: "mcp__viberr__run_agent",
+        parent_tool_use_id: "toolu_01",
+        elapsed_time_seconds: 90,
+        heartbeat: true,
+        session_id: "s",
+        uuid: "u",
+      },
+      "2026-09-20T10:01:30.000Z",
+    );
     expect(display).toEqual({
       t: display?.t,
       ev: "meta",
       tag: "tool_progress",
       name: "mcp__viberr__run_agent",
       text: "mcp__viberr__run_agent still running · 1m 30s",
-      progress: { call: "toolu_01", elapsed: 90, heartbeat: true },
+      // 366(e): the heartbeat's own instant rides the line, so a live count
+      // can run on from the figure; projected without one, it is null.
+      progress: { call: "toolu_01", elapsed: 90, heartbeat: true, at: "2026-09-20T10:01:30.000Z" },
     });
     expect(facts).toEqual({});
+    expect(
+      projectEnvelope("claude", { type: "tool_progress", tool_name: "Bash", elapsed_time_seconds: 30 }).display?.progress?.at,
+    ).toBeNull();
   });
 
   it("a frame with no figure says still running and invents no number; no parent → keyed on its own id", () => {
@@ -472,7 +481,7 @@ describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
     });
     expect(display).toMatchObject({
       text: "Agent still running",
-      progress: { call: "toolu_02", elapsed: null, heartbeat: false },
+      progress: { call: "toolu_02", elapsed: null, heartbeat: false, at: null },
     });
     // A garbled figure reads as none, never as a number.
     expect(

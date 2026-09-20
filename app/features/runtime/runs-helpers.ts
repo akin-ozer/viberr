@@ -8,6 +8,7 @@ import {
   isRunInputsLine,
   isWaitLine,
   waitClock,
+  type JsonValue,
   type LogLine,
   type RunInputs,
   type RunView,
@@ -462,13 +463,65 @@ export function waitText(lines: readonly { display: LogLine }[], live: boolean):
   return at === null ? "was still running" : `ran past ${at}`;
 }
 
-/** The fold's tooltip: what it stands for, and whose figure the row prints. */
-export function waitTitle(lines: readonly { display: LogLine }[]): string {
-  const n = lines.length;
+/**
+ * Ruling 366(d): what the fold stands for, said on the row itself — a reader
+ * has to know the hidden events were keepalives and nothing more, or a fold
+ * reads as a hole in the record. The disclosure under it lists every one.
+ */
+export const HEARTBEAT_NOTE =
+  "A heartbeat is the runtime saying the call is still open: about one every 30 s, " +
+  "carrying no output. Nothing here changed the run.";
+
+/** One folded heartbeat, as its own disclosed row: which one, and the
+ *  provider's figure at that moment. */
+export function heartbeatLabel(line: LogLine, n: number): string {
+  const elapsed = line.progress?.elapsed ?? null;
+  return `heartbeat ${n}` + (elapsed === null ? "" : ` · ${waitClock(elapsed)} in`);
+}
+
+/** The live count's tooltip: where its figure comes from, honestly — it runs
+ *  on from the provider's last report, and the next report resets it. */
+export function waitCountTitle(lines: readonly { display: LogLine }[], clock: string): string {
+  const elapsed = lines[lines.length - 1]!.display.progress?.elapsed ?? 0;
   return (
-    `${n} heartbeat${n === 1 ? "" : "s"} from the runtime, about one every 30 s. ` +
-    "The elapsed figure is its last report, not a clock."
+    `Counting on from the runtime's last heartbeat: ${waitClock(elapsed)} at ${clock}. ` +
+    "A heartbeat lands about every 30 s and resets the count."
   );
+}
+
+/** A value flattened the way the arguments line prints it. */
+function flat(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Ruling 366(d): does the tool row's summary leave any of the call's arguments
+ * unseen? The row prints Bash's command alone, an MCP call's single string
+ * argument as itself, and everything else clipped or by size — so the answer
+ * is yes for a second key, a non-string value, or a string the summary cut.
+ * The disclosure then lists every argument in full; `{ } raw` has them too,
+ * but a reader should not have to leave the row for them.
+ */
+export function hiddenArguments(line: LogLine): boolean {
+  if (line.ev !== "tool" || !line.input) return false;
+  const entries = Object.entries(line.input);
+  if (entries.length === 0) return false;
+  if (entries.length > 1) return true;
+  const only = z.string().safeParse(entries[0]![1]);
+  return !only.success || flat(only.data) !== flat(line.text);
+}
+
+/** One argument, in full: a string as itself, anything else as its JSON. */
+export interface ArgumentRow {
+  key: string;
+  text: string;
+}
+
+export function argumentRows(input: Record<string, JsonValue>): ArgumentRow[] {
+  return Object.entries(input).map(([key, value]) => {
+    const text = z.string().safeParse(value);
+    return { key, text: text.success ? text.data : JSON.stringify(value, null, 2) };
+  });
 }
 
 /** `HH:MM:SS` → seconds, or null when the clock is not readable. */
