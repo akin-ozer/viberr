@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
@@ -35,6 +34,7 @@ import {
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
+import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
   archivedTaskBlockedReason,
@@ -51,14 +51,8 @@ import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { LocalDayDotTime } from "~/ui/local-time";
-import { AgentGlyph } from "~/ui/identity";
-import { Pill, ReadinessPill, ValidationPill, validationLabel, validationQuiet } from "~/ui/pill";
-import {
-  checksPill,
-  connectionPill,
-  prStatePill,
-  reviewPill,
-} from "~/features/github/github-pills";
+import { AgentBadge, AgentGlyph } from "~/ui/identity";
+import { connectionPill } from "~/features/github/github-pills";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
 import {
@@ -76,7 +70,6 @@ import {
   matchesBoardFilter,
   matchesLabelFilter,
   matchesSearch,
-  shortBranch,
   type BoardFilterId,
 } from "./board-filters";
 
@@ -293,53 +286,31 @@ function useRovingStageMenu(active: boolean) {
   return ref;
 }
 
-function WaitTag({ task }: { task: TaskSummary }) {
-  if (task.waiting === "agent" && task.liveRun === "queued") {
-    // Ruling 349: parked behind the cap — no pulse, because nothing streams.
+/**
+ * Ruling 365: the trace mark in the card's head — the PR number when a PR
+ * exists (the stronger trace; it implies the branch, ruling 171(d)), else the
+ * branch glyph alone with the branch name as its tooltip and accessible name,
+ * else nothing. The chip used to print the branch name, which at the board's
+ * 218px lanes cut to "shop-6…" and told nobody anything the key beside it had
+ * not; the task page's GitHub trace prints both in full.
+ */
+function TraceMark({ task }: { task: TaskSummary }) {
+  if (task.pr) {
+    return (
+      <span className="trace pr" title={"Pull request #" + task.pr.number}>
+        <Icon name="pr" />#{task.pr.number}
+      </span>
+    );
+  }
+  if (task.branch) {
     return (
       <span
-        className="wait-tag agent"
-        title="Behind the instance's concurrent-run cap; it starts when a slot frees."
+        className="trace br"
+        role="img"
+        aria-label={"Branch " + task.branch}
+        title={"Branch " + task.branch}
       >
-        agent queued
-      </span>
-    );
-  }
-  if (task.waiting === "agent") {
-    return (
-      <span className="wait-tag agent">
-        <span className="working" />
-        agent working
-      </span>
-    );
-  }
-  if (task.waiting === "human") {
-    // R8-3: only the viewer who can act on the decision sees "waiting on you";
-    // everyone else sees the honest project-wide "waiting on a human".
-    return (
-      <span className="wait-tag human">
-        <Icon name="hand" />
-        {task.waitingOnMe ? "waiting on you" : "waiting on a human"}
-      </span>
-    );
-  }
-  // Ruling 225 (F37-45): resting on a clock, not on a person. The hand icon
-  // above is the demand this tag is NOT making, so it gets a clock instead.
-  // Without the instant the tag would be a worse "waiting on a human" than the
-  // one it replaces, so name it: the projection only ever sets this state from
-  // a pending occurrence, and the wordless fallback covers a schedules list
-  // that failed to parse at the read boundary rather than inventing a time.
-  if (task.waiting === "schedule") {
-    return (
-      <span className="wait-tag scheduled">
-        <Icon name="clock" />
-        {task.resumesAt ? (
-          <>
-            resumes <LocalDayDotTime iso={task.resumesAt} />
-          </>
-        ) : (
-          "resumes on its own"
-        )}
+        <Icon name="branch" />
       </span>
     );
   }
@@ -347,145 +318,70 @@ function WaitTag({ task }: { task: TaskSummary }) {
 }
 
 /**
- * F19-13 — the ACTIONABLE state block, drawn identically by BOTH board views.
- *
- * The card foot and the list row each hand-rolled their own subset: the card
- * drew the PR-state pill (R16-6 "merge pending" and the closed-PR risk pill),
- * the failing-checks pill and GitHub's "changes requested"; the list row drew
- * none of them. So a full-autonomy task whose Done still owes a human merge
- * read "merge pending" on the board and looked finished in the list — the same
- * stored state under two vocabularies, on one screen, one toggle apart. Ruling
- * 40 asks for exactly the opposite ("the difference must be visible on the board
- * card AND the review queue"), and rulings 12/14 say a mapping is never forked
- * per surface. One component, one answer, both views.
- *
- * F19-8: it is also the single place archived work goes quiet. Every signal here
- * asserts an OBLIGATION — a merge nobody will run, a verdict nobody owes, an
- * agent that is not working — and an archived task is abandoned work kept for
- * the record, under a banner that says so. The task hero made the same cut for
- * the same reason (UXO-1). The traceability chips beside this block (branch, PR
- * number) stay: "how far did this get?" is still a true question about an
- * archived task, exactly as the hero keeps its stage pill.
- *
- * Ruling 172 (owner, 2026-09-09): the card carries STATUS, not planning
- * metadata or history. The priority flag, the labels and the due date (the
- * `.card-meta` row), the "blocked by …" names a held task used to print here
- * (ruling 131(a)) and the "no activity" cue (Gap-10) left the card and the
- * list row; the task page keeps every one of them — Details, the hero's wait
- * chips, Current state's last activity — and the board's filter chips
- * ("Urgent", "No activity", "Blocked or waiting") still select on the facts.
+ * Ruling 365: the card's two seats as one stack at the head's right end — the
+ * agent's badge, when an agent carries the task (ruling 171(a)'s carrier seat,
+ * its profile name now the badge's tooltip and accessible name rather than
+ * printed text), then the owner's avatar (ruling 171(b), unchanged). Nobody
+ * carrying the task draws nothing: the ghost owner avatar and a "ready" status
+ * already say so, and "no agent" on every Triage card was noise.
  */
-function StatePills({ task }: { task: BoardTask }) {
-  if (isArchived(task)) return null;
-  // C2 (⇄ N20-14 / UXO-1): the validation pill asserts a LIVE obligation
-  // ("awaiting verdict" / "validation failing"). UXO-1 withdrew it on archived
-  // cards (the early return above) because abandoned work owes nobody a verdict;
-  // the same is true of any TERMINAL task — an accepted/merged completion owes
-  // none either, and a force-accepted one would otherwise read
-  // "accepted · gate bypassed" (or the stale "awaiting verdict") beside a Done
-  // card. The task hero makes exactly this cut with the same predicate
-  // (task-main-sections.tsx `terminal`); the board card matches it. The PR-state
-  // pill below STAYS on a terminal task — "merge pending" is a real outstanding
-  // action (R16-6), not a live verdict claim — as does the readiness pill in the
-  // card top, whose value IS the terminal status.
-  const terminal =
-    task.displayReadiness === "accepted" || task.displayReadiness === "merged";
-  // Pass 30 (audit: "worst-case card stacks ~8 equal-weight pills"): the five
-  // STATE pills below keep their individually-ruled gates, but at most
-  // STATE_PILL_CAP render full-strength; the rest fold into one neutral "+N"
-  // whose title lists them (the exact LabelChips pattern, task-meta.tsx).
-  // Every fact stays visible — on hover here, in full on the task page —
-  // which is what rulings 40/12/14 require; what changes is that five
-  // near-identical coral chips no longer compete as equals. The wait tag
-  // stays outside the fold: it is the card's status seat, not the red stack.
-  // (Ruling 172: a held task's "blocked by …" names no longer lead the stack;
-  // the readiness pill says `blocked` and the task page names the entries.)
-  const statePills: { key: string; label: string; node: ReactNode }[] = [];
-  // R16-6 (owner ruling, 2026-08-04): merge stays human-only, so a
-  // full-autonomy task reaches the done stage with its PR still open —
-  // `pr.state: "accepted"` is exactly "a human accepted the completion but the
-  // real merge is still pending". The closed case is the same omission from
-  // the other side (live finding H10). Both earn a pill under this block's
-  // density rule (only ACTIONABLE state); `merged` and `review` stay silent —
-  // the readiness pill and the PR chip already carry those. The vocabulary
-  // comes from `prStatePill`, the one PR-state → pill mapping the GitHub view
-  // and the task branch panel already read.
-  if (task.pr?.state === "accepted" || task.pr?.state === "closed") {
-    const p = prStatePill(task.pr.state);
-    statePills.push({
-      key: "pr",
-      label: p.label,
-      node: (
-        <Pill kind={p.kind} sm>
-          {p.label}
-        </Pill>
-      ),
-    });
-  }
-  // P13-D-28: CI health, but only when it is ACTIONABLE — a failing build on a
-  // task sitting in Review is news; "N checks passing" is not.
-  if (task.prChecks?.state === "failing") {
-    const p = checksPill(task.prChecks);
-    statePills.push({
-      key: "checks",
-      label: p.label,
-      node: (
-        <Pill kind={p.kind} sm>
-          {p.label}
-        </Pill>
-      ),
-    });
-  }
-  // Same rule for GitHub's own review state — a teammate asking for changes on
-  // the PR is the case a supervisor needs off the board.
-  if (task.prReview === "changes_requested") {
-    const p = reviewPill(task.prReview);
-    statePills.push({
-      key: "review",
-      label: p.label,
-      node: (
-        <Pill kind={p.kind} sm>
-          {p.label}
-        </Pill>
-      ),
-    });
-  }
-  // P13-D-6 (FR24): validation renders when it is a PROBLEM — the fill tier
-  // of the vocabulary ("validation failing"; "gate bypassed" is terminal and
-  // withdrawn by C2 above). Ruling 168: the quiet tier — "awaiting verdict",
-  // "validation healthy" — describes where the evidence stands without asking
-  // anything of the reader, and the owner's card (2026-09-09) read "awaiting
-  // verdict" beside "waiting on you", the verdict being exactly what was
-  // waited on. The card and the list row leave descriptions to the task hero,
-  // which draws every value. The "Blocked or waiting" filter matches `failing`
-  // only, so nothing it selects goes unexplained here.
-  if (!terminal && !validationQuiet(task.validation)) {
-    statePills.push({
-      key: "validation",
-      label: validationLabel(task.validation),
-      node: <ValidationPill value={task.validation} sm />,
-    });
-  }
-  // D4: the continuity cue sits with the other supervision signals.
-  if (task.continuity === "degraded") {
-    statePills.push({
-      key: "continuity",
-      label: "degraded continuity",
-      node: <ContinuityTag task={task} />,
-    });
-  }
-  const shown = statePills.slice(0, STATE_PILL_CAP);
-  const folded = statePills.slice(STATE_PILL_CAP);
+function WhoStack({ task }: { task: TaskSummary }) {
+  const sp = task.specialist;
+  return (
+    <span className="who">
+      {sp && <AgentBadge backend={sp.backend} name={sp.profileName ?? sp.role} />}
+      <OwnerSeat task={task} />
+    </span>
+  );
+}
+
+/**
+ * Ruling 365: the status chip — the ONE tinted chip on a card, whose tint is
+ * its meaning (`cardStatus`, card-status.ts). "agent working" keeps the live
+ * pulse for its mark (R21-8); a clock rest names its instant (ruling 225) and
+ * falls back to "on its own" for a schedule the read boundary could not parse.
+ */
+function StatusChip({ task }: { task: TaskSummary }) {
+  const s = cardStatus(task);
+  if (!s) return null;
+  return (
+    <span className={"chip st " + s.kind}>
+      {s.icon === null ? <span className="working" /> : <Icon name={s.icon} />}
+      {s.label}
+      {s.kind === "scheduled" &&
+        (s.resumesAt ? (
+          <>
+            {" "}
+            <LocalDayDotTime iso={s.resumesAt} />
+          </>
+        ) : (
+          " on its own"
+        ))}
+    </span>
+  );
+}
+
+/**
+ * Ruling 365: the problems, most severe first (`cardProblems`). Two draw at
+ * full strength and the rest fold into one "+N" whose title lists them — the
+ * pass-30 rule, with the cap at two now that the chips are outlined objects
+ * rather than filled pills. Every fact stays visible, on hover here and in
+ * full on the task page (rulings 40/12/14).
+ */
+function ProblemChips({ task }: { task: TaskSummary }) {
+  const problems = cardProblems(task);
+  const shown = problems.slice(0, PROBLEM_CAP);
+  const folded = problems.slice(PROBLEM_CAP);
   return (
     <>
       {shown.map((p) => (
-        <Fragment key={p.key}>{p.node}</Fragment>
+        <span key={p.key} className={"chip pb" + (p.tone ? " " + p.tone : "")}>
+          <Icon name={p.icon} />
+          {p.label}
+        </span>
       ))}
       {folded.length > 0 && (
-        <span
-          className="pill neutral sm"
-          title={folded.map((p) => p.label).join(" · ")}
-        >
+        <span className="chip more" title={folded.map((p) => p.label).join(" · ")}>
           +{folded.length}
         </span>
       )}
@@ -493,105 +389,29 @@ function StatePills({ task }: { task: BoardTask }) {
   );
 }
 
-/** The card's STATUS seat — the wait tag. Silent on an archived task, like
- *  the pills: nobody is waited on for abandoned work (F19-8). Ruling 171 seats
- *  it in the foot's right cell on the card; the list row runs it inline.
- *  Ruling 172 took the "no activity" cue (Gap-10) out of the seat: the board's
- *  "No activity" filter chip still selects those tasks, and the task page's
- *  Current state dates them. */
-function StatusTags({ task }: { task: BoardTask }) {
-  if (isArchived(task)) return null;
-  return <WaitTag task={task} />;
-}
-
-/** The list row's state block: the pills and the status tags in one run. */
-function StateSignals({ task }: { task: BoardTask }) {
+/** The card's property row: the status chip, then the problems. Drawn by the
+ *  card and the list row alike (F19-13: one state block, both layouts), and
+ *  absent when there is nothing to say. */
+function CardChips({ task }: { task: TaskSummary }) {
+  if (cardStatus(task) === null && cardProblems(task).length === 0) return null;
   return (
-    <>
-      <StatePills task={task} />
-      <StatusTags task={task} />
-    </>
-  );
-}
-
-/** F19-8: the archived card's replacement for the readiness pill — the task
- *  hero's exact vocabulary (lock glyph + "archived"), so one word describes the
- *  state on both surfaces. */
-function ArchivedPill() {
-  return (
-    <Pill kind="neutral" sm>
-      <Icon name="lock" />
-      archived
-    </Pill>
-  );
-}
-
-/**
- * D4 — the runtime-continuity cue, and the whole point of projecting the state:
- * "degraded continuity" existed only on the task page's Continuity Recovery
- * panel, so a supervisor scanning the board could not see which tasks lost their
- * provider session. It now carries the SAME state onto the card (UX spec §State
- * Semantics: "Every state must mean the same thing everywhere it appears").
- *
- * Warning tone (`risk`), matching how the panel draws the same state — a lost
- * conversation the agent had to re-anchor around is a real supervision signal,
- * not a neutral fact like "no activity". The refresh glyph is the panel heading's
- * own icon, so the cue reads as the same thing on both surfaces. It is a coarse
- * "a break happened" flag; the panel still owns the recovery detail (which agent,
- * whether it recovered), which lives in the run projection this card cannot see.
- */
-function ContinuityTag({ task }: { task: BoardTask }) {
-  if (task.continuity !== "degraded") return null;
-  return (
-    <Pill kind="risk" sm>
-      <Icon name="refresh" />
-      degraded continuity
-    </Pill>
-  );
-}
-
-/**
- * Ruling 171 (owner, 2026-09-09): the CARRIER seat — who carries the task. The
- * engaged agent, as the backend's glyph and the profile's name; or, when
- * nobody does yet, the empty seat itself, dimmed: "no agent". The human owner
- * is never here — the owner seat (`OwnerSeat`, the row's right end) carries
- * them on every card. Before this a human-owned task with no agent put the
- * owner HERE, avatar, first name and a role word, and left the right seat
- * empty, while an agent-carried task did the reverse: two cards side by side
- * read in two grammars, and which one a task got depended on what it happened
- * to have ("the task's view type shouldn't change"). One anatomy now: the
- * left seat is the carrier, the right seat is the owner, and an empty seat
- * says so the way the foot's "no branch" does.
- */
-function CarrierSeat({ task }: { task: TaskSummary }) {
-  const sp = task.specialist;
-  if (sp) {
-    return (
-      <div className="card-owner">
-        {/* Ruling 168(c): the glyph IS the backend — Claude or Codex — and
-            carries that name for assistive technology and on hover; the text
-            beside it is the agent's NAME, the deployed profile's (owner,
-            2026-09-08: not its role — two profiles can share "Implementation",
-            and "Developer" is what the roster and the task page's engagement
-            rows call this agent). "Claude · Developer" said the backend twice,
-            once as the mark and once as a word (owner, 2026-09-09: noise), so
-            the word went. The role stands in only for a profile no longer
-            deployed — there is no live name left to give. */}
-        <AgentGlyph backend={sp.backend} />
-        <span className="nm">{sp.profileName ?? sp.role}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="card-owner">
-      {/* The seat's own shape, emptied: the agent tile's cut-corner square in
-          the dim tone, a dot for a mark. Decorative — the words beside it
-          say it. */}
-      <span className="agent-glyph none" aria-hidden="true">
-        <Icon name="dot" />
-      </span>
-      <span className="lbl">no agent</span>
+    <div className="card-props">
+      <StatusChip task={task} />
+      <ProblemChips task={task} />
     </div>
+  );
+}
+
+/** The list row's agent: the badge and the name — the row has the room the
+ *  card does not, and ruling 168(c)'s name stays printed here. */
+function ListAgent({ task }: { task: TaskSummary }) {
+  const sp = task.specialist;
+  if (!sp) return null;
+  return (
+    <span className="list-agent">
+      <AgentGlyph backend={sp.backend} decorative />
+      <span className="nm">{sp.profileName ?? sp.role}</span>
+    </span>
   );
 }
 
@@ -723,7 +543,7 @@ function TaskCard({
         data-board-card={task.key}
         data-board-lane={task.stage}
       >
-        <CardFace task={task} archived={archived} />
+        <CardFace task={task} />
       </Link>
       {/* F10-25: keyboard-accessible stage move (drag is pointer-only). Sibling
           of the Link so it never triggers navigation; opens the same
@@ -753,108 +573,25 @@ function TaskCard({
  * The card's face — everything inside the link. Rendered by the card itself
  * and, faded, by the drop preview, so a preview stands exactly as tall as the
  * card that will replace it.
- */
-/**
- * Whether the readiness pill has anything to add beside the foot's wait tag.
  *
- * F15-09/R21-8 made a card state its demand ONCE and had the pill yield to
- * "agent working". The owner's card of 2026-09-09 — "blocked" in the top slot,
- * "waiting on you" in the foot — was the same duplicate with a human waited on:
- * the pill's whole content was the demand the tag already names. So when the
- * wait tag speaks for a human, the readiness values that ARE that demand, or
- * the baseline it supersedes, yield (ruling 168(a)): `input_required` and
- * `goal_edit_pending` (a packet asks), `blocked` (a packet's hold — a
- * dependency hold leaves `waiting` at "none" and keeps its pill, ruling 131),
- * `ready` ("someone will act" — the tag says who). An inconsistency risk is a
- * problem, not a demand, and accepted/merged are statuses: they keep the slot.
- * The VALUE is decided server-side (`deriveDisplayReadiness`); this is the
- * board's rendering choice, made identically by the card and the list row.
+ * Ruling 365 — the anatomy, top to bottom: the head (the key and the trace
+ * mark in secondary ink, the seats as a stack at the right), the title (the
+ * only primary text on the card), and the property row (the one tinted status
+ * chip, then the problems). The old top pill / owner row / two-cell foot, and
+ * the `readinessYields` dance that decided which of three seats got to speak,
+ * are gone: `cardStatus` answers once.
  */
-function readinessYields(task: TaskSummary): boolean {
-  const r = task.displayReadiness;
-  if (r === "agent_working" || r === "agent_queued") return true;
-  // Ruling 225 extends ruling 168(a)'s yield to a clock rest, and it matters
-  // more here than for a human wait: "input required" above "resumes Sep 14 ·
-  // 02:28" is not one demand said twice, it is two statements that contradict
-  // each other — a pill claiming a person is needed right now over a tag saying
-  // the task comes back on its own.
-  if (task.waiting !== "human" && task.waiting !== "schedule") return false;
-  return r === "ready" || r === "input_required" || r === "blocked" || r === "goal_edit_pending";
-}
-
-function CardFace({ task, archived }: { task: BoardTask; archived: boolean }) {
+function CardFace({ task }: { task: BoardTask }) {
   return (
     <>
-      <div className="card-top">
+      <div className="card-head">
         <span className="key">{task.key}</span>
-        {/* No spacer: the pill sits beside the key so the card's top-right
-            corner stays free for `.card-move` (app.css `.card-top`). */}
-        {/* The card makes each claim ONCE (F15-09). R21-8: "input required"
-            claims a human is needed RIGHT NOW — false while an agent carries
-            the work, so the slot yields to the foot's "agent working". Ruling
-            168(a) extends the yield to a human waited on: a "blocked" pill
-            above "waiting on you" is one demand said twice, so when the wait
-            tag names a human the readiness values that ARE that demand yield
-            to it (`readinessYields`); problems and terminal facts never do.
-            The task hero keeps drawing the value — it is the detail surface.
-
-            F19-8: an archived card says "archived" here instead — the same
-            swap UXO-1 made in the task hero, for the same reason. Readiness
-            is an ACTIONABLE claim ("ready · awaiting verdict" = someone owes
-            a verdict); on abandoned work nobody does, and the board drew that
-            claim directly under a banner calling the work abandoned. */}
-        {archived ? (
-          <ArchivedPill />
-        ) : readinessYields(task) ? null : (
-          <ReadinessPill value={task.displayReadiness} sm />
-        )}
+        <TraceMark task={task} />
+        <span className="card-sp" />
+        <WhoStack task={task} />
       </div>
       <h3>{task.title}</h3>
-      <div className="owner-row">
-        <CarrierSeat task={task} />
-        <OwnerSeat task={task} />
-      </div>
-      {/* Ruling 171: the foot is TWO cells, not one wrapping run. The left
-          cell holds the traces (branch, PR) and the problem pills and wraps
-          as it must; the right cell is the status seat — the quiet cue and
-          the wait tag — and is the card's bottom-right corner on every card.
-          One run wrapped "waiting on you" onto a line of its own the moment a
-          PR chip joined the branch (owner, 2026-09-09: "in the lower side
-          seems redundant"), so where the status sat depended on how far the
-          task had got. */}
-      <div className="card-foot">
-        <div className="card-trace">
-          {/* ONE trace chip, on one line with the status seat. A PR supersedes
-              the branch here: it is the stronger trace and implies the branch
-              (the task page's GitHub trace shows both), and the narrowest lane
-              (218px) cannot hold a branch name, a PR number and "waiting on
-              you" on one line — the branch was shrinking to nothing beside
-              them. Without a PR the branch name is the chip, and it gives way
-              to an ellipsis before anything wraps; without a branch the chip
-              says so. */}
-          <span className="trace-line">
-            {task.pr ? (
-              <span className="trace pr">
-                <Icon name="pr" />#{task.pr.number}
-              </span>
-            ) : task.branch ? (
-              <span className="trace ok">
-                <Icon name="branch" />
-                <span className="t">{shortBranch(task.branch)}</span>
-              </span>
-            ) : (
-              <span className="trace">
-                <Icon name="branch" />
-                <span className="t">no branch</span>
-              </span>
-            )}
-          </span>
-          <StatePills task={task} />
-        </div>
-        <div className="card-status">
-          <StatusTags task={task} />
-        </div>
-      </div>
+      <CardChips task={task} />
     </>
   );
 }
@@ -901,7 +638,7 @@ function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boo
   return (
     <div className={"card-wrap drop-preview" + (landing ? " landing" : "")} aria-hidden="true">
       <div className="card card-drop-preview">
-        <CardFace task={task} archived={false} />
+        <CardFace task={task} />
       </div>
     </div>
   );
@@ -1135,22 +872,13 @@ function ListRow({
           {stageName}
         </span>
       )}
-      <CarrierSeat task={task} />
+      <ListAgent task={task} />
       <OwnerSeat task={task} label />
-      {/* F15-09: same duplicate as the card — the row's own WaitTag below
-          already says "agent working", or names the human waited on. F19-8:
-          and the same readiness → "archived" swap the card makes. R21-8 /
-          ruling 168(a): the same yield rule (`readinessYields`) — the card
-          top's comment carries the reasoning. */}
-      {archived ? (
-        <ArchivedPill />
-      ) : readinessYields(task) ? null : (
-        <ReadinessPill value={task.displayReadiness} sm />
-      )}
       {/* F19-13: the card's state block verbatim — the row used to draw
           validation and the wait tag alone, so the PR-state, checks and
-          review pills existed on one board layout and not the other. */}
-      <StateSignals task={task} />
+          review pills existed on one board layout and not the other. Ruling
+          365: the same status chip and problem chips the card draws. */}
+      <CardChips task={task} />
     </div>
   );
 }
@@ -1609,7 +1337,6 @@ function NewTaskModal({
 const LABEL_CHIP_CAP = 6;
 
 /** Full-strength state pills on one card before the "+N" fold (pass 30). */
-const STATE_PILL_CAP = 2;
 
 const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },

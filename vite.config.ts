@@ -27,7 +27,7 @@ const dataRoot = path.resolve(process.env.VIBERR_DATA_ROOT ?? "./data");
 // workspace root, so assets served from the resolved package tree (fonts) 403
 // unless that real node_modules directory is allowed explicitly.
 const resolvedNodeModules = path.join(
-  path.dirname(createRequire(import.meta.url).resolve("@fontsource/manrope/package.json")),
+  path.dirname(createRequire(import.meta.url).resolve("@fontsource/inter/package.json")),
   "..",
   "..",
 );
