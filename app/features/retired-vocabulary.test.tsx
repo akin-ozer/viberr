@@ -337,7 +337,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
       renderToString(
         <ProfileDetail
           a={roleless(patch)}
-          stages={[{ id: "impl", name: "In Progress", color: "#7b61ff" }]}
+          stages={[{ id: "impl", name: "In Progress", color: "violet" }]}
           workflow={[{ from: "impl", to: "review" }]}
           insts={[]}
           projectName="Viberr Core"

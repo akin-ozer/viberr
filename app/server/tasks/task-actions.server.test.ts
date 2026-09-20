@@ -1,3 +1,4 @@
+import type { StageDef } from "~/schemas/project-file.schema";
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
@@ -5198,12 +5199,12 @@ describe("pass 35: operator and task actions", () => {
  * Merge had no route back to a stage where a reviewer could run.
  */
 describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
-  const MERGE_STAGES = [
-    { id: "triage", name: "Triage", color: "#a5a8b5" },
-    { id: "impl", name: "In Progress", color: "#7b61ff" },
-    { id: "review", name: "Review", color: "#5b76fe" },
-    { id: "merge", name: "Merge", color: "#187574" },
-    { id: "done", name: "Done", color: "#00b473" },
+  const MERGE_STAGES: StageDef[] = [
+    { id: "triage", name: "Triage", color: "slate" },
+    { id: "impl", name: "In Progress", color: "violet" },
+    { id: "review", name: "Review", color: "blue" },
+    { id: "merge", name: "Merge", color: "teal" },
+    { id: "done", name: "Done", color: "green" },
   ];
   const MERGE_WORKFLOW = [
     { from: "triage", to: "impl", boundary: "auto" as const, by: "Operator", locked: false },

@@ -10,6 +10,7 @@ import { createPat, getProjectCredential } from "~/server/secrets/pat-store.serv
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { AppError, isAppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
+import { isStageColor } from "~/shared/workflow/stage-colors";
 import { createProject } from "./project-create.server";
 
 // F20-1: fault-inject a stale-mount write through `createProjectFileImpl` —
@@ -482,8 +483,8 @@ describe("createProject — F20-1 data-root write resilience", () => {
   });
 });
 
-describe("ruling 352: a stage colour is a CSS value Viberr can draw, or the door refuses it", () => {
-  it("refuses a palette NAME by name, and accepts a hex value", async () => {
+describe("ruling 364: a stage colour is one of twenty preset names, or the door refuses it", () => {
+  it("accepts a preset name, refuses a hex naming the presets, and colours omitted stages from the presets", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
@@ -501,10 +502,18 @@ describe("ruling 352: a stage colour is a CSS value Viberr can draw, or the door
         ACTOR,
         { dataRoot: store.dataRoot },
       );
-    // Live: the shopify board's Triage and Review dots drew nothing, because
-    // `slate` and `amber` are not CSS colours and every renderer hands the
-    // string to CSS as it is. CANARY: store the string unchecked.
-    await expect(create("CLA", "slate")).rejects.toThrow(/"slate".*not a CSS colour/);
-    await expect(create("CLB", "#8b8b8b")).resolves.toBeTruthy();
+    // Live: the shopify board's `slate` and `amber` drew nothing for two days
+    // because ruling 352 refused NAMES and kept hexes — the inverse of what the
+    // stylesheet can paint now. CANARY: let isStageColor accept anything.
+    await expect(create("CLA", "slate")).resolves.toBeTruthy();
+    await expect(create("CLB", "#8b8b8b")).rejects.toThrow(
+      /"#8b8b8b".*not a stage colour preset.*slate, gray, stone/,
+    );
+    await expect(create("CLC", "Slate")).rejects.toThrow(/not a stage colour preset/);
+    const created = await create("CLD", "amber");
+    const stages = readProjectFile({ projectSlug: created.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.stages;
+    expect(stages.map((s) => s.color)).toEqual(["amber", "green"]);
+    for (const s of stages) expect(isStageColor(s.color)).toBe(true);
   });
 });

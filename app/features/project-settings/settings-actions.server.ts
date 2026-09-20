@@ -3,6 +3,11 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import type { FileLeaseRow } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, ROLE_LABEL } from "~/shared/rbac";
 import {
+  isStageColor,
+  nextStageColor,
+  STAGE_COLOR_LIST,
+} from "~/shared/workflow/stage-colors";
+import {
   isReservedTaskPrefix,
   RESERVED_TASK_PREFIX_REFUSAL,
 } from "~/shared/dependencies";
@@ -155,17 +160,9 @@ export interface SettingsMutationContext {
   dataRoot?: string;
 }
 
-// N20-10: hex, never a CSS token. project.md is the canonical, human-readable
-// governance record — read by agents and off-browser tooling — and every seeded
-// stage stores a hex (app/shared/workflow/templates.ts). A `var(--yellow-dark)`
-// here is meaningless outside a stylesheet. These are the light-theme values the
-// old tokens resolved to (app.css): --blue/--yellow-dark/--agent/--teal-dark.
-export const NEW_STAGE_COLORS = [
-  "#5b76fe",
-  "#746019",
-  "#7b61ff",
-  "#187574",
-] as const;
+// Ruling 364: a new stage takes the first preset NAME no sibling wears
+// (shared/workflow/stage-colors.ts). N20-10's hex palette went with the hex
+// contract — the name is what project.md holds and what an agent reads.
 
 /** The option bag `assertProjectAction` takes. Named here so `allowArchived`
  *  can be set only when it was asked for — the guard reads its ABSENCE as
@@ -811,6 +808,48 @@ export async function renameStage(
   return { toast, changed: true };
 }
 
+/**
+ * Ruling 364: recolour a stage to one of the twenty presets. The name is the
+ * whole value — the file stores it, every surface paints from it — so the
+ * door checks the name and nothing else.
+ */
+export async function recolorStage(
+  db: DatabaseSync,
+  input: { projectSlug: string; stageId: string; color: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; changed: boolean }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "edit workflow stages");
+  const color = input.color.trim();
+  if (!isStageColor(color)) {
+    throw AppError.validation(
+      `"${color}" is not a stage colour preset. Pick one of: ${STAGE_COLOR_LIST}.`,
+    );
+  }
+  let changed = false;
+  let name = "";
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    const stage = parsed.frontmatter.stages.find((s) => s.id === input.stageId);
+    if (!stage) throw AppError.notFound(`No stage ${input.stageId}.`);
+    name = stage.name;
+    if (stage.color === color) return;
+    stage.color = color;
+    changed = true;
+  });
+  const toast = `${name} is ${color} now. Board and meter follow`;
+  if (!changed) return { toast, changed: false };
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: "project.stage.recolored",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "stage",
+    subjectId: input.stageId,
+    projectSlug: input.projectSlug,
+    details: { name, color },
+  });
+  return { toast, changed: true };
+}
+
 export async function addStage(
   db: DatabaseSync,
   input: { projectSlug: string; name: string },
@@ -832,7 +871,7 @@ export async function addStage(
     const stage = {
       id: stageId,
       name,
-      color: NEW_STAGE_COLORS[stages.length % NEW_STAGE_COLORS.length]!,
+      color: nextStageColor(stages.map((s) => s.color)),
     };
     // Inserted immediately before the terminal (last) stage so Done stays last,
     // whatever its id.

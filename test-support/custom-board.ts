@@ -18,9 +18,9 @@ import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
  */
 export const CUSTOM_3_STAGE_BOARD = {
   stages: [
-    { id: "todo", name: "To do", color: "#a5a8b5" },
-    { id: "doing", name: "In progress", color: "#7b61ff" },
-    { id: "done", name: "Done", color: "#00b473" },
+    { id: "todo", name: "To do", color: "slate" },
+    { id: "doing", name: "In progress", color: "violet" },
+    { id: "done", name: "Done", color: "green" },
   ],
   workflow: [
     {

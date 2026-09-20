@@ -979,7 +979,7 @@ function Column({
       ref={ref}
     >
       <header className="col-head">
-        <span className="col-stage-dot" style={{ background: stage.color }} />
+        <span className="col-stage-dot" data-stage-color={stage.color} />
         <h2 className="nm">{stage.name}</h2>
         <span className="ct">{count}</span>
         {/* R19-14: new tasks are created at the entry stage only, so only the
@@ -1130,9 +1130,7 @@ function ListRow({
         <span className="stage-static">
           <span
             className="col-stage-dot sm"
-            style={{
-              background: stages.find((s) => s.id === task.stage)?.color,
-            }}
+            data-stage-color={stages.find((s) => s.id === task.stage)?.color}
           />
           {stageName}
         </span>

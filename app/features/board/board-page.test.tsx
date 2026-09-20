@@ -17,9 +17,9 @@ import type { RepoAccessResult } from "~/server/github/repo-access-check.server"
 afterEach(cleanup);
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "impl", name: "In Progress", color: "#7b61ff" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 function task(patch: Partial<BoardTask> = {}): BoardTask {

@@ -34,6 +34,12 @@ import { defaultAgentDeployments } from "~/server/seed/agent-catalog.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import type { ProjectRole, StageDef } from "~/schemas/project-file.schema";
 import { slugifyProjectName } from "./project-name";
+import {
+  isStageColor,
+  STAGE_COLOR_LIST,
+  stageColorAt,
+  TERMINAL_STAGE_COLOR,
+} from "~/shared/workflow/stage-colors";
 
 export type PolicyPreset = "strict" | "balanced" | "auto";
 
@@ -529,24 +535,6 @@ interface ResolvedBlueprint {
 
 const CUSTOM_STAGE_MIN = 2;
 const CUSTOM_STAGE_MAX = 8;
-/** Rotating palette for custom stages that name no color — the same family the
- *  Standard template paints with (existing tokens/hexes only). */
-const CUSTOM_STAGE_COLORS = [
-  "#a5a8b5",
-  "#187574",
-  "#7b61ff",
-  "#5b76fe",
-  "#b3691b",
-  "#8a5bc0",
-  "#2f7fb9",
-];
-const DONE_STAGE_COLOR = "#00b473";
-
-/** Ruling 352: the two forms every stage-colour renderer can draw (ruling 15). */
-export function isCssStageColor(color: string): boolean {
-  return /^#[0-9a-f]{3,8}$/i.test(color) || /^var\(--[\w-]+\)$/.test(color);
-}
-
 /**
  * Validate + compose the custom blueprint (controller create path). Everything
  * throws `AppError.validation` with the offending item named, BEFORE any
@@ -573,17 +561,15 @@ function resolveProjectBlueprint(
         `A custom board carries ${CUSTOM_STAGE_MIN} to ${CUSTOM_STAGE_MAX} stages (got ${names.length}).`,
       );
     }
-    // Ruling 352 (pass 38, F38-6): a colour is a CSS value or nothing. The board,
-    // the home meter and four more surfaces hand the string to CSS as it is;
-    // the shopify board carried `slate` and `amber`, which are not CSS colours,
-    // and two of its six stage dots drew nothing while the file said otherwise.
-    // Ruling 15 already states the contract — hex or `var(--*)` — so the door
-    // refuses anything else by name instead of storing what no surface can draw.
+    // Ruling 364: a colour is one of twenty preset NAMES or nothing. The name is
+    // the whole value — the file stores it and the stylesheet paints it — so
+    // the door checks the name; ruling 352's hex/token contract is gone with
+    // the stored `slate`/`amber` it left drawing nothing.
     for (const s of custom.stages) {
       const color = s.color?.trim();
-      if (color && !isCssStageColor(color)) {
+      if (color && !isStageColor(color)) {
         throw AppError.validation(
-          `Stage "${s.name.trim()}" names the colour "${color}", which is not a CSS colour Viberr can draw. Use a hex value (#8b8b8b) or a theme token (var(--muted)), or omit it for the palette.`,
+          `Stage "${s.name.trim()}" names the colour "${color}", which is not a stage colour preset. Pick one of: ${STAGE_COLOR_LIST}, or omit it for the palette.`,
         );
       }
     }
@@ -594,15 +580,17 @@ function resolveProjectBlueprint(
       while (seen.has(id)) id = `${id}-${i + 1}`;
       seen.add(id);
       const isTerminal = i === custom.stages!.length - 1;
-      return {
-        id,
-        name,
-        color:
-          s.color?.trim() ||
-          (isTerminal
-            ? DONE_STAGE_COLOR
-            : CUSTOM_STAGE_COLORS[i % CUSTOM_STAGE_COLORS.length]!),
-      };
+      // The loop above refused any non-preset name, so the guard here only
+      // narrows the type; an omitted colour walks the default sequence, the
+      // terminal lane keeping green.
+      const asked = s.color?.trim();
+      const color =
+        asked && isStageColor(asked)
+          ? asked
+          : isTerminal
+            ? TERMINAL_STAGE_COLOR
+            : stageColorAt(i);
+      return { id, name, color };
     });
     out.stages = stages;
     // The default chain over a custom list mirrors the Standard template's

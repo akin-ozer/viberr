@@ -611,11 +611,11 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       stages: [
-        { id: "triage", name: "Triage", color: "#a5a8b5" },
-        { id: "impl", name: "In Progress", color: "#7b61ff" },
-        { id: "review", name: "Review", color: "#5b76fe" },
-        { id: "merge", name: "Merge", color: "#187574" },
-        { id: "done", name: "Done", color: "#00b473" },
+        { id: "triage", name: "Triage", color: "slate" },
+        { id: "impl", name: "In Progress", color: "violet" },
+        { id: "review", name: "Review", color: "blue" },
+        { id: "merge", name: "Merge", color: "teal" },
+        { id: "done", name: "Done", color: "green" },
       ],
       workflow: [
         { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },

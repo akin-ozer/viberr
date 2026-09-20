@@ -18,9 +18,9 @@ import { CurrentStatePanel, TaskDetailsPanel } from "./task-side-panels";
 afterEach(cleanup);
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "review", name: "Review", color: "#5b76fe" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 const ACCEPTANCE: AcceptanceAffordance = {

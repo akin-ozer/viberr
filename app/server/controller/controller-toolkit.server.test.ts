@@ -1360,6 +1360,11 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
         args: { op: "rename", stageId: "impl", name: "In Progress" },
       },
       {
+        // Ruling 364: recolouring is the same governed edit as renaming.
+        tool: "update_stages",
+        args: { op: "recolor", stageId: "impl", color: "rose" },
+      },
+      {
         tool: "set_transition_boundary",
         args: { from: "triage", to: "ready", boundary: "approval" },
       },

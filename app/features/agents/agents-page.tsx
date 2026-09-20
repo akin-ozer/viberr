@@ -571,7 +571,7 @@ export function StageEligibility({
             >
               <span
                 className="sdot"
-                style={elig ? { background: s.color } : undefined}
+                data-stage-color={elig ? s.color : undefined}
               />
               {s.name}
             </span>

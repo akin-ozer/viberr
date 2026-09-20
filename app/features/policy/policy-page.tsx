@@ -518,7 +518,7 @@ export function WorkflowRules({
                 </span>
               )}
               <span className="stage-chip elig">
-                <span className="sdot" style={{ background: s.color }}></span>
+                <span className="sdot" data-stage-color={s.color}></span>
                 {s.name}
               </span>
             </Fragment>
@@ -528,7 +528,7 @@ export function WorkflowRules({
           const s = S(id);
           return (
             <span className="stage-chip" key={id} title="No transition rule reaches this stage">
-              <span className="sdot" style={{ background: s.color }}></span>
+              <span className="sdot" data-stage-color={s.color}></span>
               {s.name}
             </span>
           );
@@ -572,10 +572,10 @@ export function WorkflowRules({
           return (
             <div className="trans-row" key={k}>
               <span className="trans-path">
-                <span className="sdot" style={{ background: f.color }}></span>
+                <span className="sdot" data-stage-color={f.color}></span>
                 {f.name}
                 <Icon name="arrow" />
-                <span className="sdot" style={{ background: o.color }}></span>
+                <span className="sdot" data-stage-color={o.color}></span>
                 {o.name}
               </span>
               <span className="trans-by">{t.by}</span>

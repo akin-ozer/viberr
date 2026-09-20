@@ -110,11 +110,11 @@ function renderModal(props: {
 }
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "ready", name: "Ready", color: "#187574" },
-  { id: "impl", name: "In Progress", color: "#7b61ff" },
-  { id: "review", name: "Review", color: "#5b76fe" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "ready", name: "Ready", color: "teal" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 /** R14-1: eligibility resolves declared ids against the board BY ROLE too, so
@@ -130,9 +130,9 @@ const WORKFLOW = [
  *  governed template's stage ids exist here, which is exactly the case R14-1
  *  resolves by role. */
 const LIGHTWEIGHT_BOARD = [
-  { id: "todo", name: "To do", color: "#a5a8b5" },
-  { id: "doing", name: "Doing", color: "#7b61ff" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "todo", name: "To do", color: "slate" },
+  { id: "doing", name: "Doing", color: "violet" },
+  { id: "done", name: "Done", color: "green" },
 ];
 const LIGHTWEIGHT_WORKFLOW = [
   { from: "todo", to: "doing" },

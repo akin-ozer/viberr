@@ -757,7 +757,7 @@ function StagesField({
           >
             <span
               className="sdot"
-              style={stg.includes(s.id) ? { background: s.color } : undefined}
+              data-stage-color={stg.includes(s.id) ? s.color : undefined}
             />
             {s.name}
           </button>

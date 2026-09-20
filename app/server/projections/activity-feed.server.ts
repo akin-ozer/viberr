@@ -253,6 +253,7 @@ const AUDIT_ACTION_KINDS = {
   "project.member.removed": "change",
   "project.stage.added": "change",
   "project.stage.renamed": "change",
+  "project.stage.recolored": "change",
   "project.stage.removed": "change",
   "project.stage.reordered": "change",
   "project.settings.updated": "change",
@@ -341,6 +342,8 @@ const auditDetailsSchema = z.object({
   email: detailText,
   role: detailText,
   name: detailText,
+  // Ruling 364: the preset NAME a stage was recoloured to.
+  color: detailText,
   // F20-13: the composite boundary change a stage removal caused (display
   // NAMES), written only when re-joining the neighbours TIGHTENED a hop.
   tightened: z
@@ -431,6 +434,15 @@ function auditText(
       return name
         ? `${actor} renamed a workflow stage to **${name}**.`
         : `${actor} renamed a workflow stage.`;
+    }
+    case "project.stage.recolored": {
+      // Ruling 364: the writer records `{ name, color }` — the preset NAME,
+      // which is the whole value, so the feed can print it as a word.
+      const name = d.name;
+      const color = d.color;
+      return name && color
+        ? `${actor} coloured workflow stage **${name}** ${color}.`
+        : `${actor} recoloured a workflow stage.`;
     }
     case "project.stage.removed": {
       // F20-27: the writer records `details: { id, name }`; read the name (it was

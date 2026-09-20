@@ -93,7 +93,7 @@ nextTaskNumber: 169               # atomic per-project key counter
 stages:                           # per-project, ordered (ruling 15)
   - id: triage
     name: Triage
-    color: "#a5a8b5"              # hex or var(--*) both accepted
+    color: slate                  # one of twenty preset names (ruling 364)
   # … ready / impl / review / done
 workflow:                         # governed boundaries: auto|approval|human
   - from: triage

@@ -173,7 +173,7 @@ export function StageMenu({
         title="Change stage"
       >
         <span key={currentStageId} className={`sm-current${changed ? " changed" : ""}`}>
-          <span className="col-stage-dot" style={{ background: current?.color }} />
+          <span className="col-stage-dot" data-stage-color={current?.color} />
           <span className="sm-name">{current?.name ?? "unknown stage"}</span>
         </span>
         <Icon name="chevron" className="sm-caret" />
@@ -210,7 +210,7 @@ export function StageMenu({
                 >
                   <span
                     className="col-stage-dot"
-                    style={{ background: s.color }}
+                    data-stage-color={s.color}
                   />
                   <span className="sm-item-name">{s.name}</span>
                   {isCurrent && <Icon name="check" className="sm-check" />}

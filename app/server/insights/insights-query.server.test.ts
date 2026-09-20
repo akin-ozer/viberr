@@ -419,10 +419,10 @@ describe("getInsightsSummary", () => {
 // ------------------------------------------------- governance (pass 29)
 
 const STAGES = JSON.stringify([
-  { id: "triage", name: "Triage", color: "#aaa" },
-  { id: "impl", name: "In Progress", color: "#bbb" },
-  { id: "review", name: "Review", color: "#ccc" },
-  { id: "done", name: "Done", color: "#ddd" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ]);
 const WORKFLOW = JSON.stringify([
   { from: "triage", to: "impl", boundary: "auto" },

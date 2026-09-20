@@ -1,3 +1,8 @@
+import {
+  STAGE_COLORS,
+  STAGE_COLOR_LIST,
+  type StageColor,
+} from "~/shared/workflow/stage-colors";
 import type { DatabaseSync } from "node:sqlite";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
@@ -102,6 +107,7 @@ import {
 } from "~/features/agents/agents-query.server";
 import {
   addStage,
+  recolorStage,
   inviteMember,
   removeStage,
   renameStage,
@@ -1331,10 +1337,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             z.strictObject({
               name: z.string(),
               color: z
-                .string()
+                .enum(STAGE_COLORS)
                 .optional()
                 .describe(
-                  "A hex value (#8b8b8b) or a theme token (var(--muted)); anything else is refused. Omit for the palette.",
+                  `One of the stage colour presets (${STAGE_COLOR_LIST}); anything else is refused. Omit for the palette.`,
                 ),
             }),
           )
@@ -1366,7 +1372,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           repoName: string;
           policy: "strict" | "balanced" | "auto";
           description?: string;
-          stages?: { name: string; color?: string }[];
+          stages?: { name: string; color?: StageColor }[];
           boundaries?: { from: string; to: string; boundary: "auto" | "approval" | "human" }[];
           members?: { email: string; role: (typeof PROJECT_ROLES)[number] }[];
         }) => {
@@ -2764,20 +2770,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_stages",
-      "Edit the project's stage list: add (inserted before the final stage), rename, remove, or reorder. Project admin. The workflow chain follows automatically; removing a stage never loosens a boundary.",
+      "Edit the project's stage list: add (inserted before the final stage), rename, recolor (one of the twenty presets), remove, or reorder. Project admin. The workflow chain follows automatically; removing a stage never loosens a boundary.",
       {
         projectSlug: z.string().optional(),
-        op: z.enum(["add", "rename", "remove", "reorder"]),
-        stageId: z.string().optional().describe("rename/remove: the stage id."),
+        op: z.enum(["add", "rename", "recolor", "remove", "reorder"]),
+        stageId: z.string().optional().describe("rename/recolor/remove: the stage id."),
+        color: z
+          .enum(STAGE_COLORS)
+          .optional()
+          .describe(`recolor: the preset (${STAGE_COLOR_LIST}).`),
         name: z.string().optional().describe("add/rename: the stage name."),
         orderedIds: z.array(z.string()).optional().describe("reorder: every stage id, new order."),
       },
       runWith(
         async (args: {
           projectSlug?: string;
-          op: "add" | "rename" | "remove" | "reorder";
+          op: "add" | "rename" | "recolor" | "remove" | "reorder";
           stageId?: string;
           name?: string;
+          color?: StageColor;
           orderedIds?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
@@ -2798,6 +2809,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               { dataRoot },
             );
             return `[done] ${renamed.toast}.`;
+          }
+          if (args.op === "recolor") {
+            if (!args.stageId || !args.color) {
+              throw AppError.validation("Recolouring needs stageId and color.");
+            }
+            const recoloured = await recolorStage(
+              db,
+              { projectSlug: slug, stageId: args.stageId, color: args.color },
+              actor,
+              { dataRoot },
+            );
+            return `[done] ${recoloured.toast}.`;
           }
           if (args.op === "remove") {
             if (!args.stageId) throw AppError.validation("Removing needs stageId.");

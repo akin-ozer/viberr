@@ -18,11 +18,11 @@ const MEMBERS: MembershipView[] = [
 ];
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "ready", name: "Ready", color: "#187574" },
-  { id: "impl", name: "In Progress", color: "#7b61ff" },
-  { id: "review", name: "Review", color: "#5b76fe" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "ready", name: "Ready", color: "teal" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 const TRANSITIONS: TransitionView[] = [
@@ -430,7 +430,7 @@ describe("WorkflowRules", () => {
       <WorkflowRules
         stages={[
           ...STAGES.slice(0, 4),
-          { id: "qa", name: "QA", color: "#7b61ff" },
+          { id: "qa", name: "QA", color: "violet" },
           STAGES[4]!,
         ]}
         transitions={TRANSITIONS}

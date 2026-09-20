@@ -36,8 +36,9 @@ import {
   setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
-  NEW_STAGE_COLORS,
+  recolorStage,
 } from "./settings-actions.server";
+import { isStageColor } from "~/shared/workflow/stage-colors";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -311,7 +312,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
     expect(removed.details).not.toHaveProperty("tightened");
   });
 
-  it("N20-10: a new stage persists a HEX color, never a CSS var, into project.md", async () => {
+  it("ruling 364: a new stage takes the first preset NAME no sibling wears — project.md holds the name", async () => {
     const store = setup();
     const { stageId } = await addStage(
       store.db,
@@ -319,14 +320,61 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
       admin(store),
       { dataRoot: store.dataRoot },
     );
+    const stages = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.stages;
+    const stage = stages.find((s) => s.id === stageId)!;
+    expect(isStageColor(stage.color)).toBe(true);
+    // Distinct from every sibling — the Standard template wears five presets
+    // (slate/teal/violet/blue/green), so the sixth is the first default none of
+    // them took.
+    expect(stages.filter((s) => s.color === stage.color)).toHaveLength(1);
+    expect(stage.color).toBe("amber");
+  });
+});
+
+describe("recolorStage (ruling 364)", () => {
+  it("writes the preset name into project.md, reprojects and audits it", async () => {
+    const store = setup();
+    const result = await recolorStage(
+      store.db,
+      { projectSlug: store.slug, stageId: "impl", color: "rose" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.changed).toBe(true);
+    expect(result.toast).toContain("rose");
     const stage = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-      .parsed.frontmatter.stages.find((s) => s.id === stageId)!;
-    expect(stage.color).toMatch(/^#[0-9a-f]{3,8}$/i);
-    expect(stage.color).not.toContain("var(");
-    // The whole palette is hex — the canonical file holds no stylesheet token.
-    for (const color of NEW_STAGE_COLORS) {
-      expect(color).toMatch(/^#[0-9a-f]{3,8}$/i);
+      .parsed.frontmatter.stages.find((s) => s.id === "impl")!;
+    expect(stage.color).toBe("rose");
+    const audit = listAuditEvents(store.db, { action: "project.stage.recolored" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({ name: "In Progress", color: "rose" });
+    // The same colour again is not a change and not an audit row.
+    const again = await recolorStage(
+      store.db,
+      { projectSlug: store.slug, stageId: "impl", color: "rose" },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(again.changed).toBe(false);
+    expect(listAuditEvents(store.db, { action: "project.stage.recolored" })).toHaveLength(1);
+  });
+
+  it("refuses a hex, a token and an unknown name, naming the presets", async () => {
+    const store = setup();
+    for (const wrong of ["#7b61ff", "var(--muted)", "goldenrod"]) {
+      await expect(
+        recolorStage(
+          store.db,
+          { projectSlug: store.slug, stageId: "impl", color: wrong },
+          admin(store),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toThrow(/not a stage colour preset.*slate, gray, stone/);
     }
+    const stage = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.stages.find((s) => s.id === "impl")!;
+    expect(stage.color).toBe("violet");
   });
 });
 

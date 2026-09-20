@@ -40,7 +40,8 @@ export function StageMeter({
   stages,
   dist,
 }: {
-  /** The project's OWN stage list (ruling 15). */
+  /** The project's OWN stage list (ruling 15); `color` is a preset NAME the
+   *  sheet turns into paint (ruling 364). */
   stages: { id: string; name: string; color: string }[];
   dist: Record<string, number>;
 }) {
@@ -61,10 +62,7 @@ export function StageMeter({
         {stages.map((s) => (
           <span
             key={s.id}
-            style={{
-              flex: 1,
-              background: `color-mix(in srgb, ${s.color}, transparent 82%)`,
-            }}
+            data-stage-color={s.color}
           ></span>
         ))}
       </div>
@@ -83,9 +81,9 @@ export function StageMeter({
         return (
           <span
             key={s.id}
+            data-stage-color={s.color}
             style={{
               flex: n,
-              background: s.color,
               // UI-15: the completed band is dimmed because it is the
               // project's TERMINAL stage, not because its id is "done" —
               // stage ids are per-project and renameable

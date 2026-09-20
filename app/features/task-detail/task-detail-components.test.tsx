@@ -3593,7 +3593,7 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const live = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "ready", validation: "changed" })}
-        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        stage={{ id: "review", name: "Review", color: "blue" }}
         canEditGoal
       />,
     );
@@ -3608,7 +3608,7 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const archived = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "ready", validation: "changed" })}
-        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        stage={{ id: "review", name: "Review", color: "blue" }}
         canEditGoal
         archived
       />,
@@ -3705,7 +3705,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "accepted", validation: "changed" })}
-        stage={{ id: "done", name: "Done", color: "#00b473" }}
+        stage={{ id: "done", name: "Done", color: "green" }}
         canEditGoal
       />,
     );
@@ -3722,7 +3722,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "accepted", validation: "bypassed" })}
-        stage={{ id: "done", name: "Done", color: "#00b473" }}
+        stage={{ id: "done", name: "Done", color: "green" }}
         canEditGoal
       />,
     );
@@ -3742,7 +3742,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "agent_working", validation: "none" })}
-        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        stage={{ id: "impl", name: "In Progress", color: "violet" }}
         canEditGoal
       />,
     );
@@ -3766,7 +3766,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
           validation: "none",
           waiting: "agent",
         })}
-        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        stage={{ id: "impl", name: "In Progress", color: "violet" }}
         canEditGoal
       />,
     );
@@ -3779,7 +3779,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "blocked", validation: "none" })}
-        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        stage={{ id: "impl", name: "In Progress", color: "violet" }}
         canEditGoal
       />,
     );
@@ -3800,7 +3800,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
           displayReadiness: malformedReadiness as TaskDetail["displayReadiness"],
           validation: "none",
         })}
-        stage={{ id: "impl", name: "In Progress", color: "#7b61ff" }}
+        stage={{ id: "impl", name: "In Progress", color: "violet" }}
         canEditGoal
       />,
     );
@@ -3819,7 +3819,7 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
  * one word; validation appears on its own only as a problem.
  */
 describe("ruling 169: the hero's stage and status are labelled fields, and the status is one word", () => {
-  const ready = { id: "ready", name: "Ready", color: "#2fbf9a" };
+  const ready = { id: "ready", name: "Ready", color: "emerald" };
   const meta = (el: HTMLElement) => el.querySelector(".hero-meta")!;
   const fields = (el: HTMLElement) =>
     [...meta(el).querySelectorAll(".hero-field")].map((f) => ({
@@ -3848,7 +3848,7 @@ describe("ruling 169: the hero's stage and status are labelled fields, and the s
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({ displayReadiness: "ready", validation: "changed" })}
-        stage={{ id: "review", name: "Review", color: "#5b76fe" }}
+        stage={{ id: "review", name: "Review", color: "blue" }}
         canEditGoal
       />,
     );
