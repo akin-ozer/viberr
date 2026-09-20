@@ -111,6 +111,13 @@ const READINESS_UNKNOWN: PillDisplay = {
   label: "unknown",
 };
 
+/** The readiness vocabulary's label alone — for the board card's status chip
+ *  (ruling 365), which draws the value with its own mark. Unknown values fall
+ *  back to "unknown" exactly as the pill does (C12: never greenwash). */
+export function readinessLabel(value: string): string {
+  return (READINESS_BY_VALUE.get(value) ?? READINESS_UNKNOWN).label;
+}
+
 /**
  * Self-labelling readiness chip. C5: the readiness value alone collided with a
  * user-authored stage name — the default workflow ships a "Ready" stage, so the

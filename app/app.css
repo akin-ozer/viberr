@@ -12,7 +12,7 @@
   --pin-star: #e8a800; /* pinned-project star accent (TD-2) */
   /* P13-D-12: the secondary text ladder is AA-constrained, not free. Both of
      these carry real small text on --surface (#ffffff) — .opt .od (decision
-     packet option descriptions), .obs .k, .card-top .key, .tl-time, .live-head,
+     packet option descriptions), .obs .k, .tl-time, .live-head,
      every .flabel — so both must clear 4.5:1 there, and with margin over the
      3–5% --fg surface tints those labels sometimes sit on.
        old --faint       #828798 = 3.58:1  ->  #616575 = 5.79:1 (5.36:1 on a 4% tint)
@@ -182,8 +182,11 @@
      The set is locked in app.css.test.ts — a new size means widening the scale
      on purpose, not drifting off it. (font-size: 0 for visually-dropped text is
      the one sanctioned non-step.) */
-  --font-display: "Manrope", "Avenir Next", system-ui, sans-serif;
-  --font-body: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* Ruling 365: ONE UI typeface. Inter carries the body and the display
+     token alike (Manrope and Noto Sans are gone); the mono face stays for
+     code and for identifiers that are code. */
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Elevation scale — four resting steps + one interaction step, chosen by
@@ -523,7 +526,7 @@ h1, h2, h3, h4 {
 /* The rail's title, at the title step, one line each: the rail is a fixed
    column, so a long project name or repo path clips instead of breaking
    "4 / members" onto a widow. */
-.project-switch .pj-name { font-family: var(--font-display); font-weight: 800; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-switch .pj-name { font-weight: 600; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-switch .pj-meta { font-size: .75rem; color: var(--faint); margin-top: .125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* `.rail-label` is gone: a "Workspace" eyebrow labelled the only group in the
    rail; the switcher's margin does the separating. */
@@ -536,7 +539,7 @@ h1, h2, h3, h4 {
   border-radius: var(--radius-button);
   color: var(--muted);
   font-size: .88rem;
-  font-weight: 600;
+  font-weight: 500;
   border: 1px solid transparent;
   transition: background .14s ease, color .14s ease;
 }
@@ -558,7 +561,7 @@ h1, h2, h3, h4 {
 .nav-item.active {
   background: var(--blue-soft);
   color: var(--fg);
-  font-weight: 700;
+  font-weight: 600;
 }
 .nav-item .ico { width: 17px; height: 17px; flex: none; color: currentColor; }
 .nav-item .count {
@@ -642,7 +645,7 @@ h1, h2, h3, h4 {
 .crumbs { display: flex; align-items: center; gap: .5rem; font-size: .88rem; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .crumbs .sep { color: var(--placeholder); display: inline-flex; flex: none; }
 .crumbs .sep .ico { width: 14px; height: 14px; }
-.crumbs a, .crumbs button { color: var(--muted); background: none; border: 0; padding: 0; font-weight: 600; flex: none; white-space: nowrap; }
+.crumbs a, .crumbs button { color: var(--muted); background: none; border: 0; padding: 0; font-weight: 500; flex: none; white-space: nowrap; }
 .crumbs a:hover, .crumbs button:hover { color: var(--fg); }
 .crumbs .cur { color: var(--fg); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
 
@@ -933,7 +936,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: 1rem 1.5rem .75rem;
   flex-wrap: wrap;
 }
-.board-head h1 { font-size: 1.25rem; }
+.board-head h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -.01em; }
 .board-head .sub { color: var(--faint); font-size: .88rem; margin-top: .125rem;
   /* Same measure. The Agents lede ran 164 characters a line under a 28px title. */
   max-width: 70ch;
@@ -960,10 +963,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .375rem .5rem;
   border: 0; border-radius: var(--radius-small);
   background: transparent; color: var(--muted);
-  font-size: .75rem; font-weight: 700; font-family: var(--font-display);
+  font-size: .75rem; font-weight: 500;
   transition: background .14s ease, color .14s ease, transform .1s var(--ease-out);
 }
-.seg button.on { background: var(--fg); color: var(--surface); }
+/* Ruling 365: the selected segment is a subtle fill in the row's own ink, not
+   an inverted block — the one loud thing on the board is the primary button. */
+.seg button.on { background: var(--tint-press); color: var(--fg); }
 .seg .ico { width: 15px; height: 15px; }
 
 .filter-bar {
@@ -972,21 +977,22 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .fchip {
   display: inline-flex; align-items: center; gap: .375rem;
-  padding: .375rem .5rem;
+  padding: .25rem .5rem;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-chip);
-  background: var(--surface);
-  font-size: .75rem; font-weight: 700; color: var(--muted);
+  border-radius: var(--radius-small);
+  background: transparent;
+  font-size: .75rem; font-weight: 500; color: var(--muted);
   transition: border-color .14s ease, color .14s ease, background .14s ease, transform .1s var(--ease-out);
 }
 .fchip:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
-.fchip.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.fchip.on { background: var(--tint-press); color: var(--fg); border-color: transparent; }
 .fchip .ico { width: 14px; height: 14px; }
 /* F26-12 / R26-2: label-filter chips — the project's own tags, used as board
-   filters. Monospace + muted resting colour marks them as labels (matching the
-   .label-chip vocabulary) and distinct from the icon-bearing readiness chips; the
-   shared .fchip.on state paints the active one. */
-.fchip.lbl { font-family: var(--font-mono); font-weight: 600; font-size: .75rem; }
+   filters. They wear the row's face and weight (ruling 365: the mono face
+   marked them as code, and a label is a word); the missing icon is what tells
+   them from the readiness chips, and the shared .fchip.on state paints the
+   active one. */
+.fchip.lbl { font-weight: 500; font-size: .75rem; }
 .fchip.lbl:not(.on) { color: var(--muted); }
 
 /* R15-5: the board's own term filter, moved off the topbar (whose box now
@@ -1098,7 +1104,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .col-head {
   display: flex; align-items: center; gap: .5rem;
-  padding: .5rem .5rem .75rem;
+  padding: .5rem .75rem;
   position: sticky; top: 0;
   /* The head is sticky over a scrolling list and had no ground of its own, so
      cards scrolled THROUGH the stage name. `inherit` rather than a literal so
@@ -1107,20 +1113,17 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background-color: inherit;
   border-radius: var(--radius-panel) var(--radius-panel) 0 0;
 }
-.col-head .nm { font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
-.col-head .ct {
-  font-family: var(--font-mono); font-size: .75rem; color: var(--faint);
-  background: var(--tint-hover);
-  padding: .08rem .375rem; border-radius: var(--radius-chip);
-}
+.col-head .nm { font-weight: 500; font-size: .88rem; }
+/* Ruling 365: the count in plain secondary ink beside the name, no capsule. */
+.col-head .ct { font-size: .88rem; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
 .col-stage-dot { width: .56rem; height: .56rem; border-radius: 50%; flex: none; }
 .col-head .add { margin-left: auto; color: var(--placeholder); display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-small); background: none; border: 0; }
 .col-head .add:hover { background: var(--tint-press); color: var(--fg); }
 
 .col-body {
-  display: flex; flex-direction: column; gap: .75rem;
+  display: flex; flex-direction: column; gap: .375rem;
   overflow-y: auto;
-  padding: .25rem .25rem var(--dock-clear);
+  padding: 0 .5rem var(--dock-clear);
   flex: 1;
   min-height: 0;
 }
@@ -1128,21 +1131,23 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .col-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--border), transparent 40%); border-radius: var(--radius-chip); border: 2px solid transparent; background-clip: padding-box; }
 
 /* ---------- Task card ---------- */
+/* Ruling 365: the card is a borderless 12px-radius surface whose edge is a
+   1px ring of ink (8%) and a 1px contact shadow — no resting elevation
+   ("shadows are not a foundation", Linear; BoardUI's ticket draws the same
+   pair). Hover strengthens the ring and changes nothing else, so nothing
+   reflows under the pointer. The rows inside set their own spacing. */
 .card {
   text-align: left;
   width: 100%;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-card);
+  border: 0;
+  border-radius: var(--radius-box);
   background: var(--surface);
-  padding: .75rem .75rem .75rem;
-  box-shadow: var(--shadow-card);
-  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
-  display: flex; flex-direction: column; gap: .5rem;
-  /* Ruling 171(e): the card is a container so its foot can reflow on the
-     card's own width (see `@container` below). */
-  container-type: inline-size;
+  padding: .75rem;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 92%), 0 1px 1px rgba(0, 0, 0, .05);
+  transition: transform .15s ease, box-shadow .15s ease;
+  display: flex; flex-direction: column; gap: 0;
 }
-.card:hover { background: var(--tint-hover); border-color: var(--border); }
+.card:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 78%), 0 1px 2px rgba(0, 0, 0, .06); }
 /* P16-UI-01: the focus ring is the app-wide `:focus-visible` rule at the top of
    the sheet (the card face is an <a>), not a per-selector copy of it.
    P16-UI-04: `.card.wait-human, .card.wait-human.urgent { box-shadow:
@@ -1154,7 +1159,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .card-wrap { position: relative; }
 /* F10-25: keyboard/pointer stage-move control on each card. Revealed on hover
    or keyboard focus so it stays discoverable without cluttering every card. */
-.card-move { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity .12s var(--ease-out); z-index: 2; }
+/* Ruling 365: the control sits in the card's bottom-right corner, where the
+   property row leaves room, as a bare 20px chevron — the stage dot and name
+   are the menu's, not the trigger's. Absolute, so it reserves no layout. */
+.card-move { position: absolute; right: .75rem; bottom: .75rem; opacity: 0; transition: opacity .12s var(--ease-out); z-index: 2; }
 .card-wrap:hover .card-move, .card-move:focus-within { opacity: 1; }
 /* P16-F7: `opacity: 0` leaves an invisible-but-hit-testable control in the
    card's top-right corner — the same hazard `.fm-acts` was deleted for. The KB
@@ -1169,8 +1177,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @media (hover: none) {
   .card-move { opacity: 1; }
 }
-.card-move .stage-menu-btn { font-size: .69rem; padding: .125rem .375rem; min-height: 24px; }
-.card-move .sm-name { display: none; }
+.card-move .stage-menu-btn { width: 20px; height: 20px; min-height: 0; padding: 0; justify-content: center; border-radius: var(--radius-small); }
+.card-move .sm-current { display: none; }
+.card-move .sm-caret { transform: rotate(90deg); }
+.card-move .stage-menu-btn.open .sm-caret { transform: rotate(-90deg); }
 .card-wrap.draggable { cursor: grab; }
 .card-wrap.draggable:active { cursor: grabbing; }
 /* Owner, 2026-09-08 ("drag is not smooth"): the lifted card is the SOURCE
@@ -1179,7 +1189,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    both and cannot tell them apart. dnd-kit's own attributes can. The lifted
    card is solid and raised; the placeholder is the hole it left: the same box
    with nothing in it. */
-.card-wrap[data-dnd-dragging] .card { box-shadow: var(--shadow-lift); cursor: grabbing; }
+.card-wrap[data-dnd-dragging] .card { box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 78%), var(--shadow-lift); cursor: grabbing; }
 .card-wrap[data-dnd-placeholder] .card {
   background: transparent;
   border: 1.5px dashed var(--border);
@@ -1219,7 +1229,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @keyframes cardArrive {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue), transparent 45%); transform: translateY(-3px); }
   16%  { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 52%); transform: none; }
-  100% { box-shadow: var(--shadow-card); }
+  100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 92%), 0 1px 1px rgba(0, 0, 0, .05); }
 }
 
 /* ---- StageMenu (shared: board card + task-detail current state) ---- */
@@ -1294,70 +1304,62 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   .card-wrap.just-arrived .card { animation: none; }
 }
 
-.card-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-/* The stage-move control (`.card-move`, absolute in the card's top-right
-   corner, painted unconditionally where hover cannot happen) used to sit on top
-   of the readiness pill: at 320px it hid the last 41px of "input required" on
-   every held card. The pill now follows the key at the leading edge (the
-   spacer that pushed it under the control is gone) and the row keeps the
-   control's footprint free: 47px from the card edge minus the card's 12px
-   padding. Measured 0px overlap at 200/218/260px lanes for the three longest
-   labels. The price: in the 200px (viewports up to 1400px) and 218px lanes a
-   held card's pill wraps under the key, so those cards run one line taller;
-   from ~260px lanes the pill sits beside the key. */
-.card-wrap:has(.card-move) .card-top { padding-right: 2.25rem; }
-/* F21-18: `white-space: nowrap` — at 390px the readiness pill sharing this row
-   squeezed the key until it broke mid-token ("VIB-\n8"), which reads as two
-   values and is not a key any more. A task key is one identifier, so it never
-   wraps; the pill beside it is prose and takes the squeeze instead. */
-.card-top .key { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); white-space: nowrap; }
-.card h3 { font-size: 1rem; line-height: 1.18; font-weight: 800; }
+/* Ruling 365: the head — the key and the trace mark in secondary ink at the
+   left, the seats as a stack at the right. The key is the same face as the
+   title (12px / 500), not mono: on the card it is a label, not code. */
+.card-head { display: flex; align-items: center; gap: .375rem; min-height: 22px; min-width: 0; }
+.card-head .key { font-size: .75rem; font-weight: 500; line-height: 18px; letter-spacing: .01em; color: var(--faint); white-space: nowrap; flex: none; }
+.card-sp { flex: 1; }
+.card-head .trace { font-family: inherit; font-size: .75rem; font-weight: 500; color: var(--faint); gap: .25rem; }
+.card-head .trace .ico { width: 13px; height: 13px; opacity: .55; }
+/* A branch alone is the mark only (its name is the tooltip): no gap to nothing. */
+.card-head .trace.br { gap: 0; }
+/* The title: the only primary text on the card. 14px / 500 on a 20px line. */
+.card h3 { margin-top: .5rem; font-family: var(--font-body); font-size: .88rem; font-weight: 500; line-height: 20px; letter-spacing: -.006em; text-wrap: pretty; overflow-wrap: anywhere; }
 
-.card-owner {
-  display: flex; align-items: center; gap: .5rem;
-  padding-top: .125rem;
-}
-.card-owner .lbl { font-size: .75rem; color: var(--faint); }
-.card-owner .nm { font-size: .75rem; font-weight: 700; font-family: var(--font-display); }
+/* The seats: the agent's badge and the owner's avatar, the same 22px circle,
+   overlapping by 4px with a 2px ring of the surface between them. */
+.who { display: inline-flex; align-items: center; flex: none; }
+.who > * + * { margin-left: -.25rem; }
+.who .avatar { box-shadow: 0 0 0 2px var(--surface); }
+.abadge { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; flex: none; }
+.abadge .ico { width: 12px; height: 12px; }
+.abadge.claude { background: var(--claude-soft); color: var(--claude-fg); }
+.abadge.codex { background: var(--codex-soft); color: var(--agent-dark); }
 
-/* Design pass 2026-09-08: the divider is gone. A card is one object, and a rule
-   across it says "two things" — which is why a card with a branch line read as
-   a little table. Grouping is space now: more of it above the foot than between
-   the foot's own items, which is the same information the line was carrying,
-   without the ink. */
-/* Ruling 171: two cells. Traces and problem pills fill the left and wrap
-   there; the status seat (quiet cue, wait tag) is the right cell — the same
-   corner on every card, whatever the left cell holds. A single wrapping run
-   sent "waiting on you" to a line of its own as soon as a PR chip joined the
-   branch chip. */
-.card-foot {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start; column-gap: .5rem;
-  margin-top: .125rem;
+/* The property row: 22px chips, 12px / 500, a 13px mark, a 6px radius, 4px
+   apart, wrapping. Exactly ONE tinted chip per card — the status — whose
+   tint is its meaning; the problems are outlined, in red ink (amber for a
+   demand); "ready" is a ghost chip so the baseline state is present without
+   spending colour on it. */
+.card-props { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .5rem; }
+.chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  height: 22px; padding: 0 .375rem 0 .25rem;
+  border-radius: var(--radius-small);
+  font-size: .75rem; font-weight: 500; line-height: 18px; white-space: nowrap;
+  color: var(--faint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg), transparent 92%);
 }
-.card-trace { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
-/* The branch and PR chips share one line and the branch name yields first:
-   it shrinks to an ellipsis before the PR chip or the status seat moves. */
-.trace-line { display: inline-flex; align-items: center; gap: .5rem; min-width: 0; max-width: 100%; }
-.trace-line .trace { min-width: 0; }
-.trace-line .trace.pr { flex: none; }
-.trace-line .trace .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-status { display: flex; flex-direction: column; align-items: flex-end; gap: .25rem; }
-/* Ruling 171(e): at the board's narrowest lane (218px, every lane at 1440px
-   with five stages) a card's foot cannot hold a trace chip and "waiting on a
-   human" side by side, and a placeholder cut to "no…" is no placeholder. Under
-   210px of card CONTENT (a container query measures the content box — the
-   218px lane's card has 187px inside, a 259px card 235px) the foot is two rows
-   for EVERY card in the lane — the trace, then the status seat, right-aligned —
-   decided by the card's width, never by what the card holds, so a lane stays
-   uniform. Wider cards keep the one line: "no branch" and "waiting on a human"
-   need about 208px together. */
-@container (max-width: 210px) {
-  .card-foot { grid-template-columns: minmax(0, 1fr); }
-  /* The row gap rides on the status seat's first tag, so a card with no
-     status (Done) gains no empty row — and nothing is hidden by width. */
-  .card-status > :first-child { margin-top: .25rem; }
-}
+.chip .ico { width: 13px; height: 13px; flex: none; }
+.chip .working { width: 7px; height: 7px; border-radius: 50%; background: var(--agent); margin: 0 .125rem; animation: pulse-a 1.6s ease-out infinite; }
+.chip.st { box-shadow: none; }
+.chip.st.agent, .chip.st.queued { background: var(--agent-soft); color: var(--agent-dark); }
+.chip.st.you { background: var(--blue-soft); color: var(--blue-pressed); }
+.chip.st.input, .chip.st.blocked { background: var(--amber-light); color: var(--amber-dark); }
+.chip.st.done { background: var(--success-soft); color: var(--success-dark); }
+.chip.st.human, .chip.st.scheduled, .chip.st.archived, .chip.st.unknown { background: var(--tint-press); color: var(--muted); }
+.chip.st.ready { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg), transparent 92%); color: var(--faint); }
+.chip.st.ready .ico { color: var(--teal-dark); }
+.chip.pb { color: var(--coral-dark); }
+.chip.pb.amber { color: var(--amber-dark); }
+.chip.more { font-variant-numeric: tabular-nums; }
+/* The list row's agent: the tile and the name — the row has the room. */
+.list-agent { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; font-weight: 500; color: var(--muted); }
+.list-agent .agent-glyph { width: 22px; height: 22px; }
+.list-agent .agent-glyph .ico { width: 12px; height: 12px; }
+
+/* Traces elsewhere (the insights page, the live branch strip): the mono chip. */
 .trace {
   display: inline-flex; align-items: center; gap: .25rem;
   font-family: var(--font-mono); font-size: .69rem; color: var(--faint);
@@ -3529,7 +3531,7 @@ dialog[data-closing]::backdrop {
   display: inline-flex; align-items: center; gap: .5rem;
   background: none; border: 0; padding: 0;
 }
-.home-brand b { font-family: var(--font-display); font-weight: 800; font-size: 1rem; }
+.home-brand b { font-weight: 600; font-size: 1rem; }
 .home-brand .mark { transition: transform .15s ease, box-shadow .15s ease; }
 .home-brand:hover .mark { transform: translateY(-1px); box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 40%); }
 .home-user-wrap { position: relative; }
@@ -3798,12 +3800,7 @@ dialog[data-closing]::backdrop {
 .rev-add.leave:hover { border-color: var(--coral-dark); color: var(--coral-dark); background: var(--rose-light); }
 .pev-ico.act-assign { background: var(--focus-wash); color: var(--blue-pressed); }
 
-/* reviewer visibility on cards + sidebar */
-.owner-row { display: flex; align-items: center; gap: .5rem; min-width: 0; }
-.owner-row .card-owner { flex: 1; min-width: 0; overflow: hidden; flex-wrap: nowrap; }
-.owner-row .card-owner .nm, .owner-row .card-owner .lbl { white-space: nowrap; }
-.owner-row .card-owner .nm { flex: none; }
-.owner-row .card-owner .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* reviewer visibility on the task page's side panel */
 /* One avatar, a label and a release button — a labelled owner chip, not a
    stack (the name is historical). Its avatar takes `size="xs"`; the overlap
    ring the old `.rev-stack .avatar` carried never drew, because nothing here
@@ -5116,19 +5113,19 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    readable measure; the row-gap is the tighter step so a wrapped row still
    reads as one row. */
 .card.list-row { flex-direction: row; align-items: center; gap: .5rem 1rem; flex-wrap: wrap; }
-/* The list row's key is the SAME thing the grid card's `.card-top .key` is —
-   a task key — and it was the only one in the app rendered in the body face,
-   because every other `.key` rule is scoped to a container this row is not in
-   (`.card-top`, `.task-hero`, `.live-task`, `.pj-name`). It read as a different
-   kind of value at a glance. Only the width was ever declared here (P16-F3 moved
-   it out of an inline style, which is how the gap surfaced).
+/* The list row's key is the SAME thing the grid card's `.card-head .key` is —
+   a task key — and wears the same treatment (ruling 365: the body face at
+   12px / 500 in secondary ink; on a card the key is a label, not code). Only
+   the width was ever declared here (P16-F3 moved it out of an inline style).
    F21-18: the 64px column is narrower than a long key, so this is in fact the
    row that breaks a key mid-token first — it wraps inside its own fixed column
    with nothing else on the row squeezing it. */
 .card.list-row .key {
   width: 64px;
-  font-family: var(--font-mono);
   font-size: .75rem;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: .01em;
   color: var(--faint);
   white-space: nowrap;
 }
@@ -6548,13 +6545,19 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    real button (the app-wide focus ring applies), and its menu is the palette
    as a 5×4 grid of swatches on the shared menu surface. */
 .stg-color-wrap { position: relative; display: inline-flex; }
+/* The button is a 24px target (WCAG 2.5.8; the e2e axe sweep refused the
+   14px one under ruling 365's first run) and paints the 14px dot inside it. */
 .stg-swatch {
-  width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%;
-  background: var(--stage); cursor: pointer;
+  position: relative; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; cursor: pointer;
+}
+.stg-swatch::before {
+  content: ""; position: absolute; inset: 5px; border-radius: 50%;
+  background: var(--stage);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 85%);
   transition: transform .12s ease, box-shadow .12s ease;
 }
-.stg-swatch:hover:not(:disabled), .stg-swatch.open {
+.stg-swatch:hover:not(:disabled)::before, .stg-swatch.open::before {
   transform: scale(1.15);
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--fg);
 }

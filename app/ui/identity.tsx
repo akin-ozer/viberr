@@ -100,3 +100,26 @@ export function AgentGlyph({
     />
   );
 }
+
+/**
+ * Ruling 365: the agent as a badge in the board card's avatar stack — a 22px
+ * circle in the backend's tint with the backend's mark, the same size and
+ * shape as the owner's avatar beside it, so the two seats read as one stack.
+ * The profile's name is not printed on the card; it is the badge's accessible
+ * name and its tooltip ("Claude · Backend Engineer"), the way the owner's name
+ * is the avatar's. The cut-corner tile stays the agent's mark everywhere else.
+ */
+export function AgentBadge({ backend, name }: { backend?: string; name: string }) {
+  const claude = backend === "claude";
+  const label = (claude ? "Claude" : "Codex") + " · " + name;
+  return (
+    <span
+      className={"abadge " + (claude ? "claude" : "codex")}
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      <Icon name={claude ? "sparkle" : "cpu"} />
+    </span>
+  );
+}

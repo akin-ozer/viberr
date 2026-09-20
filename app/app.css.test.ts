@@ -277,10 +277,12 @@ describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
     // It was declared twice: the Roobert-first stack in the token block at the
     // top, and an overriding `:root { --font-display: "Manrope" }` 2600 lines
     // down. Manrope won, so the token block — the first place anyone looks —
-    // gave the wrong answer.
+    // gave the wrong answer. Ruling 365: Inter is the one UI face, so the
+    // display token and the body token name the same family.
     const declarations = [...CODE.matchAll(/--font-display\s*:/g)];
     expect(declarations.length).toBe(1);
-    expect(CODE).toMatch(/--font-display:\s*"Manrope"/);
+    expect(CODE).toMatch(/--font-display:\s*"Inter"/);
+    expect(CODE).toMatch(/--font-body:\s*"Inter"/);
   });
 
   it("clears the UA button background in the element reset", () => {
@@ -854,7 +856,7 @@ describe("ruling 166: primitives may ship behaviour, never appearance", () => {
     }
     // …and must not fire on viberr's own flat, unprefixed vocabulary.
     for (const own of [
-      "card-top",
+      "card-head",
       "rev-stack",
       "avatar-group",
       "agent-glyph",
@@ -963,10 +965,6 @@ const BREAKPOINTS = {
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
   "max-width: 560px": "phone-width home rows — the pipeline meter yields",
-  // The one @container query (ruling 171(e)): a board CARD with under 210px of
-  // content stacks its foot — decided by the card's width (a container query
-  // measures the content box), so a whole lane reflows together.
-  "max-width: 210px": "narrow board card — the foot becomes two rows",
 } satisfies Record<string, string>;
 
 describe("app.css breakpoints (P16-F8)", () => {
@@ -1078,16 +1076,6 @@ describe("app.css breakpoints (P16-F8)", () => {
   });
 });
 
-describe("ruling 171(e): the narrow card's foot reflows on the card's width", () => {
-  it("is a @container query on the card, stacking the foot under 210px of content", () => {
-    expect(CODE).toMatch(/\.card\s*\{[^}]*container-type:\s*inline-size/);
-    const block = CODE.match(/@container \(max-width: 210px\)\s*\{([\s\S]*?)\n\}/);
-    expect(block, "the narrow-card container block").toBeTruthy();
-    expect(block![1]).toMatch(/\.card-foot\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
-    // The status seat stays a right-aligned column, so the tag keeps the corner.
-    expect(CODE).toMatch(/\.card-status\s*\{[^}]*align-items:\s*flex-end/);
-  });
-});
 
 describe("app.css palette reachability on touch (P16-G3)", () => {
   it("hides the shortcut chip on the palette TRIGGER only", () => {
@@ -1321,20 +1309,20 @@ function isLiteral(value: string): boolean {
 }
 
 describe("app.css draws a task key the same way everywhere (P16-F3 follow-on)", () => {
-  it("gives the list row's key the mono treatment the grid card's key has", () => {
+  it("gives the list row's key the treatment the grid card's key has", () => {
     // Every `.key` rule is scoped to a container (`.card-top`, `.task-hero`,
     // `.live-task`, `.pj-name`) and the board's LIST row is in none of them, so
     // its key alone rendered in the body face — the same value looking like a
     // different kind of value depending on the view you picked. Surfaced when
     // F3 moved its width out of an inline style and there was nothing else.
-    const grid = CODE.match(/\.card-top \.key\s*\{([^}]*)\}/)?.[1] ?? "";
+    const grid = CODE.match(/\.card-head \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     const list = CODE.match(/\.card\.list-row \.key\s*\{([^}]*)\}/)?.[1] ?? "";
     // F21-18 named a third key rule, the drop preview's. Since 2026-09-08 the
     // preview renders the card's own face (`CardFace` in board-page.tsx), so its
     // key IS `.card-top .key` and a private rule would be the drift this test
     // exists to catch.
     expect(CODE).not.toMatch(/\.card-drop-preview \.key\s*\{/);
-    expect(grid, ".card-top .key must have a rule").not.toBe("");
+    expect(grid, ".card-head .key must have a rule").not.toBe("");
     expect(list, ".card.list-row .key must have a rule").not.toBe("");
     // Anchored on a declaration boundary so `color` cannot match inside
     // `background-color` and `font-family` cannot match `font-size`.
@@ -2746,8 +2734,8 @@ describe("app.css type scale (recut 2026-09-08)", () => {
   });
 
   it("declares only weights the loaded fonts ship", () => {
-    // root.tsx loads Noto Sans 400/500/600/700, Manrope 500/600/700/800,
-    // JetBrains Mono 400/500/600. Declared weights above a family's ceiling
+    // root.tsx loads Inter 400/500/600/700/800 (ruling 365: the one UI face)
+    // and JetBrains Mono 400/500/600. Declared weights above a family's ceiling
     // silently render one step down (and flash heavier in font fallback), so
     // the sheet declares only real ones; 800 is legal only where the display
     // face applies. 900/650 are gone for good.
@@ -2757,11 +2745,10 @@ describe("app.css type scale (recut 2026-09-08)", () => {
   });
 
   it("scopes font-weight: 800 to rules that resolve the display face", () => {
-    // 800 exists only in Manrope. A body/mono-face rule declaring 800 silently
-    // clamps to 700/600 — the exact fiction the pass removed (and the
-    // drop-preview's visible mid-drag typeface swap). Each 800 rule must
-    // either declare the display family itself or select an h1-h4 element,
-    // which the global heading rule puts on the display face.
+    // Inter ships 800 for both tokens now, but 800 stays a heading weight: a
+    // body-face rule at 800 is the "heap of bold" the design pass removed.
+    // Each 800 rule must either declare the display family itself or select
+    // an h1-h4 element, which the global heading rule puts on the display face.
     const offenders: string[] = [];
     for (const rule of CODE.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
       const [, selector, body] = rule;
@@ -2968,11 +2955,15 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
     expect(decls(".board.list")).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("keeps the card's top-right corner free for the stage-move control", () => {
-    expect(decls(".card-top")).toMatch(/flex-wrap:\s*wrap/);
-    expect(decls(".card-wrap:has(.card-move) .card-top")).toMatch(/padding-right:/);
-    expect(CODE).not.toMatch(/\.card-top \.spacer\s*\{/);
-    expect(decls(".card-move .stage-menu-btn")).toMatch(/min-height:\s*24px/);
+  it("overlays the stage-move control in the card's bottom-right corner (ruling 365)", () => {
+    // The control used to sit top-right and the head row reserved 36px for
+    // it; it is a bare 20px chevron in the corner the property row leaves
+    // free now, absolute, so no row reserves anything.
+    expect(decls(".card-move")).toMatch(/position:\s*absolute/);
+    expect(decls(".card-move")).toMatch(/bottom:\s*\.75rem/);
+    expect(CODE).not.toMatch(/\.card-wrap:has\(\.card-move\)/);
+    expect(decls(".card-move .stage-menu-btn")).toMatch(/width:\s*20px;\s*height:\s*20px/);
+    expect(decls(".card-move .sm-current")).toMatch(/display:\s*none/);
     expect(decls(".col-head .add")).toMatch(/width:\s*24px;\s*height:\s*24px/);
   });
 

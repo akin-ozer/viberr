@@ -196,7 +196,7 @@ describe("ruling 225: the board says a clock rest is a clock rest", () => {
         resumesAt: "2026-09-14T02:28:00.000Z",
       }),
     ]);
-    const tag = container.querySelector(".card .wait-tag")!;
+    const tag = container.querySelector(".card .chip.st.scheduled")!;
     // The promise ruling 224's own packet copy made: "Nothing runs until then
     // and the board says so." The INSTANT is rendered by `LocalDayDotTime`,
     // which swaps to the viewer's zone after hydration and has its own tests —
@@ -218,7 +218,7 @@ describe("ruling 225: the board says a clock rest is a clock rest", () => {
       task({ key: "VIB-1", stage: "impl", waiting: "schedule", resumesAt: null }),
     ]);
     expect(
-      container.querySelector(".card .wait-tag")!.textContent!.trim(),
+      container.querySelector(".card .chip.st.scheduled")!.textContent!.trim(),
     ).toBe("resumes on its own");
   });
 
@@ -237,10 +237,10 @@ describe("ruling 225: the board says a clock rest is a clock rest", () => {
         displayReadiness: "input_required",
       }),
     ]);
-    expect(container.querySelector(".card-top .pill")).toBeNull();
+    expect(container.querySelector(".card .chip.st.input")).toBeNull();
     expect(container.textContent).not.toContain("input required");
     expect(
-      container.querySelector(".card .wait-tag")!.textContent!.trim(),
+      container.querySelector(".card .chip.st.scheduled")!.textContent!.trim(),
     ).toMatch(/^resumes \S/);
   });
 
@@ -341,13 +341,16 @@ describe("interface review 2026-09-06: the lane outline and the card corner", ()
     expect(seat.getAttribute("aria-label")).toBe("Owner: Selin Aksoy");
   });
 
-  it("puts the readiness pill beside the key, leaving the corner to the stage control", () => {
+  it("ruling 365: the key leads the head, the seats close it, the status sits in the property row", () => {
     const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })]);
-    const top = container.querySelector('[data-board-card="VIB-1"] .card-top')!;
-    const kids = [...top.children].map((c) => c.className);
+    const card = container.querySelector('[data-board-card="VIB-1"]')!;
+    const head = card.querySelector(".card-head")!;
+    const kids = [...head.children].map((c) => c.className);
     expect(kids[0]).toBe("key");
-    expect(kids).not.toContain("spacer");
-    expect(top.querySelector(".pill")).toBeTruthy();
+    expect(kids[kids.length - 1]).toBe("who");
+    // Nothing coloured lives in the head: the status is the property row's.
+    expect(head.querySelector(".chip")).toBeNull();
+    expect(card.querySelector(".card-props .chip.st")!.textContent).toBe("ready");
   });
 
   it("does not ride the stage trigger on the generic panel surface", () => {
@@ -368,7 +371,7 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
     ]);
     const card = container.querySelector(".card")!;
     expect(card.textContent).toContain("validation failing");
-    expect(card.querySelector(".card-foot .pill.blocked")).toBeTruthy();
+    expect(card.querySelector(".card-props .chip.pb")).toBeTruthy();
   });
 
   it("stays silent when there is no validation signal at all", () => {
@@ -400,7 +403,7 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
       task({ key: "VIB-1", displayReadiness: "ready", validation: "failing" }),
     ]);
     const card = container.querySelector(".card")!;
-    expect(card.querySelector(".pill.ready")!.textContent).toBe("ready");
+    expect(card.querySelector(".chip.st.ready")!.textContent).toBe("ready");
     expect(card.textContent).toContain("validation failing");
   });
 });
@@ -415,7 +418,7 @@ describe("D4: degraded continuity reaches the board (card + filter)", () => {
     ]);
     const card = container.querySelector('[data-board-card="VIB-1"]')!;
     expect(card.textContent).toContain("degraded continuity");
-    expect(card.querySelector(".card-foot .pill.risk")).toBeTruthy();
+    expect(card.querySelector(".card-props .chip.pb")).toBeTruthy();
   });
 
   it("stays silent on a card whose continuity is healthy", () => {
@@ -432,7 +435,7 @@ describe("D4: degraded continuity reaches the board (card + filter)", () => {
     );
     const row = container.querySelector(".card.list-row")!;
     expect(row.textContent).toContain("degraded continuity");
-    expect(row.querySelector(".pill.risk")).toBeTruthy();
+    expect(row.querySelector(".chip.pb")).toBeTruthy();
   });
 
   it("shows the 'Degraded continuity' filter chip (with a tally) only when a degraded task exists", () => {
@@ -736,12 +739,12 @@ describe("F15-09/R21-8: 'agent working' renders once, and input-required yields 
     ]);
     // F15-09's half: the claim is made ONCE — the foot's WaitTag, never a
     // duplicate pill in the top slot.
-    const working = [...container.querySelectorAll(".card .pill, .card .wait-tag")]
+    const working = [...container.querySelectorAll(".card .chip")]
       .filter((el) => el.textContent!.trim() === "agent working");
     expect(working).toHaveLength(1);
     // R21-8's half: "input required" claims a human is needed right now —
-    // false while the agent works, so the top slot draws nothing at all.
-    expect(container.querySelector(".card-top .pill")).toBeNull();
+    // false while the agent works, so no chip says it at all.
+    expect(container.querySelector(".card .chip.st.input")).toBeNull();
     expect(container.textContent).not.toContain("input required");
   });
 
@@ -756,18 +759,19 @@ describe("F15-09/R21-8: 'agent working' renders once, and input-required yields 
         displayReadiness: "input_required",
       }),
     ]);
-    expect(container.querySelector(".card-top .pill")).toBeNull();
+    expect(container.querySelector(".card .chip.st.input")).toBeNull();
     expect(container.textContent).not.toContain("input required");
-    expect(container.querySelector(".card .wait-tag")!.textContent!.trim()).toBe(
+    expect(container.querySelector(".card .chip.st.you")!.textContent!.trim()).toBe(
       "waiting on you",
     );
   });
 
-  it("'blocked' never yields — it stays in the card top beside a working agent", () => {
+  it("'blocked' never yields — beside a working agent it becomes an amber problem chip (ruling 365)", () => {
     const { container } = renderBoard([
       task({ waiting: "agent", readiness: "blocked", displayReadiness: "blocked" }),
     ]);
-    expect(container.querySelector(".card-top .pill")!.textContent).toBe("blocked");
+    expect(container.querySelector(".card .chip.st")!.textContent).toBe("agent working");
+    expect(container.querySelector(".card .chip.pb.amber")!.textContent).toBe("blocked");
   });
 
   it("does the same in the list view", () => {
@@ -775,7 +779,7 @@ describe("F15-09/R21-8: 'agent working' renders once, and input-required yields 
       [task({ waiting: "agent", readiness: "input_required", displayReadiness: "agent_working" })],
       { view: "list" },
     );
-    const working = [...container.querySelectorAll(".pill, .wait-tag")].filter(
+    const working = [...container.querySelectorAll(".chip")].filter(
       (el) => el.textContent!.trim() === "agent working",
     );
     expect(working).toHaveLength(1);
@@ -1104,7 +1108,7 @@ describe("F19-8: an archived card is inert and honest", () => {
 
   it("says `archived` instead of a readiness anyone owes", () => {
     const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
-    const top = container.querySelector(".card-top")!.textContent!;
+    const top = container.querySelector(".card-props")!.textContent!;
     expect(top).toContain("archived");
     // The live claims: "ready" (someone will act) and "awaiting verdict"
     // (someone owes a verdict) — nobody does on abandoned work.
@@ -1117,16 +1121,18 @@ describe("F19-8: an archived card is inert and honest", () => {
     const card = container.querySelector(".card")!.textContent!;
     expect(card).not.toContain("merge pending");
     expect(card).not.toContain("awaiting verdict");
-    expect(container.querySelector(".wait-tag")).toBeNull();
+    expect(container.querySelector(".chip.st.agent")).toBeNull();
     // "How far did this get?" stays answerable — the hero keeps its stage pill
-    // for the same reason. Ruling 171: the PR chip is the one trace chip when a
-    // PR exists (it implies the branch); the branch name is the chip only
-    // before a PR opens.
+    // for the same reason. Ruling 171: the PR is the one trace when a PR
+    // exists (it implies the branch); ruling 365: a branch alone is the mark,
+    // its name the tooltip and accessible name.
     expect(card).toContain("VIB-9");
     expect(card).toContain("#124");
     cleanup();
     const noPr = renderBoard([archivedTask({ pr: null })], { search: ARCHIVED });
-    expect(noPr.container.querySelector(".card")!.textContent).toContain("VIB-9-abandoned");
+    expect(
+      noPr.container.querySelector(".card .card-head .trace.br")!.getAttribute("aria-label"),
+    ).toBe("Branch VIB-9-abandoned");
   });
 
   it("keeps the urgent/waiting card treatment off an archived card", () => {
@@ -1213,7 +1219,7 @@ describe("N20-14/C2: a force-accepted card withdraws the validation pill", () =>
     ]);
     const card = container.querySelector(".card")!;
     // The terminal status stays (the readiness pill); the live obligation goes.
-    expect(card.querySelector(".card-top")!.textContent).toContain("accepted");
+    expect(card.querySelector(".card-props .chip.st.done")!.textContent).toBe("accepted");
     expect(card.textContent).not.toContain("awaiting verdict");
     // C2 (canary): revert the `!terminal` guard in StateSignals and the
     // withdrawn validation pill returns — this assertion goes red.
@@ -1231,8 +1237,8 @@ describe("N20-14/C2: a force-accepted card withdraws the validation pill", () =>
     ]);
     const card = container.querySelector(".card")!;
     expect(card.textContent).toContain("accepted · gate bypassed");
-    // `risk`-toned: an override, not a clean pass.
-    expect(card.querySelector(".pill.risk")).toBeTruthy();
+    // A problem chip: an override, not a clean pass.
+    expect(card.querySelector(".chip.pb")).toBeTruthy();
   });
 });
 
@@ -2023,7 +2029,7 @@ describe("gap-10: the board says when a task has gone quiet", () => {
     // wants last activity off the board's cards. The wait tag is the whole
     // status seat, and the "No activity" filter chip below still finds the task.
     const { container } = renderBoard([quietTask()]);
-    const foot = container.querySelector(".card-foot")!;
+    const foot = container.querySelector(".card-props")!;
     expect(foot.textContent).not.toContain("no activity");
     expect(foot.textContent).toContain("agent working");
     cleanup();
@@ -2391,14 +2397,14 @@ describe("ruling 172: a held task's card says `blocked`, not what it waits on", 
       ],
     });
   const waitChipOf = (root: Element) =>
-    [...root.querySelectorAll(".pill")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
+    [...root.querySelectorAll(".chip")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
 
   it("draws the readiness pill and no 'blocked by' chip, on the card and the row", () => {
     for (const view of [undefined, "list" as const]) {
       const { container } = renderBoard([held()], view ? { view } : {});
       expect(waitChipOf(container), `no wait chip in ${view ?? "card"} view`).toBeUndefined();
       expect(
-        [...container.querySelectorAll(".pill.blocked")].some((p) => p.textContent?.trim() === "blocked"),
+        [...container.querySelectorAll(".chip.st.blocked")].some((p) => p.textContent?.trim() === "blocked"),
       ).toBe(true);
       expect(container.textContent).not.toContain("goal-1");
       cleanup();
@@ -2416,8 +2422,8 @@ describe("ruling 172: a held task's card says `blocked`, not what it waits on", 
     const { container } = renderBoard([stormy]);
     const card = container.querySelector(".card")!;
     expect(waitChipOf(card)).toBeUndefined();
-    const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) => /^\+\d+$/.test(p.textContent ?? ""))!;
-    // pr + checks shown; review, validation folded.
+    const fold = [...card.querySelectorAll(".chip.more")].find((p) => /^\+\d+$/.test(p.textContent ?? ""))!;
+    // validation + checks shown; review, closed folded.
     expect(fold.textContent).toBe("+2");
     expect(fold.getAttribute("title")).not.toContain("blocked by");
   });
@@ -2436,16 +2442,19 @@ describe("pass 30: the state-pill stack ranks instead of shouting", () => {
   it("shows the two leading state pills and folds the rest into +N", () => {
     const { container } = renderBoard([stormy()]);
     const card = container.querySelector(".card")!;
-    const fold = [...card.querySelectorAll(".pill.neutral.sm")].find((p) =>
+    const fold = [...card.querySelectorAll(".chip.more")].find((p) =>
       /^\+\d+$/.test(p.textContent ?? ""),
     )!;
     expect(fold).toBeTruthy();
     expect(fold.textContent).toBe("+3");
-    // Every folded fact stays reachable — named in the title, one hover away
-    // (rulings 40/12/14: visible, not merely stored).
+    // Ruling 365 ranks the failures first: validation and checks draw, the
+    // review, the closed PR and the continuity fold. Every folded fact stays
+    // reachable — named in the title, one hover away (rulings 40/12/14).
+    expect(card.textContent).toContain("validation failing");
+    expect(card.textContent).toContain("2/5 checks failing");
     const title = fold.getAttribute("title")!;
     expect(title).toContain("changes requested");
-    expect(title).toContain("validation failing");
+    expect(title).toContain("closed");
     expect(title).toContain("degraded continuity");
   });
 
@@ -2454,11 +2463,7 @@ describe("pass 30: the state-pill stack ranks instead of shouting", () => {
       task({ validation: "failing", continuity: "degraded" }),
     ]);
     const card = container.querySelector(".card")!;
-    expect(
-      [...card.querySelectorAll(".pill")].some((p) =>
-        /^\+\d+$/.test(p.textContent ?? ""),
-      ),
-    ).toBe(false);
+    expect(card.querySelector(".chip.more")).toBeNull();
     expect(card.textContent).toContain("validation failing");
     expect(card.textContent).toContain("degraded continuity");
   });
@@ -2624,26 +2629,26 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
         profileName,
       },
     });
-  const ownerLine = (container: HTMLElement) =>
-    container.querySelector('[data-board-card="VIB-1"] .card-owner')!.textContent;
+  const badge = (container: HTMLElement) =>
+    container.querySelector('[data-board-card="VIB-1"] .who .abadge')!;
 
-  it("prints the deployed profile's name beside the backend's glyph", () => {
+  it("names the deployed profile in the badge's label and tooltip (ruling 365: the name is not printed)", () => {
     const { container } = renderBoard([engaged("Developer")]);
     // The profile name says WHICH agent, where the role ("Implementation") did
-    // not — two profiles can share a role. The backend is the glyph, labelled
-    // (ruling 168(c)): "Claude · Developer" had said it twice.
-    expect(ownerLine(container)).toBe("Developer");
-    expect(ownerLine(container)).not.toContain("Implementation");
-    expect(
-      container
-        .querySelector('[data-board-card="VIB-1"] .card-owner .agent-glyph')!
-        .getAttribute("aria-label"),
-    ).toBe("Claude");
+    // not — two profiles can share a role. The backend is the badge's mark and
+    // the first word of its name (ruling 168(c)); the card face prints neither.
+    expect(badge(container).getAttribute("aria-label")).toBe("Claude · Developer");
+    expect(badge(container).getAttribute("title")).toBe("Claude · Developer");
+    expect(badge(container).getAttribute("role")).toBe("img");
+    const face = container.querySelector('[data-board-card="VIB-1"]')!.textContent!;
+    expect(face).not.toContain("Developer");
+    expect(face).not.toContain("Implementation");
+    expect(face).not.toContain("Claude");
   });
 
   it("falls back to the role for a profile no longer deployed — there is no live name to give", () => {
     const { container } = renderBoard([engaged(null)]);
-    expect(ownerLine(container)).toBe("Implementation");
+    expect(badge(container).getAttribute("aria-label")).toBe("Claude · Implementation");
   });
 });
 
@@ -2676,28 +2681,35 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     profileId: "developer",
     profileName: "Developer",
   };
+  /** Ruling 365: the seats are a stack in the head — the agent's badge, then
+   *  the owner's avatar — each named for assistive technology and on hover. */
   const seats = (root: ParentNode) => ({
-    carrier: root.querySelector(".owner-row .card-owner")!.textContent!.trim(),
-    owner: root.querySelector(".owner-row .rev-stack")?.getAttribute("aria-label") ?? null,
+    carrier: root.querySelector(".who .abadge")?.getAttribute("aria-label") ?? null,
+    owner: root.querySelector(".who .rev-stack")?.getAttribute("aria-label") ?? null,
   });
 
-  it("a human-owned task with no agent: the carrier seat is empty, the owner sits at the right", () => {
+  it("a human-owned task with no agent: no badge, the owner closes the head", () => {
     const { container } = renderBoard([task({ key: "VIB-2", owner: arda })]);
-    expect(seats(container)).toEqual({ carrier: "no agent", owner: "Owner: Arda Kaya" });
-    // Nothing of the old left-seat grammar survives.
-    expect(container.querySelector(".card")!.textContent).not.toContain("· owner");
-    expect(container.querySelector(".card")!.textContent).not.toContain("Arda");
+    expect(seats(container)).toEqual({ carrier: null, owner: "Owner: Arda Kaya" });
+    // Nothing of the old grammar survives: no name, no role word, no "no agent".
+    const face = container.querySelector(".card")!.textContent!;
+    expect(face).not.toContain("· owner");
+    expect(face).not.toContain("Arda");
+    expect(face).not.toContain("no agent");
   });
 
-  it("an agent-carried task reads the same way: agent left, owner right", () => {
+  it("an agent-carried task reads the same way: badge, then owner", () => {
     const { container } = renderBoard([task({ key: "VIB-1", owner: arda, specialist: developer })]);
-    expect(seats(container)).toEqual({ carrier: "Developer", owner: "Owner: Arda Kaya" });
+    expect(seats(container)).toEqual({ carrier: "Claude · Developer", owner: "Owner: Arda Kaya" });
+    const kids = [...container.querySelector(".who")!.children].map((c) => c.className);
+    expect(kids[0]).toContain("abadge");
+    expect(kids[1]).toBe("rev-stack");
   });
 
-  it("an unowned task keeps both seats and says what the owner seat waits for", () => {
+  it("an unowned task keeps the owner seat and says what it waits for", () => {
     const { container } = renderBoard([task({ key: "VIB-3" })]);
-    expect(seats(container)).toEqual({ carrier: "no agent", owner: "Owner: unassigned" });
-    expect(container.querySelector(".owner-row .rev-stack .avatar.ghost")).toBeTruthy();
+    expect(seats(container)).toEqual({ carrier: null, owner: "Owner: unassigned" });
+    expect(container.querySelector(".who .rev-stack .avatar.ghost")).toBeTruthy();
     cleanup();
     const withOperator = renderBoard([
       task({
@@ -2713,14 +2725,20 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     expect(seats(withOperator.container).owner).toBe("Owner: awaiting owner");
   });
 
-  it("the empty carrier tile is decorative; an agent's tile names its backend", () => {
-    const { container } = renderBoard([task({ key: "VIB-2", owner: arda })]);
-    const tile = container.querySelector(".owner-row .card-owner .agent-glyph")!;
-    expect(tile.classList.contains("none")).toBe(true);
-    expect(tile.getAttribute("aria-hidden")).toBe("true");
+  it("an agent's badge is an image named for its backend and profile; the badge's tint is the backend's", () => {
+    const { container } = renderBoard([task({ key: "VIB-1", owner: arda, specialist: developer })]);
+    const badge = container.querySelector(".who .abadge")!;
+    expect(badge.getAttribute("role")).toBe("img");
+    expect(badge.classList.contains("claude")).toBe(true);
+    cleanup();
+    const codex = renderBoard([
+      task({ key: "VIB-1", owner: arda, specialist: { ...developer, backend: "codex", name: "Codex" } }),
+    ]);
+    expect(codex.container.querySelector(".who .abadge")!.classList.contains("codex")).toBe(true);
+    expect(codex.container.querySelector(".who .abadge")!.getAttribute("aria-label")).toBe("Codex · Developer");
   });
 
-  it("the foot keeps the traces left and the status right, with a PR and without a branch alike", () => {
+  it("the head carries one trace mark and the property row the status, with a PR and without a branch alike", () => {
     const withPr = renderBoard([
       task({
         key: "VIB-1",
@@ -2732,34 +2750,41 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
         waitingOnMe: true,
       }),
     ]);
-    const foot = withPr.container.querySelector(".card-foot")!;
-    // One trace chip: the PR stands in for the branch it implies, so the
-    // narrowest lane still holds the chip and the status on one line.
-    expect(foot.querySelector(".card-trace")!.textContent).toContain("#291");
-    expect(foot.querySelector(".card-trace")!.textContent).not.toContain("vib-1-b3e3");
-    expect(foot.querySelector(".card-trace .wait-tag")).toBeNull();
-    expect(foot.querySelector(".card-status .wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    const card = withPr.container.querySelector(".card")!;
+    // One trace: the PR stands in for the branch it implies.
+    expect(card.querySelector(".card-head .trace.pr")!.textContent).toContain("#291");
+    expect(card.querySelector(".card-head .trace.br")).toBeNull();
+    expect(card.textContent).not.toContain("vib-1-b3e3");
+    expect(card.querySelector(".card-props .chip.st.you")!.textContent!.trim()).toBe("waiting on you");
     cleanup();
+    // Ruling 365: no trace draws nothing — "no branch" was an empty seat named.
     const bare = renderBoard([task({ key: "VIB-2", owner: arda, waiting: "human", waitingOnMe: true })]);
-    const foot2 = bare.container.querySelector(".card-foot")!;
-    expect(foot2.querySelector(".card-trace")!.textContent).toContain("no branch");
-    expect(foot2.querySelector(".card-status .wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    const card2 = bare.container.querySelector(".card")!;
+    expect(card2.querySelector(".card-head .trace")).toBeNull();
+    expect(card2.textContent).not.toContain("no branch");
+    expect(card2.querySelector(".card-props .chip.st.you")!.textContent!.trim()).toBe("waiting on you");
     cleanup();
+    // A branch alone is the glyph, named in full for hover and assistive technology.
     const branched = renderBoard([task({ key: "VIB-3", owner: arda, branch: "vib-3-long-branch-name" })]);
-    expect(branched.container.querySelector(".card-trace .trace.ok")!.textContent).toContain("vib-3-long");
+    const mark = branched.container.querySelector(".card-head .trace.br")!;
+    expect(mark.getAttribute("aria-label")).toBe("Branch vib-3-long-branch-name");
+    expect(branched.container.querySelector(".card")!.textContent).not.toContain("vib-3-long");
   });
 
-  it("problem pills belong to the trace cell, the wait tag to the status cell", () => {
+  it("the status chip leads the property row and the problems follow it", () => {
     const { container } = renderBoard([task({ key: "VIB-1", validation: "failing", waiting: "agent" })]);
-    const foot = container.querySelector(".card-foot")!;
-    expect(foot.querySelector(".card-trace .pill.blocked")!.textContent).toContain("validation failing");
-    expect(foot.querySelector(".card-status .wait-tag")!.textContent).toContain("agent working");
+    const chips = [...container.querySelectorAll(".card .card-props .chip")];
+    expect(chips[0].className).toBe("chip st agent");
+    expect(chips[0].textContent).toContain("agent working");
+    expect(chips[1].className).toBe("chip pb");
+    expect(chips[1].textContent).toContain("validation failing");
   });
 
   it("the list row seats the same two identities", () => {
     const { container } = renderBoard([task({ key: "VIB-2", owner: arda })], { view: "list" });
     const row = container.querySelector(".list-row")!;
-    expect(row.querySelector(".card-owner")!.textContent!.trim()).toBe("no agent");
+    expect(row.querySelector(".list-agent")).toBeNull();
+    expect(row.textContent).not.toContain("no agent");
     expect(row.querySelector(".rev-stack")!.getAttribute("aria-label")).toBe("Owner: Arda Kaya");
     expect(row.querySelector(".rev-stack .rs-lbl")!.textContent).toBe("owner");
   });
@@ -2788,25 +2813,27 @@ describe("ruling 168: the board card states each fact once", () => {
   it("a packet's hold on a human: the wait tag speaks, the readiness pill and the verdict chip stay silent", () => {
     const { container } = renderBoard([held()]);
     const card = container.querySelector(".card")!;
-    expect(card.querySelector(".card-top .pill")).toBeNull();
+    expect(card.querySelector(".chip.st.blocked")).toBeNull();
     expect(card.textContent).not.toContain("blocked");
     expect(card.textContent).not.toContain("awaiting verdict");
-    expect(card.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    expect(card.querySelector(".chip.st.you")!.textContent!.trim()).toBe("waiting on you");
   });
 
   it.each(["ready", "input_required", "goal_edit_pending"] as const)(
     "'%s' yields to a human wait tag the same way",
     (r) => {
       const { container } = renderBoard([held({ displayReadiness: r })]);
-      expect(container.querySelector(".card-top .pill")).toBeNull();
-      expect(container.querySelector(".card .wait-tag")).toBeTruthy();
+      // ONE status chip, and it is the wait's.
+      const status = container.querySelectorAll(".card .chip.st");
+      expect(status).toHaveLength(1);
+      expect(status[0].classList.contains("you")).toBe(true);
     },
   );
 
   it("a dependency hold keeps its 'blocked' pill — nobody is waited on, so nothing else says it", () => {
     const { container } = renderBoard([held({ waiting: "none", waitingOnMe: false })]);
-    expect(container.querySelector(".card-top .pill")!.textContent).toBe("blocked");
-    expect(container.querySelector(".wait-tag")).toBeNull();
+    expect(container.querySelector(".card .chip.st")!.textContent).toBe("blocked");
+    expect(container.querySelector(".card .chip.st.you")).toBeNull();
   });
 
   it("a problem never yields: inconsistency risk stays beside 'waiting on you'", () => {
@@ -2816,8 +2843,9 @@ describe("ruling 168: the board card states each fact once", () => {
         displayReadiness: "inconsistency_risk_detected",
       }),
     ]);
-    expect(container.querySelector(".card-top .pill")!.textContent).toBe("inconsistency risk");
-    expect(container.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
+    // Ruling 365: the problem is a chip beside the status, never the status.
+    expect(container.querySelector(".card .chip.pb")!.textContent).toBe("inconsistency risk");
+    expect(container.querySelector(".card .chip.st.you")!.textContent!.trim()).toBe("waiting on you");
   });
 
   it.each(["changed", "healthy", "none"] as const)(
@@ -2835,12 +2863,12 @@ describe("ruling 168: the board card states each fact once", () => {
     expect(container.querySelector(".card")!.textContent).toContain("validation failing");
   });
 
-  it("the agent line is the backend's glyph and the agent's name", () => {
+  it("the agent is the backend's badge, named with the profile (ruling 365)", () => {
     const { container } = renderBoard([held()]);
-    const owner = container.querySelector(".card-owner")!;
-    expect(owner.textContent).toBe("Developer");
-    expect(owner.querySelector(".agent-glyph")!.getAttribute("aria-label")).toBe("Claude");
-    expect(owner.querySelector(".agent-glyph")!.getAttribute("title")).toBe("Claude");
+    const badge = container.querySelector(".card .who .abadge")!;
+    expect(badge.getAttribute("aria-label")).toBe("Claude · Developer");
+    expect(badge.getAttribute("title")).toBe("Claude · Developer");
+    expect(container.querySelector(".card")!.textContent).not.toContain("Developer");
   });
 
   it("the list row makes the same three cuts", () => {
@@ -2849,8 +2877,8 @@ describe("ruling 168: the board card states each fact once", () => {
     expect(row.textContent).not.toContain("blocked");
     expect(row.textContent).not.toContain("awaiting verdict");
     expect(row.textContent).not.toContain("Claude");
-    expect(row.querySelector(".wait-tag")!.textContent!.trim()).toBe("waiting on you");
-    expect(row.querySelector(".card-owner")!.textContent).toBe("Developer");
+    expect(row.querySelector(".chip.st.you")!.textContent!.trim()).toBe("waiting on you");
+    expect(row.querySelector(".list-agent .nm")!.textContent).toBe("Developer");
   });
 });
 
@@ -3041,7 +3069,7 @@ describe("ruling 349: a run parked behind the cap reads 'agent queued'", () => {
         liveRun: "queued",
       }),
     ]);
-    const tag = container.querySelector(".card .wait-tag")!;
+    const tag = container.querySelector(".card .chip.st.queued")!;
     expect(tag.textContent!.trim()).toBe("agent queued");
     // CANARY: render the working branch for every waiting: "agent" card.
     expect(tag.querySelector(".working")).toBeNull();
