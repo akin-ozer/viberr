@@ -7,8 +7,11 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { languageForName } from "~/ui/code-language";
+import { CodeView } from "~/ui/code-view";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
+import { attachmentKind, IMAGE_RE, looksBinary } from "./attachment-kind";
 
 /**
  * Attachment lightbox (owner request 2026-08-21): clicking a piece of image
@@ -32,15 +35,16 @@ import { useDialog } from "~/ui/use-dialog";
  * Without a provider above it (bare renders, other pages reusing these
  * components) the handler does nothing and the anchor behaves exactly as
  * before — the popup is an enhancement, never a dependency.
+ *
+ * Ruling 363 (owner, 2026-09-20): the reader is a CODE reader. Whether a file
+ * is text is no longer a six-extension whitelist — `attachment-kind.ts` rules
+ * out images and the known binary kinds by name and the bytes' NUL test rules
+ * out the rest — and what it shows is `CodeView`: Shiki tokens by the name's
+ * grammar, numbered lines, plain when no grammar is mapped.
  */
 
-/** Image-typed attachment names — thumbnail previews + the image lightbox. */
-export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
-
-/** Text-typed attachment names the read-only viewer renders (ruling 105).
- *  Mirrors the serving route's inert-text whitelist (task-attachments.server
- *  INLINE_TYPES) — a name matching here must fetch as text, never render. */
-export const TEXT_VIEW_RE = /\.(txt|log|md|json|ya?ml|csv)$/i;
+/** Re-exported for the panel and the timeline, which split images from files. */
+export { IMAGE_RE };
 
 export interface LightboxImage {
   /** Filename, for the caption and the accessible name. */
@@ -123,21 +127,26 @@ async function readTextCapped(
 }
 
 /** The read-only body of a text attachment, fetched from the member-only
- *  serving route (which serves these types as inert text/plain).
+ *  serving route (inert text/plain for the ruling-105 types, a download for
+ *  every other name — fetch reads either; nothing is ever rendered).
  *  `onUnservable` fires when the fetch PROVED the file unservable (404, 413,
  *  auth redirect, network failure) so the footer can drop its Download button
  *  — some browsers save a failed download's error body as a file bearing the
  *  attachment's real name. */
 function LightboxTextBody({
   url,
+  name,
   onUnservable,
 }: {
   url: string;
+  /** The filename — it picks the grammar (ruling 363). */
+  name: string;
   onUnservable: () => void;
 }) {
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "failed" }
+    | { kind: "binary" }
     | { kind: "ready"; text: string; truncated: boolean }
   >({ kind: "loading" });
   useEffect(() => {
@@ -153,7 +162,12 @@ function LightboxTextBody({
           : Promise.reject(new Error()),
       )
       .then((read) => {
-        if (!cancelled) setState({ kind: "ready", ...read });
+        if (cancelled) return;
+        // Ruling 363: the name said "try the reader"; the bytes get the last
+        // word — a NUL in the head means this was never text.
+        setState(
+          looksBinary(read.text) ? { kind: "binary" } : { kind: "ready", ...read },
+        );
       })
       .catch(() => {
         if (!cancelled) {
@@ -176,6 +190,16 @@ function LightboxTextBody({
       </div>
     );
   }
+  if (state.kind === "binary") {
+    // Same card as a name-decided binary, and the same Download beside it:
+    // the fetch succeeded, so the file is servable — just not readable.
+    return (
+      <div className="lightbox-broken">
+        <Icon name="file" />
+        <p>This file is not text, so it has no in-app preview. Use Download to save it.</p>
+      </div>
+    );
+  }
   if (state.text === "") {
     // A zero-byte file is a real, loadable attachment — say so instead of
     // showing the blank dialog the failure branch exists to avoid.
@@ -183,9 +207,11 @@ function LightboxTextBody({
   }
   return (
     <>
-      <pre className="lightbox-text" tabIndex={0}>
-        {state.text}
-      </pre>
+      <CodeView
+        className="lightbox-text"
+        text={state.text}
+        language={languageForName(name)}
+      />
       {state.truncated && (
         <p className="lightbox-text-status">
           Showing the first part of a large file. Download it for the rest.
@@ -210,9 +236,11 @@ function Lightbox({
   // Ruling 105: a text attachment renders as a read-only viewer in the same
   // popup; per the addendum every other kind opens the card too, with a
   // no-preview note standing in for content the popup cannot render.
-  const isText = TEXT_VIEW_RE.test(img.name);
-  const isImage = IMAGE_RE.test(img.name);
-  const isOther = !isText && !isImage;
+  // Ruling 363: the name rules out images and the known binary kinds; every
+  // other name tries the reader, whose NUL test has the last word.
+  const kind = attachmentKind(img.name);
+  const isText = kind === "text";
+  const isOther = kind === "binary"; // the remaining kind, image, is the <img> branch
   // An HTTP-layer response PROVED the file unservable (404 after the ruling-
   // 105 prune or a delete, 413 over the route's 50 MB cap, auth redirect).
   // Then the footer drops Download: some browsers save a failed download's
@@ -247,7 +275,11 @@ function Lightbox({
       ref={ref}
     >
       {isText ? (
-        <LightboxTextBody url={img.url} onUnservable={markUnservable} />
+        <LightboxTextBody
+          url={img.url}
+          name={img.name}
+          onUnservable={markUnservable}
+        />
       ) : isOther ? (
         <div className="lightbox-broken">
           <Icon name="file" />

@@ -258,8 +258,10 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
 - A failure toast never renders the success tick: the kind is passed from the server
   result (`use-action-toast.ts`).
 - **Every attachment kind opens a card, and every card carries Download** (ruling 105):
-  images show the picture, text files (txt/log/md/json/yml/yaml/csv) a read-only
-  monospace reader, anything else an honest "no in-app preview" note. A body whose
+  images show the picture, every file whose name is not an image or a known binary
+  kind a read-only CODE reader (ruling 363: Shiki tokens by the name's grammar, line
+  numbers, plain when no grammar is mapped; a NUL byte in the head sends it to the
+  no-preview card instead), anything else an honest "no in-app preview" note. A body whose
   fetch proved the file unservable (404 after the completion-time prune, 413 over the
   50 MB cap, an auth redirect) reports the failure and drops Download rather than
   saving an error body under the real filename. The `Attachment lightbox` screen label

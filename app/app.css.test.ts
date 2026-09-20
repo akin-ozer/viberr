@@ -3316,3 +3316,43 @@ describe("app.css: the quiet tier reaches every surface (design pass 2026-09-08)
     }
   });
 });
+
+/* Ruling 363: the code reader's syntax palette is small text on --bg (the
+   reader's ground) inside a dialog on --surface — both must clear AA, in both
+   themes, for every scope family the highlighter can colour. */
+describe("app.css code reader palette meets WCAG AA (ruling 363)", () => {
+  const AA_SMALL_TEXT = 4.5;
+  const SYNTAX_FAMILIES = [
+    "keyword",
+    "string",
+    "string-expression",
+    "comment",
+    "constant",
+    "parameter",
+    "function",
+    "link",
+  ];
+  const THEMES = { light: LIGHT_ROOT, dark: DARK_ROOT };
+  for (const [theme, root] of Object.entries(THEMES)) {
+    it(`${theme} theme: every --syn-* token clears 4.5:1 on --bg and --surface`, () => {
+      for (const family of SYNTAX_FAMILIES) {
+        const value = tokenIn(root, `--syn-${family}`);
+        for (const ground of ["--bg", "--surface"]) {
+          const groundValue = tokenIn(root, ground);
+          expect(
+            contrastRatio(value, groundValue),
+            `${theme} --syn-${family} (${value}) on ${ground} (${groundValue})`,
+          ).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+        }
+      }
+    });
+  }
+
+  it("every scope family the highlighter emits has a rule that reads its token", () => {
+    for (const family of SYNTAX_FAMILIES) {
+      expect(CODE, family).toMatch(
+        new RegExp(`\\.code-view \\.tk-${family} \\{ color: var\\(--syn-${family}\\); \\}`),
+      );
+    }
+  });
+});

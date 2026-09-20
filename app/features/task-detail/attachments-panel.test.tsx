@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { AttachmentsPanel } from "./attachments-panel";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
@@ -663,5 +663,110 @@ describe("attachment images degrade gracefully when the picture cannot load", ()
       (a) => a.textContent === "Open original",
     )!;
     expect(original.getAttribute("href")).toBe(`${BASE}/gone.png`);
+  });
+});
+
+/*
+ * Ruling 363: the reader is a code reader. A file whose name is not an image
+ * or a known binary kind opens in it — highlighted by the name's grammar,
+ * numbered — and only the bytes (a NUL in the head) can send it to the
+ * no-preview card instead. The serving route is untouched: these fetches are
+ * downloads on the wire, text in the popup, never rendered.
+ */
+describe("attachment code reader (ruling 363)", () => {
+  const DIALOG = 'dialog[data-screen-label="Attachment lightbox"]';
+  const NUL = String.fromCharCode(0);
+  const ev = (attachments: string[]): TimelineEventRender => ({
+    id: 11,
+    type: "comment",
+    occurredAt: "2026-09-20T10:00:00.000Z",
+    actor: { kind: "agent", backend: "claude", name: "Developer", role: "delivery" },
+    title: null,
+    text: "Posted the proof script.",
+    toAgent: false,
+    evidence: null,
+    attachments,
+  });
+  async function withBody(body: string, run: () => Promise<void>) {
+    const origFetch = globalThis.fetch;
+    // SAFETY: the reader calls fetch(url) with a single string argument and
+    // reads .ok/.redirected/.body; this stub covers exactly that call shape.
+    globalThis.fetch = (async () =>
+      new Response(body, { status: 200 })) as typeof fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  }
+  function openChip(name: string) {
+    const rendered = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={ev([name])} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    fireEvent.click(rendered.container.querySelector(".tl-attach-chip")!);
+    const dialog = rendered.baseElement.querySelector(DIALOG)!;
+    expect(dialog).toBeTruthy();
+    return { ...rendered, dialog };
+  }
+  const readerIn = (dialog: Element) =>
+    waitFor(() => {
+      const found = dialog.querySelector("pre.code-view");
+      expect(found).toBeTruthy();
+      return found!;
+    });
+
+  it("a .mjs chip opens the code reader: highlighted, numbered, with Download", async () => {
+    await withBody("const answer = 42; // why\nexport { answer };\n", async () => {
+      const { dialog } = openChip("shop-65-journey-script.mjs");
+      const pre = await readerIn(dialog);
+      expect(pre.getAttribute("data-language")).toBe("javascript");
+      expect(pre.querySelectorAll(".line")).toHaveLength(2);
+      expect(pre.querySelector(".line")!.textContent).toBe("const answer = 42; // why");
+      expect(dialog.textContent).not.toMatch(/no in-app preview/);
+      await waitFor(() =>
+        expect(pre.querySelector(".tk-keyword")?.textContent).toBe("const"),
+      );
+      expect(pre.querySelector(".tk-comment")!.textContent).toBe("// why");
+      const download = dialog.querySelector<HTMLAnchorElement>('a[href$="?download=1"]')!;
+      expect(download.getAttribute("href")).toBe(
+        `${BASE}/shop-65-journey-script.mjs?download=1`,
+      );
+      expect(download.getAttribute("download")).toBe("shop-65-journey-script.mjs");
+    });
+  });
+
+  it("an unknown extension whose bytes carry a NUL opens the no-preview card — the bytes have the last word", async () => {
+    await withBody(NUL + String.fromCharCode(1, 2) + " not text " + NUL, async () => {
+      const { dialog, findByText } = openChip("blob.dat");
+      await findByText(/not text, so it has no in-app preview/);
+      expect(dialog.querySelector("pre")).toBeNull();
+      // Servable, just unreadable: Download stays.
+      const download = dialog.querySelector<HTMLAnchorElement>('a[href$="?download=1"]')!;
+      expect(download.getAttribute("download")).toBe("blob.dat");
+    });
+  });
+
+  it("an unknown extension that IS text opens plain in the reader, numbered", async () => {
+    await withBody("first\nsecond\nthird", async () => {
+      const { dialog } = openChip("notes.unknownext");
+      const pre = await readerIn(dialog);
+      expect(pre.getAttribute("data-language")).toBe("text");
+      expect(pre.querySelectorAll(".line")).toHaveLength(3);
+      expect(pre.getAttribute("data-digits")).toBe("1");
+    });
+  });
+
+  it("an svg opens as SOURCE in the reader — never as a rendered image", async () => {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+    await withBody(source, async () => {
+      const { dialog } = openChip("diagram.svg");
+      const pre = await readerIn(dialog);
+      expect(pre.textContent).toBe(source);
+      expect(pre.getAttribute("data-language")).toBe("xml");
+      expect(dialog.querySelector("img")).toBeNull();
+      expect(pre.querySelector("svg, script")).toBeNull();
+    });
   });
 });
