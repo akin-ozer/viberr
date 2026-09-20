@@ -148,12 +148,55 @@ const wireError = z
 
 // ------------------------------------------------------ claude envelopes
 
+/**
+ * Ruling 367: one block inside a `tool_result`'s `content` ARRAY — the shape
+ * an MCP server answers with (the SDK's text / image / tool_reference blocks),
+ * and every one of the product's own tools among them.
+ */
+const wireResultBlock = z
+  .object({
+    type: wireText,
+    text: absentableWireText,
+    tool_name: wireTextOrBlank,
+    source: z.object({ media_type: wireTextOrBlank }).catch(() => ({ media_type: "" })),
+  })
+  .catch(() => ({ type: "", text: undefined, tool_name: "", source: { media_type: "" } }));
+
+/** A block as the console prints it: text as itself; anything else as a
+ *  bracketed note naming what it was — an image by its media type, never its
+ *  bytes — so nothing is dropped and nothing renders as an escaped envelope. */
+function resultBlockText(block: z.infer<typeof wireResultBlock>): string {
+  if (block.type === "text" && block.text !== undefined) return block.text;
+  if (block.type === "image") {
+    return `[image${block.source.media_type ? `: ${block.source.media_type}` : ""}]`;
+  }
+  if (block.type === "tool_reference") {
+    return `[tool_reference${block.tool_name ? `: ${block.tool_name}` : ""}]`;
+  }
+  return `[${block.type || "block"}]`;
+}
+
+/** A `tool_result`'s `content`: the plain string a built-in answers with, or
+ *  the block array an MCP server answers with, read as the text it holds.
+ *  Through `wireText` the array became ONE escaped JSON string — 6,554 of this
+ *  instance's 39,148 stored results, every `get_task` and `read_board` among
+ *  them, printed as `[{"type":"text","text":"{\n  \"key\"…`. */
+const wireResultContent = z
+  .union([
+    z.string(),
+    z.array(wireResultBlock).transform((blocks) => blocks.map(resultBlockText).join("\n")),
+    z.null().transform(() => ""),
+    z.undefined().transform(() => ""),
+    z.unknown().transform((value) => JSON.stringify(value)),
+  ])
+  .catch("");
+
 /** One block of a Claude message's `content` array. */
 const claudeBlock = z.object({
   type: wireText,
   text: wireText,
-  /** `tool_result` content is free-form — a string, or blocks shown as JSON. */
-  content: wireText,
+  /** `tool_result` content: a string, or the blocks it holds (ruling 367). */
+  content: wireResultContent,
   name: wireText,
   input: wireToolInput,
   is_error: wireFlag,
