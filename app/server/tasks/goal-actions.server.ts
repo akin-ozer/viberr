@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { parseBlockedByColumn } from "~/server/projections/dependencies.server";
+import { parseBlockedByColumn, resolveDependencies } from "~/server/projections/dependencies.server";
 import { z } from "zod";
 import {
   allLinksSettled,
@@ -37,8 +37,8 @@ import {
   requireProjectMutable,
   type ProjectContext,
 } from "./task-actions.server";
-import { setTaskDependencies, validateDependencyRefs } from "./dependencies.server";
-import { formatDependencyRef, parseDependencyRef } from "~/shared/dependencies";
+import { releaseTask, setTaskDependencies, validateDependencyRefs } from "./dependencies.server";
+import { formatDependencyRef, parseDependencyRef, type DependencyRender } from "~/shared/dependencies";
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
 
@@ -1061,6 +1061,24 @@ async function startLinkTaskLocked(
     return null;
   }
   rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
+  // Ruling 358 (pass 38, F38-12): a link minted by the completion of the very
+  // link it waits on is born held on finished work. The completion's own
+  // release sweep listed the held tasks before this one existed, so the task
+  // sat until the minute tick: 11 of the 15 born-held links on this instance
+  // waited 16–77 s, the `create` drive refused meanwhile ("waits on other
+  // work (goal-2 link 2)" — the task whose acceptance had just minted it).
+  // Ask the engine once, now that the link carries its task; it is convergent,
+  // so an unsatisfied or lagging read leaves the tick to do what it always did.
+  if (linkInput.blockedBy) {
+    await releaseTask(db, ctx, projectSlug, created.key).catch((error) => {
+      logger.warn("release check after the link's mint failed — the tick will retry", {
+        goalId,
+        linkIndex,
+        taskKey: created.key,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+  }
   notifyCreator(
     db,
     fm,
@@ -1424,6 +1442,11 @@ export function startGoalRunner(db: DatabaseSync): void {
  * field that can never be set.
  */
 export type GoalLinkView = GoalLink & {
+  /** Ruling 359: the declared wait with each entry's live state, so the
+   *  Controller page reads a done entry as done (ruling 356's sentence).
+   *  Filled by `listGoals`, which has the projection; absent on the
+   *  file-only detail read. */
+  waits?: DependencyRender[];
   /**
    * Ruling 335: what the CHAIN DECLARED, present only when the task has moved
    * past it. `goal` above always carries the truth.
@@ -1572,7 +1595,11 @@ export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
         createdByLabel: r.created_by_label,
         onFailure: r.on_failure,
         description: r.description,
-        links,
+        // Ruling 359: the states ride along with the declaration.
+        links: links.map((link) => ({
+          ...link,
+          waits: resolveDependencies(db, projectSlug, link.blockedBy),
+        })),
         currentIndex: r.current_index,
         createdAt: r.created_at,
         updatedAt: r.updated_at,

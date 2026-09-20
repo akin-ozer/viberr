@@ -1,3 +1,4 @@
+import { holdEntriesSentence, joinDependencyEntries } from "~/shared/dependencies";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TurnStep } from "./turn-step";
 import {
@@ -713,7 +714,8 @@ function GoalCard({
               <span className="ctl-link-title">{l.title}</span>
               {l.blockedBy.length > 0 && (
                 <span className="sub" data-link-wait>
-                  waits on {l.blockedBy.join(", ")}
+                  {/* Ruling 359 (356's sentence): a done entry reads as done. */}
+                  waits on {l.waits ? holdEntriesSentence(l.waits) : joinDependencyEntries(l.blockedBy)}
                 </span>
               )}
               {l.taskKey && (

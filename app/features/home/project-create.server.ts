@@ -542,6 +542,11 @@ const CUSTOM_STAGE_COLORS = [
 ];
 const DONE_STAGE_COLOR = "#00b473";
 
+/** Ruling 352: the two forms every stage-colour renderer can draw (ruling 15). */
+export function isCssStageColor(color: string): boolean {
+  return /^#[0-9a-f]{3,8}$/i.test(color) || /^var\(--[\w-]+\)$/.test(color);
+}
+
 /**
  * Validate + compose the custom blueprint (controller create path). Everything
  * throws `AppError.validation` with the offending item named, BEFORE any
@@ -567,6 +572,20 @@ function resolveProjectBlueprint(
       throw AppError.validation(
         `A custom board carries ${CUSTOM_STAGE_MIN} to ${CUSTOM_STAGE_MAX} stages (got ${names.length}).`,
       );
+    }
+    // Ruling 352 (pass 38, F38-6): a colour is a CSS value or nothing. The board,
+    // the home meter and four more surfaces hand the string to CSS as it is;
+    // the shopify board carried `slate` and `amber`, which are not CSS colours,
+    // and two of its six stage dots drew nothing while the file said otherwise.
+    // Ruling 15 already states the contract — hex or `var(--*)` — so the door
+    // refuses anything else by name instead of storing what no surface can draw.
+    for (const s of custom.stages) {
+      const color = s.color?.trim();
+      if (color && !isCssStageColor(color)) {
+        throw AppError.validation(
+          `Stage "${s.name.trim()}" names the colour "${color}", which is not a CSS colour Viberr can draw. Use a hex value (#8b8b8b) or a theme token (var(--muted)), or omit it for the palette.`,
+        );
+      }
     }
     const seen = new Set<string>();
     stages = custom.stages.map((s, i) => {

@@ -1132,6 +1132,25 @@ describe("claude adapter run phases (R21-4a / FR28)", () => {
     expect(steps[2]).toBe(steps[1]);
   });
 
+  it("names the tool as answered once its result lands, so the thinking after it does not read as the tool running (ruling 348)", async () => {
+    const phases = capturePhases([
+      { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test" } }] } },
+      { type: "user", message: { content: [{ type: "tool_result", content: "12 passed" }] } },
+      // The model thinks and writes after the result: the finished call must
+      // not be shown as the thing the run is doing.
+      { type: "assistant", message: { content: [{ type: "text", text: "thinking" }] } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[1]).toBe("Bash · npm test");
+    // CANARY: keep `lastStep` untouched on a `tool_result` line.
+    expect(steps[2]).toBe("composing · Bash · npm test answered");
+    expect(steps[3]).toBe("composing · Bash · npm test answered");
+  });
+
   it("falls back to the SDK's turn count before the first tool call", async () => {
     // Two assistant envelopes with no user message between them are blocks of
     // ONE turn (the SDK's `num_turns` is one plus the user messages that flow

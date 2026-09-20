@@ -1,3 +1,4 @@
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import {
   existsSync,
   mkdirSync,
@@ -811,6 +812,68 @@ describe("startSpecialistRun", () => {
     // Nothing ran, so nothing lifted: still the one row from the first arm.
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
   });
+
+  it("ruling 355: a refusal names an entry that can never complete instead of promising a release", async () => {
+    // A MISSING entry: no such task exists, so `dependenciesSatisfied` can never
+    // turn true and "Viberr releases it when every entry is done" was a promise
+    // nothing could keep. CANARY: call `holdRefusal` without the resolved states.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", engagements: [], blockedBy: ["VIB-404"] }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("VIB-404 can never complete"),
+    });
+  });
+
+  it("ruling 356: the refusal names a done entry as done, not as still waited on", async () => {
+    // CANARY: hand `holdRefusal` the labels as if every entry were open.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", engagements: [], blockedBy: ["VIB-2", "VIB-3"] }),
+    });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-3", { stage: "done" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await expect(
+      startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("VIB-1 waits on VIB-2 (VIB-3 is done) and Viberr is holding it"),
+    });
+  });
+
+  it("ruling 357: a dispatch after the operator drive's own delivery stamps `actedAfterDelivery`", async () => {
+    // CANARY: drop the stamp before the run_started audit.
+    await assign();
+    const operatorRun: NonNullable<TaskMutationContext["operatorRun"]> = {
+      backend: "claude",
+      autonomy: "full",
+      reactDepth: 0,
+      deliveredHeadMoved: true,
+    };
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot, operatorRun },
+    );
+    expect(result.runId).toBeTruthy();
+    expect(operatorRun.actedAfterDelivery).toBe(true);
+  });
+
 
   /**
    * Ruling 311. `startRun` answers `outcome: "started" | "queued"` and the
@@ -5499,6 +5562,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
  * whole service, and pushed a branch cut from a base predating its dependency.
  */
 describe("ruling 186: a held task refuses every agent dispatch", () => {
+
   /** Make VIB-1 wait on a second task that is nowhere near done. */
   async function hold(entries: string[] = ["VIB-2"]): Promise<void> {
     writeTask(store.dataRoot, store.slug, {

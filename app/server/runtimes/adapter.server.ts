@@ -184,7 +184,7 @@ export interface RunCallbacks {
    * `run-service.launch` since the phase-6 build, but NO adapter ever called it
    * — so `agent_runs.phase`/`.step` stayed null for the entire life of every
    * run and the Live-run strip rendered two empty rows while an agent worked.
-   * Both adapters now drive it (see `RUN_PHASE` + `phaseStepForLine`); the
+   * Both adapters now drive it (see `RUN_PHASE` + `stepUpdateForLine`); the
    * service throttles the writes.
    */
   onPhase?: (phase: string | null, step: string | null) => void;
@@ -217,17 +217,56 @@ function clampStep(step: string): string {
   return flat.length > STEP_MAX ? `${flat.slice(0, STEP_MAX - 1)}…` : flat;
 }
 
+
+/** What one emitted line says about the run's live step. */
+export type StepUpdate =
+  /** The run invoked a tool: name it, with its input. */
+  | { kind: "tool"; step: string }
+  /** The tool the step names has answered; the model is composing again. */
+  | { kind: "answered" };
+
+const ANSWERED_PREFIX = "composing · ";
+const ANSWERED_SUFFIX = " answered";
+
 /**
- * The `step` line for one emitted run line, or null when the line says nothing
- * about what the run is doing right now.
+ * Ruling 348: the step once the tool it names has answered. The step used to
+ * stick unchanged from the tool's invocation to the NEXT invocation, so the
+ * strip read `Working · get_github_state · {…}` for as long as the model
+ * thought after that call came back — measured over the last 40 controller
+ * turns before this changed: 76 such stretches longer than 20 s on 26 of the
+ * 40 runs, 53 minutes in all, the longest 138 s, every one of them a finished
+ * tool shown as the thing the run was doing. "composing" is what the server
+ * knows: the result landed and no tool has been invoked since. Idempotent, so
+ * a second result line (a subagent's, a Codex error row after its start row)
+ * cannot stack the prefix; the tool's own text is trimmed before the suffix
+ * so the word "answered" survives the 120-char cap.
+ */
+export function answeredStep(step: string): string {
+  if (step.startsWith(ANSWERED_PREFIX)) return step;
+  const room = STEP_MAX - ANSWERED_PREFIX.length - ANSWERED_SUFFIX.length;
+  const inner = step.length > room ? `${step.slice(0, room - 1)}…` : step;
+  return `${ANSWERED_PREFIX}${inner}${ANSWERED_SUFFIX}`;
+}
+
+/**
+ * The step update one emitted run line carries, or null when the line says
+ * nothing about what the run is doing right now.
  *
  * Derived from the PROJECTED display line, which both adapters already compute
  * — so the two backends produce the same shape ("Bash · npm test") from very
  * different envelopes, and neither adapter re-parses the wire format for this.
  */
-export function phaseStepForLine(line: EmittedLine): string | null {
+export function stepUpdateForLine(line: EmittedLine): StepUpdate | null {
+  // A succeeding Codex MCP call projects no row at all on completion; the
+  // fact rides on the facts instead (ruling 348).
+  if (line.facts.toolAnswered) return { kind: "answered" };
   const display = line.display;
   if (!display) return null;
+  // The result rows carry no tool name, but they say the tool is done: Claude's
+  // `tool_result` (ok or error) and Codex's completed command output.
+  if (display.tag === "tool_result" || display.tag === "aggregated_output") {
+    return { kind: "answered" };
+  }
   // TOOL lines only. Both backends project a tool invocation as `ev: "tool"`
   // with a `name` (claude `tool_use`, codex `command_execution` / `mcp_tool_call`
   // / `web_search`), so one rule covers both. Command OUTPUT (`ev: "out"`) is
@@ -236,10 +275,12 @@ export function phaseStepForLine(line: EmittedLine): string | null {
   if (display.ev !== "tool") return null;
   const name = display.name?.trim();
   const text = display.text.trim();
-  if (name && text) return clampStep(`${name} · ${text}`);
-  if (name) return clampStep(name);
-  if (text) return clampStep(text);
-  return null;
+  const named = name && text ? `${name} · ${text}` : name || text;
+  if (!named) return null;
+  const step = clampStep(named);
+  // Codex projects a web search on completion only, so it is answered as it is
+  // named.
+  return { kind: "tool", step: display.tag === "web_search" ? answeredStep(step) : step };
 }
 
 /** A running handle the service can interrupt. */

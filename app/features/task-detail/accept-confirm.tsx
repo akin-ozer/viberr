@@ -1,8 +1,8 @@
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
-import type { PrChecksRender } from "~/shared/mapping/task.server";
-import { checksPill, prStatePill } from "~/features/github/github-pills";
+import type { PrChecksRender, PrChecksUnread } from "~/shared/mapping/task.server";
+import { checksPill, checksUnreadPill, prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -93,6 +93,9 @@ export interface AcceptConfirmTask {
    * nothing has reported, which reads as "not reported" and never as "green".
    */
   prChecks: PrChecksRender | null;
+  /** Ruling 360: the check-runs read GitHub refused, while nothing was ever
+   *  read. The dialog says so: a refused read is not "nothing reported". */
+  prChecksUnread?: PrChecksUnread | null;
 }
 
 function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
@@ -369,6 +372,24 @@ export function AcceptConfirm({
                           : task.prChecks.state === "pending"
                             ? "Checks have not finished. Merging now does not wait for them."
                             : "GitHub reported no conclusive check result for this head."}
+                      </span>
+                    </>
+                  ) : null}
+                  {/* Ruling 360 (pass 38, F38-14): ruling 304 put the checks
+                      on this row; a read the credential cannot make left the
+                      row silent through 89 merges of red-CI heads. The refusal
+                      is a fact the person deciding is owed. */}
+                  {!task.prChecks && task.prChecksUnread ? (
+                    <>
+                      {" "}
+                      <Pill kind={checksUnreadPill().kind} sm>
+                        {checksUnreadPill().label}
+                      </Pill>{" "}
+                      <span className="pol-note" data-checks-unread>
+                        GitHub refused this credential's read of the check results
+                        {task.prChecksUnread.status ? ` (HTTP ${task.prChecksUnread.status})` : ""}:{" "}
+                        {task.prChecksUnread.message}. Whether CI passed is not known here, and merging
+                        does not wait for it.
                       </span>
                     </>
                   ) : null}

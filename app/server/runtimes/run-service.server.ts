@@ -1926,6 +1926,33 @@ function launch(
   let lastPhase: string | null = null;
   let lastPhaseWriteMs = 0;
   const PHASE_MIN_INTERVAL_MS = 1_000;
+  // Ruling 348: a step the window suppresses is written when the window closes,
+  // not dropped. The update that matters most arrives inside the window — a
+  // tool that answers within a second of being invoked — and a Codex run then
+  // emits nothing until its reasoning item completes, so a dropped write would
+  // leave the finished call on the strip for the whole silent stretch.
+  let deferred: { phase: string | null; step: string | null } | null = null;
+  let deferredTimer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
+  const writePhase = (phase: string | null, step: string | null) => {
+    lastPhase = phase;
+    lastPhaseWriteMs = Date.now();
+    sink.phase(phase, step);
+  };
+  const flushDeferred = () => {
+    deferredTimer = null;
+    const pending = deferred;
+    deferred = null;
+    if (!pending || settled) return;
+    try {
+      writePhase(pending.phase, pending.step);
+    } catch (error) {
+      logger.error("run phase persist failed", {
+        runId: spec.runId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  };
 
   // Every adapter callback fires asynchronously (timers, SDK streams), so all
   // persistence inside them must be caught-and-logged — a throw here has no
@@ -1939,11 +1966,18 @@ function launch(
       try {
         const now = Date.now();
         if (phase === lastPhase && now - lastPhaseWriteMs < PHASE_MIN_INTERVAL_MS) {
+          deferred = { phase, step };
+          if (!deferredTimer) {
+            deferredTimer = setTimeout(
+              flushDeferred,
+              PHASE_MIN_INTERVAL_MS - (now - lastPhaseWriteMs),
+            );
+            deferredTimer.unref?.();
+          }
           return;
         }
-        lastPhase = phase;
-        lastPhaseWriteMs = now;
-        sink.phase(phase, step);
+        deferred = null;
+        writePhase(phase, step);
       } catch (error) {
         logger.error("run phase persist failed", {
           runId: spec.runId,
@@ -1952,6 +1986,11 @@ function launch(
       }
     },
     onExit: (exit) => {
+      // A step deferred by the throttle never lands on a settled row.
+      settled = true;
+      if (deferredTimer) clearTimeout(deferredTimer);
+      deferredTimer = null;
+      deferred = null;
       try {
         sink.finalize(exit);
       } catch (error) {

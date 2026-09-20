@@ -609,6 +609,24 @@ describe("RepositoryPanel", () => {
 /* -------------------------------------------------------------- PR panel */
 
 describe("PullRequestsPanel", () => {
+  it("ruling 360: a refused check-runs read renders as 'checks not readable', not as nothing", () => {
+    // CANARY: drop the `checksUnread` arm in the PR list.
+    const refused = {
+      ...prs[0]!,
+      checks: null,
+      checksRead: false,
+      checksUnread: {
+        status: 403,
+        message: "Resource not accessible by personal access token",
+        at: "2026-09-18T08:00:00.000Z",
+      },
+    };
+    const { container } = render(
+      <PullRequestsPanel prs={[refused]} defaultBranch="main" onOpenTask={() => {}} />,
+    );
+    expect(container.querySelector(".rq-row")!.textContent).toContain("checks not readable");
+  });
+
   it("renders count, rows with pills (incl. closed risk) and sub-lines", () => {
     const onOpenTask = vi.fn();
     const { container } = render(
@@ -627,6 +645,7 @@ describe("PullRequestsPanel", () => {
     expect(rows[1]!.querySelector(".pill.done")!.textContent).toContain(
       "merged",
     );
+    expect(rows[0]!.textContent).not.toContain("checks not readable");
     // Ruling 12: closed-unmerged renders the risk pill.
     expect(rows[2]!.querySelector(".pill.risk")!.textContent).toContain(
       "closed",

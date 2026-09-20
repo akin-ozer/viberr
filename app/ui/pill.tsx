@@ -70,7 +70,9 @@ export type ReadinessDisplayValue =
   | "accepted"
   | "merged"
   | "agent_working"
-  | "goal_edit_pending";
+  | "goal_edit_pending"
+  /** Ruling 349: parked behind the concurrent-run cap; nothing streams yet. */
+  | "agent_queued";
 
 /** What a pill renders for one value: its CSS kind and its label, plus whether
  *  it belongs to the quiet tier — see `Pill`'s `quiet` prop. */
@@ -88,6 +90,7 @@ const READINESS_DISPLAY = {
   accepted: { kind: "done", label: "accepted" },
   merged: { kind: "done", label: "merged" },
   agent_working: { kind: "agent", label: "agent working" },
+  agent_queued: { kind: "agent", label: "agent queued" },
   goal_edit_pending: { kind: "input", label: "goal edit pending" },
 } satisfies Record<ReadinessDisplayValue, PillDisplay>;
 

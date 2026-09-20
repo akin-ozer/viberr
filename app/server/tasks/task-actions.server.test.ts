@@ -1,3 +1,4 @@
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
@@ -91,6 +92,9 @@ import {
 } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { TaskActionContext } from "./task-actions.server";
+
+/** Ruling 361: every notice names its actor; these tests are about routing. */
+const TEST_FROM = { kind: "system" as const, name: "Test" };
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 let github: FakeGithub | null = null;
@@ -317,6 +321,23 @@ describe("createTask", () => {
     expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
     expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
+    // Ruling 356(b): a done entry is named as done in the creation note too.
+    // Live on BNB-26: "Created waiting on BNB-5, BNB-22" with BNB-22 closed
+    // 95 s before the mint — the fourth such note on the instance.
+    // CANARY: join the raw labels again and the note reads "VIB-1, VIB-2".
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done", title: "Already done" }),
+      goal: "A finished dependency.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Waits on one done and one open", blockedBy: ["VIB-1", "VIB-2"] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const mixed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-101", dataRoot: store.dataRoot })!.parsed;
+    expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 (VIB-2 is done)");
 
     /**
      * Ruling 255 (pass 37, F37-84): one creation is one instant.
@@ -1706,7 +1727,7 @@ describe("notification routing (FIX #4)", () => {
     withOwnedTask(store);
     const notified = notifyTaskWatchers(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", from: TEST_FROM, text: "operator recommends" },
       { dataRoot: store.dataRoot },
     );
     // arda (admin) + murat (maintainer) + selin (owner); nobody silenced.
@@ -1722,7 +1743,7 @@ describe("notification routing (FIX #4)", () => {
     setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, { approvals: { app: false } });
     const notified = notifyTaskWatchers(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", text: "operator recommends" },
+      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", from: TEST_FROM, text: "operator recommends" },
       { dataRoot: store.dataRoot },
     );
     expect(notified.sort()).toEqual(
@@ -1794,6 +1815,17 @@ describe("reviewer quality notification (FIX #6)", () => {
     expect(rows.map((r) => r.user_id).sort()).toEqual(
       [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
     );
+    // Ruling 361: the row names the reviewer that judged, not the Operator
+    // (CANARY: pass OPERATOR_NOTIFY_FROM at the verdict site).
+    const verdictActors = selectRows(
+      store.db,
+      `SELECT actor_json FROM notifications WHERE kind = 'quality'`,
+      z.object({ actor_json: z.string() }),
+    );
+    expect(verdictActors.length).toBeGreaterThan(0);
+    for (const row of verdictActors) {
+      expect(JSON.parse(row.actor_json)).toMatchObject({ kind: "agent", name: "Review & validation" });
+    }
   });
 
   it("an unclear reviewer reply emits neither quality event nor notification", async () => {
@@ -4683,6 +4715,43 @@ describe("pass 35: operator and task actions", () => {
       ]);
       expect(direct.runOperator).toHaveBeenCalledTimes(1);
       expect(direct.runOperator.mock.calls[0]![1].trigger).toBe("transition");
+    });
+
+    it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
+      // CANARY: drop the stamp from the `ctx.operatorRun` arm.
+      const store = prepared();
+      deployOperator(store);
+      seed(store, { stage: "ready" });
+      const delivered: NonNullable<TaskMutationContext["operatorRun"]> = {
+        backend: "claude",
+        autonomy: "full",
+        reactDepth: 0,
+        transitionDepth: 0,
+        deliveredHeadMoved: true,
+      };
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true, operatorRun: delivered },
+      );
+      expect(file(store).frontmatter.stage).toBe("impl");
+      expect(delivered.actedAfterDelivery).toBe(true);
+
+      seed(store, { stage: "ready" });
+      const plain: NonNullable<TaskMutationContext["operatorRun"]> = {
+        backend: "claude",
+        autonomy: "full",
+        reactDepth: 0,
+        transitionDepth: 0,
+      };
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true, operatorRun: plain },
+      );
+      expect(plain.actedAfterDelivery).toBeUndefined();
     });
   });
 

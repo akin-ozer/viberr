@@ -35,6 +35,10 @@ export interface EnvelopeFacts {
   isError?: boolean;
   /** True when this is a terminal result envelope (claude result). */
   isResult?: boolean;
+  /** Ruling 348: the tool this envelope closes has answered, though the envelope
+   *  carries no console row (a succeeding Codex MCP call). The adapters mark the
+   *  live step answered on it. */
+  toolAnswered?: boolean;
   /** Ruling 130(a): the assistant envelope's `error` code (`oauth_org_not_allowed`,
    *  `rate_limit`, …) when the provider streamed its API-error banner. */
   apiError?: string | null;
@@ -709,7 +713,7 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
             // failure adds information worth a second line.
             return error
               ? { display: { t, ev: "err", tag: "mcp_tool_call", name, text: error }, facts: {} }
-              : { display: null, facts: {} };
+              : { display: null, facts: { toolAnswered: true } };
           }
           return { display: null, facts: {} };
         }

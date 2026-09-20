@@ -23,6 +23,8 @@ import {
 import type { SyncState } from "./github-pills";
 import {
   mapPrChecks,
+  mapPrChecksUnread,
+  type PrChecksUnread,
   prChecksRead,
   mapPrMergeable,
   mapPrReview,
@@ -62,6 +64,8 @@ export interface PrRowView {
    *  `checks: null` with `checksRead: true` means GitHub reported NO check
    *  runs; with `checksRead: false` it means nobody has looked. */
   checksRead: boolean;
+  /** Ruling 360: the refused read, while nothing was ever read. */
+  checksUnread?: PrChecksUnread | null;
   review: PrReviewState | null;
   /** P14-LV-07 / F17-L6: GitHub's last-read mergeability for an open PR — the
    *  conflict state the acceptance chain already knows but this page did not
@@ -79,6 +83,7 @@ export interface BranchRowView {
     state: string;
     /** P13-D-28. */
     checks: PrChecksRender | null;
+    checksUnread?: PrChecksUnread | null;
     review: PrReviewState | null;
     /** F17-L6: conflict/mergeable state for an open PR (null when settled). */
     mergeable: PrMergeable | null;
@@ -206,6 +211,7 @@ export async function getGithubViewData(
               number: t.pr.number,
               state: t.pr.state,
               checks: mapPrChecks(t.pr),
+              checksUnread: mapPrChecksUnread(t.pr),
               review: mapPrReview(t.pr),
               mergeable: mapPrMergeable(t.pr),
             }
@@ -245,6 +251,7 @@ export async function getGithubViewData(
       // them apart. Carried beside the render rather than folded into it, so
       // the page's "no pill for zero checks" stays exactly as it was.
       checksRead: prChecksRead(t.pr),
+      checksUnread: mapPrChecksUnread(t.pr),
       review: mapPrReview(t.pr),
       mergeable: mapPrMergeable(t.pr),
     }))

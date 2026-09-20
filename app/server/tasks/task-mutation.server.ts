@@ -96,6 +96,17 @@ export interface TaskMutationContext {
      * the settle-time backstop needs to tell them apart.
      */
     planWhollyRefused?: boolean;
+    /**
+     * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
+     * PR or moved its head under full autonomy — the event that used to queue
+     * a `delivered` operator turn behind this very drive's lease. The drive
+     * continues on its own turn, so the follow-up is owed only if it stops
+     * without acting on the delivery; the lease release reads both stamps.
+     */
+    deliveredHeadMoved?: boolean;
+    /** Ruling 357: a transition or a dispatch this drive made AFTER its
+     *  delivery — the drive acted on it, and no follow-up turn is owed. */
+    actedAfterDelivery?: boolean;
   };
 }
 
@@ -173,7 +184,12 @@ export interface TaskWatcherNotice {
   ptype?: "input" | "blocked" | null;
   title?: string | null;
   text: string;
-  from?: ActorRender | null;
+  /** Ruling 361 (pass 38, F38-15): the actor the timeline names for the same
+   *  event — REQUIRED. There is no default: for a year the writer stamped
+   *  "Operator" on any notice that named nobody, and 816 notifications on this
+   *  instance (every reviewer verdict, every dependency release) told the inbox
+   *  the Operator had done what the reviewer or the release engine did. */
+  from: ActorRender;
   occurredAt?: string;
   /** Skip this user (e.g. the human who triggered the event). */
   exceptUserId?: string;
@@ -339,7 +355,7 @@ export function notifyTaskWatchers(
       ptype: notice.ptype ?? null,
       title: notice.title ?? null,
       text: notice.text,
-      from: notice.from ?? OPERATOR_NOTIFY_FROM,
+      from: notice.from,
       projectSlug: notice.projectSlug,
       taskKey: notice.taskKey,
     };

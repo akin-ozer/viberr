@@ -1526,6 +1526,40 @@ describe("codex adapter run phases (R21-4a / FR28)", () => {
     expect(steps[2]).toBe(steps[1]);
   });
 
+  it("names the command as answered once it completes, through the reasoning that follows (ruling 348)", async () => {
+    const phases = capturePhases([
+      { type: "thread.started", thread_id: "0199abc" },
+      { type: "item.started", item: { type: "command_execution", command: "npm test", aggregated_output: "", status: "in_progress" } },
+      { type: "item.completed", item: { type: "command_execution", command: "npm test", aggregated_output: "12 passed\n", exit_code: 0, status: "completed" } },
+      { type: "item.completed", item: { type: "reasoning", text: "next…" } },
+      { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[1]).toBe("exec · npm test");
+    // CANARY: keep `lastStep` untouched on an `aggregated_output` line.
+    expect(steps[2]).toBe("composing · exec · npm test answered");
+    expect(steps[3]).toBe("composing · exec · npm test answered");
+  });
+
+  it("names a succeeding MCP call as answered although its completion projects no row (ruling 348)", async () => {
+    const phases = capturePhases([
+      { type: "thread.started", thread_id: "0199abc" },
+      { type: "item.started", item: { id: "mcp-1", type: "mcp_tool_call", server: "viberr", tool: "get_task", arguments: { taskKey: "BNB-1" }, status: "in_progress" } },
+      { type: "item.completed", item: { id: "mcp-1", type: "mcp_tool_call", server: "viberr", tool: "get_task", arguments: { taskKey: "BNB-1" }, status: "completed" } },
+      { type: "item.completed", item: { type: "reasoning", text: "next…" } },
+      { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    await drain();
+
+    const steps = phases.filter(([p]) => p === "Working").map(([, s]) => s);
+    expect(steps[1]).toContain("viberr.get_task");
+    // CANARY: drop `facts.toolAnswered` from the completed branch in wire-format.
+    expect(steps[2]).toBe(`composing · ${steps[1]} answered`);
+    expect(steps[3]).toBe(steps[2]);
+  });
+
   it("falls back to the in-flight turn number before the first tool call", async () => {
     const phases = capturePhases([
       { type: "thread.started", thread_id: "0199abc" },

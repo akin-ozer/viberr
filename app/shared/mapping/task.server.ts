@@ -215,7 +215,14 @@ export type DisplayReadiness =
   | "merged"
   | "agent_working"
   /** Ruling 138: a decided `edit_goal` packet owes a goal edit. */
-  | "goal_edit_pending";
+  | "goal_edit_pending"
+  /** Ruling 349: the agent carrying the task is parked behind the instance's
+   *  concurrent-run cap — nothing is streaming yet. Derived by `withLiveRun`
+   *  from the run row, which is the only surface that holds the fact. */
+  | "agent_queued";
+
+/** Ruling 349: what a live run row says about the run carrying a task. */
+export type LiveRunState = "queued" | "running";
 
 /** Board-card / summary shape. `readiness` is always the canonical stored enum
  * — the acceptance gate and the board attention filter read THAT; only
@@ -233,6 +240,11 @@ export interface TaskSummary {
    * "Waiting on me" chip + per-card badge read this, member-scoped, instead of
    * the project-wide `waiting === "human"` enum. */
   waitingOnMe?: boolean;
+  /** Ruling 349: the state of the run carrying this task, when one is live —
+   *  `queued` behind the concurrent-run cap or `running`. Loader-annotated from
+   *  the run rows (the projection has no run context); null when no run is
+   *  live, undefined where no loader annotated it. */
+  liveRun?: LiveRunState | null;
   /**
    * Ruling 225 (F37-45): when this task rests on a clock (`waiting:
    * "schedule"`), the instant it picks itself back up — so the card can say
@@ -303,6 +315,10 @@ export interface TaskSummary {
   /** P13-D-28: CI health for the PR head commit — feeds the checks pill next to
    *  the PR pill. Null = no PR / never read / no CI on the commit. */
   prChecks: PrChecksRender | null;
+  /** Ruling 360: the check-runs read GitHub refused, while no summary has ever
+   *  been read for this PR. Null when checks were read (see `prChecks`), when
+   *  nothing was ever attempted, or when there is no PR. */
+  prChecksUnread?: PrChecksUnread | null;
   /** P13-D-28: GitHub review verdict on an OPEN PR — feeds the review pill.
    *  Null = no PR / settled PR / never read / nothing outstanding. */
   prReview: PrReviewState | null;
@@ -433,6 +449,20 @@ function unaccountedChecks(checks: PrChecks): number {
  */
 export function prChecksRead(pr: PrRef | null): boolean {
   return pr?.checks !== undefined && pr.checks !== null;
+}
+
+/** Ruling 360: the refused read, as the surfaces print it. */
+export interface PrChecksUnread {
+  status: number | null;
+  message: string;
+  at: string;
+}
+
+/** Ruling 360: the refusal stands only while nothing was ever read; a summary
+ *  (even `total: 0`) outranks it, and the reconciler drops the key then. */
+export function mapPrChecksUnread(pr: PrRef | null): PrChecksUnread | null {
+  if (!pr || prChecksRead(pr) || !pr.checksUnread) return null;
+  return { status: pr.checksUnread.status, message: pr.checksUnread.message, at: pr.checksUnread.at };
 }
 
 export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
@@ -808,6 +838,7 @@ export function mapTaskProjectionRow(
     repo: row.repo,
     pr,
     prChecks: mapPrChecks(pr),
+    prChecksUnread: mapPrChecksUnread(pr),
     prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
     otherCommits: github?.otherCommits ?? [],
@@ -829,4 +860,28 @@ export function mapTaskProjectionRow(
     boardRank: row.board_rank,
     filePath: row.source_path,
   };
+}
+
+/**
+ * Ruling 349 (pass 38, F38-3): the display state reads the run row when the
+ * task waits on an agent. `markWaitingAgent` writes `waiting: "agent"` for a
+ * run the concurrency cap PARKED as much as for one that started (ruling 311
+ * fixed the timeline sentence and the operator's reply, not this), so the
+ * board card said "agent working" with a pulsing dot, the hero said the same
+ * and the rail read "Agent work" while the console said "queued" and the
+ * timeline said "Nothing is streaming yet". Measured on this instance before
+ * the fix: 129 queued runs across 33 tasks, each one a card claiming work in
+ * flight. The fact lives on the run row alone, so the loaders annotate it here,
+ * in the one place display readiness is derived — never re-decided in a
+ * component.
+ */
+export function withLiveRun<T extends TaskSummary>(
+  task: T,
+  liveRun: LiveRunState | null,
+): T {
+  const displayReadiness: DisplayReadiness =
+    task.displayReadiness === "agent_working" && liveRun === "queued"
+      ? "agent_queued"
+      : task.displayReadiness;
+  return { ...task, liveRun, displayReadiness };
 }

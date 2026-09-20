@@ -35,7 +35,7 @@ import {
   cachedToolchain,
   shellInventoryPrompt,
 } from "~/server/ops/toolchain.server";
-import { holdRefusal } from "~/shared/dependencies";
+import { holdRefusalFor } from "~/server/projections/dependencies.server";
 import {
   resolveDeclaredStages,
   stageEligible,
@@ -1161,7 +1161,7 @@ async function dispatchAgentRun(
     const held = existing.parsed.frontmatter.blockedBy;
     if (held.length > 0) {
       throw AppError.validation(
-        holdRefusal(input.taskKey, held, "running an agent on it"),
+        holdRefusalFor(db, input.projectSlug, input.taskKey, held, "running an agent on it"),
       );
     }
   }
@@ -2266,6 +2266,9 @@ async function dispatchAgentRun(
     // Ruling 133: why the run was admitted at this stage.
     stageEligibility,
   };
+  // Ruling 357: a dispatch after the operator drive's own delivery is the
+  // drive acting on it; the lease release then owes no `delivered` follow-up.
+  if (ctx.operatorRun?.deliveredHeadMoved) ctx.operatorRun.actedAfterDelivery = true;
   recordAudit(db, {
     // ONE action id for every engaged agent (the former
     // task.specialist.run_started / task.reviewer.run_started split);
@@ -4341,6 +4344,7 @@ export function runEligibilityFor(
  * through, exactly as the dispatch's undeployed catch does.
  */
 export function assertResumeEligible(
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -4374,7 +4378,9 @@ export function assertResumeEligible(
     }
     const held = existing.parsed.frontmatter.blockedBy;
     if (held.length > 0) {
-      throw AppError.validation(holdRefusal(taskKey, held, "resuming an agent on it"));
+      throw AppError.validation(
+        holdRefusalFor(db, projectSlug, taskKey, held, "resuming an agent on it"),
+      );
     }
   }
   let resolved: ResolvedSpecialist | null = null;

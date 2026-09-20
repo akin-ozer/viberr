@@ -44,16 +44,29 @@ function firstSentence(description: string): string {
  * documents" named three capabilities, and `list_runs` shipped after that
  * sentence and was never added to it.
  */
+/** The name a server tool has once the SDK mounts it, and the only name ToolSearch answers to. */
+export function mountedToolName(serverName: string, toolName: string): string {
+  return `mcp__${serverName}__${toolName}`;
+}
+
 export function toolManifest(tools: SdkMcpToolDefinition[], serverName: string): string {
-  const lines = tools.map((t) => `- ${t.name}: ${firstSentence(t.description)}`);
+  // Each line carries the name ToolSearch and the call itself take: the SDK mounts
+  // a server tool as `mcp__<server>__<name>`, and the bare registry name is not
+  // a tool anywhere the model can reach. Measured before this line changed: 8 of
+  // the 40 controller runs that searched began with a bare-name `select:` and
+  // got "No matching deferred tools found" (14 wasted calls), because this
+  // manifest told them `select:<name>` and listed the bare names.
+  const lines = tools.map(
+    (t) => `- ${mountedToolName(serverName, t.name)}: ${firstSentence(t.description)}`,
+  );
   return [
     "",
     `# Every tool on ${serverName} (${tools.length})`,
     "",
     "Generated from this server's live registry as it mounted, so it cannot",
     "drift from what you actually hold. Arguments and the full description are",
-    "one ToolSearch away (`select:<name>`); this list is what tells you the",
-    "verb EXISTS.",
+    "one ToolSearch away (`select:` followed by the full name exactly as listed",
+    "below); this list is what tells you the verb EXISTS.",
     "",
     "If a verb you want is not on this list, you do not have it. Say that",
     "plainly rather than searching and reporting the absence of a result: a",

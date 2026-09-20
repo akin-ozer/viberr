@@ -27,8 +27,10 @@ describe("toolManifest (ruling 297)", () => {
     );
     // CANARY: slice the tool list, or hand-write it.
     expect(manifest).toContain("# Every tool on viberr_controller (2)");
-    expect(manifest).toContain("- whoami: Who you are.");
-    expect(manifest).toContain("- list_runs: Agent runs you can see, as run ids `read_run_log` takes.");
+    expect(manifest).toContain("- mcp__viberr_controller__whoami: Who you are.");
+    expect(manifest).toContain(
+      "- mcp__viberr_controller__list_runs: Agent runs you can see, as run ids `read_run_log` takes.",
+    );
   });
 
   it("says that absence from the list is the answer, because a search returning nothing is not", () => {
@@ -57,15 +59,38 @@ describe("toolManifest (ruling 297)", () => {
   it("clips a long purpose at a word and SAYS it clipped, naming where the rest is", () => {
     const long = `Do the thing ${"and then some more of it ".repeat(12)}right now.`;
     const manifest = toolManifest([probe("big", long)], "s");
-    const line = manifest.split("\n").find((l) => l.startsWith("- big:"))!;
+    const line = manifest.split("\n").find((l) => l.startsWith("- mcp__s__big:"))!;
     // Ruling 285's rule: a cut that does not say it cut is the defect, and it
     // has to name where the rest is. CANARY: drop the marker.
     expect(line).toContain("... (clipped; the whole description is in the tool itself)");
     // And the cut lands on a word boundary of the original, never mid-word:
     // what survives is a prefix the source continues with a space.
-    const kept = line.slice("- big: ".length, line.indexOf("... (clipped"));
+    const kept = line.slice("- mcp__s__big: ".length, line.indexOf("... (clipped"));
     // CANARY: `sentence.slice(0, PURPOSE_CHARS)` with no `lastIndexOf(" ")`.
     expect(long.startsWith(kept)).toBe(true);
     expect(long[kept.length]).toBe(" ");
+  });
+});
+
+describe("toolManifest names tools the way ToolSearch takes them (pass 38, F38-1)", () => {
+  const probe = (name: string, description: string) =>
+    strictTool(name, description, {}, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+
+  it("lists the MOUNTED name, mcp__<server>__<name>, never the bare registry name", () => {
+    // Live, 2026-09-18, the first controller turn of a new conversation: two
+    // `select:whoami,list_capabilities,…` searches answered "No matching
+    // deferred tools found" before the model guessed the prefix. Measured over
+    // the board: 8 of the 40 controller runs that searched wasted their first
+    // calls this way, because the manifest said `select:<name>` and listed
+    // bare names. CANARY: list `t.name` instead of the mounted name.
+    const manifest = toolManifest([probe("whoami", "Who you are.")], "viberr_controller");
+    const line = manifest.split("\n").find((l) => l.startsWith("- "))!;
+    expect(line.startsWith("- mcp__viberr_controller__whoami:")).toBe(true);
+    expect(manifest).not.toMatch(/^- whoami:/m);
+    // The hint must not promise a `select:` shape the listed names do not satisfy.
+    expect(manifest).not.toContain("`select:<name>`");
+    expect(manifest).toContain("exactly as listed");
   });
 });

@@ -3039,11 +3039,6 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     )!;
 
   it("clicking a roster entry and Edit in the same beat edits THAT profile", async () => {
-    const { container, getByText, getByTestId } = renderPage();
-    // The page opens on the operator (the `?profile=` default).
-    await waitFor(() =>
-      expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Operator"),
-    );
     // `waitFor` does NOT mean the mount settled: RTL turns the act environment
     // OFF while it polls, so the page's own opening navigation could still be
     // in flight when the two clicks below fire — and then the HELD navigation

@@ -865,3 +865,69 @@ describe("ruling 236: the PR's changed paths", () => {
     expect(result.pr.paths).toBeUndefined();
   });
 });
+
+/**
+ * Ruling 360 (pass 38, F38-14). The check-runs read failed on every one of
+ * this instance's 97 PRs (a fine-grained token without Checks: read answers
+ * 403), and the linker turned each refusal into `checks: null` — the same
+ * value as "never looked". The refusal is now carried beside it.
+ */
+describe("ruling 360: a refused check-runs read is a fact, not a blank", () => {
+  const routes = (checkRuns: { status?: number; body: unknown }) => ({
+    [`GET ${REPO_PATH}/pulls`]: {
+      body: [
+        {
+          number: 318,
+          title: "Attach execution workspace",
+          state: "open",
+          draft: false,
+          merged_at: null,
+          head: { sha: "headsha318" },
+        },
+      ],
+    },
+    [`GET ${REPO_PATH}/pulls/318`]: {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "open",
+        draft: false,
+        merged: false,
+        merged_at: null,
+        head: { sha: "headsha318" },
+        additions: 1,
+        deletions: 1,
+        changed_files: 1,
+      },
+    },
+    [`GET ${REPO_PATH}/commits/headsha318/check-runs`]: checkRuns,
+  });
+
+  it("carries GitHub's refusal beside `checks: null`", async () => {
+    // CANARY: drop the `else if` arms after the check-runs request.
+    const { client: c } = client(
+      routes({ status: 403, body: { message: "Resource not accessible by personal access token" } }),
+    );
+    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect(result.pr.checks).toBeNull();
+      expect(result.pr.checksUnread).toEqual({
+        status: 403,
+        message: "Resource not accessible by personal access token",
+      });
+    }
+  });
+
+  it("a read that succeeds carries no refusal", async () => {
+    const { client: c } = client(
+      routes({ body: { total_count: 1, check_runs: [{ status: "completed", conclusion: "success" }] } }),
+    );
+    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect(result.pr.checks).toEqual({ total: 1, passing: 1, failing: 0, pending: 0 });
+      expect(result.pr.checksUnread).toBeUndefined();
+    }
+  });
+});

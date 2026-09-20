@@ -1,3 +1,5 @@
+import type { ActorRender } from "~/shared/mapping/actor.server";
+import { systemIdToName } from "~/server/files/actor-ref.server";
 import type { DatabaseSync } from "node:sqlite";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { z } from "zod";
@@ -497,7 +499,15 @@ export async function announceRelease(
   });
   notifyTaskWatchers(
     db,
-    { projectSlug, taskKey, kind: "dependency", title: `${taskKey} can move again`, text },
+    {
+      projectSlug,
+      taskKey,
+      kind: "dependency",
+      title: `${taskKey} can move again`,
+      text,
+      // Ruling 361: the engine, by the name its timeline note carries.
+      from: DEPENDENCY_RELEASE_FROM,
+    },
     ctx,
   );
   // Ruling 241 (F37-68): drain the questions the hold refused, BEFORE the
@@ -602,6 +612,13 @@ export async function drainQueuedQuestions(
 
 /** The goal timeline's name for the release engine (ruling 155). */
 const RELEASE_BY = "Viberr (release)";
+
+/** Ruling 361: the inbox names the engine exactly as the task timeline does
+ *  (`systemId: "dependency-release"` → "Dependency release"). */
+const DEPENDENCY_RELEASE_FROM: ActorRender = {
+  kind: "system",
+  name: systemIdToName("dependency-release"),
+};
 
 /**
  * Release ONE task when every entry it waits on is done (ruling 131(e)).
@@ -775,7 +792,14 @@ export async function noteDeadDependency(
     reprojectTask(db, ctx, projectSlug, held.taskKey);
     notifyTaskWatchers(
       db,
-      { projectSlug, taskKey: held.taskKey, kind: "dependency", title: `${held.taskKey} waits on archived work`, text },
+      {
+        projectSlug,
+        taskKey: held.taskKey,
+        kind: "dependency",
+        title: `${held.taskKey} waits on archived work`,
+        text,
+        from: DEPENDENCY_RELEASE_FROM,
+      },
       ctx,
     );
     noted.push(held.taskKey);

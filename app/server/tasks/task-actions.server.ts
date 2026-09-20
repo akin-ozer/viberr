@@ -1,4 +1,4 @@
-import { holdRefusal } from "~/shared/dependencies";
+import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
@@ -90,7 +90,7 @@ import {
   setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
-import type { DependencyReleasePayload } from "~/shared/dependencies";
+import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -111,6 +111,7 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import {
   agentRoleDisplay,
+  systemIdToName,
   encodeActorRef,
 } from "~/server/files/actor-ref.server";
 import {
@@ -779,7 +780,11 @@ export async function createTask(
       type: "note",
       actor: creator ? humanActorRef(db, creator) : { kind: "operator" },
       title: "Waits on other work",
-      text: `Created waiting on ${blockedBy.join(", ")}. Held until every entry is done; Viberr releases it then.`,
+      // Ruling 356(b): the note names a done entry as done, like every other
+      // hold sentence — 4 of 56 creation notes on the instance had named a task
+      // that was already Done at creation (BNB-26: "waiting on BNB-5, BNB-22"
+      // with BNB-22 closed 95 s earlier).
+      text: `Created waiting on ${holdEntriesSentence(resolveDependencies(db, input.projectSlug, blockedBy))}. Held until every entry is done; Viberr releases it then.`,
       toAgent: false,
       evidence: null,
     };
@@ -2089,7 +2094,7 @@ export async function commentToAgent(
     // success (comment posted, `runNotStarted` names the refusal) while the
     // engaged deliverer resumes anywhere.
     const { assertResumeEligible } = await import("./specialist-run.server");
-    assertResumeEligible(ctx, input.projectSlug, input.taskKey, target.profileId);
+    assertResumeEligible(db, ctx, input.projectSlug, input.taskKey, target.profileId);
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context. P8 (pass 25): a supporting agent
     //     resumes into its OWN isolated checkout, never the delivering tree.
@@ -4079,15 +4084,12 @@ export async function recordAgentCompletion(
         kind: "approval",
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
+        // Ruling 361: the asker by name; the Operator only when the operator asked.
+        from:
+          actorRef.kind === "agent"
+            ? { kind: "agent", backend: actorRef.backend, name: roleDisplay, role: roleDisplay }
+            : OPERATOR_NOTIFY_FROM,
       };
-      if (actorRef.kind === "agent") {
-        askNotice.from = {
-          kind: "agent",
-          backend: actorRef.backend,
-          name: roleDisplay,
-          role: roleDisplay,
-        };
-      }
       notifyTaskWatchers(db, askNotice, ctx);
     } else if (questionDeferred) {
       logger.info("agent question held — a decision packet is already open", {
@@ -4111,7 +4113,24 @@ export async function recordAgentCompletion(
       // inside notifyTaskWatchers → createNotification.
       notifyTaskWatchers(
         db,
-        { projectSlug, taskKey, kind: "quality", title, text: summary },
+        {
+          projectSlug,
+          taskKey,
+          kind: "quality",
+          title,
+          text: summary,
+          // Ruling 361: the reviewer that judged, not the Operator — 673
+          // "Review passed" notifications on this instance named the wrong agent.
+          from:
+            actorRef.kind === "agent"
+              ? {
+                  kind: "agent",
+                  backend: actorRef.backend,
+                  name: agentRoleDisplay(actorRef),
+                  role: agentRoleDisplay(actorRef),
+                }
+              : OPERATOR_NOTIFY_FROM,
+        },
         ctx,
       );
     }
@@ -4697,6 +4716,9 @@ export async function applyAgentCompletionEffects(
     });
   }
   const runAttachments = attachmentsPrune.kept;
+  /** Ruling 362: this completion's RECORDED verdict was `approve` — a boundary
+   *  for the react chain's depth count (the arm before the react decision). */
+  let approvedThisReply = false;
   if (finished.state === "finished") {
     // Ruling 248 (pass 37, F37-77): a run whose workspace could not be
     // provisioned READ NOTHING, so it judged nothing. Live on SHOP-5 the Code
@@ -4819,6 +4841,7 @@ export async function applyAgentCompletionEffects(
       attachments: runAttachments,
     });
     if (recorded.escalated) raisedDeadlockPacket = true;
+    approvedThisReply = verdict === "approve";
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
     // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
     // verdict (no envelope, no classifiable prose). Validation is left unchanged
@@ -5171,6 +5194,9 @@ export async function applyAgentCompletionEffects(
       text: classified
         ? `${input.role} run failed. ${described.reason}`
         : `${input.role} run failed: ${endSentence(reasonText)}`,
+      // Ruling 361: the agent whose run failed — the timeline's actor for the
+      // same event.
+      from: { kind: "agent", backend: input.backend, name: input.role, role: input.role },
     };
     if (escalation.status === "opened") {
       failureNotice.exceptUserIds = escalation.notifiedUserIds;
@@ -5356,6 +5382,35 @@ export async function applyAgentCompletionEffects(
       runId: finished.id,
     });
     return;
+  }
+  // Ruling 362 (pass 38, F38-16): an APPROVE is a boundary, so the depth count
+  // starts over at it.
+  //
+  // The cap exists for a chain that goes round without getting anywhere — the
+  // operator re-prompting a specialist that keeps coming back with the same
+  // objection. A reviewer's approve is the opposite: the gate it guards has
+  // opened, and the operator's next move is the step behind it (Review → Verify
+  // and the verifier's dispatch, or the acceptance recommendation). Ruling 258
+  // recognised one such boundary — the task being ACCEPTABLE — and skipped the
+  // packet there, leaving the recommendation to the 15-minute sweep. Live on
+  // BNB-16 the code reviewer approved the rework at Review with Verify still
+  // ahead, and 0.1 s later the cap opened "Work stalled: pick a recovery path"
+  // ("hit its 4-cycle depth cap without reaching a boundary"), whose three
+  // options all re-dispatch work that had just passed. Every one of the five
+  // such packets on this instance followed an approve (SHOP-5, SHOP-32, SHOP-54
+  // twice, BNB-16); the person answered each with "nothing is stalled", and
+  // the approved work waited between six minutes and 6.8 hours for that answer.
+  //
+  // Counting from the approve keeps the cap for the loop it was written for: a
+  // rework cycle (request_changes → rework → delivery → review) still counts
+  // every hop, and a stage cannot be approved twice — the chain moves on.
+  if (approvedThisReply && currentDepth > 0) {
+    logger.info("react depth reset — this reply's approve is a boundary, the chain continues", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+      depthBefore: currentDepth,
+    });
+    currentDepth = 0;
   }
   const shouldReact = operatorShouldReactToReply(
     finished.state,
@@ -6620,6 +6675,9 @@ export async function transitionStage(
       // moves still re-trigger below. The stamp lets the settle-time backstop
       // judge the stage this drive left the task at (`maybeResumeStrandedOperator`).
       ctx.operatorRun.movedToStageId = input.toStageId;
+      // Ruling 357: a move after this drive's own delivery is the drive acting
+      // on it; the lease release then owes no `delivered` follow-up.
+      if (ctx.operatorRun.deliveredHeadMoved) ctx.operatorRun.actedAfterDelivery = true;
     } else {
       const byHuman = ctx.operatorAuthorized
         ? null
@@ -6851,7 +6909,8 @@ export type DeliveryOutcome =
        *  that pushed nothing is `false`, and re-queues nothing (ruling 48). */
       moved: boolean;
       /** Ruling 134(b): a `delivered` operator run was queued for this outcome
-       *  (full autonomy, moved head). */
+       *  (full autonomy, moved head). Ruling 357: false for a delivery made by
+       *  a live operator drive — its own lease release decides the follow-up. */
       operatorRequeued: boolean;
     }
   /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
@@ -7016,7 +7075,7 @@ export async function performDelivery(
       const heldFile = readTaskFile(taskRef(ctx, projectSlug, taskKey));
       const held = heldFile?.parsed.frontmatter.blockedBy ?? [];
       if (held.length > 0) {
-        const message = holdRefusal(taskKey, held, "delivering it for review");
+        const message = holdRefusalFor(db, projectSlug, taskKey, held, "delivering it for review");
         await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
         return { status: "failed", message };
       }
@@ -7557,7 +7616,22 @@ export async function performDelivery(
       if (autonomy === "full") {
         // Ruling 48 as amended by ruling 134(b): a newly opened PR, OR a head
         // the push moved, is a new review subject and re-queues the operator.
-        if (moved) {
+        if (moved && ctx.operatorRun) {
+          // Ruling 357 (pass 38, F38-11): the drive that delivered IS the
+          // drive that would be re-queued. Its turn continues on its own (the
+          // tool reply names the PR, the prompt says to move the task and
+          // engage the reviewer), so queuing a `delivered` turn behind its own
+          // lease paid a whole drive for one `get_task` and "the reviewer is
+          // already in flight": 140 of the 148 deliveries made inside a drive
+          // on the instance, 13 of 13 on the airbnb board, ~$0.15 and the
+          // coordination lane for ~15 s each, while a real drive of another
+          // task parked behind it. The other 8 drives stopped right after
+          // delivering, and the follow-up did the move. So the stamp defers
+          // the decision to the lease release, which fires the follow-up only
+          // when the drive stopped without moving or dispatching
+          // (`deliveredFollowUpFor`), exactly as ruling 152(a) did for a move.
+          ctx.operatorRun.deliveredHeadMoved = true;
+        } else if (moved) {
           operatorRequeued = true;
           void autoInvokeOperator(
             db,
@@ -8008,7 +8082,15 @@ async function surfaceDeliveryEvent(
     reprojectTask(db, ctx, projectSlug, taskKey);
     notifyTaskWatchers(
       db,
-      { projectSlug, taskKey, kind: "policy", title, text },
+      {
+        projectSlug,
+        taskKey,
+        kind: "policy",
+        title,
+        text,
+        // Ruling 361: the same system actor the note above carries.
+        from: { kind: "system", name: systemIdToName("delivery") },
+      },
       ctx,
     );
   } catch (surfaceErr) {
@@ -9530,6 +9612,21 @@ export async function resolvePacket(
       break;
     }
     case "retry_other_backend": {
+      // Ruling 354 (pass 38, F38-8): ruling 241's rule at this arm too. The
+      // retry is an agent dispatch, which ruling 186 refuses on a held task;
+      // reading the hold only in the start below meant the decision was
+      // written, the packet cleared, and THEN "The retry could not start" —
+      // the person's choice bought nothing and there was no packet to choose
+      // again from. The hold is read HERE, before the resolution write, and
+      // the packet stays open until the wait clears or is edited.
+      {
+        const heldFor = existing.parsed.frontmatter.blockedBy;
+        if (heldFor.length > 0) {
+          throw AppError.conflict(
+            `${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "retrying it on another backend")} The packet stays open; choose again once the wait clears.`,
+          );
+        }
+      }
       // Backend-failure recovery (D4): the run restarts below on the option's
       // target backend; startSpecialistRun/startReviewerRun set the engagement's
       // `pinnedBackend` (F27-B1) so the switch STICKS — every later prompt on this
@@ -9583,7 +9680,7 @@ export async function resolvePacket(
         text:
           option.ev ??
           (queueing
-            ? `**Decision:** ${option.t}. ${holdRefusal(input.taskKey, heldFor, "asking it now")} ` +
+            ? `**Decision:** ${option.t}. ${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "asking it now")} ` +
               "The question is queued with the task and put the moment the wait clears. " +
               "No rework until the reviewer has answered."
             : `**Decision:** ${option.t}. No rework until the reviewer has answered.`),
@@ -9688,6 +9785,18 @@ export async function resolvePacket(
         "approve-transition",
         "resolve this task's branch collision",
       );
+      // Ruling 354 (pass 38, F38-8): the ceremony ends in a re-delivery, which
+      // ruling 240 refuses on a held task — after the PR was closed and the
+      // remote branch deleted. Read the hold before any of it, so a held task
+      // keeps both its packet and its remote branch until the wait clears.
+      {
+        const heldFor = existing.parsed.frontmatter.blockedBy;
+        if (heldFor.length > 0) {
+          throw AppError.conflict(
+            `${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "clearing its branch collision and re-delivering it")} The packet stays open; choose again once the wait clears.`,
+          );
+        }
+      }
       // F33-2 (pass 33): the decision event states the DECISION, never its
       // effect. This text was written unconditionally and BEFORE any GitHub
       // work — so when the remedy refused (the delete-first ordering's whole
@@ -11538,15 +11647,18 @@ export async function requestPacketMaintainerDecision(
     title: `Decision needs a maintainer: ${packet.title}`,
     text: noteText,
     occurredAt,
+    // Ruling 361: the person who asked, or the operator when it did.
+    from: actor.userId
+      ? {
+          kind: "human",
+          userId: actor.userId,
+          name: fromName,
+          initials: initialsOfName(fromName),
+          tone: avatarTone(db, actor.userId),
+        }
+      : OPERATOR_NOTIFY_FROM,
   };
   if (actor.userId) {
-    notice.from = {
-      kind: "human",
-      userId: actor.userId,
-      name: fromName,
-      initials: initialsOfName(fromName),
-      tone: avatarTone(db, actor.userId),
-    };
     // Don't notify the owner about their own ask.
     notice.exceptUserId = actor.userId;
   }

@@ -17,8 +17,9 @@ import type {
   TurnOptions,
 } from "@openai/codex-sdk";
 import {
-  phaseStepForLine,
+  answeredStep,
   RUN_PHASE,
+  stepUpdateForLine,
   type RunCallbacks,
   type RunHandle,
   type RunSpec,
@@ -720,7 +721,8 @@ export function createCodexAdapter(
 
       // R21-4 / G5 (FR28): the live phase/step the run strip renders — the same
       // vocabulary the Claude adapter emits, so the strip reads identically on
-      // both backends. `lastStep` sticks through a stretch of reasoning events.
+      // both backends. `lastStep` sticks through a stretch of reasoning events,
+      // marked answered once the tool it names has completed (ruling 348).
       let lastStep: string | null = null;
       const phase = (name: string, step: string | null = lastStep) => {
         cb.onPhase?.(name, step);
@@ -992,8 +994,11 @@ export function createCodexAdapter(
             // R21-4: the strip's live row. `turn N` is the honest fallback until
             // the run invokes its first tool — a number that climbs is what
             // tells a human the run is alive. The service throttles the writes.
-            const step = phaseStepForLine(emitted);
-            if (step) lastStep = step;
+            // Ruling 348: a tool stays named while it runs; once its result lands the
+            // step says the model is composing again, instead of the finished call.
+            const update = stepUpdateForLine(emitted);
+            if (update?.kind === "tool") lastStep = update.step;
+            else if (update?.kind === "answered" && lastStep) lastStep = answeredStep(lastStep);
             phase(RUN_PHASE.working, lastStep ?? `turn ${turnCount + 1}`);
           }
           phase(RUN_PHASE.finishing, null);

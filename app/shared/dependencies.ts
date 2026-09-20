@@ -170,14 +170,39 @@ export interface DependencyReleasePayload {
  */
 export function holdRefusal(
   taskKey: string,
-  entries: readonly string[],
+  entries: readonly DependencyRender[],
   verb: string,
 ): string {
-  return (
-    `${taskKey} waits on ${joinDependencyEntries(entries)} and Viberr is holding it, ` +
-    `so ${verb} is refused. Viberr releases it when every entry is done; ` +
-    `to release it sooner, change what it waits on.`
-  );
+  // Ruling 355: the entries that can never complete, by label.
+  const dead = deadDependencyLabels(entries);
+  // Ruling 356: the entries already done, as done.
+  const head =
+    `${taskKey} waits on ${holdEntriesSentence(entries)} and Viberr is holding it, ` +
+    `so ${verb} is refused. `;
+  // Ruling 355 (pass 38, F38-9): "Viberr releases it when every entry is done"
+  // is a promise `dependenciesSatisfied` can never keep for a failed, missing
+  // or cancelled entry — the release engine writes "can never complete … edit
+  // what it waits on" on the same task, and this sentence stood beside it
+  // promising the opposite. The states are on the entries; say what they say.
+  if (dead.length > 0) {
+    return (
+      head +
+      `${joinDependencyEntries(dead)} can never complete, so Viberr will not release it on ` +
+      `its own: edit what it waits on (remove the entry or point it elsewhere) to release it.`
+    );
+  }
+  return head + `Viberr releases it when every entry is done; to release it sooner, change what it waits on.`;
+}
+
+/** Ruling 355: the states an entry cannot leave on its own. */
+export function isDeadDependencyState(state: DependencyState): boolean {
+  return state === "failed" || state === "missing" || state === "cancelled";
+}
+
+/** Ruling 355: the labels of the entries that can never complete — client-safe,
+ *  so the pre-click control and the server doors read one predicate. */
+export function deadDependencyLabels(entries: readonly DependencyRender[]): string[] {
+  return entries.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
 }
 
 /** "A", "A and B", "A, B and C" — the list as a sentence reads it. */
@@ -185,4 +210,28 @@ export function joinDependencyEntries(entries: readonly string[]): string {
   if (entries.length === 0) return "other work";
   if (entries.length === 1) return entries[0]!;
   return `${entries.slice(0, -1).join(", ")} and ${entries[entries.length - 1]!}`;
+}
+
+/**
+ * Ruling 356 (pass 38, F38-10): the hold list as a sentence reads it — what
+ * still holds the task, then the entries already done, as done.
+ *
+ * A hold releases as a whole (`dependenciesSatisfied` is `every(done)`), so
+ * `blockedBy` keeps an entry after the task it names is done, and every
+ * sentence built from the bare labels said "waits on goal-2 link 1 (BNB-2),
+ * goal-2 link 4 and BNB-11" beside a rail marking two of the three done —
+ * the refusal at the door, the run control, the hero's "Other work" line and
+ * two skipped-schedule notes. Three tests pinned the flattening with a fixture
+ * whose JC-3 was `done`. The states are on the entries; say what they say.
+ * An all-open list reads as before. An all-done list (the minute between a
+ * completion and the release sweep) is listed plainly: the release is on its
+ * way and nothing here can promise more than that.
+ */
+export function holdEntriesSentence(entries: readonly DependencyRender[]): string {
+  const done = entries.filter((e) => e.state === "done").map((e) => e.label);
+  const pending = entries.filter((e) => e.state !== "done").map((e) => e.label);
+  if (done.length === 0 || pending.length === 0) {
+    return joinDependencyEntries(entries.map((e) => e.label));
+  }
+  return `${joinDependencyEntries(pending)} (${joinDependencyEntries(done)} ${done.length === 1 ? "is" : "are"} done)`;
 }

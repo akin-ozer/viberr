@@ -131,7 +131,7 @@ import {
   cachedToolchain,
   shellInventoryPrompt,
 } from "~/server/ops/toolchain.server";
-import type { DependencyReleasePayload } from "~/shared/dependencies";
+import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
 import {
   describeRunFailure,
   type DescribeRunFailureInput,
@@ -635,6 +635,42 @@ function takePendingTrigger(key: string): RunOperatorInput | null {
 }
 
 /**
+ * Ruling 357 (pass 38, F38-11): the `delivered` follow-up a drive's OWN
+ * delivery owes, judged at its lease release. A delivery made inside a drive
+ * used to queue a `delivered` turn behind that drive's own lease at once;
+ * 140 of 148 such drives then moved the task or dispatched the reviewer
+ * themselves, and the queued turn read `get_task`, said the reviewer was
+ * already in flight, and cost ~$0.15 and the coordination lane for ~15 s. The
+ * other 8 stopped right after delivering, and the follow-up was what moved
+ * them. So: owed when the drive delivered (`deliveredHeadMoved`) and neither
+ * moved nor dispatched afterwards (`actedAfterDelivery`); nothing otherwise.
+ * The depth threads on as `nextTransitionChainDepth` would have.
+ */
+export function deliveredFollowUpFor(entry: {
+  projectSlug: string;
+  taskKey: string;
+  dataRoot?: string;
+  transitionDepth: number;
+  ownRun: OwnOperatorRun | null;
+}): RunOperatorInput | null {
+  const own = entry.ownRun;
+  if (!own?.deliveredHeadMoved || own.actedAfterDelivery) return null;
+  const input: RunOperatorInput = {
+    projectSlug: entry.projectSlug,
+    taskKey: entry.taskKey,
+    trigger: "delivered",
+    transitionDepth: entry.transitionDepth + 1,
+  };
+  if (entry.dataRoot) input.dataRoot = entry.dataRoot;
+  return input;
+}
+
+/** Ruling 357 tests: the live drive's own-run stamps, by task. */
+export function ownOperatorRunForTests(projectSlug: string, taskKey: string): OwnOperatorRun | null {
+  return leaseState().held.get(leaseKeyFor(projectSlug, taskKey))?.ownRun ?? null;
+}
+
+/**
  * Release the task's lease and fire the newest queued trigger, if any.
  * IDEMPOTENT per acquisition (adversarial-review #5/#7): `token` is the exact
  * lease-entry object captured when this drive acquired the lease. We only
@@ -652,6 +688,20 @@ function releaseOperatorLease(
   const current = state.held.get(key);
   if (token !== undefined && current !== token) return; // stale release — ignore
   state.held.delete(key);
+  // Ruling 357: a drive that delivered and then stopped is owed the
+  // `delivered` follow-up its delivery used to queue at once; a drive that
+  // kept going is owed nothing. The follow-up fills the machine slot only when
+  // that slot is empty, so a queued human question still goes first and a
+  // later machine trigger still wins.
+  const followUp = current ? deliveredFollowUpFor(current) : null;
+  if (followUp) {
+    if (!state.pending.get(key)?.latest) queueOperatorTrigger(key, followUp);
+  } else if (current?.ownRun?.deliveredHeadMoved) {
+    logger.info("drive delivered and kept going — no follow-up operator turn owed", {
+      key,
+      runId: current.runId,
+    });
+  }
   const queued = takePendingTrigger(key);
   if (!queued) {
     // Last drive for now: flip `waiting: agent` back to human once nothing is
@@ -789,6 +839,7 @@ async function noteQueuedTriggerRefused(
     );
     const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     const { recordAudit } = await import("~/server/audit/audit-recorder.server");
+    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
     await updateTaskFile(ref, (parsed) => {
       const packetTitle = parsed.packet?.title ?? null;
       const cause =
@@ -796,7 +847,8 @@ async function noteQueuedTriggerRefused(
           ? `a decision packet is open on ${queued.taskKey}${packetTitle ? ` ("${packetTitle}")` : ""} and coordination is paused until it is resolved`
           : refused === "closed"
             ? `${queued.taskKey} is closed (${parsed.frontmatter.archived ? "archived" : "at its terminal stage"})`
-            : `${queued.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")})`;
+            : // Ruling 356: a done entry reads as done, not as still waited on.
+              `${queued.taskKey} waits on other work (${holdEntriesSentence(resolveDependencies(db, queued.projectSlug, parsed.frontmatter.blockedBy))})`;
       const arrived =
         arrival === "door" ? "" : " when it reached the front of the queue";
       const text = queued.scheduleId

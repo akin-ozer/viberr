@@ -1,3 +1,4 @@
+import { OPERATOR_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -324,15 +325,12 @@ export async function openAgentQuestionPacket(
     kind: "approval",
     title: `${role} asks: ${packet.title}`,
     text: packet.body || "An engaged agent needs a human decision.",
+    // Ruling 361: the agent that asked, by name; the Operator only when it did.
+    from:
+      input.actorRef.kind === "agent"
+        ? { kind: "agent", backend: input.actorRef.backend, name: role, role }
+        : OPERATOR_NOTIFY_FROM,
   };
-  if (input.actorRef.kind === "agent") {
-    notice.from = {
-      kind: "agent",
-      backend: input.actorRef.backend,
-      name: role,
-      role,
-    };
-  }
   notifyTaskWatchers(db, notice, ctx);
   return true;
 }

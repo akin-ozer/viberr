@@ -73,9 +73,45 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
     };
     const { container } = renderPage(view({ goals: [goal] }));
     // The stub's root loader is async: the page renders after it resolves.
-    await screen.findByText("waits on goal-1 link 2, JC-6");
+    await screen.findByText("waits on goal-1 link 2 and JC-6");
     const waits = [...container.querySelectorAll("[data-link-wait]")].map((n) => n.textContent);
-    expect(waits).toEqual(["waits on goal-1 link 2, JC-6"]);
+    expect(waits).toEqual(["waits on goal-1 link 2 and JC-6"]);
+  });
+
+  it("ruling 359: with the entries' states resolved, a done entry reads as done, not as still waited on", async () => {
+    // Canary: print `l.blockedBy` instead of the resolved `waits`.
+    const goal: NonNullable<ControllerSurfaceView["goals"]>[number] = {
+      id: "goal-2",
+      title: "Dependent chain",
+      status: "active",
+      createdBy: "u_arda",
+      createdByLabel: "Arda",
+      onFailure: "pause",
+      description: "",
+      links: [
+        {
+          index: 1,
+          title: "Needs base B",
+          goal: "C.",
+          taskKey: "JC-9",
+          status: "active",
+          note: null,
+          redeclared: false,
+          blockedBy: ["goal-1 link 2", "JC-6"],
+          waits: [
+            { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-4)", state: "open", taskKey: "JC-4", goalId: "goal-1" },
+            { ref: "JC-6", label: "JC-6", state: "done", taskKey: "JC-6", goalId: null },
+          ],
+        },
+      ],
+      currentIndex: 1,
+      createdAt: null,
+      updatedAt: null,
+      history: [],
+    };
+    const { container } = renderPage(view({ goals: [goal] }));
+    await screen.findByText("waits on goal-1 link 2 (JC-4) (JC-6 is done)");
+    expect(container.textContent).not.toContain("waits on goal-1 link 2, JC-6");
   });
 
   /**

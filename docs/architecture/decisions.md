@@ -5931,6 +5931,274 @@ by rewriting those paragraphs:*
     this touches.
     (`runs-helpers.ts`, `runs-panels.tsx`, `runs-helpers.test.ts`.)
 
+347. **A tool manifest names each tool the way the model can call it (2026-09-18, pass 38;
+    F38-1).** Ruling 297's manifest listed every tool by its bare registry name and told the
+    controller the description was "one ToolSearch away (`select:<name>`)". The SDK mounts a
+    server tool as `mcp__<server>__<name>` and ToolSearch answers to nothing else, so the
+    instruction failed whenever it was followed literally. Live on the first turn of pass 38:
+    two `select:whoami,list_capabilities,…` searches answered "No matching deferred tools
+    found" before the model guessed the prefix. Measured over the run logs before the fix: 8
+    of the 40 controller runs that searched opened this way (14 wasted calls), and 2 of 12
+    reviewer runs. Nothing was lost and nobody was told anything false, which is why this is
+    LOW; it is fixed because the wrong instruction was Viberr's own sentence, not the model's
+    guess. The manifest now prints the mounted name on every line and the hint says `select:`
+    takes the full name exactly as listed; `mountedToolName` is the one spelling the
+    manifest and the toolkit's allow-list share.
+    (`tool-manifest.server.ts`, `tool-manifest.server.test.ts`.)
+
+348. **The live step says a tool has answered once it has (2026-09-18, pass 38; F38-2).** Ruling
+    250 put the run's current step on the row that says it is working, read off the last
+    tool line. The step then stuck, unchanged, from the tool's invocation to the NEXT
+    invocation, so the strip read `Working · mcp__viberr_controller__get_github_state ·
+    {…}` for as long as the model thought after that call came back. Live on the first
+    controller turn of this pass: two minutes, while the console one panel down logged
+    thinking lines. Measured over the 40 controller turns before the fix: 76 such
+    stretches longer than 20 s on 26 of the 40 runs, 53 minutes in all, the longest
+    138 s — every one a finished call shown as the thing the run was doing, and the
+    first one of this pass misread by the person watching it as a hung tool.
+    The adapters keep naming the tool while it runs and, once its result lands, name it as
+    answered: `composing · <tool> · <input> answered`, derived from the same projected line
+    both backends already compute — Claude's `tool_result` row, Codex's completed command
+    output, and, for a succeeding Codex MCP call whose completion projects no row at all,
+    a `toolAnswered` fact on the envelope. "composing" is what the server knows: the
+    result landed and no tool has been invoked since. The update that matters most
+    arrives inside the throttle's one-second window — a tool that answers within a second
+    of being invoked — and a Codex run then emits nothing until its reasoning item
+    completes, so the service now writes a suppressed step when the window closes
+    instead of dropping it, and never onto a settled row.
+    (`adapter.server.ts`, `wire-format.server.ts`, `claude-runtime.server.ts`,
+    `codex-runtime.server.ts`, `run-service.server.ts`, and their tests.)
+
+349. **A run the cap parked reads "agent queued", not "agent working" (2026-09-18, pass 38;
+    F38-3). Ruling 311's twin, one surface over.** `markWaitingAgent` writes `waiting:
+    "agent"` after every dispatch, for a run the concurrency cap PARKED as much as for one
+    that started; ruling 311 corrected the timeline sentence and the operator's reply and
+    left the display state alone. So the board card said "agent working" with a pulsing
+    dot, the hero pill said the same, the rail read "Agent work" and the review queue's
+    copy agreed, while the console said "queued" and the timeline said "Nothing is
+    streaming yet". Measured on this instance before the fix: **129 queued runs across 33
+    tasks**, each one a card claiming work in flight for as long as the queue held it.
+    The fact lives on the run row alone. The layout and task loaders now read it once per
+    project (`liveRunStateByTask`: `running` when any run of the task streams, else
+    `queued`; controller turns excluded) and hand it to `withLiveRun`, in the mapping
+    module where display readiness is derived, which turns `agent_working` into the new
+    `agent_queued` while the run is parked. The card, the pill and the rail say "agent
+    queued" with no pulse and name the cause in a title; the board's agent filter keeps
+    both. `run.state-changed` already rides the project firehose, so the surfaces
+    revalidate when the queue promotes the run.
+    (`task.server.ts` (mapping), `run-store.server.ts`, `project.tsx`, `project.task.tsx`,
+    `pill.tsx`, `board-page.tsx`, `task-side-panels.tsx`, and their tests.)
+
+350. **The Agent-logs footer follows the classified failure for every run kind, and promises only
+    what the row holds (2026-09-18, pass 38; F38-4; ruling 338's shape again).** The pill and the
+    footer of one panel read the same `RunView` through different gates. The class arm for
+    `unavailable` was gated on `kind === "primary" || "reviewer"` — a gate that belonged to the
+    retry CLAUSE and keeps its own — so an operator drive or a controller turn refused for
+    `unavailable` fell through to "stream ended on a continuity error; see the blocked packet",
+    beneath a pill reading "backend unavailable", and a controller turn has no packet at all
+    (live: one operator drive on this instance). `max_budget`, `max_turns`, `idle_timeout` and
+    `session_missing` had no arm, so a run the spending cap cut off read "cut off · spending
+    cap" over "continuity error" (ruling 175's own test asserted the pill and never the footer
+    — ruling 329's shape). And an interrupt by a person always said "the thread stays
+    resumable", a fact the row does not carry: both live person-interrupts on this instance
+    were closure interrupts, where ruling 177 refuses every re-run, and ruling 207(g)'s own
+    note says "there is no thread to resume" when no session was reported.
+    The class now describes the run whatever its kind; the four cut-off and hung classes have
+    sentences beside their pills; a person-interrupt says the thread can be resumed where the
+    task still takes a run when a session exists and that there is none to resume when it
+    does not; and the unclassified sentence points a specialist at the packet and everyone
+    else at the error line it does have. (`runs-panels.tsx`, `runs-panels.test.tsx`.)
+
+351. **The controller's guide names the door that starts a run (2026-09-18, pass 38; F38-5).**
+    `controller-guide.skill.md` told the controller: "To push a task forward, prefer
+    `comment_on_task` with a clear @operator directive". Ruling 252 made that route start
+    nothing — the tool's own description says "a comment starts no run", and `postAgentComment`
+    dispatches nobody — so the guide's preferred route produced a comment, a ruling-252 stamp,
+    and no run. Measured: 4 of the controller's 21 comments on the shopify board were
+    @operator directives posted this way. The sentence now says `run_agent_on_task` starts a
+    run and reports whether it did, and that a comment reaches nobody until a later run
+    happens to read the timeline. The outgoing asset hash is recorded so a store that still
+    carries the old sentence converges at boot (B-OP1).
+    (`controller-guide.skill.md`, `default-assets.server.ts`.)
+
+352. **A stage colour is a CSS value Viberr can draw, or the door refuses it (2026-09-18, pass 38;
+    F38-6).** `create_project` took any string for a stage's `color` and stored it; the board dot,
+    the home meter's `color-mix()`, the task hero and three more surfaces hand the string to CSS
+    as it is. The shopify board was created with `slate` and `amber` — palette names, not CSS
+    colours — and two of its six stage dots drew nothing while `project.md` said otherwise;
+    no later door could correct it (`update_stages` takes no colour). Ruling 15 already states
+    the contract (hex or `var(--*)`), so `resolveProjectBlueprint` refuses anything else by
+    name, naming the stage, the value and the two accepted forms, and the tool's schema says
+    so before the call. Stored values are left as they are: the fix is at the door, not a
+    rewrite of a person's file. (`project-create.server.ts`, `controller-toolkit.server.ts`.)
+
+353. **A lease binds the branch, so the gate measures the branch (2026-09-18, pass 38; F38-7;
+    amends 245).** Ruling 245's push gate read the push's delta — `remoteHead..HEAD`, ruling
+    144's shape for workflow files — so a leased path that had already reached origin before
+    the lease was declared was never examined again: the next docs-only push on that branch
+    passed, and the acceptance ceremony, which reads no lease, merged the leased change ahead
+    of its holder. The `set_file_leases` text ("another task whose push changes a leased
+    path is refused") was narrowly true and `get_project`'s "which task owns which shared
+    paths until it merges" was not. On this board the ordering is the normal case: the
+    controller declares leases while work is in flight and moves them chain by chain.
+    The gate now lists the files the branch changed from its fork point,
+    `merge-base(origin/<default>, HEAD)..HEAD` with merge commits excluded — commits a base
+    refresh absorbed sit below the fork point whatever the local `origin/<default>` ref says,
+    so they are never charged to the branch. An unreadable fork point still measures nothing
+    and, as ruling 245 chose, refuses nothing and says so in the log; whether an
+    unmeasurable branch should refuse while leases exist is a question for the owner.
+    (`push-workspace.server.ts`, `push-workspace.server.test.ts`, `controller-toolkit.server.ts`,
+    `file-formats.md`.)
+
+354. **A hold refuses a retry or a collision ceremony before the packet is consumed (2026-09-18,
+    pass 38; F38-8; ruling 241's rule at two more arms).** Ruling 241 read the hold before the
+    resolution write for `question_reviewer` and queued the question. Two arms still read it
+    only in the act that follows the write: `retry_other_backend` wrote the decision, cleared
+    the packet, then met ruling 186's refusal in `startAgentRun` and left "The retry could not
+    start" on the timeline — the person's choice bought nothing and there was no packet to
+    choose again from (its own comment said "a start failure must not un-resolve the packet",
+    which is right for a provider failure and wrong for a hold the arm could have read);
+    `resolve_remote_collision` closed the squatting PR and deleted the stale remote branch,
+    then met ruling 240's refusal in the re-delivery — the destructive half done, the
+    promised third step not. Measured: no blockedBy-held resolution of either arm on this
+    instance yet (the one live "could not start" was a quota hold that scheduled the run),
+    and both are reachable here, where the controller re-plans `blockedBy` on live tasks.
+    Both arms now read the hold HERE, before the resolution write, and refuse with
+    `holdRefusal`'s sentence plus "The packet stays open; choose again once the wait
+    clears." Refuse rather than queue: the release re-invokes the operator, which decides
+    the dispatch anew, and a remote branch is not something to delete on a promise.
+    (`task-actions.server.ts`, `task-governance.server.test.ts`.)
+
+355. **A hold refusal names an entry that can never complete instead of promising a release
+    (2026-09-18, pass 38; F38-9).** `holdRefusal` ended every refusal with "Viberr releases it
+    when every entry is done; to release it sooner, change what it waits on" — read from the
+    entry labels alone, on the Run control before the click and at four server doors. The
+    release engine reads the entry STATES and, for a failed, missing or cancelled entry,
+    writes on the same task "X can never complete. This task stays held; edit what it waits
+    on", and sets `waiting: human`; `dependenciesSatisfied` is `every(state === "done")`, so
+    the promise was structurally unreachable there. A person on such a task read the note,
+    a rail saying "a human", and a Run button promising Viberr would release it. Measured: no
+    dead entry has been recorded on this instance yet; a chain link archived or a goal
+    cancelled produces one, and both are ordinary on a board of chained goals.
+    The states are on the entries, so the sentence reads them: `deadDependencyLabels`
+    (client-safe, one predicate with the release engine's `deadDependencies`) feeds
+    `holdRefusal`'s new fourth argument, and the server doors go through
+    `holdRefusalFor`, which resolves the live states first. The resume door takes `db` for
+    it, like every other dispatch door.
+    (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `specialist-run.server.ts`,
+    `task-actions.server.ts`, `execution-profile.tsx`, and their tests.)
+
+356. **The hold sentence names a done entry as done, not as still waited on (2026-09-18,
+    pass 38; F38-10).** A hold releases as a whole — `dependenciesSatisfied` is
+    `every(state === "done")` and `clearDependencies` empties the list in one write — so
+    `blockedBy` keeps an entry after the task it names is done, and every sentence built from
+    the bare labels named it as waited on: the refusal at every door ("BNB-3 waits on goal-2
+    link 1 (BNB-2), goal-2 link 4 and BNB-11 and Viberr is holding it"), the run control's
+    note, the hero's "Other work" line and the two skipped-schedule notes — beside the
+    Blocked-by rail marking two of the three done, and at the controller's `run_agent_on_task`
+    door, where an agent reading it goes to check a task that is finished. Live: 2 of the 6
+    held tasks on the instance; three tests pinned the flattening with a fixture whose entry
+    was `done`. The operator's own prompt already renders the states per entry. So the states
+    feed every sentence: `holdEntriesSentence` (shared) prints what still holds the task, then
+    the finished entries as finished ("goal-2 link 4 (goal-2 link 1 (BNB-2) and BNB-11 are
+    done)"); `holdRefusal` takes the resolved entries and derives the dead ones itself (ruling
+    355), the server doors resolve them through `holdRefusalFor`, and the two skipped-schedule
+    notes resolve theirs. An all-open list reads as before; an all-done list (the minute before
+    the release sweep) is listed plainly.
+    (`dependencies.ts` (shared), `dependencies.server.ts` (projections), `execution-profile.tsx`,
+    `task-side-panels.tsx`, `schedule.server.ts`, `operator-run.server.ts`, and their tests.)
+
+    (b) The creation note is one more of those surfaces (pass 38, 2026-09-18 13:28Z). `createTask` wrote "Created waiting on " + the raw labels; live on BNB-26 it read "Created waiting on BNB-5, BNB-22. Held until every entry is done" with BNB-22 closed 95 s before the mint, and 4 of the instance's 56 creation notes had named a task already Done. The note now reads the entries' states through `holdEntriesSentence(resolveDependencies(…))` like the refusal, the hero and the skipped-schedule notes: "Created waiting on BNB-5 (BNB-22 is done)". Test: `task-actions.server.test.ts` ruling-131 creation case, extended with a done entry. Canary: join the raw labels again.
+
+357. **A drive's own delivery owes a follow-up turn only if the drive stopped there
+    (2026-09-18, pass 38; F38-11).** Ruling 134(b) re-queues the operator when a delivery
+    opens the review PR or moves its head under full autonomy — a new review subject. When
+    the delivery was the operator drive's own `deliver_for_review`, that `delivered` trigger
+    queued behind the drive's own lease and fired at its release: a whole drive that read
+    `get_task`, said "the required reviewer's run is already in flight", and ended — 140 of
+    the 148 deliveries made inside a drive on this instance, 13 of 13 on the airbnb board
+    (every PR it opened), ~$0.15 and ~15 s each; 330 such two-turn drives instance-wide, each
+    holding the coordination lane (ruling 152(b)) while a real drive of another task parked
+    behind one (06:52:17, BNB-2). The other 8 drives stopped right after delivering and the
+    follow-up was what moved them — and ruling 202 makes a delivery count as progress, so the
+    stranded backstop would not have nudged them; only the 15-minute sweep would. So the
+    trigger is not dropped but judged: ruling 152(a)'s shape for a move, applied to a delivery.
+    The delivery stamps the drive (`deliveredHeadMoved`); a transition or a dispatch the same
+    drive makes afterwards stamps `actedAfterDelivery`; and the lease release fires the
+    `delivered` follow-up (`deliveredFollowUpFor`, depth threaded on as before) only when the
+    first stamp stands without the second, filling the machine slot only when it is empty so
+    a queued human question still goes first. A delivery by anyone else re-queues at once, as
+    before.
+    (`task-actions.server.ts`, `specialist-run.server.ts`, `task-mutation.server.ts`,
+    `operator-run.server.ts`, and their tests.)
+
+358. **A link born waiting on the work whose completion minted it is released at birth
+    (2026-09-18, pass 38; F38-12).** A chain link's declared wait is copied onto its task at
+    the mint (ruling 131(c)); when the mint is the completion of the very link it waits on,
+    the task is born held on finished work. The completion's release sweep had listed the
+    held tasks before this one existed, so the task sat until the minute tick: 11 of the 15
+    born-held links on this instance waited 16–77 s, and each one's `create` drive was refused
+    meanwhile with "waits on other work (goal-2 link 2)" — the task whose acceptance had just
+    minted it. So the mint asks the release engine once, after the link carries its task
+    (`releaseTask`, the same two halves a person's clear or the tick performs: the release
+    note, the audit row, the notification and the `dependencies-released` operator turn). The
+    engine is convergent, so an unsatisfied or lagging read leaves the tick to do what it
+    always did. (`goal-actions.server.ts` and its test.)
+
+359. **The Controller page's link rows read the wait states too (2026-09-18, pass 38;
+    F38-13; ruling 356's sentence on one more surface).** The Goals panel printed each link's
+    declared wait raw — "waits on goal-2 link 1, goal-2 link 4, BNB-11" under a link whose
+    goal-2 link 1 sat two panels up with a `done` pill — so the page contradicted itself the
+    way the task page did before ruling 356, and on the board's main chain view. `listGoals`
+    has the projection, so it resolves each link's entries (`waits`) beside the declaration,
+    and the row prints `holdEntriesSentence` ("goal-2 link 4 (goal-2 link 1 (BNB-2) and
+    BNB-11 are done)"); the file-only detail read carries no states and the row falls back
+    to the declaration in the same sentence form. (`goal-actions.server.ts`,
+    `controller-page.tsx`, and their tests.)
+
+360. **A check-runs read GitHub refuses is a stated fact on every surface that would have
+    shown the checks (2026-09-18, pass 38; F38-14).** Ruling 304 put the checks on the accept
+    dialog's Merges row and ruling 276 kept "never read" apart from "no CI" for the
+    controller — and on this instance the check-runs read failed on every one of 97 pull
+    requests: the project's fine-grained token has no Checks: read, GitHub answers 403, the
+    linker turned each refusal into `checks: null`, the reconciler wrote nothing, and every
+    human surface rendered that nothing as nothing. Seven airbnb PRs and main itself carried
+    four failing check-runs each (the clone ships `ci.yml`; the jobs die within three
+    seconds under the account's Actions billing block) and the dialog that authorizes the
+    irreversible merge said only "Verdict · validation healthy". No sentence lied; the
+    silence did. So: the linker carries the refusal (`checksUnread`: status and message); the
+    reconciler persists it on the PR while no summary was ever read (`pr.checksUnread`, dropped
+    by the first successful read) and, on a 403, opens a `checks:read` violation on the task —
+    the same door a refused PR create (`pull_request:write`) or compare (`repo`) uses — which a
+    later successful read resolves; the credential card carries it as an advisory (ruling
+    144(a)); and the PR card, the accept dialog and the GitHub page print "checks not readable"
+    with GitHub's reason, next to the same sentence ruling 304 uses for failing checks: merging
+    does not wait for them, and the person deciding is told so. (`pr-linker.server.ts`,
+    `github-reconciler.server.ts`, `task-file.schema.ts`, `mapping/task.server.ts`,
+    `github-query.server.ts`, `github-pills.ts`, `task-side-panels.tsx`, `accept-confirm.tsx`,
+    `board-page.tsx`, `github-view.tsx`, `pat-store.server.ts`, `controller-toolkit.server.ts`
+    (the controller's `read_github` names the refused read as the third kind of null `checks`),
+    and their tests.)
+
+361. **A notification names the actor its timeline entry names; there is no default author
+    (2026-09-18, pass 38; F38-15).** `notifyTaskWatchers` stamped "Operator" on any notice
+    that named nobody, and seventeen of its twenty callers named nobody. On this instance 816
+    notifications carry the Operator as author for things it never did: all 673 reviewer
+    verdicts ("Operator · BNB Code Reviewer approved the work"), all 133 dependency releases
+    ("Operator · Released: everything this task waited on is done"), ten policy notes — while
+    the task timeline names the reviewer, the release engine and the policy engine for the
+    same events, and the test that pinned the writer required the default ("an omitted author
+    defaults to the Operator"). Ruling 237 had met the shape once, on the deadlock packet, and
+    fixed that one site. So the notice's `from` is REQUIRED and every site names its actor:
+    the reviewer that judged (verdicts), the agent whose run failed, the release engine by the
+    timeline's own name ("Dependency release"), the delivery system actor, the operator for its
+    own recommendations, packets and flags, the person who asked. A future caller that names
+    nobody does not compile. (`task-mutation.server.ts`, `task-actions.server.ts`,
+    `dependencies.server.ts`, `operator-actions.server.ts`, `agent-toolkit.server.ts`, and
+    their tests.)
+
+362. **An approve is a boundary for the react-depth count** (pass 38, F38-16). The operator's react chain is capped at four hops (`OPERATOR_REACT_DEPTH_CAP`) so a loop that gets nowhere — the operator re-prompting a specialist that keeps coming back with the same objection — ends in a person's hands ("Work stalled: pick a recovery path"). Ruling 258 recognised that a chain ending on an ACCEPTABLE task had not got stuck and skipped the packet, leaving the acceptance recommendation to the 15-minute sweep. Live on BNB-16 (2026-09-18 10:09Z) the code reviewer approved the rework at Review with Verify still ahead — not acceptable, so 258 did not apply — and 0.1 s later the cap opened the packet ("hit its 4-cycle depth cap without reaching a boundary") with redirect / send back / hold, each of them re-running work that had just passed. Measured on the instance: 25 "Work stalled" packets; 20 followed a run that ERRORED (a real stall), and all 5 that followed a run that FINISHED followed an approve (SHOP-5, SHOP-32, SHOP-54 twice, BNB-16). Every one was answered "nothing is stalled" (a redirect with a note), the approved work waited 6 minutes, 22 minutes, 3.6 hours and 6.8 hours for that answer, and one redirect sent the operator to ask the engineer to push — a policy violation on a task that had passed. Decided: a reply whose RECORDED verdict is `approve` resets the react depth to zero before the react decision, so the chain continues — the operator's next move is the step behind the gate (Review → Verify and the verifier's dispatch, or the acceptance recommendation, which also closes the 15-minute wait 258 left behind: candidate C3 of this pass). The cap keeps the loop it was written for: a rework cycle (request_changes → rework → delivery → review) still counts every hop, and a stage cannot be approved twice, so the reset cannot loop. 258's skip arm remains for a chain that reaches the cap on an acceptable task with a reply that is not an approve. The packet's own sentence claimed this test — "without reaching a boundary". Test: `agent-completion.server.test.ts` "ruling 362: an approve at the depth cap on a task that is NOT yet acceptable opens no stuck packet" (an approve at reactDepth 99 with a second verdict owed: no packet, the reset logged, one operator turn follows); the 258 test now expects the reset. Canary: drop the reset — the packet opens and no operator turn follows.
+
 202. **Delivery is something the operator DID (owner, 2026-09-13, pass 37; F37-22).** The
     stranded-operator backstop judges a finished drive by whether it moved the stage, and on
     SHOP-10 it met a drive whose entire plan was one `deliver_for_review` — it pushed
@@ -7084,6 +7352,8 @@ by rewriting those paragraphs:*
     person made and cannot see is the same defect in another place.
     (`task-file.schema.ts`, `review-deadlock.server.ts`, `task-actions.server.ts`,
     `dependencies.server.ts`, `task-side-panels.tsx`.)
+    *Extended by ruling 354 (2026-09-18): `retry_other_backend` and `resolve_remote_collision`
+    read the hold before the resolution write too, and refuse rather than queue.*
 
 242. **A review ROUND is counted by the deliverer having run, not by the reviewer having
     spoken (owner, 2026-09-14, pass 37; F37-69). Amends ruling 204.** Ruling 204 made a
@@ -7198,6 +7468,9 @@ by rewriting those paragraphs:*
     the one question a lease answers).
     (`file-leases.ts`, `project-file.schema.ts`, `settings-actions.server.ts`,
     `push-workspace.server.ts`, `task-actions.server.ts`, `controller-toolkit.server.ts`.)
+    *Amended by ruling 353 (2026-09-18): the gate measures the BRANCH from its fork point,
+    not the push's delta, so a leased path that reached origin before the lease was declared
+    still binds.*
 
 246. **A refusal names the real limit, and says whether the door it points at is open
     (2026-09-15, pass 37; F37-75).** Found by asking the controller to ATTEMPT four things it

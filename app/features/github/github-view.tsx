@@ -9,6 +9,7 @@ import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import {
   checksPill,
+  checksUnreadPill,
   connectionPill,
   mergeablePill,
   prStatePill,
@@ -206,7 +207,12 @@ export function PullRequestsPanel({
         )}
         {prs.map((row) => {
           const pill = prStatePill(row.state);
-          const checks = row.checks ? checksPill(row.checks) : null;
+          // Ruling 360: a refused read is a pill, not a blank.
+          const checks = row.checks
+            ? checksPill(row.checks)
+            : row.checksUnread
+              ? checksUnreadPill()
+              : null;
           const review = row.review ? reviewPill(row.review) : null;
           const conflict = mergeablePill(row.mergeable);
           return (

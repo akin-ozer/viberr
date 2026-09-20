@@ -481,3 +481,30 @@ describe("createProject — F20-1 data-root write resilience", () => {
     expect(readProjectFile({ projectSlug: "ghost-mount", dataRoot: store.dataRoot })).toBeNull();
   });
 });
+
+describe("ruling 352: a stage colour is a CSS value Viberr can draw, or the door refuses it", () => {
+  it("refuses a palette NAME by name, and accepts a hex value", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal("fetch", vi.fn());
+    const create = (key: string, color: string) =>
+      createProject(
+        store.db,
+        {
+          name: `Colour ${key}`,
+          key,
+          owner: "akin-ozer",
+          repoName: "c",
+          policy: "balanced",
+          custom: { stages: [{ name: "Intake", color }, { name: "Shipped" }] },
+        },
+        ACTOR,
+        { dataRoot: store.dataRoot },
+      );
+    // Live: the shopify board's Triage and Review dots drew nothing, because
+    // `slate` and `amber` are not CSS colours and every renderer hands the
+    // string to CSS as it is. CANARY: store the string unchecked.
+    await expect(create("CLA", "slate")).rejects.toThrow(/"slate".*not a CSS colour/);
+    await expect(create("CLB", "#8b8b8b")).resolves.toBeTruthy();
+  });
+});

@@ -174,11 +174,13 @@ describe("controller mounts (ruling 107)", () => {
     // conversation never learns what it now holds.
     expect(prompt).toContain("# Every tool on viberr_controller");
     expect(prompt).toContain("# Every tool on viberr_ops");
-    expect(prompt).toContain("- whoami: ");
-    expect(prompt).toContain("- read_default_branch_file: ");
+    expect(prompt).toContain("- mcp__viberr_controller__whoami: ");
+    expect(prompt).toContain("- mcp__viberr_controller__read_default_branch_file: ");
     // The absence half of the promise, which is what the controller could not
     // answer: a verb it does NOT have is not on the list.
-    expect(prompt).not.toContain("- accept_completion: ");
+    expect(prompt).not.toContain("- mcp__viberr_controller__accept_completion: ");
+    // Ruling 347: the line is the MOUNTED name, the one ToolSearch answers to.
+    expect(prompt).not.toMatch(/^- whoami: /m);
     expect(prompt).toContain("you do not have it");
 
     // And the frozen channel carries no copy at all, so there is nothing that

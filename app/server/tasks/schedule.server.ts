@@ -8,6 +8,8 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
+import { holdEntriesSentence } from "~/shared/dependencies";
+import { resolveDependencies } from "~/server/projections/dependencies.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
@@ -760,7 +762,7 @@ export async function fireDueSchedules(
                   parsed.timeline.unshift(
                     scheduleEvent(
                       { kind: "system", systemId: "schedule-runner" },
-                      `**Scheduled action skipped:** ${t.taskKey} waits on other work (${parsed.frontmatter.blockedBy.join(", ")}) — no operator run was started; Viberr releases the task when every entry is done.`,
+                      `**Scheduled action skipped:** ${t.taskKey} waits on other work (${holdEntriesSentence(resolveDependencies(db, t.projectSlug, parsed.frontmatter.blockedBy))}) — no operator run was started; Viberr releases the task when every entry is done.`,
                     ),
                   );
                 } else if (refusedPacket) {

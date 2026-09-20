@@ -12,8 +12,9 @@ import { splitClaudeVariant } from "~/shared/model-ids";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
-  phaseStepForLine,
+  answeredStep,
   RUN_PHASE,
+  stepUpdateForLine,
   type RunCallbacks,
   type RunHandle,
   type RunSpec,
@@ -1004,7 +1005,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
 
       // R21-4 / G5 (FR28): the live phase/step the run strip renders. `lastStep`
       // sticks so a stretch of model thinking still shows the tool the run is
-      // waiting on, instead of blanking the column.
+      // waiting on, instead of blanking the column — and, once that tool has
+      // answered, names it as answered (ruling 348).
       let lastStep: string | null = null;
       const phase = (name: string, step: string | null = lastStep) => {
         cb.onPhase?.(name, step);
@@ -1582,8 +1584,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             // R21-4: the strip's live row. `turn N` is the honest fallback until
             // the run invokes its first tool — a number that climbs is what
             // tells a human the run is alive. The service throttles the writes.
-            const step = phaseStepForLine(emitted);
-            if (step) lastStep = step;
+            // Ruling 348: a tool stays named while it runs; once its result lands the
+            // step says the model is composing again, instead of the finished call.
+            const update = stepUpdateForLine(emitted);
+            if (update?.kind === "tool") lastStep = update.step;
+            else if (update?.kind === "answered" && lastStep) lastStep = answeredStep(lastStep);
             phase(RUN_PHASE.working, lastStep ?? `turn ${liveTurns}`);
           }
         } catch (error) {

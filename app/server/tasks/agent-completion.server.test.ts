@@ -1275,10 +1275,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // recovery path" packet opens here, and then BLOCKS the acceptance —
     // three options, every one of them re-running work that passed.
     expect(taskFile().parsed.packet).toBeNull();
+    // Ruling 362 reaches the boundary first: the approve resets the depth and
+    // the chain continues (the operator files the recommendation itself rather
+    // than the 15-minute sweep). The skip arm below it remains for a chain that
+    // reaches the cap on an acceptable task with a reply that is NOT an approve.
     expect(
-      skipLog.mock.calls.some(([msg]) =>
-        String(msg).includes("stuck-loop packet skipped"),
-      ),
+      skipLog.mock.calls.some(([msg]) => String(msg).includes("react depth reset")),
     ).toBe(true);
     // And acceptance is still open, which is the whole point.
     expect(
@@ -1287,6 +1289,87 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { dataRoot: store.dataRoot },
       ),
     ).toBeNull();
+  });
+
+  /**
+   * Ruling 362 (pass 38, F38-16): an approve is a boundary for the depth count.
+   *
+   * Live on BNB-16: the code reviewer approved the rework at Review, the
+   * verifier's stage still ahead — so the task was NOT acceptable and ruling
+   * 258's arm did not apply — and 0.1 s later the depth cap opened "Work
+   * stalled: pick a recovery path" with redirect / send back / hold, each of
+   * them re-running work that had just passed. Five of five such packets on
+   * the instance followed an approve; every person answered "nothing is
+   * stalled" and the approved work waited hours for it.
+   */
+  it("ruling 362: an approve at the depth cap on a task that is NOT yet acceptable opens no stuck packet — the chain continues from a fresh depth", async () => {
+    deployOperator();
+    // Two verdict-capable reviewers engaged; only `reviewer` judges here, so
+    // the task stays un-acceptable after its approve (the verifier's verdict is
+    // owed) — BNB-16's shape.
+    writeReviewTask({
+      validation: "changed",
+      engagements: [
+        DEV_DELIVERS_ENGAGEMENT,
+        REVIEWER_ENGAGEMENT,
+        { ...REVIEWER_ENGAGEMENT, profileId: "verifier", role: "Integration verifier" },
+      ],
+    });
+    const summary = "Approved at the pinned head; every check in the done signal is proven.";
+    const runId = await finishedRunWith(summary);
+    stageOutcome(store.db, `oc-${runId}`, { summary, verdict: "approve" });
+    const operatorRuns = () =>
+      // SAFETY: COUNT(*) over this store's own table is always an integer.
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ? AND kind = 'operator'`,
+          )
+          .get(store.slug) as { n: number }
+      ).n;
+    const before = operatorRuns();
+    const log = vi.spyOn(logger, "info");
+    log.mockClear();
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        outcomeKey: `oc-${runId}`,
+        // At the cap, which is what fired on BNB-16.
+        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+      },
+      { id: runId, state: "finished" },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Premises: the approve was recorded, and the task is still not acceptable.
+    expect(
+      taskFile().parsed.frontmatter.verdicts.map((v) => [v.profileId, v.result]),
+    ).toEqual([["reviewer", "approve"]]);
+    expect(
+      acceptanceRefusalFor(
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        { dataRoot: store.dataRoot },
+      ),
+    ).not.toBeNull();
+    // CANARY: drop the ruling-362 reset and "Work stalled: pick a recovery
+    // path" opens here — three options, every one of them re-running work that
+    // passed — and no operator turn follows the approve.
+    expect(taskFile().parsed.packet).toBeNull();
+    expect(
+      log.mock.calls.some(([msg]) => String(msg).includes("react depth reset")),
+    ).toBe(true);
+    // The operator was re-invoked (a react at a fresh depth), not parked.
+    await waitFor(() => operatorRuns() > before);
+    expect(operatorRuns()).toBe(before + 1);
   });
 
   it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {

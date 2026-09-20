@@ -195,7 +195,9 @@ profile's stages.
   carrying such a hold reading `agent_working`, is in `deriveDisplayReadiness`).
   Surfaces render the derived
   display value `agent_working` instead of readiness while `waiting === "agent"`
-  (`deriveDisplayReadiness`, ruling 91), `goal_edit_pending` while a decided `edit_goal`
+  (`deriveDisplayReadiness`, ruling 91) — `agent_queued` when the run carrying the task is
+  parked behind the concurrent-run cap, which the loaders read off the run row through
+  `withLiveRun` (ruling 349) — `goal_edit_pending` while a decided `edit_goal`
   packet waits for the edited goal (ruling 138: below `agent_working`, above
   `input_required` and a stored `blocked`), and "accepted" for terminal-stage tasks.
   A stored `blocked` never yields to a run, with one exception (ruling 157): a

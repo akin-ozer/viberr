@@ -400,9 +400,15 @@ describe("the release engine", () => {
     expect(getTaskSummary(store.db, store.slug, "VIB-10")!.readiness).toBe("ready");
     // SAFETY: `kind`, `user_id` are NOT NULL on `notifications`.
     const notifs = store.db
-      .prepare(`SELECT user_id, kind FROM notifications WHERE task_key = 'VIB-10' AND kind = 'dependency'`)
-      .all() as { user_id: string; kind: string }[];
+      .prepare(`SELECT user_id, kind, actor_json FROM notifications WHERE task_key = 'VIB-10' AND kind = 'dependency'`)
+      .all() as { user_id: string; kind: string; actor_json: string | null }[];
     expect(notifs.map((n) => n.user_id)).toContain(store.users.arda.id);
+    // Ruling 361: the inbox names the engine as the timeline does, never the
+    // Operator (CANARY: drop `from` at the release site — the type refuses;
+    // pass OPERATOR_NOTIFY_FROM there and this reads "Operator").
+    for (const n of notifs) {
+      expect(JSON.parse(n.actor_json ?? "null")).toEqual({ kind: "system", name: "Dependency release" });
+    }
     const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released");
     expect(release).toBeDefined();
     expect(release![1].dependencyRelease).toEqual({ entries: ["VIB-2", "VIB-5", "VIB-1"], clearedBy: null });

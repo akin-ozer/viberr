@@ -43,9 +43,11 @@ import {
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import {
+  deliveredFollowUpFor,
   executeStrandedCodexPlan,
   maybeResumeStrandedOperator,
   operatorPlanToolsFor,
+  ownOperatorRunForTests,
   resetOperatorLeasesForTests,
   runOperator,
   authoredPacketOptions,
@@ -3343,6 +3345,80 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
+  /**
+   * Ruling 357 (pass 38, F38-11). A delivery made inside an operator drive
+   * queued a `delivered` turn behind the drive's own lease; 140 of 148 such
+   * drives then moved the task or dispatched the reviewer themselves and the
+   * queued turn was a paid no-op (13 of 13 on the airbnb board). The other 8
+   * stopped right after delivering, and the follow-up did the move. The
+   * delivery now stamps the drive, and the lease release fires the follow-up
+   * only for a drive that stopped there.
+   */
+  describe("ruling 357: a drive's own delivery owes a follow-up only if the drive stopped there", () => {
+    it("deliveredFollowUpFor: owed when delivered and not acted on; nothing otherwise", () => {
+      const base = { projectSlug: "p", taskKey: "VIB-1", dataRoot: "/tmp/x", transitionDepth: 2 };
+      expect(deliveredFollowUpFor({ ...base, ownRun: null })).toBeNull();
+      expect(
+        deliveredFollowUpFor({ ...base, ownRun: { backend: "claude", autonomy: "full", reactDepth: 0 } }),
+      ).toBeNull();
+      expect(
+        deliveredFollowUpFor({
+          ...base,
+          ownRun: { backend: "claude", autonomy: "full", reactDepth: 0, deliveredHeadMoved: true, actedAfterDelivery: true },
+        }),
+      ).toBeNull();
+      expect(
+        deliveredFollowUpFor({
+          ...base,
+          ownRun: { backend: "claude", autonomy: "full", reactDepth: 0, deliveredHeadMoved: true },
+        }),
+      ).toEqual({ projectSlug: "p", taskKey: "VIB-1", dataRoot: "/tmp/x", trigger: "delivered", transitionDepth: 3 });
+    });
+
+    it("the lease release fires the follow-up for a drive that delivered and stopped, and none for one that kept going", async () => {
+      // CANARY: drop the `deliveredFollowUpFor` call from releaseOperatorLease
+      // (the second drive never starts).
+      deployAgents([operatorAgent()]);
+      seed("impl");
+      await drive({ trigger: "manual" });
+      expect(adapter5.pending).not.toBeNull();
+      const own = ownOperatorRunForTests(store5.slug, "VIB-1");
+      expect(own).not.toBeNull();
+      own!.deliveredHeadMoved = true; // the drive delivered …
+      adapter5.finish(store5, JSON.stringify({ reasoning: "delivered", actions: [] }), "finished");
+      // … and stopped: the follow-up is the second drive.
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+      });
+      await eventually(() => {
+        expect(adapter5.pending).not.toBeNull();
+      });
+      adapter5.finish(store5, JSON.stringify({ reasoning: "nothing left", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns().every((r) => r.state === "finished")).toBe(true);
+        // The row flips before the lease goes; wait for the lease too, or the
+        // control drive below queues behind it.
+        expect(ownOperatorRunForTests(store5.slug, "VIB-1")).toBeNull();
+      });
+
+      // Control: the same delivery followed by a move owes nothing.
+      const control = await drive({ trigger: "manual" });
+      expect(control.refused).toBeUndefined();
+      expect(control.queued).toBeFalsy();
+      const kept = ownOperatorRunForTests(store5.slug, "VIB-1");
+      expect(kept).not.toBeNull();
+      kept!.deliveredHeadMoved = true;
+      kept!.actedAfterDelivery = true;
+      adapter5.finish(store5, JSON.stringify({ reasoning: "delivered and moved", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(3);
+        expect(operatorRuns()[2]!.state).toBe("finished");
+      });
+      await new Promise((r) => setTimeout(r, 120));
+      expect(operatorRuns()).toHaveLength(3);
+    });
+  });
+
   describe("ruling 157: a hold ends when a person starts the operator", () => {
     // Pass 35, F35-8 (KNC-25): `hold_runtime_debug` stored `readiness: blocked`
     // with no packet; a person's Run operator passed every fire-time refusal
@@ -4672,10 +4748,10 @@ describe("F37-61 / ruling 240: the held-task doctrine names two gates, and both 
     expect(src).toContain("`run_agent` and `deliver_for_review` are BOTH REFUSED");
 
     const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(specialist).toContain('holdRefusal(input.taskKey, held, "running an agent on it")');
+    expect(specialist).toContain('holdRefusalFor(db, input.projectSlug, input.taskKey, held, "running an agent on it")');
     // CANARY: delete the hold gate from `performDelivery` and this fails — the
     // prompt would be back to asserting a gate that was never built.
     const actions = readFileSync("app/server/tasks/task-actions.server.ts", "utf8");
-    expect(actions).toContain('holdRefusal(taskKey, held, "delivering it for review")');
+    expect(actions).toContain('holdRefusalFor(db, projectSlug, taskKey, held, "delivering it for review")');
   });
 });

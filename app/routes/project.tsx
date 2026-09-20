@@ -20,7 +20,8 @@ import {
 } from "~/server/projections/notifications.server";
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
-import type { TaskSummary } from "~/shared/mapping/task.server";
+import { withLiveRun, type TaskSummary } from "~/shared/mapping/task.server";
+import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { roleCan } from "~/shared/rbac";
 import { isArchived } from "~/features/board/board-filters";
 import { sseScopes } from "~/features/live-updates/event-types";
@@ -120,10 +121,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // adds (`lastActivityAt`, `quiet`). Re-typing through `TaskSummary` erased
   // them from the type while the spread carried them at runtime — the feature
   // worked, but nothing downstream could see it in the type system.
-  const annotate = <T extends TaskSummary>(t: T): T => ({
-    ...t,
-    waitingOnMe: myDecisions.has(t.key),
-  });
+  // Ruling 349: a card says "agent queued" for a run the cap parked; the fact
+  // is on the run row, read once for the project.
+  const liveRuns = liveRunStateByTask(db, params.slug);
+  const annotate = <T extends TaskSummary>(t: T): T =>
+    withLiveRun({ ...t, waitingOnMe: myDecisions.has(t.key) }, liveRuns.get(t.key) ?? null);
   const board = {
     ...raw,
     columns: raw.columns.map((c) => ({ ...c, tasks: c.tasks.map(annotate) })),

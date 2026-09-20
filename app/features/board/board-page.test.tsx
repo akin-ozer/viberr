@@ -3030,3 +3030,21 @@ describe("a move in flight draws its request until the columns show the answer",
     expect([count(container, "Triage"), count(container, "In Progress")]).toEqual(["0", "3"]);
   });
 });
+
+describe("ruling 349: a run parked behind the cap reads 'agent queued'", () => {
+  it("the foot says queued with no pulse, and never claims work in flight", () => {
+    const { container } = renderBoard([
+      task({
+        waiting: "agent",
+        readiness: "ready",
+        displayReadiness: "agent_queued",
+        liveRun: "queued",
+      }),
+    ]);
+    const tag = container.querySelector(".card .wait-tag")!;
+    expect(tag.textContent!.trim()).toBe("agent queued");
+    // CANARY: render the working branch for every waiting: "agent" card.
+    expect(tag.querySelector(".working")).toBeNull();
+    expect(container.textContent).not.toContain("agent working");
+  });
+});
