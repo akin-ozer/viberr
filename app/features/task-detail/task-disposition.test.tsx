@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import {
   ExecutionProfile,
@@ -133,6 +133,9 @@ function renderPage(props: {
   runtime?: RunView[];
   deployedSpecialists?: DeployedSpecialistView[];
   liveAgentRuns?: LiveAgentRun[];
+  /** Ruling 368: hold every action until the test answers it, so the
+   *  in-flight state can be read. */
+  held?: { reply: Promise<unknown> };
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -174,12 +177,22 @@ function renderPage(props: {
         const row: Record<string, string> = {};
         for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
         submitted.push(row);
+        if (props.held) await props.held.reply;
         return { ok: true, intent: row.intent, toast: "done" };
       },
     },
   ]);
   const utils = render(<Stub initialEntries={["/"]} />);
   return { ...utils, submitted };
+}
+
+/** An action the test answers when it decides to (ruling 368). */
+function heldAction() {
+  let answer: () => void = () => {};
+  const reply = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  return { reply, answer: () => answer() };
 }
 
 const findButton = (container: HTMLElement, text: string) =>
@@ -2720,5 +2733,92 @@ describe("C3: the archive dialog's open-PR row tells the truth about what still 
     expect(dialog.textContent).toContain("#91");
     expect(dialog.textContent).toContain("The task is still archived");
     expect(dialog.textContent).not.toContain("confirming now is refused and nothing changes");
+  });
+});
+
+/**
+ * Ruling 368: the card whose request is in flight shows it on the button that
+ * started it — the loader spinning where the glyph was, a label naming the
+ * work — while the sibling control only waits. The accept confirm has closed
+ * by then, and a card that merely dimmed read as refused. Canary: pass
+ * `inFlight={null}` from the page and the busy label never appears.
+ */
+describe("ruling 368: a recommendation's request in flight", () => {
+  const card = (kind: RecommendationView["kind"]): RecommendationView => {
+    const rec: RecommendationView = {
+      id: "rec-1",
+      kind,
+      label: kind === "accept_completion" ? "Accept completion and move VIB-151 to Done" : "Run the Developer",
+      detail: "The review is clean.",
+    };
+    if (kind === "run_agent") {
+      rec.profileId = "developer";
+      rec.prompt = "Build it.";
+    }
+    return rec;
+  };
+
+  it("an accepted recommendation's Apply reads 'Accepting…' with the spinner until the server answers", async () => {
+    const held = heldAction();
+    const { container, submitted } = renderPage({
+      myRole: "admin",
+      task: { pr: { number: 147, state: "review", title: "[VIB-151] Compress timelines" } },
+      recommendations: [card("accept_completion")],
+      held,
+    });
+    const apply = findButton(container, "Apply")!;
+    expect(apply.querySelector("svg.ico.spin")).toBeNull();
+    fireEvent.click(apply);
+    fireEvent.click(findButton(container, "Apply → Done")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const busy = findButton(container, "Accepting…")!;
+    await waitFor(() => expect(busy.getAttribute("aria-busy")).toBe("true"));
+    expect(busy.disabled).toBe(true);
+    expect(busy.querySelectorAll("svg.ico")).toHaveLength(1);
+    expect(busy.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(busy.getAttribute("title")).toBe("Accepting the completion; the merge follows when GitHub is reachable");
+    // The sibling waits without claiming to be the one working.
+    const dismiss = findButton(container, "Dismiss")!;
+    expect(dismiss.disabled).toBe(true);
+    expect(dismiss.getAttribute("aria-busy")).not.toBe("true");
+    expect(dismiss.querySelector("svg.ico.spin")).toBeNull();
+
+    await act(async () => {
+      held.answer();
+    });
+    await waitFor(() => expect(findButton(container, "Apply")!.getAttribute("aria-busy")).not.toBe("true"));
+    expect(findButton(container, "Accepting…")).toBeUndefined();
+    expect(findButton(container, "Apply")!.querySelector("svg.ico.spin")).toBeNull();
+  });
+
+  it("a plain recommendation reads 'Applying…', and a dismissal 'Dismissing…' on its own button", async () => {
+    const held = heldAction();
+    const { container, submitted, getByText } = renderPage({
+      myRole: "admin",
+      recommendations: [card("run_agent")],
+      held,
+    });
+    fireEvent.click(findButton(container, "Apply")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    await waitFor(() => expect(findButton(container, "Applying…")!.getAttribute("aria-busy")).toBe("true"));
+    await act(async () => {
+      held.answer();
+    });
+    await waitFor(() => expect(findButton(container, "Applying…")).toBeUndefined());
+
+    const held2 = heldAction();
+    const second = renderPage({ myRole: "admin", recommendations: [card("run_agent")], held: held2 });
+    fireEvent.click(findButton(second.container, "Dismiss")!);
+    // D6: the dismissal confirms first.
+    fireEvent.click(second.getByText("Dismiss recommendation"));
+    await waitFor(() => expect(second.submitted).toHaveLength(1));
+    const dismissing = findButton(second.container, "Dismissing…")!;
+    await waitFor(() => expect(dismissing.getAttribute("aria-busy")).toBe("true"));
+    expect(dismissing.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(findButton(second.container, "Apply")!.getAttribute("aria-busy")).not.toBe("true");
+    void getByText;
+    await act(async () => {
+      held2.answer();
+    });
   });
 });

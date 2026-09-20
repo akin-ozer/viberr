@@ -68,10 +68,17 @@ function reachesAcceptance(r: RecommendationView, terminalStageId: string | null
   );
 }
 
+/** Ruling 368: the one recommendation whose Apply or Dismiss is in flight. */
+export interface RecommendationInFlight {
+  recId: string;
+  action: "apply" | "dismiss";
+}
+
 export function OperatorRecommendations({
   recommendations,
   canApply,
   busy,
+  inFlight = null,
   onApply,
   onDismiss,
   acceptanceRefusal = null,
@@ -81,6 +88,12 @@ export function OperatorRecommendations({
   /** admin|maintainer — gates the Apply button (server re-checks). */
   canApply: boolean;
   busy: boolean;
+  /** Ruling 368: which card's request is in flight, so THAT button shows it —
+   *  the loader spinning where its glyph was and a label naming the work —
+   *  while every other control just waits. Applying an acceptance merges on
+   *  GitHub, which takes seconds; the confirm has closed by then, and a card
+   *  that merely dimmed read as refused, not as working. */
+  inFlight?: RecommendationInFlight | null;
   /** Page-owned: an `accept_completion` (or terminal-stage `transition`) Apply
    *  reaches the acceptance confirm before it submits (F19-3). */
   onApply: (recId: string) => void;
@@ -168,6 +181,7 @@ export function OperatorRecommendations({
                   type="button"
                   className="btn sm"
                   disabled={busy}
+                  aria-busy={inFlight?.recId === r.id && inFlight.action === "apply"}
                   onClick={() => {
                     // Ruling 162: an acceptance the gate refuses is not offered;
                     // the click re-announces the reason instead of submitting.
@@ -178,22 +192,43 @@ export function OperatorRecommendations({
                     onApply(r.id);
                   }}
                   title={
-                    r.kind === "accept_completion"
-                      ? "Apply the operator's recommendation (asks before merging)"
-                      : "Apply the operator's recommendation"
+                    inFlight?.recId === r.id && inFlight.action === "apply"
+                      ? reachesAcceptance(r, terminalStageId)
+                        ? "Accepting the completion; the merge follows when GitHub is reachable"
+                        : "Applying the recommendation"
+                      : r.kind === "accept_completion"
+                        ? "Apply the operator's recommendation (asks before merging)"
+                        : "Apply the operator's recommendation"
                   }
                 >
-                  <Icon name="check" />
-                  Apply
+                  {inFlight?.recId === r.id && inFlight.action === "apply" ? (
+                    <>
+                      <Icon name="loader" className="spin" />
+                      {reachesAcceptance(r, terminalStageId) ? "Accepting…" : "Applying…"}
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="check" />
+                      Apply
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
                   className="btn ghost sm"
                   disabled={busy}
+                  aria-busy={inFlight?.recId === r.id && inFlight.action === "dismiss"}
                   onClick={() => onDismiss(r.id)}
                   title="Dismiss without acting"
                 >
-                  Dismiss
+                  {inFlight?.recId === r.id && inFlight.action === "dismiss" ? (
+                    <>
+                      <Icon name="loader" className="spin" />
+                      Dismissing…
+                    </>
+                  ) : (
+                    "Dismiss"
+                  )}
                 </button>
               </div>
             )}

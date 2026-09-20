@@ -20,6 +20,7 @@ import type {
 import { ReleaseConfirm } from "./release-confirm";
 import {
   OperatorRecommendations,
+  type RecommendationInFlight,
   type RecommendationView,
 } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
@@ -547,6 +548,18 @@ export function TaskDetailPage({
   const recFetcher = useFetcher<ActionResult>();
   useActionFeedback(recFetcher);
   const recBusy = recFetcher.state !== "idle";
+  // Ruling 368: the card whose request this fetcher carries shows it in
+  // flight. The fetcher keeps its form data through `submitting` and the
+  // revalidating `loading` that follows, which is exactly the stretch the
+  // human is waiting through.
+  const recInFlight: RecommendationInFlight | null =
+    recBusy && recFetcher.formData
+      ? {
+          recId: String(recFetcher.formData.get("recId") ?? ""),
+          action:
+            recFetcher.formData.get("intent") === "dismiss-recommendation" ? "dismiss" : "apply",
+        }
+      : null;
   const terminalStageId =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.id : null;
   const submitApplyRec = (
@@ -846,6 +859,7 @@ export function TaskDetailPage({
         />
 
         <OperatorRecommendations
+          inFlight={recInFlight}
           recommendations={recommendations}
           canApply={canDecideOwned}
           busy={recBusy}
