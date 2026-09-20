@@ -359,7 +359,7 @@ export function AgentModal({
               aria-pressed={selStageSet.has(s.id)}
               onClick={() => toggle(selStages, setSelStages, s.id)}
             >
-              <span className="sdot" style={{ background: s.color }}></span>
+              <span className="sdot" data-stage-color={s.color}></span>
               {s.name}
             </button>
           ))}

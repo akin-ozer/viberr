@@ -72,9 +72,9 @@ describe("NotificationItem (shared bell/page row)", () => {
 
 describe("StageMeter (per-project stages, ruling 15)", () => {
   const stages = [
-    { id: "todo", name: "To do", color: "#a5a8b5" },
-    { id: "doing", name: "In progress", color: "#7b61ff" },
-    { id: "done", name: "Done", color: "#00b473" },
+    { id: "todo", name: "To do", color: "slate" },
+    { id: "doing", name: "In progress", color: "violet" },
+    { id: "done", name: "Done", color: "green" },
   ];
 
   it("renders flex-weighted segments for non-empty stages, done at 0.45 opacity", () => {

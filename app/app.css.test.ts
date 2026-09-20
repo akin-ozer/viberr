@@ -1387,7 +1387,10 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
   const sites = inlineStyleSites();
 
   it("scanned the tree, not an empty list", () => {
-    expect(sites.length).toBeGreaterThan(10);
+    // Ruling 364 moved the fifteen stage-colour sites into the sheet (a
+    // stage's colour is a NAME the markup carries now), so the floor sits
+    // under what is left: the dynamic bar sizes, tree depths and positions.
+    expect(sites.length).toBeGreaterThan(5);
   });
 
   it("leaves no `style={{…}}` whose every value is a literal", () => {
@@ -1407,7 +1410,7 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     expect(staticSites).toEqual([]);
   });
 
-  it("holds the line at 24 sites", () => {
+  it("holds the line at 12 sites", () => {
     // A ceiling, not a target. It exists because the previous pass moved the
     // `<select>` half of this finding and left the inline-style half, and
     // nothing noticed the count climbing back for three passes. Raised 20 → 22
@@ -1420,7 +1423,8 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     // Raised 23 → 24 (pass 30) for the board list row's read-only stage dot:
     // the STAGE's own colour, the exact dynamic-value case already exempted
     // for the task page's identical `.stage-static` dot.
-    expect(sites.length).toBeLessThanOrEqual(24);
+    // Ruling 364: 24 → 12 once the stage colours stopped being inline styles.
+    expect(sites.length).toBeLessThanOrEqual(12);
   });
 });
 
@@ -3354,5 +3358,44 @@ describe("app.css code reader palette meets WCAG AA (ruling 363)", () => {
         new RegExp(`\\.code-view \\.tk-${family} \\{ color: var\\(--syn-${family}\\); \\}`),
       );
     }
+  });
+});
+
+/* Ruling 364: a stage colour is a preset NAME; these rules are the one place it
+   becomes paint. Every preset needs a token in both theme blocks that clears
+   WCAG 1.4.11's 3:1 on the surfaces the dots and the home meter sit on, and
+   the attribute rule that carries the name to `--stage`. */
+describe("app.css stage colour presets (ruling 364)", () => {
+  const NON_TEXT_CONTRAST = 3;
+  const PRESETS = [
+    "slate", "gray", "stone", "red", "orange", "amber", "yellow", "lime", "green", "emerald",
+    "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose",
+  ];
+  const THEMES = { light: LIGHT_ROOT, dark: DARK_ROOT };
+  for (const [theme, root] of Object.entries(THEMES)) {
+    it(`${theme} theme: every --stage-* token exists and clears 3:1 on --surface and --bg`, () => {
+      for (const preset of PRESETS) {
+        const value = tokenIn(root, `--stage-${preset}`);
+        for (const ground of ["--surface", "--bg"]) {
+          const groundValue = tokenIn(root, ground);
+          expect(
+            contrastRatio(value, groundValue),
+            `${theme} --stage-${preset} (${value}) on ${ground} (${groundValue})`,
+          ).toBeGreaterThanOrEqual(NON_TEXT_CONTRAST);
+        }
+      }
+    });
+  }
+
+  it("every preset name resolves to its token through data-stage-color, and the stage surfaces read it", () => {
+    for (const preset of PRESETS) {
+      expect(CODE, preset).toContain(
+        `[data-stage-color="${preset}"] { --stage: var(--stage-${preset}); }`,
+      );
+    }
+    for (const consumer of [".sdot[data-stage-color]", ".col-stage-dot[data-stage-color]", ".pj-meter span[data-stage-color]", ".swatch[data-stage-color]"]) {
+      expect(CODE, consumer).toContain(consumer);
+    }
+    expect(CODE).toMatch(/\.pj-meter\.is-empty span\[data-stage-color\] \{\s*flex: 1;\s*background: color-mix\(in srgb, var\(--stage\), transparent 82%\);\s*\}/);
   });
 });

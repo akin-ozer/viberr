@@ -19,11 +19,11 @@ import { StageMenu, type StageOption } from "./stage-menu";
 afterEach(cleanup);
 
 const STAGES: StageOption[] = [
-  { id: "triage", name: "Triage", color: "#888" },
-  { id: "ready", name: "Ready", color: "#3c8" },
-  { id: "in-progress", name: "In Progress", color: "#86f" },
-  { id: "review", name: "Review", color: "#58f" },
-  { id: "done", name: "Done", color: "#3a7" },
+  { id: "triage", name: "Triage", color: "gray" },
+  { id: "ready", name: "Ready", color: "emerald" },
+  { id: "in-progress", name: "In Progress", color: "violet" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 /** Render with `ready` current, so the disabled item sits mid-list. */

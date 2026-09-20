@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stageColorSchema } from "~/shared/workflow/stage-colors";
 import {
   diagError,
   diagWarning,
@@ -42,8 +43,8 @@ export const stageSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
-    /** Hex ("#7b61ff") or var(--*) string — both accepted (ruling 15). */
-    color: z.string().default("var(--muted)"),
+    /** One of the twenty named presets (ruling 364); absent reads as slate. */
+    color: stageColorSchema.default("slate"),
   })
   .loose();
 export type StageDef = z.infer<typeof stageSchema>;

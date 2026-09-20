@@ -249,6 +249,22 @@ lock. `sudo chown 1000:1000 docker-data` fixes it; the image's own `chown` only 
 applies when `/data` is NOT bind-mounted (a named volume, say). Rootless Docker and Docker
 Desktop on macOS/Windows map ownership for you and need none of this.
 
+*(Added 2026-09-20.)* **The image fetches its Debian packages over HTTPS.** The runtime
+stage installs git, make, curl and chromium from `deb.debian.org` in three `apt-get`
+layers, each refreshing a 10 MB package index and then fetching 25 MB, 1 MB and 192 MB of
+archives. The base image names that mirror over plain HTTP, and on a connection that
+shapes port 80 (measured on the owner's Mac: 20–50 KB/s to every Debian mirror over HTTP,
+3.6 MB/s to the same host over HTTPS) the first index alone took over three minutes, and a
+`docker compose up -d --build` looked hung and was cancelled at 2m49s. The `Dockerfile`
+now rewrites the apt sources to HTTPS before its first fetch, trusting the mirror through
+Node's embedded root store for the one layer that installs `ca-certificates`; the system
+store that install creates carries every layer after it. Docker's layer cache hides all of
+this while the layers survive, so it surfaces only on a cold cache — a fresh machine, a
+`docker builder prune`, a base-image bump. A build that still stalls on an `apt-get` line
+is the network, not the image: from the host, `curl -o /dev/null -w '%{speed_download}\n'
+https://deb.debian.org/debian/dists/trixie/InRelease` is the two-second check, and the same
+URL over `http://` shows the throttle.
+
 - Migrations apply automatically at boot; no manual migrate step is needed.
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
   / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once).

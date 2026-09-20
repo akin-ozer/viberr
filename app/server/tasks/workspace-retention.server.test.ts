@@ -99,9 +99,9 @@ describe("reclaimTerminalTaskWorkspaces", () => {
       taskPrefix: "VIB",
       nextTaskNumber: 100,
       stages: [
-        { id: "triage", name: "Triage", color: "#a5a8b5" },
-        { id: "impl", name: "In Progress", color: "#7b61ff" },
-        { id: "shipped", name: "Shipped", color: "#00b473" },
+        { id: "triage", name: "Triage", color: "slate" },
+        { id: "impl", name: "In Progress", color: "violet" },
+        { id: "shipped", name: "Shipped", color: "green" },
       ],
       workflow: [
         { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },

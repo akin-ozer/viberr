@@ -879,11 +879,11 @@ export function CurrentStatePanel({
               />
             ) : (
               <span className="stage-static">
-                {/* The colour is the STAGE's, so it stays in the markup; the
-                    size is a design decision and lives in the sheet. */}
+                {/* The colour is the STAGE's, named in the markup (ruling 364);
+                    the sheet turns the name into paint and owns the size. */}
                 <span
                   className="col-stage-dot sm"
-                  style={{ background: stage?.color }}
+                  data-stage-color={stage?.color}
                 />
                 {/* Ruling 148: the empty string left a bare coloured dot with
                     no words at all. Same phrase as the stage menu. */}

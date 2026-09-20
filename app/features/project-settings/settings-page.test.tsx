@@ -50,11 +50,11 @@ const PROJECT: SettingsViewData["project"] = {
 };
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "ready", name: "Ready", color: "#187574" },
-  { id: "impl", name: "In Progress", color: "#7b61ff" },
-  { id: "review", name: "Review", color: "#5b76fe" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "ready", name: "Ready", color: "teal" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 const MEMBERS: MembershipView[] = [
@@ -276,6 +276,7 @@ describe("StagesPanel", () => {
     setEditingId: () => {},
     onReorder: () => {},
     onAdd: () => {},
+    onRecolor: () => {},
     onNavPolicy: () => {},
   };
 
@@ -422,6 +423,38 @@ describe("StagesPanel", () => {
     fireEvent.blur(input!);
     expect(onRename).toHaveBeenCalledWith("ready", "Groomed");
     expect(setEditingId).toHaveBeenCalledWith(null);
+  });
+
+  // Ruling 364: the row's dot is the colour picker — a button carrying the
+  // stage's preset NAME (the sheet paints it; nothing inline), opening the
+  // twenty swatches; a pick reports the preset and closes the menu.
+  it("ruling 364: the dot opens the twenty-swatch menu and a pick reports the preset", () => {
+    const onRecolor = vi.fn();
+    const { container } = render(
+      <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} onRecolor={onRecolor} />,
+    );
+    const trigger = container.querySelector<HTMLButtonElement>(".stg-row .stg-swatch")!;
+    expect(trigger.dataset.stageColor).toBe(STAGES[0]!.color);
+    expect(trigger.style.background).toBe("");
+    expect(trigger.disabled).toBe(false);
+    fireEvent.click(trigger);
+    const swatches = container.querySelectorAll(".swatch-menu .swatch");
+    expect(swatches).toHaveLength(20);
+    expect(
+      container.querySelector('.swatch[aria-checked="true"]')!.getAttribute("data-stage-color"),
+    ).toBe(STAGES[0]!.color);
+    fireEvent.click(container.querySelector('.swatch[data-stage-color="rose"]')!);
+    expect(onRecolor).toHaveBeenCalledWith(STAGES[0]!.id, "rose");
+    expect(container.querySelector(".swatch-menu")).toBeNull();
+  });
+
+  it("ruling 364: a non-admin sees the colour but cannot open the menu", () => {
+    const { container } = render(
+      <StagesPanel {...base} canManage={false} onRename={() => {}} onRemove={() => {}} />,
+    );
+    const trigger = container.querySelector<HTMLButtonElement>(".stg-row .stg-swatch")!;
+    expect(trigger.dataset.stageColor).toBe(STAGES[0]!.color);
+    expect(trigger.disabled).toBe(true);
   });
 
   it("hides mutating affordances for non-admins", () => {
@@ -861,6 +894,7 @@ describe("settings panels take count + note styling from the sheet (F19-33)", ()
         counts={{ triage: 2 }}
         canManage
         editingId={null}
+        onRecolor={() => {}}
         setEditingId={() => {}}
         onReorder={() => {}}
         onAdd={() => {}}

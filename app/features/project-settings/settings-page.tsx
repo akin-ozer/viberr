@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
+import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
 import {
   DragDropProvider,
   KeyboardSensor,
@@ -611,6 +612,111 @@ function StageMoveMenu({
   );
 }
 
+/**
+ * Ruling 364: the stage's dot IS the colour picker. A real button (the dot,
+ * with the app-wide focus ring) opens the twenty presets as a 5×4 grid of
+ * swatches — `role="menu"` of `menuitemradio`s, the arrows walk the grid,
+ * Escape closes and returns focus, an outside press closes. Picking submits
+ * the governed `recolor-stage` action; the file, the board, the home meter
+ * and every dot follow from the one stored name.
+ */
+const SWATCH_COLUMNS = 5;
+
+function StageColorMenu({
+  stage,
+  disabled,
+  onPick,
+}: {
+  stage: { id: string; name: string; color: string };
+  disabled: boolean;
+  onPick: (color: StageColor) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const swatches = () =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>(".swatch") ?? []);
+  // Opening lands focus on the current colour, so the arrows walk from it.
+  useEffect(() => {
+    if (!open) return;
+    (
+      menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
+      menuRef.current?.querySelector<HTMLButtonElement>(".swatch")
+    )?.focus();
+  }, [open]);
+  const closeAndReturnFocus = () => {
+    setOpen(false);
+    btnRef.current?.focus();
+  };
+  const onMenuKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const all = swatches();
+    if (all.length === 0) return;
+    const i = all.findIndex((item) => item === document.activeElement);
+    const step = (delta: number) => {
+      event.preventDefault();
+      all[(i + delta + all.length) % all.length]!.focus();
+    };
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAndReturnFocus();
+    } else if (event.key === "ArrowRight") step(1);
+    else if (event.key === "ArrowLeft") step(-1);
+    else if (event.key === "ArrowDown") step(SWATCH_COLUMNS);
+    else if (event.key === "ArrowUp") step(-SWATCH_COLUMNS);
+    else if (event.key === "Home") {
+      event.preventDefault();
+      all[0]!.focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      all[all.length - 1]!.focus();
+    }
+  };
+  return (
+    <div className="stg-color-wrap" ref={wrapRef}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={"stg-swatch" + (open ? " open" : "")}
+        data-stage-color={stage.color}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Colour of ${stage.name}: ${stage.color}. Change colour`}
+        title="Change colour"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+      />
+      {open && (
+        <div
+          ref={menuRef}
+          className="own-menu swatch-menu"
+          role="menu"
+          aria-label={`Colour for ${stage.name}`}
+          onKeyDown={onMenuKey}
+        >
+          {STAGE_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              role="menuitemradio"
+              aria-checked={color === stage.color}
+              className="swatch"
+              data-stage-color={color}
+              aria-label={color}
+              title={color}
+              onClick={() => {
+                closeAndReturnFocus();
+                if (color !== stage.color) onPick(color);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StageRow({
   stage,
   index,
@@ -628,6 +734,7 @@ function StageRow({
   onCancelRename,
   onMove,
   onRemove,
+  onRecolor,
   entryId,
 }: {
   stage: SettingsViewData["stages"][number];
@@ -646,6 +753,7 @@ function StageRow({
   onCancelRename: () => void;
   onMove: (beforeId: string | null) => void;
   onRemove: () => void;
+  onRecolor: (color: StageColor) => void;
   entryId: string | undefined;
 }) {
   // Whole row is the drag surface. Optimistic sorting is OFF — this list never
@@ -684,7 +792,7 @@ function StageRow({
       >
         {locked && <Icon name="lock" />}
       </span>
-      <span className="sdot" style={{ background: stage.color }}></span>
+      <StageColorMenu stage={stage} disabled={!canManage} onPick={onRecolor} />
       {editing ? (
         <input
           type="text"
@@ -752,6 +860,7 @@ export function StagesPanel({
   onReorder,
   onAdd,
   onRemove,
+  onRecolor,
   onNavPolicy,
 }: {
   stages: SettingsViewData["stages"];
@@ -763,6 +872,7 @@ export function StagesPanel({
   onReorder: (orderedIds: string[]) => void;
   onAdd: (name: string) => void;
   onRemove: (stageId: string) => void;
+  onRecolor: (stageId: string, color: StageColor) => void;
   onNavPolicy: () => void;
 }) {
   const push = useToast();
@@ -887,6 +997,7 @@ export function StagesPanel({
               onCancelRename={() => setEditingId(null)}
               onMove={(before) => move(s.id, before)}
               onRemove={() => remove(s)}
+              onRecolor={(color) => onRecolor(s.id, color)}
             />
           ))}
         </div>
@@ -2082,6 +2193,12 @@ export function SettingsPage({
             onRemove={(stageId) =>
               stageFetcher.submit(
                 { intent: "remove-stage", _csrf: csrf, stageId },
+                { method: "post" },
+              )
+            }
+            onRecolor={(stageId, color) =>
+              stageFetcher.submit(
+                { intent: "recolor-stage", _csrf: csrf, stageId, color },
                 { method: "post" },
               )
             }

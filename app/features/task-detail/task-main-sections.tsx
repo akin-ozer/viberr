@@ -202,7 +202,7 @@ export function TaskHero({
           <Pill kind="neutral">
             <span
               className="col-stage-dot sm"
-              style={{ background: stage?.color }}
+              data-stage-color={stage?.color}
             />
             {stage?.name ?? ""}
           </Pill>

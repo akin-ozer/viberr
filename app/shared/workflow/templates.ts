@@ -35,11 +35,11 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
   id: "governed-5",
   label: "Standard · 5 stages",
   stages: [
-    { id: "triage", name: "Triage", color: "#a5a8b5" },
-    { id: "ready", name: "Ready", color: "#187574" },
-    { id: "impl", name: "In Progress", color: "#7b61ff" },
-    { id: "review", name: "Review", color: "#5b76fe" },
-    { id: "done", name: "Done", color: "#00b473" },
+    { id: "triage", name: "Triage", color: "slate" },
+    { id: "ready", name: "Ready", color: "teal" },
+    { id: "impl", name: "In Progress", color: "violet" },
+    { id: "review", name: "Review", color: "blue" },
+    { id: "done", name: "Done", color: "green" },
   ],
   workflow: [
     {

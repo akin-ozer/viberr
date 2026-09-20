@@ -1,3 +1,4 @@
+import type { StageDef } from "~/schemas/project-file.schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { CUSTOM_3_STAGE_BOARD } from "../../../test-support/custom-board";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -928,14 +929,14 @@ describe("ruling 138: the queue row flags a decided edit_goal packet", () => {
  * working half; KNC-8, KNC-9 and KNC-5 vanish and the first four cases go red.
  */
 describe("U35-5: review work before the boundary is listed on a custom board", () => {
-  const STAGES = [
-    { id: "triage", name: "Triage", color: "#a5a8b5" },
-    { id: "design", name: "Design", color: "#187574" },
-    { id: "impl", name: "Implementation", color: "#7b61ff" },
-    { id: "validation", name: "Validation", color: "#5b76fe" },
-    { id: "review", name: "Review", color: "#5b76fe" },
-    { id: "merge", name: "Merge", color: "#5b76fe" },
-    { id: "done", name: "Done", color: "#00b473" },
+  const STAGES: StageDef[] = [
+    { id: "triage", name: "Triage", color: "slate" },
+    { id: "design", name: "Design", color: "teal" },
+    { id: "impl", name: "Implementation", color: "violet" },
+    { id: "validation", name: "Validation", color: "blue" },
+    { id: "review", name: "Review", color: "blue" },
+    { id: "merge", name: "Merge", color: "blue" },
+    { id: "done", name: "Done", color: "green" },
   ];
   const edge = (from: string, to: string, boundary: "auto" | "approval" | "human") => ({
     from,

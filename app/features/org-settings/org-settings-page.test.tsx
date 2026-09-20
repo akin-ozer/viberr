@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import { z } from "zod";
+import type { StageDef } from "~/schemas/project-file.schema";
 import type { ConnectionRecord } from "~/server/org/connections.server";
 import { formatCalendarDate } from "~/shared/dates/format";
 import type { GagentView } from "~/server/org/gagents.server";
@@ -438,12 +439,12 @@ const GAGENTS: GagentView[] = [
     role: "Spare hands", model: "", effort: "",
     persona: "", stages: ["impl"], skills: [], mcps: [], kbs: [], used: 0 },
 ];
-const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "ready", name: "Ready", color: "#187574" },
-  { id: "impl", name: "In Progress", color: "#7b61ff" },
-  { id: "review", name: "Review", color: "#5b76fe" },
-  { id: "done", name: "Done", color: "#00b473" },
+const STAGES: StageDef[] = [
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "ready", name: "Ready", color: "teal" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 /** The template-grant counts the LOADER supplies, matching what GAGENTS

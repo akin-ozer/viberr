@@ -24,9 +24,9 @@ import type { HomeProjectCard } from "./home-query.server";
 afterEach(cleanup);
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "impl", name: "In Progress", color: "#7b61ff" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "impl", name: "In Progress", color: "violet" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 function card(patch: Partial<HomeProjectCard> = {}): HomeProjectCard {
@@ -216,8 +216,8 @@ describe("UI-22: override-available decisions are never hidden", () => {
 describe("UI-15: the dimmed band is the TERMINAL stage, not the id 'done'", () => {
   it("dims the last stage on a board with renamed ids", () => {
     const renamed = [
-      { id: "todo", name: "Todo", color: "#111111" },
-      { id: "shipped", name: "Shipped", color: "#222222" },
+      { id: "todo", name: "Todo", color: "stone" },
+      { id: "shipped", name: "Shipped", color: "rose" },
     ];
     const { container } = renderHome(
       baseData([
@@ -228,6 +228,12 @@ describe("UI-15: the dimmed band is the TERMINAL stage, not the id 'done'", () =
     expect(bands).toHaveLength(2);
     expect(bands[0]!.style.opacity).toBe("1");
     expect(bands[1]!.style.opacity).toBe("0.45");
+    // Ruling 364: the band carries the preset NAME for the sheet to paint —
+    // never an inline colour (the shopify meter's `amber` band painted nothing
+    // that way). CANARY: put `background: s.color` back.
+    expect(bands[0]!.dataset.stageColor).toBe("stone");
+    expect(bands[1]!.dataset.stageColor).toBe("rose");
+    expect(bands[0]!.style.background).toBe("");
   });
 });
 

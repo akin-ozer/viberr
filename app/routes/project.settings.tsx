@@ -21,6 +21,7 @@ import {
 } from "~/features/github/credential-visibility.server";
 import {
   addStage,
+  recolorStage,
   deleteProject,
   setProjectArchived,
   inviteMember,
@@ -117,6 +118,14 @@ export async function action({ request, params }: Route.ActionArgs) {
         const result = await renameStage(
           db,
           { projectSlug: slug, stageId: field("stageId"), name: field("name") },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "recolor-stage": {
+        const result = await recolorStage(
+          db,
+          { projectSlug: slug, stageId: field("stageId"), color: field("color") },
           actor,
         );
         return { ok: true as const, toast: result.toast };

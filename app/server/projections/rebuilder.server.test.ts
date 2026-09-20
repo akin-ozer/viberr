@@ -516,7 +516,7 @@ describe("rebuilder", () => {
     const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     project.parsed.frontmatter.stages = [
       ...project.parsed.frontmatter.stages,
-      { id: "qa", name: "QA", color: "#187574" },
+      { id: "qa", name: "QA", color: "teal" },
     ];
     writeFileAtomic(project.absPath, serializeProjectFile(project.parsed));
 

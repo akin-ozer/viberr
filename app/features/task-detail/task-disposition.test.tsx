@@ -51,9 +51,9 @@ afterEach(cleanup);
  */
 
 const STAGES = [
-  { id: "triage", name: "Triage", color: "#a5a8b5" },
-  { id: "review", name: "Review", color: "#5b76fe" },
-  { id: "done", name: "Done", color: "#00b473" },
+  { id: "triage", name: "Triage", color: "slate" },
+  { id: "review", name: "Review", color: "blue" },
+  { id: "done", name: "Done", color: "green" },
 ];
 
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
@@ -985,10 +985,10 @@ describe("F19-10: merge-pending is finishable by the owner the server authorizes
  */
 describe("R19-5: the force-accept confirm enumerates what the jump skips", () => {
   const FOUR_STAGES = [
-    { id: "triage", name: "Triage", color: "#a5a8b5" },
-    { id: "impl", name: "In Progress", color: "#f0a202" },
-    { id: "review", name: "Review", color: "#5b76fe" },
-    { id: "done", name: "Done", color: "#00b473" },
+    { id: "triage", name: "Triage", color: "slate" },
+    { id: "impl", name: "In Progress", color: "amber" },
+    { id: "review", name: "Review", color: "blue" },
+    { id: "done", name: "Done", color: "green" },
   ];
   const openForceConfirm = (props: Parameters<typeof renderPage>[0]) => {
     const r = renderPage(props);
