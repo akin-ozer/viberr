@@ -8,6 +8,7 @@ import {
   fmtClock,
   fmtTok,
   foldWaits,
+  commandNote,
   groupThoughts,
   HEARTBEAT_NOTE,
   heartbeatLabel,
@@ -654,32 +655,54 @@ describe("foldWaits + waitText (ruling 366)", () => {
 });
 
 /**
- * Ruling 366(d): a tool row opens to its full arguments exactly when its
- * one-line summary left some unseen. Canary: return true for every tool row
- * and the single-string case below fails; return false and Bash's description
- * is only ever reachable through `{ } raw`.
+ * Ruling 366(d): a tool row links to what its one-line summary CUT, named,
+ * and to nothing else. Canary: count every omitted key and the Bash case
+ * below grows a link for its `timeout`; drop the clip check and a clipped
+ * prompt reads as shown.
  */
-describe("hiddenArguments + argumentRows (ruling 366(d))", () => {
-  it("says yes for a second key, a non-string value, or a string the summary clipped", () => {
-    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "npm test", input: { command: "npm test", description: "run" } }))).toBe(true);
-    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__get_task", text: "12", input: { events: 12 } }))).toBe(true);
-    const long = "x".repeat(200);
-    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__post_comment", text: `${"x".repeat(159)}…`, input: { text: long } }))).toBe(true);
+describe("hiddenArguments + argumentRows + commandNote (ruling 366(d))", () => {
+  const tool = (name: string, text: string, input: LogLine["input"] = null) => L({ ev: "tool", tag: "tool_use", name, text, input });
+
+  it("names a clipped string, a collection by its size, and a long omitted string", () => {
+    const long = "y".repeat(200);
+    const clippedText = `profileId: developer · prompt: ${long.slice(0, 159)}…`;
+    expect(hiddenArguments(tool("mcp__viberr__run_agent", clippedText, { profileId: "developer", prompt: long }))).toEqual({
+      keys: ["prompt"],
+      label: "+ full prompt",
+    });
+    expect(
+      hiddenArguments(tool("mcp__viberr_agent__report_outcome", "summary: done · evidence: [3 items] · verdict: {2 fields}", {
+        summary: "done", evidence: [1, 2, 3], verdict: { a: 1, b: 2 },
+      })),
+    ).toEqual({ keys: ["evidence", "verdict"], label: "+ evidence (3 items), verdict (2 fields)" });
+    expect(
+      hiddenArguments(tool("Edit", "app/a.ts", { file_path: "app/a.ts", old_string: "const a = 1;\nconst b = 2;", new_string: "const a = 2;\nconst b = 3;" })),
+    ).toEqual({ keys: ["old_string", "new_string"], label: "+ old_string, new_string" });
+    // Past three, a count — the row is not the place for a key list.
+    expect(hiddenArguments(tool("TodoWrite", "", { a: [1], b: [1], c: [1], d: [1] }))!.label).toBe("+ 4 arguments");
   });
 
-  it("says no when the row already shows the one string, whitespace aside, and for rows with no input", () => {
-    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__read_default_branch_file", text: "a/b.ts", input: { path: "a/b.ts" } }))).toBe(false);
-    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "git  status\n", input: { command: "git status" } }))).toBe(false);
-    expect(hiddenArguments(L({ ev: "tool", name: "exec", text: "ls" }))).toBe(false);
-    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "", input: {} }))).toBe(false);
-    expect(hiddenArguments(L({ ev: "out", text: "x", input: { a: 1, b: 2 } }))).toBe(false);
+  it("offers nothing for trivia: numbers, booleans, empty collections, short omitted strings, Bash's own description", () => {
+    expect(hiddenArguments(tool("Bash", "npm test", { command: "npm test", description: "Run the suite", timeout: 60000, run_in_background: false }))).toBeNull();
+    expect(hiddenArguments(tool("Read", "app/a.ts", { file_path: "app/a.ts", offset: 10, limit: 50 }))).toBeNull();
+    expect(hiddenArguments(tool("Grep", "TODO app", { pattern: "TODO", path: "app", output_mode: "content", glob: "**/*.ts", "-i": true }))).toBeNull();
+    expect(hiddenArguments(tool("mcp__viberr__read_default_branch_file", "a/b.ts", { path: "a/b.ts" }))).toBeNull();
+    expect(hiddenArguments(tool("mcp__viberr__get_task", "", { events: [], meta: {}, n: null }))).toBeNull();
+    expect(hiddenArguments(tool("exec", "ls"))).toBeNull();
+    expect(hiddenArguments(L({ ev: "out", text: "x", input: { a: "z".repeat(80) } }))).toBeNull();
   });
 
-  it("lists every argument in full: strings as themselves, the rest as readable JSON", () => {
-    expect(argumentRows({ command: "npm test", timeout: 60000, tags: ["a", "b"] })).toEqual([
-      { key: "command", text: "npm test" },
-      { key: "timeout", text: "60000" },
+  it("prints Bash's description beside its command, and nothing for other tools", () => {
+    expect(commandNote(tool("Bash", "npm test", { command: "npm test", description: "  Run the suite " }))).toBe("Run the suite");
+    expect(commandNote(tool("Bash", "npm test", { command: "npm test" }))).toBeNull();
+    expect(commandNote(tool("Bash", "npm test", { command: "npm test", description: "   " }))).toBeNull();
+    expect(commandNote(tool("mcp__viberr__run_agent", "x", { description: "not a shell" }))).toBeNull();
+  });
+
+  it("discloses only the named keys, in full, in the link's order", () => {
+    expect(argumentRows({ command: "npm test", tags: ["a", "b"], timeout: 60000 }, ["tags", "command", "missing"])).toEqual([
       { key: "tags", text: '[\n  "a",\n  "b"\n]' },
+      { key: "command", text: "npm test" },
     ]);
   });
 });

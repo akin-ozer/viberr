@@ -21,6 +21,7 @@ import { Pill } from "~/ui/pill";
 import {
   agentMessageProse,
   argumentRows,
+  commandNote,
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
@@ -637,15 +638,15 @@ function WaitRow({
 }
 
 /**
- * Ruling 366(d): a tool call's arguments in full, under its row. The row's
- * summary is one line by design (the command, the one string, the clipped
- * pairs); this is where the rest lives, in the same shape the run-inputs
- * disclosure uses, so a reader never has to leave the row for `{ } raw`.
+ * Ruling 366(d): the arguments a tool row's summary cut, in full, under the
+ * row — only those, in the order the link named them — in the same shape the
+ * run-inputs disclosure uses, so a reader never has to leave the row for
+ * `{ } raw`.
  */
-function ArgumentRows({ input }: { input: NonNullable<LogLine["input"]> }) {
+function ArgumentRows({ input, keys }: { input: NonNullable<LogLine["input"]>; keys: readonly string[] }) {
   return (
     <>
-      {argumentRows(input).map((row) => (
+      {argumentRows(input, keys).map((row) => (
         <div className="log-line meta tstep" key={row.key}>
           <span className="lt" />
           <span className="ltag">{row.key}</span>
@@ -1264,9 +1265,11 @@ export function AgentLogsPanel({
           // the console used to flatten. All three are computed only when `raw`
           // is off — under it the stored envelope prints verbatim, unchanged.
           const chip = raw ? null : toolChip(display);
-          // Ruling 366(d): the arguments the one-line summary left unseen.
-          const args = !raw && hiddenArguments(display) ? display.input! : null;
-          const argsOpen = args !== null && openArgs.includes(entry.line.raw);
+          // Ruling 366(d): what the one-line summary cut, if anything worth a
+          // click, and Bash's description for the row itself.
+          const hidden = raw ? null : hiddenArguments(display);
+          const argsOpen = hidden !== null && openArgs.includes(entry.line.raw);
+          const note = raw ? null : commandNote(display);
           const files = raw ? null : fileChangeChips(display);
           const code = raw ? null : consoleCodeBlock(display);
           // N20-18: a Codex final message is the raw outcome-envelope JSON;
@@ -1285,8 +1288,30 @@ export function AgentLogsPanel({
                     {chip ? (
                       <span className={"log-chip" + (chip.who.kind === "viberr" ? " vb" : "")}>
                         <ToolName who={chip.who} />
-                        {chip.detail ? (
-                          <span className="lc-detail">{chip.detail}</span>
+                        {chip.detail || note || hidden ? (
+                          // The note and the link live INSIDE the detail's
+                          // own text flow: as flex items of the chip they were
+                          // squeezed to a letter a line, and after the chip
+                          // they dangled on a line of their own once the
+                          // detail wrapped.
+                          <span className="lc-detail">
+                            {chip.detail}
+                            {note ? <span className="log-more-note"> # {note}</span> : null}
+                            {hidden ? (
+                              <span className="log-more-note">
+                                {" · "}
+                                <button
+                                  type="button"
+                                  className="log-more"
+                                  aria-expanded={argsOpen}
+                                  title="Show it in full under this row"
+                                  onClick={() => toggle(setOpenArgs)(entry.line.raw)}
+                                >
+                                  {hidden.label}
+                                </button>
+                              </span>
+                            ) : null}
+                          </span>
                         ) : null}
                       </span>
                     ) : (
@@ -1316,25 +1341,14 @@ export function AgentLogsPanel({
                         ))}
                       </span>
                     ) : null}
-                    {args ? (
-                      <span className="log-more-note">
-                        {" · "}
-                        <button
-                          type="button"
-                          className="log-more"
-                          aria-expanded={argsOpen}
-                          onClick={() => toggle(setOpenArgs)(entry.line.raw)}
-                        >
-                          arguments
-                        </button>
-                      </span>
-                    ) : null}
                     {code ? <ConsoleCode block={code} /> : null}
                   </>
                 )}
               </span>
             </div>
-            {argsOpen && args ? <ArgumentRows input={args} /> : null}
+            {argsOpen && hidden && display.input ? (
+              <ArgumentRows input={display.input} keys={hidden.keys} />
+            ) : null}
             </Fragment>
           );
         })}

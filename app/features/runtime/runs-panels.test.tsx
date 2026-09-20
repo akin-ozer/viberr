@@ -1377,10 +1377,11 @@ describe("the wait row's live count (ruling 366(e))", () => {
     expect(count.getAttribute("data-elapsed")).toBe("42");
   });
 
-  it("opens a tool row to its full arguments when the summary left some unseen (366(d))", () => {
-    const { container, getByText, queryByText } = render(
+  it("links a tool row to what its summary cut, by name, inside the detail's own flow (366(d))", () => {
+    const prompt = "p".repeat(200);
+    const { container, getByText } = render(
       <AgentLogsPanel
-        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 3 })]}
         sel="primary"
         onSel={() => {}}
         linesByThread={{
@@ -1390,26 +1391,36 @@ describe("the wait row's live count (ruling 366(e))", () => {
               raw: '{"type":"assistant","n":1}',
             },
             {
-              display: { t: "10:00:02", ev: "tool", tag: "tool_use", name: "mcp__viberr__read_default_branch_file", text: "a/b.ts", input: { path: "a/b.ts" } },
+              display: {
+                t: "10:00:02", ev: "tool", tag: "tool_use", name: "mcp__viberr__run_agent",
+                text: `profileId: developer · prompt: ${prompt.slice(0, 159)}…`,
+                input: { profileId: "developer", prompt },
+              },
               raw: '{"type":"assistant","n":2}',
+            },
+            {
+              display: { t: "10:00:03", ev: "tool", tag: "tool_use", name: "mcp__viberr__read_default_branch_file", text: "a/b.ts", input: { path: "a/b.ts" } },
+              raw: '{"type":"assistant","n":3}',
             },
           ],
         }}
       />,
     );
-    // One button: the single-string call already shows its whole argument.
-    const buttons = container.querySelectorAll("button.log-more");
-    expect(buttons.length).toBe(1);
-    expect(buttons[0]!.textContent).toBe("arguments");
-    expect(queryByText("Run the suite")).toBeNull();
-    fireEvent.click(getByText("arguments"));
+    // Bash: the description sits beside the command as a comment, and its
+    // timeout earns no link. The single-string call shows its whole argument.
+    // Only the clipped prompt gets a link — named for what it hides, inside
+    // the detail text rather than beside the chip.
+    const bash = container.querySelectorAll(".log-line.tool")[0]!;
+    expect(bash.querySelector(".lc-detail")!.textContent).toBe("npm test # Run the suite");
+    const buttons = [...container.querySelectorAll("button.log-more")];
+    expect(buttons.map((b) => b.textContent)).toEqual(["+ full prompt"]);
+    expect(buttons[0]!.closest(".lc-detail")).not.toBeNull();
+    expect(container.textContent).not.toContain(prompt);
+    fireEvent.click(getByText("+ full prompt"));
     const rows = [...container.querySelectorAll(".log-line.tstep")].map((r) => [r.querySelector(".ltag")!.textContent, r.querySelector(".lx")!.textContent]);
-    expect(rows).toEqual([
-      ["command", "npm test"],
-      ["description", "Run the suite"],
-      ["timeout", "60000"],
-    ]);
+    expect(rows).toEqual([["prompt", prompt]]);
     fireEvent.click(getByText("{ } raw"));
     expect(container.querySelector("button.log-more")).toBeNull();
+    expect(container.textContent).not.toContain("# Run the suite");
   });
 });

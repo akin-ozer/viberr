@@ -685,8 +685,9 @@ Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redact
 the last heartbeat while the call is still open, "ran past N" once anything landed after
 it, and "N heartbeats, no output" opening to each one (ruling 366) — and a tool chip is
 marked by whose tool it is: the product's own carry the agent tint and the V mark, an org
-server's prints `server · tool`, a built-in stays neutral; a row whose summary left
-arguments unseen opens to all of them. The strip's
+server's prints `server · tool`, a built-in stays neutral; a row that clipped or elided an
+argument links to it by name (`+ full prompt`), and Bash's description prints beside its
+command. The strip's
 **Tokens** cell (F35-1) reads `RunView.tokens` and `tokensEstimated`: `~1.2M` with the
 tooltip "Estimated from the streamed text. The provider's own total replaces it when one
 lands; a run that was stopped never gets one" whenever the row's `usage_final` is 0

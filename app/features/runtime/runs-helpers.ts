@@ -4,6 +4,7 @@ import type { PillKind } from "~/ui/pill";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import type { ConsoleEntry } from "./log-noise";
 import {
+  ARGUMENT_CLIP,
   isRunBoundary,
   isRunInputsLine,
   isWaitLine,
@@ -495,20 +496,77 @@ function flat(text: string): string {
 }
 
 /**
- * Ruling 366(d): does the tool row's summary leave any of the call's arguments
- * unseen? The row prints Bash's command alone, an MCP call's single string
- * argument as itself, and everything else clipped or by size — so the answer
- * is yes for a second key, a non-string value, or a string the summary cut.
- * The disclosure then lists every argument in full; `{ } raw` has them too,
- * but a reader should not have to leave the row for them.
+ * Ruling 366(d): what a tool row's one-line summary CUT — the arguments a
+ * reader cannot see on the row — by key, with the label the link prints.
+ *
+ * Three cuts count: a string the arguments line clipped at `ARGUMENT_CLIP`
+ * (`+ full prompt`), a collection the line shows by its size (`+ evidence (3
+ * items)`), and a string a bespoke summary omitted altogether when it is
+ * longer than a line or has one (an Edit's old and new text: `+ old_string,
+ * new_string`). An omitted number, boolean, null, empty collection or short
+ * string is trivia the raw view keeps — the first version offered a link on
+ * every Bash row for its `timeout`, and the owner's verdict on that was "this
+ * looks odd". Bash's `description` is not hidden either: `commandNote` prints
+ * it beside the command. The label names what is behind the link, never the
+ * bare word "arguments".
  */
-export function hiddenArguments(line: LogLine): boolean {
-  if (line.ev !== "tool" || !line.input) return false;
-  const entries = Object.entries(line.input);
-  if (entries.length === 0) return false;
-  if (entries.length > 1) return true;
-  const only = z.string().safeParse(entries[0]![1]);
-  return !only.success || flat(only.data) !== flat(line.text);
+export interface HiddenArguments {
+  keys: string[];
+  label: string;
+}
+
+/** An omitted string shorter than this, on one line, is trivia. */
+const SUBSTANTIVE_CHARS = 40;
+
+const stringValue = z.string();
+const recordValue = z.record(z.string(), z.unknown());
+
+export function hiddenArguments(line: LogLine): HiddenArguments | null {
+  if (line.ev !== "tool" || !line.input) return null;
+  const text = flat(line.text);
+  const hidden: { key: string; label: string }[] = [];
+  for (const [key, value] of Object.entries(line.input)) {
+    const str = stringValue.safeParse(value);
+    if (str.success) {
+      const v = flat(str.data);
+      if (!v || text.includes(v)) continue;
+      if (line.name === "Bash" && key === "description") continue;
+      if (v.length > ARGUMENT_CLIP && text.includes(v.slice(0, ARGUMENT_CLIP - 1))) {
+        hidden.push({ key, label: `full ${key}` });
+      } else if (v.length > SUBSTANTIVE_CHARS || str.data.includes("\n")) {
+        hidden.push({ key, label: key });
+      }
+      continue;
+    }
+    if (Array.isArray(value)) {
+      if (value.length) {
+        hidden.push({ key, label: `${key} (${value.length} item${value.length === 1 ? "" : "s"})` });
+      }
+      continue;
+    }
+    const rec = recordValue.safeParse(value);
+    if (rec.success) {
+      const n = Object.keys(rec.data).length;
+      if (n) hidden.push({ key, label: `${key} (${n} field${n === 1 ? "" : "s"})` });
+    }
+  }
+  if (!hidden.length) return null;
+  const label =
+    hidden.length > 3
+      ? `+ ${hidden.length} arguments`
+      : `+ ${hidden.map((h) => h.label).join(", ")}`;
+  return { keys: hidden.map((h) => h.key), label };
+}
+
+/**
+ * Bash's `description` — Claude's own line on what the command is for —
+ * printed beside the command the way a shell comment sits beside one, so it
+ * never needs a click. Null for any other tool, and when there is none.
+ */
+export function commandNote(line: LogLine): string | null {
+  if (line.ev !== "tool" || line.name !== "Bash" || !line.input) return null;
+  const note = stringValue.safeParse(line.input.description);
+  return note.success && note.data.trim() ? note.data.trim() : null;
 }
 
 /** One argument, in full: a string as itself, anything else as its JSON. */
@@ -517,10 +575,12 @@ export interface ArgumentRow {
   text: string;
 }
 
-export function argumentRows(input: Record<string, JsonValue>): ArgumentRow[] {
-  return Object.entries(input).map(([key, value]) => {
-    const text = z.string().safeParse(value);
-    return { key, text: text.success ? text.data : JSON.stringify(value, null, 2) };
+/** The disclosed arguments, in the order the link named them. */
+export function argumentRows(input: Record<string, JsonValue>, keys: readonly string[]): ArgumentRow[] {
+  return keys.flatMap((key) => {
+    if (!Object.hasOwn(input, key)) return [];
+    const text = stringValue.safeParse(input[key]);
+    return [{ key, text: text.success ? text.data : JSON.stringify(input[key], null, 2) }];
   });
 }
 

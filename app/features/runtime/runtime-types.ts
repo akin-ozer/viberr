@@ -138,6 +138,14 @@ export interface LogLine {
  */
 export const TOOL_PROGRESS_TAG = "tool_progress";
 
+/**
+ * Ruling 366(c): the longest a single argument value prints on a tool row's
+ * arguments line. A longer string is clipped there, and the row links to it in
+ * full (366(d)) — both sides read the same figure, so the link appears exactly
+ * when the projection cut something.
+ */
+export const ARGUMENT_CLIP = 160;
+
 /** True for a heartbeat the console folds into a wait row. */
 export function isWaitLine(line: LogLine): boolean {
   return line.tag === TOOL_PROGRESS_TAG && !!line.progress;
