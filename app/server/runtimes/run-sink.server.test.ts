@@ -603,7 +603,21 @@ describe("quota exhaustion from a refused run (D5)", () => {
     "\n\nThe provider reported: You've hit your usage limit. To continue using " +
     "Codex, start a free trial of Plus today.";
 
-  function quotaFor(backend: "claude" | "codex", nowIso?: string) {
+  /**
+   * The block's frozen clock: the morning of the day `CODEX_REFUSAL` names,
+   * seven hours before the 17:20 UTC instant it resolves to. A line is observed
+   * at it, and a read that is not ABOUT expiry happens at it, so the reader's
+   * expiry arms (`exhaustionExpired`) stay out of the tests that record and
+   * retire the flag. Reading on the wall clock instead is what failed three of
+   * them on 2026-09-20: the fixture's reset plus `QUOTA_RESET_GRACE_MS` had
+   * passed the evening before, and the reader — correctly — retired the record
+   * before the assertion looked at it. A test that IS about expiry passes its
+   * own instants. CANARY: default `nowIso` back to `undefined` (the wall
+   * clock) and those three tests fail again on any day after 2026-09-19.
+   */
+  const FROZEN_NOW = "2026-09-18T10:00:00.000Z";
+
+  function quotaFor(backend: "claude" | "codex", nowIso: string = FROZEN_NOW) {
     return latestBackendRateLimits(store.db, nowIso).find(
       (q) => q.backend === backend,
     )!;
@@ -692,6 +706,7 @@ describe("quota exhaustion from a refused run (D5)", () => {
         emitted(
           { t: "10:00:00", ev: "err", tag: "run·error·quota", text: CODEX_REFUSAL },
           "{}",
+          FROZEN_NOW,
         ),
       );
       const row = quotaFor("claude");
@@ -726,6 +741,7 @@ describe("quota exhaustion from a refused run (D5)", () => {
         emitted(
           { t: "10:00:00", ev: "err", tag: "run·error·quota", text: TRANSIENT_429 },
           "{}",
+          FROZEN_NOW,
         ),
       );
       // CANARY: have `quotaExhaustionEvidence` return the sentence
@@ -736,6 +752,7 @@ describe("quota exhaustion from a refused run (D5)", () => {
         emitted(
           { t: "10:00:01", ev: "err", tag: "run·error·quota", text: CODEX_REFUSAL },
           "{}",
+          FROZEN_NOW,
         ),
       );
       expect(quotaFor("claude").exhausted).toBeTruthy();
@@ -871,6 +888,7 @@ describe("quota exhaustion from a refused run (D5)", () => {
         emitted(
           { t: "10:00:00", ev: "err", tag: "error·quota", text: CODEX_REFUSAL },
           "{}",
+          FROZEN_NOW,
         ),
       );
       failed.finalize({ outcome: "error", effectiveBackend: "claude" });
