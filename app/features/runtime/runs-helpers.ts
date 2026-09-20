@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
+import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import type { ConsoleEntry } from "./log-noise";
 import {
   isRunBoundary,
   isRunInputsLine,
+  isWaitLine,
+  waitClock,
+  type JsonValue,
   type LogLine,
   type RunInputs,
   type RunView,
@@ -360,7 +364,11 @@ export function runInputRows(
  * a folded THOUGHT run. Additive over `ConsoleEntry` so the existing pipeline
  * keeps its meaning and only the new kind has to be handled.
  */
-export type ConsoleBlock<T> = ConsoleEntry<T> | { kind: "thought"; lines: T[] };
+export type ConsoleBlock<T> =
+  | ConsoleEntry<T>
+  | { kind: "thought"; lines: T[] }
+  /** Ruling 366: one tool call's heartbeats, drawn as one wait row. */
+  | { kind: "wait"; lines: T[] };
 
 /** True when a line is the model narrating its own reasoning. */
 export function isThoughtLine(line: LogLine): boolean {
@@ -403,6 +411,119 @@ export function groupThoughts<T extends { display: LogLine }>(
   );
 }
 
+/**
+ * Ruling 366: fold one call's heartbeats into one wait row.
+ *
+ * Keyed on the call, not on adjacency alone: two calls back to back that each
+ * heartbeat (a `run_agent` answered, then a `deliver_for_review` that waits on
+ * the push) are two waits, because that is the shape of the work. A single
+ * heartbeat still folds — unlike a lone thought, it is not a line worth reading
+ * as itself, it is thirty seconds of a call still open.
+ *
+ * Runs after `groupThoughts`, on its blocks: a heartbeat is a `meta` line, so
+ * the thought fold passes it through untouched. A NO-OP under `raw`, like every
+ * fold before it.
+ */
+export function foldWaits<T extends { display: LogLine }>(
+  blocks: readonly ConsoleBlock<T>[],
+  raw: boolean,
+): ConsoleBlock<T>[] {
+  if (raw) return [...blocks];
+  const out: ConsoleBlock<T>[] = [];
+  for (const block of blocks) {
+    if (block.kind !== "line" || !isWaitLine(block.line.display)) {
+      out.push(block);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (
+      last &&
+      last.kind === "wait" &&
+      last.lines[0]!.display.progress?.call === block.line.display.progress?.call
+    ) {
+      last.lines.push(block.line);
+      continue;
+    }
+    out.push({ kind: "wait", lines: [block.line] });
+  }
+  return out;
+}
+
+/**
+ * The wait row's words, from the provider's LAST elapsed report and in the
+ * tense the row's liveness sets. Live = the run is still going and nothing has
+ * landed after the last heartbeat, so the call is open now. Ended = something
+ * did land, so all the record supports is that the call was still running AT
+ * that figure — "ran past 2m 30s", never a total the heartbeats cannot give.
+ */
+export function waitText(lines: readonly { display: LogLine }[], live: boolean): string {
+  const elapsed = lines[lines.length - 1]!.display.progress?.elapsed ?? null;
+  const at = elapsed === null ? null : waitClock(elapsed);
+  if (live) return at === null ? "still running" : `still running · ${at}`;
+  return at === null ? "was still running" : `ran past ${at}`;
+}
+
+/**
+ * Ruling 366(d): what the fold stands for, said on the row itself — a reader
+ * has to know the hidden events were keepalives and nothing more, or a fold
+ * reads as a hole in the record. The disclosure under it lists every one.
+ */
+export const HEARTBEAT_NOTE =
+  "A heartbeat is the runtime saying the call is still open: about one every 30 s, " +
+  "carrying no output. Nothing here changed the run.";
+
+/** One folded heartbeat, as its own disclosed row: which one, and the
+ *  provider's figure at that moment. */
+export function heartbeatLabel(line: LogLine, n: number): string {
+  const elapsed = line.progress?.elapsed ?? null;
+  return `heartbeat ${n}` + (elapsed === null ? "" : ` · ${waitClock(elapsed)} in`);
+}
+
+/** The live count's tooltip: where its figure comes from, honestly — it runs
+ *  on from the provider's last report, and the next report resets it. */
+export function waitCountTitle(lines: readonly { display: LogLine }[], clock: string): string {
+  const elapsed = lines[lines.length - 1]!.display.progress?.elapsed ?? 0;
+  return (
+    `Counting on from the runtime's last heartbeat: ${waitClock(elapsed)} at ${clock}. ` +
+    "A heartbeat lands about every 30 s and resets the count."
+  );
+}
+
+/** A value flattened the way the arguments line prints it. */
+function flat(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Ruling 366(d): does the tool row's summary leave any of the call's arguments
+ * unseen? The row prints Bash's command alone, an MCP call's single string
+ * argument as itself, and everything else clipped or by size — so the answer
+ * is yes for a second key, a non-string value, or a string the summary cut.
+ * The disclosure then lists every argument in full; `{ } raw` has them too,
+ * but a reader should not have to leave the row for them.
+ */
+export function hiddenArguments(line: LogLine): boolean {
+  if (line.ev !== "tool" || !line.input) return false;
+  const entries = Object.entries(line.input);
+  if (entries.length === 0) return false;
+  if (entries.length > 1) return true;
+  const only = z.string().safeParse(entries[0]![1]);
+  return !only.success || flat(only.data) !== flat(line.text);
+}
+
+/** One argument, in full: a string as itself, anything else as its JSON. */
+export interface ArgumentRow {
+  key: string;
+  text: string;
+}
+
+export function argumentRows(input: Record<string, JsonValue>): ArgumentRow[] {
+  return Object.entries(input).map(([key, value]) => {
+    const text = z.string().safeParse(value);
+    return { key, text: text.success ? text.data : JSON.stringify(value, null, 2) };
+  });
+}
+
 /** `HH:MM:SS` → seconds, or null when the clock is not readable. */
 function clockSeconds(t: string): number | null {
   const m = /^(\d{2}):(\d{2}):(\d{2})$/.exec(t);
@@ -434,8 +555,8 @@ export function thoughtLabel(lines: readonly { display: LogLine }[]): string {
 
 /** A tool call reduced to what a scanning reader needs: the verb and its target. */
 export interface ToolChip {
-  /** The tool's own name — `Bash`, `Read`, `exec`… */
-  name: string;
+  /** Whose tool, and the label the chip prints for it (ruling 366). */
+  who: ToolIdentity;
   /** What it was pointed at; empty when the line carried only a name. */
   detail: string;
 }
@@ -450,7 +571,7 @@ export interface ToolChip {
  */
 export function toolChip(line: LogLine): ToolChip | null {
   if (line.ev !== "tool" || !line.name) return null;
-  return { name: line.name, detail: line.text };
+  return { who: toolIdentity(line.name), detail: line.text };
 }
 
 /** One file a run touched, as the `file_change` envelope recorded it. */

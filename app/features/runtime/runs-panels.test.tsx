@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
 import {
   runBoundaryLine,
@@ -44,7 +44,9 @@ describe("LiveRunPanel", () => {
     expect(getByText("1 agent running")).toBeTruthy();
     expect(container.querySelector(".who-chip")).not.toBeNull();
     // Elapsed derives from startedAt (~402s → 06:42), never a fabricated count.
-    expect(getByText("06:42")).toBeTruthy();
+    // Ruling 366(e): the digits roll (`@number-flow/react`), and the plain
+    // figure rides the wrapper's `data-clock` for anyone reading the DOM.
+    expect(container.querySelector(".run-cell .lw-clock")!.getAttribute("data-clock")).toBe("06:42");
   });
 
   /**
@@ -60,7 +62,11 @@ describe("LiveRunPanel", () => {
         <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
       );
       const vals = [...container.querySelectorAll(".run-cell")].find((c) => c.querySelector(".lbl")?.textContent === "Tokens")!.querySelector<HTMLElement>(".val")!;
-      const out = { text: vals.textContent, title: vals.getAttribute("title") };
+      // 366(e): a rolling figure carries its plain text on `data-tokens`.
+      const out = {
+        text: vals.querySelector(".lw-clock")?.getAttribute("data-tokens") ?? vals.textContent,
+        title: vals.getAttribute("title"),
+      };
       unmount();
       return out;
     };
@@ -468,6 +474,99 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".log-chip")).toBeNull();
     expect(container.querySelector(".log-file")).toBeNull();
     expect(queryByText("npm run build")).toBeNull();
+  });
+
+  /**
+   * Ruling 366: a call's heartbeats are one wait row — the orb while the call
+   * is still open, the clock once anything landed after it — and a Viberr
+   * tool's chip is marked as the product's own. Canary: drop `foldWaits` from
+   * the pipeline and two `.log-line.wait` rows never appear (the heartbeats
+   * render as plain meta rows).
+   */
+  it("folds heartbeats into a wait row: orb while live, clock once ended, the chip marked as Viberr's", () => {
+    const beat = (n: number, elapsed: number): StreamedLine => ({
+      display: {
+        t: `10:0${n}:00`, ev: "meta", tag: "tool_progress", name: "mcp__viberr__run_agent",
+        text: `mcp__viberr__run_agent still running · ${elapsed}s`,
+        // No instant: the live row prints the static words, no count runs.
+        progress: { call: "toolu_1", elapsed, heartbeat: true, at: null },
+      },
+      raw: `{"type":"tool_progress","elapsed_time_seconds":${elapsed}}`,
+    });
+    const call: StreamedLine = {
+      display: { t: "10:00:00", ev: "tool", tag: "tool_use", name: "mcp__viberr__run_agent", text: "profileId: developer" },
+      raw: '{"type":"assistant"}',
+    };
+    const live = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ lineCount: 3 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [call, beat(1, 30), beat(2, 60)] }}
+      />,
+    );
+    const rows = live.container.querySelectorAll(".log-line.wait");
+    expect(rows.length).toBe(1);
+    const row = rows[0]!;
+    expect(row.className).toContain("lw-live");
+    expect(row.querySelector("canvas.log-orb")).not.toBeNull();
+    expect(row.querySelector("canvas.log-orb")!.getAttribute("aria-hidden")).toBe("true");
+    expect(row.textContent).toContain("still running · 1m");
+    // 366(d): the fold says what it hid, and opens to list every heartbeat
+    // under a note that says what one is.
+    const fold = row.querySelector<HTMLButtonElement>("button.log-more")!;
+    expect(fold.textContent).toBe("2 heartbeats");
+    expect(row.textContent).toContain("2 heartbeats, no output");
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    // Tag and text only: the clock column is reprojected into the viewer's
+    // zone after hydration, so it is not something a test should pin.
+    const steps = [...live.container.querySelectorAll(".log-line.tstep")].map((r) => [
+      r.querySelector(".ltag")!.textContent,
+      r.querySelector(".lx")!.textContent,
+    ]);
+    expect(steps).toEqual([
+      ["heartbeat", "A heartbeat is the runtime saying the call is still open: about one every 30 s, carrying no output. Nothing here changed the run."],
+      ["tool_progress", "heartbeat 1 · 30s in"],
+      ["tool_progress", "heartbeat 2 · 1m in"],
+    ]);
+    fireEvent.click(fold);
+    expect(live.container.querySelector(".log-line.tstep")).toBeNull();
+    // The chip is Viberr's: tinted, marked, the prefix gone, and the word read
+    // to assistive tech so the mark is never the only carrier.
+    const chip = row.querySelector(".log-chip.vb .lc-name")!;
+    expect(chip.querySelector(".lc-mark")).not.toBeNull();
+    expect(chip.textContent).toBe("viberr run_agent");
+    expect(chip.getAttribute("title")).toBe("Viberr's own tool · mcp__viberr__run_agent");
+    // …and the call's own chip carries the same mark; a built-in never does.
+    expect(live.container.querySelectorAll(".log-chip.vb").length).toBe(2);
+    live.unmount();
+
+    const done: StreamedLine = {
+      display: { t: "10:03:00", ev: "out", tag: "tool_result", text: "ok" },
+      raw: '{"type":"user"}',
+    };
+    const ended = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ lineCount: 4 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [call, beat(1, 30), beat(2, 60), done] }}
+      />,
+    );
+    const past = ended.container.querySelector(".log-line.wait")!;
+    expect(past.className).not.toContain("lw-live");
+    expect(past.querySelector("canvas")).toBeNull();
+    expect(past.querySelector(".ico")).not.toBeNull();
+    expect(past.textContent).toContain("ran past 1m");
+
+    // `raw` is authoritative: every heartbeat verbatim, no fold, no chip.
+    fireEvent.click(ended.getByText("{ } raw"));
+    expect(ended.container.querySelector(".log-line.wait")).toBeNull();
+    expect(ended.container.querySelector("canvas")).toBeNull();
+    expect(ended.container.textContent).toContain('"elapsed_time_seconds":30');
+    expect(ended.container.textContent).toContain('"elapsed_time_seconds":60');
   });
 
   it("lifts multi-line output into a bounded block, whole and copyable", () => {
@@ -1236,5 +1335,81 @@ describe("ruling 350: the footer follows the classified failure for every run ki
     );
     expect(container.textContent).toContain("the error line above carries what the provider said");
     expect(container.textContent).not.toContain("blocked packet");
+  });
+});
+
+/**
+ * Ruling 366(e): while the call is open the count runs on from the
+ * heartbeat's own instant, one second at a time, and the next heartbeat
+ * resyncs it. Canary: count from the render instead of `progress.at` and the
+ * first reading below is 30, not 40.
+ */
+describe("the wait row's live count (ruling 366(e))", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("runs on from the provider's figure at the heartbeat's instant, and ticks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-20T10:05:00.000Z"));
+    const beat: StreamedLine = {
+      display: {
+        t: "10:04:50", ev: "meta", tag: "tool_progress", name: "Bash",
+        text: "Bash still running · 30s",
+        progress: { call: "toolu_9", elapsed: 30, heartbeat: true, at: "2026-09-20T10:04:50.000Z" },
+      },
+      raw: '{"type":"tool_progress"}',
+    };
+    const { container } = render(
+      <AgentLogsPanel runtime={[mkRun({ lineCount: 1 })]} sel="primary" onSel={() => {}} linesByThread={{ primary: [beat] }} />,
+    );
+    // The mount effect supplies the clock: 30 s reported + 10 s since the heartbeat.
+    await act(async () => {});
+    const count = container.querySelector(".log-line.wait .lw-clock")!;
+    expect(count.getAttribute("data-elapsed")).toBe("40");
+    // The clock in the tooltip is the viewer's, so only its shape is pinned.
+    expect(count.getAttribute("title")).toMatch(
+      /^Counting on from the runtime's last heartbeat: 30s at \d{2}:\d{2}:\d{2}\. A heartbeat lands about every 30 s and resets the count\.$/,
+    );
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(count.getAttribute("data-elapsed")).toBe("42");
+  });
+
+  it("opens a tool row to its full arguments when the summary left some unseen (366(d))", () => {
+    const { container, getByText, queryByText } = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{
+          primary: [
+            {
+              display: { t: "10:00:01", ev: "tool", tag: "tool_use", name: "Bash", text: "npm test", input: { command: "npm test", description: "Run the suite", timeout: 60000 } },
+              raw: '{"type":"assistant","n":1}',
+            },
+            {
+              display: { t: "10:00:02", ev: "tool", tag: "tool_use", name: "mcp__viberr__read_default_branch_file", text: "a/b.ts", input: { path: "a/b.ts" } },
+              raw: '{"type":"assistant","n":2}',
+            },
+          ],
+        }}
+      />,
+    );
+    // One button: the single-string call already shows its whole argument.
+    const buttons = container.querySelectorAll("button.log-more");
+    expect(buttons.length).toBe(1);
+    expect(buttons[0]!.textContent).toBe("arguments");
+    expect(queryByText("Run the suite")).toBeNull();
+    fireEvent.click(getByText("arguments"));
+    const rows = [...container.querySelectorAll(".log-line.tstep")].map((r) => [r.querySelector(".ltag")!.textContent, r.querySelector(".lx")!.textContent]);
+    expect(rows).toEqual([
+      ["command", "npm test"],
+      ["description", "Run the suite"],
+      ["timeout", "60000"],
+    ]);
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.querySelector("button.log-more")).toBeNull();
   });
 });

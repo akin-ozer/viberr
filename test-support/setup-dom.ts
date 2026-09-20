@@ -40,3 +40,14 @@ if ("window" in globalThis && !Object.hasOwn(window, "ResizeObserver")) {
   }
   window.ResizeObserver = ResizeObserverStub;
 }
+
+/**
+ * jsdom implements no 2D canvas: `getContext` reports "not implemented" through
+ * the virtual console's error channel and returns null. The run console's wait
+ * row mounts a `thinking-orbs` canvas (ruling 366), which returns early on a
+ * null context — so the honest stub answers null quietly, and a panel test's
+ * output is not an error the code under test never raised.
+ */
+if ("window" in globalThis && "HTMLCanvasElement" in window) {
+  window.HTMLCanvasElement.prototype.getContext = () => null;
+}

@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   agentMessageProse,
+  argumentRows,
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
   fmtClock,
   fmtTok,
+  foldWaits,
   groupThoughts,
+  HEARTBEAT_NOTE,
+  heartbeatLabel,
+  hiddenArguments,
   hoistRunInputs,
   roleShort,
   runInputRows,
@@ -15,11 +20,15 @@ import {
   RUN_STATE,
   thoughtLabel,
   toolChip,
+  waitCountTitle,
+  waitText,
 } from "./runs-helpers";
 import {
   runBoundaryLine,
   RUN_BOUNDARY_TAG,
   RUN_INPUTS_TAG,
+  TOOL_PROGRESS_TAG,
+  waitClock,
   type LogLine,
   type RunInputs,
   type RunView,
@@ -437,9 +446,18 @@ describe("thoughtLabel (P19-RC1)", () => {
 describe("toolChip (P19-RC1)", () => {
   it("promotes the tool's own name and target", () => {
     expect(toolChip(L({ ev: "tool", name: "Bash", text: "npm run build" }))).toEqual({
-      name: "Bash",
+      who: { kind: "builtin", name: "Bash", server: null, tool: "Bash", label: "Bash" },
       detail: "npm run build",
     });
+  });
+
+  it("knows whose tool it is (ruling 366): the product's own get the mark, the prefix goes", () => {
+    const chip = toolChip(L({ ev: "tool", name: "mcp__viberr__deliver_for_review", text: "reason: rework landed" }))!;
+    expect(chip.who).toMatchObject({ kind: "viberr", label: "deliver_for_review" });
+    expect(chip.detail).toBe("reason: rework landed");
+    expect(toolChip(L({ ev: "tool", name: "everything-http.echo", text: "ping" }))!.who.label).toBe(
+      "everything-http · echo",
+    );
   });
 
   it("declines anything that is not a named tool call", () => {
@@ -562,5 +580,106 @@ describe("agentMessageProse (N20-18)", () => {
     // Claude's own prose event, and other event kinds, are untouched.
     expect(agentMessageProse(L({ tag: "assistant", text: "hi" }))).toBeNull();
     expect(agentMessageProse(L({ ev: "tool", tag: "command_execution", text: "ls" }))).toBeNull();
+  });
+});
+
+/**
+ * Ruling 366: a call's heartbeats are ONE wait row, in the tense its liveness
+ * sets. Canary: fold on adjacency alone and `two calls` below becomes one row.
+ */
+describe("foldWaits + waitText (ruling 366)", () => {
+  const beat = (call: string, elapsed: number | null, t = "10:00:30"): LogLine =>
+    L({
+      t,
+      ev: "meta",
+      tag: TOOL_PROGRESS_TAG,
+      name: "mcp__viberr__run_agent",
+      text: "mcp__viberr__run_agent still running",
+      progress: { call, elapsed, heartbeat: true, at: "2026-09-20T10:00:30.000Z" },
+    });
+
+  it("folds one call's heartbeats into one wait row and keeps two calls apart", () => {
+    const rows = [
+      R(L({ ev: "tool", tag: "tool_use", name: "mcp__viberr__run_agent", text: "profileId: developer" })),
+      R(beat("a", 30)),
+      R(beat("a", 60, "10:01:00")),
+      R(L({ ev: "out", tag: "tool_result", text: "done" })),
+      R(beat("b", 30)),
+    ];
+    const blocks = foldWaits(rows.map(line), false);
+    expect(blocks.map((b) => b.kind)).toEqual(["line", "wait", "line", "wait"]);
+    expect(blocks[1]).toEqual({ kind: "wait", lines: [rows[1], rows[2]] });
+    expect(blocks[3]).toEqual({ kind: "wait", lines: [rows[4]] });
+    // A heartbeat that never got its structured field is not a wait row: it
+    // renders as the meta line it is.
+    const bare = R(L({ ev: "meta", tag: TOOL_PROGRESS_TAG, text: "{…}" }));
+    expect(foldWaits([line(bare)], false)).toEqual([line(bare)]);
+  });
+
+  it("is a no-op under raw — the toggle's contract is what the provider sent", () => {
+    const rows = [R(beat("a", 30)), R(beat("a", 60))].map(line);
+    expect(foldWaits(rows, true)).toEqual(rows);
+  });
+
+  it("prints the provider's LAST figure, in the tense the row's liveness sets", () => {
+    const lines = [R(beat("a", 30)), R(beat("a", 150, "10:02:30"))];
+    expect(waitText(lines, true)).toBe("still running · 2m 30s");
+    // Ended: all the record supports is that the call was still open AT the
+    // figure — never a total the heartbeats cannot give.
+    expect(waitText(lines, false)).toBe("ran past 2m 30s");
+    expect(waitText([R(beat("a", null))], true)).toBe("still running");
+    expect(waitText([R(beat("a", null))], false)).toBe("was still running");
+    // 366(e): the live count's tooltip says where its figure comes from.
+    expect(waitCountTitle(lines, "13:02:30")).toBe(
+      "Counting on from the runtime's last heartbeat: 2m 30s at 13:02:30. " +
+        "A heartbeat lands about every 30 s and resets the count.",
+    );
+  });
+
+  it("discloses each folded heartbeat by number and figure, under a note that says what one is (366(d))", () => {
+    expect(heartbeatLabel(beat("a", 30), 1)).toBe("heartbeat 1 · 30s in");
+    expect(heartbeatLabel(beat("a", 90), 3)).toBe("heartbeat 3 · 1m 30s in");
+    expect(heartbeatLabel(beat("a", null), 2)).toBe("heartbeat 2");
+    expect(HEARTBEAT_NOTE).toBe(
+      "A heartbeat is the runtime saying the call is still open: about one every 30 s, " +
+        "carrying no output. Nothing here changed the run.",
+    );
+  });
+
+  it("waitClock keeps whole units and never goes negative", () => {
+    expect([29, 60, 150, 3600, 6039, 7200, -5].map(waitClock)).toEqual([
+      "29s", "1m", "2m 30s", "1h", "1h 40m", "2h", "0s",
+    ]);
+  });
+});
+
+/**
+ * Ruling 366(d): a tool row opens to its full arguments exactly when its
+ * one-line summary left some unseen. Canary: return true for every tool row
+ * and the single-string case below fails; return false and Bash's description
+ * is only ever reachable through `{ } raw`.
+ */
+describe("hiddenArguments + argumentRows (ruling 366(d))", () => {
+  it("says yes for a second key, a non-string value, or a string the summary clipped", () => {
+    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "npm test", input: { command: "npm test", description: "run" } }))).toBe(true);
+    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__get_task", text: "12", input: { events: 12 } }))).toBe(true);
+    const long = "x".repeat(200);
+    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__post_comment", text: `${"x".repeat(159)}…`, input: { text: long } }))).toBe(true);
+  });
+
+  it("says no when the row already shows the one string, whitespace aside, and for rows with no input", () => {
+    expect(hiddenArguments(L({ ev: "tool", name: "mcp__viberr__read_default_branch_file", text: "a/b.ts", input: { path: "a/b.ts" } }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "git  status\n", input: { command: "git status" } }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "tool", name: "exec", text: "ls" }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "tool", name: "Bash", text: "", input: {} }))).toBe(false);
+    expect(hiddenArguments(L({ ev: "out", text: "x", input: { a: 1, b: 2 } }))).toBe(false);
+  });
+
+  it("lists every argument in full: strings as themselves, the rest as readable JSON", () => {
+    expect(argumentRows({ command: "npm test", timeout: 60000, tags: ["a", "b"] })).toEqual([
+      { key: "command", text: "npm test" },
+      { key: "timeout", text: "60000" },
+      { key: "tags", text: '[\n  "a",\n  "b"\n]' },
+    ]);
   });
 });

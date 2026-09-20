@@ -1,3 +1,5 @@
+import { isReservedMcpName } from "./mcp-reserved";
+
 /**
  * Ruling 176 (amends 39): an org MCP server's WRITE tools, as an admin marks
  * them in the MCP server editor. MCP grants stay outside the capability matrix,
@@ -90,4 +92,39 @@ function claudeMcpSegment(segment: string): string {
  *  `disallowedTools` entry must match: `mcp__<server>__<tool>`. */
 export function claudeMcpToolName(server: string, tool: string): string {
   return `mcp__${claudeMcpSegment(server)}__${claudeMcpSegment(tool)}`;
+}
+
+/**
+ * Ruling 366: whose tool a console name is, read back from the two spellings
+ * the runs carry — Claude's `mcp__<server>__<tool>` (the inverse of
+ * `claudeMcpToolName`) and Codex's `<server>.<tool>` (as `wire-format.server.ts`
+ * names an `mcp_tool_call`). `viberr` when the server is one of the product's
+ * own in-process servers (`RESERVED_MCP_NAMES`, either spelling), `mcp` for an
+ * org server, `builtin` for everything else (`Bash`, `Read`, `exec`,
+ * `web_search`).
+ *
+ * The label is what the console chip prints: the bare tool for a Viberr call
+ * (the chip's mark says whose it is, and `mcp__viberr_controller__` in front of
+ * every one of them was the widest thing on the row), `server · tool` for an
+ * org server, the name itself for a built-in. A server name with no tool after
+ * it (the runtime has logged `mcp__viberr_agent` bare) labels itself.
+ */
+export interface ToolIdentity {
+  kind: "viberr" | "mcp" | "builtin";
+  /** The name exactly as the provider wrote it. */
+  name: string;
+  server: string | null;
+  tool: string;
+  label: string;
+}
+
+export function toolIdentity(name: string): ToolIdentity {
+  const claude = /^mcp__(.+?)(?:__(.+))?$/.exec(name);
+  const codex = claude ? null : /^([^.\s]+)\.(\S+)$/.exec(name);
+  const server = claude?.[1] ?? codex?.[1] ?? null;
+  if (server === null) return { kind: "builtin", name, server: null, tool: name, label: name };
+  const tool = claude ? (claude[2] ?? "") : (codex?.[2] ?? "");
+  const kind = isReservedMcpName(server) ? "viberr" : "mcp";
+  const label = kind === "viberr" ? tool || server : `${server} · ${tool}`;
+  return { kind, name, server, tool, label };
 }

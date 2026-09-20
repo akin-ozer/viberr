@@ -1,4 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
+import { ThinkingOrb } from "thinking-orbs";
+import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
@@ -17,12 +20,17 @@ function finishedClock(value: string, hydrated: boolean): string {
 import { Pill } from "~/ui/pill";
 import {
   agentMessageProse,
+  argumentRows,
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
   fmtClock,
   fmtTok,
+  foldWaits,
   groupThoughts,
+  HEARTBEAT_NOTE,
+  heartbeatLabel,
+  hiddenArguments,
   hoistRunInputs,
   roleShort,
   runInputRows,
@@ -31,12 +39,99 @@ import {
   thoughtLabel,
   toolChip,
   useElapsed,
+  waitCountTitle,
+  waitText,
   type ConsoleCodeBlock,
 } from "./runs-helpers";
 import { localLogClock } from "./log-clock";
 import { collapseTelemetry, telemetryLabel } from "./log-noise";
-import { isRunBoundary, isRunInputsLine, type RunView } from "./runtime-types";
+import { isRunBoundary, isRunInputsLine, type LogLine, type RunView } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
+
+/**
+ * Ruling 366(e): the counts that climb while a run waits roll their digits
+ * (`@number-flow/react`: Intl-formatted, accessible as one labelled number,
+ * static under reduced motion, plain markup on the server). Every wrapper
+ * carries the figure in plain text on a `data-` attribute, so the DOM can be
+ * read without the animation's markup.
+ */
+const TWO_DIGITS = { minimumIntegerDigits: 2 } as const;
+/** The tens digit of a base-60 field never passes 5. */
+const BASE_60 = { 1: { max: 5 } } as const;
+
+/** The strip's Elapsed cell: `fmtClock`'s `mm:ss` / `h:mm:ss`, rolling. */
+function RunClock({ seconds }: { seconds: number }) {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  return (
+    <span className="lw-clock" data-clock={fmtClock(s)}>
+      <NumberFlowGroup>
+        {h ? <NumberFlow value={h} suffix=":" trend={1} willChange /> : null}
+        <NumberFlow
+          value={Math.floor((s % 3600) / 60)}
+          format={TWO_DIGITS}
+          digits={h ? BASE_60 : undefined}
+          suffix=":"
+          trend={1}
+          willChange
+        />
+        <NumberFlow value={s % 60} format={TWO_DIGITS} digits={BASE_60} trend={1} willChange />
+      </NumberFlowGroup>
+    </span>
+  );
+}
+
+/** A wait's elapsed figure in `waitClock`'s shape, rolling: seconds alone under
+ *  a minute, minutes + two-digit seconds under an hour, hours + two-digit
+ *  minutes past it (the static form drops the seconds there too). */
+function WaitClock({ seconds, title }: { seconds: number; title: string }) {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return (
+    <span className="lw-clock" data-elapsed={s} title={title}>
+      <NumberFlowGroup>
+        {h > 0 ? (
+          <>
+            <NumberFlow value={h} suffix="h " trend={1} willChange />
+            <NumberFlow value={m} format={TWO_DIGITS} digits={BASE_60} suffix="m" trend={1} willChange />
+          </>
+        ) : m > 0 ? (
+          <>
+            <NumberFlow value={m} suffix="m " trend={1} willChange />
+            <NumberFlow value={s % 60} format={TWO_DIGITS} digits={BASE_60} suffix="s" trend={1} willChange />
+          </>
+        ) : (
+          <NumberFlow value={s} suffix="s" trend={1} willChange />
+        )}
+      </NumberFlowGroup>
+    </span>
+  );
+}
+
+/** F35-1's token figure with rolling digits, in `fmtTok`'s units. */
+function TokenCount({ n, estimated }: { n: number; estimated: boolean }) {
+  const scaled =
+    n >= 1_000_000
+      ? { value: n / 1_000_000, fraction: 1, unit: "M" }
+      : n >= 100_000
+        ? { value: Math.round(n / 1000), fraction: 0, unit: "k" }
+        : n >= 1000
+          ? { value: n / 1000, fraction: 1, unit: "k" }
+          : { value: n, fraction: 0, unit: "" };
+  return (
+    <span className="lw-clock" data-tokens={(estimated ? "~" : "") + fmtTok(n)}>
+      <NumberFlow
+        value={scaled.value}
+        format={{ minimumFractionDigits: scaled.fraction, maximumFractionDigits: scaled.fraction }}
+        prefix={estimated ? "~" : ""}
+        suffix={scaled.unit}
+        trend={1}
+        willChange={estimated}
+      />
+    </span>
+  );
+}
 
 /**
  * Port of runs.jsx: LiveRunPanel (run strip) + AgentLogsPanel (dark console)
@@ -234,7 +329,9 @@ export function LiveRunPanel({
         <div className="run-stats">
           <div className="run-cell">
             <div className="lbl">Elapsed</div>
-            <div className="val mono">{fmtClock(elapsed)}</div>
+            <div className="val mono">
+              <RunClock seconds={elapsed} />
+            </div>
           </div>
           <div className="run-cell">
             <div className="lbl">Turns</div>
@@ -255,10 +352,12 @@ export function LiveRunPanel({
                 className="val mono"
                 title="Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one"
               >
-                ~{fmtTok(run.tokens)}
+                <TokenCount n={run.tokens} estimated />
               </div>
             ) : (
-              <div className="val mono">{fmtTok(run.tokens)}</div>
+              <div className="val mono">
+                <TokenCount n={run.tokens} estimated={false} />
+              </div>
             )}
           </div>
           <div className="run-cell">
@@ -410,6 +509,154 @@ const FILE_KIND_WORD = {
 } satisfies Record<"add" | "update" | "delete", string>;
 
 /**
+ * Ruling 366: a tool chip's name, marked by whose tool it is. Viberr's own
+ * tools carry the agent tint and the V mark; the word is read to assistive
+ * tech (`.vh`) so the mark is never the only carrier, and the title spells the
+ * provider's full name for anyone who greps a transcript by it.
+ */
+function ToolName({ who }: { who: ToolIdentity }) {
+  const title =
+    who.kind === "viberr"
+      ? `Viberr's own tool · ${who.name}`
+      : who.kind === "mcp"
+        ? `MCP server ${who.server} · ${who.name}`
+        : undefined;
+  return (
+    <span className="lc-name" title={title}>
+      {who.kind === "viberr" ? (
+        <>
+          <span className="lc-mark" aria-hidden="true">
+            <Icon name="viberr" />
+          </span>
+          <span className="vh">viberr </span>
+        </>
+      ) : null}
+      {who.label}
+    </span>
+  );
+}
+
+/**
+ * Ruling 366: one call's heartbeats, folded into one wait row. LIVE while the
+ * run is going and nothing has landed after the last heartbeat — the orb
+ * turns and the count runs on from the provider's last figure (366(e)); once
+ * anything follows, the call was still running AT that figure, and the row
+ * claims exactly that. The row says what it folded — "5 heartbeats, no
+ * output" — and opens to list them (366(d)), so a fold never reads as a hole
+ * in the record.
+ */
+function WaitRow({
+  lines,
+  live,
+  run,
+  hydrated,
+  open,
+  onToggle,
+}: {
+  lines: StreamedLine[];
+  live: boolean;
+  run: RunView;
+  hydrated: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const last = lines[lines.length - 1]!.display;
+  const who = toolIdentity(last.name ?? "");
+  const reported = last.progress?.elapsed ?? null;
+  const at = last.progress?.at ?? null;
+  // The count runs on from the heartbeat's own instant, so a page opened
+  // mid-wait starts at the right figure and the next heartbeat resyncs it
+  // rather than jumping. With no instant or no figure there is nothing honest
+  // to count from, and the row prints the static words.
+  const since = useElapsed(live ? at : null, live);
+  const ticking = live && reported !== null && at !== null;
+  const clock = (t: string) => (hydrated ? localLogClock(t, run.startedAt) : t);
+  const n = lines.length;
+  return (
+    <>
+      <div className={"log-line meta wait" + (live ? " lw-live" : "")}>
+        <span className="lt">{clock(last.t)}</span>
+        <span className="ltag">{last.tag}</span>
+        <span className="lx">
+          <span className="log-wait">
+            {live ? (
+              // Pinned to its dark ink: the console paints its own near-black
+              // fill in BOTH app themes, and `auto` would read the light
+              // theme's `data-theme` off `:root` and draw dark dots on it.
+              // Decorative — the words beside it carry the state, so it is
+              // hidden from assistive tech.
+              <ThinkingOrb
+                state={who.kind === "viberr" ? "connecting" : "working"}
+                size={20}
+                theme="dark"
+                className="log-orb"
+                aria-hidden="true"
+              />
+            ) : (
+              <Icon name="clock" />
+            )}
+            <span className={"log-chip" + (who.kind === "viberr" ? " vb" : "")}>
+              <ToolName who={who} />
+            </span>
+            {ticking ? (
+              <span>
+                still running ·{" "}
+                <WaitClock seconds={reported + since} title={waitCountTitle(lines, clock(last.t))} />
+              </span>
+            ) : (
+              waitText(lines, live)
+            )}
+            <span className="log-more-note">
+              {" · "}
+              <button type="button" className="log-more" aria-expanded={open} onClick={onToggle}>
+                {n} heartbeat{n === 1 ? "" : "s"}
+              </button>
+              , no output
+            </span>
+          </span>
+        </span>
+      </div>
+      {open && (
+        <>
+          <div className="log-line meta tstep">
+            <span className="lt" />
+            <span className="ltag">heartbeat</span>
+            <span className="lx">{HEARTBEAT_NOTE}</span>
+          </div>
+          {lines.map((line, i) => (
+            <div className="log-line meta tstep" key={i}>
+              <span className="lt">{clock(line.display.t)}</span>
+              <span className="ltag">{line.display.tag}</span>
+              <span className="lx">{heartbeatLabel(line.display, i + 1)}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Ruling 366(d): a tool call's arguments in full, under its row. The row's
+ * summary is one line by design (the command, the one string, the clipped
+ * pairs); this is where the rest lives, in the same shape the run-inputs
+ * disclosure uses, so a reader never has to leave the row for `{ } raw`.
+ */
+function ArgumentRows({ input }: { input: NonNullable<LogLine["input"]> }) {
+  return (
+    <>
+      {argumentRows(input).map((row) => (
+        <div className="log-line meta tstep" key={row.key}>
+          <span className="lt" />
+          <span className="ltag">{row.key}</span>
+          <span className="lx">{row.text}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
  * P19-RC1 — multi-line command output and diffs, lifted out of the grid row
  * into their own bounded block.
  *
@@ -519,6 +766,12 @@ export function AgentLogsPanel({
    * survives streaming, folding and backward paging.
    */
   const [openThoughts, setOpenThoughts] = useState<string[]>([]);
+  /** Ruling 366(d): which heartbeat folds and which tool rows' argument lists
+   *  are open — keyed by a stored envelope like the folds above. */
+  const [openWaits, setOpenWaits] = useState<string[]>([]);
+  const [openArgs, setOpenArgs] = useState<string[]>([]);
+  const toggle = (set: typeof setOpenWaits) => (key: string) =>
+    set((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   const hydrated = useHydrated();
   const boxRef = useRef<HTMLDivElement>(null);
   /**
@@ -551,8 +804,11 @@ export function AgentLogsPanel({
   // P19-RC1: …and consecutive reasoning lines fold into one block on top of
   // that. Both foldings are no-ops under `raw`, which keeps the stored stream
   // the authoritative view of what the provider sent.
-  const entries = groupThoughts(
-    collapseTelemetry(hoistRunInputs(shown), raw),
+  // Ruling 366: …and a call's heartbeats fold into one wait row last, on the
+  // thought fold's blocks (a heartbeat is a `meta` line the thought fold never
+  // touches). Still a no-op under `raw`.
+  const entries = foldWaits(
+    groupThoughts(collapseTelemetry(hoistRunInputs(shown), raw), raw),
     raw,
   );
 
@@ -930,6 +1186,24 @@ export function AgentLogsPanel({
               </Fragment>
             );
           }
+          // Ruling 366: one call's heartbeats, folded into one wait row. LIVE
+          // while the run is going and nothing has landed after the last
+          // heartbeat — the orb turns; once anything follows, the call was
+          // still running AT the figure, and the row claims exactly that.
+          if (entry.kind === "wait") {
+            const key = entry.lines[0]!.raw;
+            return (
+              <WaitRow
+                key={i}
+                lines={entry.lines}
+                live={cur!.state === "running" && i === entries.length - 1}
+                run={cur!}
+                hydrated={hydrated}
+                open={openWaits.includes(key)}
+                onToggle={() => toggle(setOpenWaits)(key)}
+              />
+            );
+          }
           const display = entry.line.display;
           // F15-08: the stored `t` is a UTC wall clock; the timeline on the
           // same page is local. One story per page. Until hydration the raw UTC
@@ -990,13 +1264,17 @@ export function AgentLogsPanel({
           // the console used to flatten. All three are computed only when `raw`
           // is off — under it the stored envelope prints verbatim, unchanged.
           const chip = raw ? null : toolChip(display);
+          // Ruling 366(d): the arguments the one-line summary left unseen.
+          const args = !raw && hiddenArguments(display) ? display.input! : null;
+          const argsOpen = args !== null && openArgs.includes(entry.line.raw);
           const files = raw ? null : fileChangeChips(display);
           const code = raw ? null : consoleCodeBlock(display);
           // N20-18: a Codex final message is the raw outcome-envelope JSON;
           // fold it to the prose it wraps so it reads like Claude's `assistant`.
           const prose = raw ? null : agentMessageProse(display);
           return (
-            <div className={"log-line " + display.ev} key={i}>
+            <Fragment key={i}>
+            <div className={"log-line " + display.ev}>
               <span className="lt">{clock}</span>
               <span className="ltag">{display.tag}</span>
               <span className="lx">
@@ -1005,8 +1283,8 @@ export function AgentLogsPanel({
                 ) : (
                   <>
                     {chip ? (
-                      <span className="log-chip">
-                        <span className="lc-name">{chip.name}</span>
+                      <span className={"log-chip" + (chip.who.kind === "viberr" ? " vb" : "")}>
+                        <ToolName who={chip.who} />
                         {chip.detail ? (
                           <span className="lc-detail">{chip.detail}</span>
                         ) : null}
@@ -1038,11 +1316,26 @@ export function AgentLogsPanel({
                         ))}
                       </span>
                     ) : null}
+                    {args ? (
+                      <span className="log-more-note">
+                        {" · "}
+                        <button
+                          type="button"
+                          className="log-more"
+                          aria-expanded={argsOpen}
+                          onClick={() => toggle(setOpenArgs)(entry.line.raw)}
+                        >
+                          arguments
+                        </button>
+                      </span>
+                    ) : null}
                     {code ? <ConsoleCode block={code} /> : null}
                   </>
                 )}
               </span>
             </div>
+            {argsOpen && args ? <ArgumentRows input={args} /> : null}
+            </Fragment>
           );
         })}
         {cur!.state === "running" && (

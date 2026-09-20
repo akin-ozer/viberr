@@ -60,6 +60,8 @@ const ICON_PATHS = {
   checkcircle: '<circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.5 2.5L16 9.5"/>',
   ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6.5 6.5l11 11"/>',
   ring: '<circle cx="12" cy="12" r="5.5"/>',
+  // Ruling 366: the product's own mark, for the console chip of a Viberr tool.
+  viberr: '<path d="M5 5l7 14 7-14"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
