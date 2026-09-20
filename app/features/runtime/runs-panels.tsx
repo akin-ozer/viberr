@@ -4,6 +4,7 @@ import { ThinkingOrb } from "thinking-orbs";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
+import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
@@ -1367,8 +1368,13 @@ export function AgentLogsPanel({
         {/* UI-03/UI-30: a stopped tail is stated, never left to look like
             silence from the agent. */}
         <span>{streamError ?? footer}</span>
+        {/* Ruling 366(f): the total counts up to its figure; the figure itself
+            is on `data-count` for anyone reading the DOM, and the noun follows
+            the figure drawn, so the count never passes through "1 events". */}
         <span className="mono">
-          {eventCount} event{eventCount === 1 ? "" : "s"}
+          <NumberTicker end={eventCount}>
+            {(n, text) => `${text} event${n === 1 ? "" : "s"}`}
+          </NumberTicker>
         </span>
       </div>
     </div>

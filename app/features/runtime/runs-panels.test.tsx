@@ -10,6 +10,12 @@ import {
 } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
+/** Ruling 366(f): the footer's total counts up to its figure, so a test reads
+ *  the figure itself off the ticker's `data-count`, not the moving text. */
+function footerCount(container: HTMLElement): string | null {
+  return container.querySelector(".logs-foot [data-count]")?.getAttribute("data-count") ?? null;
+}
+
 afterEach(cleanup);
 
 function mkRun(patch: Partial<RunView>): RunView {
@@ -653,7 +659,8 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelectorAll(".log-line")).toHaveLength(4);
     expect(container.textContent).toContain(rawTelemetry);
     // The footer counts stored lines, so folding never changes the total.
-    expect(getByText("4 events")).toBeTruthy();
+    // Ruling 366(f): the total counts up, so the figure is read off `data-count`.
+    expect(footerCount(container)).toBe("4");
   });
 
   it("codex meta line vs claude meta line", () => {
@@ -908,7 +915,7 @@ describe("P13-D-11: the console pages backwards", () => {
         headSeq: 2,
       },
     });
-    const { getByText, rerender } = render(
+    const { container, rerender } = render(
       <AgentLogsPanel
         runtime={[run]}
         sel="primary"
@@ -922,7 +929,8 @@ describe("P13-D-11: the console pages backwards", () => {
         }}
       />,
     );
-    expect(getByText("6 events")).toBeTruthy();
+    expect(footerCount(container)).toBe("6");
+    expect(container.querySelector(".logs-foot .mono")?.textContent).toMatch(/ events$/);
 
     // A live tail can run ahead of the loader's snapshot — the count follows
     // the lines that exist, so it never goes backwards.
@@ -940,7 +948,7 @@ describe("P13-D-11: the console pages backwards", () => {
         }}
       />,
     );
-    expect(getByText("8 events")).toBeTruthy();
+    expect(footerCount(container)).toBe("8");
   });
 });
 
