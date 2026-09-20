@@ -553,3 +553,58 @@ describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
     expect(todo.display?.text).toBe("todos: [2 items]");
   });
 });
+
+/**
+ * Ruling 367: a tool result reads as its content, never as its envelope.
+ * Canary: send `content` through `wireText` again and the first text below
+ * starts with `[{"type"`.
+ */
+describe("projectEnvelope — ruling 367: MCP result blocks", () => {
+  /** A `tool_result`'s `content` as the SDK sends it: a string, nothing, or
+   *  content blocks (with one deliberately malformed slot for the last case). */
+  type WireResultContent =
+    | string
+    | null
+    | (
+        | { type: string; text?: string; tool_name?: string; source?: { type: string; media_type: string; data: string } }
+        | number
+      )[];
+  const result = (content: WireResultContent, is_error = false) => ({
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content, is_error }] },
+  });
+
+  it("reads a content-block array as its text, so a multi-line answer takes the code block", () => {
+    const json = '{\n  "key": "BNB-27",\n  "title": "Become a host"\n}';
+    const { display } = projectEnvelope("claude", result([{ type: "text", text: json }]));
+    expect(display).toMatchObject({ ev: "out", tag: "tool_result", text: json });
+    expect(display?.text.startsWith("[{")).toBe(false);
+  });
+
+  it("notes an image by its media type and a tool reference by its name, never the bytes", () => {
+    const { display } = projectEnvelope(
+      "claude",
+      result([
+        { type: "text", text: "Navigated." },
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "/9j/4AAQSkZJRg" } },
+        { type: "tool_reference", tool_name: "mcp__viberr_browser__browser_navigate" },
+        { type: "document" },
+      ]),
+    );
+    expect(display?.text).toBe(
+      "Navigated.\n[image: image/jpeg]\n[tool_reference: mcp__viberr_browser__browser_navigate]\n[document]",
+    );
+    expect(display?.text).not.toContain("/9j/");
+  });
+
+  it("keeps the error flag through the unwrapping, and a plain string as it was", () => {
+    expect(projectEnvelope("claude", result([{ type: "text", text: "[denied] not at this stage" }], true)).display).toMatchObject({
+      ev: "err",
+      text: "[denied] not at this stage",
+    });
+    expect(projectEnvelope("claude", result("290 passing")).display?.text).toBe("290 passing");
+    expect(projectEnvelope("claude", result(null)).display?.text).toBe("");
+    // A block that is not an object costs its own slot, never the answer.
+    expect(projectEnvelope("claude", result([{ type: "text", text: "a" }, 7])).display?.text).toBe("a\n[block]");
+  });
+});
