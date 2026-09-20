@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { findPackageJSON } from "node:module";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -126,10 +127,28 @@ describe("resolveToolchain", () => {
 
   it("matches the pinned @openai/codex the Codex SDK depends on", () => {
     const reading = resolveToolchain({ run: scriptedRunner({}) });
+    // Resolved the way Node resolves, never from the cwd. A git worktree has
+    // no `node_modules` of its own and borrows the parent checkout's install,
+    // so `process.cwd()/node_modules/...` named a path that does not exist and
+    // this test — alone in the whole suite — died on ENOENT while the resolver
+    // it checks worked fine. `resolveToolchain` anchors its own lookup on
+    // `import.meta.url` (`pinnedPackageVersion`), so anchoring here too is what
+    // makes the two agree on WHICH install they are reading.
+    //
+    // `findPackageJSON` and not `require.resolve`: the SDK's `exports` map
+    // publishes `.` under the `import` condition alone, which hides both
+    // `./package.json` and the CJS entry, so every `resolve` spelling of this
+    // package throws ERR_PACKAGE_PATH_NOT_EXPORTED. Finding the manifest of a
+    // package Node can resolve is exactly what this call is for.
+    //
+    // An absent package throws out of `findPackageJSON` itself, naming the
+    // package and the importer; `undefined` is the narrower case of a package
+    // that resolves with no manifest above its entry, so say THAT rather than
+    // reporting every failure here as "not installed".
+    const manifest = findPackageJSON("@openai/codex-sdk", import.meta.url);
+    if (!manifest) throw new Error("@openai/codex-sdk resolved with no package.json above it");
     const codexSdk = z.object({ version: z.string() }).parse(
-      JSON.parse(
-        readFileSync(path.join(process.cwd(), "node_modules", "@openai", "codex-sdk", "package.json"), "utf8"),
-      ),
+      JSON.parse(readFileSync(manifest, "utf8")),
     );
     expect(reading.codexCli).toBe(codexSdk.version);
   });
