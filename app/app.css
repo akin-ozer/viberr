@@ -6545,13 +6545,19 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    real button (the app-wide focus ring applies), and its menu is the palette
    as a 5×4 grid of swatches on the shared menu surface. */
 .stg-color-wrap { position: relative; display: inline-flex; }
+/* The button is a 24px target (WCAG 2.5.8; the e2e axe sweep refused the
+   14px one under ruling 365's first run) and paints the 14px dot inside it. */
 .stg-swatch {
-  width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%;
-  background: var(--stage); cursor: pointer;
+  position: relative; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; cursor: pointer;
+}
+.stg-swatch::before {
+  content: ""; position: absolute; inset: 5px; border-radius: 50%;
+  background: var(--stage);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 85%);
   transition: transform .12s ease, box-shadow .12s ease;
 }
-.stg-swatch:hover:not(:disabled), .stg-swatch.open {
+.stg-swatch:hover:not(:disabled)::before, .stg-swatch.open::before {
   transform: scale(1.15);
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--fg);
 }
