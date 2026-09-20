@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeMcpToolName, looksLikeWriteTool, MCP_TOOL_NAME_RE } from "./mcp-tools";
+import { claudeMcpToolName, looksLikeWriteTool, MCP_TOOL_NAME_RE, toolIdentity } from "./mcp-tools";
 
 describe("the write-tool suggestion (ruling 176)", () => {
   it("matches a write verb as a WORD, in snake, kebab, dotted and camel case", () => {
@@ -73,5 +73,56 @@ describe("MCP tool names (ruling 176)", () => {
     expect(claudeMcpToolName("everything-http", "repo.merge")).toBe(
       "mcp__everything-http__repo_merge",
     );
+  });
+});
+
+describe("toolIdentity (ruling 366)", () => {
+  it("reads Claude's mcp__server__tool back and knows the product's own servers", () => {
+    expect(toolIdentity("mcp__viberr__run_agent")).toEqual({
+      kind: "viberr",
+      name: "mcp__viberr__run_agent",
+      server: "viberr",
+      tool: "run_agent",
+      label: "run_agent",
+    });
+    // A server name with a single underscore splits on the DOUBLE one.
+    expect(toolIdentity("mcp__viberr_controller__save_global_agent")).toMatchObject({
+      kind: "viberr",
+      server: "viberr_controller",
+      label: "save_global_agent",
+    });
+    expect(toolIdentity("mcp__github__create_pull_request")).toEqual({
+      kind: "mcp",
+      name: "mcp__github__create_pull_request",
+      server: "github",
+      tool: "create_pull_request",
+      label: "github · create_pull_request",
+    });
+  });
+
+  it("reads Codex's server.tool, in the hyphen spelling the Codex side writes", () => {
+    expect(toolIdentity("viberr-agent.post_comment")).toMatchObject({
+      kind: "viberr",
+      server: "viberr-agent",
+      tool: "post_comment",
+      label: "post_comment",
+    });
+    expect(toolIdentity("everything-http.echo")).toMatchObject({
+      kind: "mcp",
+      label: "everything-http · echo",
+    });
+  });
+
+  it("leaves a built-in as itself, and a bare server name labels itself", () => {
+    for (const name of ["Bash", "Read", "exec", "web_search"]) {
+      expect(toolIdentity(name)).toEqual({ kind: "builtin", name, server: null, tool: name, label: name });
+    }
+    // The runtime has logged `mcp__viberr_agent` with no tool after it.
+    expect(toolIdentity("mcp__viberr_agent")).toMatchObject({
+      kind: "viberr",
+      server: "viberr_agent",
+      tool: "",
+      label: "viberr_agent",
+    });
   });
 });

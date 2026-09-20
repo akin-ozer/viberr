@@ -432,3 +432,108 @@ describe("ruling 175: the result fold reads modelUsage", () => {
     expect(facts.costUsd).toBe(0.52);
   });
 });
+
+/**
+ * Ruling 366: the heartbeat line and the arguments line. Canary: drop the
+ * `tool_progress` case and the first test's `ev` is still "meta" but `progress`
+ * is gone and the text is the raw JSON.
+ */
+describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
+  it("tool_progress → a meta heartbeat naming the tool, its call and the provider's figure", () => {
+    const { display, facts } = projectEnvelope("claude", {
+      type: "tool_progress",
+      tool_use_id: "toolu_01-heartbeat-2",
+      tool_name: "mcp__viberr__run_agent",
+      parent_tool_use_id: "toolu_01",
+      elapsed_time_seconds: 90,
+      heartbeat: true,
+      session_id: "s",
+      uuid: "u",
+    });
+    expect(display).toEqual({
+      t: display?.t,
+      ev: "meta",
+      tag: "tool_progress",
+      name: "mcp__viberr__run_agent",
+      text: "mcp__viberr__run_agent still running · 1m 30s",
+      progress: { call: "toolu_01", elapsed: 90, heartbeat: true },
+    });
+    expect(facts).toEqual({});
+  });
+
+  it("a frame with no figure says still running and invents no number; no parent → keyed on its own id", () => {
+    const { display } = projectEnvelope("claude", {
+      type: "tool_progress",
+      tool_use_id: "toolu_02",
+      tool_name: "Agent",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: null,
+      subagent_type: "explorer",
+    });
+    expect(display).toMatchObject({
+      text: "Agent still running",
+      progress: { call: "toolu_02", elapsed: null, heartbeat: false },
+    });
+    // A garbled figure reads as none, never as a number.
+    expect(
+      projectEnvelope("claude", { type: "tool_progress", tool_name: "Bash", elapsed_time_seconds: "soon" })
+        .display?.progress?.elapsed,
+    ).toBeNull();
+  });
+
+  it("an MCP call's arguments read as key: value pairs — clipped strings, collections by size", () => {
+    const { display } = projectEnvelope("claude", {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "mcp__viberr__run_agent",
+            input: {
+              profileId: "integration-verifier",
+              delivers: false,
+              prompt: "re-verify   the\nbranch " + "x".repeat(200),
+              evidence: [1, 2, 3],
+              extra: { a: 1 },
+              gone: null,
+            },
+          },
+        ],
+      },
+    });
+    expect(display?.text).toBe(
+      "profileId: integration-verifier · delivers: false · prompt: re-verify the branch " +
+        "x".repeat(159 - "re-verify the branch ".length) +
+        "… · evidence: [3 items] · extra: {1 field} · gone: null",
+    );
+    // The raw view keeps every character: the input rides the line untouched.
+    expect(display?.input?.prompt).toContain("x".repeat(200));
+  });
+
+  it("a single string argument is the row, on both backends; a built-in keeps its own summary", () => {
+    const claude = projectEnvelope("claude", {
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "mcp__viberr__read_default_branch_file", input: { path: "services/orders/src/app.ts" } }],
+      },
+    });
+    expect(claude.display?.text).toBe("services/orders/src/app.ts");
+    const codex = projectEnvelope("codex", {
+      type: "item.started",
+      item: {
+        id: "m",
+        type: "mcp_tool_call",
+        server: "viberr-agent",
+        tool: "read_knowledge_doc",
+        arguments: { kb: "rulings", path: "rulings.md" },
+        status: "in_progress",
+      },
+    });
+    expect(codex.display).toMatchObject({ name: "viberr-agent.read_knowledge_doc", text: "kb: rulings · path: rulings.md" });
+    const bash = projectEnvelope("claude", {
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test", description: "run tests" } }] },
+    });
+    expect(bash.display?.text).toBe("npm test");
+  });
+});

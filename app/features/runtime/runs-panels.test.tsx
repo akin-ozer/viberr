@@ -470,6 +470,78 @@ describe("AgentLogsPanel", () => {
     expect(queryByText("npm run build")).toBeNull();
   });
 
+  /**
+   * Ruling 366: a call's heartbeats are one wait row — the orb while the call
+   * is still open, the clock once anything landed after it — and a Viberr
+   * tool's chip is marked as the product's own. Canary: drop `foldWaits` from
+   * the pipeline and two `.log-line.wait` rows never appear (the heartbeats
+   * render as plain meta rows).
+   */
+  it("folds heartbeats into a wait row: orb while live, clock once ended, the chip marked as Viberr's", () => {
+    const beat = (n: number, elapsed: number): StreamedLine => ({
+      display: {
+        t: `10:0${n}:00`, ev: "meta", tag: "tool_progress", name: "mcp__viberr__run_agent",
+        text: `mcp__viberr__run_agent still running · ${elapsed}s`,
+        progress: { call: "toolu_1", elapsed, heartbeat: true },
+      },
+      raw: `{"type":"tool_progress","elapsed_time_seconds":${elapsed}}`,
+    });
+    const call: StreamedLine = {
+      display: { t: "10:00:00", ev: "tool", tag: "tool_use", name: "mcp__viberr__run_agent", text: "profileId: developer" },
+      raw: '{"type":"assistant"}',
+    };
+    const live = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ lineCount: 3 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [call, beat(1, 30), beat(2, 60)] }}
+      />,
+    );
+    const rows = live.container.querySelectorAll(".log-line.wait");
+    expect(rows.length).toBe(1);
+    const row = rows[0]!;
+    expect(row.className).toContain("lw-live");
+    expect(row.querySelector("canvas.log-orb")).not.toBeNull();
+    expect(row.querySelector("canvas.log-orb")!.getAttribute("aria-hidden")).toBe("true");
+    expect(row.textContent).toContain("still running · 1m");
+    expect(row.querySelector(".log-wait")!.getAttribute("title")).toMatch(/^2 heartbeats from the runtime/);
+    // The chip is Viberr's: tinted, marked, the prefix gone, and the word read
+    // to assistive tech so the mark is never the only carrier.
+    const chip = row.querySelector(".log-chip.vb .lc-name")!;
+    expect(chip.querySelector(".lc-mark")).not.toBeNull();
+    expect(chip.textContent).toBe("viberr run_agent");
+    expect(chip.getAttribute("title")).toBe("Viberr's own tool · mcp__viberr__run_agent");
+    // …and the call's own chip carries the same mark; a built-in never does.
+    expect(live.container.querySelectorAll(".log-chip.vb").length).toBe(2);
+    live.unmount();
+
+    const done: StreamedLine = {
+      display: { t: "10:03:00", ev: "out", tag: "tool_result", text: "ok" },
+      raw: '{"type":"user"}',
+    };
+    const ended = render(
+      <AgentLogsPanel
+        runtime={[mkRun({ lineCount: 4 })]}
+        sel="primary"
+        onSel={() => {}}
+        linesByThread={{ primary: [call, beat(1, 30), beat(2, 60), done] }}
+      />,
+    );
+    const past = ended.container.querySelector(".log-line.wait")!;
+    expect(past.className).not.toContain("lw-live");
+    expect(past.querySelector("canvas")).toBeNull();
+    expect(past.querySelector(".ico")).not.toBeNull();
+    expect(past.textContent).toContain("ran past 1m");
+
+    // `raw` is authoritative: every heartbeat verbatim, no fold, no chip.
+    fireEvent.click(ended.getByText("{ } raw"));
+    expect(ended.container.querySelector(".log-line.wait")).toBeNull();
+    expect(ended.container.querySelector("canvas")).toBeNull();
+    expect(ended.container.textContent).toContain('"elapsed_time_seconds":30');
+    expect(ended.container.textContent).toContain('"elapsed_time_seconds":60');
+  });
+
   it("lifts multi-line output into a bounded block, whole and copyable", () => {
     const out = ["> npm test", "", "34 passed", "done in 1.2s"].join("\n");
     const { container, getByText } = render(

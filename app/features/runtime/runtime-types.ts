@@ -114,6 +114,39 @@ export interface LogLine {
    *  reader of a failure consumes THIS, never a second regex over the raw
    *  stream. Absent on every other line. */
   failure?: RunFailureFacts;
+  /** Ruling 366: a provider heartbeat (Claude's `tool_progress`): the call it
+   *  reports on is still running. `call` is the tool_use id every heartbeat
+   *  of one call shares (the console folds them into one wait row); `elapsed`
+   *  is the provider's own figure in seconds, null when it sent none — never
+   *  counted here. Absent on every other line. */
+  progress?: { call: string; elapsed: number | null; heartbeat: boolean };
+}
+
+/**
+ * Ruling 366: the tag of a provider heartbeat line — the projection writes it
+ * for Claude's `tool_progress` envelope (one every ~30 s while a tool call is
+ * open; 7,472 of them on this instance's stored runs, 120 on one operator's
+ * `run_agent` alone). The console folds a run of them into one wait row.
+ */
+export const TOOL_PROGRESS_TAG = "tool_progress";
+
+/** True for a heartbeat the console folds into a wait row. */
+export function isWaitLine(line: LogLine): boolean {
+  return line.tag === TOOL_PROGRESS_TAG && !!line.progress;
+}
+
+/**
+ * A provider's elapsed figure as the wait row prints it: `30s`, `2m 30s`,
+ * `1h 40m`. Whole units only, seconds dropped past the hour — the figure is
+ * the provider's last report, not a stopwatch, and the row says so.
+ */
+export function waitClock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (s < 3600) return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
+  const h = Math.floor(s / 3600);
+  return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
 }
 
 /**

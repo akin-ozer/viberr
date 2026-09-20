@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ThinkingOrb } from "thinking-orbs";
+import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import { AgentGlyph } from "~/ui/identity";
 import { Icon } from "~/ui/icon";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
@@ -22,6 +24,7 @@ import {
   fileChangeChips,
   fmtClock,
   fmtTok,
+  foldWaits,
   groupThoughts,
   hoistRunInputs,
   roleShort,
@@ -31,6 +34,8 @@ import {
   thoughtLabel,
   toolChip,
   useElapsed,
+  waitText,
+  waitTitle,
   type ConsoleCodeBlock,
 } from "./runs-helpers";
 import { localLogClock } from "./log-clock";
@@ -410,6 +415,34 @@ const FILE_KIND_WORD = {
 } satisfies Record<"add" | "update" | "delete", string>;
 
 /**
+ * Ruling 366: a tool chip's name, marked by whose tool it is. Viberr's own
+ * tools carry the agent tint and the V mark; the word is read to assistive
+ * tech (`.vh`) so the mark is never the only carrier, and the title spells the
+ * provider's full name for anyone who greps a transcript by it.
+ */
+function ToolName({ who }: { who: ToolIdentity }) {
+  const title =
+    who.kind === "viberr"
+      ? `Viberr's own tool · ${who.name}`
+      : who.kind === "mcp"
+        ? `MCP server ${who.server} · ${who.name}`
+        : undefined;
+  return (
+    <span className="lc-name" title={title}>
+      {who.kind === "viberr" ? (
+        <>
+          <span className="lc-mark" aria-hidden="true">
+            <Icon name="viberr" />
+          </span>
+          <span className="vh">viberr </span>
+        </>
+      ) : null}
+      {who.label}
+    </span>
+  );
+}
+
+/**
  * P19-RC1 — multi-line command output and diffs, lifted out of the grid row
  * into their own bounded block.
  *
@@ -551,8 +584,11 @@ export function AgentLogsPanel({
   // P19-RC1: …and consecutive reasoning lines fold into one block on top of
   // that. Both foldings are no-ops under `raw`, which keeps the stored stream
   // the authoritative view of what the provider sent.
-  const entries = groupThoughts(
-    collapseTelemetry(hoistRunInputs(shown), raw),
+  // Ruling 366: …and a call's heartbeats fold into one wait row last, on the
+  // thought fold's blocks (a heartbeat is a `meta` line the thought fold never
+  // touches). Still a no-op under `raw`.
+  const entries = foldWaits(
+    groupThoughts(collapseTelemetry(hoistRunInputs(shown), raw), raw),
     raw,
   );
 
@@ -930,6 +966,47 @@ export function AgentLogsPanel({
               </Fragment>
             );
           }
+          // Ruling 366: one call's heartbeats, folded into one wait row. LIVE
+          // while the run is going and nothing has landed after the last
+          // heartbeat — the orb turns; once anything follows, the call was
+          // still running AT the figure, and the row claims exactly that.
+          if (entry.kind === "wait") {
+            const last = entry.lines[entry.lines.length - 1]!.display;
+            const live = cur!.state === "running" && i === entries.length - 1;
+            const who = toolIdentity(last.name ?? "");
+            return (
+              <div className={"log-line meta wait" + (live ? " lw-live" : "")} key={i}>
+                <span className="lt">
+                  {hydrated ? localLogClock(last.t, cur!.startedAt) : last.t}
+                </span>
+                <span className="ltag">{last.tag}</span>
+                <span className="lx">
+                  <span className="log-wait" title={waitTitle(entry.lines)}>
+                    {live ? (
+                      // Pinned to its dark ink: the console paints its own
+                      // near-black fill in BOTH app themes, and `auto` would
+                      // read the light theme's `data-theme` off `:root` and
+                      // draw dark dots on it. Decorative — the words beside it
+                      // carry the state, so it is hidden from assistive tech.
+                      <ThinkingOrb
+                        state={who.kind === "viberr" ? "connecting" : "working"}
+                        size={20}
+                        theme="dark"
+                        className="log-orb"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <Icon name="clock" />
+                    )}
+                    <span className={"log-chip" + (who.kind === "viberr" ? " vb" : "")}>
+                      <ToolName who={who} />
+                    </span>
+                    {waitText(entry.lines, live)}
+                  </span>
+                </span>
+              </div>
+            );
+          }
           const display = entry.line.display;
           // F15-08: the stored `t` is a UTC wall clock; the timeline on the
           // same page is local. One story per page. Until hydration the raw UTC
@@ -1005,8 +1082,8 @@ export function AgentLogsPanel({
                 ) : (
                   <>
                     {chip ? (
-                      <span className="log-chip">
-                        <span className="lc-name">{chip.name}</span>
+                      <span className={"log-chip" + (chip.who.kind === "viberr" ? " vb" : "")}>
+                        <ToolName who={chip.who} />
                         {chip.detail ? (
                           <span className="lc-detail">{chip.detail}</span>
                         ) : null}

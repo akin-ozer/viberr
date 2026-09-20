@@ -1,5 +1,10 @@
 import { z } from "zod";
-import type { LogLine } from "~/features/runtime/runtime-types";
+import {
+  TOOL_PROGRESS_TAG,
+  waitClock,
+  type JsonValue,
+  type LogLine,
+} from "~/features/runtime/runtime-types";
 
 /** Normalize provider wire envelopes into console lines and persisted facts. */
 
@@ -200,8 +205,19 @@ const claudeEnvelopeFields = z.object({
     ])
     .catch(() => ({ content: claudeBlocks.parse([]), text: "" })),
   /** `system/permission_denied`: the tool the run was refused, and why (the
-   *  deciding component's reason and its kind — `rule`, `mode`, `classifier`…). */
+   *  deciding component's reason and its kind — `rule`, `mode`, `classifier`…).
+   *  `tool_progress` (ruling 366) names its tool through the same key. */
   tool_name: wireTextOrBlank,
+  /** `tool_progress`: the call a heartbeat reports on. The SDK gives each
+   *  heartbeat its own `tool_use_id` (`<call>-heartbeat-N`) and names the call
+   *  in `parent_tool_use_id`; a subagent's progress frame carries the call in
+   *  `tool_use_id` alone. */
+  tool_use_id: wireTextOrBlank,
+  parent_tool_use_id: wireTextOrBlank,
+  /** Nullable on purpose: a heartbeat with no figure reads "still running",
+   *  never a fabricated "0s". */
+  elapsed_time_seconds: z.number().nullable().catch(null),
+  heartbeat: wireFlag,
   decision_reason: wireTextOrBlank,
   decision_reason_type: wireTextOrBlank,
   usage: z
@@ -483,6 +499,34 @@ function projectClaude(e: ClaudeEnvelope, t: string): ProjectedEnvelope | null {
         facts: {},
       };
     }
+    case "tool_progress": {
+      // Ruling 366: the provider's heartbeat — "this tool call is still
+      // running, N seconds in". It fell to the unknown-envelope row, so a
+      // `run_agent` that waited forty minutes on a specialist printed eighty
+      // rows of raw JSON under the call it was waiting on. The row carries the
+      // tool (so the console draws the same chip the call has), the call id
+      // (so consecutive heartbeats fold into ONE wait row) and the provider's
+      // own elapsed figure. `meta` on purpose: the ONE row a reader is shown
+      // is drawn by the fold; a heartbeat that reaches a reader unfolded (the
+      // raw view, an older client) is still a dim status line.
+      const tool = e.tool_name || "tool";
+      const elapsed = e.elapsed_time_seconds;
+      return {
+        display: {
+          t,
+          ev: "meta",
+          tag: TOOL_PROGRESS_TAG,
+          name: tool,
+          text: `${tool} still running${elapsed === null ? "" : ` · ${waitClock(elapsed)}`}`,
+          progress: {
+            call: e.parent_tool_use_id || e.tool_use_id,
+            elapsed,
+            heartbeat: e.heartbeat,
+          },
+        },
+        facts: {},
+      };
+    }
     case "assistant": {
       const content = e.message.content;
       // Ruling 130(a): the provider streams its API-error banner ("You are not
@@ -610,6 +654,9 @@ const toolInputSummary = z.object({
 
 function summarizeToolInput(name: string, input: LogLine["input"]): string {
   if (!input) return "";
+  // Ruling 366: an MCP call's arguments read as the arguments line on both
+  // backends; the built-in summaries below are Claude's own tools.
+  if (name.startsWith("mcp__")) return summarizeArguments(input);
   const summary = toolInputSummary.parse(input);
   if (name === "Bash" && summary.command !== undefined) return summary.command;
   if (summary.file_path !== undefined) return summary.file_path;
@@ -617,6 +664,62 @@ function summarizeToolInput(name: string, input: LogLine["input"]): string {
     return summary.pattern + (summary.path !== undefined ? " " + summary.path : "");
   }
   return JSON.stringify(input);
+}
+
+/** Longest a single argument value prints on the arguments line. Measured on
+ *  this instance's 6,574 stored MCP calls: a `run_agent` prompt or a
+ *  `post_comment` body runs to thousands of characters, and the whole object
+ *  used to print as one JSON blob. The raw view keeps every character. */
+const ARGUMENT_CLIP = 160;
+
+/** One argument value, classified for the arguments line: text prints
+ *  flattened and clipped, a collection by its size — never its body — and any
+ *  other scalar as itself. */
+const argumentValue = z.union([
+  z.string().transform((text) => ({ kind: "text" as const, text })),
+  z.array(z.unknown()).transform((list) => ({ kind: "list" as const, size: list.length })),
+  z
+    .record(z.string(), z.unknown())
+    .transform((record) => ({ kind: "record" as const, size: Object.keys(record).length })),
+  z.unknown().transform((value) => ({ kind: "scalar" as const, text: String(value) })),
+]);
+
+function clippedText(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > ARGUMENT_CLIP ? `${flat.slice(0, ARGUMENT_CLIP - 1)}…` : flat;
+}
+
+function argumentText(value: JsonValue): string {
+  const v = argumentValue.parse(value);
+  switch (v.kind) {
+    case "text":
+      return clippedText(v.text);
+    case "list":
+      return `[${v.size} item${v.size === 1 ? "" : "s"}]`;
+    case "record":
+      return `{${v.size} field${v.size === 1 ? "" : "s"}}`;
+    default:
+      return v.text;
+  }
+}
+
+/**
+ * Ruling 366: the console row for an MCP call's arguments, one rule on both
+ * backends. A single string argument prints as itself (`services/orders/src/
+ * app.ts`, `ping` — the value IS the row, and it is what the Codex rule already
+ * did for `query`/`path`/`url`/`name`/`message`); anything else prints every
+ * key with its value, so `run_agent`'s `profileId: integration-verifier ·
+ * delivers: false · reason: … · prompt: …` names the profile before the prompt
+ * instead of burying it in a JSON object the reader had to parse by eye.
+ */
+function summarizeArguments(input: Record<string, JsonValue>): string {
+  const entries = Object.entries(input);
+  if (entries.length === 0) return "";
+  if (entries.length === 1) {
+    const only = argumentValue.parse(entries[0]![1]);
+    if (only.kind === "text") return clippedText(only.text);
+  }
+  return entries.map(([key, value]) => `${key}: ${argumentText(value)}`).join(" · ");
 }
 
 /** `null` → the envelope type is unrecognized; the caller renders it raw. */
@@ -701,7 +804,7 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
                 ev: "tool",
                 tag: "mcp_tool_call",
                 name,
-                text: args.record === null ? args.text : summarizeMcpArguments(args.record),
+                text: args.record === null ? args.text : summarizeArguments(args.record),
                 input: args.record,
               },
               facts: {},
@@ -741,26 +844,6 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
     default:
       return null;
   }
-}
-
-/** The fields an MCP call's arguments are summarized BY, in priority order. */
-const mcpArgumentSummary = z.object({
-  query: wireStringOrAbsent,
-  path: wireStringOrAbsent,
-  url: wireStringOrAbsent,
-  name: wireStringOrAbsent,
-  message: wireStringOrAbsent,
-});
-
-/** The console row for an MCP call's arguments — the same "show the useful
- *  field, else the JSON" rule `summarizeToolInput` applies on Claude. */
-function summarizeMcpArguments(args: LogLine["input"]): string {
-  if (args == null) return "";
-  const summary = mcpArgumentSummary.parse(args);
-  for (const value of [summary.query, summary.path, summary.url, summary.name, summary.message]) {
-    if (value !== undefined && value.trim()) return value;
-  }
-  return JSON.stringify(args);
 }
 
 function cleanCommand(command: string): string {

@@ -5487,19 +5487,43 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .log-line.think .log-more { font-style: normal; }
 
 /* Tool call — the verb, promoted out of the prose so a reader scanning for
-   what the agent DID lands on it. */
+   what the agent DID lands on it. Ruling 366: the chip is NEUTRAL, so a scan
+   down the console tells the product's own tools — the agent tint and the V
+   mark (`.vb`) — from a shell and an org server's tool without reading a
+   name. Console-literal colours, like every rule around them. */
 .log-chip { display: inline-flex; align-items: baseline; gap: .375rem; max-width: 100%; }
 .log-chip .lc-name {
   flex: none;
+  display: inline-flex; align-items: center;
   padding: .04rem .25rem;
-  border: 1px solid #3d3560;
+  border: 1px solid #333a4d;
   border-radius: var(--radius-small);
-  background: #241f38;
-  color: #d9ccff;
+  background: #1c2130;
+  color: #c9d1e3;
   font-weight: 600;
   font-size: .69rem;
 }
+.log-chip.vb .lc-name { border-color: #5a48b8; background: #2a2350; color: #e6dcff; }
+/* The mark is 12px on the row's own scale — the header's 34px `.mark` would
+   swallow the line — and a glyph, so no off-scale font size is minted for it. */
+.log-chip .lc-mark {
+  display: inline-grid; place-items: center;
+  width: 12px; height: 12px; margin-right: .25rem;
+  border-radius: 3px;
+  background: #d9ccff; color: #1a1433;
+}
+.log-chip .lc-mark .ico { width: 9px; height: 9px; }
 .log-chip .lc-detail { color: #a9b0c4; word-break: break-word; }
+
+/* Ruling 366: one call's heartbeats folded into one wait row. The orb turns
+   while the call is still open (`thinking-orbs`, pinned to its dark ink — the
+   console is dark in both themes); the clock glyph marks a wait that ended.
+   `.lx` is pre-wrap for prose, so the row's own box goes back to normal flow. */
+.log-line.wait .lx { white-space: normal; }
+.log-line.wait.lw-live .lx { color: #c9d1e3; }
+.log-wait { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .375rem; max-width: 100%; }
+.log-wait .log-orb { flex: none; }
+.log-line.wait .ico { flex: none; width: 14px; height: 14px; color: #8a95b1; }
 
 /* Files a run touched, from the `file_change` envelope. Kind is carried by a
    GLYPH as well as a colour (WCAG 1.4.1) — the +/~/− reads without hue. No

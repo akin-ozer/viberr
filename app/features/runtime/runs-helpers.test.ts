@@ -6,6 +6,7 @@ import {
   fileChangeChips,
   fmtClock,
   fmtTok,
+  foldWaits,
   groupThoughts,
   hoistRunInputs,
   roleShort,
@@ -15,11 +16,15 @@ import {
   RUN_STATE,
   thoughtLabel,
   toolChip,
+  waitText,
+  waitTitle,
 } from "./runs-helpers";
 import {
   runBoundaryLine,
   RUN_BOUNDARY_TAG,
   RUN_INPUTS_TAG,
+  TOOL_PROGRESS_TAG,
+  waitClock,
   type LogLine,
   type RunInputs,
   type RunView,
@@ -437,9 +442,18 @@ describe("thoughtLabel (P19-RC1)", () => {
 describe("toolChip (P19-RC1)", () => {
   it("promotes the tool's own name and target", () => {
     expect(toolChip(L({ ev: "tool", name: "Bash", text: "npm run build" }))).toEqual({
-      name: "Bash",
+      who: { kind: "builtin", name: "Bash", server: null, tool: "Bash", label: "Bash" },
       detail: "npm run build",
     });
+  });
+
+  it("knows whose tool it is (ruling 366): the product's own get the mark, the prefix goes", () => {
+    const chip = toolChip(L({ ev: "tool", name: "mcp__viberr__deliver_for_review", text: "reason: rework landed" }))!;
+    expect(chip.who).toMatchObject({ kind: "viberr", label: "deliver_for_review" });
+    expect(chip.detail).toBe("reason: rework landed");
+    expect(toolChip(L({ ev: "tool", name: "everything-http.echo", text: "ping" }))!.who.label).toBe(
+      "everything-http · echo",
+    );
   });
 
   it("declines anything that is not a named tool call", () => {
@@ -562,5 +576,64 @@ describe("agentMessageProse (N20-18)", () => {
     // Claude's own prose event, and other event kinds, are untouched.
     expect(agentMessageProse(L({ tag: "assistant", text: "hi" }))).toBeNull();
     expect(agentMessageProse(L({ ev: "tool", tag: "command_execution", text: "ls" }))).toBeNull();
+  });
+});
+
+/**
+ * Ruling 366: a call's heartbeats are ONE wait row, in the tense its liveness
+ * sets. Canary: fold on adjacency alone and `two calls` below becomes one row.
+ */
+describe("foldWaits + waitText (ruling 366)", () => {
+  const beat = (call: string, elapsed: number | null, t = "10:00:30"): LogLine =>
+    L({
+      t,
+      ev: "meta",
+      tag: TOOL_PROGRESS_TAG,
+      name: "mcp__viberr__run_agent",
+      text: "mcp__viberr__run_agent still running",
+      progress: { call, elapsed, heartbeat: true },
+    });
+
+  it("folds one call's heartbeats into one wait row and keeps two calls apart", () => {
+    const rows = [
+      R(L({ ev: "tool", tag: "tool_use", name: "mcp__viberr__run_agent", text: "profileId: developer" })),
+      R(beat("a", 30)),
+      R(beat("a", 60, "10:01:00")),
+      R(L({ ev: "out", tag: "tool_result", text: "done" })),
+      R(beat("b", 30)),
+    ];
+    const blocks = foldWaits(rows.map(line), false);
+    expect(blocks.map((b) => b.kind)).toEqual(["line", "wait", "line", "wait"]);
+    expect(blocks[1]).toEqual({ kind: "wait", lines: [rows[1], rows[2]] });
+    expect(blocks[3]).toEqual({ kind: "wait", lines: [rows[4]] });
+    // A heartbeat that never got its structured field is not a wait row: it
+    // renders as the meta line it is.
+    const bare = R(L({ ev: "meta", tag: TOOL_PROGRESS_TAG, text: "{…}" }));
+    expect(foldWaits([line(bare)], false)).toEqual([line(bare)]);
+  });
+
+  it("is a no-op under raw — the toggle's contract is what the provider sent", () => {
+    const rows = [R(beat("a", 30)), R(beat("a", 60))].map(line);
+    expect(foldWaits(rows, true)).toEqual(rows);
+  });
+
+  it("prints the provider's LAST figure, in the tense the row's liveness sets", () => {
+    const lines = [R(beat("a", 30)), R(beat("a", 150, "10:02:30"))];
+    expect(waitText(lines, true)).toBe("still running · 2m 30s");
+    // Ended: all the record supports is that the call was still open AT the
+    // figure — never a total the heartbeats cannot give.
+    expect(waitText(lines, false)).toBe("ran past 2m 30s");
+    expect(waitText([R(beat("a", null))], true)).toBe("still running");
+    expect(waitText([R(beat("a", null))], false)).toBe("was still running");
+    expect(waitTitle(lines)).toBe(
+      "2 heartbeats from the runtime, about one every 30 s. The elapsed figure is its last report, not a clock.",
+    );
+    expect(waitTitle([R(beat("a", 30))])).toMatch(/^1 heartbeat from/);
+  });
+
+  it("waitClock keeps whole units and never goes negative", () => {
+    expect([29, 60, 150, 3600, 6039, 7200, -5].map(waitClock)).toEqual([
+      "29s", "1m", "2m 30s", "1h", "1h 40m", "2h", "0s",
+    ]);
   });
 });

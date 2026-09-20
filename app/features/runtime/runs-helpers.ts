@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
+import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import type { ConsoleEntry } from "./log-noise";
 import {
   isRunBoundary,
   isRunInputsLine,
+  isWaitLine,
+  waitClock,
   type LogLine,
   type RunInputs,
   type RunView,
@@ -360,7 +363,11 @@ export function runInputRows(
  * a folded THOUGHT run. Additive over `ConsoleEntry` so the existing pipeline
  * keeps its meaning and only the new kind has to be handled.
  */
-export type ConsoleBlock<T> = ConsoleEntry<T> | { kind: "thought"; lines: T[] };
+export type ConsoleBlock<T> =
+  | ConsoleEntry<T>
+  | { kind: "thought"; lines: T[] }
+  /** Ruling 366: one tool call's heartbeats, drawn as one wait row. */
+  | { kind: "wait"; lines: T[] };
 
 /** True when a line is the model narrating its own reasoning. */
 export function isThoughtLine(line: LogLine): boolean {
@@ -403,6 +410,67 @@ export function groupThoughts<T extends { display: LogLine }>(
   );
 }
 
+/**
+ * Ruling 366: fold one call's heartbeats into one wait row.
+ *
+ * Keyed on the call, not on adjacency alone: two calls back to back that each
+ * heartbeat (a `run_agent` answered, then a `deliver_for_review` that waits on
+ * the push) are two waits, because that is the shape of the work. A single
+ * heartbeat still folds — unlike a lone thought, it is not a line worth reading
+ * as itself, it is thirty seconds of a call still open.
+ *
+ * Runs after `groupThoughts`, on its blocks: a heartbeat is a `meta` line, so
+ * the thought fold passes it through untouched. A NO-OP under `raw`, like every
+ * fold before it.
+ */
+export function foldWaits<T extends { display: LogLine }>(
+  blocks: readonly ConsoleBlock<T>[],
+  raw: boolean,
+): ConsoleBlock<T>[] {
+  if (raw) return [...blocks];
+  const out: ConsoleBlock<T>[] = [];
+  for (const block of blocks) {
+    if (block.kind !== "line" || !isWaitLine(block.line.display)) {
+      out.push(block);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (
+      last &&
+      last.kind === "wait" &&
+      last.lines[0]!.display.progress?.call === block.line.display.progress?.call
+    ) {
+      last.lines.push(block.line);
+      continue;
+    }
+    out.push({ kind: "wait", lines: [block.line] });
+  }
+  return out;
+}
+
+/**
+ * The wait row's words, from the provider's LAST elapsed report and in the
+ * tense the row's liveness sets. Live = the run is still going and nothing has
+ * landed after the last heartbeat, so the call is open now. Ended = something
+ * did land, so all the record supports is that the call was still running AT
+ * that figure — "ran past 2m 30s", never a total the heartbeats cannot give.
+ */
+export function waitText(lines: readonly { display: LogLine }[], live: boolean): string {
+  const elapsed = lines[lines.length - 1]!.display.progress?.elapsed ?? null;
+  const at = elapsed === null ? null : waitClock(elapsed);
+  if (live) return at === null ? "still running" : `still running · ${at}`;
+  return at === null ? "was still running" : `ran past ${at}`;
+}
+
+/** The fold's tooltip: what it stands for, and whose figure the row prints. */
+export function waitTitle(lines: readonly { display: LogLine }[]): string {
+  const n = lines.length;
+  return (
+    `${n} heartbeat${n === 1 ? "" : "s"} from the runtime, about one every 30 s. ` +
+    "The elapsed figure is its last report, not a clock."
+  );
+}
+
 /** `HH:MM:SS` → seconds, or null when the clock is not readable. */
 function clockSeconds(t: string): number | null {
   const m = /^(\d{2}):(\d{2}):(\d{2})$/.exec(t);
@@ -434,8 +502,8 @@ export function thoughtLabel(lines: readonly { display: LogLine }[]): string {
 
 /** A tool call reduced to what a scanning reader needs: the verb and its target. */
 export interface ToolChip {
-  /** The tool's own name — `Bash`, `Read`, `exec`… */
-  name: string;
+  /** Whose tool, and the label the chip prints for it (ruling 366). */
+  who: ToolIdentity;
   /** What it was pointed at; empty when the line carried only a name. */
   detail: string;
 }
@@ -450,7 +518,7 @@ export interface ToolChip {
  */
 export function toolChip(line: LogLine): ToolChip | null {
   if (line.ev !== "tool" || !line.name) return null;
-  return { name: line.name, detail: line.text };
+  return { who: toolIdentity(line.name), detail: line.text };
 }
 
 /** One file a run touched, as the `file_change` envelope recorded it. */
