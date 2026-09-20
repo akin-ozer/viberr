@@ -93,6 +93,20 @@
   --amber-light: #fff8c5;
   --amber-dark: #735c0f;
   --red-light: #fbd4d4;
+  /* Ruling 363: the code reader's syntax palette — GitHub's light syntax
+     colours, the family the danger and warning pairs already borrow (ruling
+     148(d)). Eight scope families, the ones Shiki's css-variables theme
+     resolves every grammar to; each clears 4.5:1 on --bg and --surface,
+     locked in app.css.test.ts beside the secondary-text checks. Punctuation
+     stays --fg, so it has no token. */
+  --syn-keyword: #cf222e;
+  --syn-string: #0a3069;
+  --syn-string-expression: #116329;
+  --syn-comment: #57606a;
+  --syn-constant: #0550ae;
+  --syn-parameter: #953800;
+  --syn-function: #8250df;
+  --syn-link: #0969da;
 
   /* agent identity tint — violet, distinct from human blue */
   --agent: #7b61ff;
@@ -3431,6 +3445,15 @@ dialog[data-closing]::backdrop {
   --amber-light: #3a3019;
   --amber-dark: #d29922;
   --red-light: #47211f;
+  /* Ruling 363: GitHub's dark syntax colours (see the light block). */
+  --syn-keyword: #ff7b72;
+  --syn-string: #a5d6ff;
+  --syn-string-expression: #7ee787;
+  --syn-comment: #8b949e;
+  --syn-constant: #79c0ff;
+  --syn-parameter: #ffa657;
+  --syn-function: #d2a8ff;
+  --syn-link: #58a6ff;
 
   --agent: #957fff;
   --agent-dark: #c6baff;
@@ -6405,3 +6428,37 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .rr-row > .btn { margin-left: auto; }
 .rr-row .guard-ctl select { min-width: 9rem; }
 .rr-actions { display: flex; justify-content: flex-end; gap: .5rem; padding-top: .75rem; }
+
+/* ---------- appended: ruling 363, the attachment code reader ---------- */
+/* The read-only text viewer (ruling 105) grew a line-number gutter and Shiki
+   tokens. Each line is a block with the number absolutely placed in its
+   padding, so a wrapped continuation sits under the code, not under the
+   number; the gutter is unselectable so a copy takes only code. Token
+   classes are the css-variables theme's scope families (code-highlight.ts),
+   coloured from the --syn-* palette declared with the other tokens. */
+.code-view { counter-reset: line; tab-size: 4; --code-gutter: 3ch; }
+.code-view[data-digits="4"] { --code-gutter: 4ch; }
+.code-view[data-digits="5"] { --code-gutter: 5ch; }
+.code-view[data-digits="6"] { --code-gutter: 6ch; }
+.code-view .line {
+  display: block; position: relative; min-height: 1lh;
+  padding-left: calc(var(--code-gutter) + .875rem);
+  counter-increment: line;
+}
+.code-view .line::before {
+  content: counter(line);
+  position: absolute; left: 0; top: 0; width: var(--code-gutter);
+  text-align: right; color: var(--faint);
+  font-variant-numeric: tabular-nums; user-select: none;
+}
+.code-view .tk-keyword { color: var(--syn-keyword); }
+.code-view .tk-string { color: var(--syn-string); }
+.code-view .tk-string-expression { color: var(--syn-string-expression); }
+.code-view .tk-comment { color: var(--syn-comment); }
+.code-view .tk-constant { color: var(--syn-constant); }
+.code-view .tk-parameter { color: var(--syn-parameter); }
+.code-view .tk-function { color: var(--syn-function); }
+.code-view .tk-link { color: var(--syn-link); }
+.code-view .tk-i { font-style: italic; }
+.code-view .tk-b { font-weight: 600; }
+.code-view .tk-u { text-decoration: underline; text-underline-offset: 2px; }

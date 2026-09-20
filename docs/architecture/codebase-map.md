@@ -113,7 +113,9 @@ copy) and `retired-vocabulary.test.tsx` ("primary specialist" and friends).
 `avatar`, `identity` (agent glyph: sparkle for Claude, cpu for Codex, shield for the
 operator), `icon` (one stroke icon set), `pill` (the one readiness/validation/state
 mapping), `rich-text` (inline `**bold**`, `` `code` ``, `@mention`), `markdown`
-(react-markdown + GFM with attachment-aware images), `mention-spans`, `toast`
+(react-markdown + GFM with attachment-aware images), `code-view` + `code-language` +
+`code-highlight` (the ruling-363 reader: numbered lines, Shiki tokens by filename grammar,
+loaded on first use), `mention-spans`, `toast`
 (bottom-center, 2600 ms), `confirm-dialog`, `use-dialog` (native `<dialog>` contract:
 Escape, backdrop click, focus restore), `use-dismiss`, `page-overlay`, `stage-menu`,
 `task-meta` (priority, labels, due date), `label-input`, `calendar` + `date-picker`,

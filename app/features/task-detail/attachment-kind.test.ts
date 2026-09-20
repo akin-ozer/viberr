@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+import {
+  attachmentKind,
+  BINARY_SNIFF_CHARS,
+  looksBinary,
+} from "./attachment-kind";
+
+const NUL = String.fromCharCode(0);
+
+/* Ruling 363: what the card can show, decided from the name and then the bytes. */
+describe("attachmentKind (ruling 363)", () => {
+  it("names decide images and the known binary kinds; everything else tries the reader", () => {
+    expect(attachmentKind("shot.PNG")).toBe("image");
+    expect(attachmentKind("bundle.zip")).toBe("binary");
+    expect(attachmentKind("report.pdf")).toBe("binary");
+    expect(attachmentKind("font.woff2")).toBe("binary");
+    // The file the owner was shown "no in-app preview" for.
+    expect(attachmentKind("shop-65-journey-script.mjs")).toBe("text");
+    expect(attachmentKind("Dockerfile")).toBe("text");
+    expect(attachmentKind("capture.yml")).toBe("text");
+    expect(attachmentKind("icon.svg")).toBe("text");
+    // Unknown is not binary: the bytes decide.
+    expect(attachmentKind("weird.dat")).toBe("text");
+  });
+
+  it("a NUL in the head is binary; UTF-8 text with odd characters is not", () => {
+    expect(looksBinary("PK" + String.fromCharCode(3, 4) + NUL + NUL)).toBe(true);
+    expect(looksBinary("héllo — 日本語 " + String.fromCharCode(9, 13, 10))).toBe(false);
+    expect(looksBinary("")).toBe(false);
+    // The window is the head, git's 8,000 — a NUL past it is not what a
+    // reader sees first, and the card already says the file is shown in part.
+    expect(looksBinary("a".repeat(BINARY_SNIFF_CHARS) + NUL)).toBe(false);
+    expect(looksBinary("a".repeat(BINARY_SNIFF_CHARS - 1) + NUL)).toBe(true);
+  });
+});

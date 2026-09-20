@@ -20,7 +20,7 @@
 
 **Always-human capabilities** — `merge-pull-request`, `transition-to-done`, `change-project-policy`. A server invariant (`ALWAYS_HUMAN_CAPABILITY_IDS`); no stored grant can hand them to an agent.
 
-**Attachments** — files under `projects/<slug>/tasks/<KEY>/attachments/` that a run granted `attach-evidence-references` (or the browser MCP) wrote. Served member-only at `/projects/:slug/tasks/:key/attachments/:file`; images render as timeline thumbnails. Every kind opens an in-app card with a Download button — images the picture, text files a read-only reader, anything else a "no in-app preview" note — and at run completion the browser MCP's machine-stamped working artifacts are pruned unless the run cited the exact filename (ruling 105).
+**Attachments** — files under `projects/<slug>/tasks/<KEY>/attachments/` that a run granted `attach-evidence-references` (or the browser MCP) wrote. Served member-only at `/projects/:slug/tasks/:key/attachments/:file`; images render as timeline thumbnails. Every kind opens an in-app card with a Download button — images the picture, text files a read-only code reader (highlighted by the name's grammar, numbered; ruling 363), anything else a "no in-app preview" note — and at run completion the browser MCP's machine-stamped working artifacts are pruned unless the run cited the exact filename (ruling 105).
 
 **Autonomy** — the operator deployment's `supervised | full` setting. Supervised operators recommend at governed boundaries; full operators act. A per-run level is clamped to the configured ceiling (ruling 67).
 
