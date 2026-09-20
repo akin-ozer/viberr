@@ -52,10 +52,32 @@ FROM node:26-slim
 # runtime needs git + a CA bundle for HTTPS to github.com and the model APIs.
 # (The SDKs' own native binaries are already inside node_modules from the
 # linux `npm ci` in the build stage.)
+#
+# APT OVER HTTPS, from the first fetch. The base image names its mirror as
+# `http://deb.debian.org`, and on a connection that shapes port 80 the three
+# apt layers of this stage crawl. Measured 2026-09-20 on the owner's
+# connection: 20–50 KB/s over plain HTTP to every Debian mirror tried, 3.6 MB/s
+# to the SAME host over HTTPS. The 9.6 MB package index alone took three
+# minutes, the chromium closure below would have taken hours, and a
+# `docker compose up -d --build` was cancelled at 2m49s looking hung. The
+# layer cache hides this until it is cold (a fresh machine, a builder prune, a
+# base-image bump), which is exactly when it surfaces as "the build hangs".
+#
+# apt has spoken HTTPS natively since 1.5, but the slim image ships no CA
+# bundle — `ca-certificates` is one of the two packages this layer installs —
+# so the first fetch has nothing to trust the mirror with. Node does: its
+# binary embeds Mozilla's root store (`tls.rootCertificates`), written out
+# here as the trust anchor for THIS layer's two apt calls only
+# (`Acquire::https::CaInfo`). The `ca-certificates` install creates the
+# system store, every later apt call uses that, and the bootstrap file goes
+# out with the lists. Integrity was never the question — every package is
+# signature-checked over either transport; throughput was.
 # hadolint ignore=DL3008
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && node -p 'require("tls").rootCertificates.join(require("os").EOL)' > /tmp/node-roots.pem \
+    && apt-get -o Acquire::https::CaInfo=/tmp/node-roots.pem update \
+    && apt-get -o Acquire::https::CaInfo=/tmp/node-roots.pem install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* /tmp/node-roots.pem
 
 # Ruling 196 (owner, pass 37): the three an agent reaches for FIRST and cannot
 # install for itself. Pass 37 measured the cost of their absence — 75

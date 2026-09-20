@@ -1177,9 +1177,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @media (hover: none) {
   .card-move { opacity: 1; }
 }
-.card-move .stage-menu-btn { width: 20px; height: 20px; min-height: 0; padding: 0; justify-content: center; border-radius: var(--radius-small); }
-.card-move .sm-current { display: none; }
-.card-move .sm-caret { transform: rotate(90deg); }
+/* A 24px target (owner, 2026-09-20: 20px was "a bit too small") holding a
+   14px chevron alone. The trigger's own `.sm-current` rule sits later in the
+   sheet at equal specificity, so the dot is hidden at one level higher. */
+.card-move .stage-menu-btn { width: 24px; height: 24px; min-height: 0; padding: 0; justify-content: center; border-radius: var(--radius-small); }
+.card-move .stage-menu-btn .sm-current { display: none; }
+.card-move .stage-menu-btn .sm-caret { width: 14px; height: 14px; transform: rotate(90deg); }
 .card-move .stage-menu-btn.open .sm-caret { transform: rotate(-90deg); }
 .card-wrap.draggable { cursor: grab; }
 .card-wrap.draggable:active { cursor: grabbing; }

@@ -2962,8 +2962,11 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
     expect(decls(".card-move")).toMatch(/position:\s*absolute/);
     expect(decls(".card-move")).toMatch(/bottom:\s*\.75rem/);
     expect(CODE).not.toMatch(/\.card-wrap:has\(\.card-move\)/);
-    expect(decls(".card-move .stage-menu-btn")).toMatch(/width:\s*20px;\s*height:\s*20px/);
-    expect(decls(".card-move .sm-current")).toMatch(/display:\s*none/);
+    expect(decls(".card-move .stage-menu-btn")).toMatch(/width:\s*24px;\s*height:\s*24px/);
+    // One level above the trigger's own `.stage-menu-btn .sm-current`, which
+    // comes later in the sheet: at equal specificity the dot came back.
+    expect(decls(".card-move .stage-menu-btn .sm-current")).toMatch(/display:\s*none/);
+    expect(decls(".card-move .stage-menu-btn .sm-caret")).toMatch(/width:\s*14px/);
     expect(decls(".col-head .add")).toMatch(/width:\s*24px;\s*height:\s*24px/);
   });
 
