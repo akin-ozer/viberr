@@ -81,6 +81,13 @@ import {
 } from "./controller-ops-mcp.server";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
 import { buildControllerToolkit } from "./controller-toolkit.server";
+import {
+  joinedPrompt,
+  sortedBy,
+  sortedNames,
+  type PromptPrefix,
+} from "~/server/runtimes/prompt-prefix.server";
+import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -466,7 +473,15 @@ async function startTurnRun(
     deniedTools: disallowedTools,
     dataRoot,
   });
-  const systemPrompt = promptBuild.prompt;
+  // Ruling 373: the split the adapter records for the session (`snapshot`),
+  // and the anchor the turn is handed back after a compaction.
+  const systemPrompt = promptBuild.prefix;
+  const compactAnchor = controllerCompactAnchor({
+    conversationId: conversation.id,
+    userLabel: conversation.userLabel,
+    projectSlug: conversation.projectSlug,
+    taskKey: conversation.taskKey,
+  });
 
   const prior = latestTurnRun(db, conversation.id);
   const workdir = controllerScratchDir(dataRoot);
@@ -495,6 +510,7 @@ async function startTurnRun(
       credentialUserId,
       autonomous: true,
       systemPrompt,
+      compactAnchor,
       mcpServers,
       allowedTools,
       disallowedTools,
@@ -524,6 +540,7 @@ async function startTurnRun(
       agentProfileId: CONTROLLER_PROFILE_ID,
       autonomous: true,
       systemPrompt,
+      compactAnchor,
       mcpServers,
       allowedTools,
       disallowedTools,
@@ -979,7 +996,10 @@ interface SystemPromptInput {
 
 /** Ruling 344: the prompt, and the resolution it was built from. */
 export interface ControllerPromptBuild {
+  /** The prompt as one document (the static block then the dynamic tail). */
   prompt: string;
+  /** Ruling 370: the same text as its static/dynamic split. */
+  prefix: PromptPrefix;
   /** The resource half of this turn's `run_inputs` disclosure. */
   inputs: ResolvedResourceInputs;
 }
@@ -998,7 +1018,11 @@ export function buildControllerSystemPrompt(
   // C03-OC3: `resolveControllerConfig` already applied the one rule (an empty
   // stored list ⇒ the controller guide), so the prompt injects exactly what
   // the settings panel shows — no private fallback here.
-  const skillSet = readSkillBodies(input.config.skills, input.dataRoot);
+  // Ruling 370: every list in the static block is sorted before it renders.
+  const configSkills = sortedNames(input.config.skills);
+  const mountedMcps = sortedNames(input.mountedMcps);
+  const unresolvedMcps = sortedBy(input.unresolvedMcps, (u) => u.name);
+  const skillSet = readSkillBodies(configSkills, input.dataRoot);
   for (const part of skillSet.parts) {
     resourceParts.push(`\n\n---\n# ${part.name} (skill)\n\n${part.body}`);
   }
@@ -1007,10 +1031,8 @@ export function buildControllerSystemPrompt(
   // where a project's stages, profiles, grants and knowledge bases are set up,
   // so it is the one actor that must not be planning against rules the project
   // has already settled without it.
-  const controllerKb = controllerKbNames(
-    input.config.kb,
-    input.conversation.projectSlug,
-    input.dataRoot,
+  const controllerKb = sortedNames(
+    controllerKbNames(input.config.kb, input.conversation.projectSlug, input.dataRoot),
   );
   // Ruling 283: indexed, not injected. The controller is the most heavily
   // granted agent on most instances, which is exactly the shape the old shared
@@ -1056,19 +1078,9 @@ export function buildControllerSystemPrompt(
       // and the flat negation used to sit one line above the built-in
       // diagnostics sentence, telling the model in consecutive breaths that it
       // has no MCP servers and that it has one (ruling 107's review).
-      (input.mountedMcps.length
-        ? `Attached org MCP servers: ${input.mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
+      (mountedMcps.length
+        ? `Attached org MCP servers: ${mountedMcps.join(", ")}. Their tools widen no authority: never use one to bypass a permission, merge, accept, or delete anything.\n`
         : "No org MCP servers are attached to you.\n") +
-      // Ruling 310, third surface. This one never asserted a false cause — it
-      // named the servers and stopped — but it could not say WHY either, and it
-      // is the surface a person asks "why?" on. The reason each server gave was
-      // one `.map((u) => u.name)` away.
-      (input.unresolvedMcps.length
-        ? `These granted MCP servers did NOT mount this turn and their tools will not appear — ` +
-          `each with the reason it gave: ` +
-          `${input.unresolvedMcps.map((u) => `${u.name} (${u.reason})`).join("; ")}. ` +
-          `Say so if asked, in those terms; do not infer a cause the server did not give.\n`
-        : "") +
       // Ruling 107: this line is true on every turn by construction — the mount
       // reads no config, so the model is never told about tools it does not have.
       //
@@ -1109,7 +1121,25 @@ export function buildControllerSystemPrompt(
       ),
   );
 
-  parts.push(
+  // ------------------------------------------------ the per-turn tail (dynamic)
+  // Ruling 370: what names THIS conversation and THIS turn — the servers that
+  // did not mount, the person and the scope — follows the static block behind
+  // the SDK's boundary.
+  const dynamic: string[] = [];
+  // Ruling 310, third surface. This one never asserted a false cause — it
+  // named the servers and stopped — but it could not say WHY either, and it
+  // is the surface a person asks "why?" on. The reason each server gave was
+  // one `.map((u) => u.name)` away.
+  if (unresolvedMcps.length) {
+    dynamic.push(
+      "\n\n---\n# MCP servers that did NOT mount this turn\n\n" +
+        `These granted MCP servers did NOT mount this turn and their tools will not appear — ` +
+        `each with the reason it gave: ` +
+        `${unresolvedMcps.map((u) => `${u.name} (${u.reason})`).join("; ")}. ` +
+        `Say so if asked, in those terms; do not infer a cause the server did not give.`,
+    );
+  }
+  dynamic.push(
     "\n\n---\n# This conversation\n\n" +
       `You are talking with ${input.user.name} (${input.user.email}). Their LIVE permissions ` +
       "are the ceiling for everything you do here; the server re-checks them on every tool " +
@@ -1128,13 +1158,17 @@ export function buildControllerSystemPrompt(
       // permissions, and the role it named is the org one, which decides
       // nothing on a board. The tier list is generated from the server's own
       // authorization map; the asking person's role in the bound project is a
-      // live read in the turn context.
+      // live read in the turn context. It stays beside the ceiling sentence —
+      // the claim and what makes it usable belong in one place — so it rides
+      // the dynamic tail with it (ruling 370).
       projectAuthorityPrompt(),
   );
 
-  const prompt = parts.join("");
+  const prefix: PromptPrefix = { static: parts, dynamic };
+  const prompt = joinedPrompt(prefix);
   return {
     prompt,
+    prefix,
     // Ruling 344: off the same locals the prompt was assembled from.
     inputs: resolvedResourceInputs({
       // The controller has no checkout at all — ruling 299 gave it repository
@@ -1146,13 +1180,13 @@ export function buildControllerSystemPrompt(
       workspaceRefresh: undefined,
       delivers: false,
       personaChars: prompt.length,
-      skills: [...input.config.skills],
+      skills: configSkills,
       // Every controller skill and knowledge base rides this prompt as text or
       // as an index; nothing mounts natively.
       nativeSkills: [],
       kb: [...controllerKb],
-      mountedMcps: [...input.mountedMcps],
-      unresolvedMcps: input.unresolvedMcps.map((u) => u.name),
+      mountedMcps: [...mountedMcps],
+      unresolvedMcps: unresolvedMcps.map((u) => u.name),
       // A controller turn's MCP resolution splits mounted-but-down out before
       // it arrives (`unresolved.filter((u) => !u.mounted)`), so a down server
       // is not in this list and claiming one here would be inventing it.

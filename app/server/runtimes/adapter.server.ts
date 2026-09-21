@@ -9,6 +9,7 @@ import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.se
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import type { SkillPlugin } from "./skill-mount.server";
 import type { EnvelopeFacts } from "./wire-format.server";
+import type { RunPrompt } from "./prompt-prefix.server";
 
 /**
  * Common runtime-adapter interface. Each backend implements it; run-service is the only
@@ -73,9 +74,20 @@ export interface RunSpec {
   /** Whether the run should be autonomous (Claude bypassPermissions / Codex
    *  danger-full-access for coding specialists). */
   autonomous?: boolean;
-  /** Custom system prompt (operator persona + expertise skill). Claude uses
-   *  its systemPrompt option; Codex maps it to developer_instructions. */
-  systemPrompt?: string;
+  /** The run's system prompt: a static/dynamic split (ruling 370,
+   *  `PromptPrefix`) or a plain string. Claude renders the split by kind —
+   *  the operator as a `string[]` with the SDK's dynamic boundary, the
+   *  controller as a recorded custom prompt, a specialist as the preset's
+   *  static append with the dynamic tail on the first user message; Codex
+   *  joins the same text into `developer_instructions`. */
+  systemPrompt?: RunPrompt;
+  /** Ruling 371/373: what the run is told the moment its context has been
+   *  compacted — the task anchor (task.md path, branch, PR, knowledge bases)
+   *  or the controller's conversation anchor. Claude injects it through a
+   *  `SessionStart` hook on the `compact` source; Codex keeps its per-task
+   *  facts in `developer_instructions`, which survive compaction on their own,
+   *  so this is not sent there. */
+  compactAnchor?: string;
   /** MCP servers keyed by name. Portable HTTP/stdio configs work on both
    *  backends; Claude additionally supports in-process SDK servers such as the
    *  operator's `{ viberr: createSdkMcpServer(...) }`.
@@ -205,6 +217,10 @@ export const RUN_PHASE = {
   preparing: "Preparing workspace",
   starting: "Starting",
   working: "Working",
+  /** Ruling 371: the CLI is summarizing the context — a full-history model
+   *  call that took 131 s on the one stored compaction — so the strip says
+   *  what the wait is instead of showing the last tool as still running. */
+  compacting: "Compacting context",
   finishing: "Finishing",
 } as const;
 
@@ -293,8 +309,28 @@ export interface RunHandle {
   interrupt(): void;
 }
 
+/** What a completion compaction (ruling 376) reports back to the run service. */
+export type CompactOutcome =
+  | { compacted: true; preTokens: number | null; postTokens: number | null }
+  | { compacted: false; reason: string };
+
+/** The callbacks a completion compaction drives: the same line sink and
+ *  phase writer as the run it closes; no exit, it returns its outcome. */
+export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase">;
+
 export interface RuntimeAdapter {
   readonly backend: RunBackend;
   /** Begin a run; drives callbacks; returns a handle for interrupt. */
   start(spec: RunSpec, cb: RunCallbacks): RunHandle;
+  /**
+   * Ruling 376: compact the session `sessionId` a run of `spec` just left,
+   * while its prompt cache is warm. The request must share the run's prefix
+   * (tools, system prompt, servers), so an adapter builds it from the same
+   * spec it started the run with. Emits its lines through `cb.onLine` (a
+   * `compaction` fact with trigger `completion`, the cost as `costAddUsd`)
+   * and resolves with what happened; it never throws for a provider refusal.
+   * Optional so a test's throwing or capturing stub stays a valid adapter; a
+   * backend without it simply keeps its large sessions for ruling 372.
+   */
+  compact?(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome>;
 }

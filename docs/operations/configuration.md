@@ -205,7 +205,17 @@ An agent run's child env also carries `VIBERR_RUN_ID=<runId>` (ruling 174, updat
 2026-09-11). It is not a knob and is not in the schema; the run service sets it per run,
 last, and nothing reads it but the settle sweep, which finds the run's leftover processes
 by it (`app/server/runtimes/run-processes.server.ts`). There is no environment variable for
-the sweep or its 5 s grace.
+the sweep or its 5 s grace. No context window rides a run's child env (ruling 376: every
+`AUTO_COMPACT_WINDOW` entry in `app/server/runtimes/context-policy.server.ts` is null, the
+CLI compacts at its model's own limit, and a session above `COMPACT_AT_COMPLETION_TOKENS`,
+100k, is compacted at the end of its run instead); the key `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+would be set by the run service from that table if an entry were ever non-null again, and
+Codex would take its window through `config.toml` (§2.5 of `agents-and-runtime.md`). It is not
+a deployment knob — there is nothing to set in `.env` — and the hermeticity test pins the
+whole set of keys Viberr adds to a child env by name (`CONTEXT_ENV_KEYS` plus the
+credential, the home and the marker). No cache-TTL variable is set on any run (ruling 374:
+`CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M` stay unset; the CLI's automatic
+choice stands).
 *(Corrected 2026-09-04, pass 34 — U34-7 / ruling 142: this paragraph used to say the
 runtime "never inherits its own environment" while only the credential-shaped and
 private-runtime names were stripped; the container's `NODE_ENV=production` and `PORT`

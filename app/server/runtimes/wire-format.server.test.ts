@@ -608,3 +608,146 @@ describe("projectEnvelope — ruling 367: MCP result blocks", () => {
     expect(projectEnvelope("claude", result([{ type: "text", text: "a" }, 7])).display?.text).toBe("a\n[block]");
   });
 });
+
+/**
+ * Ruling 369: the prompt-cache figures are read ONCE, at the wire boundary,
+ * and ride `facts.cache`; a compaction rides `facts.compaction`. The sink folds
+ * both onto the run row and the console prints them, so what this boundary
+ * misses no surface can show.
+ */
+describe("projectEnvelope — ruling 369: cache facts and compactions", () => {
+  interface Usage {
+    input_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation?: { ephemeral_5m_input_tokens: number; ephemeral_1h_input_tokens: number };
+    output_tokens?: number;
+  }
+  interface Extra {
+    diagnostics?: { cache_miss_reason: { type: string } };
+  }
+  const assistant = (usage: Usage, extra: Extra = {}) => ({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: {
+      id: "msg_1",
+      role: "assistant",
+      content: [{ type: "text", text: "hi" }],
+      usage,
+      ...extra,
+    },
+  });
+
+  it("an assistant envelope carries the call's prompt, its cache write and read, the TTL split and the miss reason", () => {
+    const { facts } = projectEnvelope(
+      "claude",
+      assistant(
+        {
+          input_tokens: 2,
+          cache_creation_input_tokens: 11597,
+          cache_read_input_tokens: 7413,
+          cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 11597 },
+          output_tokens: 1,
+        },
+        { diagnostics: { cache_miss_reason: { type: "unavailable" } } },
+      ),
+    );
+    expect(facts.cache).toEqual({
+      messageId: "msg_1",
+      promptTokens: 2 + 11597 + 7413,
+      cacheWrite: 11597,
+      cacheRead: 7413,
+      perCall: true,
+      ttl: { fiveMinute: 0, oneHour: 11597 },
+      missReason: "unavailable",
+    });
+  });
+
+  it("no TTL split and no diagnostics read as null, never as zeros or empty strings", () => {
+    const { facts } = projectEnvelope(
+      "claude",
+      assistant({ input_tokens: 2, cache_creation_input_tokens: 10, cache_read_input_tokens: 20 }),
+    );
+    expect(facts.cache).toMatchObject({ ttl: null, missReason: null, promptTokens: 32 });
+  });
+
+  it("a subagent's envelope and an all-zero usage carry no cache fact", () => {
+    // Canary: drop the `parent_tool_use_id` gate and a subagent's prompt
+    // becomes the run's first call.
+    const sub = projectEnvelope("claude", {
+      ...assistant({ input_tokens: 5, cache_creation_input_tokens: 5, cache_read_input_tokens: 5 }),
+      parent_tool_use_id: "toolu_agent",
+    });
+    expect(sub.facts.cache).toBeNull();
+    const zero = projectEnvelope(
+      "claude",
+      assistant({ input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 }),
+    );
+    expect(zero.facts.cache).toBeNull();
+    // A tool_use envelope and an API-error banner carry the fact too: the
+    // call happened, whatever the model did with it.
+    const tool = projectEnvelope("claude", {
+      ...assistant({ input_tokens: 1, cache_creation_input_tokens: 1, cache_read_input_tokens: 1 }),
+      message: {
+        id: "msg_2",
+        content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }],
+        usage: { input_tokens: 1, cache_creation_input_tokens: 1, cache_read_input_tokens: 1 },
+      },
+    });
+    expect(tool.facts.cache?.messageId).toBe("msg_2");
+  });
+
+  it("a compact_boundary names the trigger and the sizes, and rides facts.compaction", () => {
+    const { display, facts } = projectEnvelope("claude", {
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 972032, post_tokens: 10041 },
+    });
+    expect(display).toMatchObject({
+      ev: "meta",
+      tag: "system·compact_boundary",
+      text: "context compacted (auto) · 972k → 10k tokens",
+    });
+    expect(facts.compaction).toEqual({ trigger: "auto", preTokens: 972032, postTokens: 10041 });
+    // Without metadata the line still says a compaction happened.
+    const bare = projectEnvelope("claude", { type: "system", subtype: "compact_boundary" });
+    expect(bare.display?.text).toBe("context compacted (auto)");
+    expect(bare.facts.compaction).toEqual({ trigger: "auto", preTokens: null, postTokens: null });
+  });
+
+  it("a Codex turn's usage carries its cache write and cached read as a TURN total, never a prompt size", () => {
+    const { display, facts } = projectEnvelope("codex", {
+      type: "turn.completed",
+      usage: { input_tokens: 26_000, cached_input_tokens: 21_248, cache_write_input_tokens: 1_500, output_tokens: 300 },
+    });
+    expect(facts.cache).toEqual({
+      messageId: null,
+      promptTokens: 26_000,
+      cacheWrite: 1_500,
+      cacheRead: 21_248,
+      perCall: false,
+      ttl: null,
+      missReason: null,
+    });
+    expect(display?.text).toContain("wrote 1.5k");
+    // An SDK that sent no write figure (the default 0) prints none.
+    const silent = projectEnvelope("codex", {
+      type: "turn.completed",
+      usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 1 },
+    });
+    expect(silent.display?.text).not.toContain("wrote");
+    expect(silent.facts.cache?.cacheWrite).toBe(0);
+  });
+
+  it("a Codex context_compaction item counts as a compaction", () => {
+    const { display, facts } = projectEnvelope("codex", {
+      type: "item.completed",
+      item: { id: "cc-1", type: "context_compaction" },
+    });
+    expect(display).toMatchObject({ ev: "meta", tag: "context_compaction", text: "context compacted" });
+    expect(facts.compaction).toEqual({ trigger: "auto", preTokens: null, postTokens: null });
+    expect(
+      projectEnvelope("codex", { type: "item.started", item: { id: "cc-1", type: "context_compaction" } }).display,
+    ).toBeNull();
+  });
+});

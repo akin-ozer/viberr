@@ -34,6 +34,7 @@ import {
   type RunInputs,
   type RunView,
 } from "./runtime-types";
+import { NO_RUN_CACHE } from "./runtime-types";
 
 const base: RunView = {
   id: "primary", serverRunId: "run_1", role: "Primary specialist", kind: "primary",
@@ -41,7 +42,7 @@ const base: RunView = {
   who: { kind: "agent", backend: "codex", name: "Codex", role: "Developer" },
   backend: "codex", sdk: "Codex SDK", model: "gpt-5.4-codex", sid: "0199", exportable: false,
   state: "running", lifecycle: "running", interruptedBy: null, phase: null, step: null,
-  startedAt: null, finished: null, turns: 0, tokens: 0, tokensEstimated: false, lines: [], raw: [], lineCount: 0,
+  startedAt: null, finished: null, turns: 0, tokens: 0, tokensEstimated: false, cache: NO_RUN_CACHE, lines: [], raw: [], lineCount: 0,
   logWindow: { totalLines: 0, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: -1 },
 };
 

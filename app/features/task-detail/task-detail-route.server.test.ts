@@ -1108,7 +1108,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     );
   });
 
-  it("ruling 152(c) (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, no hand-off comment is written, and the retry is on the schedule", async () => {
+  it("ruling 152(c) (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, the hand-off comment stays on the record unanswered (ruling 375), and the retry is on the schedule", async () => {
     // Canary: remove the `isDispatchHeld` catch in the run-agent arm and the
     // route answers the 409 as an error instead of the hold toast.
     const { recordBackendQuotaExhaustion, clearBackendQuotaExhaustion } = await import(
@@ -1141,10 +1141,13 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
       const held = after.task.timeline.find((e) => e.title === "Dispatch held");
       expect(held?.text).toContain("**Held:** Codex is out of quota until");
       expect(held?.text).toContain("Developer's run starts when the window reopens");
-      expect(
-        after.task.timeline.find((e) => e.type === "comment" && e.text === "@Developer Pick up the lint debt"),
-        "no hand-off comment for a run that has not started",
-      ).toBeUndefined();
+      // Ruling 375: the prompt is recorded BEFORE the start (so a run's own
+      // directive is never redelivered), which on a hold leaves the person's
+      // words on the record with the hold note beside them and no reply.
+      const handOff = after.task.timeline.find(
+        (e) => e.type === "comment" && e.text === "@Developer Pick up the lint debt",
+      );
+      expect(handOff?.toAgent, "the hand-off comment is on the record").toBe(true);
       const schedule = after.schedules.find((x) => x.status === "pending" && x.action === "run-agent");
       expect(schedule).toMatchObject({ profileId: "developer", prompt: "Pick up the lint debt" });
     } finally {

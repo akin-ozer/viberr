@@ -25,6 +25,50 @@ const FULL: InsightsSummary = {
     tokenlessRuns: 2,
     turns: 130,
   },
+  // Ruling 369: the prompt-cache record.
+  cache: {
+    byKind: [
+      {
+        label: "primary",
+        runs: 20,
+        firstCalls: 18,
+        warmStarts: 5,
+        warmRate: 5 / 18,
+        writeTokens: 1_900_000,
+        readTokens: 95_000_000,
+        writeReadRatio: 0.02,
+        largeFirstWrites: 1,
+        ttl: { fiveMinute: 0, oneHour: 18, mixed: 0 },
+      },
+      {
+        label: "operator",
+        runs: 7,
+        firstCalls: 0,
+        warmStarts: 0,
+        warmRate: null,
+        writeTokens: 0,
+        readTokens: 0,
+        writeReadRatio: null,
+        largeFirstWrites: 0,
+        ttl: { fiveMinute: 0, oneHour: 0, mixed: 0 },
+      },
+    ],
+    byCredentialKind: [
+      {
+        label: "login",
+        runs: 27,
+        firstCalls: 18,
+        warmStarts: 5,
+        warmRate: 5 / 18,
+        writeTokens: 1_900_000,
+        readTokens: 95_000_000,
+        writeReadRatio: 0.02,
+        largeFirstWrites: 1,
+        ttl: { fiveMinute: 0, oneHour: 18, mixed: 0 },
+      },
+    ],
+    largeWriteTokens: 100_000,
+  },
   outcomes: {
     finished: 30,
     error: 6,
@@ -691,5 +735,34 @@ describe("Completion rate names restart-stopped and never-started runs", () => {
   it("stays the plain count when neither applies", () => {
     const { getByText } = renderPage(FULL);
     expect(getByText("30 finished · 6 error · 4 stopped · 2 running")).toBeTruthy();
+  });
+});
+
+/**
+ * Ruling 369: the prompt-cache panel — the warm-start rate over the runs that
+ * have a first call, the write/read ratio, the large first writes and the TTL
+ * lifetimes, by run kind and by credential kind, every figure on a `data-`
+ * attribute; a group with no first call prints "n/a", never 0%.
+ */
+describe("the prompt-cache panel (ruling 369)", () => {
+  it("renders both groupings with their figures", () => {
+    const { container } = renderPage(FULL);
+    const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
+    expect(panel.querySelector("h2")?.textContent).toBe("Prompt cache");
+    const primary = panel.querySelector('[data-cache-row="by run kind:primary"]')!;
+    expect(primary.querySelector("[data-runs]")?.getAttribute("data-runs")).toBe("20");
+    expect(primary.querySelector("[data-warm-rate]")?.textContent).toBe("28%");
+    expect(primary.querySelector("[data-warm-rate]")?.getAttribute("title")).toBe("5 of 18 first calls read more than they wrote");
+    expect(primary.querySelector("[data-write]")?.getAttribute("data-write")).toBe("1900000");
+    expect(primary.querySelector("[data-write-read]")?.textContent).toBe("0.020");
+    expect(primary.querySelector("[data-large]")?.textContent).toBe("1");
+    expect(primary.querySelector("[data-ttl-1h]")?.textContent).toBe("18 × 1h");
+    const operator = panel.querySelector('[data-cache-row="by run kind:operator"]')!;
+    expect(operator.querySelector("[data-warm-rate]")?.textContent).toBe("n/a");
+    expect(operator.querySelector("[data-write-read]")?.textContent).toBe("n/a");
+    expect(operator.querySelector("[data-ttl-1h]")?.textContent).toBe("not reported");
+    expect(panel.querySelector('[data-cache-row="by credential kind:login"]')).not.toBeNull();
+    // The line the large-write column counts against is named.
+    expect(panel.textContent).toContain("above 100.0K");
   });
 });

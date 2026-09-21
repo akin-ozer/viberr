@@ -2197,6 +2197,8 @@ export async function commentToAgent(
       if (confinement.skillPlugin) resume.skillPlugin = confinement.skillPlugin;
       if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
       if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
+      // Ruling 371: the compaction anchor is part of the confinement too.
+      if (confinement.compactAnchor) resume.compactAnchor = confinement.compactAnchor;
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
       // structured verdict/questions instead of falling back to the prose regex.
       if (confinement.outputSchema) resume.outputSchema = confinement.outputSchema;

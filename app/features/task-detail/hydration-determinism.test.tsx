@@ -12,6 +12,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
 import type { DeployedSpecialistView } from "./execution-profile";
 import type { RecommendationView } from "./operator-recommendations";
 
@@ -222,6 +223,7 @@ function run(patch: Partial<RunView>): RunView {
     // F35-1: a live Claude run carries the adapter's estimate until the result.
     tokens: 1500,
     tokensEstimated: true,
+    cache: NO_RUN_CACHE,
     lines: CONSOLE,
     raw: CONSOLE_RAW,
     lineCount: CONSOLE.length,
@@ -253,6 +255,7 @@ const FINISHED_OPERATOR = run({
   turns: 2,
   tokens: 800,
   tokensEstimated: false,
+  cache: NO_RUN_CACHE,
   lines: [
     { t: "23:20:01", ev: "init", tag: "system·init", text: "session op-1" },
     { t: "23:29:30", ev: "result", tag: "result", text: "success · 2 turns", stats: { subtype: "success", dur: 569, api: 400, turns: 2, cost: 0.02, in: 500, cached: 0, out: 300 } },

@@ -283,6 +283,25 @@ function projectRow(
     // provider's total, which is the dishonesty F35-1 exists to remove, and
     // would disagree with the Insights sums, which leave that same row out.
     tokensEstimated: row.usage_final === 0,
+    // Ruling 369: read off the row as stored; the sink folded every figure.
+    cache: {
+      writeTokens: row.cache_write_tokens,
+      readTokens: row.cached_input_tokens,
+      firstCall:
+        row.first_call_warm === null
+          ? null
+          : {
+              promptTokens: row.first_call_prompt_tokens ?? 0,
+              write: row.first_call_cache_write ?? 0,
+              read: row.first_call_cache_read ?? 0,
+              warm: row.first_call_warm === 1,
+              missReason: row.first_call_miss_reason,
+            },
+      ttlBucket: row.cache_ttl_bucket,
+      peakPromptTokens: row.peak_prompt_tokens,
+      lastPromptTokens: row.last_prompt_tokens,
+      compactions: row.compactions,
+    },
     lines,
     raw,
     // P13-D-11: the count of lines that EXIST, not of the ones this payload

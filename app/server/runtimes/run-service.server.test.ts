@@ -6,6 +6,7 @@ import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "../../../test-support/test-store";
 import { AppError } from "~/server/errors/app-error.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   backendUnavailableMessage,
@@ -44,8 +45,10 @@ import {
   fakeBackendSecret,
 } from "../../../test-support/backend-credentials";
 import {
+  compactedRunSpecs,
   installFakeRuntime,
   lastRunSpec,
+  queueFakeCompaction,
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
@@ -2253,3 +2256,426 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
     expect(replayAttempted("run_no_reply_text")).toBe(false);
   });
 });
+
+/**
+ * Rulings 369, 371 and 372 on the run service: every run stamps the kind of
+ * credential it bills and carries its kind's context window; a resume of a
+ * session that is BOTH idle past its cache TTL AND larger than the replay
+ * threshold starts fresh on task.md and the last report, under its own reason,
+ * on both backends and for the controller. Every clock is pinned.
+ */
+describe("ruling 372: the resume policy, and the window and credential kind a run carries", () => {
+  const NOW = "2026-09-21T12:00:00.000Z";
+  const minutesBefore = (m: number) => new Date(Date.parse(NOW) - m * 60_000).toISOString();
+
+  /** The principal's transcript store, with the session present. */
+  async function withSession(backend: "claude" | "codex", sid: string, usageLines: object[] = []): Promise<void> {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = (await import("node:path")).default;
+    const { userBackendHome } = await import("./user-homes.server");
+    const home = userBackendHome(store.users.arda.id, backend, store.dataRoot);
+    if (backend === "claude") {
+      const dir = path.join(home, "projects", "-w-x");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, `${sid}.jsonl`), usageLines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+      return;
+    }
+    const dir = path.join(home, "sessions", "2026", "09", "21");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `rollout-2026-09-21T10-00-00-${sid}.jsonl`),
+      [{ timestamp: minutesBefore(120), type: "session_meta", payload: { id: sid } }, ...usageLines]
+        .map((l) => JSON.stringify(l))
+        .join("\n") + "\n",
+    );
+  }
+
+  /** A run that answered once and finished; then the prior row is shaped. */
+  async function priorRun(input: {
+    backend?: "claude" | "codex";
+    kind?: "primary" | "controller";
+    finishedMinutesAgo: number;
+    lastPromptTokens: number;
+    credentialKind?: "login" | "api_key" | null;
+    transcript?: object[];
+  }) {
+    const backend = input.backend ?? "claude";
+    const sid = `sess-${Math.random().toString(36).slice(2, 8)}`;
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend,
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onLine({
+          raw: JSON.stringify({ type: "assistant" }),
+          display: { t: "00:00:00", ev: "text", tag: "assistant", text: "Implemented the attach flow; tests green." },
+          facts: {},
+          occurredAt: NOW,
+        });
+        cb.onExit({ outcome: "finished", effectiveBackend: backend, sessionId: sid });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    const kind = input.kind ?? "primary";
+    // One thread per prior run: a test that shapes two priors on one task
+    // must not collide on the (project, task, thread) key.
+    const threadId = `t-${sid.slice(5)}`;
+    const startInput: TestRunInput = {
+      projectSlug: kind === "controller" ? "" : store.slug,
+      taskKey: kind === "controller" ? "cnv_test" : "VIB-1",
+      threadId,
+      role: kind === "controller" ? "Controller" : "Primary specialist",
+      // A supporting kind, so two priors on one task never hit the
+      // one-delivering-run index either.
+      kind: kind === "controller" ? "controller" : "reviewer",
+      backend,
+      model: "m",
+      agentName: kind === "controller" ? "Controller" : "dev",
+      agentProfileId: kind === "controller" ? "controller" : `dev-${threadId}`,
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    };
+    if (kind === "controller") startInput.workdir = store.dataRoot;
+    const { runId } = await startTestRun(store.db, startInput);
+    await settle();
+    patchRun(store.db, runId, {
+      finishedAt: minutesBefore(input.finishedMinutesAgo),
+      lastPromptTokens: input.lastPromptTokens,
+      credentialKind: input.credentialKind === undefined ? "login" : input.credentialKind,
+    });
+    await withSession(backend, sid, input.transcript ?? []);
+    return {
+      runId,
+      sid,
+      specs,
+      resume: (extra: Partial<Parameters<typeof resumeRun>[1]> = {}) =>
+        resumeRun(store.db, {
+          runId,
+          prompt: "follow up",
+          credentialUserId: store.users.arda.id,
+          dataRoot: store.dataRoot,
+          nowIso: NOW,
+          ...extra,
+        }),
+    };
+  }
+
+  it("startRun stamps the credential kind and the kind's window on both backends", async () => {
+    installFakeRuntime();
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    // Ruling 376: no mid-run window rides the env on any kind.
+    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    // SAFETY: `credential_kind` is a nullable TEXT column of agent_runs.
+    const row = store.db.prepare(`SELECT credential_kind FROM agent_runs WHERE id = ?`).get(runId) as { credential_kind: string | null };
+    expect(row.credential_kind).toBe("api_key");
+    // No kind carries a window (ruling 376); the credential kind still lands.
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "op", role: "Operator", kind: "operator",
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    await startTestRun(store.db, {
+      projectSlug: "", taskKey: "cnv_w", threadId: "cnv_w", role: "Controller", kind: "controller",
+      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot, workdir: store.dataRoot,
+      agentProfileId: "controller",
+    });
+    await settle();
+    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "c1", role: "Reviewer", kind: "reviewer",
+      backend: "codex", model: "m", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+  });
+
+  it("a session idle past its TTL AND large starts fresh on task.md and the last report, under its own reason", async () => {
+    const prior = await priorRun({ finishedMinutesAgo: 74, lastPromptTokens: 298_000 });
+    const resumed = await prior.resume();
+    await settle();
+    expect(resumed).toMatchObject({ continuityReset: true, continuityLossReason: "stale_large_session" });
+    const spec = prior.specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.resumeSessionId).toBeNull();
+    expect(spec.prompt).toContain("set aside on purpose");
+    expect(spec.prompt).toContain("298k tokens");
+    expect(spec.prompt).toContain("idle 1 hour 14 minutes");
+    expect(spec.prompt).toContain("Implemented the attach flow; tests green.");
+    expect(spec.prompt.endsWith("follow up")).toBe(true);
+    // The set-aside session's last run carries a meta line, not a failure.
+    const lines = listRunLines(store.db, prior.runId);
+    const marker = lines.find((l) => l.display.tag === "run·session_stale");
+    expect(marker?.display.ev).toBe("meta");
+    expect(marker?.display.text).toContain("not resumed on purpose");
+    expect(lines.some((l) => l.display.tag.endsWith("session_missing"))).toBe(false);
+    // The timeline says a fresh session was started, and why.
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = task.parsed.timeline.find((e) => e.type === "continuity");
+    expect(note?.text).toContain("Started a fresh session");
+    expect(note?.text).toContain("298k tokens and 1 hour 14 minutes old");
+    // …and the fresh row's start audit records the reason.
+    const started = listAuditEvents(store.db, { action: "runtime.run.started" }).find(
+      (e) => e.subjectId === resumed.runId,
+    );
+    expect(started?.details).toMatchObject({ continuityReset: "stale_large_session", resumed: false });
+  });
+
+  it("warm and large, or stale and small, resumes the stored session", async () => {
+    const warm = await priorRun({ finishedMinutesAgo: 16, lastPromptTokens: 298_000 });
+    const resumedWarm = await warm.resume();
+    await settle();
+    expect(resumedWarm.continuityReset).toBeUndefined();
+    expect(warm.specs.find((s) => s.runId === resumedWarm.runId)?.resumeSessionId).toBe(warm.sid);
+    const small = await priorRun({ finishedMinutesAgo: 600, lastPromptTokens: 100_000 });
+    const resumedSmall = await small.resume();
+    await settle();
+    expect(resumedSmall.continuityReset).toBeUndefined();
+    expect(small.specs.find((s) => s.runId === resumedSmall.runId)?.resumeSessionId).toBe(small.sid);
+  });
+
+  it("an API key's TTL is five minutes; a row with no kind reads as a sign-in", async () => {
+    const key = await priorRun({ finishedMinutesAgo: 6, lastPromptTokens: 200_000, credentialKind: "api_key" });
+    expect((await key.resume()).continuityLossReason).toBe("stale_large_session");
+    await settle();
+    const unknown = await priorRun({ finishedMinutesAgo: 6, lastPromptTokens: 200_000, credentialKind: null });
+    expect((await unknown.resume()).continuityReset).toBeUndefined();
+    await settle();
+  });
+
+  it("reads the size off the provider's transcript when the row never folded one", async () => {
+    const usage = (write: number, read: number) => ({
+      type: "assistant",
+      isSidechain: false,
+      message: { usage: { input_tokens: 2, cache_creation_input_tokens: write, cache_read_input_tokens: read } },
+    });
+    const prior = await priorRun({
+      finishedMinutesAgo: 74,
+      lastPromptTokens: 0,
+      transcript: [usage(100, 0), usage(500, 199_000)],
+    });
+    const resumed = await prior.resume();
+    await settle();
+    expect(resumed.continuityLossReason).toBe("stale_large_session");
+    expect(prior.specs.find((s) => s.runId === resumed.runId)?.prompt).toContain("200k tokens");
+  });
+
+  it("Codex: ten minutes idle on a large thread starts fresh; nine resumes", async () => {
+    const token = (input: number) => ({
+      timestamp: minutesBefore(100),
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0 } } },
+    });
+    const stale = await priorRun({ backend: "codex", finishedMinutesAgo: 11, lastPromptTokens: 0, transcript: [token(200_000)] });
+    const fresh = await stale.resume();
+    await settle();
+    expect(fresh.continuityLossReason).toBe("stale_large_session");
+    expect(stale.specs.find((s) => s.runId === fresh.runId)?.prompt).toContain("Your previous Codex session");
+    const recent = await priorRun({ backend: "codex", finishedMinutesAgo: 9, lastPromptTokens: 200_000 });
+    const kept = await recent.resume();
+    await settle();
+    expect(kept.continuityReset).toBeUndefined();
+  });
+
+  it("the controller follows the same rule, and its fresh turn points at the digest it carries", async () => {
+    const prior = await priorRun({ kind: "controller", finishedMinutesAgo: 71, lastPromptTokens: 945_000 });
+    const resumed = await prior.resume({ workdir: store.dataRoot });
+    await settle();
+    expect(resumed.continuityLossReason).toBe("stale_large_session");
+    const spec = prior.specs.find((s) => s.runId === resumed.runId)!;
+    expect(spec.resumeSessionId).toBeNull();
+    expect(spec.prompt).toContain("session for this conversation was set aside on purpose");
+    expect(spec.prompt).toContain("945k tokens");
+    expect(spec.prompt).toContain("recent-conversation digest");
+    // No task file to note on: the run's own meta line is the record.
+    expect(listRunLines(store.db, prior.runId).some((l) => l.display.tag === "run·session_stale")).toBe(true);
+  });
+});
+
+/**
+ * Ruling 376: a session larger than the completion threshold is compacted
+ * at the end of its run, while its cache is warm, and the run's record says
+ * so; a small session, an interrupted run and a backend that cannot compact
+ * are left alone.
+ */
+describe("compaction at completion (ruling 376)", () => {
+  const bigCall = {
+    cache: {
+      messageId: "m1",
+      promptTokens: 120_000,
+      cacheWrite: 2_000,
+      cacheRead: 118_000,
+      perCall: true,
+      ttl: { fiveMinute: 0, oneHour: 2_000 },
+      missReason: null,
+    },
+  };
+  const finished = (sessionId: string, promptTokens: number): FakeRun => ({
+    sessionId,
+    lines: [
+      { t: "1", ev: "init", tag: "system·init", text: "session" },
+      { t: "2", ev: "text", tag: "assistant", text: "read a lot" },
+      { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 4, in: promptTokens, cached: 0, out: 500 } },
+    ],
+    extraFacts: [undefined, { cache: { ...bigCall.cache, promptTokens } }, undefined],
+  });
+
+  it("compacts a finished run above 100k, folds the result and notes the task", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-big", 120_000));
+    queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    const asked = compactedRunSpecs().slice(before);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ sessionId: "sess-big", spec: { runId } });
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(run.phase).toBeNull();
+    expect(run.compactions).toBe(1);
+    // What a resume replays now (ruling 372 reads it): the summary.
+    expect(run.last_prompt_tokens).toBe(18_000);
+    expect(run.peak_prompt_tokens).toBe(120_000);
+    // The compaction's own cost rides the run's total.
+    expect(run.total_cost_usd).toBeCloseTo(4.5, 5);
+    expect(JSON.stringify(listRunLines(store.db, runId))).toContain("run·compacted·completion");
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.details).toMatchObject({ trigger: "completion", preTokens: 120_000, postTokens: 18_000 });
+    // The timeline note is best-effort and asynchronous; give it its ticks.
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
+    expect(note?.text).toContain("at the end of the run");
+    expect(note?.text).toContain("from 120k to 18k tokens");
+  });
+
+  it("leaves a run under the threshold alone", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-small", 60_000));
+    queueFakeCompaction("claude", { compacted: true, preTokens: 60_000, postTokens: 9_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before);
+    expect(getRun(store.db, runId)!.compactions).toBe(0);
+    expect(getRun(store.db, runId)!.last_prompt_tokens).toBe(60_000);
+  });
+
+  it("leaves an interrupted run alone, whatever its size", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun({ ...finished("sess-stopped", 150_000), keepRunning: true });
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 20_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before);
+    expect(getRun(store.db, runId)!.state).toBe("interrupted");
+    expect(getRun(store.db, runId)!.compactions).toBe(0);
+  });
+
+  it("on Codex the rollout is the truth: a compaction the app-server did not announce still counts", async () => {
+    // The fake adapter answers "not compacted"; the rollout on disk says otherwise.
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const path = await import("node:path");
+    const sid = "01a0c4e5-dcff-7cd2-b82f-251a14792b47";
+    const dir = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id, "codex-home", "sessions", "2026", "09", "21");
+    mkdirSync(dir, { recursive: true });
+    // The reader windows the rollout by the run's start, so the lines sit
+    // just AFTER this test's clock (the run starts below).
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+    const line = (ts: string, input: number) =>
+      JSON.stringify({ timestamp: ts, type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0 } } } });
+    const rollout = path.join(dir, `rollout-2026-09-21T17-00-00-${sid}.jsonl`);
+    // At the run's exit the rollout holds the calls and no compaction.
+    writeFileSync(
+      rollout,
+      [
+        JSON.stringify({ timestamp: at(60_000), type: "session_meta", payload: { id: sid } }),
+        line(at(60_100), 60_000),
+        line(at(60_200), 123_508),
+      ].join("\n") + "\n",
+    );
+    const { codexRolloutRunStats } = await import("./session-export.server");
+    expect(codexRolloutRunStats(store.users.arda.id, sid, null, store.dataRoot)).toMatchObject({ calls: 2, compactions: 0 });
+    const { appendFileSync } = await import("node:fs");
+    const before = compactedRunSpecs().length;
+    queueFakeRun({
+      ...finished(sid, 123_508),
+      backend: "codex",
+      lines: [
+        { t: "1", ev: "init", tag: "thread.started", text: "thread" },
+        { t: "2", ev: "result", tag: "turn.completed", text: "done", stats: { dur: 100, api: 90, turns: 1, cost: 0, in: 123_508, cached: 0, out: 200 } },
+      ],
+      extraFacts: [undefined, undefined],
+    });
+    // The "app-server" compacts the thread — the rollout gains the line and
+    // the post-size call — but its reply never reaches the client in time.
+    queueFakeCompaction(
+      "codex",
+      { compacted: false, reason: "the app-server did not report a compaction within 300s" },
+      () => {
+        appendFileSync(
+          rollout,
+          [
+            JSON.stringify({ timestamp: at(60_300), type: "compacted", payload: { message: "", replacement_history: [] } }),
+            line(at(60_400), 6_914),
+          ].join("\n") + "\n",
+        );
+      },
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "codex", model: "gpt-5.6-terra", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(compactedRunSpecs().length).toBe(before + 1);
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(run.compactions).toBe(1);
+    expect(run.last_prompt_tokens).toBe(6_914);
+    expect(run.peak_prompt_tokens).toBe(123_508);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.details).toMatchObject({ trigger: "completion", backend: "codex", preTokens: 123_508, postTokens: 6_914 });
+  });
+
+  it("a refused compaction leaves the run finished with its size, and says why on the log", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-refused", 130_000));
+    queueFakeCompaction("claude", { compacted: false, reason: "Not enough messages to compact." });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before + 1);
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(run.compactions).toBe(0);
+    expect(run.last_prompt_tokens).toBe(130_000);
+  });
+});
+

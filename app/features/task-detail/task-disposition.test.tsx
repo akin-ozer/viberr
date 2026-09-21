@@ -23,6 +23,7 @@ import { DecisionPacket } from "./decision-packet";
 import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import type { RunView } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
 
 /** Ruling 127: the task owner whose accounts a run bills, both backends
  *  connected — the ordinary case, so the run controls render live and these
@@ -2419,6 +2420,7 @@ describe("D6: consequential actions confirm before they act", () => {
     turns: 1,
     tokens: 0,
     tokensEstimated: false,
+    cache: NO_RUN_CACHE,
     lines: [],
     raw: [],
     lineCount: 0,

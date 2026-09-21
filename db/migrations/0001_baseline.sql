@@ -608,6 +608,41 @@ CREATE TABLE "agent_runs" (
   -- the closure dies with the process, and a recovered no-checkout reviewer
   -- would otherwise have its report re-classified into a verdict.
   no_checkout INTEGER NOT NULL DEFAULT 0,
+  -- Ruling 369: what the prompt cache did for this run, from the provider's
+  -- own usage figures (Claude: every main-loop API message; Codex: the turn's
+  -- usage, and the rollout's per-call figures read at finalize). Every column
+  -- is folded by the run sink and read by the console and Insights.
+  -- The tokens WRITTEN into the cache over the whole run (Claude
+  -- cache_creation_input_tokens summed per call; Codex cache_write_input_tokens).
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  -- The FIRST model call: its whole prompt, what it wrote into the cache, what
+  -- it read back, whether it started WARM (read more than it wrote — one rule,
+  -- `startTemperature`) and the provider's miss reason when it sent one
+  -- (`previous_message_not_found`, `unavailable`, `messages_changed`). NULL
+  -- until a first call has landed; a run that never reached the provider keeps
+  -- NULL, which the console prints as "no first call", never as cold.
+  first_call_prompt_tokens INTEGER,
+  first_call_cache_write INTEGER,
+  first_call_cache_read INTEGER,
+  first_call_warm INTEGER CHECK (first_call_warm IN (0, 1)),
+  first_call_miss_reason TEXT,
+  -- Which prompt-cache TTL the provider billed this run's writes under, read
+  -- off usage.cache_creation: '5m', '1h', or 'mixed' when both appeared. NULL
+  -- on Codex (no such figure) and before any write has landed.
+  cache_ttl_bucket TEXT CHECK (cache_ttl_bucket IN ('5m', '1h', 'mixed')),
+  -- The largest prompt any one call of this run carried, and the LAST call's
+  -- prompt — the size a resume of this session would replay (ruling 372 reads
+  -- the last one; the peak is what the window bounds). 0 until a call lands.
+  peak_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  last_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  -- How many times the provider compacted this run's context (a Claude
+  -- `compact_boundary`, a Codex context-compaction event).
+  compactions INTEGER NOT NULL DEFAULT 0,
+  -- Ruling 369: the KIND of credential this run billed at start (`login`,
+  -- `api_key`, `access_token`), which decides the cache TTL the resume policy
+  -- assumes (ruling 372) and is the Insights breakdown's second axis. NULL on a
+  -- run refused before a credential was opened.
+  credential_kind TEXT CHECK (credential_kind IN ('login', 'api_key', 'access_token')),
   -- Ruling 127: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
   -- run billed. Task runs (operator, specialist, resume, scheduled, boot recovery,
   -- retry) carry the task owner; controller turns carry the asker. NULL only on a

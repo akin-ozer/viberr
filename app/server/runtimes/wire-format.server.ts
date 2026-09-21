@@ -62,6 +62,39 @@ export interface EnvelopeFacts {
     resetsAt: number | null;
     isUsingOverage: boolean;
   } | null;
+  /** Ruling 369: what the prompt cache did for ONE model call (a Claude
+   *  main-loop assistant envelope; the Claude adapter keeps only the first
+   *  envelope of each API message) or one Codex turn. `promptTokens` is the
+   *  whole prompt; the two cache figures are its written and read slices;
+   *  `perCall` says whether `promptTokens` is one call's prompt (Claude — the
+   *  sink folds the run's peak and last from it) or a turn's total over many
+   *  calls (Codex — not a prompt size, never folded as one); `ttl` is the
+   *  provider's split of the write by cache lifetime (Claude only);
+   *  `missReason` the provider's own word for why a read missed, when it sent
+   *  one (`previous_message_not_found`, `unavailable`, `messages_changed`). */
+  cache?: {
+    messageId: string | null;
+    promptTokens: number;
+    cacheWrite: number;
+    cacheRead: number;
+    perCall: boolean;
+    ttl: { fiveMinute: number; oneHour: number } | null;
+    missReason: string | null;
+  } | null;
+  /** Ruling 369: the provider compacted the run's context — a Claude
+   *  `compact_boundary` (with its token counts) or a Codex context-compaction
+   *  item (which carries none). The sink counts it and notes it on the task. */
+  compaction?: {
+    trigger: string;
+    preTokens: number | null;
+    postTokens: number | null;
+  } | null;
+  /** Ruling 376: a call made AFTER the run's own result — the completion
+   *  compaction's summary request — adds to the run's totals instead of
+   *  replacing them (a result's `costUsd`/`usage` is the run's whole figure;
+   *  these are increments the sink folds on top). */
+  costAddUsd?: number | null;
+  usageAdd?: { input_tokens: number; cached_input_tokens: number; output_tokens: number } | null;
 }
 
 /** What the normalizer returns: the display line + any facts to fold into the run row. */
@@ -230,8 +263,53 @@ const claudeModelUsage = z
   )
   .catch(() => []);
 
+/**
+ * Ruling 369: an assistant envelope's `message.usage`. The three prompt figures
+ * are disjoint (the uncached slice, the cache write, the cache read);
+ * `cache_creation` splits the write by the TTL the provider billed it under.
+ * Null when the message carries no usage at all (an SDK synthetic message),
+ * so the projection emits no cache fact for it rather than a fabricated zero.
+ */
+const claudeMessageUsage = z
+  .object({
+    input_tokens: wireCount,
+    cache_creation_input_tokens: wireCount,
+    cache_read_input_tokens: wireCount,
+    cache_creation: z
+      .object({
+        ephemeral_5m_input_tokens: wireCount,
+        ephemeral_1h_input_tokens: wireCount,
+      })
+      .nullable()
+      .catch(null),
+  })
+  .nullable()
+  .catch(null);
+
+/** Ruling 369: the provider's own attribution of a cache miss, when it sent
+ *  one (13 of this instance's last 400 runs carried it). */
+const claudeDiagnostics = z
+  .object({
+    cache_miss_reason: z
+      .object({ type: wireTextOrBlank })
+      .nullable()
+      .catch(null),
+  })
+  .catch(() => ({ cache_miss_reason: null }));
+
+/** Ruling 369: a `compact_boundary`'s metadata — what the CLI compacted. */
+const claudeCompactMetadata = z
+  .object({
+    trigger: wireTextOrBlank,
+    pre_tokens: z.number().nullable().catch(null),
+    post_tokens: z.number().nullable().catch(null),
+  })
+  .nullable()
+  .catch(null);
+
 const claudeEnvelopeFields = z.object({
   type: wireText,
+  compact_metadata: claudeCompactMetadata,
   subtype: wireText,
   error: absentableWireText,
   session_id: wireText,
@@ -244,10 +322,39 @@ const claudeEnvelopeFields = z.object({
    *  `system/permission_denied` frame (SDK ≥ 0.3.223) — read as `text`. */
   message: z
     .union([
-      z.string().transform((text) => ({ content: claudeBlocks.parse([]), text })),
-      z.object({ content: claudeBlocks }).transform((m) => ({ content: m.content, text: "" })),
+      z.string().transform((text) => ({
+        content: claudeBlocks.parse([]),
+        text,
+        id: "",
+        usage: null,
+        missReason: null,
+      })),
+      z
+        .object({
+          content: claudeBlocks,
+          /** The API message id: one message yields one envelope per content
+           *  block, all carrying the same usage under the same id. */
+          id: wireTextOrBlank,
+          /** Ruling 369: the call's prompt-cache figures, read here so the
+           *  adapter and the sink never decode the envelope twice. */
+          usage: claudeMessageUsage,
+          diagnostics: claudeDiagnostics,
+        })
+        .transform((m) => ({
+          content: m.content,
+          text: "",
+          id: m.id,
+          usage: m.usage,
+          missReason: m.diagnostics.cache_miss_reason?.type ?? null,
+        })),
     ])
-    .catch(() => ({ content: claudeBlocks.parse([]), text: "" })),
+    .catch(() => ({
+      content: claudeBlocks.parse([]),
+      text: "",
+      id: "",
+      usage: null,
+      missReason: null,
+    })),
   /** `system/permission_denied`: the tool the run was refused, and why (the
    *  deciding component's reason and its kind — `rule`, `mode`, `classifier`…).
    *  `tool_progress` (ruling 366) names its tool through the same key. */
@@ -347,9 +454,17 @@ const codexEnvelopeFields = z.object({
     .object({
       input_tokens: wireCount,
       cached_input_tokens: wireCount,
+      /** Ruling 369: the SDK defaults it to 0 when the CLI sent none; the
+       *  ChatGPT-backed CLI has reported 0 on every stored run so far. */
+      cache_write_input_tokens: wireCount,
       output_tokens: wireCount,
     })
-    .catch(() => ({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 })),
+    .catch(() => ({
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 0,
+    })),
   error: wireError,
   item: codexItem.catch(() => codexItem.parse({})),
 });
@@ -533,7 +648,30 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
           facts: {},
         };
       }
-      // api_retry / compact_boundary / … — surface as a dim meta line.
+      // Ruling 369: the CLI compacted the context. The line names the
+      // trigger and the token counts, and the fact rides to the sink, which
+      // counts it on the row and notes it on the task's timeline.
+      if (e.subtype === "compact_boundary") {
+        const meta = e.compact_metadata;
+        const trigger = meta?.trigger || "auto";
+        const pre = meta?.pre_tokens ?? null;
+        const post = meta?.post_tokens ?? null;
+        const k = (n: number) => `${(n / 1000).toFixed(0)}k`;
+        const sizes =
+          pre !== null
+            ? ` · ${k(pre)} → ${post !== null ? k(post) : "?"} tokens`
+            : "";
+        return {
+          display: {
+            t,
+            ev: "meta",
+            tag: "system·compact_boundary",
+            text: `context compacted (${trigger})${sizes}`,
+          },
+          facts: { compaction: { trigger, preTokens: pre, postTokens: post } },
+        };
+      }
+      // api_retry / … — surface as a dim meta line.
       return {
         display: {
           t,
@@ -575,6 +713,13 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
     }
     case "assistant": {
       const content = e.message.content;
+      // Ruling 369: the call's prompt-cache figures, on every main-loop
+      // envelope that carries usage (a subagent's envelope is not part of the
+      // run's own context and reports none here). One API message yields one
+      // envelope per content block, all with the same figures under the same
+      // id; the adapter keeps the first and strips the repeats before the
+      // sink folds them.
+      const cache = e.parent_tool_use_id ? null : claudeCacheFacts(e);
       // Ruling 130(a): the provider streams its API-error banner ("You are not
       // allowed to …") as an assistant message carrying an `error` code. It is
       // an error line, never the agent's reply, so it can never be selected as
@@ -587,7 +732,7 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
             tag: `assistant·${e.error}`,
             text: summarizeContent(content) || e.error,
           },
-          facts: { apiError: e.error },
+          facts: { apiError: e.error, cache },
         };
       }
       const toolUse = content.find((b) => b.type === "tool_use");
@@ -595,10 +740,13 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
         const text = summarizeToolInput(toolUse.name, toolUse.input);
         return {
           display: { t, ev: "tool", tag: "tool_use", name: toolUse.name, text, input: toolUse.input },
-          facts: {},
+          facts: { cache },
         };
       }
-      return { display: { t, ev: "text", tag: "assistant", text: summarizeContent(content) }, facts: {} };
+      return {
+        display: { t, ev: "text", tag: "assistant", text: summarizeContent(content) },
+        facts: { cache },
+      };
     }
     case "user": {
       const content = e.message.content;
@@ -671,6 +819,34 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
     default:
       return null;
   }
+}
+
+/**
+ * Ruling 369: one Claude call's cache fact, or null when the envelope carries
+ * no usage — or only zeros, which is the SDK's placeholder for a message that
+ * never reached the API (an interrupt, a synthetic frame) and would otherwise
+ * be counted as a first call that read and wrote nothing.
+ */
+function claudeCacheFacts(e: ClaudeEnvelope): NonNullable<EnvelopeFacts["cache"]> | null {
+  const usage = e.message.usage;
+  if (!usage) return null;
+  const write = usage.cache_creation_input_tokens;
+  const read = usage.cache_read_input_tokens;
+  if (usage.input_tokens === 0 && write === 0 && read === 0) return null;
+  return {
+    messageId: e.message.id || null,
+    promptTokens: usage.input_tokens + write + read,
+    cacheWrite: write,
+    cacheRead: read,
+    perCall: true,
+    ttl: usage.cache_creation
+      ? {
+          fiveMinute: usage.cache_creation.ephemeral_5m_input_tokens,
+          oneHour: usage.cache_creation.ephemeral_1h_input_tokens,
+        }
+      : null,
+    missReason: e.message.missReason || null,
+  };
 }
 
 /** An epoch-seconds instant as absolute UTC (`2026-09-03 11:50 UTC`). */
@@ -788,14 +964,34 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
     case "turn.completed": {
       const inTok = e.usage.input_tokens;
       const cached = e.usage.cached_input_tokens;
+      const written = e.usage.cache_write_input_tokens;
       const outTok = e.usage.output_tokens;
-      const text = usageText(inTok, cached, outTok);
+      const text =
+        usageText(inTok, cached, outTok) + (written > 0 ? ` · wrote ${(written / 1000).toFixed(1)}k` : "");
       return {
         display: { t, ev: "result", tag: "turn.completed", text, usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok } },
         // Each completed turn counts as one turn (codex has no cumulative
         // num_turns); the adapter overrides this with a running count for a
         // multi-turn run, so the live Turns counter isn't stuck at 0.
-        facts: { usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false }, turns: 1 },
+        facts: {
+          usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false },
+          turns: 1,
+          // Ruling 369: a TURN's totals over every call it made — a cached
+          // ratio and a write figure, never a prompt size (`perCall: false`).
+          // The per-call figures come off the rollout at finalize.
+          cache:
+            inTok > 0 || cached > 0 || written > 0
+              ? {
+                  messageId: null,
+                  promptTokens: inTok,
+                  cacheWrite: written,
+                  cacheRead: cached,
+                  perCall: false,
+                  ttl: null,
+                  missReason: null,
+                }
+              : null,
+        },
       };
     }
     case "turn.failed":
@@ -868,6 +1064,16 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
           }
           return { display: null, facts: {} };
         }
+        case "context_compaction":
+          // Ruling 369: the CLI compacted the thread (an item type newer than
+          // the SDK's own union). Counted on the row like Claude's boundary;
+          // the rollout read at finalize carries the authoritative count.
+          return completed
+            ? {
+                display: { t, ev: "meta", tag: "context_compaction", text: "context compacted" },
+                facts: { compaction: { trigger: "auto", preTokens: null, postTokens: null } },
+              }
+            : { display: null, facts: {} };
         case "web_search":
           // Same fix, same reason: the query IS the content of the row.
           return completed

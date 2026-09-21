@@ -14,7 +14,7 @@ import {
   parseQuotaResetAt,
 } from "./backend-quota.server";
 import { createLineRedactor, createRunSink } from "./run-sink.server";
-import { listRunLines, rawLogPath, upsertRun } from "./run-store.server";
+import { listRunLines, rawLogPath, upsertRun, getRun } from "./run-store.server";
 
 /**
  * P13-U-1: output-side secret redaction at the sink.
@@ -1059,5 +1059,272 @@ describe("ruling 130(d): structured refusals and the principal", () => {
     } finally {
       rmSync(rawLogPath("claude", bare), { force: true });
     }
+  });
+});
+
+/**
+ * Ruling 369: the sink folds every cache fact onto the row — the run's writes,
+ * the FIRST call (with its temperature and the provider's miss reason), the
+ * peak and last prompt (per-call figures only), the TTL bucket and the
+ * compactions — and a compaction is a governed fact with an audit row and a
+ * timeline note.
+ */
+describe("ruling 369: the sink folds the prompt-cache record", () => {
+  const cacheLine = (
+    cache: NonNullable<EmittedLine["facts"]["cache"]>,
+    tag = "assistant",
+  ): EmittedLine => ({
+    raw: JSON.stringify({ type: "assistant" }),
+    display: { t: "00:00:00", ev: "text", tag, text: "x" },
+    facts: { cache },
+    occurredAt: new Date().toISOString(),
+  });
+  const call = (
+    write: number,
+    read: number,
+    extra: Partial<NonNullable<EmittedLine["facts"]["cache"]>> = {},
+  ): NonNullable<EmittedLine["facts"]["cache"]> => ({
+    messageId: null,
+    promptTokens: 2 + write + read,
+    cacheWrite: write,
+    cacheRead: read,
+    perCall: true,
+    ttl: { fiveMinute: 0, oneHour: write },
+    missReason: null,
+    ...extra,
+  });
+  const rowOf = (runId: string) =>
+    // SAFETY: every selected column is declared on agent_runs (0001_baseline).
+    store.db
+      .prepare(
+        `SELECT cache_write_tokens, first_call_prompt_tokens, first_call_cache_write, first_call_cache_read,
+                first_call_warm, first_call_miss_reason, cache_ttl_bucket, peak_prompt_tokens,
+                last_prompt_tokens, compactions FROM agent_runs WHERE id = ?`,
+      )
+      .get(runId) as {
+      cache_write_tokens: number;
+      first_call_prompt_tokens: number | null;
+      first_call_cache_write: number | null;
+      first_call_cache_read: number | null;
+      first_call_warm: number | null;
+      first_call_miss_reason: string | null;
+      cache_ttl_bucket: string | null;
+      peak_prompt_tokens: number;
+      last_prompt_tokens: number;
+      compactions: number;
+    };
+
+  it("the first fact is the first call; writes sum; peak and last fold per call; the TTL bucket follows the writes", () => {
+    const sink = sinkFor("run_cache");
+    // A cold first call (wrote 14k, read 0) with the provider's reason.
+    sink.line(cacheLine(call(14_100, 0, { missReason: "previous_message_not_found" })));
+    sink.line(cacheLine(call(2_000, 40_000)));
+    sink.line(cacheLine(call(500, 60_000)));
+    const row = rowOf("run_cache");
+    expect(row).toEqual({
+      cache_write_tokens: 16_600,
+      first_call_prompt_tokens: 14_102,
+      first_call_cache_write: 14_100,
+      first_call_cache_read: 0,
+      first_call_warm: 0,
+      first_call_miss_reason: "previous_message_not_found",
+      cache_ttl_bucket: "1h",
+      peak_prompt_tokens: 60_502,
+      last_prompt_tokens: 60_502,
+      compactions: 0,
+    });
+  });
+
+  it("a warm first call reads 1; a later miss reason never overwrites the first call's", () => {
+    const sink = sinkFor("run_warm");
+    sink.line(cacheLine(call(4_200, 47_900)));
+    sink.line(cacheLine(call(300, 50_000, { missReason: "messages_changed" })));
+    const row = rowOf("run_warm");
+    expect(row.first_call_warm).toBe(1);
+    expect(row.first_call_miss_reason).toBeNull();
+    expect(row.first_call_cache_read).toBe(47_900);
+  });
+
+  it("mixed TTLs read 'mixed'", () => {
+    const mixed = sinkFor("run_mixed");
+    mixed.line(cacheLine(call(10, 0, { ttl: { fiveMinute: 10, oneHour: 0 } })));
+    mixed.line(cacheLine(call(10, 0, { ttl: { fiveMinute: 0, oneHour: 10 } })));
+    expect(rowOf("run_mixed").cache_ttl_bucket).toBe("mixed");
+  });
+
+  it("a 5-minute-only write reads '5m'", () => {
+    const five = sinkFor("run_five");
+    five.line(cacheLine(call(10, 0, { ttl: { fiveMinute: 10, oneHour: 0 } })));
+    expect(rowOf("run_five").cache_ttl_bucket).toBe("5m");
+  });
+
+  it("no TTL split reads null", () => {
+    const none = sinkFor("run_none");
+    none.line(cacheLine(call(10, 0, { ttl: null })));
+    expect(rowOf("run_none").cache_ttl_bucket).toBeNull();
+  });
+
+  it("a Codex turn total is a first call and a write, never a peak or a last prompt", () => {
+    const sink = sinkFor("run_codex_turn");
+    sink.line(cacheLine(call(1_500, 21_248, { perCall: false, ttl: null, promptTokens: 26_000 })));
+    const row = rowOf("run_codex_turn");
+    expect(row.first_call_prompt_tokens).toBe(26_000);
+    expect(row.first_call_warm).toBe(1);
+    expect(row.cache_write_tokens).toBe(1_500);
+    expect(row.peak_prompt_tokens).toBe(0);
+    expect(row.last_prompt_tokens).toBe(0);
+    // …until the rollout says what the calls carried.
+    sink.foldRolloutStats({
+      peakPromptTokens: 24_000,
+      lastPromptTokens: 22_600,
+      compactions: 1,
+      firstCall: { promptTokens: 14_000, cacheRead: 0, cacheWrite: 0 },
+    });
+    const after = rowOf("run_codex_turn");
+    expect(after.peak_prompt_tokens).toBe(24_000);
+    expect(after.last_prompt_tokens).toBe(22_600);
+    expect(after.compactions).toBe(1);
+    // The rollout's first call replaces the turn total as the run's first
+    // call: one request of 14k with nothing cached is a cold start, whatever
+    // the whole turn later read back.
+    expect(after.first_call_prompt_tokens).toBe(14_000);
+    expect(after.first_call_cache_read).toBe(0);
+    expect(after.first_call_warm).toBe(0);
+    // Folded by max: a smaller rollout figure never lowers a streamed one.
+    sink.foldRolloutStats({ peakPromptTokens: 1, lastPromptTokens: 0, compactions: 0 });
+    expect(rowOf("run_codex_turn").peak_prompt_tokens).toBe(24_000);
+    expect(rowOf("run_codex_turn").last_prompt_tokens).toBe(22_600);
+    // A fold without a first call leaves the recorded one alone.
+    expect(rowOf("run_codex_turn").first_call_prompt_tokens).toBe(14_000);
+  });
+
+  it("a compaction the rollout reports and the stream never carried is audited and noted at finalize", async () => {
+    const { writeTask, baseTaskFrontmatter } = await import("../../../test-support/test-store");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { listAuditEvents } = await import("../../../test-support/audit-log");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
+    });
+    upsertRun(store.db, {
+      id: "run_rollout_compact",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "rollout-compact",
+      role: "developer",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-5.6-terra",
+      sdk: "Codex SDK",
+      agentName: "Dev",
+      agentProfileId: "dev",
+      state: "running",
+    });
+    const sink = createRunSink(
+      store.db,
+      { ...spec("run_rollout_compact"), backend: "codex", taskKey: "VIB-3" },
+      { dataRoot: store.dataRoot },
+    );
+    const stats = {
+      peakPromptTokens: 177_960,
+      lastPromptTokens: 26_700,
+      compactions: 1,
+      compactionEvents: [{ preTokens: 177_960, postTokens: 19_509 }],
+    };
+    sink.foldRolloutStats(stats);
+    expect(rowOf("run_rollout_compact").compactions).toBe(1);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter(
+      (e) => e.taskKey === "VIB-3",
+    );
+    expect(audit).toHaveLength(1);
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!;
+    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
+    expect(note?.text).toContain("from 178k to 20k tokens");
+    // The same rollout folded again (a second finalize read) notes nothing new.
+    sink.foldRolloutStats(stats);
+    expect(
+      listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.taskKey === "VIB-3"),
+    ).toHaveLength(1);
+  });
+
+  it("ruling 376: a completion compaction's fact sets the replay size, and its request adds cost and tokens", () => {
+    const sink = sinkFor("run_completion_compact", "completion-compact");
+    sink.line(cacheLine(call(2_000, 118_000, { promptTokens: 120_000 })));
+    sink.line({
+      raw: "",
+      display: { t: "00:00:01", ev: "result", tag: "result", text: "done" },
+      facts: { isResult: true, costUsd: 4, usage: { input_tokens: 120_000, cached_input_tokens: 118_000, output_tokens: 500, outputEstimated: false } },
+      occurredAt: "2026-09-21T12:00:01.000Z",
+    });
+    expect(rowOf("run_completion_compact").last_prompt_tokens).toBe(120_000);
+    sink.line({
+      raw: "",
+      display: { t: "00:00:02", ev: "meta", tag: "run·compacted·completion", text: "context compacted at the end of the run" },
+      facts: { compaction: { trigger: "completion", preTokens: 120_000, postTokens: 18_000 } },
+      occurredAt: "2026-09-21T12:00:02.000Z",
+    });
+    sink.line({
+      raw: "",
+      display: { t: "00:00:03", ev: "meta", tag: "run·compaction·request", text: "compaction request · $0.70" },
+      facts: { costAddUsd: 0.7, usageAdd: { input_tokens: 2_000, cached_input_tokens: 118_000, output_tokens: 4_000 } },
+      occurredAt: "2026-09-21T12:00:03.000Z",
+    });
+    sink.finalize({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
+    const row = rowOf("run_completion_compact");
+    expect(row.compactions).toBe(1);
+    // What a resume replays now: the summary, not the history it folded.
+    expect(row.last_prompt_tokens).toBe(18_000);
+    expect(row.peak_prompt_tokens).toBe(120_000);
+    // Increments on top of the result's figures, never a replacement.
+    const full = getRun(store.db, "run_completion_compact")!;
+    expect(full.total_cost_usd).toBeCloseTo(4.7, 5);
+    expect(full.input_tokens).toBe(122_000);
+    expect(full.cached_input_tokens).toBe(236_000);
+    expect(full.output_tokens).toBe(4_500);
+  });
+
+  it("a compaction counts on the row, audits, and notes the task's timeline", async () => {
+    const { writeTask, baseTaskFrontmatter } = await import("../../../test-support/test-store");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { listAuditEvents } = await import("../../../test-support/audit-log");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    upsertRun(store.db, {
+      id: "run_compact",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "primary",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "Claude Agent SDK",
+      agentName: "Dev",
+      agentProfileId: "dev",
+      state: "running",
+    });
+    const sink = createRunSink(
+      store.db,
+      { ...spec("run_compact"), compactAnchor: "# Context compacted — re-anchor" },
+      { dataRoot: store.dataRoot },
+    );
+    sink.line({
+      raw: JSON.stringify({ type: "system", subtype: "compact_boundary" }),
+      display: { t: "00:00:00", ev: "meta", tag: "system·compact_boundary", text: "context compacted (auto)" },
+      facts: { compaction: { trigger: "auto", preTokens: 251_000, postTokens: 12_000 } },
+      occurredAt: "2026-09-21T12:00:00.000Z",
+    });
+    expect(rowOf("run_compact").compactions).toBe(1);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.taskKey).toBe("VIB-1");
+    // The note is best-effort and lands after the line's own persist.
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
+    expect(note?.text).toContain("Dev");
+    expect(note?.text).toContain("from 251k to 12k tokens");
+    expect(note?.text).toContain("re-injected the task anchor");
   });
 });

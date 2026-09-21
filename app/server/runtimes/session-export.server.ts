@@ -365,6 +365,255 @@ export function probeSessionContinuity(
   return locateClaude(userId, sessionId, dataRoot) ? "present" : "missing";
 }
 
+// ------------------------------------------------- context size readers
+
+/**
+ * Ruling 372: ONE main-loop assistant line of a Claude transcript — the fields
+ * the context-size reader needs. `isSidechain` marks a subagent's line, which
+ * is not part of the session a resume replays.
+ */
+const claudeTranscriptUsageLineSchema = z.object({
+  type: z.string().catch(""),
+  isSidechain: z.boolean().catch(false),
+  message: z
+    .object({
+      usage: z
+        .object({
+          input_tokens: z.number().catch(0),
+          cache_creation_input_tokens: z.number().catch(0),
+          cache_read_input_tokens: z.number().catch(0),
+        })
+        .nullable()
+        .catch(null),
+    })
+    .nullable()
+    .catch(null),
+});
+
+/** Ruling 369/372: one `token_count` line of a Codex rollout: the last call's
+ *  usage (the prompt it carried, cached slice inside it) and when. */
+const codexRolloutLineSchema = z.object({
+  timestamp: z.string().catch(""),
+  type: z.string().catch(""),
+  payload: z
+    .object({
+      type: z.string().catch(""),
+      item: z.object({ type: z.string().catch("") }).nullable().catch(null),
+      info: z
+        .object({
+          last_token_usage: z
+            .object({
+              input_tokens: z.number().catch(0),
+              cached_input_tokens: z.number().catch(0),
+              cache_write_input_tokens: z.number().catch(0),
+              total_tokens: z.number().catch(0),
+            })
+            .nullable()
+            .catch(null),
+        })
+        .nullable()
+        .catch(null),
+    })
+    .nullable()
+    .catch(null),
+});
+
+function transcriptLines(filePath: string): unknown[] {
+  let text: string;
+  try {
+    text = readFileSync(filePath, "utf8");
+  } catch {
+    return [];
+  }
+  const out: unknown[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      // A torn last line (the CLI mid-write) is not a transcript fact.
+    }
+  }
+  return out;
+}
+
+/**
+ * Ruling 372: the size a resume of this session would REPLAY — the last
+ * main-loop call's whole prompt as the provider's own transcript records it
+ * (Claude: the last non-sidechain assistant line's usage, uncached + written +
+ * read; Codex: the rollout's last `token_count`, whose `last_token_usage`
+ * carries the last call's input with its cached slice inside). Null when the
+ * transcript cannot be found or holds no usage yet, which the policy reads as
+ * "size unknown, resume as before".
+ *
+ * Read from the transcript rather than a stored column so the policy answers
+ * for a session whose runs predate the column, and so a session another run
+ * extended is measured as it now is.
+ */
+export function sessionContextTokens(
+  backend: RealBackend,
+  userId: string | null,
+  sessionId: string | null | undefined,
+  dataRoot?: string,
+): number | null {
+  if (!sessionId || !userId) return null;
+  const filePath =
+    backend === "codex"
+      ? locateCodex(userId, sessionId, dataRoot)
+      : locateClaude(userId, sessionId, dataRoot);
+  if (!filePath) return null;
+  const lines = transcriptLines(filePath);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (backend === "codex") {
+      const line = codexRolloutLineSchema.parse(lines[i]);
+      const usage = line.payload?.type === "token_count" ? line.payload.info?.last_token_usage : null;
+      if (usage && usage.input_tokens > 0) return usage.input_tokens;
+      continue;
+    }
+    const line = claudeTranscriptUsageLineSchema.parse(lines[i]);
+    if (line.type !== "assistant" || line.isSidechain) continue;
+    const usage = line.message?.usage;
+    if (!usage) continue;
+    const total =
+      usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+    if (total > 0) return total;
+  }
+  return null;
+}
+
+/** One compaction as the rollout shows it: the last prompt the CLI sent
+ *  before it and the first one after (0 when no later call landed). */
+export interface CodexCompactionEvent {
+  preTokens: number;
+  postTokens: number;
+}
+
+/** The compaction still waiting for the first prompt after it. */
+interface PendingCompaction {
+  event: CodexCompactionEvent | null;
+}
+
+/** Ruling 369: what a Codex run's calls carried, read off its rollout. */
+export interface CodexRolloutRunStats {
+  /** The largest prompt any call in the window carried. */
+  peakPromptTokens: number;
+  /** The last call's prompt — the size a resume replays. */
+  lastPromptTokens: number;
+  /** Context compactions the CLI recorded in the window. */
+  compactions: number;
+  /** One entry per compaction in the window, in order: the last prompt the
+   *  CLI sent before it and the first one after (0 when the rollout ended
+   *  before another call landed). The sizes the timeline note prints. */
+  compactionEvents: CodexCompactionEvent[];
+  /** Calls seen in the window; 0 means the rollout said nothing about it. */
+  calls: number;
+  /** The FIRST call in the window — the run's real first request, which the
+   *  SDK's turn total is not: a prompt of `promptTokens` of which `cacheRead`
+   *  came back from the cache (Codex reports no write slice; the SDK's field
+   *  is carried for the day it does). Null when the rollout has no call. */
+  firstCall: { promptTokens: number; cacheRead: number; cacheWrite: number } | null;
+}
+
+/**
+ * Ruling 369: the per-call prompt figures the Codex SDK does not stream (its
+ * `turn.completed` is a turn TOTAL), read at finalize off the rollout the CLI
+ * writes into the principal's home: every `token_count` line from `sinceIso`
+ * on is one call, and a `context_compacted` event is one compaction. A thread
+ * resumed across runs is windowed by the run's own start, so an earlier run's
+ * calls are not this run's.
+ */
+export function codexRolloutRunStats(
+  userId: string | null,
+  sessionId: string | null | undefined,
+  sinceIso: string | null,
+  dataRoot?: string,
+): CodexRolloutRunStats | null {
+  if (!sessionId || !userId) return null;
+  const filePath = locateCodex(userId, sessionId, dataRoot);
+  if (!filePath) return null;
+  const since = sinceIso ? Date.parse(sinceIso) : NaN;
+  const stats: CodexRolloutRunStats = {
+    peakPromptTokens: 0,
+    lastPromptTokens: 0,
+    compactions: 0,
+    compactionEvents: [],
+    calls: 0,
+    firstCall: null,
+  };
+  // The CLI has spelled a compaction three ways across its versions: a
+  // top-level `compacted` line carrying the replacement history (0.153, the
+  // shape measured live on 2026-09-21), an `event_msg` whose item is a
+  // `ContextCompaction` (written beside it), and an older `context_compacted`
+  // event. One compaction can appear under two of them, so the count is the
+  // LARGEST of the three tallies, never their sum; the sizes come from the
+  // prompt figures around the first marker of each compaction.
+  const tallies = { compacted: 0, item: 0, event: 0 };
+  let lastPrompt = 0;
+  // The compaction still waiting for the first prompt after it (a holder, so
+  // the marking below is one statement the flow analysis can follow).
+  const pending: PendingCompaction = { event: null };
+  const markCompaction = () => {
+    if (pending.event) return; // the same compaction's second spelling
+    pending.event = { preTokens: lastPrompt, postTokens: 0 };
+    stats.compactionEvents.push(pending.event);
+  };
+  for (const raw of transcriptLines(filePath)) {
+    const line = codexRolloutLineSchema.parse(raw);
+    const at = Date.parse(line.timestamp);
+    // A line with no readable instant is kept: better to count a call twice
+    // across two runs than to lose the only figure a run has.
+    if (Number.isFinite(since) && Number.isFinite(at) && at < since) continue;
+    if (line.type === "compacted") {
+      tallies.compacted += 1;
+      markCompaction();
+      continue;
+    }
+    if (line.type !== "event_msg" || !line.payload) continue;
+    if (line.payload.type === "context_compacted") {
+      tallies.event += 1;
+      markCompaction();
+      continue;
+    }
+    if (line.payload.type === "item_completed" && line.payload.item?.type === "ContextCompaction") {
+      tallies.item += 1;
+      markCompaction();
+      continue;
+    }
+    if (line.payload.type !== "token_count") continue;
+    const usage = line.payload.info?.last_token_usage;
+    const prompt = usage?.input_tokens ?? 0;
+    if (prompt <= 0) {
+      // The compaction request's own line: no prompt, but `total_tokens` is
+      // the compacted context — the size a resume replays when no later call
+      // followed (ruling 376's completion compaction is the run's last event).
+      const compacted = usage?.total_tokens ?? 0;
+      if (pending.event && compacted > 0) {
+        pending.event.postTokens = compacted;
+        pending.event = null;
+        stats.lastPromptTokens = compacted;
+      }
+      continue;
+    }
+    if (pending.event) {
+      pending.event.postTokens = prompt;
+      pending.event = null;
+    }
+    lastPrompt = prompt;
+    stats.calls += 1;
+    if (stats.firstCall === null) {
+      stats.firstCall = {
+        promptTokens: prompt,
+        cacheRead: usage?.cached_input_tokens ?? 0,
+        cacheWrite: usage?.cache_write_input_tokens ?? 0,
+      };
+    }
+    stats.lastPromptTokens = prompt;
+    if (prompt > stats.peakPromptTokens) stats.peakPromptTokens = prompt;
+  }
+  stats.compactions = Math.max(tallies.compacted, tallies.item, tallies.event);
+  return stats;
+}
+
 /**
  * Locate the resumable transcript for a session id + backend, or null when the
  * provider kept no on-disk session.

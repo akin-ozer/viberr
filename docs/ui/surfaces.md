@@ -43,7 +43,7 @@ POST.
 | `/org/settings` | `org.settings.tsx` | org admin | tabs: Users & access, GitHub connections, Sign-in & SSO, Agent resources, Controller settings; audit export card (the S3 target is one fact row plus a button that opens the target modal, ruling 148(b) — "Export to S3 now" and "Remove" stay on the card); concurrency; under the standalone-page header (ruling 145) | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send`, `interrupt` (`conversationId`, `runId`) |
-| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate; the stopped count names both, ruling 158 addendum), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)); under the standalone-page header (ruling 145) | |
+| `/insights` | `insights.tsx` | org admin | run analytics: counts, cost, tokens, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate; the stopped count names both, ruling 158 addendum), the **Prompt cache** table (ruling 369: by run kind and by credential kind — runs, the warm-start rate over the runs with a first call ("n/a" with none, never 0%), tokens written and read, the write/read ratio, first calls writing over 100k, and how many runs' writes were billed under each cache lifetime; every figure on a `data-` attribute, rows keyed `data-cache-row="by run kind:primary"`), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)); under the standalone-page header (ruling 145) | |
 | `/profile` | `profile.tsx` | user | identity, password, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's), GitHub identity disconnect, theme, notification and timeline prefs (ruling 148: the password change is a row on the Profile card whose button opens a modal; the reduce-motion setting is gone) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user | fetcher target | `read-all` |
@@ -267,6 +267,13 @@ cannot rejoin the gap silently — the typecheck refuses it.)*
   saving an error body under the real filename. The `Attachment lightbox` screen label
   covers all three. *(Added 2026-09-02, pass 32 — A00-3: the docs described the panel
   as image thumbnails plus a lightbox, which was the pre-ruling-105 surface.)*
+- **The Agent-logs console carries a prompt-cache facts row** (ruling 369) under its bar:
+  quiet chips for the first call's temperature and figures (green "warm start · read 47.9k",
+  amber "cold start · wrote 298k"), the provider's miss reason when it sent one, the TTL
+  bucket ("cache 1h"), the run's writes and reads, the peak prompt (the last prompt, what a
+  resume would replay, in its tooltip) and the compaction count; each figure rides a `data-`
+  attribute, and a run with no first call says "no first call yet". The Live-run strip's
+  Tokens cell says on hover what the cache wrote and read.
 - Timestamps render through `app/shared/dates/format.ts` only: zero-padded `HH:MM`,
   `{day} · {time}`, relative forms. **The hydration contract** (pass 34, C6): a
   timestamp's first pass depends on the timestamp alone — the `*UTC` formatters take no

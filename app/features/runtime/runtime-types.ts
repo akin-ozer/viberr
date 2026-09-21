@@ -322,6 +322,50 @@ export interface RunLogWindow {
   headSeq: number;
 }
 
+/**
+ * Ruling 369: what the prompt cache did for a run, as the console and the
+ * strip read it off the row (`agent_runs.cache_write_tokens`,
+ * `first_call_*`, `cache_ttl_bucket`, `peak_prompt_tokens`,
+ * `last_prompt_tokens`, `compactions`).
+ */
+export interface RunCacheView {
+  /** Tokens written into the cache over the whole run. */
+  writeTokens: number;
+  /** Tokens read back from the cache over the whole run (the row's
+   *  `cached_input_tokens`). */
+  readTokens: number;
+  /** The run's FIRST model call, or null while none has landed (and for ever
+   *  on a run that never reached the provider — never printed as "cold"). */
+  firstCall: {
+    promptTokens: number;
+    write: number;
+    read: number;
+    /** `startTemperature`: it read more than it wrote. */
+    warm: boolean;
+    /** The provider's own reason for a miss, when it sent one. */
+    missReason: string | null;
+  } | null;
+  /** Which cache lifetime the provider billed the writes under (Claude). */
+  ttlBucket: "5m" | "1h" | "mixed" | null;
+  /** The largest prompt any one call carried. */
+  peakPromptTokens: number;
+  /** The last call's prompt — what a resume replays (ruling 372). */
+  lastPromptTokens: number;
+  /** Context compactions the provider performed. */
+  compactions: number;
+}
+
+/** Ruling 369: the record of a run that has reported nothing yet. */
+export const NO_RUN_CACHE: RunCacheView = {
+  writeTokens: 0,
+  readTokens: 0,
+  firstCall: null,
+  ttlBucket: null,
+  peakPromptTokens: 0,
+  lastPromptTokens: 0,
+  compactions: 0,
+};
+
 /** Identity chip shape (mock `who`). Operator: no backend, no role. */
 export interface RunWho {
   kind: "agent";
@@ -398,6 +442,9 @@ export interface RunView {
    *  that errored before the provider replied, keeps its estimate after it
    *  ends. The cell prints `~1.2M` with a tooltip while true. */
   tokensEstimated: boolean;
+  /** Ruling 369: the prompt-cache record (write vs read, the first call's
+   *  temperature, the TTL bucket, the peak and last prompt, compactions). */
+  cache: RunCacheView;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
    * runs. NOT the whole history since P13-D-11 — see `logWindow`. */

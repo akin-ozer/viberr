@@ -31,6 +31,7 @@ import {
   type RunHandle,
   type RunMcpServers,
   type RunSpec,
+  type RunExit,
   type RuntimeAdapter,
 } from "./adapter.server";
 import {
@@ -43,7 +44,7 @@ import {
   projectRunsForTask,
   type ProjectedRunView,
 } from "./run-projection.server";
-import { createRunSink } from "./run-sink.server";
+import { createRunSink, runPersistDrained } from "./run-sink.server";
 import {
   appendRawLine,
   getRun,
@@ -58,7 +59,9 @@ import {
   type InsertRunInput,
 } from "./run-store.server";
 import {
+  codexRolloutRunStats,
   probeSessionContinuity,
+  sessionContextTokens,
   type SessionContinuity,
 } from "./session-export.server";
 import {
@@ -81,8 +84,18 @@ import {
   principalRefusalMessage,
   type RunPrincipalRefusal,
 } from "./run-principal.server";
-import { runMarkerEnv } from "./run-processes.server";
+import {
+  runMarkerEnv,
+  compactionRunId,
+  reapRunProcesses,
+} from "./run-processes.server";
 import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
+import {
+  COMPACT_AT_COMPLETION_TOKENS,
+  contextWindowEnv,
+  resumeVerdict,
+} from "./context-policy.server";
+import type { RunPrompt } from "./prompt-prefix.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
 import { newId } from "~/shared/ids/new-id.server";
@@ -392,8 +405,12 @@ export interface StartRunInput {
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
   actor?: AuditActor;
-  /** Custom instructions: Claude systemPrompt / Codex developer_instructions. */
-  systemPrompt?: string;
+  /** Custom instructions: Claude systemPrompt / Codex developer_instructions —
+   *  a static/dynamic split (ruling 370) or a plain string. */
+  systemPrompt?: RunPrompt;
+  /** Ruling 371/373: the anchor the run is handed back after a compaction
+   *  (see `RunSpec.compactAnchor`). */
+  compactAnchor?: string;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: RunMcpServers;
   /** Tool allowlist confining the run (operator → its governance tools only). */
@@ -432,6 +449,9 @@ export interface StartRunInput {
    *  a live "Preparing workspace" strip while it cloned. `startRun` then adopts
    *  that row (id, thread, started_at) instead of minting a second one. */
   reservation?: RunReservation;
+  /** Ruling 372: set by `resumeRun` on the fresh turn it starts instead of a
+   *  replay, so the run's start audit records why the session was not resumed. */
+  continuityReset?: ContinuityLossReason;
 }
 
 // ------------------------------------------------------- run reservation
@@ -785,6 +805,10 @@ type RunStartedAudit = {
   credentialUserId: string | null;
   /** R7-2 fail-fast marker: the run never spawned a backend process. */
   failedUnavailable?: true;
+  /** Ruling 372: this is the fresh turn `resumeRun` started INSTEAD of a
+   *  replay, and why (`stale_large_session`, `transcript_gone`,
+   *  `owner_changed`). */
+  continuityReset?: ContinuityLossReason;
 };
 
 /**
@@ -903,6 +927,9 @@ export async function startRun(
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId,
     credentialUserId: input.credentialUserId,
+    // Ruling 369: the kind of credential the run bills, which decides the
+    // cache TTL the resume policy assumes for its session (ruling 372).
+    credentialKind: credential.ok ? credential.credential.kind : null,
     // Ruling 316: kept on the row so the completion path can tell an answer
     // from a silence long after the dispatch is gone.
     verdictWithheld: input.verdictWithheld === true,
@@ -956,6 +983,7 @@ export async function startRun(
     spec.effort = resolveRunEffort(input.backend, input.effort);
   }
   if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
+  if (input.compactAnchor) spec.compactAnchor = input.compactAnchor;
   if (input.attachmentsWritableDir) {
     spec.attachmentsWritableDir = input.attachmentsWritableDir;
   }
@@ -1014,6 +1042,11 @@ export async function startRun(
     ? { ...credential.credential.env }
     : {};
   Object.assign(runEnv, input.env);
+  // Ruling 371/373: the context window for this kind, from the one home for
+  // the number (`context-policy.server.ts`), set here — the one funnel every
+  // run goes through — so no path can start a specialist or controller run
+  // without it, and after the caller's overlay so nothing renames it.
+  Object.assign(runEnv, contextWindowEnv(input.backend, input.kind));
   // Ruling 174: every process the run starts carries its id, so the settle
   // sweep can find what it left behind (`run-processes.server.ts`). Set last:
   // no caller overlay may rename a run's processes. A refused run spawns
@@ -1037,6 +1070,7 @@ export async function startRun(
     credentialUserId: input.credentialUserId,
   };
   if (refusal !== null) details.failedUnavailable = true;
+  if (input.continuityReset) details.continuityReset = input.continuityReset;
 
   // Governed action: opening a runtime session is audited (BUILD-PLAN
   // Phase 10 / contracts — run start + interrupt both leave audit rows).
@@ -1068,6 +1102,7 @@ export async function startRun(
   const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
+  if (input.dataRoot) launchOpts.dataRoot = input.dataRoot;
   const adapter = selectAdapter(input.backend, state.adapters);
   const secrets = credential.credential.secrets;
   const launchThunk = () => launch(db, spec, adapter, secrets, launchOpts);
@@ -1260,10 +1295,40 @@ export function backendUnavailableMessage(
  */
 const SESSION_MISSING_TAG = "run·session_missing";
 
-/** Ruling 207(j): WHY a resume could not reach its session. The two causes look
+/** Ruling 207(j): WHY a resume did not reach its session. The causes look
  *  identical downstream and read completely differently to a human: one is a
- *  storage fault worth investigating, the other is a decision viberr made. */
-export type ContinuityLossReason = "transcript_gone" | "owner_changed";
+ *  storage fault worth investigating, the others are decisions viberr made.
+ *  Ruling 372 added `stale_large_session`: the transcript exists and Viberr
+ *  chose not to replay it — idle past its cache TTL and above the replay
+ *  threshold, so a resume would re-write the whole history as one cache
+ *  write. */
+export type ContinuityLossReason = "transcript_gone" | "owner_changed" | "stale_large_session";
+
+/** Ruling 372: the tag of the meta line a set-aside session's last run gets.
+ *  Not `·session_missing` on purpose: `runIdsWithMissingSession` must not skip
+ *  the row (the session is intact and a later small resume may use it), and
+ *  no failure classifier may read a decision as a fault. */
+const SESSION_STALE_TAG = "run·session_stale";
+
+/** Ruling 372: the size and age the verdict was taken on, for the sentences. */
+export interface StaleSessionFacts {
+  contextTokens: number;
+  idleMs: number;
+  ttlMs: number;
+}
+
+function humanDuration(ms: number): string {
+  if (!Number.isFinite(ms)) return "an unknown time";
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} minute${rest === 1 ? "" : "s"}` : ""}`;
+}
+
+function k(n: number): string {
+  return `${(n / 1000).toFixed(0)}k`;
+}
 
 /** What the user is told when a session could not be resumed. Never "review your
  *  authentication" — the credential is fine. */
@@ -1290,15 +1355,23 @@ function recordSessionMissing(
   db: DatabaseSync,
   run: AgentRunRow,
   reason: ContinuityLossReason,
+  stale?: StaleSessionFacts,
 ): void {
   const now = new Date().toISOString();
-  const text = sessionMissingMessage(run.backend, run.session_id ?? "", reason);
+  const label = run.backend === "claude" ? "Claude" : "Codex";
+  // Ruling 372: a set-aside session is a DECISION, recorded as a meta line
+  // under its own tag — the session is intact, nothing failed.
+  const text =
+    reason === "stale_large_session" && stale
+      ? `The ${label} session ${run.session_id ?? ""} was not resumed on purpose: it was ${humanDuration(stale.idleMs)} idle, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, and ${k(stale.contextTokens)} tokens large, so replaying it would have re-written the whole history as one cache write. The agent started a fresh session anchored on task.md and its last report; the transcript is intact.`
+      : sessionMissingMessage(run.backend, run.session_id ?? "", reason);
   const raw = JSON.stringify({
-    type: "error",
+    type: reason === "stale_large_session" ? "notice" : "error",
     source: "viberr",
-    reason: "session_missing",
+    reason: reason === "stale_large_session" ? "session_stale" : "session_missing",
     session_id: run.session_id,
     message: text,
+    ...stale,
   });
   try {
     appendRawLine(run.backend, run.id, raw);
@@ -1307,7 +1380,10 @@ function recordSessionMissing(
       seq: nextSeq(db, run.id),
       occurredAt: now,
       raw,
-      display: { t: now.slice(11, 19), ev: "err", tag: SESSION_MISSING_TAG, text },
+      display:
+        reason === "stale_large_session"
+          ? { t: now.slice(11, 19), ev: "meta", tag: SESSION_STALE_TAG, text }
+          : { t: now.slice(11, 19), ev: "err", tag: SESSION_MISSING_TAG, text },
     });
   } catch (error) {
     logger.error("session-missing marker persist failed", {
@@ -1324,20 +1400,60 @@ function recordSessionMissing(
  * The follow-up prompt alone assumes a conversation the agent no longer has, so
  * it is prefixed with what happened and where the truth lives.
  */
-function continuityResetPreamble(backend: RealBackend, kind?: string): string {
+function continuityResetPreamble(
+  backend: RealBackend,
+  kind?: string,
+  /** Ruling 372: a set-aside session says so, and carries the last report. */
+  stale?: { facts: StaleSessionFacts; lastReport: string | null },
+): string {
   const label = backend === "claude" ? "Claude" : "Codex";
   // Ruling 99: a controller turn has no task.md — its anchors are the recent
   // conversation digest its turn prompt carries and the live tool reads.
   if (kind === "controller") {
+    return stale
+      ? [
+          `[continuity notice] Your previous ${label} session for this conversation was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${k(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history. None of the earlier exchange is in your context.`,
+          `The recent-conversation digest in the prompt below carries the last stored turns, and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
+        ].join(" ")
+      : [
+          `[continuity notice] Your previous ${label} session for this conversation is gone — the provider transcript no longer exists, so none of the earlier exchange is in your context.`,
+          `The recent-conversation digest in the prompt below and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
+        ].join(" ");
+  }
+  if (stale) {
     return [
-      `[continuity notice] Your previous ${label} session for this conversation is gone — the provider transcript no longer exists, so none of the earlier exchange is in your context.`,
-      `The recent-conversation digest in the prompt below and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
-    ].join(" ");
+      `[continuity notice] Your previous ${label} session for this task was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${k(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history as one cache write. None of that conversation is in your context.`,
+      `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
+      stale.lastReport
+        ? `Your last report on this task, for orientation (the task record and the repository are the truth if they disagree):\n\n${stale.lastReport}`
+        : "",
+    ]
+      .filter((part) => part !== "")
+      .join(" ");
   }
   return [
     `[continuity notice] Your previous ${label} session for this task is gone — the provider transcript no longer exists, so none of that conversation is in your context.`,
     `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
   ].join(" ");
+}
+
+/** Ruling 372: how much of the prior run's last report the fresh turn carries. */
+const LAST_REPORT_CHARS = 6_000;
+
+/**
+ * Ruling 372: the prior run's last reply — the newest agent-text line of its
+ * console — clipped, so a fresh session set aside on purpose still knows what
+ * the agent last said it did. Null when the run wrote no reply.
+ */
+function lastReportOf(db: DatabaseSync, runId: string): string | null {
+  const tail = listRunLinesTail(db, runId, 400);
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const line = tail[i]!.display;
+    if (line.ev !== "text" || !line.text.trim()) continue;
+    const text = line.text.trim();
+    return text.length > LAST_REPORT_CHARS ? `${text.slice(0, LAST_REPORT_CHARS - 1)}…` : text;
+  }
+  return null;
 }
 
 /**
@@ -1354,6 +1470,7 @@ async function noteContinuityReset(
   run: AgentRunRow,
   reason: ContinuityLossReason,
   dataRoot?: string,
+  stale?: StaleSessionFacts,
 ): Promise<void> {
   // Ruling 99: a controller conversation has no task file to note on — its
   // per-turn digest is the recovery, and the run row's session_missing stamp
@@ -1379,7 +1496,10 @@ async function noteContinuityReset(
         // hunting a storage fault that does not exist, and hid the one fact
         // that explains it.
         text:
-          reason === "owner_changed"
+          reason === "stale_large_session" && stale
+            ? // Ruling 372: a decision, said as one — the session is intact.
+              `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${k(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
+            : reason === "owner_changed"
             ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
             : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
         toAgent: false,
@@ -1549,7 +1669,13 @@ export interface ResumeRunInput {
   /** Re-apply the specialist's declared MCP servers on resume (Claude). */
   mcpServers?: RunMcpServers;
   /** Re-apply the persona/system prompt on resume (Claude). */
-  systemPrompt?: string;
+  systemPrompt?: RunPrompt;
+  /** Ruling 371: re-apply the compaction anchor on resume, or a resumed run
+   *  would lose it mid-thread (the XS-1 fresh-vs-resume parity class). */
+  compactAnchor?: string;
+  /** Ruling 372: the instant the resume is decided at. Tests pin it; the
+   *  product passes nothing and the service reads its clock ONCE here. */
+  nowIso?: string;
   /** Re-apply the outcome-envelope schema on resume so a resumed (e.g.
    *  @mention) Codex agent still emits the structured outcome (verdict /
    *  questions) instead of falling back to the fragile prose regex — and so
@@ -1589,6 +1715,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.env) target.env = input.env;
   if (input.mcpServers) target.mcpServers = input.mcpServers;
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
+  if (input.compactAnchor) target.compactAnchor = input.compactAnchor;
   if (input.outputSchema) target.outputSchema = input.outputSchema;
   if (input.attachmentsWritableDir) {
     target.attachmentsWritableDir = input.attachmentsWritableDir;
@@ -1619,7 +1746,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
 export async function resumeRun(
   db: DatabaseSync,
   input: ResumeRunInput,
-): Promise<{ runId: string; continuityReset?: true }> {
+): Promise<{ runId: string; continuityReset?: true; continuityLossReason?: ContinuityLossReason }> {
   const prev = getRun(db, input.runId);
   if (!prev) throw AppError.notFound(`Run ${input.runId} not found.`);
   const backend: RealBackend = prev.backend;
@@ -1659,18 +1786,59 @@ export async function resumeRun(
         prev.session_id,
         input.dataRoot,
       );
-  if (continuity === "missing") {
-    logger.warn("runtime continuity lost — re-anchoring on task.md", {
-      runId: prev.id,
-      taskKey: prev.task_key,
+  // Ruling 372: a session that is BOTH idle past its cache TTL AND larger than
+  // the replay threshold is never replayed — the whole history would be one
+  // cache write (298k, 911k and 929k on this instance). The size is what a
+  // resume would replay: the last call's prompt, from the row when the sink
+  // recorded it, else from the provider's own transcript (a row that predates
+  // the column, a session another run extended). The TTL follows the
+  // credential kind the prior run billed. A controller turn takes the same
+  // rule; its per-turn digest carries the last stored turns.
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  const stale =
+    continuity === "present"
+      ? (() => {
+          const contextTokens =
+            prev.last_prompt_tokens > 0
+              ? prev.last_prompt_tokens
+              : sessionContextTokens(backend, input.credentialUserId, prev.session_id, input.dataRoot);
+          const verdict = resumeVerdict({
+            backend,
+            credentialKind: prev.credential_kind,
+            finishedAt: prev.finished_at,
+            nowIso,
+            contextTokens,
+          });
+          return verdict.fresh
+            ? { contextTokens: verdict.contextTokens, idleMs: verdict.idleMs, ttlMs: verdict.ttlMs }
+            : null;
+        })()
+      : null;
+  if (continuity === "missing" || stale) {
+    const lossReason: ContinuityLossReason = stale
+      ? "stale_large_session"
+      : ownerChanged
+        ? "owner_changed"
+        : "transcript_gone";
+    logger.warn(
+      stale
+        ? "stale large session set aside — starting fresh on task.md and the last report"
+        : "runtime continuity lost — re-anchoring on task.md",
+      {
+        runId: prev.id,
+        taskKey: prev.task_key,
+        backend,
+        sessionId: prev.session_id,
+        ...stale,
+      },
+    );
+    recordSessionMissing(db, prev, lossReason, stale ?? undefined);
+    await noteContinuityReset(db, prev, lossReason, input.dataRoot, stale ?? undefined);
+    const preamble = continuityResetPreamble(
       backend,
-      sessionId: prev.session_id,
-    });
-    const lossReason: ContinuityLossReason = ownerChanged
-      ? "owner_changed"
-      : "transcript_gone";
-    recordSessionMissing(db, prev, lossReason);
-    await noteContinuityReset(db, prev, lossReason, input.dataRoot);
+      prev.kind,
+      stale ? { facts: stale, lastReport: lastReportOf(db, prev.id) } : undefined,
+    );
     const freshTurn: StartRunInput = {
       projectSlug: prev.project_slug,
       taskKey: prev.task_key,
@@ -1682,13 +1850,15 @@ export async function resumeRun(
       model: input.model ?? prev.model,
       agentName: input.agentName ?? prev.agent_name,
       agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
-      prompt: `${continuityResetPreamble(backend, prev.kind)}\n\n${input.prompt}`,
+      prompt: `${preamble}\n\n${input.prompt}`,
       // The whole point: no resumeSessionId. A fresh provider session.
       resumeSessionId: null,
+      // Ruling 372: the fresh row says WHY it is fresh, in its start audit.
+      continuityReset: lossReason,
     };
     carryResumeOptions(freshTurn, input);
     const fresh = await startRun(db, freshTurn);
-    return { runId: fresh.runId, continuityReset: true };
+    return { runId: fresh.runId, continuityReset: true, continuityLossReason: lossReason };
   }
 
   const resumedTurn: StartRunInput = {
@@ -1882,10 +2052,14 @@ function launch(
     startedAt?: string;
     /** F21-13: a disclosure line to open the run log with. */
     notice?: string;
+    /** The data root the run's task lives under: what the sink's timeline
+     *  notes (a compaction, ruling 369/376) are written against. Absent means
+     *  the instance's own root. */
+    dataRoot?: string;
   } = {},
 ): void {
   const state = getState();
-  const sink = createRunSink(db, spec, { secrets });
+  const sink = createRunSink(db, spec, opts.dataRoot ? { secrets, dataRoot: opts.dataRoot } : { secrets });
 
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.
@@ -1991,7 +2165,103 @@ function launch(
       if (deferredTimer) clearTimeout(deferredTimer);
       deferredTimer = null;
       deferred = null;
+      // The handle is tracked only for a run still in flight, so the flag is
+      // set here, synchronously, exactly as before ruling 376 made the rest
+      // of the exit asynchronous.
+      exited = true;
+      // Ruling 376: the exit may compact the session first, a provider round
+      // trip; everything after the exit — the finalize, the slot, the
+      // completion contract — waits for it, so no resume of the same session
+      // starts under a compaction still in flight.
+      void settleRun(exit);
+    },
+  });
+  // Only track the handle if the run is still in flight. A synchronously-exiting
+  // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
+  // deletes the not-yet-set handle; setting it here afterward would leave a
+  // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
+  // (and interrupt) think a dead run is live. Guard on the exit flag.
+  if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
+
+  async function settleRun(exit: RunExit): Promise<void> {
       try {
+        // Ruling 369: a Codex run's per-call prompt sizes and compactions are
+        // in the rollout the CLI wrote, never in its SDK stream; read once the
+        // CLI has exited, off the principal's own home.
+        // A shutdown drain (F21-24): nothing below can be read or written; the
+        // finalize alone says so, once.
+        const drained = runPersistDrained(db);
+        const row = drained ? null : getRun(db, spec.runId);
+        const rolloutStats = () =>
+          !drained && exit.effectiveBackend === "codex" && exit.sessionId
+            ? codexRolloutRunStats(
+                row?.credential_user_id ?? null,
+                exit.sessionId,
+                row?.started_at ?? null,
+                opts.dataRoot,
+              )
+            : null;
+        let stats = rolloutStats();
+        if (stats && stats.calls > 0) sink.foldRolloutStats(stats);
+        // Ruling 376: a session larger than the completion threshold is
+        // compacted now, while its prefix is still in the provider's cache.
+        // Never after an interrupt (the person asked for the spending to
+        // stop), never without a session, never on a backend that cannot,
+        // and never as a failure of the run.
+        const replaySize = drained
+          ? 0
+          : exit.effectiveBackend === "codex"
+            ? (stats?.lastPromptTokens ?? 0)
+            : (getRun(db, spec.runId)?.last_prompt_tokens ?? 0);
+        if (
+          adapter.compact &&
+          exit.sessionId &&
+          exit.outcome !== "interrupted" &&
+          replaySize > COMPACT_AT_COMPLETION_TOKENS
+        ) {
+          const compactionsBefore = stats?.compactionEvents.length ?? 0;
+          const outcome = await adapter.compact(spec, exit.sessionId, {
+            onLine: (line) => sink.line(line),
+            onPhase: (phase, step) => writePhase(phase, step),
+          });
+          logger.info("run compaction at completion", {
+            runId: spec.runId,
+            backend: exit.effectiveBackend,
+            replaySize,
+            ...outcome,
+          });
+          // The epilogue's process carries its own marker (the settle sweep
+          // must not reap it mid-compaction); it is reaped here, once done.
+          void reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
+            logger.warn("compaction epilogue reap failed", {
+              runId: spec.runId,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+          });
+          if (exit.effectiveBackend === "codex") {
+            // The rollout is the truth on Codex, whatever the app-server said:
+            // its reply carries no sizes, and a compaction it did not announce
+            // in time (live, 2026-09-21) is still on disk. The rollout's
+            // newest compaction, when there is a new one, is this one.
+            stats = rolloutStats();
+            const event = stats?.compactionEvents.at(-1) ?? null;
+            if (stats && stats.compactionEvents.length > compactionsBefore && event) {
+              const occurredAt = new Date().toISOString();
+              sink.line({
+                raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
+                display: {
+                  t: occurredAt.slice(11, 19),
+                  ev: "meta",
+                  tag: "run·compacted·completion",
+                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${Math.round(event.postTokens / 1000)}k tokens`,
+                },
+                facts: { compaction: { trigger: "completion", ...event } },
+                occurredAt,
+              });
+              sink.foldRolloutStats(stats);
+            }
+          }
+        }
         sink.finalize(exit);
       } catch (error) {
         logger.error("run finalize persist failed", {
@@ -2034,15 +2304,7 @@ function launch(
           if (finished) void noteCompletionEffectsLost(db, finished);
         }
       }
-      exited = true;
-    },
-  });
-  // Only track the handle if the run is still in flight. A synchronously-exiting
-  // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
-  // deletes the not-yet-set handle; setting it here afterward would leave a
-  // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
-  // (and interrupt) think a dead run is live. Guard on the exit flag.
-  if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
+  }
 }
 
 // ---------------------------------------------- interrupt

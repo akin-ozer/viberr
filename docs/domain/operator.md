@@ -177,6 +177,22 @@ it with no follow-up at all.
 
 ## 4. The turn
 
+The system prompt is built once per drive by `buildOperatorSystemPrompt` as a static block
+and a per-task tail (ruling 370): the shipped definition and the project's operator
+guidance, the attached skills and knowledge-base indexes (sorted by name), the two-kinds-of-
+ruling note, the runtime ground truth (backend, model, effort, the attached MCP servers in
+name order), the measured shell inventory, the live capability policy (rows sorted by id),
+the triage signals and the non-negotiable rules close the static block; the workspace
+section (the checkout's repository, branch and directory), the MCP governance and
+write-tool notes, the servers that failed their probe or did not mount and the grants whose
+content did not arrive follow it as the tail. On Claude the two blocks reach the SDK as a
+`string[]` with `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` between them, so the static block is one
+cache entry shared by every task of the project and the tail its own; on Codex the same
+text, in the same order, is joined into `developer_instructions`. The operator is a fresh
+session per turn on both backends, carries no context window (its turns peak under 100k)
+and asks the provider for no cache lifetime (ruling 374). The trigger doctrine and the task
+snapshot stay in the user turn.
+
 `operatorTurnDoctrine` builds the trigger-specific instruction, `operatorTurnInstruction`
 appends the capability-gap remedy clause (ruling 85: a packet must name the grantable
 capability and where a human grants it, not only workarounds), and the backend prompt

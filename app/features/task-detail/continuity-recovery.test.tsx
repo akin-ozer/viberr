@@ -9,6 +9,7 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
 import { ToastProvider } from "~/ui/toast";
 import {
   CONTINUITY_EVENT_TYPE,
@@ -107,6 +108,7 @@ function run(patch: Partial<RunView> = {}): RunView {
     turns: 3,
     tokens: 1200,
     tokensEstimated: false,
+    cache: NO_RUN_CACHE,
     lines: [plainLine],
     raw: ["{}"],
     lineCount: 1,

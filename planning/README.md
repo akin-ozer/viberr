@@ -35,3 +35,10 @@ The 2026-08-03 dependency/subsystem modernization (chokidar, dnd-kit, Lexical, f
 dependency currency, production-image e2e) is recorded in
 [`modernization-2026-08-03/PLAN.md`](modernization-2026-08-03/PLAN.md) and
 [`modernization-2026-08-03/IMPLEMENTATION.md`](modernization-2026-08-03/IMPLEMENTATION.md).
+
+The 2026-09-21 prompt-cache pass (why operator runs are warm, why specialist starts are
+cold, why two controller resumes wrote 900k tokens, and what to change on both backends)
+is recorded in [`prompt-cache-2026-09-21/RESEARCH.md`](prompt-cache-2026-09-21/RESEARCH.md),
+its implementation plan in [`prompt-cache-2026-09-21/PLAN.md`](prompt-cache-2026-09-21/PLAN.md)
+and the goal that drives the implementation in
+[`prompt-cache-2026-09-21/GOAL.md`](prompt-cache-2026-09-21/GOAL.md).

@@ -614,3 +614,47 @@ describe("pass 35 U35-7: a restart is a reason, not an actor", () => {
     expect(view!.interruptedBy).toEqual({ userId: "u-nobody", label: "u-nobody" });
   });
 });
+
+/**
+ * Ruling 369: the projection reads the prompt-cache record off the row as the
+ * sink stored it, and a row with no first call says so (null), never "cold".
+ */
+describe("ruling 369: the cache record on the run view", () => {
+  it("projects every stored figure, and null for a first call that never landed", () => {
+    insert({ id: "run_cache", threadId: "primary", state: "finished" });
+    patchRun(db, "run_cache", {
+      cachedInputTokens: 6_100_000,
+      cacheWriteTokens: 120_800,
+      firstCallPromptTokens: 14_102,
+      firstCallCacheWrite: 14_100,
+      firstCallCacheRead: 0,
+      firstCallWarm: 0,
+      firstCallMissReason: "previous_message_not_found",
+      cacheTtlBucket: "1h",
+      peakPromptTokens: 226_000,
+      lastPromptTokens: 180_000,
+      compactions: 2,
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.cache).toEqual({
+      writeTokens: 120_800,
+      readTokens: 6_100_000,
+      firstCall: { promptTokens: 14_102, write: 14_100, read: 0, warm: false, missReason: "previous_message_not_found" },
+      ttlBucket: "1h",
+      peakPromptTokens: 226_000,
+      lastPromptTokens: 180_000,
+      compactions: 2,
+    });
+    insert({ id: "run_bare", threadId: "c0", kind: "reviewer", agentProfileId: "critic", state: "queued" });
+    const bare = projectRunsForTask(db, SLUG, TASK).find((v) => v.serverRunId === "run_bare")!;
+    expect(bare.cache).toEqual({
+      writeTokens: 0,
+      readTokens: 0,
+      firstCall: null,
+      ttlBucket: null,
+      peakPromptTokens: 0,
+      lastPromptTokens: 0,
+      compactions: 0,
+    });
+  });
+});

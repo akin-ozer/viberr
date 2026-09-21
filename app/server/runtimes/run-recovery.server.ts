@@ -4,7 +4,7 @@ import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server"
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
-import { reapRunProcesses, type ReapRunProcesses } from "./run-processes.server";
+import { reapRunProcesses, type ReapRunProcesses, compactionRunId } from "./run-processes.server";
 import { patchRun, type AgentRunRow } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
 import {
@@ -196,7 +196,10 @@ export function finalizeOrphanedRuns(
   }
 
   const reapProcesses = deps.reapProcesses ?? reapRunProcesses;
-  const reaped = reapProcesses({ runIds: orphans.map((run) => run.id) }).then(
+  // Ruling 376: an epilogue interrupted by the restart carries its own marker.
+  const reaped = reapProcesses({
+    runIds: orphans.flatMap((run) => [run.id, compactionRunId(run.id)]),
+  }).then(
     () => {},
     (error) => {
       logger.warn("reaping the orphaned runs' processes failed", {

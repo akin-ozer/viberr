@@ -382,7 +382,10 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
 
     const res = finalizeOrphanedRuns(store.db, { reapProcesses });
     await res.reaped;
-    expect(asked).toEqual([["run_running", "run_waiting"]]);
+    // Ruling 376: each orphan's completion-compaction marker is swept beside it.
+    expect(asked).toEqual([
+      ["run_running", "run_running:compaction", "run_waiting", "run_waiting:compaction"],
+    ]);
 
     // Nothing orphaned, nothing to sweep.
     asked.length = 0;

@@ -1,5 +1,7 @@
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type {
+  CompactCallbacks,
+  CompactOutcome,
   EmittedLine,
   RunCallbacks,
   RunHandle,
@@ -11,6 +13,10 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 
 export interface FakeRun {
   lines: LogLine[];
+  /** Ruling 376: facts a test wants on a line beyond what its `usage` or
+   *  `stats` imply (a `cache` fact that sets the run's last prompt, say),
+   *  merged into the line at the same index. */
+  extraFacts?: (EmittedLine["facts"] | undefined)[];
   backend?: RealBackend;
   occurredAt?: string[];
   sessionId?: string;
@@ -34,6 +40,36 @@ const queued: QueuedRuns = { claude: [], codex: [] };
  */
 const startedSpecs: RunSpec[] = [];
 
+/** Ruling 376: what the fake answers a completion compaction with, per
+ *  backend, consumed oldest-first; nothing queued means "not compacted". */
+/** A queued answer, plus what the "provider" does when asked (a test appends
+ *  the compaction to a rollout there, as the real app-server would). */
+interface QueuedCompaction {
+  outcome: CompactOutcome;
+  onCompact?: () => void;
+}
+interface QueuedCompactions {
+  claude: QueuedCompaction[];
+  codex: QueuedCompaction[];
+}
+const queuedCompactions: QueuedCompactions = { claude: [], codex: [] };
+const compactedSpecs: { spec: RunSpec; sessionId: string }[] = [];
+
+export function queueFakeCompaction(
+  backend: RealBackend,
+  outcome: CompactOutcome,
+  onCompact?: () => void,
+): void {
+  const queued: QueuedCompaction = { outcome };
+  if (onCompact) queued.onCompact = onCompact;
+  queuedCompactions[backend].push(queued);
+}
+
+/** The compactions the fake was asked for, oldest first. */
+export function compactedRunSpecs(): readonly { spec: RunSpec; sessionId: string }[] {
+  return compactedSpecs;
+}
+
 /** The specs the fake runtime received, oldest first. */
 export function startedRunSpecs(): readonly RunSpec[] {
   return startedSpecs;
@@ -52,6 +88,9 @@ export function installFakeRuntime(): void {
   queued.claude.length = 0;
   queued.codex.length = 0;
   startedSpecs.length = 0;
+  queuedCompactions.claude.length = 0;
+  queuedCompactions.codex.length = 0;
+  compactedSpecs.length = 0;
   configureRunServiceForTests({
     claude: createFakeAdapter("claude"),
     codex: createFakeAdapter("codex"),
@@ -61,6 +100,39 @@ export function installFakeRuntime(): void {
 function createFakeAdapter(backend: RealBackend): RuntimeAdapter {
   return {
     backend,
+    async compact(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome> {
+      compactedSpecs.push({ spec, sessionId });
+      const queued = queuedCompactions[backend].shift();
+      queued?.onCompact?.();
+      const outcome: CompactOutcome = queued?.outcome ?? {
+        compacted: false,
+        reason: "no compaction queued",
+      };
+      cb.onPhase?.("Compacting context", "at the end of the run");
+      const occurredAt = new Date().toISOString();
+      if (outcome.compacted) {
+        // What the Claude adapter emits: the boundary as this run's fact.
+        cb.onLine({
+          raw: JSON.stringify({ type: "test", backend, compaction: outcome }),
+          display: {
+            t: occurredAt.slice(11, 19),
+            ev: "meta",
+            tag: "run·compacted·completion",
+            text: "context compacted at the end of the run",
+          },
+          facts: {
+            compaction: {
+              trigger: "completion",
+              preTokens: outcome.preTokens,
+              postTokens: outcome.postTokens,
+            },
+            costAddUsd: 0.5,
+          },
+          occurredAt,
+        });
+      }
+      return outcome;
+    },
     start(spec, callbacks) {
       startedSpecs.push(spec);
       return playFakeRun(spec, callbacks, queued[backend].shift());
@@ -82,7 +154,7 @@ function playFakeRun(
     for (const [index, line] of lines.entries()) {
       if (stopped) return;
       const occurredAt = queuedRun?.occurredAt?.[index] ?? new Date().toISOString();
-      emit(spec, callbacks, line, sessionId, occurredAt);
+      emit(spec, callbacks, line, sessionId, occurredAt, queuedRun?.extraFacts?.[index]);
     }
     if (!queuedRun?.keepRunning && !stopped) {
       stopped = true;
@@ -114,11 +186,12 @@ function emit(
   line: LogLine,
   sessionId: string,
   occurredAt: string,
+  extraFacts?: EmittedLine["facts"],
 ): void {
   callbacks.onLine({
     raw: JSON.stringify({ type: "test", backend: spec.backend, line }),
     display: line,
-    facts: lineFacts(spec, line, sessionId),
+    facts: { ...lineFacts(spec, line, sessionId), ...extraFacts },
     occurredAt,
   });
 }

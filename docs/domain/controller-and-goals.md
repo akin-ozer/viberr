@@ -242,7 +242,14 @@ owner-routed SSE event `controller.updated`.
    `task_key = <conversation id>`, so no task-scoped query ever matches it. Model is
    the profile's through `resolveRunModel("claude", …)`; effort only when set. The
    newest prior controller run is resumed when it has a session id, otherwise a fresh
-   run starts. Each prompt opens with the **context read** (ruling 121,
+   run starts — unless that session is BOTH idle past its cache TTL (60 min on a
+   sign-in, 5 min on an API key) AND above 150k tokens, in which case ruling 372 starts a
+   fresh run instead of replaying it (the two largest first calls this instance ever made,
+   911k and 929k, were controller resumes 39 hours and 71 minutes after the previous turn
+   on a 945k conversation): the prior run gets a `run·session_stale` line, the fresh turn's
+   prompt says the session was set aside on purpose and points at the digest below, and
+   the run's start audit records `continuityReset: "stale_large_session"`. Each prompt
+   opens with the **context read** (ruling 121,
    `gatherControllerContext`): a block labelled as a server read taken when the turn
    started — for a task-anchored conversation a derived header (stage and position, next
    stages with their boundaries, the asking person's live project role as
@@ -274,7 +281,12 @@ owner-routed SSE event `controller.updated`.
    controller's granted org MCP servers. Denied built-ins: `Read`, `Grep`, `Glob`,
    `WebFetch`, `WebSearch` plus the operator read-only set (`Bash`, `Edit`,
    `MultiEdit`, `Write`, `NotebookEdit`). The system prompt replaces the Claude Code
-   preset: doctrine, attached skills and KBs (24 000-char KB budget), a runtime block
+   preset and reaches the SDK as `{ type: "custom", prompt: [static, boundary, dynamic],
+   snapshot: true }` (ruling 373): recorded on the session's first request and reused
+   verbatim on every later turn until a compaction, so a changed append on a resume does
+   not invalidate the cache prefix — which is also why the per-turn tool manifest reaches a
+   running conversation at its next compaction. Every list in it is sorted by name (ruling
+   370). The static block is doctrine, attached skills and KBs (24 000-char KB budget), a runtime block
    naming the mounted MCP servers and, for every granted server that did NOT mount, the
    reason its own probe gave, with the instruction to say so in those terms and not to
    infer a cause the server did not give (ruling 310, the third surface), then the
@@ -292,8 +304,17 @@ owner-routed SSE event `controller.updated`.
    parentheses, ruling 309(a)), then the hand-written exceptions marked as hand-written,
    and the rule that the list is ADVISORY, NEVER ENFORCING — predict a refusal, say why,
    make the call anyway, and let the server's answer be the answer; the asking person's
-   own project role is not in this list but in the context read above. Working directory
-   is `<dataRoot>/runtimes/controller-scratch`.
+   own project role is not in this list but in the context read above. The conversation
+   block, the tier list beside it (ruling 309: the claim and what makes it usable stay in
+   one place) and the "did NOT mount this turn" notice are the dynamic tail behind the
+   SDK's boundary. Working directory is `<dataRoot>/runtimes/controller-scratch`. The
+   run carries no context window (ruling 376: the CLI's own limit stands, and a turn that
+   leaves the conversation above 100k is compacted at its end, warm), and a
+   `SessionStart` hook on the `compact` source hands the conversation anchor back after a
+   compaction — the conversation id, the person, the scope, that every turn's server read
+   outranks the summary, that `viberr_ops` is still attached, and to ask rather than guess
+   when the last request depends on lost context. The controller's tools stay deferred
+   behind ToolSearch (deferred tools only append and keep the cache).
 6. `settleTurn` records the reply (or a failure note naming quota/auth/other),
    releases the lease and starts the next queued message.
 

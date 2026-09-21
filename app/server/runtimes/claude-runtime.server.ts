@@ -15,14 +15,18 @@ import {
   answeredStep,
   RUN_PHASE,
   stepUpdateForLine,
+  type CompactCallbacks,
+  type CompactOutcome,
   type RunCallbacks,
   type RunHandle,
   type RunSpec,
   type RuntimeAdapter,
 } from "./adapter.server";
+import { COMPLETION_COMPACT_INSTRUCTIONS } from "./context-policy.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { isSdkSkillName, skillPluginInPlace } from "./skill-mount.server";
-import { projectEnvelope } from "./wire-format.server";
+import { projectEnvelope, type EnvelopeFacts } from "./wire-format.server";
+import type { LogLine } from "~/features/runtime/runtime-types";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
   spawnClaudeCli,
@@ -38,9 +42,18 @@ import {
   type ReapRunProcesses,
   type ReapTargets,
   type SignalProcess,
+  compactionMarkerEnv,
 } from "./run-processes.server";
 import { bashDenyPrefixes, deniedPrefixFor } from "./bash-policy.server";
 import { bashDenyReason } from "~/server/tasks/specialist-tool-policy";
+import {
+  claudeSystemPromptBlocks,
+  dynamicPromptText,
+  isPromptPrefix,
+  sortedNames,
+  sortedRecord,
+  staticPromptText,
+} from "./prompt-prefix.server";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -96,12 +109,26 @@ export interface ClaudeQueryOptions {
   includePartialMessages?: boolean;
   env?: Record<string, string>;
   abortController?: AbortController;
-  /** Custom system prompt. A string REPLACES the default (operator: tools-only,
-   *  no coding harness). The append-preset form keeps Claude Code's default
-   *  scaffolding and appends the persona (specialists: they DO write code). */
+  /** Custom system prompt. A string (or a `string[]` split at the SDK's
+   *  dynamic boundary, ruling 370) REPLACES the default (operator: tools-only,
+   *  no coding harness); the custom OBJECT form is the same text recorded on
+   *  the session's first request (`snapshot`, the controller). The
+   *  append-preset form keeps Claude Code's default scaffolding and appends
+   *  the persona (specialists: they DO write code); `excludeDynamicSections`
+   *  moves the preset's per-directory sections into the first user message so
+   *  every dispatch of one profile shares one system-prompt cache entry
+   *  (ruling 371). */
   systemPrompt?:
     | string
-    | { type: "preset"; preset: "claude_code"; append?: string };
+    | string[]
+    | { type: "custom"; prompt: string | string[]; snapshot?: boolean }
+    | {
+        type: "preset";
+        preset: "claude_code";
+        append?: string;
+        excludeDynamicSections?: boolean;
+        snapshot?: boolean;
+      };
   /** In-process SDK MCP servers (operator governance tools) plus the profile's
    *  declared external ones — forwarded exactly as `RunSpec` carries them. The
    *  SDK owns their shape (an `sdk` entry is a live server INSTANCE, not data);
@@ -146,9 +173,34 @@ export interface ClaudeQueryOptions {
   spawnClaudeCodeProcess?: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
   /** Ruling 101(e), amended (Option D PR 5): the PreToolUse hook that refuses a
    *  Bash command reaching one of the run's argument-level denies, however it
-   *  is wrapped, with a reason the model reads. It only ever denies. */
-  hooks?: { PreToolUse: { matcher: string; hooks: ClaudePreToolUseHook[] }[] };
+   *  is wrapped, with a reason the model reads. It only ever denies.
+   *  Ruling 371/373: the `SessionStart` hook on the `compact` source that hands
+   *  the run its anchor back after a compaction, and the `PreCompact` hook that
+   *  names the wait on the strip. */
+  hooks?: {
+    PreToolUse?: { matcher: string; hooks: ClaudePreToolUseHook[] }[];
+    SessionStart?: { matcher: string; hooks: ClaudeSessionStartHook[] }[];
+    PreCompact?: { hooks: ClaudePreCompactHook[] }[];
+  };
 }
+
+/** The SDK's `SessionStart` callback, narrowed to the one answer Viberr gives:
+ *  pinned context after a compaction. */
+export type ClaudeSessionStartHook = (
+  input: { hook_event_name: string; source?: string },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<{
+  hookSpecificOutput?: { hookEventName: "SessionStart"; additionalContext: string };
+}>;
+
+/** The SDK's `PreCompact` callback; its `custom_instructions` is input, so
+ *  Viberr's hook only observes. */
+export type ClaudePreCompactHook = (
+  input: { hook_event_name: string; trigger?: string },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<Record<string, never>>;
 
 /** The SDK's `PreToolUse` callback, narrowed to the fields Viberr's hook reads
  *  and the one answer it gives. */
@@ -621,21 +673,12 @@ const claudeEnvelopeSchema = z
      *  usage is not part of the result's `usage` (main loop only), so the live
      *  fold leaves them out too. */
     parent_tool_use_id: z.string().nullable().catch(null),
-    /** `assistant` envelopes: the API message's id (one message yields one
-     *  envelope per content block, all carrying the same usage), its
-     *  `message_start` usage, and the content blocks THIS envelope carries
+    /** `assistant` envelopes: the content blocks THIS envelope carries
      *  (F35-1: the live output estimate is read off them, because the usage's
-     *  `output_tokens` is a placeholder until the result). Anything that is
-     *  not a finite number counts as 0, exactly as the run row folds it. */
+     *  `output_tokens` is a placeholder until the result). The prompt figures
+     *  are read once, at the wire boundary (`facts.cache`, ruling 369). */
     message: z
       .object({
-        id: z.string().nullable().catch(null),
-        usage: z.object({
-          input_tokens: z.number().catch(0),
-          output_tokens: z.number().catch(0),
-          cache_creation_input_tokens: z.number().catch(0),
-          cache_read_input_tokens: z.number().catch(0),
-        }),
         content: z.array(claudeContentBlock).catch(() => []),
       })
       .nullable()
@@ -652,46 +695,15 @@ const claudeEnvelopeSchema = z
     parent_tool_use_id: null,
     message: null,
   });
-type ClaudeEnvelope = z.infer<typeof claudeEnvelopeSchema>;
-
-/** The live PROMPT counters one API message contributes, in the run row's
- *  terms (wire-format.server.ts, `result`): `input_tokens` is the WHOLE prompt
- *  of the call (uncached slice + cache writes + cache reads),
- *  `cached_input_tokens` its cache-read subset. Output is not here: the
- *  envelope's `output_tokens` is the `message_start` placeholder, and the live
- *  figure is `estimateOutputTokens` over the content blocks (F35-1). */
-interface StepUsage {
-  /** The API message id: the dedupe key across the envelopes of one message.
-   *  Null when the SDK sent none, which counts the envelope once. */
-  messageId: string | null;
-  input_tokens: number;
-  cached_input_tokens: number;
-}
-
 /**
- * One API message's usage from a Claude `assistant` envelope, or null when the
- * envelope is not an assistant message or carries no usage at all. Used to grow
- * the live token counter during a run (the final `result` envelope supplies the
- * authoritative totals).
+ * Ruling 371: the dynamic tail of a specialist's prompt split rides its FIRST
+ * user message, ahead of the instruction, so the preset's system prompt (the
+ * static block as its append) stays byte-identical across the tasks one
+ * profile is dispatched on. The heading tells the model what it is reading.
  */
-function assistantUsage(envelope: ClaudeEnvelope): StepUsage | null {
-  if (envelope.type !== "assistant") return null;
-  const usage = envelope.message?.usage;
-  if (!usage) return null;
-  const { input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens } = usage;
-  if (
-    input_tokens === 0 &&
-    output_tokens === 0 &&
-    cache_creation_input_tokens === 0 &&
-    cache_read_input_tokens === 0
-  ) {
-    return null;
-  }
-  return {
-    messageId: envelope.message?.id ?? null,
-    input_tokens: input_tokens + cache_creation_input_tokens + cache_read_input_tokens,
-    cached_input_tokens: cache_read_input_tokens,
-  };
+function withDynamicTail(dynamic: string, prompt: string): string {
+  if (!dynamic.trim()) return prompt;
+  return `# This run's context (Viberr, this run only)${dynamic}\n\n---\n\n${prompt}`;
 }
 
 /**
@@ -972,9 +984,407 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
   };
 }
 
+
+/** What `assembleClaudeOptions` needs from the caller beyond the spec: the
+ *  per-run resolutions the adapter made and the seams a query drives. */
+interface AssembleContext {
+  resolvedModel: ReturnType<typeof resolveClaudeModel>;
+  nativeSkills: string[];
+  droppedSkills: string[];
+  skillPlugin: RunSpec["skillPlugin"] | undefined;
+  spawn: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
+  phase: (name: string, step: string | null) => void;
+  emitPolicyDenied: (command: string, reason: string, toolUseId: string | undefined) => void;
+  abortController: AbortController;
+}
+
+/** What `assembleClaudeOptions` returns: the SDK options and the first prompt. */
+interface AssembledClaudeQuery {
+  options: ClaudeQueryOptions;
+  prompt: string;
+}
+
+/**
+ * The query options a run of `spec` is started with, and its first prompt.
+ * ONE builder for the run and for the completion compaction that follows it
+ * (ruling 376): the compaction request must carry the same tools, system
+ * prompt and servers as the run, or it is a different prefix and the cache it
+ * was meant to read is missed.
+ */
+function assembleClaudeOptions(
+  spec: RunSpec,
+  deps: ClaudeAdapterDeps,
+  ctx: AssembleContext,
+): AssembledClaudeQuery {
+  const { resolvedModel, nativeSkills, droppedSkills, skillPlugin } = ctx;
+  const options: ClaudeQueryOptions = {
+    cwd: spec.workdir,
+    // Fully autonomous: bypass ALL permission prompts so a
+    // server-spawned run never blocks waiting for approval (there is no
+    // human at the CLI). acceptEdits still gated non-edit tools like
+    // Bash; bypassPermissions runs unattended end-to-end.
+    permissionMode: spec.autonomous ? "bypassPermissions" : "default",
+    // Nobody answers a prompt here, on ANY run: the process that would
+    // is this server, and it passes no `canUseTool`. Stated to the SDK
+    // (≥ 0.3.259) so a tool the mode would ask about is denied at once
+    // with a reason the model can act on, instead of the unstated
+    // headless fallback. Binds only on the `default` seam; bypass never
+    // prompts. Deny rules and `disallowedTools` are unaffected.
+    permissionPrompts: "none",
+    // A runaway guard, NOT a work budget: 50 cut off real dev runs
+    // mid-delivery (a finished implementation died at turn 51). Default
+    // generous; override per deployment with VIBERR_CLAUDE_MAX_TURNS.
+    maxTurns: resolveMaxTurns(),
+    // SDK isolation: never load the host machine's ~/.claude settings
+    // tiers into a Viberr run — a run must see exactly the resources its
+    // profile grants, not the operator-user's personal Claude Code
+    // settings/plugins/skills. `settingSources: []` on EVERY run: no host
+    // tier, and no project source over the checkout either (ruling 180),
+    // so the repository under review's `.claude` and CLAUDE.md never
+    // reach the model at system-prompt tier.
+    //
+    // Two shapes, decided by whether Viberr mounted any granted skill:
+    //
+    //  · NO granted skills (operator runs, Codex profiles, a run with no
+    //    checkout) — `skills: []` lists none and `plugins: []` names ZERO
+    //    local plugins (defense-in-depth for the plugin channel, F13).
+    //    HONEST LIMIT (docker-verified 2026-07-18): `skills: []` does NOT
+    //    give an empty skill SET — the SDK compiles ~16 first-party
+    //    skills into its binary and a standalone deployment (pristine
+    //    CLAUDE_CONFIG_DIR, no host ~/.claude) still lists all 16 in the
+    //    run's init. That is why `BASE_DENIED_BUILTINS` denies the
+    //    `Skill` TOOL, making them UNINVOKABLE.
+    //
+    //  · GRANTED skills mounted — ruling 180 (F36-9): the run's plugin
+    //    directory (`<checkout>/../.viberr-plugins/<runId>/`, built by
+    //    `mountGrantedSkills` moments earlier) is the ONE local plugin,
+    //    and `skills: ["<plugin>:<name>", …]` enables exactly its skills
+    //    by their qualified names. The filter is what replaces the
+    //    blanket `Skill` deny: an unlisted skill (every bundled one
+    //    included) is hidden from the model and REJECTED by the Skill
+    //    tool. Nothing of Viberr's lives inside the checkout any more,
+    //    so the project's own tools (`prettier --check .`) see the tree
+    //    exactly as a clean clone. Canaried inside the image 2026-09-11:
+    //    the CLI's init lists `viberr:<name>` and the model invokes it.
+    settingSources: [],
+    // Ruling 370: sorted, so two runs of one profile list the same
+    // skills in the same order (enumeration drift was the one measured
+    // residual of a shared preset prefix).
+    skills: skillPlugin
+      ? sortedNames(nativeSkills.map((name) => `${skillPlugin.name}:${name}`))
+      : [],
+    plugins: skillPlugin
+      ? [{ type: "local", path: skillPlugin.path, skipMcpDiscovery: true }]
+      : [],
+    // R18-3 (governance parity with settingSources): only Viberr-granted
+    // MCP servers reach a run — ignore a repo `.mcp.json`, user MCP config,
+    // and plugin MCP. Viberr passes its granted external MCPs + the
+    // in-process toolkit via `mcpServers`; nothing ambient should widen it.
+    strictMcpConfig: true,
+  };
+  // Ruling 174: the SDK requires this beside `bypassPermissions`
+  // (sdk.d.ts) and defaults it to false. Only the autonomous run asks
+  // for bypass, so only it carries the acknowledgement.
+  if (spec.autonomous) options.allowDangerouslySkipPermissions = true;
+  // Ruling 174: the CLI leads its own process group, so every signal the
+  // SDK sends it reaches the MCP servers it starts, and the settle sweep
+  // can name the group. The handle is this run's alone.
+  options.spawnClaudeCodeProcess = (request) => ctx.spawn(request);
+  // Ruling 175: the instance's spending cap, when one is set. The SDK
+  // stops the query past it and says so with `error_max_budget_usd`.
+  if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd;
+  // Only NAME a model when we have a real id/alias; otherwise let the SDK
+  // (and the subscription) pick its default.
+  if (resolvedModel) options.model = resolvedModel;
+  // Pass the profile's chosen reasoning effort when it is one the SDK
+  // accepts; otherwise the SDK uses its default (high). Narrowed rather
+  // than forwarded raw so a Codex-only tier ("minimal") never reaches the
+  // Claude union (P13-RT-08).
+  const effort = resolveClaudeEffort(spec.effort);
+  if (effort) options.effort = effort;
+  if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
+  // Base adapter env, overlaid with any per-run env (e.g. the specialist's
+  // GIT_CEILING_DIRECTORIES workspace confinement).
+  if (deps.env || spec.env) {
+    options.env = { ...deps.env, ...spec.env };
+  }
+  // System prompt strategy differs by run kind:
+  //  · OPERATOR — its persona REPLACES the default. The operator never
+  //    writes code; it only uses the in-process viberr MCP tools, so it
+  //    must not carry Claude Code's coding harness/tool scaffolding.
+  //  · SPECIALIST (primary/reviewer) — its persona is APPENDED to the
+  //    `claude_code` preset, so the agent keeps the default coding
+  //    harness (it DOES implement/test) with its persona layered on top.
+  //    Replacing it (the old behavior) stripped the scaffolding and made a
+  //    coding agent run on persona prose alone.
+  // The instruction the first user message carries. A specialist's
+  // prompt split puts its dynamic tail here (ruling 371).
+  let prompt = spec.prompt;
+  if (spec.systemPrompt) {
+    // C02-R7: the persona announced the mounted skills; when the start
+    // could not enable them, the correction rides the run — on the
+    // dynamic side, since it varies per run (ruling 370).
+    const correction = droppedSkills.length > 0 ? droppedSkillsNotice(droppedSkills) : "";
+    const split = isPromptPrefix(spec.systemPrompt)
+      ? {
+          static: spec.systemPrompt.static,
+          dynamic: correction
+            ? [...spec.systemPrompt.dynamic, correction]
+            : spec.systemPrompt.dynamic,
+        }
+      : null;
+    if (spec.kind === "operator") {
+      // Ruling 370: a fresh session per turn, so nothing to record; the
+      // static block caches across tasks behind the SDK's boundary.
+      options.systemPrompt = split
+        ? claudeSystemPromptBlocks(split)
+        : spec.systemPrompt + correction;
+    } else if (spec.kind === "controller") {
+      // Ruling 373: coordination machinery like the operator (its
+      // persona REPLACES the coding harness), resumed on every turn —
+      // so the prompt is recorded on the session's first request and
+      // reused until compaction (`snapshot`).
+      options.systemPrompt = {
+        type: "custom",
+        prompt: split ? claudeSystemPromptBlocks(split) : spec.systemPrompt + correction,
+        snapshot: true,
+      };
+    } else {
+      // Ruling 371: the coding harness with the STATIC block appended,
+      // its per-directory sections moved out of the system prompt
+      // (`excludeDynamicSections`) and the whole thing recorded for the
+      // session (`snapshot`); the dynamic tail opens the first user
+      // message instead. An edited persona therefore reaches a resumed
+      // session only after its next compaction.
+      options.systemPrompt = {
+        type: "preset",
+        preset: "claude_code",
+        append: split ? staticPromptText(split) : spec.systemPrompt + correction,
+        excludeDynamicSections: true,
+        snapshot: true,
+      };
+      if (split) prompt = withDynamicTail(dynamicPromptText(split), prompt);
+    }
+  }
+  // Ruling 370: servers in name order, so the init's `mcp_servers` and
+  // the tool definitions the SDK sends are the same bytes on every run.
+  if (spec.mcpServers) options.mcpServers = sortedRecord(spec.mcpServers);
+  if (spec.allowedTools && spec.allowedTools.length) {
+    options.allowedTools = sortedNames(spec.allowedTools);
+  }
+  // Capability confinement via denylist. `disallowedTools` removes tools
+  // from the model's context entirely and binds even under
+  // bypassPermissions (unlike `allowedTools`, which only auto-approves).
+  //   - operator: deny the repo-mutation built-ins so it genuinely can't
+  //     write code / touch the repo — its job is the in-process
+  //     `mcp__viberr__*` governance tools, which stay available (as does
+  //     the tool-loading path). Enforces the PRD contract in code, not
+  //     just the persona prompt.
+  //   - specialist: deny the git/gh commands for capabilities the profile
+  //     withholds (push / PR / merge), computed upstream.
+  const denied = [
+    // `Skill` leaves the base list for a run that mounted granted skills:
+    // denying it would remove the tool from the model's context entirely
+    // (deny beats the `skills` option's auto-allow), so the mounted skills
+    // would be listed and uninvokable — a silent capability loss. The
+    // `skills` filter is the fence for that run instead.
+    ...BASE_DENIED_BUILTINS.filter(
+      (tool) => tool !== "Skill" || nativeSkills.length === 0,
+    ),
+    // The controller shares the operator's no-write posture and goes
+    // further (no filesystem reads either); its extra denies arrive via
+    // spec.disallowedTools from buildControllerRun.
+    ...(spec.kind === "operator" || spec.kind === "controller"
+      ? OPERATOR_READ_ONLY_DENIED_TOOLS
+      : []),
+    // Supporting/reviewing runs never touch the remote (VIB-30); their
+    // LOCAL write posture is grants-derived via spec.disallowedTools
+    // (parity ruling 2026-08-31 — see the constant's doc).
+    ...(spec.kind === "reviewer" ? SUPPORTING_DELIVERY_DENIED_BUILTINS : []),
+    ...(spec.disallowedTools ?? []),
+  ];
+  // Ruling 370: sorted and deduplicated for the same reason as the
+  // servers above; the rules read the same whatever their order.
+  if (denied.length) options.disallowedTools = sortedNames(denied);
+  // Ruling 101(e), amended (Option D PR 5): the prefix rules above match a
+  // command by its leading words, and the pinned CLI, which already splits
+  // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
+  // through (measured 2026-09-11: both refs landed on a local remote). A
+  // run with argument-level denies gets a PreToolUse hook that refuses a
+  // command reaching one, however wrapped, with a reason the model reads.
+  // It runs before the rules and only ever denies, so the rules stay the
+  // fence; a run whose Bash is denied outright needs none.
+  const bashPrefixes = denied.includes("Bash") ? [] : bashDenyPrefixes(denied);
+  if (bashPrefixes.length) {
+    const policyHook: ClaudePreToolUseHook = async (input, toolUseId) => {
+      const command = bashCommandSchema.safeParse(input.tool_input).data?.command ?? "";
+      const prefix = deniedPrefixFor(command, bashPrefixes);
+      if (!prefix) return {};
+      const reason = bashDenyReason(prefix, denied, spec.kind === "reviewer");
+      ctx.emitPolicyDenied(command, reason, toolUseId);
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: reason,
+        },
+      };
+    };
+    options.hooks = { PreToolUse: [{ matcher: "Bash", hooks: [policyHook] }] };
+  }
+  // Ruling 371/373: the run's anchor comes back the moment its context
+  // has been compacted (the `compact` source of `SessionStart`) — the
+  // system prompt survives compaction, tool output and the summary's
+  // omissions do not. `PreCompact` only names the wait: the summary
+  // request is a full-history model call (131 s on the one stored
+  // compaction), and the strip would otherwise show the last tool as
+  // still running.
+  const anchor = spec.compactAnchor;
+  if (anchor) {
+    const anchorHook: ClaudeSessionStartHook = async () => ({
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: anchor },
+    });
+    options.hooks = {
+      ...options.hooks,
+      SessionStart: [{ matcher: "compact", hooks: [anchorHook] }],
+    };
+  }
+  const preCompactHook: ClaudePreCompactHook = async (input) => {
+    logger.info("claude run compacting its context", {
+      runId: spec.runId,
+      trigger: input.trigger ?? null,
+    });
+    ctx.phase(RUN_PHASE.compacting, null);
+    return {};
+  };
+  options.hooks = { ...options.hooks, PreCompact: [{ hooks: [preCompactHook] }] };
+  // The subprocess kill switch: the interrupt/idle watchdogs abort this
+  // when the cooperative `interrupt()` goes unanswered (see `armForcedStop`).
+  options.abortController = ctx.abortController;
+  return { options, prompt };
+}
+
 export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapter {
   return {
     backend: "claude",
+    /**
+     * Ruling 376: `/compact` on the session a run just left, built from the
+     * same spec so the request reads the run's cached prefix. The boundary the
+     * CLI reports becomes the run's own compaction fact (trigger `completion`,
+     * sizes from the CLI); the request's cost and tokens add to the run's
+     * totals; a refusal ("Not enough messages to compact.") is the outcome's
+     * reason, never a thrown error.
+     */
+    async compact(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome> {
+      const queryFn = deps.queryFn ?? (await realQuery());
+      const { native: nativeSkills, dropped: droppedSkills } = nativeSkillsOutcome(spec);
+      const phase = (name: string, step: string | null) => cb.onPhase?.(name, step);
+      const { options } = assembleClaudeOptions(spec, deps, {
+        resolvedModel: resolveClaudeModel(spec.model),
+        nativeSkills,
+        droppedSkills,
+        skillPlugin: nativeSkills.length ? spec.skillPlugin : undefined,
+        spawn: (request) => spawnClaudeCli(request, deps.spawnCli, deps.signalProcess).process,
+        phase,
+        emitPolicyDenied: () => {},
+        abortController: new AbortController(),
+      });
+      options.resume = sessionId;
+      options.maxTurns = 1;
+      // Its own marker: the run's settle sweep must not reap this process.
+      if (options.env?.[RUN_MARKER_ENV]) {
+        options.env = { ...options.env, ...compactionMarkerEnv(spec.runId) };
+      }
+      phase(RUN_PHASE.compacting, "at the end of the run");
+      const clock = (iso: string) => iso.slice(11, 19);
+      const k = (n: number | null) => (n === null ? "?" : `${Math.round(n / 1000)}k`);
+      let outcome: CompactOutcome = {
+        compacted: false,
+        reason: "the provider reported no compaction boundary",
+      };
+      let resultText: string | null = null;
+      try {
+        const q = queryFn({
+          prompt: singlePrompt(`/compact ${COMPLETION_COMPACT_INSTRUCTIONS}`),
+          options,
+        });
+        for await (const message of q) {
+          const occurredAt = new Date().toISOString();
+          const { display, facts } = projectEnvelope("claude", message, occurredAt);
+          const envelope = claudeEnvelopeSchema.parse(message);
+          // The session is the run's; its init line and the summary the CLI
+          // writes as a user message are on the transcript, not the console.
+          if (envelope.type === "system" && envelope.subtype === "init") continue;
+          if (envelope.type === "user") continue;
+          const folded: EnvelopeFacts = {};
+          // A message the projector shows nothing for carries nothing here.
+          if (!display && !facts.compaction && !facts.isResult) continue;
+          const base: LogLine = display ?? {
+            t: clock(occurredAt),
+            ev: "meta",
+            tag: "run·compaction",
+            text: "",
+          };
+          let shown: LogLine = base;
+          if (facts.compaction) {
+            const compaction = { ...facts.compaction, trigger: "completion" };
+            folded.compaction = compaction;
+            outcome = {
+              compacted: true,
+              preTokens: compaction.preTokens,
+              postTokens: compaction.postTokens,
+            };
+            shown = {
+              ...base,
+              ev: "meta",
+              tag: "run·compacted·completion",
+              text: `context compacted at the end of the run · ${k(compaction.preTokens)} → ${k(compaction.postTokens)} tokens`,
+            };
+          } else if (facts.isResult) {
+            resultText = envelope.result ?? null;
+            if (facts.costUsd != null) folded.costAddUsd = facts.costUsd;
+            if (facts.usage && !facts.usage.outputEstimated) {
+              folded.usageAdd = {
+                input_tokens: facts.usage.input_tokens,
+                cached_input_tokens: facts.usage.cached_input_tokens,
+                output_tokens: facts.usage.output_tokens,
+              };
+            }
+            shown = {
+              ...base,
+              ev: "meta",
+              tag: "run·compaction·request",
+              text:
+                `compaction request · ${facts.costUsd != null ? `$${facts.costUsd.toFixed(2)}` : "cost not reported"}` +
+                (facts.usage ? ` · ${k(facts.usage.input_tokens + facts.usage.cached_input_tokens)} in, ${k(facts.usage.output_tokens)} out` : ""),
+            };
+          } else if (envelope.type === "assistant") {
+            // The summary call's own figures ride the result line; a per-call
+            // cache fact here would read the whole history as this run's last
+            // prompt, which the boundary's post size just replaced.
+            continue;
+          }
+          cb.onLine({ raw: JSON.stringify(message), display: shown, facts: folded, occurredAt });
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        outcome = { compacted: false, reason };
+        const occurredAt = new Date().toISOString();
+        cb.onLine({
+          raw: "",
+          display: {
+            t: clock(occurredAt),
+            ev: "meta",
+            tag: "run·compaction·failed",
+            text: `compaction at the end of the run did not happen: ${redactProviderText(reason)}`,
+          },
+          facts: {},
+          occurredAt,
+        });
+      }
+      if (!outcome.compacted && resultText) outcome = { compacted: false, reason: resultText };
+      return outcome;
+    },
     start(spec: RunSpec, cb: RunCallbacks): RunHandle {
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawResult = false;
@@ -1244,193 +1654,21 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         // Set only when the outcome enabled something: `nativeSkillsOutcome`
         // answers `native` only for a plugin it found in place.
         const skillPlugin = nativeSkills.length ? spec.skillPlugin : undefined;
-        const options: ClaudeQueryOptions = {
-          cwd: spec.workdir,
-          // Fully autonomous: bypass ALL permission prompts so a
-          // server-spawned run never blocks waiting for approval (there is no
-          // human at the CLI). acceptEdits still gated non-edit tools like
-          // Bash; bypassPermissions runs unattended end-to-end.
-          permissionMode: spec.autonomous ? "bypassPermissions" : "default",
-          // Nobody answers a prompt here, on ANY run: the process that would
-          // is this server, and it passes no `canUseTool`. Stated to the SDK
-          // (≥ 0.3.259) so a tool the mode would ask about is denied at once
-          // with a reason the model can act on, instead of the unstated
-          // headless fallback. Binds only on the `default` seam; bypass never
-          // prompts. Deny rules and `disallowedTools` are unaffected.
-          permissionPrompts: "none",
-          // A runaway guard, NOT a work budget: 50 cut off real dev runs
-          // mid-delivery (a finished implementation died at turn 51). Default
-          // generous; override per deployment with VIBERR_CLAUDE_MAX_TURNS.
-          maxTurns: resolveMaxTurns(),
-          // SDK isolation: never load the host machine's ~/.claude settings
-          // tiers into a Viberr run — a run must see exactly the resources its
-          // profile grants, not the operator-user's personal Claude Code
-          // settings/plugins/skills. `settingSources: []` on EVERY run: no host
-          // tier, and no project source over the checkout either (ruling 180),
-          // so the repository under review's `.claude` and CLAUDE.md never
-          // reach the model at system-prompt tier.
-          //
-          // Two shapes, decided by whether Viberr mounted any granted skill:
-          //
-          //  · NO granted skills (operator runs, Codex profiles, a run with no
-          //    checkout) — `skills: []` lists none and `plugins: []` names ZERO
-          //    local plugins (defense-in-depth for the plugin channel, F13).
-          //    HONEST LIMIT (docker-verified 2026-07-18): `skills: []` does NOT
-          //    give an empty skill SET — the SDK compiles ~16 first-party
-          //    skills into its binary and a standalone deployment (pristine
-          //    CLAUDE_CONFIG_DIR, no host ~/.claude) still lists all 16 in the
-          //    run's init. That is why `BASE_DENIED_BUILTINS` denies the
-          //    `Skill` TOOL, making them UNINVOKABLE.
-          //
-          //  · GRANTED skills mounted — ruling 180 (F36-9): the run's plugin
-          //    directory (`<checkout>/../.viberr-plugins/<runId>/`, built by
-          //    `mountGrantedSkills` moments earlier) is the ONE local plugin,
-          //    and `skills: ["<plugin>:<name>", …]` enables exactly its skills
-          //    by their qualified names. The filter is what replaces the
-          //    blanket `Skill` deny: an unlisted skill (every bundled one
-          //    included) is hidden from the model and REJECTED by the Skill
-          //    tool. Nothing of Viberr's lives inside the checkout any more,
-          //    so the project's own tools (`prettier --check .`) see the tree
-          //    exactly as a clean clone. Canaried inside the image 2026-09-11:
-          //    the CLI's init lists `viberr:<name>` and the model invokes it.
-          settingSources: [],
-          skills: skillPlugin
-            ? nativeSkills.map((name) => `${skillPlugin.name}:${name}`)
-            : [],
-          plugins: skillPlugin
-            ? [{ type: "local", path: skillPlugin.path, skipMcpDiscovery: true }]
-            : [],
-          // R18-3 (governance parity with settingSources): only Viberr-granted
-          // MCP servers reach a run — ignore a repo `.mcp.json`, user MCP config,
-          // and plugin MCP. Viberr passes its granted external MCPs + the
-          // in-process toolkit via `mcpServers`; nothing ambient should widen it.
-          strictMcpConfig: true,
-        };
-        // Ruling 174: the SDK requires this beside `bypassPermissions`
-        // (sdk.d.ts) and defaults it to false. Only the autonomous run asks
-        // for bypass, so only it carries the acknowledgement.
-        if (spec.autonomous) options.allowDangerouslySkipPermissions = true;
-        // Ruling 174: the CLI leads its own process group, so every signal the
-        // SDK sends it reaches the MCP servers it starts, and the settle sweep
-        // can name the group. The handle is this run's alone.
-        options.spawnClaudeCodeProcess = (request) => {
-          cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess);
-          return cli.process;
-        };
-        // Ruling 175: the instance's spending cap, when one is set. The SDK
-        // stops the query past it and says so with `error_max_budget_usd`.
-        if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd;
-        // Only NAME a model when we have a real id/alias; otherwise let the SDK
-        // (and the subscription) pick its default.
-        if (resolvedModel) options.model = resolvedModel;
-        // Pass the profile's chosen reasoning effort when it is one the SDK
-        // accepts; otherwise the SDK uses its default (high). Narrowed rather
-        // than forwarded raw so a Codex-only tier ("minimal") never reaches the
-        // Claude union (P13-RT-08).
-        const effort = resolveClaudeEffort(spec.effort);
-        if (effort) options.effort = effort;
-        if (spec.resumeSessionId) options.resume = spec.resumeSessionId;
-        // Base adapter env, overlaid with any per-run env (e.g. the specialist's
-        // GIT_CEILING_DIRECTORIES workspace confinement).
-        if (deps.env || spec.env) {
-          options.env = { ...deps.env, ...spec.env };
-        }
-        // System prompt strategy differs by run kind:
-        //  · OPERATOR — its persona REPLACES the default. The operator never
-        //    writes code; it only uses the in-process viberr MCP tools, so it
-        //    must not carry Claude Code's coding harness/tool scaffolding.
-        //  · SPECIALIST (primary/reviewer) — its persona is APPENDED to the
-        //    `claude_code` preset, so the agent keeps the default coding
-        //    harness (it DOES implement/test) with its persona layered on top.
-        //    Replacing it (the old behavior) stripped the scaffolding and made a
-        //    coding agent run on persona prose alone.
-        if (spec.systemPrompt) {
-          // C02-R7: the persona announced the mounted skills; when the start
-          // could not enable them, the correction rides the same prompt.
-          const persona =
-            droppedSkills.length > 0
-              ? spec.systemPrompt + droppedSkillsNotice(droppedSkills)
-              : spec.systemPrompt;
-          // The controller (ruling 99) is coordination machinery like the
-          // operator: its persona REPLACES the coding harness, and it works
-          // only through its in-process toolkit.
-          if (spec.kind === "operator" || spec.kind === "controller") {
-            options.systemPrompt = persona;
-          } else {
-            options.systemPrompt = {
-              type: "preset",
-              preset: "claude_code",
-              append: persona,
-            };
-          }
-        }
-        if (spec.mcpServers) options.mcpServers = spec.mcpServers;
-        if (spec.allowedTools && spec.allowedTools.length) {
-          options.allowedTools = spec.allowedTools;
-        }
-        // Capability confinement via denylist. `disallowedTools` removes tools
-        // from the model's context entirely and binds even under
-        // bypassPermissions (unlike `allowedTools`, which only auto-approves).
-        //   - operator: deny the repo-mutation built-ins so it genuinely can't
-        //     write code / touch the repo — its job is the in-process
-        //     `mcp__viberr__*` governance tools, which stay available (as does
-        //     the tool-loading path). Enforces the PRD contract in code, not
-        //     just the persona prompt.
-        //   - specialist: deny the git/gh commands for capabilities the profile
-        //     withholds (push / PR / merge), computed upstream.
-        const denied = [
-          // `Skill` leaves the base list for a run that mounted granted skills:
-          // denying it would remove the tool from the model's context entirely
-          // (deny beats the `skills` option's auto-allow), so the mounted skills
-          // would be listed and uninvokable — a silent capability loss. The
-          // `skills` filter is the fence for that run instead.
-          ...BASE_DENIED_BUILTINS.filter(
-            (tool) => tool !== "Skill" || nativeSkills.length === 0,
-          ),
-          // The controller shares the operator's no-write posture and goes
-          // further (no filesystem reads either); its extra denies arrive via
-          // spec.disallowedTools from buildControllerRun.
-          ...(spec.kind === "operator" || spec.kind === "controller"
-            ? OPERATOR_READ_ONLY_DENIED_TOOLS
-            : []),
-          // Supporting/reviewing runs never touch the remote (VIB-30); their
-          // LOCAL write posture is grants-derived via spec.disallowedTools
-          // (parity ruling 2026-08-31 — see the constant's doc).
-          ...(spec.kind === "reviewer" ? SUPPORTING_DELIVERY_DENIED_BUILTINS : []),
-          ...(spec.disallowedTools ?? []),
-        ];
-        if (denied.length) options.disallowedTools = denied;
-        // Ruling 101(e), amended (Option D PR 5): the prefix rules above match a
-        // command by its leading words, and the pinned CLI, which already splits
-        // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
-        // through (measured 2026-09-11: both refs landed on a local remote). A
-        // run with argument-level denies gets a PreToolUse hook that refuses a
-        // command reaching one, however wrapped, with a reason the model reads.
-        // It runs before the rules and only ever denies, so the rules stay the
-        // fence; a run whose Bash is denied outright needs none.
-        const bashPrefixes = denied.includes("Bash") ? [] : bashDenyPrefixes(denied);
-        if (bashPrefixes.length) {
-          const policyHook: ClaudePreToolUseHook = async (input, toolUseId) => {
-            const command = bashCommandSchema.safeParse(input.tool_input).data?.command ?? "";
-            const prefix = deniedPrefixFor(command, bashPrefixes);
-            if (!prefix) return {};
-            const reason = bashDenyReason(prefix, denied, spec.kind === "reviewer");
-            emitPolicyDenied(command, reason, toolUseId);
-            return {
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: reason,
-              },
-            };
-          };
-          options.hooks = { PreToolUse: [{ matcher: "Bash", hooks: [policyHook] }] };
-        }
-        // The subprocess kill switch: the interrupt/idle watchdogs abort this
-        // when the cooperative `interrupt()` goes unanswered (see `armForcedStop`).
-        options.abortController = abortController;
+        const { options, prompt } = assembleClaudeOptions(spec, deps, {
+          resolvedModel,
+          nativeSkills,
+          droppedSkills,
+          skillPlugin,
+          spawn: (request) => {
+            cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess);
+            return cli.process;
+          },
+          phase,
+          emitPolicyDenied,
+          abortController,
+        });
 
-        const q = queryFn({ prompt: singlePrompt(spec.prompt), options });
+        const q = queryFn({ prompt: singlePrompt(prompt), options });
         queryHandle = q;
 
         // Live usage accumulation so the run row GROWS during streaming instead
@@ -1556,14 +1794,21 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               liveTurns = 1 + liveUsers;
               facts.turns = liveTurns;
             } else if (envelope.type === "assistant" && !envelope.parent_tool_use_id) {
-              const u = assistantUsage(envelope);
+              // Ruling 369: the call's prompt-cache figures were read once at
+              // the wire boundary. One API message yields one envelope per
+              // content block, all carrying the same figures under the same
+              // id: the first one counts, and the repeats are stripped so the
+              // sink folds exactly one fact per call.
+              const u = facts.cache ?? null;
               if (u) {
                 const firstOfMessage =
                   u.messageId === null || !seenMessages.has(u.messageId);
                 if (firstOfMessage) {
                   if (u.messageId !== null) seenMessages.add(u.messageId);
-                  liveIn += u.input_tokens;
-                  liveCached += u.cached_input_tokens;
+                  liveIn += u.promptTokens;
+                  liveCached += u.cacheRead;
+                } else {
+                  facts.cache = null;
                 }
               }
               const estimate = estimateOutputTokens(envelope.message?.content ?? []);

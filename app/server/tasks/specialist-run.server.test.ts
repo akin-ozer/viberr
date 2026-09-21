@@ -1,3 +1,4 @@
+import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import {
   existsSync,
@@ -2263,7 +2264,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const sys = specs.at(-1)!.systemPrompt ?? "";
+    const sys = joinedPrompt(specs.at(-1)!.systemPrompt ?? "");
     const attachments = path.join(
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments",
     );
@@ -3561,7 +3562,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actor(store.users.arda));
-    return lastRunSpec()?.systemPrompt ?? "";
+    return joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
   }
 
   it("a reviewer with kb:[] resolves the delivering engagement's KB bodies", async () => {
@@ -3682,7 +3683,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId, dataRoot: store.dataRoot },
       actor(store.users.arda));
-    expect(lastRunSpec()?.systemPrompt ?? "").not.toContain("SENTINEL-REVIEWER-ONLY-KB");
+    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
   });
 });
 
@@ -3819,7 +3820,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(existsSync(path.join(ws, ".claude"))).toBe(false);
     expect(readFileSync(path.join(ws, ".git", "info", "exclude"), "utf8")).not.toContain(".claude");
     // The body is NOT in the prompt any more — the SDK loads it on invocation.
-    const sys = spec.systemPrompt ?? "";
+    const sys = joinedPrompt(spec.systemPrompt ?? "");
     expect(sys).not.toContain("SENTINEL-SKILL-BODY");
     expect(sys).toContain("attached to this run as the `viberr` plugin");
     expect(sys).toContain("`viberr:<name>`");
@@ -3848,7 +3849,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
     expect(lastRunSpec()?.backend).toBe("codex");
     expect(lastRunSpec()?.skills).toBeUndefined();
-    expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-SKILL-BODY");
+    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("SENTINEL-SKILL-BODY");
   });
 
   it("falls back to injection when the run has no checkout to mount into", async () => {
@@ -3860,7 +3861,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     await withOfflineGit(runDev);
 
     expect(lastRunSpec()?.skills).toBeUndefined();
-    expect(lastRunSpec()?.systemPrompt ?? "").toContain("SENTINEL-SKILL-BODY");
+    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("SENTINEL-SKILL-BODY");
   });
 
   it("F19-6: the checkout-failure NOTE quotes git, not just the classification", async () => {
@@ -3919,8 +3920,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     );
 
     expect(confinement.skills).toEqual(["conventional-commits"]);
-    expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
-    expect(confinement.systemPrompt ?? "").toContain("attached to this run as the `viberr` plugin");
+    expect(joinedPrompt(confinement.systemPrompt ?? "")).not.toContain("SENTINEL-SKILL-BODY");
+    expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain("attached to this run as the `viberr` plugin");
     // Ruling 180: the resumed run gets its OWN plugin beside the checkout
     // (a fresh id: the resumed row does not exist yet) and nothing inside it.
     expect(confinement.skillPlugin?.name).toBe("viberr");
@@ -3978,9 +3979,9 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(existsSync(attachments)).toBe(true);
     // The persona carries the same drop section the fresh run gets, and
     // (ruling 159) it names the ABSOLUTE dir, never the store-relative form.
-    expect(confinement.systemPrompt ?? "").toContain("Files on the task thread");
-    expect(confinement.systemPrompt ?? "").toContain(`\`${attachments}\``);
-    expect(confinement.systemPrompt ?? "").not.toContain(
+    expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain("Files on the task thread");
+    expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain(`\`${attachments}\``);
+    expect(joinedPrompt(confinement.systemPrompt ?? "")).not.toContain(
       `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
     );
     // Ruling 185: the resumed inputs carry no sandbox row at all — Viberr
@@ -4127,8 +4128,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(assembled).not.toContain("viberr-app-expertise");
       expect(assembled).not.toContain("SENTINEL-VIBERR-APP-EXPERTISE");
       // The positive half: the grant IS announced (its body arrives on invocation).
-      expect(spec.systemPrompt ?? "").toContain("developer-expertise");
-      expect(spec.systemPrompt ?? "").not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).toContain("developer-expertise");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
     });
 
     it("Codex: the prompt-text channel carries the grant only — the decoy stays out", async () => {
@@ -4148,7 +4149,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(spec.backend).toBe("codex");
       // Nothing mounted natively — the Codex adapter would ignore it anyway.
       expect(spec.skills).toBeUndefined();
-      const sys = spec.systemPrompt ?? "";
+      const sys = joinedPrompt(spec.systemPrompt ?? "");
       expect(sys).toContain("developer-expertise (skill)");
       expect(sys).toContain("SENTINEL-DEVELOPER-EXPERTISE");
       expect(sys).not.toContain("kubernetes-rollback");
@@ -4274,7 +4275,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(readdirSync(path.join(confinement.skillPlugin!.path, "skills"))).toEqual([
         "granted-craft",
       ]);
-      expect(confinement.systemPrompt ?? "").not.toContain("SENTINEL-SELF-WRITTEN");
+      expect(joinedPrompt(confinement.systemPrompt ?? "")).not.toContain("SENTINEL-SELF-WRITTEN");
     });
   });
 
@@ -4346,8 +4347,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       const spec = lastRunSpec()!;
       // R18-1: the deliverer's KB crosses to the reviewer…
-      expect(spec.systemPrompt ?? "").toContain("SENTINEL-DELIVERER-KB");
-      expect(spec.systemPrompt ?? "").toContain("house-kb (knowledge base)");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).toContain("SENTINEL-DELIVERER-KB");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).toContain("house-kb (knowledge base)");
       // …R19-3: its SKILL does not, on either channel.
       expect(spec.skills).toEqual(["critic-craft"]);
       // P8 (pass 25): the reviewer runs in its OWN isolated checkout
@@ -4869,7 +4870,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputs!.knowledge).toEqual(["house-style"]);
     expect(inputs!.unresolvedResources.map((r) => r.name)).toContain("house-style");
     // The persona still tells the agent too — both audiences, one resolution.
-    expect(lastRunSpec()?.systemPrompt ?? "").toContain("did NOT fully reach this run");
+    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("did NOT fully reach this run");
   });
 
   it("ruling 176: a read-only agent's run withholds the org server's marked write tools, on the spec, the prompt and the record", async () => {
@@ -4924,8 +4925,8 @@ describe("P19-G11 — the run records what it was given", () => {
       url: "https://mcp.example.test/gh",
       tools: [{ name: "merge_pull_request", permission_policy: "always_deny" }],
     });
-    expect(spec.systemPrompt ?? "").toContain("MCP write tools withheld");
-    expect(spec.systemPrompt ?? "").not.toContain("You have tools from these attached MCP servers: gh");
+    expect(joinedPrompt(spec.systemPrompt ?? "")).toContain("MCP write tools withheld");
+    expect(joinedPrompt(spec.systemPrompt ?? "")).not.toContain("You have tools from these attached MCP servers: gh");
     expect(inputsLine(runId)!.mcp.writeToolsDenied).toEqual([
       { server: "gh", tools: ["merge_pull_request"] },
     ]);
@@ -4947,7 +4948,7 @@ describe("P19-G11 — the run records what it was given", () => {
     const granted = lastRunSpec()!;
     expect(granted.disallowedTools ?? []).not.toContain("mcp__gh__merge_pull_request");
     expect(granted.mcpServers?.gh).toEqual({ type: "http", url: "https://mcp.example.test/gh" });
-    expect(granted.systemPrompt ?? "").toContain("You have tools from these attached MCP servers: gh");
+    expect(joinedPrompt(granted.systemPrompt ?? "")).toContain("You have tools from these attached MCP servers: gh");
     expect(inputsLine(grantedRun)!.mcp.writeToolsDenied).toEqual([]);
   });
 

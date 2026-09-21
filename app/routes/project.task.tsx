@@ -1018,6 +1018,34 @@ export async function action({ request, params }: Route.ActionArgs) {
           dispatch.directive = prompt;
           dispatch.directiveFrom = dispatcherName;
         }
+        // R21-9's law, applied to the dispatch prompt: a directive that reaches
+        // an agent off the record is invisible to supervision — record it as the
+        // human's own timeline comment addressed to the agent. BEFORE the start
+        // (ruling 375): ruling 203's redelivery window is "a human comment
+        // addressed to this agent, posted after this run started", and the
+        // record used to be written after the start, so every prompted manual
+        // dispatch ran twice — the run, then the same words redelivered as an
+        // @mention the moment it finished (live, 2026-09-21: two identical
+        // replies on BNB-26 and on BNB-28, one session each). Recorded first,
+        // the comment predates the run it is the directive of and no window
+        // ever holds it. A refused start leaves the person's words on the
+        // record with the refusal beside them (below), which is the honest
+        // account of what was asked and why nothing ran.
+        const handle =
+          listDeployedSpecialists(projectSlug).find((sp) => sp.id === profileId)?.name ??
+          profileId;
+        if (prompt) {
+          await appendComment(
+            db,
+            {
+              projectSlug,
+              taskKey,
+              text: `@${handle} ${prompt}`,
+              forceToAgent: true,
+            },
+            actor,
+          );
+        }
         let result: Awaited<ReturnType<typeof startAgentRun>>;
         try {
           result = await startAgentRun(db, dispatch, actor);
@@ -1025,28 +1053,23 @@ export async function action({ request, params }: Route.ActionArgs) {
           // Ruling 152(c) (pass 35, G35-4): a hold is not a refusal. The
           // dispatcher already scheduled the retry for the reopen instant and
           // put the prompt on that schedule, so the person reads the hold as
-          // the outcome and no hand-off comment is written for a run that
-          // has not started.
+          // the outcome; the recorded directive predates that later run too.
           if (isDispatchHeld(error)) {
             return { ok: true as const, intent, toast: error.userMessage };
           }
+          if (prompt) {
+            const message = error instanceof Error ? error.message : String(error);
+            await appendComment(
+              db,
+              {
+                projectSlug,
+                taskKey,
+                text: `No run started for ${handle}: ${message}`,
+              },
+              actor,
+            );
+          }
           throw error;
-        }
-        // R21-9's law, applied to the dispatch prompt: a directive that reaches
-        // an agent off the record is invisible to supervision — record it as the
-        // human's own timeline comment addressed to the agent. After the start,
-        // so a refused dispatch leaves no orphaned hand-off comment.
-        if (prompt) {
-          await appendComment(
-            db,
-            {
-              projectSlug,
-              taskKey,
-              text: `@${result.name} ${prompt}`,
-              forceToAgent: true,
-            },
-            actor,
-          );
         }
         // Ruling 263 (F37-93): the toast said "run started" for a run refused
         // before any process existed, and for one parked behind the cap. The
