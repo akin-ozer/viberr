@@ -398,10 +398,15 @@ const codexRolloutLineSchema = z.object({
   payload: z
     .object({
       type: z.string().catch(""),
+      item: z.object({ type: z.string().catch("") }).nullable().catch(null),
       info: z
         .object({
           last_token_usage: z
-            .object({ input_tokens: z.number().catch(0) })
+            .object({
+              input_tokens: z.number().catch(0),
+              cached_input_tokens: z.number().catch(0),
+              cache_write_input_tokens: z.number().catch(0),
+            })
             .nullable()
             .catch(null),
         })
@@ -475,6 +480,18 @@ export function sessionContextTokens(
   return null;
 }
 
+/** One compaction as the rollout shows it: the last prompt the CLI sent
+ *  before it and the first one after (0 when no later call landed). */
+export interface CodexCompactionEvent {
+  preTokens: number;
+  postTokens: number;
+}
+
+/** The compaction still waiting for the first prompt after it. */
+interface PendingCompaction {
+  event: CodexCompactionEvent | null;
+}
+
 /** Ruling 369: what a Codex run's calls carried, read off its rollout. */
 export interface CodexRolloutRunStats {
   /** The largest prompt any call in the window carried. */
@@ -483,8 +500,17 @@ export interface CodexRolloutRunStats {
   lastPromptTokens: number;
   /** Context compactions the CLI recorded in the window. */
   compactions: number;
+  /** One entry per compaction in the window, in order: the last prompt the
+   *  CLI sent before it and the first one after (0 when the rollout ended
+   *  before another call landed). The sizes the timeline note prints. */
+  compactionEvents: CodexCompactionEvent[];
   /** Calls seen in the window; 0 means the rollout said nothing about it. */
   calls: number;
+  /** The FIRST call in the window — the run's real first request, which the
+   *  SDK's turn total is not: a prompt of `promptTokens` of which `cacheRead`
+   *  came back from the cache (Codex reports no write slice; the SDK's field
+   *  is carried for the day it does). Null when the rollout has no call. */
+  firstCall: { promptTokens: number; cacheRead: number; cacheWrite: number } | null;
 }
 
 /**
@@ -509,26 +535,70 @@ export function codexRolloutRunStats(
     peakPromptTokens: 0,
     lastPromptTokens: 0,
     compactions: 0,
+    compactionEvents: [],
     calls: 0,
+    firstCall: null,
+  };
+  // The CLI has spelled a compaction three ways across its versions: a
+  // top-level `compacted` line carrying the replacement history (0.153, the
+  // shape measured live on 2026-09-21), an `event_msg` whose item is a
+  // `ContextCompaction` (written beside it), and an older `context_compacted`
+  // event. One compaction can appear under two of them, so the count is the
+  // LARGEST of the three tallies, never their sum; the sizes come from the
+  // prompt figures around the first marker of each compaction.
+  const tallies = { compacted: 0, item: 0, event: 0 };
+  let lastPrompt = 0;
+  // The compaction still waiting for the first prompt after it (a holder, so
+  // the marking below is one statement the flow analysis can follow).
+  const pending: PendingCompaction = { event: null };
+  const markCompaction = () => {
+    if (pending.event) return; // the same compaction's second spelling
+    pending.event = { preTokens: lastPrompt, postTokens: 0 };
+    stats.compactionEvents.push(pending.event);
   };
   for (const raw of transcriptLines(filePath)) {
     const line = codexRolloutLineSchema.parse(raw);
-    if (line.type !== "event_msg" || !line.payload) continue;
     const at = Date.parse(line.timestamp);
     // A line with no readable instant is kept: better to count a call twice
     // across two runs than to lose the only figure a run has.
     if (Number.isFinite(since) && Number.isFinite(at) && at < since) continue;
+    if (line.type === "compacted") {
+      tallies.compacted += 1;
+      markCompaction();
+      continue;
+    }
+    if (line.type !== "event_msg" || !line.payload) continue;
     if (line.payload.type === "context_compacted") {
-      stats.compactions += 1;
+      tallies.event += 1;
+      markCompaction();
+      continue;
+    }
+    if (line.payload.type === "item_completed" && line.payload.item?.type === "ContextCompaction") {
+      tallies.item += 1;
+      markCompaction();
       continue;
     }
     if (line.payload.type !== "token_count") continue;
-    const prompt = line.payload.info?.last_token_usage?.input_tokens ?? 0;
+    const usage = line.payload.info?.last_token_usage;
+    const prompt = usage?.input_tokens ?? 0;
     if (prompt <= 0) continue;
+    if (pending.event) {
+      pending.event.postTokens = prompt;
+      pending.event = null;
+    }
+    lastPrompt = prompt;
     stats.calls += 1;
+    if (stats.firstCall === null) {
+      stats.firstCall = {
+        promptTokens: prompt,
+        cacheRead: usage?.cached_input_tokens ?? 0,
+        cacheWrite: usage?.cache_write_input_tokens ?? 0,
+      };
+    }
     stats.lastPromptTokens = prompt;
     if (prompt > stats.peakPromptTokens) stats.peakPromptTokens = prompt;
   }
+  stats.compactions = Math.max(tallies.compacted, tallies.item, tallies.event);
   return stats;
 }
 

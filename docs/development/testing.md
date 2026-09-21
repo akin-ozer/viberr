@@ -120,6 +120,11 @@ ctx.cleanup();
 
 ### Doc-pinning tests
 
+- `routes/project.task.run-agent.server.test.ts` (ruling 375) POSTs the Run-an-agent intent
+  with a prompt through the real route and pins the order that keeps a prompted dispatch to
+  ONE run: the person's `@<agent>` comment predates the run, and `deliverDeferredMention`
+  asked with that run's window finds nothing to redeliver. Canary: move the record below the
+  start and the developer runs twice.
 - `app/shared/docs/prd-sync.test.ts`: `design/prd.md` must be byte-identical to
   `planning/planning-artifacts/prd.md`.
 - `app/shared/docs/file-formats-sync.test.ts`: the `## Packet` section of

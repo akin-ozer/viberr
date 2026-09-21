@@ -1174,15 +1174,77 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     expect(row.peak_prompt_tokens).toBe(0);
     expect(row.last_prompt_tokens).toBe(0);
     // …until the rollout says what the calls carried.
-    sink.foldRolloutStats({ peakPromptTokens: 24_000, lastPromptTokens: 22_600, compactions: 1 });
+    sink.foldRolloutStats({
+      peakPromptTokens: 24_000,
+      lastPromptTokens: 22_600,
+      compactions: 1,
+      firstCall: { promptTokens: 14_000, cacheRead: 0, cacheWrite: 0 },
+    });
     const after = rowOf("run_codex_turn");
     expect(after.peak_prompt_tokens).toBe(24_000);
     expect(after.last_prompt_tokens).toBe(22_600);
     expect(after.compactions).toBe(1);
+    // The rollout's first call replaces the turn total as the run's first
+    // call: one request of 14k with nothing cached is a cold start, whatever
+    // the whole turn later read back.
+    expect(after.first_call_prompt_tokens).toBe(14_000);
+    expect(after.first_call_cache_read).toBe(0);
+    expect(after.first_call_warm).toBe(0);
     // Folded by max: a smaller rollout figure never lowers a streamed one.
     sink.foldRolloutStats({ peakPromptTokens: 1, lastPromptTokens: 0, compactions: 0 });
     expect(rowOf("run_codex_turn").peak_prompt_tokens).toBe(24_000);
     expect(rowOf("run_codex_turn").last_prompt_tokens).toBe(22_600);
+    // A fold without a first call leaves the recorded one alone.
+    expect(rowOf("run_codex_turn").first_call_prompt_tokens).toBe(14_000);
+  });
+
+  it("a compaction the rollout reports and the stream never carried is audited and noted at finalize", async () => {
+    const { writeTask, baseTaskFrontmatter } = await import("../../../test-support/test-store");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { listAuditEvents } = await import("../../../test-support/audit-log");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
+    });
+    upsertRun(store.db, {
+      id: "run_rollout_compact",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "rollout-compact",
+      role: "developer",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-5.6-terra",
+      sdk: "Codex SDK",
+      agentName: "Dev",
+      agentProfileId: "dev",
+      state: "running",
+    });
+    const sink = createRunSink(
+      store.db,
+      { ...spec("run_rollout_compact"), backend: "codex", taskKey: "VIB-3" },
+      { dataRoot: store.dataRoot },
+    );
+    const stats = {
+      peakPromptTokens: 177_960,
+      lastPromptTokens: 26_700,
+      compactions: 1,
+      compactionEvents: [{ preTokens: 177_960, postTokens: 19_509 }],
+    };
+    sink.foldRolloutStats(stats);
+    expect(rowOf("run_rollout_compact").compactions).toBe(1);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter(
+      (e) => e.taskKey === "VIB-3",
+    );
+    expect(audit).toHaveLength(1);
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!;
+    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
+    expect(note?.text).toContain("from 178k to 20k tokens");
+    // The same rollout folded again (a second finalize read) notes nothing new.
+    sink.foldRolloutStats(stats);
+    expect(
+      listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.taskKey === "VIB-3"),
+    ).toHaveLength(1);
   });
 
   it("a compaction counts on the row, audits, and notes the task's timeline", async () => {

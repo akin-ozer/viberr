@@ -211,6 +211,20 @@ function redactDisplay(
 }
 
 /** Per-run sink options. */
+/** What `foldRolloutStats` takes: the rollout figures a Codex run learns at
+ *  finalize (`codexRolloutRunStats`), the first call optional so a caller with
+ *  only the sizes can still fold them. */
+export interface RolloutStats {
+  peakPromptTokens: number;
+  lastPromptTokens: number;
+  compactions: number;
+  /** The rollout's compactions with their sizes; the sink audits and notes
+   *  every one beyond what the stream already carried (Codex SDK 0.153
+   *  streams no compaction item at all, measured live 2026-09-21). */
+  compactionEvents?: { preTokens: number; postTokens: number }[];
+  firstCall?: { promptTokens: number; cacheRead: number; cacheWrite: number } | null;
+}
+
 export interface RunSinkOptions {
   /** Ruling 127: the plaintext credentials this run's child env carries, from
    *  `runCredentialFor`. Redacted from every persisted line and SSE payload. */
@@ -664,10 +678,45 @@ export function createRunSink(
      * max so nothing a streamed fact already established is lowered; the
      * last prompt is the rollout's own answer when it has one.
      */
-    foldRolloutStats(stats: { peakPromptTokens: number; lastPromptTokens: number; compactions: number }) {
+    foldRolloutStats(stats: RolloutStats) {
       if (stats.peakPromptTokens > peakPromptTokens) peakPromptTokens = stats.peakPromptTokens;
       if (stats.lastPromptTokens > 0) lastPromptTokens = stats.lastPromptTokens;
+      // Every compaction the rollout knows and the stream did not carry gets
+      // the same governed record a streamed one gets (ruling 369(d)): the
+      // audit row and the task's timeline note, sizes from the rollout.
+      const events = stats.compactionEvents ?? [];
+      for (const event of events.slice(compactions)) {
+        try {
+          noteRunCompaction(
+            db,
+            spec,
+            agentName,
+            { trigger: "auto", preTokens: event.preTokens, postTokens: event.postTokens },
+            new Date().toISOString(),
+            opts.dataRoot,
+          );
+        } catch (error) {
+          logger.error("compaction audit failed", {
+            runId: spec.runId,
+            err: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      }
       if (stats.compactions > compactions) compactions = stats.compactions;
+      // The run's real first REQUEST: a Codex turn total (the streamed fact)
+      // sums every call of the turn, so its "first call" read a whole turn's
+      // cache hits. The rollout's first `token_count` is one request, and the
+      // start chip and Insights' warm rate speak about that.
+      if (stats.firstCall) {
+        firstCall = {
+          firstCallPromptTokens: stats.firstCall.promptTokens,
+          firstCallCacheWrite: stats.firstCall.cacheWrite,
+          firstCallCacheRead: stats.firstCall.cacheRead,
+          firstCallWarm:
+            startTemperature(stats.firstCall.cacheWrite, stats.firstCall.cacheRead) === "warm" ? 1 : 0,
+          firstCallMissReason: null,
+        };
+      }
       persistOrDrain(() => {
         patchRun(db, spec.runId, cachePatch());
       });

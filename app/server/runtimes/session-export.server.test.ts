@@ -386,9 +386,20 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
         JSON.stringify({ timestamp: "2026-07-15T03:09:54.000Z", type: "session_meta", payload: { id: sid } }),
         line("2026-07-15T03:10:00.000Z", 21_825),
         line("2026-07-15T03:10:30.000Z", 44_000),
-        // A second run on the same thread, an hour later.
+        // A second run on the same thread, an hour later. The CLI spells the
+        // compaction twice (the top-level `compacted` line with the replacement
+        // history, then the `ContextCompaction` item): one compaction.
         line("2026-07-15T04:10:00.000Z", 50_000),
-        line("2026-07-15T04:10:05.000Z", 0, "context_compacted"),
+        JSON.stringify({
+          timestamp: "2026-07-15T04:10:05.000Z",
+          type: "compacted",
+          payload: { message: "", replacement_history: [] },
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-15T04:10:05.010Z",
+          type: "event_msg",
+          payload: { type: "item_completed", item: { type: "ContextCompaction", id: "c1" } },
+        }),
         line("2026-07-15T04:11:00.000Z", 12_000),
       ].join("\n") + "\n",
     );
@@ -397,10 +408,29 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
       peakPromptTokens: 50_000,
       lastPromptTokens: 12_000,
       compactions: 1,
+      // Sizes from the prompts around it: the last before, the first after.
+      compactionEvents: [{ preTokens: 50_000, postTokens: 12_000 }],
       calls: 2,
+      // The window's first call is the run's real first request (not the
+      // SDK's turn total): its prompt and what the cache gave back.
+      firstCall: { promptTokens: 50_000, cacheRead: 0, cacheWrite: 0 },
     });
     // The whole thread, when the caller has no start instant.
     expect(codexRolloutRunStats(OWNER, sid, null)).toMatchObject({ peakPromptTokens: 50_000, calls: 4 });
+    // The older CLI's `context_compacted` event is a compaction too.
+    const older = "01a0a30a-e256-7c91-b8da-6093b9f84200";
+    writeFileSync(
+      path.join(dir, `rollout-2026-07-15T05-09-54-${older}.jsonl`),
+      [
+        JSON.stringify({ timestamp: "2026-07-15T05:09:54.000Z", type: "session_meta", payload: { id: older } }),
+        line("2026-07-15T05:10:00.000Z", 30_000),
+        line("2026-07-15T05:10:05.000Z", 0, "context_compacted"),
+      ].join("\n") + "\n",
+    );
+    expect(codexRolloutRunStats(OWNER, older, null)).toMatchObject({
+      compactions: 1,
+      compactionEvents: [{ preTokens: 30_000, postTokens: 0 }],
+    });
     expect(codexRolloutRunStats(OWNER, "0000-missing", null)).toBeNull();
   });
 });

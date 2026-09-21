@@ -147,6 +147,42 @@ Canaries, run in the image, all readable from the console after PR 1:
 | Codex peak input per turn | unmeasured | ≤ 200k |
 | first calls writing > 100k (4 days) | 3 | 0 |
 
+### Measured live, 2026-09-21 13:00–14:00 UTC (rulings 369–375 deployed on this instance)
+
+Driven on the airbnb-clone project from Arda's seat (a Playwright script against the app's
+own forms), one profile per case, read back from the run logs, the task files and the
+console's facts row. Every operator turn after the priming one was warm; every specialist
+second start was warm; the four compactions landed between 222k and 233k with the anchor
+re-injected; both stale resumes started fresh under their own reason.
+
+| metric | baseline (§1) | target | measured live |
+|---|---|---|---|
+| operator warm-start rate | 98% | ≥ 98% under task alternation | 3 of 3 measured turns warm on three tasks 2 min apart (read 24.4k, wrote 2.2–2.5k) after one cold priming turn (wrote 26.7k); the 13 operator reactions of the hour all warm |
+| specialist cold-start rate | 73% | < 20% | the profile's first start of the day cold (19.8k written), every later start of that profile warm: BNB-26 read 13.4k / wrote 5.7k; the two 250k runs read 20.1k and 13.4k on their first call |
+| specialist max peak prompt | 482k | ≤ 260k | 216.9k (both long runs compacted at 222.0k, 222.9k, 230.9k and 233.3k → 16–22k; the window is 250k, the CLI's own reserve fires the compaction below it) |
+| specialist read tokens per 300-call run | ≈ 72M | ≈ 45–55M | not reached: the two 25-call runs read 2.38M and 2.40M (≈ 95k per call, one 12-page read each) |
+| controller first-call write | 320k avg, 929k max | < 30k typical; none above 200k | not exercised live (no controller turn was owed); the rule and the recorded prompt are unit-tested |
+| Codex peak input per turn | unmeasured | ≤ 200k | 175,226 tokens on the read thread before the stale reset (window 180k, scope `total`); the per-call figures now come off the rollout |
+| first calls writing > 100k | 3 in 4 days | 0 | 0 in the hour (largest first-call write 26.7k, the operator's priming turn) |
+| stale resume (Claude) | replayed whole | fresh session | BNB-28's 226k session, 18 h 41 min idle → fresh session (`run·session_stale`, timeline event, audit); the fresh first call wrote 19.8k |
+| stale resume (Codex) | replayed whole | fresh session | BNB-30's 175k thread, 11 min idle → fresh thread (`run·session_stale`, timeline event); first call 15.8k, nothing cached |
+| compaction keeps the persona, KBs, skills and the anchor | untested | proven | both sessions carry `hook_additional_context` with the anchor right after `compact_boundary`; the invoked skill and the three KB indexes are present after the boundary; both agents finished the 12-page read correctly (`IDBCursorWithValue` at line 22048) |
+| compaction on Codex | untested | window 180k, summarizer prompt | BNB-31's thread compacted at 177,960 → 19,509 tokens (a resumed turn that crossed 180k on its 27th file); the replacement history keeps `developer_instructions` (persona, KB indexes), the canonical task state and the task key; the console chip, the "Context compacted" note and the audit row landed once the rollout reader learned the CLI's `compacted` line — the SDK streamed no compaction item |
+| a prompted manual dispatch runs once (ruling 375) | ran twice | one run | after the fix: one run, one reply, the person's comment on the record before "Started a Codex run" (BNB-31, 14:01:51 → 14:01:52) |
+
+Two Codex facts the plan did not have: its cache is a per-thread affair — within one
+process every call after the first read its prefix back (92% of a 2.26M-token turn), but a
+new thread and a resumed thread both started with `cached_input_tokens` 0 eleven seconds
+after an identical prefix (across every stored rollout, 330 of 774 first calls were warm) —
+and `codex exec` died with `SIGBUS` on "Reading prompt from stdin" once (6 of 810 stored
+Codex runs). A resumed Codex thread can be warm: the 14:14 resume five minutes after its
+previous turn read 43.8k back, where the 11-second resume at 13:25 read nothing — the
+provider's routing decides, not Viberr's prefix. The model also defends its own context:
+asked to fill it with `cat`, `gpt-5.6-terra` twice clipped its tool outputs to 100 and then 1
+tokens ("truncated output, 3629 tokens truncated") and reported the files read; a fresh
+thread with an unpoisoned history read them in full. And one Viberr defect the validation caught: a prompted manual dispatch ran
+twice (ruling 375).
+
 ## 5. Risks and what covers them
 
 - `excludeDynamicSections` moves the working directory into the first user message. Repo-write confinement does not depend on it (GIT_CEILING_DIRECTORIES and the deny rules enforce it); run one e2e dispatch and confirm the agent still edits the right checkout.

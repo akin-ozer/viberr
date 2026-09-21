@@ -412,9 +412,13 @@ connecting a different account there (ruling 165).
   why, pending work, files changed); the operator sets none of the three. Codex keeps
   `developer_instructions` and recent user messages within a 20k budget plus the summary
   across a compaction and drops earlier assistant turns, tool calls, outputs and reasoning.
-  A `context_compaction` item counts as a compaction (ruling 369), and the run's per-call
-  prompt sizes and compactions are read off the rollout once the CLI has exited
-  (`codexRolloutRunStats`), because the SDK's `turn.completed` is a turn TOTAL.
+  A `context_compaction` item counts as a compaction (ruling 369) — none was streamed on the
+  compaction measured live (SDK 0.153.4), so the rollout's `compacted` line and
+  `ContextCompaction` item are the record and the sink audits and notes them at finalize —
+  and the run's per-call prompt sizes and compactions are read off the rollout once the CLI has exited
+  (`codexRolloutRunStats`), because the SDK's `turn.completed` is a turn TOTAL; the rollout's
+  first `token_count` in the run's window is the run's first call (the turn total's cached
+  slice sums every call of the turn and says nothing about the start).
 - Only six env keys are re-exported through `shell_environment_policy`:
   `GIT_CEILING_DIRECTORIES`, `GIT_AUTHOR_NAME/EMAIL`, `GIT_COMMITTER_NAME/EMAIL` and, since
   ruling 174, the run marker `VIBERR_RUN_ID`, so a command the model backgrounds carries
