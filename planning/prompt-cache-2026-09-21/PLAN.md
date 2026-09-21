@@ -31,9 +31,8 @@ Encode these once, in one module each, and make both runtimes consume them. One 
 
 | constant | value | applies to |
 |---|---|---|
-| `AUTO_COMPACT_WINDOW.specialist` | 250,000 tokens | Claude `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; Codex `model_auto_compact_token_limit` at 180,000 (Codex's own window and its measured cache collapse past ~160k) |
-| `AUTO_COMPACT_WINDOW.controller` | 300,000 | Claude only (the controller is Claude-only) |
-| `AUTO_COMPACT_WINDOW.operator` | none | operator turns peak at 97k; never reached |
+| `AUTO_COMPACT_WINDOW.*` | none (ruling 376, owner: "drop it, model default"; first shipped as 250k specialist / 300k controller / 180k Codex) | both backends: the CLI compacts at its model's own limit |
+| `COMPACT_AT_COMPLETION_TOKENS` | 100,000 (ruling 376, owner's number) | both backends: a run that ends above it has its session compacted at once, while warm — Claude by `/compact` on the run's session, Codex through the app-server's `thread/compact/start` |
 | `RESUME_FRESH_AFTER.tokens` | 150,000 peak prompt tokens | both backends |
 | `RESUME_FRESH_AFTER.idle` | Claude: 60 min for a `login` credential, 5 min for `api_key`; Codex: 10 min | both backends |
 | `CACHE_TTL_POLICY` | leave the CLI's automatic choice; no forced TTL, no keep-alive | Claude |
@@ -147,6 +146,15 @@ Canaries, run in the image, all readable from the console after PR 1:
 | Codex peak input per turn | unmeasured | ≤ 200k |
 | first calls writing > 100k (4 days) | 3 | 0 |
 
+> **Owner's revision after the live run (ruling 376):** compacting mid-run at 250k did not
+> touch the writes that dominate a long run; compacting a large session at the END of its
+> run, while its cache is still warm, is the cheap case 374(d) named and it keeps the
+> session's memory as the summary. So: no mid-run window on either backend (the model's own
+> limit), and every run that ends above 100k is compacted at once — Claude through
+> `/compact` on the run's session, Codex through the CLI's app-server, which has the
+> `thread/compact/start` method that `exec` and the SDK lack. Ruling 372's fresh start stays
+> as the backstop.
+
 ### Measured live, 2026-09-21 13:00–14:00 UTC (rulings 369–375 deployed on this instance)
 
 Driven on the airbnb-clone project from Arda's seat (a Playwright script against the app's
@@ -169,6 +177,8 @@ re-injected; both stale resumes started fresh under their own reason.
 | compaction keeps the persona, KBs, skills and the anchor | untested | proven | both sessions carry `hook_additional_context` with the anchor right after `compact_boundary`; the invoked skill and the three KB indexes are present after the boundary; both agents finished the 12-page read correctly (`IDBCursorWithValue` at line 22048) |
 | compaction on Codex | untested | window 180k, summarizer prompt | BNB-31's thread compacted at 177,960 → 19,509 tokens (a resumed turn that crossed 180k on its 27th file); the replacement history keeps `developer_instructions` (persona, KB indexes), the canonical task state and the task key; the console chip, the "Context compacted" note and the audit row landed once the rollout reader learned the CLI's `compacted` line — the SDK streamed no compaction item |
 | a prompted manual dispatch runs once (ruling 375) | ran twice | one run | after the fix: one run, one reply, the person's comment on the record before "Started a Codex run" (BNB-31, 14:01:51 → 14:01:52) |
+| compaction at completion, Claude (ruling 376) | none | above 100k, warm | BNB-28's 232k session compacted at the end of its run to 3.7k (one warm request: 246k in, 6k out, $1.53); the row reads "1 compaction", `last_prompt_tokens` 3,672, the note and the audit say "at the end of the run"; the next resume replayed 22.6k (13.4k read, 9.2k written) and the agent named its three knowledge bases, its skill and its last measurement from the summary |
+| compaction at completion, Codex (ruling 376) | none | above 100k, through the app-server | BNB-31's fresh thread read 20 files to 125,535 tokens and was compacted at the end of the run through `codex app-server` (`thread/compact/start`, the `contextCompaction` item) to about 8k; the row reads "1 compaction", the note and the audit say "at the end of the run"; the next resume replayed 18.8k (10.0k cached) and the agent named its three knowledge bases, its skill and its last measurement from the summary. Two defects found on the way: the run's settle sweep reaped both epilogues by their inherited run marker (they carry their own now), and the client waited for `ContextCompaction` where v2 sends `contextCompaction` (the rollout is the truth on Codex now, whatever the client heard) |
 
 Two Codex facts the plan did not have: its cache is a per-thread affair — within one
 process every call after the first read its prefix back (92% of a 2.26M-token turn), but a

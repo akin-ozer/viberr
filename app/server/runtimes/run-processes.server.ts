@@ -31,6 +31,24 @@ export function runMarkerEnv(runId: string) {
   return { [RUN_MARKER_ENV]: runId };
 }
 
+/**
+ * Ruling 376: the completion compaction runs AFTER the run's own CLI has
+ * exited, under the same credential overlay — and the settle sweep that reaps
+ * a run's leftovers by its marker five seconds after that exit would reap the
+ * compaction too (live, 2026-09-21: both epilogues died by SIGTERM). So the
+ * epilogue carries its own marker value, which the settle sweep does not
+ * target and the boot sweep does (`compactionRunId` is listed beside every
+ * run id it settles), and the run service reaps it itself once the
+ * compaction has answered.
+ */
+export function compactionRunId(runId: string): string {
+  return `${runId}:compaction`;
+}
+
+export function compactionMarkerEnv(runId: string) {
+  return { [RUN_MARKER_ENV]: compactionRunId(runId) };
+}
+
 /** How long a signalled process gets between SIGTERM and SIGKILL — the grace
  *  the Claude CLI gives its own shells before it escalates. */
 export const RUN_REAP_GRACE_MS = 5_000;

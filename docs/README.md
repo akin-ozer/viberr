@@ -120,13 +120,15 @@ console facts row, an Insights table, a `task.agent.compaction` audit and timeli
 the context numbers have one home (`app/server/runtimes/context-policy.server.ts`) and every
 prompt one order (`prompt-prefix.server.ts`: a static block byte-identical across tasks, a
 per-task tail, every list sorted); specialists run on the preset with `excludeDynamicSections`
-and `snapshot`, a 250k window and a compaction anchor hook, Codex specialists on a 180k
-window with a shared summarizer prompt; a session idle past its cache TTL and above 150k is
-never replayed; the controller's prompt is recorded, its window 300k; the TTL stays the
+and `snapshot` and a compaction anchor hook, Codex specialists with a shared summarizer
+prompt; a session idle past its cache TTL and above 150k is never replayed; the controller's
+prompt is recorded; no mid-run window on either backend and a session above 100k compacted
+at the end of its run, warm, on both backends (ruling 376, Codex through the CLI's
+app-server); the TTL stays the
 CLI's automatic choice. Live validation the same day caught ruling 375: a prompted manual
 dispatch ran twice (the record of the prompt sat inside ruling 203's redelivery window); the
 prompt is recorded before the run now, and a Codex run's first call is read off its rollout
-rather than the SDK's turn total. Pages: `architecture/decisions.md` (rulings 369–375),
+rather than the SDK's turn total. Pages: `architecture/decisions.md` (rulings 369–376),
 `architecture/data-model.md` (§3), `domain/agents-and-runtime.md` (§§2.4, 2.5, 3.1, 3.6, 3.7,
 6), `domain/operator.md` (§4), `domain/controller-and-goals.md` (§3),
 `operations/configuration.md` (§3), `ui/surfaces.md` and `development/testing.md` (§2).

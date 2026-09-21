@@ -309,8 +309,28 @@ export interface RunHandle {
   interrupt(): void;
 }
 
+/** What a completion compaction (ruling 376) reports back to the run service. */
+export type CompactOutcome =
+  | { compacted: true; preTokens: number | null; postTokens: number | null }
+  | { compacted: false; reason: string };
+
+/** The callbacks a completion compaction drives: the same line sink and
+ *  phase writer as the run it closes; no exit, it returns its outcome. */
+export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase">;
+
 export interface RuntimeAdapter {
   readonly backend: RunBackend;
   /** Begin a run; drives callbacks; returns a handle for interrupt. */
   start(spec: RunSpec, cb: RunCallbacks): RunHandle;
+  /**
+   * Ruling 376: compact the session `sessionId` a run of `spec` just left,
+   * while its prompt cache is warm. The request must share the run's prefix
+   * (tools, system prompt, servers), so an adapter builds it from the same
+   * spec it started the run with. Emits its lines through `cb.onLine` (a
+   * `compaction` fact with trigger `completion`, the cost as `costAddUsd`)
+   * and resolves with what happened; it never throws for a provider refusal.
+   * Optional so a test's throwing or capturing stub stays a valid adapter; a
+   * backend without it simply keeps its large sessions for ruling 372.
+   */
+  compact?(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome>;
 }

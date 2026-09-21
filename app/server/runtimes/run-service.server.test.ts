@@ -45,8 +45,10 @@ import {
   fakeBackendSecret,
 } from "../../../test-support/backend-credentials";
 import {
+  compactedRunSpecs,
   installFakeRuntime,
   lastRunSpec,
+  queueFakeCompaction,
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
@@ -2366,11 +2368,12 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
     await settle();
-    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("250000");
+    // Ruling 376: no mid-run window rides the env on any kind.
+    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     // SAFETY: `credential_kind` is a nullable TEXT column of agent_runs.
     const row = store.db.prepare(`SELECT credential_kind FROM agent_runs WHERE id = ?`).get(runId) as { credential_kind: string | null };
     expect(row.credential_kind).toBe("api_key");
-    // The operator carries no window; the controller carries 300k; Codex none.
+    // No kind carries a window (ruling 376); the credential kind still lands.
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", threadId: "op", role: "Operator", kind: "operator",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
@@ -2383,7 +2386,7 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
       agentProfileId: "controller",
     });
     await settle();
-    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("300000");
+    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", threadId: "c1", role: "Reviewer", kind: "reviewer",
       backend: "codex", model: "m", prompt: "go", dataRoot: store.dataRoot,
@@ -2492,3 +2495,187 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
     expect(listRunLines(store.db, prior.runId).some((l) => l.display.tag === "run·session_stale")).toBe(true);
   });
 });
+
+/**
+ * Ruling 376: a session larger than the completion threshold is compacted
+ * at the end of its run, while its cache is warm, and the run's record says
+ * so; a small session, an interrupted run and a backend that cannot compact
+ * are left alone.
+ */
+describe("compaction at completion (ruling 376)", () => {
+  const bigCall = {
+    cache: {
+      messageId: "m1",
+      promptTokens: 120_000,
+      cacheWrite: 2_000,
+      cacheRead: 118_000,
+      perCall: true,
+      ttl: { fiveMinute: 0, oneHour: 2_000 },
+      missReason: null,
+    },
+  };
+  const finished = (sessionId: string, promptTokens: number): FakeRun => ({
+    sessionId,
+    lines: [
+      { t: "1", ev: "init", tag: "system·init", text: "session" },
+      { t: "2", ev: "text", tag: "assistant", text: "read a lot" },
+      { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 4, in: promptTokens, cached: 0, out: 500 } },
+    ],
+    extraFacts: [undefined, { cache: { ...bigCall.cache, promptTokens } }, undefined],
+  });
+
+  it("compacts a finished run above 100k, folds the result and notes the task", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-big", 120_000));
+    queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    const asked = compactedRunSpecs().slice(before);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ sessionId: "sess-big", spec: { runId } });
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(run.phase).toBeNull();
+    expect(run.compactions).toBe(1);
+    // What a resume replays now (ruling 372 reads it): the summary.
+    expect(run.last_prompt_tokens).toBe(18_000);
+    expect(run.peak_prompt_tokens).toBe(120_000);
+    // The compaction's own cost rides the run's total.
+    expect(run.total_cost_usd).toBeCloseTo(4.5, 5);
+    expect(JSON.stringify(listRunLines(store.db, runId))).toContain("run·compacted·completion");
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.details).toMatchObject({ trigger: "completion", preTokens: 120_000, postTokens: 18_000 });
+    // The timeline note is best-effort and asynchronous; give it its ticks.
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
+    expect(note?.text).toContain("at the end of the run");
+    expect(note?.text).toContain("from 120k to 18k tokens");
+  });
+
+  it("leaves a run under the threshold alone", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-small", 60_000));
+    queueFakeCompaction("claude", { compacted: true, preTokens: 60_000, postTokens: 9_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before);
+    expect(getRun(store.db, runId)!.compactions).toBe(0);
+    expect(getRun(store.db, runId)!.last_prompt_tokens).toBe(60_000);
+  });
+
+  it("leaves an interrupted run alone, whatever its size", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun({ ...finished("sess-stopped", 150_000), keepRunning: true });
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 20_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+    );
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before);
+    expect(getRun(store.db, runId)!.state).toBe("interrupted");
+    expect(getRun(store.db, runId)!.compactions).toBe(0);
+  });
+
+  it("on Codex the rollout is the truth: a compaction the app-server did not announce still counts", async () => {
+    // The fake adapter answers "not compacted"; the rollout on disk says otherwise.
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const path = await import("node:path");
+    const sid = "01a0c4e5-dcff-7cd2-b82f-251a14792b47";
+    const dir = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id, "codex-home", "sessions", "2026", "09", "21");
+    mkdirSync(dir, { recursive: true });
+    // The reader windows the rollout by the run's start, so the lines sit
+    // just AFTER this test's clock (the run starts below).
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+    const line = (ts: string, input: number) =>
+      JSON.stringify({ timestamp: ts, type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0 } } } });
+    const rollout = path.join(dir, `rollout-2026-09-21T17-00-00-${sid}.jsonl`);
+    // At the run's exit the rollout holds the calls and no compaction.
+    writeFileSync(
+      rollout,
+      [
+        JSON.stringify({ timestamp: at(60_000), type: "session_meta", payload: { id: sid } }),
+        line(at(60_100), 60_000),
+        line(at(60_200), 123_508),
+      ].join("\n") + "\n",
+    );
+    const { codexRolloutRunStats } = await import("./session-export.server");
+    expect(codexRolloutRunStats(store.users.arda.id, sid, null, store.dataRoot)).toMatchObject({ calls: 2, compactions: 0 });
+    const { appendFileSync } = await import("node:fs");
+    const before = compactedRunSpecs().length;
+    queueFakeRun({
+      ...finished(sid, 123_508),
+      backend: "codex",
+      lines: [
+        { t: "1", ev: "init", tag: "thread.started", text: "thread" },
+        { t: "2", ev: "result", tag: "turn.completed", text: "done", stats: { dur: 100, api: 90, turns: 1, cost: 0, in: 123_508, cached: 0, out: 200 } },
+      ],
+      extraFacts: [undefined, undefined],
+    });
+    // The "app-server" compacts the thread — the rollout gains the line and
+    // the post-size call — but its reply never reaches the client in time.
+    queueFakeCompaction(
+      "codex",
+      { compacted: false, reason: "the app-server did not report a compaction within 300s" },
+      () => {
+        appendFileSync(
+          rollout,
+          [
+            JSON.stringify({ timestamp: at(60_300), type: "compacted", payload: { message: "", replacement_history: [] } }),
+            line(at(60_400), 6_914),
+          ].join("\n") + "\n",
+        );
+      },
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "codex", model: "gpt-5.6-terra", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(compactedRunSpecs().length).toBe(before + 1);
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(run.compactions).toBe(1);
+    expect(run.last_prompt_tokens).toBe(6_914);
+    expect(run.peak_prompt_tokens).toBe(123_508);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.details).toMatchObject({ trigger: "completion", backend: "codex", preTokens: 123_508, postTokens: 6_914 });
+  });
+
+  it("a refused compaction leaves the run finished with its size, and says why on the log", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-refused", 130_000));
+    queueFakeCompaction("claude", { compacted: false, reason: "Not enough messages to compact." });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before + 1);
+    const run = getRun(store.db, runId)!;
+    expect(run.state).toBe("finished");
+    expect(run.compactions).toBe(0);
+    expect(run.last_prompt_tokens).toBe(130_000);
+  });
+});
+

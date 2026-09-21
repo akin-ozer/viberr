@@ -406,6 +406,7 @@ const codexRolloutLineSchema = z.object({
               input_tokens: z.number().catch(0),
               cached_input_tokens: z.number().catch(0),
               cache_write_input_tokens: z.number().catch(0),
+              total_tokens: z.number().catch(0),
             })
             .nullable()
             .catch(null),
@@ -581,7 +582,18 @@ export function codexRolloutRunStats(
     if (line.payload.type !== "token_count") continue;
     const usage = line.payload.info?.last_token_usage;
     const prompt = usage?.input_tokens ?? 0;
-    if (prompt <= 0) continue;
+    if (prompt <= 0) {
+      // The compaction request's own line: no prompt, but `total_tokens` is
+      // the compacted context — the size a resume replays when no later call
+      // followed (ruling 376's completion compaction is the run's last event).
+      const compacted = usage?.total_tokens ?? 0;
+      if (pending.event && compacted > 0) {
+        pending.event.postTokens = compacted;
+        pending.event = null;
+        stats.lastPromptTokens = compacted;
+      }
+      continue;
+    }
     if (pending.event) {
       pending.event.postTokens = prompt;
       pending.event = null;

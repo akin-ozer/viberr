@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PassThrough } from "node:stream";
 import { z } from "zod";
 import type {
   CodexOptions,
@@ -6,6 +7,7 @@ import type {
   ThreadOptions,
 } from "@openai/codex-sdk";
 import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
+import { RUN_PHASE } from "./adapter.server";
 import {
   CODEX_SDK_VERIFIED_VERSION,
   createCodexAdapter,
@@ -1895,7 +1897,7 @@ describe("codex run marker and settle sweep (ruling 174)", () => {
  * does not), and the server table reaches the CLI in name order.
  */
 describe("ruling 370/371: the joined prompt, the compaction keys and sorted servers", () => {
-  it("joins a prompt split into developer_instructions and sets the specialist's compaction keys", async () => {
+  it("joins a prompt split into developer_instructions and sets the specialist's summarizer prompt (no limit since ruling 376)", async () => {
     const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
     createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
       { ...SPEC, systemPrompt: { static: ["# Persona\n"], dynamic: ["# This task\n"] } },
@@ -1904,8 +1906,6 @@ describe("ruling 370/371: the joined prompt, the compaction keys and sorted serv
     await drain();
     expect(run.factoryOptions()?.config).toMatchObject({
       developer_instructions: "# Persona\n# This task\n",
-      model_auto_compact_token_limit: 180_000,
-      model_auto_compact_token_limit_scope: "total",
     });
     const prompt = z.string().parse(run.factoryOptions()?.config?.compact_prompt);
     expect(prompt).toContain("task.md");
@@ -1946,3 +1946,113 @@ describe("ruling 370/371: the joined prompt, the compaction keys and sorted serv
     expect(servers.alpha?.disabled_tools).toEqual(["write_a", "write_b"]);
   });
 });
+
+/**
+ * Ruling 376: the Codex completion compaction goes through the app-server,
+ * in the principal's shared home with the run's credential overlay, the
+ * thread's model and the shared summarizer prompt.
+ */
+describe("codex adapter compact() (ruling 376)", () => {
+  interface ServerLine {
+    id?: number | undefined;
+    method?: string;
+    params?: { threadId: string; turnId: string };
+    result?: { thread?: { id: string } };
+    error?: { code: number; message: string };
+  }
+  interface ClientRequest {
+    id?: number;
+    method: string;
+    params?: { threadId?: string; cwd?: string; model?: string; config?: { compact_prompt?: string } };
+  }
+  const requestSchema = z.object({
+    id: z.number().optional(),
+    method: z.string(),
+    params: z
+      .object({
+        threadId: z.string().optional(),
+        cwd: z.string().optional(),
+        model: z.string().optional(),
+        config: z.object({ compact_prompt: z.string().optional() }).optional(),
+      })
+      .optional(),
+  });
+  const scripted = (reply: (method: string, id: number | undefined, write: (line: ServerLine) => void) => void) => {
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const requests: ClientRequest[] = [];
+    const spawned: { binary: string; args: readonly string[]; env: Record<string, string> | undefined }[] = [];
+    const write = (line: ServerLine) => stdout.write(`${JSON.stringify(line)}\n`);
+    let buffer = "";
+    stdin.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString();
+      let nl = buffer.indexOf("\n");
+      while (nl >= 0) {
+        const request: ClientRequest = requestSchema.parse(JSON.parse(buffer.slice(0, nl)));
+        buffer = buffer.slice(nl + 1);
+        nl = buffer.indexOf("\n");
+        requests.push(request);
+        reply(request.method, request.id, write);
+      }
+    });
+    const process = { stdin, stdout, stderr: null, kill: () => true, once: () => process, on: () => process };
+    return {
+      requests,
+      spawned,
+      spawn: (binary: string, args: readonly string[], env: Record<string, string> | undefined) => {
+        spawned.push({ binary, args, env });
+        return process;
+      },
+    };
+  };
+
+  it("resumes the thread in the shared home with the model and the summarizer prompt, then starts the compaction", async () => {
+    const server = scripted((method, id, write) => {
+      if (method === "initialize" || method === "thread/resume") write({ id, result: {} });
+      if (method === "thread/compact/start") {
+        write({ id, result: {} });
+        write({ method: "thread/compacted", params: { threadId: "thread-1", turnId: "t" } });
+      }
+    });
+    const adapter = createCodexAdapter({ env: { PATH: "/usr/bin" }, spawnAppServer: server.spawn });
+    const phases: string[] = [];
+    const lines: EmittedLine[] = [];
+    const outcome = await adapter.compact!(
+      { ...SPEC, model: "gpt-5.6-terra", env: { CODEX_HOME: "/homes/arda/codex", VIBERR_RUN_ID: "run_1" } },
+      "thread-1",
+      { onLine: (l) => lines.push(l), onPhase: (phase) => phases.push(phase ?? "") },
+    );
+    expect(outcome).toEqual({ compacted: true, preTokens: null, postTokens: null });
+    expect(phases[0]).toBe(RUN_PHASE.compacting);
+    // The run's credential overlay and home, under the epilogue's OWN marker
+    // (the run's settle sweep reaps `r1`; this process must outlive it).
+    expect(server.spawned[0]).toMatchObject({
+      args: ["app-server"],
+      env: { PATH: "/usr/bin", CODEX_HOME: "/homes/arda/codex", VIBERR_RUN_ID: `${SPEC.runId}:compaction` },
+    });
+    expect(server.requests.map((r) => r.method)).toEqual(["initialize", "initialized", "thread/resume", "thread/compact/start"]);
+    expect(server.requests[2]?.params).toMatchObject({
+      threadId: "thread-1",
+      cwd: SPEC.workdir,
+      model: "gpt-5.6-terra",
+      config: { compact_prompt: expect.stringContaining("task.md") },
+    });
+    // The sizes come off the rollout in the run service; the adapter says nothing here.
+    expect(lines).toHaveLength(0);
+  });
+
+  it("a refusal lands on the log as one line and the outcome's reason", async () => {
+    const server = scripted((method, id, write) => {
+      if (method === "initialize") write({ id, result: {} });
+      if (method === "thread/resume") write({ id, error: { code: 1, message: "thread not found" } });
+    });
+    const adapter = createCodexAdapter({ env: {}, spawnAppServer: server.spawn });
+    const lines: EmittedLine[] = [];
+    const outcome = await adapter.compact!({ ...SPEC, env: { CODEX_HOME: "/h" } }, "gone", { onLine: (l) => lines.push(l) });
+    expect(outcome).toEqual({ compacted: false, reason: "thread/resume refused: thread not found" });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.display?.tag).toBe("run·compaction·failed");
+    expect(lines[0]!.display?.text).toContain("thread not found");
+  });
+});
+

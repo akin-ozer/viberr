@@ -21,6 +21,8 @@ import {
   RUN_PHASE,
   stepUpdateForLine,
   type RunCallbacks,
+  type CompactCallbacks,
+  type CompactOutcome,
   type RunHandle,
   type RunSpec,
   type RuntimeAdapter,
@@ -42,8 +44,14 @@ import {
   reapRunProcesses,
   RUN_MARKER_ENV,
   type ReapRunProcesses,
+  compactionMarkerEnv,
 } from "./run-processes.server";
 import { codexCompactionConfig } from "./context-policy.server";
+import {
+  compactCodexThread,
+  type SpawnAppServer,
+  type ThreadResumeConfig,
+} from "./codex-app-server.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
 
 /**
@@ -123,6 +131,9 @@ interface CodexAdapterDeps {
   env?: Record<string, string>;
   /** Extra supported CLI config overrides, primarily for test/deployment seams. */
   config?: CodexOptions["config"];
+  /** Ruling 376: how the completion compaction starts `codex app-server`
+   *  (a test scripts the JSON-RPC exchange over pipes of its own). */
+  spawnAppServer?: SpawnAppServer;
   /** Ruling 174: the sweep that runs once a marked run has settled (default:
    *  the real one). */
   reapProcesses?: ReapRunProcesses;
@@ -699,6 +710,57 @@ export function createCodexAdapter(
 ): RuntimeAdapter {
   return {
     backend: "codex",
+    /**
+     * Ruling 376: compact the thread a run just left through the CLI's
+     * app-server (`thread/compact/start`; neither `exec` nor the SDK has a
+     * command for it). Runs in the principal's SHARED home — the run's forked
+     * home is gone by the time a run has exited (`finishCodexRunHome`), and
+     * the rollout lives in the shared one — with the same credential overlay
+     * and the shared summarizer prompt. The sizes are not in the reply; the
+     * run service reads them off the rollout the CLI just extended.
+     */
+    async compact(spec: RunSpec, threadId: string, cb: CompactCallbacks): Promise<CompactOutcome> {
+      cb.onPhase?.(RUN_PHASE.compacting, "at the end of the run");
+      const baseEnv =
+        deps.env ??
+        (spec.env
+          ? Object.fromEntries(
+              Object.entries(process.env).filter(
+                (entry): entry is [string, string] => entry[1] !== undefined,
+              ),
+            )
+          : undefined);
+      const env = baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
+      // Its own marker: the run's settle sweep must not reap the app-server.
+      if (env?.[RUN_MARKER_ENV]) Object.assign(env, compactionMarkerEnv(spec.runId));
+      const config: ThreadResumeConfig = {};
+      const compaction = codexCompactionConfig(spec.kind);
+      if (compaction.compact_prompt) config.compact_prompt = compaction.compact_prompt;
+      const input: Parameters<typeof compactCodexThread>[0] = {
+        threadId,
+        cwd: spec.workdir,
+        config,
+      };
+      if (spec.model) input.model = spec.model;
+      if (env) input.env = env;
+      if (deps.spawnAppServer) input.spawn = deps.spawnAppServer;
+      const outcome = await compactCodexThread(input);
+      if (!outcome.compacted) {
+        const occurredAt = new Date().toISOString();
+        cb.onLine({
+          raw: "",
+          display: {
+            t: occurredAt.slice(11, 19),
+            ev: "meta",
+            tag: "run·compaction·failed",
+            text: `compaction at the end of the run did not happen: ${redactProviderText(outcome.reason)}`,
+          },
+          facts: {},
+          occurredAt,
+        });
+      }
+      return outcome;
+    },
     start(spec: RunSpec, cb: RunCallbacks): RunHandle {
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawTurnCompleted = false;

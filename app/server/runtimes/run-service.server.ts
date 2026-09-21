@@ -31,6 +31,7 @@ import {
   type RunHandle,
   type RunMcpServers,
   type RunSpec,
+  type RunExit,
   type RuntimeAdapter,
 } from "./adapter.server";
 import {
@@ -43,7 +44,7 @@ import {
   projectRunsForTask,
   type ProjectedRunView,
 } from "./run-projection.server";
-import { createRunSink } from "./run-sink.server";
+import { createRunSink, runPersistDrained } from "./run-sink.server";
 import {
   appendRawLine,
   getRun,
@@ -83,9 +84,17 @@ import {
   principalRefusalMessage,
   type RunPrincipalRefusal,
 } from "./run-principal.server";
-import { runMarkerEnv } from "./run-processes.server";
+import {
+  runMarkerEnv,
+  compactionRunId,
+  reapRunProcesses,
+} from "./run-processes.server";
 import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
-import { contextWindowEnv, resumeVerdict } from "./context-policy.server";
+import {
+  COMPACT_AT_COMPLETION_TOKENS,
+  contextWindowEnv,
+  resumeVerdict,
+} from "./context-policy.server";
 import type { RunPrompt } from "./prompt-prefix.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 
@@ -1093,6 +1102,7 @@ export async function startRun(
   const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
+  if (input.dataRoot) launchOpts.dataRoot = input.dataRoot;
   const adapter = selectAdapter(input.backend, state.adapters);
   const secrets = credential.credential.secrets;
   const launchThunk = () => launch(db, spec, adapter, secrets, launchOpts);
@@ -2042,10 +2052,14 @@ function launch(
     startedAt?: string;
     /** F21-13: a disclosure line to open the run log with. */
     notice?: string;
+    /** The data root the run's task lives under: what the sink's timeline
+     *  notes (a compaction, ruling 369/376) are written against. Absent means
+     *  the instance's own root. */
+    dataRoot?: string;
   } = {},
 ): void {
   const state = getState();
-  const sink = createRunSink(db, spec, { secrets });
+  const sink = createRunSink(db, spec, opts.dataRoot ? { secrets, dataRoot: opts.dataRoot } : { secrets });
 
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.
@@ -2151,18 +2165,102 @@ function launch(
       if (deferredTimer) clearTimeout(deferredTimer);
       deferredTimer = null;
       deferred = null;
+      // The handle is tracked only for a run still in flight, so the flag is
+      // set here, synchronously, exactly as before ruling 376 made the rest
+      // of the exit asynchronous.
+      exited = true;
+      // Ruling 376: the exit may compact the session first, a provider round
+      // trip; everything after the exit — the finalize, the slot, the
+      // completion contract — waits for it, so no resume of the same session
+      // starts under a compaction still in flight.
+      void settleRun(exit);
+    },
+  });
+  // Only track the handle if the run is still in flight. A synchronously-exiting
+  // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
+  // deletes the not-yet-set handle; setting it here afterward would leave a
+  // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
+  // (and interrupt) think a dead run is live. Guard on the exit flag.
+  if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
+
+  async function settleRun(exit: RunExit): Promise<void> {
       try {
         // Ruling 369: a Codex run's per-call prompt sizes and compactions are
         // in the rollout the CLI wrote, never in its SDK stream; read once the
         // CLI has exited, off the principal's own home.
-        if (exit.effectiveBackend === "codex" && exit.sessionId) {
-          const row = getRun(db, spec.runId);
-          const stats = codexRolloutRunStats(
-            row?.credential_user_id ?? null,
-            exit.sessionId,
-            row?.started_at ?? null,
-          );
-          if (stats && stats.calls > 0) sink.foldRolloutStats(stats);
+        // A shutdown drain (F21-24): nothing below can be read or written; the
+        // finalize alone says so, once.
+        const drained = runPersistDrained(db);
+        const row = drained ? null : getRun(db, spec.runId);
+        const rolloutStats = () =>
+          !drained && exit.effectiveBackend === "codex" && exit.sessionId
+            ? codexRolloutRunStats(
+                row?.credential_user_id ?? null,
+                exit.sessionId,
+                row?.started_at ?? null,
+                opts.dataRoot,
+              )
+            : null;
+        let stats = rolloutStats();
+        if (stats && stats.calls > 0) sink.foldRolloutStats(stats);
+        // Ruling 376: a session larger than the completion threshold is
+        // compacted now, while its prefix is still in the provider's cache.
+        // Never after an interrupt (the person asked for the spending to
+        // stop), never without a session, never on a backend that cannot,
+        // and never as a failure of the run.
+        const replaySize = drained
+          ? 0
+          : exit.effectiveBackend === "codex"
+            ? (stats?.lastPromptTokens ?? 0)
+            : (getRun(db, spec.runId)?.last_prompt_tokens ?? 0);
+        if (
+          adapter.compact &&
+          exit.sessionId &&
+          exit.outcome !== "interrupted" &&
+          replaySize > COMPACT_AT_COMPLETION_TOKENS
+        ) {
+          const compactionsBefore = stats?.compactionEvents.length ?? 0;
+          const outcome = await adapter.compact(spec, exit.sessionId, {
+            onLine: (line) => sink.line(line),
+            onPhase: (phase, step) => writePhase(phase, step),
+          });
+          logger.info("run compaction at completion", {
+            runId: spec.runId,
+            backend: exit.effectiveBackend,
+            replaySize,
+            ...outcome,
+          });
+          // The epilogue's process carries its own marker (the settle sweep
+          // must not reap it mid-compaction); it is reaped here, once done.
+          void reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
+            logger.warn("compaction epilogue reap failed", {
+              runId: spec.runId,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+          });
+          if (exit.effectiveBackend === "codex") {
+            // The rollout is the truth on Codex, whatever the app-server said:
+            // its reply carries no sizes, and a compaction it did not announce
+            // in time (live, 2026-09-21) is still on disk. The rollout's
+            // newest compaction, when there is a new one, is this one.
+            stats = rolloutStats();
+            const event = stats?.compactionEvents.at(-1) ?? null;
+            if (stats && stats.compactionEvents.length > compactionsBefore && event) {
+              const occurredAt = new Date().toISOString();
+              sink.line({
+                raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
+                display: {
+                  t: occurredAt.slice(11, 19),
+                  ev: "meta",
+                  tag: "run·compacted·completion",
+                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${Math.round(event.postTokens / 1000)}k tokens`,
+                },
+                facts: { compaction: { trigger: "completion", ...event } },
+                occurredAt,
+              });
+              sink.foldRolloutStats(stats);
+            }
+          }
         }
         sink.finalize(exit);
       } catch (error) {
@@ -2206,15 +2304,7 @@ function launch(
           if (finished) void noteCompletionEffectsLost(db, finished);
         }
       }
-      exited = true;
-    },
-  });
-  // Only track the handle if the run is still in flight. A synchronously-exiting
-  // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
-  // deletes the not-yet-set handle; setting it here afterward would leave a
-  // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
-  // (and interrupt) think a dead run is live. Guard on the exit flag.
-  if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
+  }
 }
 
 // ---------------------------------------------- interrupt

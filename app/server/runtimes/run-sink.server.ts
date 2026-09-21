@@ -491,6 +491,14 @@ export function createRunSink(
           }
         }
         if (f.costUsd != null) totalCostUsd = f.costUsd;
+        // Ruling 376: the completion compaction's own call lands after the
+        // run's result, so its cost and tokens ADD to the recorded figures.
+        if (f.costAddUsd != null) totalCostUsd = (totalCostUsd ?? 0) + f.costAddUsd;
+        if (f.usageAdd) {
+          inputTokens += f.usageAdd.input_tokens;
+          cachedInputTokens += f.usageAdd.cached_input_tokens;
+          outputTokens += f.usageAdd.output_tokens;
+        }
         // Ruling 369: fold the call's cache figures (see `cachePatch`).
         if (f.cache) {
           cacheWriteTokens += f.cache.cacheWrite;
@@ -518,6 +526,13 @@ export function createRunSink(
         // by construction, and never on the line's own persist path.
         if (f.compaction) {
           compactions += 1;
+          // What a resume replays now is the summary, not the history the
+          // compaction folded: the last prompt is the post size until the
+          // next call says otherwise (ruling 372 reads it; ruling 376 sets it
+          // at the end of the run).
+          if (f.compaction.postTokens !== null && f.compaction.postTokens > 0) {
+            lastPromptTokens = f.compaction.postTokens;
+          }
           try {
             noteRunCompaction(db, spec, agentName, f.compaction, line.occurredAt, opts.dataRoot);
           } catch (error) {

@@ -88,6 +88,7 @@ interface CapturedOptions {
   systemPrompt?: unknown;
   /** The model id as forwarded to the SDK. */
   model?: string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -1944,3 +1945,98 @@ describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)"
     expect(live.at(-1)).toBe(2 * 1002);
   });
 });
+
+/**
+ * Ruling 376: the completion compaction. `/compact` on the run's own session,
+ * built from the run's spec so the request shares its prefix, folded as the
+ * run's own compaction fact and cost increment, refusals as reasons.
+ */
+describe("claude adapter compact() (ruling 376)", () => {
+  const promptMessage = z.object({ message: z.object({ content: z.string() }) });
+  /** The adapter hands the SDK an async iterable of one user message; this
+   *  reads that one message's text back. */
+  const readPrompt = async (prompt: Parameters<ClaudeQueryFn>[0]["prompt"]): Promise<string> => {
+    const literal = z.string().safeParse(prompt);
+    if (literal.success) return literal.data;
+    // SAFETY: the adapter never hands the SDK a string (`singlePrompt` wraps
+    // every prompt in an async iterable of one user message), and the string
+    // arm above returned; what is left is that iterable.
+    for await (const message of prompt as AsyncIterable<unknown>) {
+      return promptMessage.parse(message).message.content;
+    }
+    return "";
+  };
+
+  it("resumes the session with the run's options, one turn, and folds the boundary as this run's completion compaction", async () => {
+    const messages = [
+      { type: "system", subtype: "init", session_id: "sess-1", model: "claude-sonnet-4-5", tools: ["Bash"], mcp_servers: [] },
+      { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 120_000, post_tokens: 18_000 } },
+      { type: "user", message: { role: "user", content: "This session is being continued from a previous conversation…" } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: { input_tokens: 2_000, cache_read_input_tokens: 118_000, output_tokens: 4_000 }, total_cost_usd: 0.7 },
+    ];
+    const { q } = fakeQuery(messages);
+    let captured: {
+      prompt: Parameters<ClaudeQueryFn>[0]["prompt"];
+      options: CapturedOptions & { resume?: string; maxTurns?: number };
+    } | null = null;
+    const adapter = createClaudeAdapter({
+      queryFn: (args) => {
+        // SAFETY: the test reads the handful of option fields it asserts on;
+        // the adapter's own type is wider and the SDK-typed shape is irrelevant here.
+        captured = { prompt: args.prompt, options: (args.options ?? {}) as CapturedOptions & { resume?: string; maxTurns?: number } };
+        return q;
+      },
+    });
+    const lines: EmittedLine[] = [];
+    const phases: string[] = [];
+    const outcome = await adapter.compact!(
+      { ...SPEC, env: { VIBERR_RUN_ID: "r1" }, systemPrompt: { static: ["persona"], dynamic: ["tail"] } },
+      "sess-1",
+      { onLine: (l) => lines.push(l), onPhase: (phase) => phases.push(phase ?? "") },
+    );
+    expect(outcome).toEqual({ compacted: true, preTokens: 120_000, postTokens: 18_000 });
+    expect(captured!.options.resume).toBe("sess-1");
+    expect(captured!.options.maxTurns).toBe(1);
+    // The epilogue's own marker: the run's settle sweep reaps `r1`, not this.
+    expect(captured!.options.env?.VIBERR_RUN_ID).toBe("r1:compaction");
+    // The same system prompt shape the run used: the preset with the static append.
+    expect(captured!.options.systemPrompt).toMatchObject({ type: "preset", preset: "claude_code", append: "persona" });
+    const prompt = await readPrompt(captured!.prompt);
+    expect(prompt.startsWith("/compact ")).toBe(true);
+    expect(prompt).toContain("task.md");
+    expect(phases[0]).toBe(RUN_PHASE.compacting);
+    // Two lines: the boundary as a completion compaction, the request's cost.
+    // The init and the summary the CLI writes as a user message stay on the transcript.
+    expect(lines.map((l) => l.display?.tag)).toEqual(["run·compacted·completion", "run·compaction·request"]);
+    expect(lines[0]!.facts).toEqual({ compaction: { trigger: "completion", preTokens: 120_000, postTokens: 18_000 } });
+    expect(lines[0]!.display?.text).toContain("120k → 18k tokens");
+    expect(lines[1]!.facts.costAddUsd).toBe(0.7);
+    expect(lines[1]!.facts.usageAdd).toMatchObject({ output_tokens: 4_000 });
+    expect(lines[1]!.facts.isResult).toBeUndefined();
+    expect(lines[1]!.facts.cache).toBeUndefined();
+  });
+
+  it("a refusal is the outcome's reason: the CLI had nothing to compact", async () => {
+    const messages = [
+      { type: "system", subtype: "init", session_id: "sess-2", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
+      { type: "result", subtype: "success", is_error: false, num_turns: 0, result: "Not enough messages to compact.", usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0 },
+    ];
+    const { q } = fakeQuery(messages);
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    const outcome = await adapter.compact!(SPEC, "sess-2", { onLine: (l) => lines.push(l) });
+    expect(outcome).toEqual({ compacted: false, reason: "Not enough messages to compact." });
+    expect(lines.map((l) => l.display?.tag)).toEqual(["run·compaction·request"]);
+  });
+
+  it("a stream that dies is a reason and one line, never a throw", async () => {
+    const { q } = fakeQuery([], { rejectWith: new Error("socket hang up") });
+    const adapter = createClaudeAdapter({ queryFn: () => q });
+    const lines: EmittedLine[] = [];
+    const outcome = await adapter.compact!(SPEC, "sess-3", { onLine: (l) => lines.push(l) });
+    expect(outcome).toEqual({ compacted: false, reason: "socket hang up" });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.display?.tag).toBe("run·compaction·failed");
+  });
+});
+

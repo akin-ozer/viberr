@@ -37,6 +37,18 @@ export function compactionNoteText(
     compaction.preTokens !== null
       ? ` from ${k(compaction.preTokens)} to ${compaction.postTokens !== null ? k(compaction.postTokens) : "a summary"} tokens`
       : "";
+  if (compaction.trigger === "completion") {
+    // Ruling 376: the run is over; the summary is what the next resume replays.
+    return (
+      `Context compacted at the end of the run: Viberr summarized ${agent}'s conversation${sizes} ` +
+      "while its prompt cache was still warm, so the next resume replays the summary instead of the " +
+      "whole history. Its persona, knowledge-base indexes and skills are unchanged; tool output and " +
+      "reasoning survive only as the summary" +
+      (anchored
+        ? ", and the task anchor (task.md, branch, PR, knowledge bases) is re-injected when it resumes."
+        : ".")
+    );
+  }
   return (
     `Context compacted: the provider summarized ${agent}'s conversation${sizes} (${compaction.trigger}). ` +
     "Its persona and knowledge-base indexes are unchanged; tool output and reasoning before this point " +

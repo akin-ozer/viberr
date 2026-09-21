@@ -535,26 +535,17 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     return { added, seen: seen ?? {} };
   }
 
-  it("a Claude specialist carries the 250k window, a controller 300k, an operator none", async () => {
-    const primary = await childEnvFor("primary", "claude");
-    expect(primary.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("250000");
-    expect(primary.added).toEqual([
-      "ANTHROPIC_API_KEY",
-      "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-      "CLAUDE_CONFIG_DIR",
-      "GIT_CEILING_DIRECTORIES",
-      "VIBERR_RUN_ID",
-    ]);
-    expect((await childEnvFor("reviewer", "claude")).seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("250000");
-    expect((await childEnvFor("controller", "claude")).seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("300000");
-    const operator = await childEnvFor("operator", "claude");
-    expect(operator.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
-    expect(operator.added).toEqual([
-      "ANTHROPIC_API_KEY",
-      "CLAUDE_CONFIG_DIR",
-      "GIT_CEILING_DIRECTORIES",
-      "VIBERR_RUN_ID",
-    ]);
+  it("ruling 376: no kind carries a window key — the child env is the credential, the home, git and the marker", async () => {
+    for (const kind of ["primary", "reviewer", "controller", "operator"] as const) {
+      const env = await childEnvFor(kind, "claude");
+      expect(env.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+      expect(env.added).toEqual([
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CONFIG_DIR",
+        "GIT_CEILING_DIRECTORIES",
+        "VIBERR_RUN_ID",
+      ]);
+    }
   });
 
   it("a Codex run's window is config, never an env key", async () => {
@@ -563,8 +554,8 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     expect(primary.added.filter((k) => k.startsWith("CLAUDE_"))).toEqual([]);
   });
 
-  it("the policy's own key list is exactly what the two tests above name", async () => {
+  it("the policy's own key list is exactly what the two tests above name: nothing", async () => {
     const { CONTEXT_ENV_KEYS } = await import("./context-policy.server");
-    expect([...CONTEXT_ENV_KEYS]).toEqual(["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]);
+    expect([...CONTEXT_ENV_KEYS]).toEqual([]);
   });
 });

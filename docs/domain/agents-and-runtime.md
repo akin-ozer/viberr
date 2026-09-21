@@ -276,10 +276,19 @@ connecting a different account there (ruling 165).
   compaction. Every list the adapter sends is in name order (`skills`, the `mcpServers`
   map, `allowedTools`, `disallowedTools`), so two runs of one profile hand the CLI the same
   bytes.
-- Context window and compaction (rulings 371, 373). A specialist run's child env carries
-  `CLAUDE_CODE_AUTO_COMPACT_WINDOW=250000`, a controller's `300000`, an operator's nothing;
-  `startRun` sets it from `context-policy.server.ts` (`contextWindowEnv`) after the caller's
-  overlay and before the run marker. A run with a `compactAnchor` (every specialist and
+- Context window and compaction (rulings 371, 373, 376). No mid-run window: every
+  `AUTO_COMPACT_WINDOW` entry is null since ruling 376 and the CLI compacts at its model's
+  own limit (`startRun` would set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` from
+  `context-policy.server.ts` if an entry were non-null). Instead, a run that finishes or
+  errors with a session whose last prompt is above `COMPACT_AT_COMPLETION_TOKENS` (100k)
+  is compacted at the END of the run, while its cache is warm: the adapter's `compact()`
+  sends `/compact <COMPLETION_COMPACT_INSTRUCTIONS>` as a one-turn query that resumes the
+  session, built by the same options builder as the run so it reads the run's cached
+  prefix; the exit is asynchronous (`settleRun`) so the finalize and the completion contract
+  wait for it; the boundary is the run's compaction fact with trigger `completion`, the
+  request's cost and tokens add to the run's totals, `last_prompt_tokens` becomes the post
+  size, and the timeline note says the next resume replays the summary. An interrupted run
+  is left alone. A run with a `compactAnchor` (every specialist and
   controller run) carries a `SessionStart` hook on the `compact` matcher that returns the
   anchor as `additionalContext` the moment the CLI has compacted the context — the task
   anchor (task.md path, branch, PR, knowledge bases, the rulings note) or the conversation
@@ -405,11 +414,15 @@ connecting a different account there (ruling 165).
   off, memories off, `developer_instructions` = the prompt split joined in order (ruling
   370: Codex has no boundary, so the static block and the per-task tail are one document),
   `mcp_servers` in name order with each server's withheld tools sorted, and on a specialist
-  run (ruling 371) `model_auto_compact_token_limit = 180000`,
-  `model_auto_compact_token_limit_scope = "total"` and `compact_prompt =
-  CODEX_COMPACT_PROMPT` (the shared summarizer prompt: keep the task key and goal, the
-  task.md pointer, branch and PR, the knowledge-base names, decisions, failed attempts and
-  why, pending work, files changed); the operator sets none of the three. Codex keeps
+  or controller run `compact_prompt = CODEX_COMPACT_PROMPT` (the shared summarizer prompt:
+  keep the task key and goal, the task.md pointer, branch and PR, the knowledge-base names,
+  decisions, failed attempts and why, pending work, files changed) — no
+  `model_auto_compact_token_limit` since ruling 376 (the CLI's own default stands); the
+  operator sets neither. Ruling 376's completion compaction on Codex goes through the CLI's
+  app-server (`codex-app-server.server.ts`: `codex app-server` over stdio, `initialize`,
+  `thread/resume` with the run's cwd, model and `compact_prompt`, `thread/compact/start`,
+  then the `thread/compacted` notification), in the principal's shared home where the
+  rollout lives; the sizes come off the rollout's `compacted` line. Codex keeps
   `developer_instructions` and recent user messages within a 20k budget plus the summary
   across a compaction and drops earlier assistant turns, tool calls, outputs and reasoning.
   A `context_compaction` item counts as a compaction (ruling 369) — none was streamed on the
@@ -737,7 +750,9 @@ terminated exactly once (the `..` of F34-12 is gone).
   controller follows the same rule; its fresh turn's preamble points at the
   recent-conversation digest every controller prompt carries, and it notes nothing on a
   task. The size is the LAST call's prompt, not the run's peak, on purpose: a run that
-  compacted at 250k and finished at 20k replays 20k.
+  compacted and finished at 20k replays 20k — which, since ruling 376, is what every run
+  that ended above 100k leaves behind, so this rule is the backstop for a session that
+  never got compacted (an interrupted run, a refused compaction).
 - Transcripts: Claude
   `runtimes/users/<principal>/claude-home/projects/<cwd-dashes>/<sid>.jsonl`; Codex
   `runtimes/users/<principal>/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`

@@ -69,8 +69,8 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
   `ResizeObserver` under jsdom.
 - No `.env` is required.
 - `harness-hermeticity.server.test.ts` pins, by name, every key Viberr ADDS to a run's child
-  env (the principal's credential and home, `VIBERR_RUN_ID`, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
-  on a Claude specialist or controller run — `CONTEXT_ENV_KEYS`, rulings 371/373); a key
+  env (the principal's credential and home, `VIBERR_RUN_ID`; no window key since ruling 376 —
+  `CONTEXT_ENV_KEYS` is empty and the test says so); a key
   added anywhere on the run path without a line there fails the suite. Every clock the
   resume policy reads is pinned (`nowIso`), never the wall clock (ruling 372).
 
@@ -120,6 +120,9 @@ ctx.cleanup();
 
 ### Doc-pinning tests
 
+- `codex-app-server.server.test.ts` (ruling 376) scripts the Codex app-server over pipes and
+  pins the JSON-RPC exchange a completion compaction makes, the notification that settles
+  it, and the three ways it ends without one (a refusal, a dead server, the timeout).
 - `routes/project.task.run-agent.server.test.ts` (ruling 375) POSTs the Run-an-agent intent
   with a prompt through the real route and pins the order that keeps a prompted dispatch to
   ONE run: the person's `@<agent>` comment predates the run, and `deliverDeferredMention`

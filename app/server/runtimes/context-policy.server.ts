@@ -19,44 +19,47 @@ import type { CredentialKind } from "./backend-credentials.server";
 export type ContextBackend = RunBackend;
 
 /**
- * The context window past which the CLI is asked to compact, per backend and
- * run kind, in prompt tokens. `null` means "leave the CLI's own default": the
- * operator's turns peak well under 100k (measured p90 59k, max 97k over 247
- * runs), so a window there would never fire and only add a knob.
+ * The context window past which the CLI is asked to compact MID-RUN, per
+ * backend and run kind. Every entry is `null` since ruling 376 (owner,
+ * 2026-09-21, "drop it, model default"): the CLI compacts at its model's own
+ * limit (near 967k on a native-1M Claude model, near the 258k window on
+ * Codex), and the size a session carries between runs is bounded by
+ * `COMPACT_AT_COMPLETION_TOKENS` below instead. Measured on the 25-call runs
+ * of 2026-09-21: a 250k window held cache reads to 2.4M where the model's own
+ * limit would have read about 7M, but the writes (574k) — the run's real cost
+ * — are the same either way, and a mid-run summary drops in-run detail.
  *
- * Claude reads `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (a plain token count, 100k to
- * 1M; overrides the model's own threshold, which on a native-1M model sits
- * near 967k — how specialists reached 482k per call and the controller 948k).
- * Codex reads `model_auto_compact_token_limit` with
- * `model_auto_compact_token_limit_scope = "total"`; 180k is under the ~160k
- * point past which one report saw its cache collapse under memory pressure
- * and well inside its 258k context.
+ * The table stays so the decision has one place to be reversed; a non-null
+ * entry is what `contextWindowEnv` (Claude, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
+ * and `codexCompactionConfig` (Codex, `model_auto_compact_token_limit` with
+ * scope `total`) would carry again.
  */
 export const AUTO_COMPACT_WINDOW = {
-  claude: { operator: null, primary: 250_000, reviewer: 250_000, controller: 300_000 },
-  codex: { operator: null, primary: 180_000, reviewer: 180_000, controller: null },
+  claude: { operator: null, primary: null, reviewer: null, controller: null },
+  codex: { operator: null, primary: null, reviewer: null, controller: null },
 } as const satisfies Record<ContextBackend, Record<RunKind, number | null>>;
 
-/** The env key the Claude CLI reads the window from (see `contextWindowEnv`). */
+/** The env key the Claude CLI reads a mid-run window from (see `contextWindowEnv`). */
 export const CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
 /**
  * Every env key this policy may put into a run's child environment. The
  * hermeticity test pins the child env's Viberr-added keys against this list
  * plus the credential and marker keys, so a key added here without a test
- * naming it fails the suite.
+ * naming it fails the suite. Empty since ruling 376: no window rides the env.
  */
-export const CONTEXT_ENV_KEYS = [CLAUDE_AUTO_COMPACT_WINDOW_ENV] as const;
+export const CONTEXT_ENV_KEYS: readonly string[] = [];
 
-/** The window for one run, or null when the CLI's default stands. */
+/** The mid-run window for one run, or null when the CLI's default stands. */
 export function autoCompactWindow(backend: ContextBackend, kind: RunKind): number | null {
   return AUTO_COMPACT_WINDOW[backend][kind];
 }
 
 /**
- * The env overlay a Claude run carries for its window: exactly one key when
- * the kind has a window, nothing otherwise. Codex takes its window through
- * `config.toml` keys (`codexCompactionConfig`), never the environment.
+ * The env overlay a Claude run carries for its mid-run window: exactly one key
+ * when the kind has a window, nothing otherwise (nothing, since ruling 376).
+ * Codex takes its window through `config.toml` keys (`codexCompactionConfig`),
+ * never the environment.
  */
 export function contextWindowEnv(backend: ContextBackend, kind: RunKind): Record<string, string> {
   if (backend !== "claude") return {};
@@ -65,10 +68,12 @@ export function contextWindowEnv(backend: ContextBackend, kind: RunKind): Record
 }
 
 /**
- * The Codex CLI config keys for a kind with a window: the limit, its scope and
- * the shared compaction prompt. Empty for a kind with no window, so the CLI's
- * own defaults stand and nothing is written that a reader could mistake for a
- * decision.
+ * The Codex CLI config keys a kind carries: the shared compaction prompt on
+ * every specialist and controller run (it steers the mid-run compaction at
+ * the model's own limit AND the completion compaction of ruling 376, both of
+ * which the CLI summarizes), plus the limit and its scope only for a kind
+ * with a mid-run window (none, since ruling 376). Empty for the operator, so
+ * nothing is written that a reader could mistake for a decision.
  */
 export interface CodexCompactionConfig {
   model_auto_compact_token_limit: number;
@@ -77,14 +82,45 @@ export interface CodexCompactionConfig {
 }
 
 export function codexCompactionConfig(kind: RunKind): Partial<CodexCompactionConfig> {
+  if (kind === "operator") return {};
   const window = autoCompactWindow("codex", kind);
-  if (window === null) return {};
-  return {
-    model_auto_compact_token_limit: window,
-    model_auto_compact_token_limit_scope: "total",
-    compact_prompt: CODEX_COMPACT_PROMPT,
-  };
+  const config: Partial<CodexCompactionConfig> = { compact_prompt: CODEX_COMPACT_PROMPT };
+  if (window !== null) {
+    config.model_auto_compact_token_limit = window;
+    config.model_auto_compact_token_limit_scope = "total";
+  }
+  return config;
 }
+
+/**
+ * Ruling 376 (owner, 2026-09-21): a session whose last prompt is larger than
+ * this is compacted at the END of its run, while its prefix is still in the
+ * provider's cache — one warm full-history read plus a summary, instead of a
+ * cold replay of the whole history on the next resume (200k written at the
+ * 1-hour rate is $6; the compaction is about $0.70 and every later call reads
+ * ~20k instead of ~200k). The session keeps its memory as the summary and
+ * stays resumable; ruling 372's fresh start is the backstop for a large
+ * session that never got compacted. 100k, the owner's number: the specialist
+ * median peak is 108k, so the typical long run is compacted once, at its end.
+ * Applies to a run that finished or errored; an interrupted run is left alone
+ * (the person asked for the spending to stop).
+ */
+export const COMPACT_AT_COMPLETION_TOKENS = 100_000;
+
+/**
+ * What the completion compaction asks the summarizer to keep — the same
+ * facts `CODEX_COMPACT_PROMPT` names, as the argument of Claude's `/compact`.
+ * Skills and knowledge bases need no instruction: the persona and the
+ * knowledge-base indexes live in the recorded system prompt, which no
+ * compaction touches, and the CLI re-injects the skills the run invoked.
+ */
+export const COMPLETION_COMPACT_INSTRUCTIONS =
+  "This run has finished; summarize it for the agent that resumes this session later. Keep, " +
+  "verbatim where short: the task key and title; the canonical task.md path; the branch and " +
+  "the pull request; the knowledge bases attached and that read_knowledge_doc re-reads them; " +
+  "every decision taken and its reason; every attempt that failed and why; the pending work " +
+  "in order; the files changed and the commands run with their exit codes; the last report " +
+  "posted. Drop tool output and reasoning.";
 
 /**
  * Ruling 372: the size past which a session that has outlived its cache is

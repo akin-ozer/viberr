@@ -14,7 +14,7 @@ import {
   parseQuotaResetAt,
 } from "./backend-quota.server";
 import { createLineRedactor, createRunSink } from "./run-sink.server";
-import { listRunLines, rawLogPath, upsertRun } from "./run-store.server";
+import { listRunLines, rawLogPath, upsertRun, getRun } from "./run-store.server";
 
 /**
  * P13-U-1: output-side secret redaction at the sink.
@@ -1245,6 +1245,42 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     expect(
       listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.taskKey === "VIB-3"),
     ).toHaveLength(1);
+  });
+
+  it("ruling 376: a completion compaction's fact sets the replay size, and its request adds cost and tokens", () => {
+    const sink = sinkFor("run_completion_compact", "completion-compact");
+    sink.line(cacheLine(call(2_000, 118_000, { promptTokens: 120_000 })));
+    sink.line({
+      raw: "",
+      display: { t: "00:00:01", ev: "result", tag: "result", text: "done" },
+      facts: { isResult: true, costUsd: 4, usage: { input_tokens: 120_000, cached_input_tokens: 118_000, output_tokens: 500, outputEstimated: false } },
+      occurredAt: "2026-09-21T12:00:01.000Z",
+    });
+    expect(rowOf("run_completion_compact").last_prompt_tokens).toBe(120_000);
+    sink.line({
+      raw: "",
+      display: { t: "00:00:02", ev: "meta", tag: "run·compacted·completion", text: "context compacted at the end of the run" },
+      facts: { compaction: { trigger: "completion", preTokens: 120_000, postTokens: 18_000 } },
+      occurredAt: "2026-09-21T12:00:02.000Z",
+    });
+    sink.line({
+      raw: "",
+      display: { t: "00:00:03", ev: "meta", tag: "run·compaction·request", text: "compaction request · $0.70" },
+      facts: { costAddUsd: 0.7, usageAdd: { input_tokens: 2_000, cached_input_tokens: 118_000, output_tokens: 4_000 } },
+      occurredAt: "2026-09-21T12:00:03.000Z",
+    });
+    sink.finalize({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
+    const row = rowOf("run_completion_compact");
+    expect(row.compactions).toBe(1);
+    // What a resume replays now: the summary, not the history it folded.
+    expect(row.last_prompt_tokens).toBe(18_000);
+    expect(row.peak_prompt_tokens).toBe(120_000);
+    // Increments on top of the result's figures, never a replacement.
+    const full = getRun(store.db, "run_completion_compact")!;
+    expect(full.total_cost_usd).toBeCloseTo(4.7, 5);
+    expect(full.input_tokens).toBe(122_000);
+    expect(full.cached_input_tokens).toBe(236_000);
+    expect(full.output_tokens).toBe(4_500);
   });
 
   it("a compaction counts on the row, audits, and notes the task's timeline", async () => {

@@ -4,6 +4,8 @@ import {
   CACHE_TTL_MS,
   CLAUDE_AUTO_COMPACT_WINDOW_ENV,
   CODEX_COMPACT_PROMPT,
+  COMPACT_AT_COMPLETION_TOKENS,
+  COMPLETION_COMPACT_INSTRUCTIONS,
   CONTEXT_ENV_KEYS,
   FIRST_CALL_LARGE_WRITE_TOKENS,
   RESUME_FRESH_CONTEXT_TOKENS,
@@ -22,44 +24,37 @@ const NOW = "2026-09-21T12:00:00.000Z";
 const minutesBefore = (m: number) => new Date(Date.parse(NOW) - m * 60_000).toISOString();
 
 describe("ruling 370: the numbers have one home", () => {
-  it("names the windows the research chose, per backend and kind", () => {
-    expect(AUTO_COMPACT_WINDOW.claude).toEqual({
-      operator: null,
-      primary: 250_000,
-      reviewer: 250_000,
-      controller: 300_000,
-    });
-    expect(AUTO_COMPACT_WINDOW.codex).toEqual({
-      operator: null,
-      primary: 180_000,
-      reviewer: 180_000,
-      controller: null,
-    });
-    expect(autoCompactWindow("claude", "reviewer")).toBe(250_000);
-    expect(autoCompactWindow("codex", "operator")).toBeNull();
+  it("ruling 376: no mid-run window on either backend — the model's own limit stands", () => {
+    for (const backend of ["claude", "codex"] as const) {
+      expect(AUTO_COMPACT_WINDOW[backend]).toEqual({
+        operator: null,
+        primary: null,
+        reviewer: null,
+        controller: null,
+      });
+      for (const kind of ["operator", "primary", "reviewer", "controller"] as const) {
+        expect(autoCompactWindow(backend, kind)).toBeNull();
+        expect(contextWindowEnv(backend, kind)).toEqual({});
+      }
+    }
+    // The hermeticity test pins the child env against this list: nothing rides it.
+    expect([...CONTEXT_ENV_KEYS]).toEqual([]);
+    expect(CLAUDE_AUTO_COMPACT_WINDOW_ENV).toBe("CLAUDE_CODE_AUTO_COMPACT_WINDOW");
   });
 
-  it("a Claude window is one env key; the operator and Codex carry none", () => {
-    expect(contextWindowEnv("claude", "primary")).toEqual({
-      [CLAUDE_AUTO_COMPACT_WINDOW_ENV]: "250000",
-    });
-    expect(contextWindowEnv("claude", "controller")).toEqual({
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW: "300000",
-    });
-    expect(contextWindowEnv("claude", "operator")).toEqual({});
-    expect(contextWindowEnv("codex", "primary")).toEqual({});
-    // The hermeticity test pins the child env against this list.
-    expect(CONTEXT_ENV_KEYS).toEqual(["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]);
-  });
-
-  it("a Codex window is three config keys, all from the same home", () => {
-    expect(codexCompactionConfig("primary")).toEqual({
-      model_auto_compact_token_limit: 180_000,
-      model_auto_compact_token_limit_scope: "total",
-      compact_prompt: CODEX_COMPACT_PROMPT,
-    });
+  it("Codex carries the shared summarizer prompt and no limit; the operator carries nothing", () => {
+    expect(codexCompactionConfig("primary")).toEqual({ compact_prompt: CODEX_COMPACT_PROMPT });
+    expect(codexCompactionConfig("reviewer")).toEqual({ compact_prompt: CODEX_COMPACT_PROMPT });
+    expect(codexCompactionConfig("controller")).toEqual({ compact_prompt: CODEX_COMPACT_PROMPT });
     expect(codexCompactionConfig("operator")).toEqual({});
-    expect(codexCompactionConfig("controller")).toEqual({});
+  });
+
+  it("ruling 376: the completion threshold is the owner's 100k, with instructions that name what to keep", () => {
+    expect(COMPACT_AT_COMPLETION_TOKENS).toBe(100_000);
+    expect(COMPACT_AT_COMPLETION_TOKENS).toBeLessThan(RESUME_FRESH_CONTEXT_TOKENS);
+    for (const must of ["task.md", "read_knowledge_doc", "branch", "pull request", "failed", "pending", "last report"]) {
+      expect(COMPLETION_COMPACT_INSTRUCTIONS).toContain(must);
+    }
   });
 
   it("the compaction prompt names what a Viberr run cannot recover from a summary", () => {

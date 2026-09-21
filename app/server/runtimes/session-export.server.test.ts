@@ -431,6 +431,30 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
       compactions: 1,
       compactionEvents: [{ preTokens: 30_000, postTokens: 0 }],
     });
+    // A compaction that is the run's LAST event (ruling 376): the request's
+    // own line carries no prompt, but its total is the compacted context —
+    // the post size and what the next resume replays.
+    const last = "01a0a30a-e256-7c91-b8da-6093b9f84201";
+    writeFileSync(
+      path.join(dir, `rollout-2026-07-15T06-09-54-${last}.jsonl`),
+      [
+        JSON.stringify({ timestamp: "2026-07-15T06:09:54.000Z", type: "session_meta", payload: { id: last } }),
+        line("2026-07-15T06:10:00.000Z", 125_535),
+        JSON.stringify({ timestamp: "2026-07-15T06:10:05.000Z", type: "compacted", payload: { message: "", replacement_history: [] } }),
+        JSON.stringify({
+          timestamp: "2026-07-15T06:10:06.000Z",
+          type: "event_msg",
+          payload: { type: "token_count", info: { last_token_usage: { input_tokens: 0, cached_input_tokens: 0, total_tokens: 8_033 } } },
+        }),
+      ].join("\n") + "\n",
+    );
+    expect(codexRolloutRunStats(OWNER, last, null)).toMatchObject({
+      calls: 1,
+      peakPromptTokens: 125_535,
+      lastPromptTokens: 8_033,
+      compactions: 1,
+      compactionEvents: [{ preTokens: 125_535, postTokens: 8_033 }],
+    });
     expect(codexRolloutRunStats(OWNER, "0000-missing", null)).toBeNull();
   });
 });

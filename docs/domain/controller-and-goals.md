@@ -308,7 +308,8 @@ owner-routed SSE event `controller.updated`.
    block, the tier list beside it (ruling 309: the claim and what makes it usable stay in
    one place) and the "did NOT mount this turn" notice are the dynamic tail behind the
    SDK's boundary. Working directory is `<dataRoot>/runtimes/controller-scratch`. The
-   run's child env carries `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000` (ruling 373), and a
+   run carries no context window (ruling 376: the CLI's own limit stands, and a turn that
+   leaves the conversation above 100k is compacted at its end, warm), and a
    `SessionStart` hook on the `compact` source hands the conversation anchor back after a
    compaction — the conversation id, the person, the scope, that every turn's server read
    outranks the summary, that `viberr_ops` is still attached, and to ask rather than guess

@@ -89,6 +89,12 @@ export interface EnvelopeFacts {
     preTokens: number | null;
     postTokens: number | null;
   } | null;
+  /** Ruling 376: a call made AFTER the run's own result — the completion
+   *  compaction's summary request — adds to the run's totals instead of
+   *  replacing them (a result's `costUsd`/`usage` is the run's whole figure;
+   *  these are increments the sink folds on top). */
+  costAddUsd?: number | null;
+  usageAdd?: { input_tokens: number; cached_input_tokens: number; output_tokens: number } | null;
 }
 
 /** What the normalizer returns: the display line + any facts to fold into the run row. */
