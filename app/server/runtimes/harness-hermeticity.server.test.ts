@@ -476,3 +476,95 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
     expect(phantom).toEqual([]);
   });
 });
+
+/**
+ * Ruling 371/373: the context window rides the child env of a Claude
+ * specialist and controller run and nothing else, and the set of keys Viberr
+ * ADDS to a child env is pinned by name — the credential (ruling 127), the
+ * home, the run marker (ruling 174) and the window (`CONTEXT_ENV_KEYS`). A key
+ * added anywhere on the run path without a line here fails this test.
+ */
+describe("the keys Viberr adds to a run's child env are named (ruling 371)", () => {
+  const ctx = createTestDbContext();
+  afterEach(() => ctx.cleanup());
+
+  async function childEnvFor(kind: RunSpec["kind"], backend: RunSpec["backend"]) {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    insertUser(db, { id: "u_window", email: "window@viberr.test", name: "Window", role: "member" });
+    await connectFakeBackend(db, "u_window", backend);
+    const credential = runCredentialFor(db, "u_window", backend, dataRoot);
+    let seen: Record<string, string> | undefined;
+    const adapters = createAdapters({
+      claudeQueryFn: (params) => {
+        seen = params.options?.env;
+        return fakeClaudeQuery({ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} });
+      },
+      codexFactory: (options) => {
+        seen = options?.env;
+        const thread: ReturnType<CodexClient["startThread"]> = {
+          id: "thread-window",
+          async runStreamed() {
+            const events = (async function* (): AsyncGenerator<ThreadEvent> {
+              yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } };
+            })();
+            return { events };
+          },
+        };
+        return { startThread: () => thread, resumeThread: () => thread };
+      },
+    });
+    // What `startRun` assembles for THIS kind: the credential env, the caller
+    // overlay, the window, then the marker — through the real policy home.
+    const { contextWindowEnv } = await import("./context-policy.server");
+    const { runMarkerEnv } = await import("./run-processes.server");
+    const env = {
+      ...credential.env,
+      GIT_CEILING_DIRECTORIES: "/data/projects/viberr-core/tasks/VIB-1",
+      ...contextWindowEnv(backend, kind),
+      ...runMarkerEnv("run_window"),
+    };
+    const spec: RunSpec = {
+      runId: "run_window", projectSlug: "viberr-core", taskKey: "VIB-1", threadId: "t", role: "r",
+      kind, backend, model: "m", prompt: "hello", workdir: "/tmp", autonomous: true, env,
+    };
+    adapters[backend].start(spec, { onLine: () => {}, onExit: () => {} });
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+    const base = filteredSpawnEnv();
+    const added = Object.keys(seen ?? {}).filter((key) => !(key in base) || seen![key] !== base[key]).sort();
+    return { added, seen: seen ?? {} };
+  }
+
+  it("a Claude specialist carries the 250k window, a controller 300k, an operator none", async () => {
+    const primary = await childEnvFor("primary", "claude");
+    expect(primary.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("250000");
+    expect(primary.added).toEqual([
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+      "CLAUDE_CONFIG_DIR",
+      "GIT_CEILING_DIRECTORIES",
+      "VIBERR_RUN_ID",
+    ]);
+    expect((await childEnvFor("reviewer", "claude")).seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("250000");
+    expect((await childEnvFor("controller", "claude")).seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("300000");
+    const operator = await childEnvFor("operator", "claude");
+    expect(operator.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    expect(operator.added).toEqual([
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_CONFIG_DIR",
+      "GIT_CEILING_DIRECTORIES",
+      "VIBERR_RUN_ID",
+    ]);
+  });
+
+  it("a Codex run's window is config, never an env key", async () => {
+    const primary = await childEnvFor("primary", "codex");
+    expect(primary.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    expect(primary.added.filter((k) => k.startsWith("CLAUDE_"))).toEqual([]);
+  });
+
+  it("the policy's own key list is exactly what the two tests above name", async () => {
+    const { CONTEXT_ENV_KEYS } = await import("./context-policy.server");
+    expect([...CONTEXT_ENV_KEYS]).toEqual(["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]);
+  });
+});

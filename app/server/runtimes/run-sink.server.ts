@@ -31,6 +31,8 @@ import {
   REDACTED,
   TOKEN_PATTERN_SOURCE,
 } from "~/server/secrets/git-output-redact.server";
+import { startTemperature } from "./context-policy.server";
+import { noteRunCompaction } from "./run-context-events.server";
 
 /** Terminal run states — reaching one is the run's final answer. */
 const TERMINAL_STATES: readonly RunState[] = ["finished", "error", "interrupted"];
@@ -213,6 +215,8 @@ export interface RunSinkOptions {
   /** Ruling 127: the plaintext credentials this run's child env carries, from
    *  `runCredentialFor`. Redacted from every persisted line and SSE payload. */
   secrets?: readonly string[];
+  /** The data root the compaction note writes under (tests). */
+  dataRoot?: string;
 }
 
 export function createRunSink(
@@ -249,19 +253,45 @@ export function createRunSink(
   let usageFinal = false;
   let totalCostUsd: number | null = null;
 
+  // Ruling 369: the prompt-cache record, folded from `facts.cache` — one fact
+  // per model call on Claude (the adapter strips a message's repeat
+  // envelopes), one per turn on Codex. The first fact is the run's FIRST
+  // CALL; the write sums; the peak and the last fold only from per-call
+  // figures (a Codex turn total is not a prompt size); the TTL bucket reads
+  // off the provider's split of each write; compactions count the boundary
+  // facts. Everything lands on the row with the token counters below.
+  let cacheWriteTokens = 0;
+  let firstCall: RunPatch | null = null;
+  let peakPromptTokens = 0;
+  let lastPromptTokens = 0;
+  let sawFiveMinute = false;
+  let sawOneHour = false;
+  let compactions = 0;
+  const cachePatch = (): RunPatch => ({
+    cacheWriteTokens,
+    peakPromptTokens,
+    lastPromptTokens,
+    compactions,
+    cacheTtlBucket:
+      sawFiveMinute && sawOneHour ? "mixed" : sawFiveMinute ? "5m" : sawOneHour ? "1h" : null,
+    ...firstCall,
+  });
+
   // P13-U-1: built once per run — see createLineRedactor. `opts.secrets` is the
   // principal's own credential (ruling 127), which lives sealed in the database
   // rather than in this process's env, so the env sweep could not find it.
   const redact = createLineRedactor(process.env, opts.secrets ?? []);
   // Ruling 130(d): whose account this run bills, for the quota and credential
   // observation records (ruling 127: a run bills one person's credential).
+  const runRow = getRun(db, spec.runId);
   const principal = (() => {
-    const row = getRun(db, spec.runId);
-    const userId = row?.credential_user_id ?? null;
+    const userId = runRow?.credential_user_id ?? null;
     if (!userId) return { credentialUserId: null, credentialLabel: null };
     const user = findUserById(db, userId);
     return { credentialUserId: userId, credentialLabel: user ? user.name || user.email : null };
   })();
+  /** Ruling 369: the name the compaction note calls the agent by. */
+  const agentName = runRow?.agent_name ?? null;
 
   // Ruling 99: a controller turn's frames route to its conversation owner (it
   // has no task scope to route on). Resolved once per run, like the principal.
@@ -447,6 +477,42 @@ export function createRunSink(
           }
         }
         if (f.costUsd != null) totalCostUsd = f.costUsd;
+        // Ruling 369: fold the call's cache figures (see `cachePatch`).
+        if (f.cache) {
+          cacheWriteTokens += f.cache.cacheWrite;
+          if (firstCall === null) {
+            firstCall = {
+              firstCallPromptTokens: f.cache.promptTokens,
+              firstCallCacheWrite: f.cache.cacheWrite,
+              firstCallCacheRead: f.cache.cacheRead,
+              firstCallWarm: startTemperature(f.cache.cacheWrite, f.cache.cacheRead) === "warm" ? 1 : 0,
+              firstCallMissReason: f.cache.missReason,
+            };
+          }
+          if (f.cache.perCall) {
+            lastPromptTokens = f.cache.promptTokens;
+            if (f.cache.promptTokens > peakPromptTokens) peakPromptTokens = f.cache.promptTokens;
+          }
+          if (f.cache.ttl) {
+            if (f.cache.ttl.fiveMinute > 0) sawFiveMinute = true;
+            if (f.cache.ttl.oneHour > 0) sawOneHour = true;
+          }
+        }
+        // Ruling 369: a compaction is counted on the row and noted on the task
+        // — the audit row and the timeline note are how a supervisor sees
+        // that the agent's context was replaced with a summary. Best-effort
+        // by construction, and never on the line's own persist path.
+        if (f.compaction) {
+          compactions += 1;
+          try {
+            noteRunCompaction(db, spec, agentName, f.compaction, line.occurredAt, opts.dataRoot);
+          } catch (error) {
+            logger.error("compaction audit failed", {
+              runId: spec.runId,
+              err: error instanceof Error ? error : new Error(String(error)),
+            });
+          }
+        }
         // Backend quota telemetry (pass 29): a rate_limit_event's reading is
         // folded into the instance-wide store so approaching exhaustion is
         // visible on /insights BEFORE a run fails on it. `recordBackendRateLimit`
@@ -561,6 +627,7 @@ export function createRunSink(
           outputTokens,
           usageFinal: usageFinal ? 1 : 0,
           totalCostUsd,
+          ...cachePatch(),
         });
 
         // 4. Publish the reference (only when a console line was produced).
@@ -588,6 +655,22 @@ export function createRunSink(
         });
         markDivergent(error);
       }
+    },
+
+    /**
+     * Ruling 369: figures learned AFTER the stream ended — a Codex run's
+     * per-call prompt sizes and compactions, which its SDK never streams and
+     * the run service reads off the rollout once the CLI has exited. Folded by
+     * max so nothing a streamed fact already established is lowered; the
+     * last prompt is the rollout's own answer when it has one.
+     */
+    foldRolloutStats(stats: { peakPromptTokens: number; lastPromptTokens: number; compactions: number }) {
+      if (stats.peakPromptTokens > peakPromptTokens) peakPromptTokens = stats.peakPromptTokens;
+      if (stats.lastPromptTokens > 0) lastPromptTokens = stats.lastPromptTokens;
+      if (stats.compactions > compactions) compactions = stats.compactions;
+      persistOrDrain(() => {
+        patchRun(db, spec.runId, cachePatch());
+      });
     },
 
     finalize(exit: RunExit, byInterrupt?: { userId: string }) {

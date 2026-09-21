@@ -9,6 +9,7 @@ import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.se
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import type { SkillPlugin } from "./skill-mount.server";
 import type { EnvelopeFacts } from "./wire-format.server";
+import type { RunPrompt } from "./prompt-prefix.server";
 
 /**
  * Common runtime-adapter interface. Each backend implements it; run-service is the only
@@ -73,9 +74,20 @@ export interface RunSpec {
   /** Whether the run should be autonomous (Claude bypassPermissions / Codex
    *  danger-full-access for coding specialists). */
   autonomous?: boolean;
-  /** Custom system prompt (operator persona + expertise skill). Claude uses
-   *  its systemPrompt option; Codex maps it to developer_instructions. */
-  systemPrompt?: string;
+  /** The run's system prompt: a static/dynamic split (ruling 370,
+   *  `PromptPrefix`) or a plain string. Claude renders the split by kind —
+   *  the operator as a `string[]` with the SDK's dynamic boundary, the
+   *  controller as a recorded custom prompt, a specialist as the preset's
+   *  static append with the dynamic tail on the first user message; Codex
+   *  joins the same text into `developer_instructions`. */
+  systemPrompt?: RunPrompt;
+  /** Ruling 371/373: what the run is told the moment its context has been
+   *  compacted — the task anchor (task.md path, branch, PR, knowledge bases)
+   *  or the controller's conversation anchor. Claude injects it through a
+   *  `SessionStart` hook on the `compact` source; Codex keeps its per-task
+   *  facts in `developer_instructions`, which survive compaction on their own,
+   *  so this is not sent there. */
+  compactAnchor?: string;
   /** MCP servers keyed by name. Portable HTTP/stdio configs work on both
    *  backends; Claude additionally supports in-process SDK servers such as the
    *  operator's `{ viberr: createSdkMcpServer(...) }`.
@@ -205,6 +217,10 @@ export const RUN_PHASE = {
   preparing: "Preparing workspace",
   starting: "Starting",
   working: "Working",
+  /** Ruling 371: the CLI is summarizing the context — a full-history model
+   *  call that took 131 s on the one stored compaction — so the strip says
+   *  what the wait is instead of showing the last tool as still running. */
+  compacting: "Compacting context",
   finishing: "Finishing",
 } as const;
 

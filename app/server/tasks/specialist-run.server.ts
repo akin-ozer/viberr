@@ -564,6 +564,14 @@ import {
   resolvedResourceInputs,
   type ResolvedResourceInputs,
 } from "~/server/runtimes/run-inputs.server";
+import {
+  joinedPrompt,
+  sortedBy,
+  sortedNames,
+  type PromptPrefix,
+  type RunPrompt,
+} from "~/server/runtimes/prompt-prefix.server";
+import { specialistCompactAnchor } from "~/server/runtimes/context-policy.server";
 
 export {
   recordRunInputs,
@@ -1813,7 +1821,20 @@ async function dispatchAgentRun(
   // A profile with no body of its own leaves the key ABSENT — the builder falls
   // back to the generic prompt, which an empty definition would not do.
   if (resolved?.definition) personaInput.definition = resolved.definition;
-  const persona = buildSpecialistPersona(personaInput);
+  // Ruling 370: the split the adapters render by backend; `persona` is the
+  // same text as one document, for the disclosure's character count.
+  const personaPrefix = buildSpecialistPromptPrefix(personaInput);
+  const persona = joinedPrompt(personaPrefix);
+  // Ruling 371: what the run is handed back after a compaction.
+  const compactAnchor = specialistCompactAnchor({
+    taskKey: input.taskKey,
+    title,
+    taskMdPath: resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)),
+    branch: existing.parsed.frontmatter.branch ?? null,
+    pr: prAnchor(existing.parsed.frontmatter.pr?.number ?? null, repo),
+    kb: sortedNames(kb),
+    rulingsKb: projectRulingsKb(input.projectSlug, ctx),
+  });
   // The refused pair joins the run-input disclosure (P19-G11) — a granted
   // browser that silently reached no run would be the silent-resource class.
   if (browser.refused) unresolvedResources.push(browser.refused);
@@ -2097,7 +2118,8 @@ async function dispatchAgentRun(
   if (input.withholdVerdict) runInput.verdictWithheld = true;
   if (!principal.ok) runInput.principalRefusal = principal.refusal;
   if (effort) runInput.effort = effort;
-  if (persona) runInput.systemPrompt = persona;
+  if (persona) runInput.systemPrompt = personaPrefix;
+  runInput.compactAnchor = compactAnchor;
   if (disallowedTools.length) runInput.disallowedTools = disallowedTools;
   if (resolvedMcps.toolDenials.length) runInput.mcpToolDenials = resolvedMcps.toolDenials;
   // The SDK's native skills filter (Claude): exactly what mounted, nothing else.
@@ -2696,8 +2718,19 @@ export interface SpecialistPersonaInput {
   unresolvedOut?: { name: string; reason: string }[];
 }
 
-/** Assemble the profile definition and attached skill/KB bodies into its persona. */
-export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
+/**
+ * Ruling 370: the persona as a static/dynamic split. Everything a profile's
+ * dispatches share — the definition, the skills, the knowledge-base indexes,
+ * the MCP governance rules, the GitHub read section — is the STATIC block, in
+ * one order with every list sorted, so two tasks of one profile produce the
+ * same bytes and Claude's preset caches it once (`excludeDynamicSections`).
+ * Everything that names this task or this run — the attachments directory,
+ * the browser section (which carries it), the servers that failed to mount or
+ * to answer their probe, the grants whose content did not arrive — is the
+ * DYNAMIC tail: the Claude adapter puts it on the first user message, Codex
+ * joins it after the static block into `developer_instructions`.
+ */
+export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): PromptPrefix {
   const parts: string[] = [];
   // F10-30: ONE persona source — the profile's own body (its `definition`).
   // The old `agents/definitions/<id>.md` override (a parallel authoring source
@@ -2706,6 +2739,11 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // now folded into the profile-template body (default-assets.server.ts).
   const definition = (input.definition ?? "").trim();
   if (definition) parts.push(definition);
+  // Ruling 370: every list rendered below is sorted first, whatever order the
+  // profile stored it in.
+  const skills = sortedNames(input.skills);
+  const kbNames = sortedNames(input.kb ?? []);
+  const mcps = sortedNames(input.mcps ?? []);
   // Collect the actually-resolvable resource bodies first, so the trusted-
   // provenance banner (F7-RES4) is emitted ONLY when there is real attached
   // content — a profile that declares resources the store doesn't ship still
@@ -2721,10 +2759,8 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // mounted is NOT injected (no double feed), whatever did not still is (no
   // silent loss). It is intersected with the declared grants so a stale mount
   // can never enable craft the profile no longer grants.
-  const native = input.skills.filter((name) =>
-    (input.nativeSkills ?? []).includes(name),
-  );
-  const injectable = input.skills.filter((name) => !native.includes(name));
+  const native = skills.filter((name) => (input.nativeSkills ?? []).includes(name));
+  const injectable = skills.filter((name) => !native.includes(name));
   if (native.length > 0) {
     // The same trusted-provenance framing the injected block carries (F7-RES4):
     // without it an agent can (and live did) read attached craft as a
@@ -2759,7 +2795,7 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // An index costs a few hundred characters whatever the folder weighs, so
   // every declared KB now names every document it holds, and the run pulls the
   // ones it needs through `read_knowledge_doc`.
-  const kbSet = readKbIndexes(input.kb ?? [], input.dataRoot, {
+  const kbSet = readKbIndexes(kbNames, input.dataRoot, {
     rulingsKb: input.rulingsKb ?? null,
   });
   const hasRulings =
@@ -2837,9 +2873,10 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // withholds repo write, those tools are removed from the run on both
   // backends, so that server leaves the paragraph and a plain statement of
   // what was removed replaces it. A server with no marks keeps the rule.
-  const gatedServers = new Set((input.mcpWriteToolsDenied ?? []).map((d) => d.server));
-  const ungatedMcps = (input.mcps ?? []).filter((name) => !gatedServers.has(name));
-  if ((input.mcps ?? []).length > 0) {
+  const writeDenials = sortedBy(input.mcpWriteToolsDenied ?? [], (d) => d.server);
+  const gatedServers = new Set(writeDenials.map((d) => d.server));
+  const ungatedMcps = mcps.filter((name) => !gatedServers.has(name));
+  if (mcps.length > 0) {
     if (ungatedMcps.length > 0) {
       parts.push(
         "\n\n---\n# MCP tools are governed too\n\n" +
@@ -2861,8 +2898,8 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
           `These attached MCP servers stay mounted: ${[...gatedServers].join(", ")}. ` +
           "Your capability policy withholds writing to the repository, so the tools on " +
           "them that an administrator marked as write tools are removed from this run: " +
-          (input.mcpWriteToolsDenied ?? [])
-            .map((d) => `${d.tools.join(", ")} (on ${d.server})`)
+          writeDenials
+            .map((d) => `${sortedNames(d.tools).join(", ")} (on ${d.server})`)
             .join("; ") +
           ". Their other tools are available to you. If your task needs a removed tool, " +
           "say so in your report.",
@@ -2890,7 +2927,7 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // workspace) because nothing in its context said the server was not there.
   // The dispatch annotates such a directive too (operatorDispatchAgent); this
   // is the run-side half, true on both backends.
-  if ((input.mcps ?? []).length === 0) {
+  if (mcps.length === 0) {
     parts.push(
       "\n\n---\n# No external MCP servers on this run\n\n" +
         "No org MCP servers are attached to this run, so there are no `mcp__*` " +
@@ -2904,18 +2941,26 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
         "workspace for it, and do not treat its absence as your own failure.",
     );
   }
+  // F4: the GitHub read section names the project's repository, which every
+  // task of the project shares — static.
+  if (input.githubRead) {
+    parts.push(githubReadPersonaSection(input.githubRead.repo));
+  }
+
+  // ------------------------------------------------ the per-run tail (dynamic)
+  const dynamic: string[] = [];
   // P14-LV-09: a granted MCP server that resolves to nothing used to be
   // announced in the prompt and mounted nowhere — silent capability loss the
   // human never saw. Live, a scout reported `vm-memory` as "referenced but
   // exposes zero callable tools", and only its own diligence surfaced it. Name
   // the gap so the agent reports it instead of claiming a tool it never had.
-  const unhealthy = input.unhealthyMcps ?? [];
+  const unhealthy = sortedNames(input.unhealthyMcps ?? []);
   if (unhealthy.length > 0) {
     // P14-LV-09b: mounted, but its last probe failed — so it may expose nothing.
     // Live, a scout granted `broken-mcp` found it named in its context with "no
     // callable tools ever surfaced for it". Mounting is still right (a probe can
     // be stale), but the prompt must not present it as working.
-    parts.push(
+    dynamic.push(
       "\n\n---\n# MCP servers that may be unavailable\n\n" +
         `${unhealthy.join(", ")} ${unhealthy.length === 1 ? "is" : "are"} attached, ` +
         `but the last connection check failed — the tools may never appear. If ` +
@@ -2923,23 +2968,23 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
     );
   }
   // Ruling 310: the reason the server itself gave, not a cause we invented.
-  const unavailable = unavailableMcpSection(input.unresolvedMcps ?? []);
-  if (unavailable) parts.push(unavailable);
+  const unavailable = unavailableMcpSection(
+    sortedBy(input.unresolvedMcps ?? [], (g) => g.name),
+  );
+  if (unavailable) dynamic.push(unavailable);
   // R19-19: the browser guardrails ride the prompt ONLY when the server
   // mounted; a granted-but-refused browser is named with its reason instead.
   // The drop section rides with the EVIDENCE grant, before the browser text:
   // it is the general mechanic (copy a file, it lands on your reply) that the
-  // browser's default-named-screenshot behavior is a special case of.
+  // browser's default-named-screenshot behavior is a special case of. Both
+  // carry the task's own attachments directory, so both are per-task.
   if (input.attachmentsDrop) {
-    parts.push(attachmentsDropSection(input.attachmentsDrop.attachmentsDir));
-  }
-  if (input.githubRead) {
-    parts.push(githubReadPersonaSection(input.githubRead.repo));
+    dynamic.push(attachmentsDropSection(input.attachmentsDrop.attachmentsDir));
   }
   if (input.browser && "attachmentsDir" in input.browser) {
-    parts.push(browserPersonaSection(input.browser.attachmentsDir, input.backend));
+    dynamic.push(browserPersonaSection(input.browser.attachmentsDir, input.backend));
   } else if (input.browser && "refusedReason" in input.browser) {
-    parts.push(
+    dynamic.push(
       "\n\n---\n# Browser not mounted\n\n" +
         `Your profile grants \`use-browser\`, but ${input.browser.refusedReason}. ` +
         "Do not claim or attempt browser tools; report the gap if the task " +
@@ -2952,7 +2997,7 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
   // `logger.warn` — so a renamed KB folder or a typo'd skill was invisible
   // everywhere while every UI still showed it attached, and the agent had no way
   // to know its granted craft/facts never arrived. Same honesty rule, same shape.
-  const missing = [...skillSet.unresolved, ...kbSet.unresolved];
+  const missing = sortedBy([...skillSet.unresolved, ...kbSet.unresolved], (m) => m.name);
   // P19-G11: the SAME list, handed to the caller for the run's input
   // disclosure. Until now this honesty reached the agent only — a human saw a
   // grant that resolved to nothing only if the agent chose to repeat it.
@@ -2962,7 +3007,7 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
     }
   }
   if (missing.length > 0) {
-    parts.push(
+    dynamic.push(
       // Ruling 253: "did NOT reach" was true of every row when only a total
       // miss could appear here. A partial now appears too, so the heading and
       // the instruction have to cover both or they misdescribe half the list.
@@ -2974,7 +3019,24 @@ export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
         "empty or incomplete so a human can fix the configuration.",
     );
   }
-  return parts.join("");
+  return { static: parts, dynamic };
+}
+
+/** The persona as one document — the static block and the dynamic tail in
+ *  order, exactly what Codex receives as `developer_instructions` and what a
+ *  test reads when it asserts on the prompt as text. */
+export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
+  return joinedPrompt(buildSpecialistPromptPrefix(input));
+}
+
+/** Ruling 371: the PR the anchor names, with its GitHub URL when the project's
+ *  repository is known (the task record keeps the number, not the link). */
+function prAnchor(
+  number: number | null,
+  repo: string | null,
+): { number: number; url: string | null } | null {
+  if (number === null) return null;
+  return { number, url: repo ? `https://github.com/${repo}/pull/${number}` : null };
 }
 
 // readKbBody now lives in ~/server/files/kb-injection.server (shared with the
@@ -3429,7 +3491,10 @@ export interface ResumeConfinement {
   mcpToolDenials?: McpToolDenial[];
   env: Record<string, string>;
   mcpServers?: RunMcpServers;
-  systemPrompt?: string;
+  /** Ruling 370: the persona as its static/dynamic split. */
+  systemPrompt?: RunPrompt;
+  /** Ruling 371: the compaction anchor, re-derived like the rest. */
+  compactAnchor?: string;
   /** The granted skills re-mounted beside the surviving workspace (Claude). */
   skills?: string[];
   /** Ruling 180: the resumed run's own plugin directory carrying `skills`. */
@@ -3616,8 +3681,19 @@ export async function resolveResumeConfinement(
     // Same rule as the fresh run: a profile with no body of its own leaves the
     // key ABSENT so the builder falls back to the generic prompt.
     if (resolved.definition) personaInput.definition = resolved.definition;
-    const persona = buildSpecialistPersona(personaInput);
+    const personaPrefix = buildSpecialistPromptPrefix(personaInput);
+    const persona = joinedPrompt(personaPrefix);
     if (resumeBrowser.refused) resumeUnresolved.push(resumeBrowser.refused);
+    // Ruling 371: the same anchor the fresh run carries (XS-1 parity).
+    const compactAnchor = specialistCompactAnchor({
+      taskKey: input.taskKey,
+      title: resumeTask?.parsed.frontmatter.title ?? input.taskKey,
+      taskMdPath: resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)),
+      branch: resumeTask?.parsed.frontmatter.branch ?? null,
+      pr: prAnchor(resumeTask?.parsed.frontmatter.pr?.number ?? null, resumeRepo),
+      kb: sortedNames(kb),
+      rulingsKb: projectRulingsKb(input.projectSlug, ctx),
+    });
     // Same collaboration transport the fresh-run path mounts (XS-1 / F7 parity):
     // the in-process toolkit on Claude, the outcome-envelope outputSchema on
     // Codex. Both key off the SAME collaboration grants the fresh run resolves
@@ -3702,7 +3778,8 @@ export async function resolveResumeConfinement(
     // spreads the result into the resume spec, where an ABSENT key means "keep
     // the adapter's default" and a present-but-undefined one would not.
     if (Object.keys(merged).length) confinement.mcpServers = merged;
-    if (persona) confinement.systemPrompt = persona;
+    if (persona) confinement.systemPrompt = personaPrefix;
+    confinement.compactAnchor = compactAnchor;
     if (skillMount.mounted.length) confinement.skills = skillMount.mounted;
     if (skillMount.plugin) confinement.skillPlugin = skillMount.plugin;
     if (outcomeKey) confinement.outcomeKey = outcomeKey;

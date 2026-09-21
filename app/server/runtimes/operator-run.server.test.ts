@@ -1,3 +1,4 @@
+import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { execFile } from "node:child_process";
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -942,7 +943,7 @@ describe("Codex structured operator completion", () => {
     });
     // …and the operator is told which servers it holds, so it can report them
     // honestly instead of guessing (P14-LV-11).
-    expect(adapter.pending!.spec.systemPrompt).toContain(
+    expect(joinedPrompt(adapter.pending!.spec.systemPrompt ?? "")).toContain(
       "Attached MCP servers: ops-readonly.",
     );
   });
@@ -1073,7 +1074,7 @@ describe("Codex structured operator completion", () => {
   // echoed the premise in the task goal.
   it("tells the operator which backend and model it is actually running on", async () => {
     await start();
-    const systemPrompt = adapter.pending!.spec.systemPrompt ?? "";
+    const systemPrompt = joinedPrompt(adapter.pending!.spec.systemPrompt ?? "");
     expect(systemPrompt).toContain("# Your runtime");
     expect(systemPrompt).toContain("You are running on the **Codex** backend");
     expect(systemPrompt).toContain(defaultModelFor("codex"));
@@ -1087,7 +1088,7 @@ describe("Codex structured operator completion", () => {
   // metadata-propagation test in operator-actions.server.test.
   it("R26-1: the system prompt carries the advisory Triage-signals note", async () => {
     await start();
-    const systemPrompt = adapter.pending!.spec.systemPrompt ?? "";
+    const systemPrompt = joinedPrompt(adapter.pending!.spec.systemPrompt ?? "");
     expect(systemPrompt).toContain("# Triage signals (advisory)");
     expect(systemPrompt).toContain("`priority`");
     expect(systemPrompt).toContain("`dueDate`");
@@ -3995,7 +3996,7 @@ describe("runOperator — authority, ordering, orphans", () => {
     seed("impl");
 
     await drive({ trigger: "manual" });
-    const systemPrompt = adapter5.pending!.spec.systemPrompt ?? "";
+    const systemPrompt = joinedPrompt(adapter5.pending!.spec.systemPrompt ?? "");
     expect(systemPrompt).not.toContain("Attached MCP servers: ghost-mcp");
     expect(systemPrompt).toContain("No MCP servers are attached to you.");
     expect(systemPrompt).toContain("Unavailable MCP servers");
@@ -4317,7 +4318,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
   const workspaceRoot = () =>
     path.join(store7.dataRoot, "projects", store7.slug, "tasks", "VIB-1", "workspace");
   const checkoutDir = () => path.join(workspaceRoot(), "widgets");
-  const systemPrompt = () => adapter7.pending?.spec.systemPrompt ?? "";
+  const systemPrompt = () => joinedPrompt(adapter7.pending?.spec.systemPrompt ?? "");
 
   /**
    * A local origin for `acme/widgets` (test-support/git-origin.ts), carrying
@@ -4466,7 +4467,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     // names the checkout by ABSOLUTE path, not the cwd-relative `./workspace/…/`.
     expect(spec.workdir ?? "").toContain(".operator-scratch");
     expect(spec.workdir ?? "").not.toContain(path.join("workspace", "widgets"));
-    const p = spec.systemPrompt ?? "";
+    const p = joinedPrompt(spec.systemPrompt ?? "");
     expect(p).toContain("separate, empty scratch folder");
     expect(p).toContain(checkoutDir());
     expect(p).not.toContain("`./workspace/widgets/`");
@@ -4700,9 +4701,9 @@ describe("R19-1 — the operator's read-only repository view", () => {
 
       const spec = adapter7.pending!.spec;
       // The prompt does not claim it, and says why.
-      expect(spec.systemPrompt ?? "").not.toContain("Attached MCP servers: dead-mcp");
-      expect(spec.systemPrompt ?? "").toContain("Unavailable MCP servers");
-      expect(spec.systemPrompt ?? "").toContain("dead-mcp");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).not.toContain("Attached MCP servers: dead-mcp");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).toContain("Unavailable MCP servers");
+      expect(joinedPrompt(spec.systemPrompt ?? "")).toContain("dead-mcp");
       // …and the toolkit did not mount it either: the prompt and the mount are
       // built from ONE resolution, so they cannot disagree.
       expect(Object.keys(spec.mcpServers ?? {})).toEqual(["viberr"]);

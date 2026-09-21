@@ -9,6 +9,8 @@ import {
   locateTranscript,
   probeSessionContinuity,
   transcriptExists,
+  codexRolloutRunStats,
+  sessionContextTokens,
 } from "./session-export.server";
 import { userBackendHome } from "./user-homes.server";
 
@@ -332,5 +334,73 @@ describe("buildResumeScript", () => {
     expect(body).toContain(`ORIG_NAME="${origName}"`);
     expect(body).toContain("codex resume $SID");
     expect(body).toContain("sessions/imported");
+  });
+});
+
+/**
+ * Rulings 369 and 372: the size a resume would replay, read off the provider's
+ * own transcript, and a Codex run's per-call figures read off its rollout.
+ */
+describe("sessionContextTokens and codexRolloutRunStats", () => {
+  const usage = (input: number, write: number, read: number) => ({
+    input_tokens: input,
+    cache_creation_input_tokens: write,
+    cache_read_input_tokens: read,
+  });
+
+  it("claude: the LAST main-loop assistant line's whole prompt; a sidechain line after it does not count", () => {
+    const sid = "0f0f0f0f-aaaa-4bbb-8ccc-000000000001";
+    writeClaudeSession(sid, "/w/x", [
+      { type: "user", message: { role: "user", content: "go" } },
+      { type: "assistant", isSidechain: false, message: { usage: usage(2, 100, 0) } },
+      { type: "assistant", isSidechain: false, message: { usage: usage(2, 500, 180_000) } },
+      // A subagent's line lands last in the file and is not the session's context.
+      { type: "assistant", isSidechain: true, message: { usage: usage(2, 5, 5) } },
+    ]);
+    expect(sessionContextTokens("claude", OWNER, sid)).toBe(180_502);
+  });
+
+  it("claude: null with no transcript, no usage, or no principal", () => {
+    const sid = "0f0f0f0f-aaaa-4bbb-8ccc-000000000002";
+    expect(sessionContextTokens("claude", OWNER, sid)).toBeNull();
+    writeClaudeSession(sid, "/w/x", [{ type: "user", message: { role: "user", content: "go" } }]);
+    expect(sessionContextTokens("claude", OWNER, sid)).toBeNull();
+    expect(sessionContextTokens("claude", null, sid)).toBeNull();
+  });
+
+  it("codex: the rollout's last token_count carries the last call's prompt; the run window bounds the stats", () => {
+    const sid = "01a0a30a-e256-7c91-b8da-6093b9f8424c";
+    const dir = codexDir("15");
+    const line = (ts: string, input: number, type = "token_count") =>
+      JSON.stringify({
+        timestamp: ts,
+        type: "event_msg",
+        payload:
+          type === "token_count"
+            ? { type, info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0 } } }
+            : { type },
+      });
+    writeFileSync(
+      path.join(dir, `rollout-2026-07-15T03-09-54-${sid}.jsonl`),
+      [
+        JSON.stringify({ timestamp: "2026-07-15T03:09:54.000Z", type: "session_meta", payload: { id: sid } }),
+        line("2026-07-15T03:10:00.000Z", 21_825),
+        line("2026-07-15T03:10:30.000Z", 44_000),
+        // A second run on the same thread, an hour later.
+        line("2026-07-15T04:10:00.000Z", 50_000),
+        line("2026-07-15T04:10:05.000Z", 0, "context_compacted"),
+        line("2026-07-15T04:11:00.000Z", 12_000),
+      ].join("\n") + "\n",
+    );
+    expect(sessionContextTokens("codex", OWNER, sid)).toBe(12_000);
+    expect(codexRolloutRunStats(OWNER, sid, "2026-07-15T04:00:00.000Z")).toEqual({
+      peakPromptTokens: 50_000,
+      lastPromptTokens: 12_000,
+      compactions: 1,
+      calls: 2,
+    });
+    // The whole thread, when the caller has no start instant.
+    expect(codexRolloutRunStats(OWNER, sid, null)).toMatchObject({ peakPromptTokens: 50_000, calls: 4 });
+    expect(codexRolloutRunStats(OWNER, "0000-missing", null)).toBeNull();
   });
 });

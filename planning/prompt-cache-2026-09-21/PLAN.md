@@ -6,6 +6,8 @@ Two corrections to the research note, found while pinning versions: viberr's sto
 
 ## 0. What the numbers say the money is
 
+> **Implemented 2026-09-21 as rulings 369–374** (one change, not the seven PRs below; the owner asked for the whole of it end to end). Deviations from this plan, each with its reason: the resume policy (PR 3) reads the LAST call's prompt (`last_prompt_tokens`, else the provider transcript) rather than the peak — a run that compacted at 250k and finished at 20k replays 20k, and refusing it would discard the summary compaction just built; the run row also stores `last_prompt_tokens` and `credential_kind` (the TTL follows the kind the run billed, not the person's current row); a set-aside session is stamped `run·session_stale` (a meta line) rather than `session_missing`, so `latestSessionRun` does not skip a live session and no classifier reads a decision as a fault; Codex per-call figures come off the rollout at finalize because the SDK streams turn totals only; the controller's authority tiers stay beside its ceiling sentence (ruling 309) in the dynamic tail rather than moving to the static block; PR 7's owner decision is recorded as ruling 374 (automatic TTL, nothing forced). The re-measured baseline and its corrections are in `RESEARCH.md` (§1 note).
+
 | kind | first-call cold | avg first-call write | cache reads / run | peak prompt (median · p90 · max) |
 |---|---|---|---|---|
 | operator (247) | 2% | 4.4k | 609k | 48k · 59k · 97k |

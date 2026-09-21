@@ -47,7 +47,13 @@ import {
 } from "./runs-helpers";
 import { localLogClock } from "./log-clock";
 import { collapseTelemetry, telemetryLabel } from "./log-noise";
-import { isRunBoundary, isRunInputsLine, type LogLine, type RunView } from "./runtime-types";
+import {
+  isRunBoundary,
+  isRunInputsLine,
+  type LogLine,
+  type RunCacheView,
+  type RunView,
+} from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 /**
@@ -352,12 +358,15 @@ export function LiveRunPanel({
             ) : run.tokensEstimated ? (
               <div
                 className="val mono"
-                title="Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one"
+                title={withCacheTitle(
+                  "Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one",
+                  run.cache,
+                )}
               >
                 <TokenCount n={run.tokens} estimated />
               </div>
             ) : (
-              <div className="val mono">
+              <div className="val mono" title={withCacheTitle(null, run.cache)}>
                 <TokenCount n={run.tokens} estimated={false} />
               </div>
             )}
@@ -390,6 +399,113 @@ export function LiveRunPanel({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Ruling 369: the strip's Tokens cell says on hover how much of the prompt
+ * the cache wrote and read, beside the estimate sentence when there is one.
+ * Nothing is claimed for a run that has reported no cache figure yet.
+ */
+function withCacheTitle(base: string | null, cache: RunCacheView): string | undefined {
+  const line =
+    cache.writeTokens > 0 || cache.readTokens > 0
+      ? `Prompt cache: wrote ${fmtTok(cache.writeTokens)} · read ${fmtTok(cache.readTokens)}`
+      : null;
+  if (base && line) return `${base}\n${line}`;
+  return base ?? line ?? undefined;
+}
+
+/** The provider's miss reason, as the chip prints it. */
+function missLabel(reason: string): string {
+  return reason.replace(/_/g, " ");
+}
+
+/**
+ * Ruling 369: the console's record of what the prompt cache did for the run —
+ * the first call's temperature and figures (with the provider's miss reason
+ * when it sent one), the TTL bucket, the run's writes and reads, the peak
+ * prompt and the compactions. Every chip carries its figure on a `data-`
+ * attribute, so the DOM reads without the words. A run that has reported
+ * nothing says so instead of printing zeros as facts.
+ */
+function RunFactsRow({ run }: { run: RunView }) {
+  const c = run.cache;
+  const first = c.firstCall;
+  const reported = first !== null || c.writeTokens > 0 || c.readTokens > 0 || c.peakPromptTokens > 0;
+  return (
+    <div className="run-facts" data-comment-anchor="run-facts">
+      {first ? (
+        <Pill kind={first.warm ? "done" : "input"} sm quiet dot>
+          <span
+            data-start={first.warm ? "warm" : "cold"}
+            data-first-write={first.write}
+            data-first-read={first.read}
+            title={`First model call: prompt ${fmtTok(first.promptTokens)} · wrote ${fmtTok(first.write)} into the cache · read ${fmtTok(first.read)} from it. Warm means it read more than it wrote.`}
+          >
+            {first.warm ? "warm start" : "cold start"} ·{" "}
+            {first.warm ? `read ${fmtTok(first.read)}` : `wrote ${fmtTok(first.write)}`}
+          </span>
+        </Pill>
+      ) : (
+        <Pill kind="neutral" sm quiet>
+          <span data-start="none" title="No model call has reported its prompt figures yet">
+            {reported ? "first call not recorded" : "no first call yet"}
+          </span>
+        </Pill>
+      )}
+      {first?.missReason ? (
+        <Pill kind="neutral" sm quiet>
+          <span data-miss={first.missReason} title="The provider's own reason the first call missed the cache">
+            miss: {missLabel(first.missReason)}
+          </span>
+        </Pill>
+      ) : null}
+      {c.ttlBucket ? (
+        <Pill kind="neutral" sm quiet>
+          <span
+            data-ttl={c.ttlBucket}
+            title={
+              c.ttlBucket === "mixed"
+                ? "Cache writes were billed under both the 5-minute and the 1-hour lifetime"
+                : `Cache writes were billed under the ${c.ttlBucket === "1h" ? "1-hour" : "5-minute"} lifetime`
+            }
+          >
+            cache {c.ttlBucket}
+          </span>
+        </Pill>
+      ) : null}
+      {reported ? (
+        <Pill kind="neutral" sm quiet>
+          <span
+            data-write={c.writeTokens}
+            data-read={c.readTokens}
+            title="Over the whole run: tokens written into the prompt cache, and tokens read back from it"
+          >
+            wrote {fmtTok(c.writeTokens)} · read {fmtTok(c.readTokens)}
+          </span>
+        </Pill>
+      ) : null}
+      {c.peakPromptTokens > 0 ? (
+        <Pill kind="neutral" sm quiet>
+          <span
+            data-peak={c.peakPromptTokens}
+            data-last={c.lastPromptTokens}
+            title={`The largest prompt one call carried. The last call's prompt, ${fmtTok(c.lastPromptTokens)}, is what a resume would replay`}
+          >
+            peak prompt {fmtTok(c.peakPromptTokens)}
+          </span>
+        </Pill>
+      ) : null}
+      <Pill kind={c.compactions > 0 ? "info" : "neutral"} sm quiet>
+        <span
+          data-compactions={c.compactions}
+          title="Times the provider replaced the conversation with a summary. The persona and knowledge-base indexes survive; tool output before the boundary does not"
+        >
+          {c.compactions} compaction{c.compactions === 1 ? "" : "s"}
+        </span>
+      </Pill>
     </div>
   );
 }
@@ -1076,6 +1192,9 @@ export function AgentLogsPanel({
           follow
         </button>
       </div>
+
+      {/* Ruling 369: what the prompt cache did for this run, above the stream. */}
+      <RunFactsRow run={cur!} />
 
       <div
         className="console"

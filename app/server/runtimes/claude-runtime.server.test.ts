@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { resetEnvCacheForTests } from "../config/env.server";
-import type { EmittedLine, RunExit, RunSpec } from "./adapter.server";
+import { RUN_PHASE, type EmittedLine, type RunExit, type RunSpec } from "./adapter.server";
 import {
   createClaudeAdapter,
   INTERRUPT_ABORT_GRACE_MS,
@@ -706,9 +706,10 @@ describe("claude adapter (SDK, injected fake query)", () => {
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
+    // Ruling 370: in name order, whatever order the caller listed them.
     expect(captured?.allowedTools).toEqual([
-      "mcp__viberr_agent",
       "mcp__everything__echo",
+      "mcp__viberr_agent",
     ]);
     expect(captured).not.toHaveProperty("tools");
   });
@@ -1728,7 +1729,7 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
   }
 
   const hookOf = (options: ClaudeQueryOptions): ClaudePreToolUseHook | undefined =>
-    options.hooks?.PreToolUse.find((m) => m.matcher === "Bash")?.hooks[0];
+    options.hooks?.PreToolUse?.find((m) => m.matcher === "Bash")?.hooks[0];
 
   const bash = (hook: ClaudePreToolUseHook, command: string) =>
     hook({ hook_event_name: "PreToolUse", tool_input: { command } }, "toolu_1", {
@@ -1738,9 +1739,11 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
   it("is installed only on a run with argument-level denies whose Bash is not denied outright", async () => {
     // Canary: drop the `bashPrefixes.length` guard and the plain run grows a hook.
     expect(hookOf((await started({ ...SPEC, disallowedTools: PUSH_WITHHELD })).options)).toBeDefined();
-    expect((await started(SPEC)).options.hooks).toBeUndefined();
+    // Ruling 371: every run carries the PreCompact observer, so the absence
+    // under test is the PreToolUse matcher's, not the whole hooks map's.
+    expect((await started(SPEC)).options.hooks?.PreToolUse).toBeUndefined();
     // The operator's Bash is denied outright: nothing for a hook to add.
-    expect((await started({ ...SPEC, kind: "operator" })).options.hooks).toBeUndefined();
+    expect((await started({ ...SPEC, kind: "operator" })).options.hooks?.PreToolUse).toBeUndefined();
     // A supporting run carries the kind-based delivery denies even with no grant denies.
     expect(hookOf((await started({ ...SPEC, kind: "reviewer" })).options)).toBeDefined();
   });
@@ -1781,5 +1784,163 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
     expect(answer.hookSpecificOutput?.permissionDecisionReason).toBe(
       "A supporting engagement never delivers: `git push` belongs to the delivering agent and Viberr's server. Say what should be delivered in your report instead.",
     );
+  });
+});
+
+/**
+ * Rulings 370, 371 and 373: how each kind's prompt reaches the SDK, what the
+ * run is handed back after a compaction, and the byte-stability of every
+ * list the adapter sends. Driven through the real adapter with a fake query,
+ * so what is asserted is exactly what the SDK was handed.
+ */
+describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)", () => {
+  const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+  const PREFIX = { static: ["# Persona\n", "# Skills\n"], dynamic: ["\n# This task\n"] };
+
+  async function sent(spec: RunSpec, messages: unknown[] = RESULT) {
+    let options: ClaudeQueryOptions = {};
+    let promptSeen = "";
+    const phases: (string | null)[] = [];
+    const lines: EmittedLine[] = [];
+    const queryFn: ClaudeQueryFn = (params) => {
+      options = params.options ?? {};
+      void (async () => {
+        const plain = z.string().safeParse(params.prompt);
+        if (plain.success) {
+          promptSeen = plain.data;
+          return;
+        }
+        // SAFETY: the adapter's only prompt shape is `singlePrompt`, an async
+        // iterable of one SDK user message; a string was ruled out just above.
+        for await (const m of params.prompt as AsyncIterable<unknown>) {
+          promptSeen = z.object({ message: z.object({ content: z.string() }) }).parse(m).message.content;
+        }
+      })();
+      return fakeQuery(messages).q;
+    };
+    createClaudeAdapter({ queryFn }).start(spec, {
+      onLine: (l) => lines.push(l),
+      onExit: () => {},
+      onPhase: (phase) => phases.push(phase),
+    });
+    await drain();
+    return { options, prompt: promptSeen, phases, lines };
+  }
+
+  it("a specialist gets the preset with the static block appended, dynamic sections excluded and the prompt recorded; the dynamic tail opens its first message", async () => {
+    const { options, prompt } = await sent({ ...SPEC, systemPrompt: PREFIX });
+    expect(options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: "# Persona\n# Skills\n",
+      excludeDynamicSections: true,
+      snapshot: true,
+    });
+    // Canary: drop `withDynamicTail` and the task section is nowhere.
+    expect(prompt).toContain("# This run's context (Viberr, this run only)");
+    expect(prompt).toContain("# This task");
+    expect(prompt.endsWith("do the thing")).toBe(true);
+    expect(prompt.indexOf("# This task")).toBeLessThan(prompt.indexOf("do the thing"));
+  });
+
+  it("a specialist with a plain-string persona keeps the same preset shape and an untouched prompt", async () => {
+    const { options, prompt } = await sent({ ...SPEC, systemPrompt: "You are the Developer." });
+    expect(options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: "You are the Developer.",
+      excludeDynamicSections: true,
+      snapshot: true,
+    });
+    expect(prompt).toBe("do the thing");
+  });
+
+  it("the operator gets the static block, the SDK's boundary, then the dynamic block, as a string array", async () => {
+    const { options, prompt } = await sent({ ...SPEC, kind: "operator", systemPrompt: PREFIX });
+    expect(options.systemPrompt).toEqual([
+      "# Persona\n",
+      "# Skills\n",
+      "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__",
+      "\n# This task\n",
+    ]);
+    expect(prompt).toBe("do the thing");
+    // A plain string stays a plain string: nothing invents a boundary.
+    expect((await sent({ ...SPEC, kind: "operator", systemPrompt: "op" })).options.systemPrompt).toBe("op");
+  });
+
+  it("the controller gets the same blocks as a RECORDED custom prompt", async () => {
+    const { options } = await sent({ ...SPEC, kind: "controller", systemPrompt: PREFIX });
+    expect(options.systemPrompt).toEqual({
+      type: "custom",
+      prompt: ["# Persona\n", "# Skills\n", "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__", "\n# This task\n"],
+      snapshot: true,
+    });
+  });
+
+  it("a run with an anchor carries a SessionStart hook on the compact source that hands it back", async () => {
+    const { options } = await sent({ ...SPEC, systemPrompt: PREFIX, compactAnchor: "# Context compacted\nTask VIB-1" });
+    const matcher = options.hooks?.SessionStart?.[0];
+    expect(matcher?.matcher).toBe("compact");
+    const answer = await matcher!.hooks[0]!(
+      { hook_event_name: "SessionStart", source: "compact" },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+    expect(answer).toEqual({
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "# Context compacted\nTask VIB-1" },
+    });
+    // No anchor, no hook: nothing is pinned that the caller did not write.
+    expect((await sent({ ...SPEC, systemPrompt: PREFIX })).options.hooks?.SessionStart).toBeUndefined();
+  });
+
+  it("every run carries a PreCompact observer that names the wait on the strip", async () => {
+    const { options, phases } = await sent(SPEC);
+    const hook = options.hooks?.PreCompact?.[0]?.hooks[0];
+    expect(hook).toBeDefined();
+    await hook!({ hook_event_name: "PreCompact", trigger: "auto" }, undefined, {
+      signal: new AbortController().signal,
+    });
+    expect(phases).toContain(RUN_PHASE.compacting);
+  });
+
+  it("skills, servers, the approval list and the denylist reach the SDK in name order, deduplicated", async () => {
+    const plugin = mkdtempSync(path.join(tmpdir(), "viberr-sorted-"));
+    for (const name of ["zeta", "alpha"]) {
+      mkdirSync(path.join(plugin, "skills", name), { recursive: true });
+      writeFileSync(path.join(plugin, "skills", name, "SKILL.md"), `---\nname: ${name}\n---\nbody\n`);
+    }
+    mkdirSync(path.join(plugin, ".claude-plugin"), { recursive: true });
+    writeFileSync(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "viberr" }));
+    const { options } = await sent({
+      ...SPEC,
+      skills: ["zeta", "alpha"],
+      skillPlugin: { path: plugin, name: "viberr" },
+      mcpServers: { zulu: { type: "http", url: "https://z" }, alpha: { type: "http", url: "https://a" } },
+      allowedTools: ["mcp__zulu", "mcp__alpha", "mcp__alpha"],
+      disallowedTools: ["Write", "Edit", "Write"],
+    });
+    expect(options.skills).toEqual(["viberr:alpha", "viberr:zeta"]);
+    expect(Object.keys(options.mcpServers ?? {})).toEqual(["alpha", "zulu"]);
+    expect(options.allowedTools).toEqual(["mcp__alpha", "mcp__zulu"]);
+    const denied = options.disallowedTools ?? [];
+    expect(denied).toEqual([...denied].sort());
+    expect(denied.filter((t) => t === "Write")).toHaveLength(1);
+  });
+
+  it("keeps one cache fact per API message: a message's repeat envelopes are stripped before the sink", async () => {
+    const usage = { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 900 };
+    const { lines } = await sent(SPEC, [
+      { type: "assistant", parent_tool_use_id: null, message: { id: "msg_a", content: [{ type: "text", text: "one" }], usage } },
+      { type: "assistant", parent_tool_use_id: null, message: { id: "msg_a", content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }], usage } },
+      { type: "assistant", parent_tool_use_id: null, message: { id: "msg_b", content: [{ type: "text", text: "two" }], usage } },
+      ...RESULT,
+    ]);
+    const facts = lines.filter((l) => l.facts.cache).map((l) => l.facts.cache!.messageId);
+    expect(facts).toEqual(["msg_a", "msg_b"]);
+    // …and the live prompt sum counts each message once.
+    const live = lines
+      .filter((l) => l.facts.usage?.outputEstimated)
+      .map((l) => l.facts.usage!.input_tokens);
+    expect(live.at(-1)).toBe(2 * 1002);
   });
 });

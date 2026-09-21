@@ -68,6 +68,11 @@ on failure. No secrets are needed: the unit setup file seeds synthetic ones and
 - `test-support/setup-dom.ts` polyfills `<dialog>` `show/showModal/close` and stubs
   `ResizeObserver` under jsdom.
 - No `.env` is required.
+- `harness-hermeticity.server.test.ts` pins, by name, every key Viberr ADDS to a run's child
+  env (the principal's credential and home, `VIBERR_RUN_ID`, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+  on a Claude specialist or controller run — `CONTEXT_ENV_KEYS`, rulings 371/373); a key
+  added anywhere on the run path without a line there fails the suite. Every clock the
+  resume policy reads is pinned (`nowIso`), never the wall clock (ruling 372).
 
 ### Harnesses
 

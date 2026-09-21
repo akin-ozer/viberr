@@ -43,6 +43,8 @@ import {
   RUN_MARKER_ENV,
   type ReapRunProcesses,
 } from "./run-processes.server";
+import { codexCompactionConfig } from "./context-policy.server";
+import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
@@ -212,13 +214,18 @@ function codexMcpServers(
   toolDenials: RunSpec["mcpToolDenials"] = [],
 ): CodexConfig {
   const translated: CodexConfig = {};
-  for (const [name, value] of Object.entries(servers ?? {})) {
+  // Ruling 370: servers in name order and their withheld tools sorted, so two
+  // runs of one profile hand the CLI the same argv whatever order the grants
+  // were stored in.
+  for (const [name, value] of Object.entries(sortedRecord(servers ?? {}))) {
     if (!name) continue;
     const declaration = codexMcpServerSchema.safeParse(value);
     if (!declaration.success || declaration.data === null) continue;
-    const disabledTools = toolDenials
-      .filter((denial) => denial.server === name)
-      .flatMap((denial) => denial.tools);
+    const disabledTools = sortedNames(
+      toolDenials
+        .filter((denial) => denial.server === name)
+        .flatMap((denial) => denial.tools),
+    );
 
     // F7-MCP1 credential scope: resolveSpecialistMcpServers injects the decrypted
     // token as `headers.Authorization` (HTTP) / `env.MCP_CREDENTIAL` (stdio).
@@ -426,8 +433,13 @@ function codexConfigForRun(
   };
   // The persona/expertise prompt, when the run carries one. Set after the
   // literal so it still overrides a base declaration of the same key without
-  // ever landing as an empty one.
-  if (spec.systemPrompt) config.developer_instructions = spec.systemPrompt;
+  // ever landing as an empty one. Ruling 370: a prompt split is the same text
+  // in the same order, joined — Codex has no boundary to hand it to.
+  if (spec.systemPrompt) config.developer_instructions = joinedPrompt(spec.systemPrompt);
+  // Ruling 371: a specialist's context is compacted at the shared window,
+  // with the shared summarizer prompt; a kind with no window (the operator)
+  // sets none of the three keys and keeps the CLI's own default.
+  Object.assign(config, codexCompactionConfig(spec.kind));
   return config;
 }
 

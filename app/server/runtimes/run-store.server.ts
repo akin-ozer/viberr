@@ -9,6 +9,7 @@ import type {
   RunState,
 } from "~/features/runtime/runtime-types";
 import { getDataRoot } from "~/server/files/file-store-root.server";
+import type { CredentialKind } from "./backend-credentials.server";
 
 /**
  * Run persistence: the RAW .jsonl append (canonical truth, under
@@ -87,7 +88,35 @@ export type AgentRunRow = {
    *  not read the work judges nothing — the completion pipeline closes the
    *  verdict path (envelope and prose fallback alike) for these rows. */
   no_checkout: number;
+  /** Ruling 369: the prompt-cache record, folded by the sink from the
+   *  provider's own usage figures. `cache_write_tokens` is the whole run's
+   *  cache writes; the `first_call_*` columns describe the FIRST model call
+   *  (NULL until one lands; a run that never reached the provider keeps NULL,
+   *  which no reader may print as "cold"); `first_call_warm` is 1 when that
+   *  call read more than it wrote (`startTemperature`, one rule);
+   *  `cache_ttl_bucket` is which TTL the provider billed the writes under
+   *  (`5m`, `1h`, `mixed`; NULL on Codex); `peak_prompt_tokens` is the largest
+   *  prompt any call carried and `last_prompt_tokens` the last call's — the
+   *  size a resume replays, which ruling 372 reads; `compactions` counts the
+   *  provider's context compactions. */
+  cache_write_tokens: number;
+  first_call_prompt_tokens: number | null;
+  first_call_cache_write: number | null;
+  first_call_cache_read: number | null;
+  first_call_warm: 0 | 1 | null;
+  first_call_miss_reason: string | null;
+  cache_ttl_bucket: CacheTtlBucket | null;
+  peak_prompt_tokens: number;
+  last_prompt_tokens: number;
+  compactions: number;
+  /** Ruling 369: the kind of credential the run billed at start, which decides
+   *  the cache TTL the resume policy assumes (ruling 372). NULL on a refused
+   *  run and on rows written before the column existed. */
+  credential_kind: CredentialKind | null;
 };
+
+/** Ruling 369: which prompt-cache TTL the provider billed a run's writes under. */
+export type CacheTtlBucket = "5m" | "1h" | "mixed";
 
 export interface InsertRunInput {
   id: string;
@@ -126,6 +155,10 @@ export interface InsertRunInput {
   /** Ruling 316: this run was dispatched with its verdict channel withheld, so
    *  a reply carrying no envelope verdict is an ANSWER, not silence to repair. */
   verdictWithheld?: boolean;
+  /** Ruling 369: the kind of credential the run bills (see
+   *  `AgentRunRow.credential_kind`). Omitted (a refused run, a fixture) stores
+   *  NULL. */
+  credentialKind?: CredentialKind | null;
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
@@ -138,6 +171,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, interrupted_reason, credential_user_id, verdict_withheld,
+        credential_kind,
         created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
@@ -145,6 +179,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
         @interruptedBy, @interruptedReason, @credentialUserId, @verdictWithheld,
+        @credentialKind,
         @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
@@ -161,6 +196,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         interrupted_reason=excluded.interrupted_reason,
         credential_user_id=excluded.credential_user_id,
         verdict_withheld=excluded.verdict_withheld,
+        credential_kind=excluded.credential_kind,
         updated_at=excluded.updated_at`,
   ).run({
     id: input.id,
@@ -189,6 +225,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     interruptedReason: input.interruptedReason ?? null,
     credentialUserId: input.credentialUserId ?? null,
     verdictWithheld: input.verdictWithheld ? 1 : 0,
+    credentialKind: input.credentialKind ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -234,6 +271,20 @@ export interface RunPatch {
    *  `AgentRunRow.no_checkout`). Patched at completion registration, like
    *  `outcomeKey`, so boot recovery re-reads it from the row after a restart. */
   noCheckout?: 0 | 1;
+  /** Ruling 369: the prompt-cache record (see `AgentRunRow`), patched by the
+   *  sink as the run streams. */
+  cacheWriteTokens?: number;
+  firstCallPromptTokens?: number | null;
+  firstCallCacheWrite?: number | null;
+  firstCallCacheRead?: number | null;
+  firstCallWarm?: 0 | 1 | null;
+  firstCallMissReason?: string | null;
+  cacheTtlBucket?: CacheTtlBucket | null;
+  peakPromptTokens?: number;
+  lastPromptTokens?: number;
+  compactions?: number;
+  /** Ruling 369: patchable so the start path can stamp it on a reserved row. */
+  credentialKind?: CredentialKind | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -265,6 +316,17 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     // dispatch creates without driving the whole dispatch.
     verdictWithheld: ["verdict_withheld", patch.verdictWithheld === undefined ? undefined : patch.verdictWithheld ? 1 : 0],
     noCheckout: ["no_checkout", patch.noCheckout],
+    cacheWriteTokens: ["cache_write_tokens", patch.cacheWriteTokens],
+    firstCallPromptTokens: ["first_call_prompt_tokens", patch.firstCallPromptTokens],
+    firstCallCacheWrite: ["first_call_cache_write", patch.firstCallCacheWrite],
+    firstCallCacheRead: ["first_call_cache_read", patch.firstCallCacheRead],
+    firstCallWarm: ["first_call_warm", patch.firstCallWarm],
+    firstCallMissReason: ["first_call_miss_reason", patch.firstCallMissReason],
+    cacheTtlBucket: ["cache_ttl_bucket", patch.cacheTtlBucket],
+    peakPromptTokens: ["peak_prompt_tokens", patch.peakPromptTokens],
+    lastPromptTokens: ["last_prompt_tokens", patch.lastPromptTokens],
+    compactions: ["compactions", patch.compactions],
+    credentialKind: ["credential_kind", patch.credentialKind],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

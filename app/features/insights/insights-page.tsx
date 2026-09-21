@@ -1,5 +1,7 @@
 import type {
   Breakdown,
+  CacheRow,
+  CacheSummary,
   OversightSummary,
   InsightsSummary,
 } from "~/server/insights/insights-query.server";
@@ -145,6 +147,8 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
           </div>
 
           <DailyChart summary={summary} />
+
+          <CachePanel cache={summary.cache} />
 
           <OversightCards oversight={summary.oversight} />
 
@@ -629,6 +633,89 @@ function StatCard({
       )}
     </div>
   );
+}
+
+/**
+ * Ruling 369: the prompt-cache record, by run kind and by credential kind —
+ * the warm-start rate over the runs that have a first call, the write/read
+ * ratio, the first calls that wrote more than the large-write line, and how
+ * many runs' writes were billed under each cache lifetime. Every figure is on
+ * a `data-` attribute so the DOM reads without the words; a rate with no
+ * first call behind it prints "n/a", never 0%.
+ */
+function CachePanel({ cache }: { cache: CacheSummary }) {
+  const rows = (group: string, list: CacheRow[]) => (
+    <>
+      <tr className="group">
+        <td colSpan={7}>{group}</td>
+      </tr>
+      {list.map((r) => (
+        <tr key={`${group}:${r.label}`} data-cache-row={`${group}:${r.label}`}>
+          <td>{r.label}</td>
+          <td data-runs={r.runs}>{fmtCount(r.runs)}</td>
+          <td
+            data-warm-rate={r.warmRate === null ? "" : r.warmRate}
+            className={r.warmRate === null ? "na" : undefined}
+            title={`${fmtCount(r.warmStarts)} of ${fmtCount(r.firstCalls)} first calls read more than they wrote`}
+          >
+            {r.warmRate === null ? "n/a" : fmtPercent(r.warmRate)}
+          </td>
+          <td data-write={r.writeTokens}>{fmtTokens(r.writeTokens)}</td>
+          <td data-read={r.readTokens}>{fmtTokens(r.readTokens)}</td>
+          <td
+            data-write-read={r.writeReadRatio === null ? "" : r.writeReadRatio}
+            className={r.writeReadRatio === null ? "na" : undefined}
+          >
+            {r.writeReadRatio === null ? "n/a" : r.writeReadRatio.toFixed(3)}
+          </td>
+          <td data-large={r.largeFirstWrites}>{fmtCount(r.largeFirstWrites)}</td>
+          <td data-ttl-5m={r.ttl.fiveMinute} data-ttl-1h={r.ttl.oneHour} data-ttl-mixed={r.ttl.mixed}>
+            {ttlLabel(r)}
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+  return (
+    <section className="panel" data-comment-anchor="prompt-cache">
+      <div className="panel-head">
+        <h2>Prompt cache</h2>
+      </div>
+      <p className="fine">
+        What the provider's prompt cache did for the runs on this instance: a warm start read more
+        than it wrote on its first model call; the ratio is tokens written over tokens read; a
+        large first write is one above {fmtTokens(cache.largeWriteTokens)}, the whole-history
+        replay a stale resume causes. The lifetime column is how many runs' writes were billed
+        under each cache TTL (Claude reports it; Codex does not).
+      </p>
+      <table className="cache-table">
+        <thead>
+          <tr>
+            <th>group</th>
+            <th>runs</th>
+            <th>warm starts</th>
+            <th>written</th>
+            <th>read</th>
+            <th>write / read</th>
+            <th>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</th>
+            <th>lifetime</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows("by run kind", cache.byKind)}
+          {rows("by credential kind", cache.byCredentialKind)}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function ttlLabel(r: CacheRow): string {
+  const parts: string[] = [];
+  if (r.ttl.oneHour) parts.push(`${fmtCount(r.ttl.oneHour)} × 1h`);
+  if (r.ttl.fiveMinute) parts.push(`${fmtCount(r.ttl.fiveMinute)} × 5m`);
+  if (r.ttl.mixed) parts.push(`${fmtCount(r.ttl.mixed)} mixed`);
+  return parts.length ? parts.join(" · ") : "not reported";
 }
 
 /** `PROJ/KEY` → the task page. The query hands back the pair precisely so the

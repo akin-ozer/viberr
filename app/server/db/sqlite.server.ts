@@ -422,6 +422,24 @@ const BASELINE_COLUMNS: readonly {
         name: "verdict_withheld",
         ddl: "verdict_withheld INTEGER NOT NULL DEFAULT 0",
       },
+      // Ruling 369: the prompt-cache columns the sink folds on every persisted
+      // line, so a root that predates them would fail every run's first line.
+      // No backfill on any of them: a row written before the columns existed
+      // carries no first-call figure (NULL says so), wrote no counted cache
+      // tokens, holds no peak and compacted nothing THAT WAS RECORDED — and
+      // the console prints each absence as an absence. `credential_kind` stays
+      // NULL too; the resume policy reads an unknown kind as a sign-in.
+      { name: "cache_write_tokens", ddl: "cache_write_tokens INTEGER NOT NULL DEFAULT 0" },
+      { name: "first_call_prompt_tokens", ddl: "first_call_prompt_tokens INTEGER" },
+      { name: "first_call_cache_write", ddl: "first_call_cache_write INTEGER" },
+      { name: "first_call_cache_read", ddl: "first_call_cache_read INTEGER" },
+      { name: "first_call_warm", ddl: "first_call_warm INTEGER" },
+      { name: "first_call_miss_reason", ddl: "first_call_miss_reason TEXT" },
+      { name: "cache_ttl_bucket", ddl: "cache_ttl_bucket TEXT" },
+      { name: "peak_prompt_tokens", ddl: "peak_prompt_tokens INTEGER NOT NULL DEFAULT 0" },
+      { name: "last_prompt_tokens", ddl: "last_prompt_tokens INTEGER NOT NULL DEFAULT 0" },
+      { name: "compactions", ddl: "compactions INTEGER NOT NULL DEFAULT 0" },
+      { name: "credential_kind", ddl: "credential_kind TEXT" },
     ],
   },
   {

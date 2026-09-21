@@ -8,6 +8,7 @@ import {
   type RunInputs,
   type RunView,
 } from "./runtime-types";
+import { NO_RUN_CACHE } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
 
 /** Ruling 366(f): the footer's total counts up to its figure, so a test reads
@@ -25,7 +26,7 @@ function mkRun(patch: Partial<RunView>): RunView {
     backend: "claude", sdk: "Claude Agent SDK", model: "claude-sonnet-4-5",
     exportable: false, sid: "51d8f0e2-3a7b", state: "running", lifecycle: "running", interruptedBy: null,
     phase: "Running validation sweep", step: "Bash · npm test", startedAt: new Date(Date.now() - 402_000).toISOString(),
-    finished: null, turns: 0, tokens: 0, tokensEstimated: false,
+    finished: null, turns: 0, tokens: 0, tokensEstimated: false, cache: NO_RUN_CACHE,
     lines: [{ t: "1", ev: "init", tag: "system·init", text: "session x" }],
     raw: ['{"type":"system","subtype":"init","session_id":"51d8f0e2"}'], lineCount: 1,
     logWindow: { totalLines: 1, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 0 },
@@ -1430,5 +1431,105 @@ describe("the wait row's live count (ruling 366(e))", () => {
     fireEvent.click(getByText("{ } raw"));
     expect(container.querySelector("button.log-more")).toBeNull();
     expect(container.textContent).not.toContain("# Run the suite");
+  });
+});
+
+/**
+ * Ruling 369: the console's facts row carries the run's cache record on
+ * `data-` attributes (the DOM reads without the words), and the strip's Tokens
+ * cell says on hover what the cache wrote and read.
+ */
+describe("the console's prompt-cache facts (ruling 369)", () => {
+  const facts = (run: RunView) => {
+    const { container, unmount } = render(
+      <AgentLogsPanel runtime={[run]} sel={run.id} onSel={() => {}} linesByThread={{}} />,
+    );
+    const row = container.querySelector<HTMLElement>(".run-facts")!;
+    const read = (attr: string) => row.querySelector<HTMLElement>(`[${attr}]`)?.getAttribute(attr) ?? null;
+    const out = {
+      start: read("data-start"),
+      firstWrite: read("data-first-write"),
+      firstRead: read("data-first-read"),
+      miss: read("data-miss"),
+      ttl: read("data-ttl"),
+      write: read("data-write"),
+      read: read("data-read"),
+      peak: read("data-peak"),
+      last: read("data-last"),
+      compactions: read("data-compactions"),
+      text: row.textContent,
+    };
+    unmount();
+    return out;
+  };
+
+  it("a cold first call with a miss reason, the TTL, the totals, the peak and the compactions", () => {
+    const out = facts(
+      mkRun({
+        cache: {
+          writeTokens: 120_800,
+          readTokens: 6_100_000,
+          firstCall: { promptTokens: 298_000, write: 297_600, read: 14_900, warm: false, missReason: "messages_changed" },
+          ttlBucket: "1h",
+          peakPromptTokens: 344_000,
+          lastPromptTokens: 12_000,
+          compactions: 1,
+        },
+      }),
+    );
+    expect(out).toMatchObject({
+      start: "cold",
+      firstWrite: "297600",
+      firstRead: "14900",
+      miss: "messages_changed",
+      ttl: "1h",
+      write: "120800",
+      read: "6100000",
+      peak: "344000",
+      last: "12000",
+      compactions: "1",
+    });
+    expect(out.text).toContain("cold start · wrote 298k");
+    expect(out.text).toContain("miss: messages changed");
+    expect(out.text).toContain("cache 1h");
+    expect(out.text).toContain("peak prompt 344k");
+    expect(out.text).toContain("1 compaction");
+  });
+
+  it("a warm first call reads its figure; a run with no first call says so instead of zeros", () => {
+    const warm = facts(
+      mkRun({
+        cache: { ...NO_RUN_CACHE, writeTokens: 4_200, readTokens: 47_900, firstCall: { promptTokens: 52_102, write: 4_200, read: 47_900, warm: true, missReason: null } },
+      }),
+    );
+    expect(warm.start).toBe("warm");
+    expect(warm.text).toContain("warm start · read 47.9k");
+    expect(warm.miss).toBeNull();
+    expect(warm.ttl).toBeNull();
+    const none = facts(mkRun({ cache: NO_RUN_CACHE }));
+    expect(none.start).toBe("none");
+    expect(none.text).toContain("no first call yet");
+    expect(none.write).toBeNull();
+    expect(none.peak).toBeNull();
+    expect(none.compactions).toBe("0");
+  });
+
+  it("the strip's Tokens cell carries the cache writes and reads on hover, beside the estimate sentence", () => {
+    const title = (run: RunView) => {
+      const { container, unmount } = render(
+        <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+      );
+      const cell = [...container.querySelectorAll(".run-cell")].find((c) => c.querySelector(".lbl")?.textContent === "Tokens")!;
+      const out = cell.querySelector<HTMLElement>(".val")!.getAttribute("title");
+      unmount();
+      return out;
+    };
+    const cache = { ...NO_RUN_CACHE, writeTokens: 4_200, readTokens: 47_900 };
+    expect(title(mkRun({ tokens: 52_000, tokensEstimated: false, cache }))).toBe("Prompt cache: wrote 4.2k · read 47.9k");
+    expect(title(mkRun({ tokens: 52_000, tokensEstimated: true, cache }))).toBe(
+      "Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one\nPrompt cache: wrote 4.2k · read 47.9k",
+    );
+    // Nothing reported: nothing claimed (the existing test pins the null).
+    expect(title(mkRun({ tokens: 1500, tokensEstimated: false, cache: NO_RUN_CACHE }))).toBeNull();
   });
 });

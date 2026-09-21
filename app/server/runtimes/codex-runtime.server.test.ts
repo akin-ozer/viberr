@@ -1887,3 +1887,62 @@ describe("codex run marker and settle sweep (ruling 174)", () => {
     expect(reaped).toEqual([]);
   });
 });
+
+/**
+ * Rulings 370 and 371 on the Codex side: the prompt split joins into
+ * `developer_instructions` in the same order, a specialist's config carries
+ * the compaction window with the shared summarizer prompt (and the operator's
+ * does not), and the server table reaches the CLI in name order.
+ */
+describe("ruling 370/371: the joined prompt, the compaction keys and sorted servers", () => {
+  it("joins a prompt split into developer_instructions and sets the specialist's compaction keys", async () => {
+    const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      { ...SPEC, systemPrompt: { static: ["# Persona\n"], dynamic: ["# This task\n"] } },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(run.factoryOptions()?.config).toMatchObject({
+      developer_instructions: "# Persona\n# This task\n",
+      model_auto_compact_token_limit: 180_000,
+      model_auto_compact_token_limit_scope: "total",
+    });
+    const prompt = z.string().parse(run.factoryOptions()?.config?.compact_prompt);
+    expect(prompt).toContain("task.md");
+    expect(prompt).toContain("read_knowledge_doc");
+  });
+
+  it("an operator run sets none of the compaction keys and keeps the CLI's default", async () => {
+    const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      { ...SPEC, kind: "operator", systemPrompt: "op" },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const config = run.factoryOptions()?.config ?? {};
+    expect(config.developer_instructions).toBe("op");
+    expect("model_auto_compact_token_limit" in config).toBe(false);
+    expect("compact_prompt" in config).toBe(false);
+  });
+
+  it("servers and their withheld tools reach the CLI in name order", async () => {
+    const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      {
+        ...SPEC,
+        mcpServers: {
+          zulu: { type: "http", url: "https://z" },
+          alpha: { command: "npx", args: ["-y", "a"] },
+        },
+        mcpToolDenials: [{ server: "alpha", tools: ["write_b", "write_a"] }],
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const servers = z.record(z.string(), z.object({ disabled_tools: z.array(z.string()).optional() })).parse(
+      run.factoryOptions()?.config?.mcp_servers,
+    );
+    expect(Object.keys(servers)).toEqual(["alpha", "zulu"]);
+    expect(servers.alpha?.disabled_tools).toEqual(["write_a", "write_b"]);
+  });
+});

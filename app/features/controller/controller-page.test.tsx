@@ -6,6 +6,7 @@ import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, surfaceLabel } from "./controller-page";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import type { RunView } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
 
 /**
  * Ruling 121 on the full controller page: the project is named, task-anchored
@@ -450,6 +451,7 @@ describe("the open conversation's execution", () => {
     turns: 3,
     tokens: 1200,
     tokensEstimated: false,
+    cache: NO_RUN_CACHE,
     lines: [{ t: "10:00:01", ev: "text", tag: "assistant", text: "Reading the board." }],
     raw: ['{"type":"assistant"}'],
     lineCount: 1,

@@ -262,8 +262,33 @@ connecting a different account there (ruling 165).
   own skill plugin (`RunSpec.skillPlugin`, §6) when granted skills mounted — else `[]` —
   with `skills: ["viberr:<name>", …]` qualified by that plugin's name, `disallowedTools`
   (binds even under bypass), `allowedTools` for the toolkit and mounted MCP names.
-  `systemPrompt` **replaces** the preset for operator and controller runs and is
-  `{ preset: "claude_code", append }` for specialists.
+  `systemPrompt` follows the run's kind (rulings 370, 371, 373): the operator sends its
+  prompt split as a `string[]` with the SDK's `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` between the
+  static block and the per-task tail (a fresh session per turn, nothing recorded); the
+  controller sends the same blocks as `{ type: "custom", prompt, snapshot: true }`,
+  recorded on the session's first request and reused until compaction; a specialist sends
+  `{ type: "preset", preset: "claude_code", append: <static block>,
+  excludeDynamicSections: true, snapshot: true }` — the preset's working directory, git
+  status and memory paths move into the first user message so every dispatch of one
+  profile shares one system-prompt cache entry — and its dynamic tail opens the first user
+  message under "# This run's context (Viberr, this run only)". A specialist's or
+  controller's edited persona therefore reaches a RESUMED session only after its next
+  compaction. Every list the adapter sends is in name order (`skills`, the `mcpServers`
+  map, `allowedTools`, `disallowedTools`), so two runs of one profile hand the CLI the same
+  bytes.
+- Context window and compaction (rulings 371, 373). A specialist run's child env carries
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW=250000`, a controller's `300000`, an operator's nothing;
+  `startRun` sets it from `context-policy.server.ts` (`contextWindowEnv`) after the caller's
+  overlay and before the run marker. A run with a `compactAnchor` (every specialist and
+  controller run) carries a `SessionStart` hook on the `compact` matcher that returns the
+  anchor as `additionalContext` the moment the CLI has compacted the context — the task
+  anchor (task.md path, branch, PR, knowledge bases, the rulings note) or the conversation
+  anchor; every Claude run carries a `PreCompact` hook that sets the strip's phase to
+  "Compacting context" for the length of the summary request. What compaction keeps: the
+  system prompt (persona, knowledge-base indexes) untouched, the skills the run invoked
+  (capped 5k per skill, 25k in all), up to five recent files under 5k; what it drops: tool
+  results, reasoning and the un-invoked skill index. A `compact_boundary` envelope reads
+  "context compacted (auto) · 972k → 10k tokens" and rides `facts.compaction` (ruling 369).
 - Denylists: `BASE_DENIED_BUILTINS` (Skill, Task*, Workflow, Cron*, ScheduleWakeup,
   RemoteTrigger, Monitor, PushNotification, SendMessage, DesignSync, Enter/ExitWorktree;
   `Skill` is re-allowed when native skills are mounted; SDK 0.3.233 took `TaskCreate`/
@@ -377,7 +402,19 @@ connecting a different account there (ruling 165).
   removes it in `settle`, the one exit every outcome takes.
 - Per-run `config.toml` merged per leaf into `$CODEX_HOME`: `allow_login_shell: false`,
   `project_doc_max_bytes: 0`, bundled skills and skill instructions off, apps/plugins/hooks
-  off, memories off, `developer_instructions = systemPrompt`, `mcp_servers`.
+  off, memories off, `developer_instructions` = the prompt split joined in order (ruling
+  370: Codex has no boundary, so the static block and the per-task tail are one document),
+  `mcp_servers` in name order with each server's withheld tools sorted, and on a specialist
+  run (ruling 371) `model_auto_compact_token_limit = 180000`,
+  `model_auto_compact_token_limit_scope = "total"` and `compact_prompt =
+  CODEX_COMPACT_PROMPT` (the shared summarizer prompt: keep the task key and goal, the
+  task.md pointer, branch and PR, the knowledge-base names, decisions, failed attempts and
+  why, pending work, files changed); the operator sets none of the three. Codex keeps
+  `developer_instructions` and recent user messages within a 20k budget plus the summary
+  across a compaction and drops earlier assistant turns, tool calls, outputs and reasoning.
+  A `context_compaction` item counts as a compaction (ruling 369), and the run's per-call
+  prompt sizes and compactions are read off the rollout once the CLI has exited
+  (`codexRolloutRunStats`), because the SDK's `turn.completed` is a turn TOTAL.
 - Only six env keys are re-exported through `shell_environment_policy`:
   `GIT_CEILING_DIRECTORIES`, `GIT_AUTHOR_NAME/EMAIL`, `GIT_COMMITTER_NAME/EMAIL` and, since
   ruling 174, the run marker `VIBERR_RUN_ID`, so a command the model backgrounds carries
@@ -431,9 +468,33 @@ connecting a different account there (ruling 165).
   session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
   usage_final, total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
-  credential_user_id, interrupted_reason`. `interrupted_by` is the person who stopped
-  the run (a `users.id`) or null; `interrupted_reason` (`restart` or null) says why an
-  `interrupted` run stopped when nobody did (ruling 158 addendum, pass 35 U35-7).
+  credential_user_id, interrupted_reason`, and the prompt-cache record (ruling 369):
+  `cache_write_tokens, first_call_prompt_tokens, first_call_cache_write,
+  first_call_cache_read, first_call_warm, first_call_miss_reason, cache_ttl_bucket,
+  peak_prompt_tokens, last_prompt_tokens, compactions, credential_kind`. `interrupted_by`
+  is the person who stopped the run (a `users.id`) or null; `interrupted_reason`
+  (`restart` or null) says why an `interrupted` run stopped when nobody did (ruling 158
+  addendum, pass 35 U35-7).
+- **The prompt-cache record** (ruling 369) is folded by the sink from the provider's own
+  figures: `cache_write_tokens` sums every call's cache write (Claude
+  `cache_creation_input_tokens`; Codex `cache_write_input_tokens`, 0 on every run this
+  backend has stored); the `first_call_*` columns are the run's FIRST model call — its
+  whole prompt, its write and read slices, `first_call_warm` = 1 when it read more than it
+  wrote (`startTemperature`, one rule in `context-policy.server.ts`), and the provider's
+  `cache_miss_reason` when it sent one (`previous_message_not_found`, `unavailable`,
+  `messages_changed`); they are NULL until a call lands and NULL for ever on a run that
+  never reached the provider, which no surface prints as "cold". `cache_ttl_bucket` is
+  which lifetime the provider billed the writes under (`5m`, `1h`, `mixed`; NULL on
+  Codex). `peak_prompt_tokens` is the largest prompt any one call carried and
+  `last_prompt_tokens` the last call's — the size a resume replays, which ruling 372
+  reads; on Claude both fold from the stream (main-loop calls only), on Codex from the
+  rollout at finalize. `compactions` counts `compact_boundary` envelopes and Codex
+  compaction events. `credential_kind` is the kind of credential the run billed at start
+  (`login`, `api_key`, `access_token`), which decides the TTL ruling 372 assumes; NULL on
+  a refused run. *(Corrected 2026-09-21, ruling 369: this page said "a resumed Codex thread
+  reports the thread's cumulative total". It does not — `turn.completed.usage` is the
+  TURN's total over its calls; a thread's first run stored 3.46M input tokens and its
+  resumed run 67k.)*
 - **Token columns mean the same thing on both backends.** `input_tokens` is the total
   input the provider processed for the run, cache reads and cache writes included: Codex
   `usage.input_tokens` verbatim (its cache figures are subsets of it); Claude
@@ -652,6 +713,27 @@ terminated exactly once (the `..` of F34-12 is gone).
   only in the passed principal's home, and a home with no transcript store yet — a new
   owner who has connected the backend but never had a run here — answers `unknown`,
   which means "resume as before".
+- **The resume policy** (ruling 372): after the probe says the session is present,
+  `resumeRun` takes `resumeVerdict` (`context-policy.server.ts`) on how long the prior run
+  has been finished (against the caller's `nowIso`; the service reads its clock once, the
+  tests pin it), the cache TTL for the prior run's `credential_kind` (Claude: 60 min on a
+  sign-in, 5 min on an API key or access token; Codex: 10 min; a row with no kind reads as
+  a sign-in) and the size a resume would REPLAY — the prior run's `last_prompt_tokens`,
+  else the provider's own transcript (`sessionContextTokens`: Claude's last main-loop
+  assistant usage, Codex's rollout's last `token_count`). When the session is BOTH idle past
+  its TTL AND above 150k tokens (`RESUME_FRESH_CONTEXT_TOKENS`), it is never replayed: the
+  continuity-reset path runs under the reason `stale_large_session` — the prior run gets a
+  `meta` line tagged `run·session_stale` (not `·session_missing`: the transcript is intact,
+  and `latestSessionRun` must not skip the row), the task timeline a `continuity` event
+  ("Started a fresh session: the previous one was 298k tokens and 1 hour 14 minutes old…"),
+  the fresh turn's prompt a preamble that says the session was set aside on purpose and
+  carries the prior run's last report (its newest agent-text line, clipped to 6,000
+  characters) ahead of the caller's follow-up, and the fresh run's `runtime.run.started`
+  audit `continuityReset: "stale_large_session"`. Either fact alone resumes as before. The
+  controller follows the same rule; its fresh turn's preamble points at the
+  recent-conversation digest every controller prompt carries, and it notes nothing on a
+  task. The size is the LAST call's prompt, not the run's peak, on purpose: a run that
+  compacted at 250k and finished at 20k replays 20k.
 - Transcripts: Claude
   `runtimes/users/<principal>/claude-home/projects/<cwd-dashes>/<sid>.jsonl`; Codex
   `runtimes/users/<principal>/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`
@@ -694,7 +776,18 @@ tooltip "Estimated from the streamed text. The provider's own total replaces it 
 lands; a run that was stopped never gets one" whenever the row's `usage_final` is 0
 (while the run is live and after it ends), "pending" while no usage envelope has landed
 at all and the run is still live (a Codex run before its turn ends), and the plain figure
-once the provider's total landed.
+once the provider's total landed; on hover it says what the prompt cache wrote and read
+over the run (ruling 369). The console carries a **facts row** of quiet chips under its bar
+(ruling 369, `RunView.cache`): warm or cold start with the first call's figures ("warm
+start · read 47.9k", "cold start · wrote 298k"; green or amber), "miss: previous message
+not found" when the provider sent a reason, "cache 1h" (the TTL bucket), "wrote 121k ·
+read 6.1M" over the run, "peak prompt 226k" (the last prompt, what a resume would replay,
+in its tooltip) and "N compactions" — each figure on a `data-` attribute (`data-start`,
+`data-first-write`, `data-first-read`, `data-miss`, `data-ttl`, `data-write`,
+`data-read`, `data-peak`, `data-last`, `data-compactions`); a run with no first call says
+"no first call yet", never cold. A compaction also reads as a `system·compact_boundary`
+line ("context compacted (auto) · 972k → 10k tokens") and as a "Context compacted" note on
+the task timeline. Insights carries the same record as a table (ui/surfaces.md).
 
 ## 4. Specialist runs
 
@@ -1012,6 +1105,15 @@ above is the create-seed value and never the runtime's answer for a missing gran
   model invokes it.
 - **Skills, Codex and the operator**: bodies are injected into the prompt under a shared
   24 000-char budget (`skill-body.server.ts`); symlinked folders or files are refused.
+- **The persona's order** (ruling 370): `buildSpecialistPromptPrefix` returns the persona
+  as a static block (definition, the native-skill banner, the attached-resources banner,
+  injected skill bodies, the knowledge-base notes and indexes, the MCP governance rules,
+  the GitHub read section) and a per-run tail (the servers that failed their probe or
+  did not mount, the attachments drop and the browser section — both carry the task's own
+  directory — and the grants whose content did not arrive), every list sorted by name;
+  `buildSpecialistPersona` is the same text joined. Two tasks of one profile therefore
+  produce a byte-identical static block, which is what the Claude preset's
+  `excludeDynamicSections` caches once (ruling 371).
 - **Knowledge bases**: text files under `kb/<dir>` (depth ≤ 32, no symlinks, no
   dotfiles) are injected under a separate 24 000-char budget with `### <rel>` headings and
   truncation markers; `KB_PRECEDENCE_NOTE` (repo conventions outrank KBs) is emitted only

@@ -4,6 +4,12 @@ Research note, 2026-09-21 (`planning/prompt-cache-2026-09-21/RESEARCH.md`; the i
 
 ## 1. What viberr's own numbers say
 
+> **Re-measured 2026-09-21 while implementing (rulings 369–374).** Four corrections to this note, from the same 400 Claude and 200 Codex transcripts and the projection rows behind them:
+> 1. The 911k and 929k controller writes are the TTL-expiry shape after all: 39 hours and 71 minutes idle since the previous turn on the same 945k conversation. The 298k specialist write was NOT — 16 minutes idle, `diagnostics.cache_miss_reason.type = "messages_changed"` with 240k tokens missed, a reconstruction miss inside the TTL (the S8 family). Ruling 372's age-and-size rule removes the first two; the third is now recorded on every run (`first_call_miss_reason`) so the data can decide whether a size-only rule is needed.
+> 2. The "16 low-cache Codex runs" (§3 Codex 4) are 16 single-call operator turns of about 26k input tokens with nothing cached — cold Codex OPERATOR starts, not context past 160k. Codex reports `cache_write_input_tokens = 0` on every stored run; the SDK defaults the field.
+> 3. A resumed Codex thread does NOT report a cumulative total: `turn.completed.usage` is the turn's total over its calls (a thread's first run stored 3.46M input tokens, its resumed run 67k). The per-call prompt sizes are in the rollout's `token_count` lines (`last_token_usage`), which the run service now reads at finalize.
+> 4. The sample: 199 operator runs in the last 400 Claude transcripts (3 cold, 1 of 141 within 5 min, 0 of 55 between 5 and 60 min, 1 of 2 past 60 min), 147 specialists (108 cold), 3 identifiable controller turns; the §1 table's 247 operator runs came from a wider window. The conclusions stand.
+
 | kind | runs | model calls / run | first-call cache write | first call cold | cache write / run | cache read / run | peak prompt median · p90 · max |
 |---|---|---|---|---|---|---|---|
 | operator | 247 | 15.7 | 4.4k | 5 of 247 | 65k | 609k | 48k · 59k · 97k |

@@ -41,6 +41,14 @@ import {
 } from "./run-processes.server";
 import { bashDenyPrefixes, deniedPrefixFor } from "./bash-policy.server";
 import { bashDenyReason } from "~/server/tasks/specialist-tool-policy";
+import {
+  claudeSystemPromptBlocks,
+  dynamicPromptText,
+  isPromptPrefix,
+  sortedNames,
+  sortedRecord,
+  staticPromptText,
+} from "./prompt-prefix.server";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -96,12 +104,26 @@ export interface ClaudeQueryOptions {
   includePartialMessages?: boolean;
   env?: Record<string, string>;
   abortController?: AbortController;
-  /** Custom system prompt. A string REPLACES the default (operator: tools-only,
-   *  no coding harness). The append-preset form keeps Claude Code's default
-   *  scaffolding and appends the persona (specialists: they DO write code). */
+  /** Custom system prompt. A string (or a `string[]` split at the SDK's
+   *  dynamic boundary, ruling 370) REPLACES the default (operator: tools-only,
+   *  no coding harness); the custom OBJECT form is the same text recorded on
+   *  the session's first request (`snapshot`, the controller). The
+   *  append-preset form keeps Claude Code's default scaffolding and appends
+   *  the persona (specialists: they DO write code); `excludeDynamicSections`
+   *  moves the preset's per-directory sections into the first user message so
+   *  every dispatch of one profile shares one system-prompt cache entry
+   *  (ruling 371). */
   systemPrompt?:
     | string
-    | { type: "preset"; preset: "claude_code"; append?: string };
+    | string[]
+    | { type: "custom"; prompt: string | string[]; snapshot?: boolean }
+    | {
+        type: "preset";
+        preset: "claude_code";
+        append?: string;
+        excludeDynamicSections?: boolean;
+        snapshot?: boolean;
+      };
   /** In-process SDK MCP servers (operator governance tools) plus the profile's
    *  declared external ones — forwarded exactly as `RunSpec` carries them. The
    *  SDK owns their shape (an `sdk` entry is a live server INSTANCE, not data);
@@ -146,9 +168,34 @@ export interface ClaudeQueryOptions {
   spawnClaudeCodeProcess?: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
   /** Ruling 101(e), amended (Option D PR 5): the PreToolUse hook that refuses a
    *  Bash command reaching one of the run's argument-level denies, however it
-   *  is wrapped, with a reason the model reads. It only ever denies. */
-  hooks?: { PreToolUse: { matcher: string; hooks: ClaudePreToolUseHook[] }[] };
+   *  is wrapped, with a reason the model reads. It only ever denies.
+   *  Ruling 371/373: the `SessionStart` hook on the `compact` source that hands
+   *  the run its anchor back after a compaction, and the `PreCompact` hook that
+   *  names the wait on the strip. */
+  hooks?: {
+    PreToolUse?: { matcher: string; hooks: ClaudePreToolUseHook[] }[];
+    SessionStart?: { matcher: string; hooks: ClaudeSessionStartHook[] }[];
+    PreCompact?: { hooks: ClaudePreCompactHook[] }[];
+  };
 }
+
+/** The SDK's `SessionStart` callback, narrowed to the one answer Viberr gives:
+ *  pinned context after a compaction. */
+export type ClaudeSessionStartHook = (
+  input: { hook_event_name: string; source?: string },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<{
+  hookSpecificOutput?: { hookEventName: "SessionStart"; additionalContext: string };
+}>;
+
+/** The SDK's `PreCompact` callback; its `custom_instructions` is input, so
+ *  Viberr's hook only observes. */
+export type ClaudePreCompactHook = (
+  input: { hook_event_name: string; trigger?: string },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<Record<string, never>>;
 
 /** The SDK's `PreToolUse` callback, narrowed to the fields Viberr's hook reads
  *  and the one answer it gives. */
@@ -621,21 +668,12 @@ const claudeEnvelopeSchema = z
      *  usage is not part of the result's `usage` (main loop only), so the live
      *  fold leaves them out too. */
     parent_tool_use_id: z.string().nullable().catch(null),
-    /** `assistant` envelopes: the API message's id (one message yields one
-     *  envelope per content block, all carrying the same usage), its
-     *  `message_start` usage, and the content blocks THIS envelope carries
+    /** `assistant` envelopes: the content blocks THIS envelope carries
      *  (F35-1: the live output estimate is read off them, because the usage's
-     *  `output_tokens` is a placeholder until the result). Anything that is
-     *  not a finite number counts as 0, exactly as the run row folds it. */
+     *  `output_tokens` is a placeholder until the result). The prompt figures
+     *  are read once, at the wire boundary (`facts.cache`, ruling 369). */
     message: z
       .object({
-        id: z.string().nullable().catch(null),
-        usage: z.object({
-          input_tokens: z.number().catch(0),
-          output_tokens: z.number().catch(0),
-          cache_creation_input_tokens: z.number().catch(0),
-          cache_read_input_tokens: z.number().catch(0),
-        }),
         content: z.array(claudeContentBlock).catch(() => []),
       })
       .nullable()
@@ -652,46 +690,15 @@ const claudeEnvelopeSchema = z
     parent_tool_use_id: null,
     message: null,
   });
-type ClaudeEnvelope = z.infer<typeof claudeEnvelopeSchema>;
-
-/** The live PROMPT counters one API message contributes, in the run row's
- *  terms (wire-format.server.ts, `result`): `input_tokens` is the WHOLE prompt
- *  of the call (uncached slice + cache writes + cache reads),
- *  `cached_input_tokens` its cache-read subset. Output is not here: the
- *  envelope's `output_tokens` is the `message_start` placeholder, and the live
- *  figure is `estimateOutputTokens` over the content blocks (F35-1). */
-interface StepUsage {
-  /** The API message id: the dedupe key across the envelopes of one message.
-   *  Null when the SDK sent none, which counts the envelope once. */
-  messageId: string | null;
-  input_tokens: number;
-  cached_input_tokens: number;
-}
-
 /**
- * One API message's usage from a Claude `assistant` envelope, or null when the
- * envelope is not an assistant message or carries no usage at all. Used to grow
- * the live token counter during a run (the final `result` envelope supplies the
- * authoritative totals).
+ * Ruling 371: the dynamic tail of a specialist's prompt split rides its FIRST
+ * user message, ahead of the instruction, so the preset's system prompt (the
+ * static block as its append) stays byte-identical across the tasks one
+ * profile is dispatched on. The heading tells the model what it is reading.
  */
-function assistantUsage(envelope: ClaudeEnvelope): StepUsage | null {
-  if (envelope.type !== "assistant") return null;
-  const usage = envelope.message?.usage;
-  if (!usage) return null;
-  const { input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens } = usage;
-  if (
-    input_tokens === 0 &&
-    output_tokens === 0 &&
-    cache_creation_input_tokens === 0 &&
-    cache_read_input_tokens === 0
-  ) {
-    return null;
-  }
-  return {
-    messageId: envelope.message?.id ?? null,
-    input_tokens: input_tokens + cache_creation_input_tokens + cache_read_input_tokens,
-    cached_input_tokens: cache_read_input_tokens,
-  };
+function withDynamicTail(dynamic: string, prompt: string): string {
+  if (!dynamic.trim()) return prompt;
+  return `# This run's context (Viberr, this run only)${dynamic}\n\n---\n\n${prompt}`;
 }
 
 /**
@@ -1294,8 +1301,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           //    exactly as a clean clone. Canaried inside the image 2026-09-11:
           //    the CLI's init lists `viberr:<name>` and the model invokes it.
           settingSources: [],
+          // Ruling 370: sorted, so two runs of one profile list the same
+          // skills in the same order (enumeration drift was the one measured
+          // residual of a shared preset prefix).
           skills: skillPlugin
-            ? nativeSkills.map((name) => `${skillPlugin.name}:${name}`)
+            ? sortedNames(nativeSkills.map((name) => `${skillPlugin.name}:${name}`))
             : [],
           plugins: skillPlugin
             ? [{ type: "local", path: skillPlugin.path, skipMcpDiscovery: true }]
@@ -1344,29 +1354,60 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         //    harness (it DOES implement/test) with its persona layered on top.
         //    Replacing it (the old behavior) stripped the scaffolding and made a
         //    coding agent run on persona prose alone.
+        // The instruction the first user message carries. A specialist's
+        // prompt split puts its dynamic tail here (ruling 371).
+        let prompt = spec.prompt;
         if (spec.systemPrompt) {
           // C02-R7: the persona announced the mounted skills; when the start
-          // could not enable them, the correction rides the same prompt.
-          const persona =
-            droppedSkills.length > 0
-              ? spec.systemPrompt + droppedSkillsNotice(droppedSkills)
-              : spec.systemPrompt;
-          // The controller (ruling 99) is coordination machinery like the
-          // operator: its persona REPLACES the coding harness, and it works
-          // only through its in-process toolkit.
-          if (spec.kind === "operator" || spec.kind === "controller") {
-            options.systemPrompt = persona;
+          // could not enable them, the correction rides the run — on the
+          // dynamic side, since it varies per run (ruling 370).
+          const correction = droppedSkills.length > 0 ? droppedSkillsNotice(droppedSkills) : "";
+          const split = isPromptPrefix(spec.systemPrompt)
+            ? {
+                static: spec.systemPrompt.static,
+                dynamic: correction
+                  ? [...spec.systemPrompt.dynamic, correction]
+                  : spec.systemPrompt.dynamic,
+              }
+            : null;
+          if (spec.kind === "operator") {
+            // Ruling 370: a fresh session per turn, so nothing to record; the
+            // static block caches across tasks behind the SDK's boundary.
+            options.systemPrompt = split
+              ? claudeSystemPromptBlocks(split)
+              : spec.systemPrompt + correction;
+          } else if (spec.kind === "controller") {
+            // Ruling 373: coordination machinery like the operator (its
+            // persona REPLACES the coding harness), resumed on every turn —
+            // so the prompt is recorded on the session's first request and
+            // reused until compaction (`snapshot`).
+            options.systemPrompt = {
+              type: "custom",
+              prompt: split ? claudeSystemPromptBlocks(split) : spec.systemPrompt + correction,
+              snapshot: true,
+            };
           } else {
+            // Ruling 371: the coding harness with the STATIC block appended,
+            // its per-directory sections moved out of the system prompt
+            // (`excludeDynamicSections`) and the whole thing recorded for the
+            // session (`snapshot`); the dynamic tail opens the first user
+            // message instead. An edited persona therefore reaches a resumed
+            // session only after its next compaction.
             options.systemPrompt = {
               type: "preset",
               preset: "claude_code",
-              append: persona,
+              append: split ? staticPromptText(split) : spec.systemPrompt + correction,
+              excludeDynamicSections: true,
+              snapshot: true,
             };
+            if (split) prompt = withDynamicTail(dynamicPromptText(split), prompt);
           }
         }
-        if (spec.mcpServers) options.mcpServers = spec.mcpServers;
+        // Ruling 370: servers in name order, so the init's `mcp_servers` and
+        // the tool definitions the SDK sends are the same bytes on every run.
+        if (spec.mcpServers) options.mcpServers = sortedRecord(spec.mcpServers);
         if (spec.allowedTools && spec.allowedTools.length) {
-          options.allowedTools = spec.allowedTools;
+          options.allowedTools = sortedNames(spec.allowedTools);
         }
         // Capability confinement via denylist. `disallowedTools` removes tools
         // from the model's context entirely and binds even under
@@ -1399,7 +1440,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           ...(spec.kind === "reviewer" ? SUPPORTING_DELIVERY_DENIED_BUILTINS : []),
           ...(spec.disallowedTools ?? []),
         ];
-        if (denied.length) options.disallowedTools = denied;
+        // Ruling 370: sorted and deduplicated for the same reason as the
+        // servers above; the rules read the same whatever their order.
+        if (denied.length) options.disallowedTools = sortedNames(denied);
         // Ruling 101(e), amended (Option D PR 5): the prefix rules above match a
         // command by its leading words, and the pinned CLI, which already splits
         // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
@@ -1426,11 +1469,37 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           };
           options.hooks = { PreToolUse: [{ matcher: "Bash", hooks: [policyHook] }] };
         }
+        // Ruling 371/373: the run's anchor comes back the moment its context
+        // has been compacted (the `compact` source of `SessionStart`) — the
+        // system prompt survives compaction, tool output and the summary's
+        // omissions do not. `PreCompact` only names the wait: the summary
+        // request is a full-history model call (131 s on the one stored
+        // compaction), and the strip would otherwise show the last tool as
+        // still running.
+        const anchor = spec.compactAnchor;
+        if (anchor) {
+          const anchorHook: ClaudeSessionStartHook = async () => ({
+            hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: anchor },
+          });
+          options.hooks = {
+            ...options.hooks,
+            SessionStart: [{ matcher: "compact", hooks: [anchorHook] }],
+          };
+        }
+        const preCompactHook: ClaudePreCompactHook = async (input) => {
+          logger.info("claude run compacting its context", {
+            runId: spec.runId,
+            trigger: input.trigger ?? null,
+          });
+          phase(RUN_PHASE.compacting, null);
+          return {};
+        };
+        options.hooks = { ...options.hooks, PreCompact: [{ hooks: [preCompactHook] }] };
         // The subprocess kill switch: the interrupt/idle watchdogs abort this
         // when the cooperative `interrupt()` goes unanswered (see `armForcedStop`).
         options.abortController = abortController;
 
-        const q = queryFn({ prompt: singlePrompt(spec.prompt), options });
+        const q = queryFn({ prompt: singlePrompt(prompt), options });
         queryHandle = q;
 
         // Live usage accumulation so the run row GROWS during streaming instead
@@ -1556,14 +1625,21 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               liveTurns = 1 + liveUsers;
               facts.turns = liveTurns;
             } else if (envelope.type === "assistant" && !envelope.parent_tool_use_id) {
-              const u = assistantUsage(envelope);
+              // Ruling 369: the call's prompt-cache figures were read once at
+              // the wire boundary. One API message yields one envelope per
+              // content block, all carrying the same figures under the same
+              // id: the first one counts, and the repeats are stripped so the
+              // sink folds exactly one fact per call.
+              const u = facts.cache ?? null;
               if (u) {
                 const firstOfMessage =
                   u.messageId === null || !seenMessages.has(u.messageId);
                 if (firstOfMessage) {
                   if (u.messageId !== null) seenMessages.add(u.messageId);
-                  liveIn += u.input_tokens;
-                  liveCached += u.cached_input_tokens;
+                  liveIn += u.promptTokens;
+                  liveCached += u.cacheRead;
+                } else {
+                  facts.cache = null;
                 }
               }
               const estimate = estimateOutputTokens(envelope.message?.content ?? []);

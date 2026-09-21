@@ -1,3 +1,4 @@
+import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -520,7 +521,7 @@ describe("the turn carries the context read (ruling 121)", () => {
       spec!.prompt.indexOf("## Task VIB-142"),
     );
     // The anchor reached the toolkit that runs under it.
-    expect(spec!.systemPrompt).toContain(
+    expect(joinedPrompt(spec!.systemPrompt ?? "")).toContain(
       "anchored to task `VIB-142` in project `viberr-core`",
     );
     expect(Object.keys(spec!.mcpServers ?? {})).toContain("viberr_controller");
@@ -793,5 +794,59 @@ describe("ruling 283: the prompt and the tool name the SAME knowledge bases", ()
     expect(mounts.allowedTools).not.toContain(
       "mcp__viberr_controller__read_knowledge_doc",
     );
+  });
+});
+
+/**
+ * Ruling 370/373: the controller's static block is the same bytes for every
+ * conversation of one instance; only the conversation block and this turn's
+ * mount notices differ. The adapter records the split for the session.
+ */
+describe("ruling 370: the controller prefix", () => {
+  async function build(scope: { projectSlug?: string; taskKey?: string }, extra: Partial<Parameters<typeof import("./controller-run.server").buildControllerSystemPrompt>[1]> = {}) {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+      ...scope,
+    });
+    return buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: resolveControllerConfig(app.dataRoot),
+      mountedMcps: [],
+      unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
+      dataRoot: app.dataRoot,
+      ...extra,
+    });
+  }
+
+  it("an instance-scoped and a board-scoped conversation share the static block; the conversation block is the tail", async () => {
+    const instance = await build({});
+    const board = await build({ projectSlug: "viberr-core" });
+    // A project scope indexes the project's rulings (ruling 239), which is a
+    // resource difference, so the proof is over the same scope twice and the
+    // tail over the two.
+    const instanceAgain = await build({});
+    expect(instance.prefix.static.join("")).toBe(instanceAgain.prefix.static.join(""));
+    expect(instance.prefix.dynamic.join("")).toContain("# This conversation");
+    expect(instance.prefix.dynamic.join("")).toContain("What a project role may do");
+    expect(instance.prefix.static.join("")).not.toContain("# This conversation");
+    expect(board.prefix.dynamic.join("")).toContain("bound to the project `viberr-core`");
+    expect(instance.prompt).toBe(joinedPrompt(instance.prefix));
+  });
+
+  it("the unmounted-server notice is per turn, so it rides the tail", async () => {
+    const built = await build({}, {
+      unresolvedMcps: [{ name: "zulu", reason: "probe failed", mounted: false }, { name: "alpha", reason: "not registered", mounted: false }],
+    });
+    expect(built.prefix.static.join("")).not.toContain("did NOT mount this turn");
+    const tail = built.prefix.dynamic.join("");
+    expect(tail).toContain("MCP servers that did NOT mount this turn");
+    expect(tail.indexOf("alpha (not registered)")).toBeLessThan(tail.indexOf("zulu (probe failed)"));
   });
 });

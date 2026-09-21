@@ -113,6 +113,21 @@ Pages: `architecture/decisions.md` (ruling 178), `architecture/file-formats.md` 
 `domain/operator.md` (§4), `domain/controller-and-goals.md` (§4), `product/glossary.md`
 and `ui/surfaces.md`.
 
+Updated 2026-09-21 for rulings 369–374 (the prompt-cache work, branch
+`docs/prompt-cache-plan-2026-09-21`; research and plan in `planning/prompt-cache-2026-09-21/`):
+every run stores and shows what the prompt cache did for it (eleven `agent_runs` columns, a
+console facts row, an Insights table, a `task.agent.compaction` audit and timeline note);
+the context numbers have one home (`app/server/runtimes/context-policy.server.ts`) and every
+prompt one order (`prompt-prefix.server.ts`: a static block byte-identical across tasks, a
+per-task tail, every list sorted); specialists run on the preset with `excludeDynamicSections`
+and `snapshot`, a 250k window and a compaction anchor hook, Codex specialists on a 180k
+window with a shared summarizer prompt; a session idle past its cache TTL and above 150k is
+never replayed; the controller's prompt is recorded, its window 300k; the TTL stays the
+CLI's automatic choice. Pages: `architecture/decisions.md` (rulings 369–374),
+`architecture/data-model.md` (§3), `domain/agents-and-runtime.md` (§§2.4, 2.5, 3.1, 3.6, 3.7,
+6), `domain/operator.md` (§4), `domain/controller-and-goals.md` (§3),
+`operations/configuration.md` (§3), `ui/surfaces.md` and `development/testing.md` (§2).
+
 ## Reading order for an agent new to the repo
 
 1. [product/overview.md](product/overview.md) — what Viberr is, for whom, the operating

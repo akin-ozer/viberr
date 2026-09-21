@@ -7,6 +7,7 @@ import {
 } from "~/server/runtimes/backend-quota.server";
 import { DEFAULT_COMPACTION } from "~/server/tasks/timeline-compaction.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { FIRST_CALL_LARGE_WRITE_TOKENS } from "~/server/runtimes/context-policy.server";
 
 /**
  * Insights: read-only aggregate analytics over `agent_runs` — the cost, token,
@@ -182,8 +183,42 @@ export interface OversightSummary {
   };
 }
 
+/**
+ * Ruling 369: what the prompt cache did for one group of runs — by run kind,
+ * and by the kind of credential the runs billed (the TTL follows it).
+ */
+export interface CacheRow {
+  label: string;
+  runs: number;
+  /** Runs whose first model call reported its figures. The rate below is
+   *  over these, never over `runs`: a run that never reached the provider
+   *  started neither warm nor cold. */
+  firstCalls: number;
+  warmStarts: number;
+  /** warmStarts / firstCalls, null with no first call at all. */
+  warmRate: number | null;
+  writeTokens: number;
+  readTokens: number;
+  /** writeTokens / readTokens, null when nothing was read. */
+  writeReadRatio: number | null;
+  /** First calls that wrote more than `FIRST_CALL_LARGE_WRITE_TOKENS` — the
+   *  whole-history replay shape ruling 372 removes. */
+  largeFirstWrites: number;
+  /** How many runs' writes were billed under each cache lifetime. */
+  ttl: { fiveMinute: number; oneHour: number; mixed: number };
+}
+
+export interface CacheSummary {
+  byKind: CacheRow[];
+  byCredentialKind: CacheRow[];
+  /** The line `largeFirstWrites` counts against, so the card can name it. */
+  largeWriteTokens: number;
+}
+
 export interface InsightsSummary {
   totals: InsightsTotals;
+  /** Ruling 369: the prompt-cache record, all-time like the totals. */
+  cache: CacheSummary;
   /** Terminal-outcome breakdown + the success rate over terminal runs. */
   outcomes: {
     finished: number;
@@ -256,6 +291,21 @@ const groupSchema = z.object({
   label: z.string().nullable(),
   runs: z.number(),
   cost: z.number().nullable(),
+});
+
+/** Ruling 369: one grouped cache row as SQLite returns it; every SUM over a
+ *  boolean or a nullable column is nullable. */
+const cacheGroupSchema = z.object({
+  label: z.string().nullable(),
+  runs: z.number(),
+  first_calls: z.number().nullable(),
+  warm_starts: z.number().nullable(),
+  write_tokens: z.number().nullable(),
+  read_tokens: z.number().nullable(),
+  large_first_writes: z.number().nullable(),
+  ttl_5m: z.number().nullable(),
+  ttl_1h: z.number().nullable(),
+  ttl_mixed: z.number().nullable(),
 });
 
 const outcomeSchema = z.object({ state: z.string(), runs: z.number() });
@@ -728,6 +778,55 @@ export function getInsightsSummary(
     tokenless,
   };
 
+  // Ruling 369: the prompt-cache record, grouped by run kind and by the
+  // credential kind the runs billed. Every figure is a plain SUM over the
+  // columns the sink folded; the rates are taken over the runs that HAVE a
+  // first call, so a refused run is neither warm nor cold.
+  const cacheGroup = (column: string): CacheRow[] =>
+    z
+      .array(cacheGroupSchema)
+      .parse(
+        db
+          .prepare(
+            `SELECT ${column} AS label, count(*) AS runs,
+                    SUM(CASE WHEN first_call_warm IS NOT NULL THEN 1 ELSE 0 END) AS first_calls,
+                    SUM(CASE WHEN first_call_warm = 1 THEN 1 ELSE 0 END) AS warm_starts,
+                    SUM(cache_write_tokens) AS write_tokens,
+                    SUM(cached_input_tokens) AS read_tokens,
+                    SUM(CASE WHEN first_call_cache_write > ? THEN 1 ELSE 0 END) AS large_first_writes,
+                    SUM(CASE WHEN cache_ttl_bucket = '5m' THEN 1 ELSE 0 END) AS ttl_5m,
+                    SUM(CASE WHEN cache_ttl_bucket = '1h' THEN 1 ELSE 0 END) AS ttl_1h,
+                    SUM(CASE WHEN cache_ttl_bucket = 'mixed' THEN 1 ELSE 0 END) AS ttl_mixed
+             FROM agent_runs ${clause}
+             GROUP BY ${column} ORDER BY runs DESC, label ASC`,
+          )
+          .all(FIRST_CALL_LARGE_WRITE_TOKENS, ...params),
+      )
+      .map((r) => {
+        const firstCalls = r.first_calls ?? 0;
+        const warmStarts = r.warm_starts ?? 0;
+        const writeTokens = r.write_tokens ?? 0;
+        const readTokens = r.read_tokens ?? 0;
+        return {
+          label: r.label ?? "unknown",
+          runs: r.runs,
+          firstCalls,
+          warmStarts,
+          warmRate: firstCalls > 0 ? warmStarts / firstCalls : null,
+          writeTokens,
+          readTokens,
+          writeReadRatio: readTokens > 0 ? writeTokens / readTokens : null,
+          largeFirstWrites: r.large_first_writes ?? 0,
+          ttl: { fiveMinute: r.ttl_5m ?? 0, oneHour: r.ttl_1h ?? 0, mixed: r.ttl_mixed ?? 0 },
+        };
+      });
+  const cache: CacheSummary = {
+    byKind: cacheGroup("kind"),
+    // A row written before the kind was stored, or a refused run, has none.
+    byCredentialKind: cacheGroup("COALESCE(credential_kind, 'unknown')"),
+    largeWriteTokens: FIRST_CALL_LARGE_WRITE_TOKENS,
+  };
+
   const outcomeRows = z.array(outcomeSchema).parse(
     db
       .prepare(
@@ -879,6 +978,7 @@ export function getInsightsSummary(
       tokenlessRuns: totals.tokenless_runs ?? 0,
       turns: totals.turns ?? 0,
     },
+    cache,
     outcomes: {
       finished,
       error: errored,

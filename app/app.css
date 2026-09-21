@@ -6605,3 +6605,19 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 }
 .swatch:hover { transform: scale(1.12); }
 .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--fg); }
+
+/* ---------- appended: ruling 369, the console's prompt-cache facts ---------- */
+/* One row of quiet chips between the console bar and the stream: the first
+   call's temperature, the TTL bucket, the run's writes and reads, the peak
+   prompt and the compactions. Quiet on purpose — the state pill above is the
+   loud thing; these describe the run. */
+.run-facts { display: flex; align-items: center; gap: .375rem; flex-wrap: wrap; margin: -.25rem 0 .625rem; }
+.run-facts .pill { font-family: var(--font-mono); font-weight: 500; letter-spacing: 0; }
+/* ---------- appended: ruling 369, the Insights prompt-cache table ---------- */
+.cache-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
+.cache-table th, .cache-table td { padding: .375rem .5rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--hairline); }
+.cache-table th { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.cache-table th:first-child, .cache-table td:first-child { text-align: left; font-family: var(--font-mono); }
+.cache-table tbody tr:last-child td { border-bottom: 0; }
+.cache-table .group td { padding-top: .625rem; font-weight: 600; color: var(--muted); text-align: left; border-bottom: 0; }
+.cache-table .na { color: var(--faint); }
