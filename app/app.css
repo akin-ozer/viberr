@@ -4029,12 +4029,19 @@ dialog[data-closing]::backdrop {
      instead of jumping to its place a beat before the sheet arrives and back a
      beat after it leaves (review finding 29). scale(.77) is the 34px the
      layout version used, measured from the 44px resting size. */
+  /* Ruling 419(j): the arithmetic, since the old offset missed by 39px and
+     parked the button across the sheet header's pop-out and Close buttons.
+     The button rests with its centre at 22px (half of 44) above the dock's
+     own bottom inset, B = max(20px, safe area); scaled to .77 its half-height
+     is 17px; the sheet's top edge is H = min(80dvh, 640px) above the viewport
+     bottom. Centre 8px + 17px above that edge means travelling
+     H - B + 3px up. */
   .dock[data-open="true"] .dock-fab {
-    transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - 56px))) scale(.77);
+    transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))) scale(.77);
     transition: transform .22s var(--ease-out);
   }
   .dock[data-open="true"] .dock-fab:active {
-    transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - 56px))) scale(.72);
+    transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))) scale(.72);
   }
   /* The return is keyed off the CLOSING state, not data-open, which is still
      "true" until the panel unmounts. */

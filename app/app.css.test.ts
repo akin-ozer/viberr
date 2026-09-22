@@ -3427,6 +3427,18 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
   });
 
+  it("ruling 419(j): the open dock's button perches ABOVE the phone sheet, clear of its header", () => {
+    // Measured live at 375×812: the sheet's top at y=172 and the perched button
+    // at 169-203, across the header's pop-out and Close buttons. The travel
+    // must count the dock's own bottom inset and the scaled button's
+    // half-height. CANARY: restore `- 56px`.
+    const collapse720 = CODE.match(/\.dock\[data-open="true"\] \.dock-fab \{([^}]*)\}/);
+    expect(collapse720, "the perch rule must exist").toBeTruthy();
+    expect(collapse720![1]).toContain(
+      "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))",
+    );
+  });
+
   it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {
     // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
