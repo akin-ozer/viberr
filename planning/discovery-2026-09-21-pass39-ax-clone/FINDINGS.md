@@ -494,6 +494,25 @@ sentence already makes.
 
 ---
 
+## F39-14 · LOW · Viberr's own diagnostic caught viberr writing the record out of order
+
+The AX-12 task page carried a HEADS UP finding: "Timeline entries are not strictly
+newest-first. The page renders file order, so an entry may sit out of place until the file is
+rewritten." Checked against the files across the board: AX-11 and AX-12 clean, **AX-9 had one
+out-of-order pair** — a `transition` at `05:18:52.004Z` above the "Recommendation withdrawn"
+note at `05:18:52.005Z`.
+
+The cause is viberr's own write order. `transitionStage` builds its event before taking the
+lock, `withdrawAcceptanceOffers` stamps and unshifts its note inside the lock, and the move
+was unshifted last — so the older event went on top. It reads backwards too: the withdrawal
+is caused by the move, and a newest-first list showed the consequence below its cause.
+
+Worth recording as much for the method as the fix: the diagnostic was right, nobody had
+followed it, and following it found a real ordering bug in one line. The other three
+withdrawal sites were checked and are already correct.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

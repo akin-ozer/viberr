@@ -6748,6 +6748,14 @@ export async function transitionStage(
     // the note counts the survivors it really leaves (pass 34 review: counting
     // before this filter overstated them).
     const staleTransition = (r: Recommendation) => r.kind === "transition";
+    // Ruling 387 (F39-14): the MOVE goes on first, and the withdrawal note it
+    // causes lands above it. `event` was built before the lock; the note is
+    // stamped inside `withdrawAcceptanceOffers`, so it is always the newer of
+    // the two. Unshifting the move last put the OLDER event on top, which is
+    // how viberr's own `timeline_not_strictly_newest_first` diagnostic came to
+    // fire on AX-9 over a one-millisecond pair — and it read backwards besides,
+    // showing a consequence below its cause in a newest-first list.
+    parsed.timeline.unshift(event);
     if (moveCause) {
       moveWithdrawal.offers = withdrawAcceptanceOffers(
         parsed,
@@ -6760,7 +6768,6 @@ export async function transitionStage(
       parsed.frontmatter.recommendations =
         parsed.frontmatter.recommendations.filter((r) => !staleTransition(r));
     }
-    parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // U3: the racing submit already wrote this exact move. Everything below is a

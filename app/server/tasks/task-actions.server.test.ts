@@ -4252,6 +4252,15 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
     const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
     expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
+    // Ruling 387 (F39-14): the withdrawal is a CONSEQUENCE of the move, and
+    // its timestamp is the later of the two, so it sits ABOVE the transition in
+    // a newest-first timeline — and the file stays strictly newest-first, which
+    // viberr's own `timeline_not_strictly_newest_first` diagnostic checks.
+    // CANARY: unshift the transition after the withdrawal and both fail.
+    expect(parsed.timeline[0]?.title).toBe("Recommendation withdrawn");
+    expect(parsed.timeline[1]?.type).toBe("transition");
+    const stamps = parsed.timeline.map((e) => e.occurredAt);
+    expect([...stamps].sort().reverse()).toEqual(stamps);
     expect(note?.text).toContain('"Move to Done"');
     expect(note?.text).toMatch(/moved to \*\*[^*]+\*\*, away from the acceptance boundary/);
     expect(note?.text).toContain("1 recommendation still stands");
