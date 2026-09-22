@@ -3955,6 +3955,10 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     // No input until the choice is selected; the note field shows instead.
     expect(document.querySelector("#pkt-custom")).toBeNull();
     expect(document.querySelector("#pkt-note")).not.toBeNull();
+    // U39-7: the note's example fits every packet, not only a closed PR's.
+    expect(document.querySelector("#pkt-note")!.getAttribute("placeholder")).toBe(
+      "e.g. anything the operator should also know",
+    );
 
     fireEvent.click(custom);
     expect(custom.getAttribute("aria-checked")).toBe("true");

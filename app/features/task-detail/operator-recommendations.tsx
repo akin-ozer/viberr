@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
+import { RichText } from "~/ui/rich-text";
 
 /**
  * Operator recommendations panel — a SUPERVISED operator recommends governed
@@ -148,7 +149,15 @@ export function OperatorRecommendations({
                   </span>
                 )}
               </div>
-              {r.detail && <div className="op-rec-detail">{r.detail}</div>}
+              {/* U39-7: the operator writes its reason the way it writes every
+                  comment, with `code` and **bold**, and the card printed the
+                  backticks ("Reviewer approved `9471594`"). The one-line
+                  micro-format renderer, not markdown: a card is one line. */}
+              {r.detail && (
+                <div className="op-rec-detail">
+                  <RichText text={r.detail} mentions={false} />
+                </div>
+              )}
               {/* Hunt 2026-08-29: `prompt` is the DIRECTIVE Apply hands the
                   run. It was never rendered, so whenever the operator supplied
                   a separate `reason` the human approved an instruction they
@@ -156,7 +165,7 @@ export function OperatorRecommendations({
                   line does not already carry verbatim. */}
               {r.kind === "run_agent" && r.prompt && r.prompt !== r.detail && (
                 <div className="op-rec-prompt">
-                  Directive: &ldquo;{r.prompt}&rdquo;
+                  Directive: &ldquo;<RichText text={r.prompt} mentions={false} />&rdquo;
                 </div>
               )}
               {acceptanceRefusal && reachesAcceptance(r, terminalStageId) && (

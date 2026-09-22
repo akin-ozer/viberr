@@ -1401,7 +1401,9 @@ export function DecisionPacket({
               className="packet-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. what to change before reopening"
+              // U39-7: this box sits under every packet, and "before
+              // reopening" fitted only the closed-pull-request one.
+              placeholder="e.g. anything the operator should also know"
               rows={1}
               // The browser stops the paste at the cap rather than letting the
               // server refuse a confirm the person has already committed to.

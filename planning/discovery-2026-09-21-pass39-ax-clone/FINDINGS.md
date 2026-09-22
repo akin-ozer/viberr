@@ -114,6 +114,17 @@ conversations first, sticks beside the conversation and scrolls itself. The tran
 capped scroller at every width. Settled chains fold to one line. Cancel and Skip confirm, name
 what they strand, and record an optional reason.
 
+- **U39-7 (LOW) — the task page prints the operator's formatting marks, and every packet's note
+  box asks about reopening.** AX-24's acceptance card read "Reviewer approved \`9471594\`." with
+  the backticks showing. The operator writes a card's reason the way it writes every comment,
+  and the card rendered it as plain text; a `run_agent` card's directive had the same problem.
+  Under every decision packet (agent questions, deadlock rounds, conflicts) the note box's example
+  was "e.g. what to change before reopening", which only fits the closed-pull-request packet.
+  **Fixed:** the card renders its reason and directive with `RichText`, the one-line format
+  renderer, and the example now reads "e.g. anything the operator should also know". Tests:
+  `operator-recommendations.test.tsx` "inline format" (a canary on each of the two renders goes
+  red) and the P21 custom-answer test pins the placeholder.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
