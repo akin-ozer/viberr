@@ -68,6 +68,11 @@ default and marked **(default, owner may revisit)**.
   reviewer). So every rulings upkeep (rulings 378 and 418, the controller's KB work tonight)
   reaches the agents that break the contract and misses the ones that keep it. **Fixed: ruling 422.**
 
+- **F39-46 (MED) — every collision-aware directive stamps a false "delivery" policy note.** Ten on
+  ax-clone between 22:00 and 23:25, all for a possessive before "open PR" ("AX-21's open PR also
+  touches cli.go"), the sentence rulings 413 and 417 ask the operator to write. The task timeline
+  showed a policy warning on nearly every dispatch. **Fixed: ruling 423.**
+
 ### The controller page, for the person using it (measured 2026-09-23, ax-clone, 6 chains)
 
 - **U39-1 (MED) — Conversations and New sit under every goal chain.** Desktop 1440×900: the

@@ -2951,6 +2951,18 @@ describe("directiveRequestsDelivery (F10-31)", () => {
    *  the yes/no the older assertions were written against. */
   const asks = (d: string) => directiveRequestsDelivery(d) !== null;
 
+  it("ruling 423: another task's open PR, named by possessive, is a fact, not an instruction", () => {
+    // The ten false notes on ax-clone, verbatim shapes. CANARY: drop the
+    // possessive alternative (or the one-adjective slot) from ADJECTIVE_LEAD_RE.
+    expect(asks("AX-21's open PR also touches internal/cli/cli.go, so avoid it.")).toBe(false);
+    expect(asks("AX-19\u2019s open PR #11 also touches docs/manifests.md.")).toBe(false);
+    expect(asks("AX-21\u2019s overlapping open PR touches internal/cli/cli.go.")).toBe(false);
+    expect(asks("The reviewers' open pull request is stale.")).toBe(false);
+    // …and the imperative is still caught, possessive or not nearby.
+    expect(asks("Fix the parser, then open a PR for AX-21's review.")).toBe(true);
+    expect(asks("When done, open the pull request.")).toBe(true);
+  });
+
   it("detects push / open-PR / merge imperatives in operator directives", () => {
     expect(asks("push the branch when done")).toBe(true);
     expect(asks("run git push origin HEAD")).toBe(true);

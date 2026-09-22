@@ -3404,9 +3404,16 @@ const NEGATION_RE =
  * verbs the same alternation matches (`create`, `raise`, `submit`, `file`) take
  * the same guard for free; none of them is ever an adjective here, so the check
  * costs nothing on those and protects the one word that is.
+ *
+ * Ruling 423 (F39-46): a POSSESSIVE is a determiner too, and one adjective
+ * may stand between it and `open`. Rulings 413 and 417 have the operator name
+ * another task's pull request in its directives, and every one of them tripped
+ * this detector: ten policy notes on ax-clone in ninety minutes, all of them for
+ * "AX-21's open PR", "AX-19\u2019s open PR #11" or "AX-21\u2019s overlapping
+ * open PR", a fact about another branch.
  */
 const ADJECTIVE_LEAD_RE =
-  /\b(?:an?|the|this|that|these|those|its|their|his|her|our|your|my|any|each|every|no|one|same|existing|already|still|with|behind|has|have|had)\s*$/i;
+  /(?:\b(?:an?|the|this|that|these|those|its|their|his|her|our|your|my|any|each|every|no|one|same|existing|already|still|with|behind|has|have|had)|[\w-]+['\u2019]s|[\w-]+s['\u2019])(?:\s+[a-z-]+)?\s*$/i;
 
 /**
  * Ruling 323: a subject that is not the agent being addressed.
