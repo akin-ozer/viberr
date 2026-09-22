@@ -1208,6 +1208,16 @@ skill saying that a link with `taskKey: null` is work already decided and not ye
 
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
+- **A full 40-character sha scrolls a task page sideways on a phone.** At 375 px two `code.mono`
+  elements holding a whole head sha run 10 px past the column, and the task page's `.detail`
+  container scrolls 24 px horizontally (measured on AX-18: scrollWidth 389 in a 365 box). The
+  agent console scrolling sideways is expected; the page doing it is not, but nothing is hidden.
+- **A resumed controller session keeps the model identity it started with until it compacts.**
+  After the switch to Opus 5.5 the controller found "Opus 5 ... claude-opus-5[1m]" in its own
+  context: ruling 373 records its prompt on the session's first request and replays it. It trusted
+  the SDK's start record instead and said why, so nothing it told a person was wrong, and the
+  next completion compaction re-renders the prompt.
+
 - **`mode: off` is written unquoted, which YAML 1.1 reads as `false`.** 21 instances in the
   live store, all of them `capabilities[].mode`, and it is the ONLY ambiguous bare value the
   store contains (no `on`/`yes`/`no` anywhere). Viberr itself is correct — the `yaml` package
