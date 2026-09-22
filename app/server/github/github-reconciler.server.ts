@@ -89,6 +89,7 @@ import {
   POLICY_ENGINE_ACTOR,
   flagScopeViolation,
   policyViolationText,
+  scopeFlagText,
   resolveScopeViolationWithEvent,
 } from "./scope-flag.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
@@ -490,7 +491,10 @@ async function reconcileTaskUnlocked(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         scope: "checks:read",
-        detail: policyViolationText(
+        // F39-5: `checks:read` is advisory (ruling 360 says merging never
+        // needed it), so the picker writes the advisory sentence and a neutral
+        // note rather than a violation under a shield.
+        detail: scopeFlagText(
           "checks:read",
           "Reading the pull request's check results was refused during reconcile, so the PR card and the accept dialog say the checks could not be read, and a merge proceeds without them.",
         ),

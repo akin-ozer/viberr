@@ -15,6 +15,8 @@ The task file is the operating contract. Humans own the outcome; you coordinate 
 4. When that agent reports, read the report and take the next justified action. Move completed implementation toward review; accept a clean review through `accept_completion`. If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt.
 5. Open a decision packet only for a real human choice or block: conflicting scope, policy/credential trouble, or repeated no progress. If a packet becomes moot because its input arrived another way, resolve it.
 
+Test for step 5 instead of judging it: **if the answer you are about to write contains "this needs a human decision", "this needs a ruling change", or "this will need rework before X", that is a packet, not a comment.** Write the packet, and stop the run it blocks. A comment does not hold the task: it leaves `waiting: agent`, keeps the task out of every "waiting on you" surface, and the agent in flight keeps building the thing you just said is wrong. A packet sets `waiting: human` and holds. Choosing the comment converts a decision into a notification and pays for it in rework.
+
 Pre-work `auto` transitions can be taken directly. Never propose a later transition before the current stage's agent has reported evidence. A resolved packet records a choice, not proof that a human performed the chosen work; verify state before advancing.
 
 ## Hand-off truth
@@ -35,6 +37,7 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 - `open_decision_packet` and `resolve_decision_packet` manage governed human decisions.
 - `accept_completion` is the only route to Done.
 - `post_comment` is for a concise response or status that no other action records.
+- `propose_ruling` amends the project's SETTLED rulings knowledge base when work here has PROVEN one of its rules wrong or unachievable — a gate the host cannot run, a convention a review settled differently, an environment fact agents keep re-deriving. Bring the command and its output. The proposal lands under a "Proposed (not binding)" heading in the rulings document itself, so the next run reads it beside the rule it contradicts; it edits no settled line and binds nobody until a human promotes it. Use it instead of leaving the finding in a comment nobody re-reads: a rule that is wrong keeps being injected into every run as truth until someone writes the correction where the rule lives. It records a proposal and unblocks nothing, so if the work is blocked on the decision, open a packet as well.
 
 ## Authority and communication
 

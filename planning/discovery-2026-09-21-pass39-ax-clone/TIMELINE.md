@@ -1,0 +1,39 @@
+# Pass 39 timeline (all times local, 2026-09-21)
+
+| time | what |
+|---|---|
+| 23:0x | Clean-sheet instance: 0 projects, 1 admin, 1 GitHub connection (akin-ozer), 2 global profiles + operator, 1 KB, 4 skills, 0 MCP servers. |
+| 23:28 | `go` absent from the image (`/resources/health` → `"go": null`). Owner authorised a Dockerfile Go layer for this pass; added + `git update-index --skip-worktree Dockerfile`. `npm run deploy` rebuilt and recreated; health now `go: 1.25.1`, build `707b60bf2eb0`. |
+| 23:37 | Controller set to `opus[1m]` / effort `high` via Org settings → Controller. Audited `org.controller.updated`. Model picker offers no plain `opus` (F39-2). |
+| 23:38:31 | Opening brief sent from the dock (instance scope). Controller run `run_WzN1btYlhLq7`, cold start, opus[1m]. |
+| 23:38:37 | Controller read `whoami` then `instance_health` FIRST — checked the host toolchain before promising a gate. Saw `go 1.25.1`, no docker, no python3. Could not see golangci-lint (F39-1). |
+| 23:40 | `create_project` ax-clone / key AX / repo akin-ozer/ax-clone, six CUSTOM stages (Triage, Design, Build, Verify, Review, Done), boundaries auto×4 + human into Done. |
+| 23:41 | `save_knowledge_base` ax-clone-rulings ← `environment-and-gates.md`. Names golangci-lint as unverified and makes AX-1 prove it empirically. |
+| 23:41 | Second KB doc **failed**: `InputValidationError: … could not be parsed as JSON` (7356 bytes of markdown inline). Controller retried smaller and succeeded. (F39-3) |
+| 23:42 | `save_skill` go-gate-discipline; `save_skill` ax-clone-engineering. |
+| 23:43 | `save_global_agent` developer + reviewer → codex / gpt-5.6-luna / max. `set_project_rulings_kb` → ax-clone-rulings. |
+| 23:43 | `update_agent_deployment` operator (codex/luna/max, autonomy **full**, all six stages), developer (design/build/verify), reviewer (verify/review). `set_required_reviewers` Reviewer @ Review. |
+| 23:43:58 | `create_goal` goal-1 "Cycle 1 — Foundation", 4 links; AX-1 created. |
+| 23:44:00 | Operator run 1 (`run_tSUAI4QwdBDI`, codex) → auto transition triage→design. |
+| 23:44:14 | Operator run 2 (`run_R2o_Tch2iuyT`) fired by the transition → selected `developer`, `delivers: true`. Sequential, not duplicated — checked in the audit log. |
+| 23:44:47 | `github.repo.bootstrapped` — viberr put the initial commit on the empty repo itself (`cbe4230e`). |
+| 23:45 | goal-2 "Cycle 2 — Control plane" chained onto cycle 1; AX-2, AX-3 born blocked. Board renders 6 custom stages. |
+| 23:45–23:47 | goal-1..goal-6 created (26 tasks, 6 cycles). AX-2..AX-6 born blocked on the previous cycle's last link (cross-goal `blockedBy` works). Controller also `schedule_task_action`'d an operator stall check on AX-1 (+180 min). |
+| 23:47 | Controller's answer: full shape + **"Where the surfaces stopped me"** — no merge/accept tool (26 human ceremonies), no project-scoped agent template, and advisory capabilities it could not turn off (→ F39-4). |
+| 23:48–23:56 | Developer run on AX-1 (Codex luna/max). Probed `go version`, `make`, `git remote`; ran the golangci-lint probe → **downloaded and exited 0** (module proxy reachable from a run). Wrote the skeleton, `gofmt -w`, `make gate` → exit 0. Then **verified the fmt gate can go red** by adding an unformatted file (exit 2, named the file) and removing it. |
+| 23:56 | Developer reported honestly, including: **"`make race` is blocked by the host's disabled cgo and missing C compiler."** Confirmed: `CGO_ENABLED=0`, no cc/gcc/clang in the image. The rulings KB *requires* `go test -race ./...`. The settled record is now wrong and nothing in the delivery loop can correct it (DOCTRINE §4). |
+| 23:57 | Operator delivered: pushed `ax-1`, **opened PR #1** on akin-ozer/ax-clone (17 files, +140/−1), recorded `workRevision rev_i1clpdB5wbBw` head `5631192`. Then walked Design→Build→Verify→Review, one operator run per boundary (5 operator runs : 1 specialist run on this task). |
+| 23:58 | Reviewer engaged as a supporting (non-delivering) engagement with a revision-bound directive naming sha `5631192…`. |
+| 23:58 | `verify-record.mjs` — 27/27 checks: every stage, branch, PR number and delivered-revision sha the app renders matches `task.md` on disk. |
+| 00:01 | **Policy event:** "Policy violation: active PAT is missing `checks:read`" written to `task.md`, while the GitHub card says "All required scopes proven" (→ F39-5). |
+| 00:04 | Reviewer verdict: **approve**, bound to `rev_i1clpdB5wbBw` / `5631192`. It re-ran `make gate` itself, ran `go build`, executed the built binary, and **independently re-tested the developer's `-race` claim** (`command -v cc gcc clang`, then `CGO_ENABLED=1 go test -race ./...`) rather than taking its word. Evidence rows include "Race check · unavailable: cgo…". |
+| 00:04 | RBAC users created by the controller: Nadia (admin), Ravi (maintainer), Tomas (contributor), Priya (viewer), Jonas (**non-member**), each with a one-time password. |
+| 00:05 | **Non-member probe passes.** Signed in as Jonas through the real login form (incl. the forced password change) — every ax-clone surface answers `404 "No project at projects/ax-clone"`, byte-identical to `/projects/no-such-project`. No existence oracle. |
+| 00:06 | Task page showed the **operator recommendation** ("Accept completion and move AX-1 to Done for revision 5631192") with Apply/Dismiss — `completion-for-acceptance` at `recommend`, exactly as the controller configured it. |
+| 00:07 | Acceptance ceremony: dialog named the PR, the merge target, **"checks not readable"** with GitHub's verbatim 403 reason, the branch refresh, the revision and the verdict. Applied → **PR #1 MERGED** on akin-ozer/ax-clone (merge commit `1ad45a08`), AX-1 → Done. |
+| 00:07 | Goal chain advanced on its own: **AX-7** created for goal-1 link 2 ("Object model"). |
+| 00:07 | `verify-record.mjs` — 31/31 checks agree with disk. |
+| 00:10 | **Attachment**: no human upload path exists (F39-6), so `ax-upstream-manifests.yaml` (the real `examples/task.yaml` + `simple.yaml` from google/ax) was written into the task's attachments dir by hand. The panel picked it up immediately — the read side is directory-is-truth and works. |
+| 00:11 | Human comment on AX-7 with an `@operator` mention landed; the mention **woke the operator** (`run-resumed`, run 3 of 3). Notifications page filled with Controller/Operator/Reviewer/Policy-engine rows. |
+| 00:14 | **RBAC matrix probed for real** against the live server, all four roles + the non-member, via the actual form intents. See `RBAC.md`. |
+| 00:14 | AX-8 (a throwaway probe task) **force-accepted by the project admin from Triage**. Viberr's record of it is exemplary — see `RBAC.md`. |

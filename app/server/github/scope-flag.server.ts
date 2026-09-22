@@ -43,16 +43,60 @@ export const POLICY_ENGINE_ACTOR = {
   systemId: "policy-engine",
 };
 
+/**
+ * F39-5 (pass 39): the scopes a project does NOT require, where a refusal is
+ * worth saying and is not a violation.
+ *
+ * Ruling 360 settled the substance for `checks:read` and `credentialAdvisories`
+ * says so in as many words — *"Not a missing REQUIRED scope — merging never
+ * needed it"* — but the TIMELINE writer never learned it. Live in pass 39, one
+ * minute apart, viberr told its owner both of these about the same fact: the
+ * task record said **"Policy violation: active PAT is missing `checks:read`"**
+ * under a red shield, and the credential card said **"All required scopes
+ * proven."** Both true by their own definitions, and the pair is a lie.
+ *
+ * ONE list, read by the timeline writer and by the credential card, so they
+ * cannot drift again.
+ */
+export const ADVISORY_SCOPES: ReadonlySet<string> = new Set(["checks:read"]);
+
+/** Is a refusal on `scope` an advisory rather than a violation? */
+export function scopeIsAdvisory(scope: string): boolean {
+  return ADVISORY_SCOPES.has(scope);
+}
+
+/**
+ * The sentence for a refusal on a scope the project REQUIRES — a genuine
+ * violation, under the shield. `scopeFlagText` picks between this and the
+ * advisory wording; call that instead of choosing here.
+ */
 export function policyViolationText(scope: string, consequence: string): string {
   return `**Policy violation:** active PAT is missing \`${scope}\`. ${consequence}`;
+}
+
+/** The sentence for a refusal on a scope nothing requires: the same fact and
+ *  the same consequence, without calling it a violation. */
+export function credentialAdvisoryText(scope: string, consequence: string): string {
+  return `**Credential advisory:** the active PAT has no \`${scope}\`, which this project does not require. ${consequence}`;
+}
+
+/** The right sentence for `scope`, whichever kind it is. */
+export function scopeFlagText(scope: string, consequence: string): string {
+  return scopeIsAdvisory(scope)
+    ? credentialAdvisoryText(scope, consequence)
+    : policyViolationText(scope, consequence);
 }
 
 export function policyUpdateText(scope: string): string {
   // The consequence names the ACTUAL scope — no hardcoded pull_request:write
   // copy shown for unrelated scopes (e.g. a `repo` read refusal).
+  //
+  // F39-5: an advisory scope's clearing note must not say "violation" either,
+  // or the resolution contradicts the flag that opened it.
+  const opened = scopeIsAdvisory(scope) ? "advisory" : "violation";
   return (
-    `**Policy update:** \`${scope}\` granted on the project credential. ` +
-    `The earlier violation is resolved, and operations needing \`${scope}\` will work now.`
+    `**${scopeIsAdvisory(scope) ? "Credential" : "Policy"} update:** \`${scope}\` granted on the project credential. ` +
+    `The earlier ${opened} is resolved, and operations needing \`${scope}\` will work now.`
   );
 }
 
@@ -74,14 +118,25 @@ function taskRef(input: {
 
 async function appendPolicyEvent(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; text: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    text: string;
+    /** F39-5: a scope nothing requires writes a neutral note, not a shield. */
+    advisory?: boolean;
+  },
   ctx: ScopeFlagContext,
 ): Promise<boolean> {
   const ref = taskRef({ ...input, ...ctx });
   if (!readTaskFile(ref)) return false; // soft ref — task file may be gone
   await appendTimelineEvent(ref, {
     occurredAt: new Date().toISOString(),
-    type: "policy",
+    // F39-5: the `policy` type renders as "Policy violation" under a red
+    // shield (`event-meta.ts`), which is the right chip for a scope the
+    // project requires and the wrong one for a scope nothing requires. The
+    // neutral `note` type already exists for governance notes; an advisory
+    // takes it, so the permanent record does not call a non-violation one.
+    type: input.advisory ? "note" : "policy",
     actor: POLICY_ENGINE_ACTOR,
     title: null,
     text: input.text,
@@ -129,7 +184,12 @@ export async function flagScopeViolation(
   if (input.taskKey) {
     await appendPolicyEvent(
       db,
-      { projectSlug: input.projectSlug, taskKey: input.taskKey, text: input.detail },
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        text: input.detail,
+        advisory: scopeIsAdvisory(input.scope),
+      },
       ctx,
     );
     // E3: fan out to the humans who supervise the task — owner (if any) plus
@@ -170,6 +230,7 @@ export async function resolveScopeViolationWithEvent(
         projectSlug: violation.projectSlug,
         taskKey: violation.taskKey,
         text: policyUpdateText(violation.scope),
+        advisory: scopeIsAdvisory(violation.scope),
       },
       ctx,
     );

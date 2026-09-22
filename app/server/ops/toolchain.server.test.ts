@@ -10,7 +10,12 @@ import {
   primeToolchain,
 } from "../../../test-support/toolchain";
 import {
+  PROBE_LIMIT,
+  PROBE_NAME_RE,
   cachedToolchain,
+  probeTool,
+  probeTools,
+  resetProbeCacheForTests,
   resetToolchainCacheForTests,
   resolveToolchain,
   shellInventoryPrompt,
@@ -329,5 +334,115 @@ describe("ruling 196: the runtime image installs what a run reaches for", () => 
     // every run that a Compose stack cannot come up in this image.
     expect(text).not.toMatch(/install[^\n]*\bdocker(-ce|\.io)?\b/);
     expect(text).toMatch(/docker-in-docker is a posture change/);
+  });
+});
+
+/**
+ * F39-1 (pass 39): probing a command the fixed {@link Toolchain} struct does
+ * not name.
+ *
+ * Live, the controller was briefed with four Go gates, could verify three of
+ * them off `instance_health`, and had no way at all to ask about the fourth. It
+ * wrote "golangci-lint is NOT preinstalled" into the project's BINDING rulings
+ * and spent a delivery task discovering it was wrong. Nothing here spawns a
+ * program: the runner is the seam, exactly as above.
+ */
+describe("F39-1: probeTool", () => {
+  beforeEach(() => resetProbeCacheForTests());
+
+  /** A runner that reports which argv it was handed, and answers for `present`. */
+  const runnerFor = (present: readonly string[], version = "golangci-lint 2.6.0") => {
+    const calls: { command: string; args: readonly string[] }[] = [];
+    const run: CommandRunner = (command, args) => {
+      calls.push({ command, args });
+      if (command === "/bin/sh") {
+        const name = args[args.length - 1]!;
+        return present.includes(name)
+          ? { ok: true, stdout: `/usr/local/bin/${name}\n` }
+          : { ok: false, detail: "exit 1" };
+      }
+      return { ok: true, stdout: version };
+    };
+    return { run, calls };
+  };
+
+  it("reports a present command with its version, and an absent one with a reason", () => {
+    const { run } = runnerFor(["golangci-lint"]);
+    expect(probeTool("golangci-lint", { run })).toEqual({
+      name: "golangci-lint",
+      present: true,
+      version: "2.6.0",
+    });
+    expect(probeTool("gofmt", { run })).toEqual({
+      name: "gofmt",
+      present: false,
+      reason: "gofmt is not on PATH",
+    });
+  });
+
+  it("a present command whose --version says nothing is still present", () => {
+    const { run } = runnerFor(["ssh"], "OpenSSH_9.6p1");
+    // No semver-shaped token: `present` is the fact the caller asked for, and
+    // a missing version must not read as a missing binary.
+    expect(probeTool("ssh", { run })).toEqual({
+      name: "ssh",
+      present: true,
+      version: null,
+    });
+  });
+
+  it("passes the name as an ARGUMENT, never interpolated into the script", () => {
+    const { run, calls } = runnerFor(["gofmt"]);
+    probeTool("gofmt", { run });
+    const lookup = calls[0]!;
+    expect(lookup.command).toBe("/bin/sh");
+    // CANARY: build the script as `command -v ${name}` and this goes red — the
+    // name would then be shell code rather than data.
+    expect(lookup.args[1]).toBe('command -v -- "$1"');
+    expect(lookup.args[1]).not.toContain("gofmt");
+    expect(lookup.args[lookup.args.length - 1]).toBe("gofmt");
+  });
+
+  it("refuses a name that is a path, a flag or a shell fragment WITHOUT running anything", () => {
+    for (const bad of [
+      "/usr/bin/go",
+      "go; rm -rf /",
+      "go && curl evil",
+      "--version",
+      "$(whoami)",
+      "go test",
+      "",
+      "a".repeat(65),
+    ]) {
+      const { run, calls } = runnerFor([]);
+      const probed = probeTool(bad, { run });
+      expect(probed.present, bad).toBe(false);
+      expect(probed.present === false && probed.reason, bad).toContain(
+        "not a command name",
+      );
+      // CANARY: relax PROBE_NAME_RE and these reach a child process.
+      expect(calls, bad).toHaveLength(0);
+    }
+    expect(PROBE_NAME_RE.test("golangci-lint")).toBe(true);
+    expect(PROBE_NAME_RE.test("go1.25.1")).toBe(true);
+    expect(PROBE_NAME_RE.test("g++")).toBe(true);
+  });
+
+  it("probeTools de-duplicates, keeps order, caps the count and memoizes each name", () => {
+    const { run, calls } = runnerFor(["go"]);
+    const first = probeTools(["go", "gofmt", "go", " gofmt "], { run });
+    expect(first.map((p) => p.name)).toEqual(["go", "gofmt"]);
+    const spawnsAfterFirst = calls.length;
+    // Memoized: a second ask for the same names spawns nothing more.
+    probeTools(["go", "gofmt"], { run });
+    expect(calls).toHaveLength(spawnsAfterFirst);
+
+    const many = probeTools(
+      Array.from({ length: PROBE_LIMIT + 5 }, (_, i) => `tool${i}`),
+      { run },
+    );
+    // CANARY: drop the cap and an unbounded list becomes an unbounded number of
+    // child processes on a read any asker can make.
+    expect(many).toHaveLength(PROBE_LIMIT);
   });
 });

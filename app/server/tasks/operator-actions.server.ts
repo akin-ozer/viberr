@@ -89,6 +89,8 @@ import {
 import { backendDispatchHold } from "~/server/runtimes/backend-quota.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import {
   readTaskFile,
   resolveTaskFilePath,
@@ -1969,6 +1971,177 @@ export function contextConflictEvent(
       `\`${conflict.kbSource}\` says otherwise. ${conflict.detail}`,
     toAgent: false,
     evidence: null,
+  };
+}
+
+// -------------------------------------------------- propose a ruling change
+
+export const RULING_PROPOSAL_TITLE = "Ruling contradicted by evidence";
+
+/** The heading every proposal is filed under, in the settled document itself.
+ *  One constant so the writer and the reader cannot disagree about it. */
+export const PROPOSED_RULINGS_HEADING = "## Proposed (not binding)";
+
+export interface RulingProposal {
+  /** Document path inside the project's rulings knowledge base. */
+  doc: string;
+  /** What should change, in the operator's own words. */
+  text: string;
+  /** What proves it: the command and its output, a run id, a verdict. */
+  evidence: string;
+}
+
+/**
+ * F39-1/F39-7 (pass 39, owner ruling): the operator may PROPOSE a change to the
+ * project's settled rulings, in the rulings document itself, and nothing more.
+ *
+ * Before this, nothing inside the delivery loop could write the rulings KB. The
+ * operator's toolkit had no KB write, specialists have none, and the controller
+ * only runs when a human talks to it — so a ruling that turned out to be FALSE
+ * kept being injected into every run as binding truth. Live in pass 39 the
+ * rulings demanded `go test -race ./...`; the host has `CGO_ENABLED=0` and no C
+ * compiler; the delivering agent proved it, the reviewer re-proved it
+ * independently, the operator wrote "the ruling is contradicted by evidence,
+ * remedy: update the ruling" — as a COMMENT, because that was the only surface
+ * it had — and the false requirement went on propagating into every goal the
+ * operator drafted afterwards.
+ *
+ * The proposal is appended under {@link PROPOSED_RULINGS_HEADING} in the named
+ * document. It never edits a settled line and never removes one: promotion is a
+ * human or controller edit, exactly as before. What changes is that the fact now
+ * lands where the rule lives, next to the rule it contradicts, and every run
+ * reads it with the rule.
+ */
+export async function operatorProposeRuling(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string } & RulingProposal,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const doc = input.doc.trim();
+  const text = input.text.trim();
+  const evidence = input.evidence.trim();
+  if (!doc || !text || !evidence) {
+    return {
+      outcome: "noop",
+      message:
+        "A proposal needs all three: the rulings document to amend, what should change, and the evidence that proves it. Nothing was written.",
+    };
+  }
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project.",
+    };
+  }
+  const { listKnowledgeBases, resolveStoreTarget } = await import(
+    "~/server/org/resources.server"
+  );
+  const { writeStoreDoc } = await import("~/server/org/store-files.server");
+  const project = readProjectFile({
+    projectSlug: input.projectSlug,
+    dataRoot: ctx.dataRoot,
+  });
+  const rulingsDir = project?.parsed.frontmatter.rulingsKb ?? null;
+  if (!rulingsDir) {
+    return {
+      outcome: "noop",
+      message:
+        `${input.projectSlug} names no rulings knowledge base, so there is no settled document to amend. ` +
+        "Say what you found on the timeline instead, and an org admin can set one (Org settings, or ask the controller).",
+    };
+  }
+  const seedCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
+  const kb =
+    listKnowledgeBases(db, seedCtx).find((row) => row.dir === rulingsDir) ?? null;
+  const target = kb ? resolveStoreTarget(db, "kb", kb.id, seedCtx) : null;
+  if (!target) {
+    return {
+      outcome: "noop",
+      message: `The rulings knowledge base "${rulingsDir}" is named by ${input.projectSlug} but no longer resolves in the store. Nothing was written.`,
+    };
+  }
+  // The document has to be one the KB really holds: a typo would otherwise
+  // CREATE a settled-looking document nobody asked for.
+  const name = doc.replace(/^\/+/, "").split("/").pop() ?? doc;
+  const abs = path.join(target.rootAbs, name);
+  let existing: string;
+  try {
+    existing = readFileSync(abs, "utf8");
+  } catch {
+    const held = readdirSync(target.rootAbs)
+      .filter((f) => !f.startsWith("."))
+      .sort();
+    return {
+      outcome: "noop",
+      message:
+        `"${name}" is not a document in the rulings knowledge base ${rulingsDir}. Nothing was written. ` +
+        (held.length > 0
+          ? `It holds: ${held.join(", ")}.`
+          : "It holds no documents."),
+    };
+  }
+  const entry =
+    `- **[${input.taskKey}, ${new Date().toISOString().slice(0, 10)}]** ${text}\n` +
+    `  Evidence: ${evidence}\n`;
+  const body = existing.includes(PROPOSED_RULINGS_HEADING)
+    ? existing.replace(
+        PROPOSED_RULINGS_HEADING,
+        `${PROPOSED_RULINGS_HEADING}\n\n${entry.trimEnd()}`,
+      )
+    : `${existing.trimEnd()}\n\n${PROPOSED_RULINGS_HEADING}\n\n` +
+      "Raised by an operator from evidence on a task. **Nothing here is binding.** " +
+      "A human or the controller promotes an entry into the settled text above, or deletes it.\n\n" +
+      entry;
+  writeStoreDoc(db, target, [], name, body, OPERATOR_AUDIT_ACTOR, {
+    overwrite: true,
+  });
+  const event: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "quality",
+    actor: { kind: "operator" },
+    title: RULING_PROPOSAL_TITLE,
+    text:
+      `**Proposed, not binding:** ${text} ` +
+      `Filed under "${PROPOSED_RULINGS_HEADING.replace(/^#+ /, "")}" in \`${rulingsDir}/${name}\`, ` +
+      `which every run on this project reads. Evidence: ${evidence}`,
+    toAgent: false,
+    evidence: null,
+  };
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(event);
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.ruling_proposed",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { rulingsKb: rulingsDir, doc: name, bytes: entry.length },
+  });
+  // A settled ruling is a human's to change; the proposal is worth nothing if
+  // it only exists in a document nobody re-reads.
+  notifyTaskWatchers(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "quality",
+      title: RULING_PROPOSAL_TITLE,
+      text: event.text,
+      occurredAt: event.occurredAt,
+      from: OPERATOR_NOTIFY_FROM,
+    },
+    ctx,
+  );
+  return {
+    outcome: "done",
+    message: `Proposed against \`${rulingsDir}/${name}\`. It is NOT binding: a human promotes or deletes it.`,
   };
 }
 

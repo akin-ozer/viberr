@@ -1,0 +1,250 @@
+# Pass 39 findings — ax clone (2026-09-21)
+
+Severity: **HIGH** = viberr lies, loses work, or blocks a path with no way out ·
+**MED** = makes a person or an agent do something absurd · **LOW** = noted, not worked.
+
+---
+
+## F39-1 · MED · The host toolchain inventory is a fixed, npm-shaped list — nothing can probe for anything else
+
+**What happened.** The instance had no Go toolchain at all (`/resources/health` →
+`"go": null`) on a pass whose gates are `gofmt`, `go vet`, `golangci-lint`, `go test`.
+The owner authorised installing Go into the image for this pass (Dockerfile layer,
+deliberately untracked), so the pass could proceed.
+
+**The finding is the second half.** `Toolchain` (`app/server/ops/toolchain.server.ts`) is a
+FIXED struct — node, npm, git, python3, go, make, docker, pnpm, yarn, curl, codexCli,
+claudeAgentSdk. Ruling 191 added five names after pass 37 logged 75 `command not found`
+lines, but the *shape* did not change: the list is hardcoded and npm-centric. There is no
+way for the controller — or anyone — to ask "is `golangci-lint` on PATH?" without spending a
+whole delivery task on it.
+
+**Evidence.** The controller, briefed with the four Go gates, read `instance_health` first
+(good), then wrote into its own project KB:
+
+> | **golangci-lint** | **NOT preinstalled** (see section 3) |
+> … Task AX-1 establishes the truth empirically and records the result here.
+
+golangci-lint *is* installed on this host. The controller could not know that, so it
+budgeted a task to discover it and wrote a wrong fact into the KB that every run on the
+project then reads. It behaved correctly given what it could see; the surface was the
+problem.
+
+**Proposed fix.** `viberr_ops` gains a bounded command-presence probe (e.g.
+`instance_health({ probe: ["golangci-lint", "goimports"] })`, ≤8 names, `[A-Za-z0-9._-]+`
+only, no shell, `command -v` + `--version`, 5s each, memoized per name per process), and the
+controller guide tells it to probe before promising a gate.
+
+---
+
+## F39-2 · LOW · The Claude model picker offers no plain `opus`, only `opus[1m]`
+
+Live catalog on this account: `default`, `opus[1m]`, `claude-fable-5-1[1m]`, `sonnet`,
+`haiku`. The curated fallback (`model-catalog.server.ts`) lists plain `opus`/`sonnet`/`haiku`.
+So which Opus you can pick depends on whether the live `supportedModels()` fetch succeeded,
+and the two lists disagree about whether a 200k-context Opus is selectable. Noted, not
+blocking: `opus[1m]` was set for the controller and runs.
+
+---
+
+## F39-3 · MED · A knowledge-base document has to fit in one JSON string argument, and a big one fails as malformed JSON
+
+`save_knowledge_base` takes the whole document body as one inline JSON string. On this pass
+the controller's second KB doc (7356 bytes of markdown containing Go snippets and tables)
+came back:
+
+```
+InputValidationError: mcp__viberr_controller__save_knowledge_base was called with input that
+could not be parsed as JSON.
+You sent (first 200 of 7356 bytes): {"id": "kb_HZpcYS3sovrJ", "name": "ax-clone-rulings", …
+Common causes: unescaped backslashes in file paths (use / or \\), unescaped control
+characters, or truncated output.
+```
+
+The controller recovered (it said so in the transcript: *"The KB write was malformed on my
+side (truncated JSON) — retrying it smaller"*) and the second attempt landed. So nothing was
+lost — but the retry re-emitted several thousand output tokens, and the same shape governs
+every `save_skill`, `save_global_agent` persona and KB doc. The bigger and more useful the
+document, the likelier the write fails.
+
+**Proposed fix.** Give the doc writers an append mode: `save_knowledge_base` /
+`save_skill` accept `doc.append: true` (or a `section` argument) so a long document is
+written in two or three bounded calls instead of one large one, and say so in the tool
+description. Cheap, no schema migration, removes a whole failure class.
+
+---
+
+## F39-4 · HIGH · `get_project` shows advisory persona text as a granted authority — and the setter then refuses to change it
+
+**The lie.** `UNIFIED_CAP_CATALOG` (`app/shared/capabilities.ts:145-155`) has two kinds of
+row. Rows with a `group` are real: a runtime consumer enforces them and an admin can toggle
+them. Rows with `group: null` are *"Advisory persona guidance (no runtime consumer —
+matrix-only, no toggle)"* — `move-task-to-review`, `run-unit-integration-validation`,
+`read-repo-diff`, `run-validation-suites`, `post-quality-flags`, `approve-review`,
+`request-changes`, `author-test-cases`, `read-task-repo`, `flag-underspecified-tasks`.
+
+Three surfaces disagree about them:
+
+| surface | filter | result |
+|---|---|---|
+| Agents page editor | `capability-catalog.ts:42` `group !== null` | advisory rows hidden ✅ |
+| `list_capabilities` | `controller-toolkit.server.ts:430` `group !== null` | advisory rows hidden ✅ |
+| **`get_project`** | **`controller-toolkit.server.ts:1496` — no filter** | **advisory rows shown as `{capabilityId, mode:"direct", label}`, byte-identical in shape to an enforced grant** ❌ |
+
+`get_project`'s own description tells the reader this is the authoritative pre-flight read:
+*"deployed agents with their RESOLVED grants (every catalogued capability id at the mode the
+runtime applies … ruling 139: read this before update_agent_deployment)"*. It is not: some of
+those rows are at no mode the runtime applies, because no runtime applies them.
+
+**What it cost, live.** The controller read `get_project`, saw `move-task-to-review: direct`
+on the Developer, tried to turn it off, was refused by `update_agent_deployment` (which
+filters by the *settable* list), and reported to the owner, in writing:
+
+> *"Some deployed capabilities aren't in the settable catalogue — the Developer carries
+> `move-task-to-review` and `run-unit-integration-validation`, the Reviewer `approve-review`
+> … I could not turn `move-task-to-review` off, so the Developer can advance a task to Review
+> on its own even though I routed delivery through the operator."*
+
+Every clause of that conclusion is false, and viberr is what made it false. The Developer
+cannot advance a task on its own: the capability has no consumer. The instance's own manager
+read the authoritative surface, reasoned correctly, and told its owner a wrong thing about
+who may do what — the exact shape of `ground-truth-displaced-by-prose`.
+
+**The write side is already right — checked.** `capabilityPatchRefusal`
+(`capability-catalog.ts:265`) already answers an advisory id with exactly the right sentence:
+*"…is a matrix-only capability with no toggle: it describes persona guidance and cannot be
+granted or withheld."* And the controller **never called it** — grepped the run log: there is
+no `update_agent_deployment` attempt carrying `move-task-to-review`. It reasoned from
+`get_project` alone and reported the conclusion as fact. So the defect is exactly one site,
+and a better refusal would not have prevented it.
+
+**Proposed fix.** `get_project` marks an advisory row inline, in the reply the controller
+actually reads, so the false inference is unavailable:
+
+```json
+{ "capabilityId": "move-task-to-review", "mode": "direct", "label": "Move the task to Review",
+  "advisory": "persona guidance only: no runtime consumer enforces this, and it has no toggle" }
+```
+
+Enforced rows are unchanged (no `advisory` key), and the tool description says what the key
+means. Test: an advisory row in a deployment carries `advisory`, an enforced row does not
+(canary: drop the marking and the test goes red).
+
+---
+
+## F39-5 · MED · The same missing scope is a "Policy violation" on the task record and "not required" on the credential card
+
+Live on AX-1, within one minute of each other, viberr said both of these about one fact:
+
+- `task.md` timeline, rendered with the coral shield whose label is literally
+  **"Policy violation"** (`event-meta.ts:31`):
+  > **Policy violation:** active PAT is missing `checks:read`. Reading the pull request's
+  > check results was refused during reconcile…
+- GitHub page, credential card, at the same time:
+  > `repo` · `pull_request:write` — **All required scopes proven.** Secrets stay isolated…
+
+Both are "true" by the code's own definitions, and ruling 360 settled the substance:
+`credentialAdvisories()` (`pat-store.server.ts:408`) says in as many words —
+
+> Ruling 360 (pass 38, F38-14): the check-runs read GitHub refused with this token.
+> **Not a missing REQUIRED scope — merging never needed it** — but the reason every task
+> page and accept dialog says "checks not readable".
+
+The advisory text on the card is excellent. The **timeline event is not**:
+`policyViolationText()` (`scope-flag.server.ts:47`) is a single string used for *every*
+scope, so the optional one is written into the permanent task record under the word
+"violation", with a red shield, next to a card that says nothing is missing. The advisory
+is the considered wording; the timeline never got it.
+
+**Proposed fix.** Split the two cases at the one place they are written. A scope the
+project actually requires keeps "**Policy violation:**". A scope ruling 360 classes as
+advisory (`checks:read` today) writes "**Credential advisory:**" with the same consequence
+sentence, and `event-meta.ts` gives that variant a neutral label and icon rather than the
+violation shield. One list of required-vs-advisory scopes, read by both writers, so they
+cannot drift again. Test: flagging `checks:read` produces an advisory-worded event and
+leaves "All required scopes proven" true; flagging a required scope still produces the
+violation wording (canary: swap the classification and the test goes red).
+
+---
+
+## F39-6 · MED · A human cannot attach a file to a task — and the instance's own controller plans around one
+
+`task-attachments.server.ts:9-18` says it outright:
+
+> Files land here through two writers: the browser MCP server's `--output-dir` … and the
+> agent evidence drop … The read side is deliberately dumb — the DIRECTORY is the truth,
+> **no projection table, no upload path**, no retention machinery.
+
+Confirmed in the routes: `app/routes/task-attachment.ts` exports a `loader` and no `action`;
+`routes.ts:76` registers only `projects/:slug/tasks/:key/attachments/:file`; there is no
+`<input type="file">` anywhere under `app/features/task-detail/`. The only file inputs in the
+app are in `store-browser.tsx` — a human may upload a document into a **knowledge base**, but
+not onto a **task**.
+
+The attachments panel's empty state is honest about it ("A browser-capable agent on this task
+saves the screenshots and files it captures here"). The problem is upstream of the panel.
+Asked where a human-supplied artifact would genuinely help, the controller answered:
+
+> **The task: AX-4. The file: captured help output from the real `google/ax` binary** …
+> A human-supplied transcript turns that from self-consistency into fidelity.
+> … when AX-1 completes and goal-1 link 2 ("Object model") gets its task, attach a **real
+> multi-document `ax` manifest** … a human-supplied fixture stops the decoder from being
+> tested against a fixture it wrote for itself.
+
+That reasoning is correct and it is exactly the kind of input a governed delivery product
+should accept. Viberr cannot. The only way to do it on this instance is to write into
+`docker-data/projects/<slug>/tasks/<KEY>/attachments/` on the server's volume by hand, which
+is what this pass had to do. An agent then reads it normally — the read side works fine.
+
+**Proposed fix.** An `attach-file` intent on the task route: multipart, project-membership
+gated at contributor or above, size-capped, extension-checked against the same whitelist the
+read side already enforces, written through a writer into the task's attachments dir, with a
+typed timeline event and an audit row naming the uploader. A small drop zone in the
+attachments panel (and the panel rendering for every task, not only browser-capable ones).
+Test: a contributor uploads and the file lists + a timeline event names them; a viewer is
+refused; a traversal name and a `.html` are refused.
+
+---
+
+## F39-7 · MED · The operator answers a conflicting-scope block with a comment, so the work keeps going the wrong way
+
+**Setup.** A human (project admin) put an authoritative upstream fixture on AX-7 and said, on
+the timeline, that it contradicts the project's settled `architecture.md` on the wire format
+(`ax.io/v1alpha1` vs `ax.dev/v1`, `atespace` vs `namespace`, and the whole Task/Workspace/
+Gateway/Model spec shape), and asked the operator to decide and say so — explicitly: *"do not
+let an agent quietly pick one and write tests that confirm its own guess."*
+
+**What the operator did.** It reasoned correctly and reported honestly:
+
+> @Arda I've recorded the conflict. The settled ax-clone-rulings architecture.md §2 governs
+> this run … the upstream fixture is evidence for a possible future scope change, not
+> permission to diverge. The Developer is already running with that architecture-bound
+> directive, so it will not choose between the two. **Upstream wire fidelity would require a
+> human update to the goal or ruling before rework.**
+
+Nothing there is wrong. The problem is the *shape* it used. Measured on the task file
+straight afterwards: `queuedQuestions: []`, no packet, `waiting: agent`. So:
+
+- the task is **not** waiting on a human — it does not show in "waiting on you", the review
+  queue, or the board's human filter;
+- the delivering agent **kept running** and is building the format the human just said is
+  wrong;
+- the only signal is a mention notification (which did arrive correctly).
+
+The operator's own playbook picks the other shape for exactly this case
+(`viberr-app-expertise.skill.md`): *"Open a decision packet only for a real human choice or
+block: **conflicting scope**, policy/credential trouble, or repeated no progress."* An
+authoritative artifact contradicting a settled ruling, where the operator's own sentence is
+"this needs a human update before rework", **is** conflicting scope. It holds
+`generate-packets: direct`, so it could have.
+
+A comment and a packet are not interchangeable: a packet sets `waiting: human`, holds the
+task, and is the thing the product's whole decision surface is built around. Choosing the
+comment converts a blocking decision into a notification, and pays for it in rework.
+
+**Proposed fix (doctrine, not code).** In `viberr-app-expertise.skill.md`, make the trigger
+testable instead of adjectival: *if your own answer to a human contains "this needs a human
+decision / a ruling change / rework before X", that is a packet, not a comment — open it and
+stop the work it blocks.* And add the converse to the hand-off truth section: *a comment does
+not stop a run; if the run in flight is now building the wrong thing, say so and interrupt it
+rather than letting it finish.*

@@ -74,6 +74,7 @@ import {
   operatorSetDependencies,
   operatorSetGoal,
   operatorFlagContextConflict,
+  operatorProposeRuling,
   operatorSnapshot,
   operatorTransitionStage,
   operatorResolvePacket,
@@ -2052,6 +2053,12 @@ const OPERATOR_PLAN_TOOLS = [
   // task keys and goal links; `blockedBy: []` clears it) instead of opening a
   // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
+  // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`. Every agent on
+  // the pass-39 instance ran on Codex, so a tool that exists only on the Claude
+  // toolkit would have been unreachable by the operator that actually found the
+  // false ruling. `text` carries the correction, `kbSource` the document to
+  // amend, `repoSource` the evidence.
+  "propose_ruling",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -2083,6 +2090,9 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // Ruling 131(b): the wait is the hold packet's replacement, so it rides the
   // packet's own grant.
   set_dependencies: ["generate-packets"],
+  // F39-1/F39-7: same gate as `flag_context_conflict` — it writes a typed event
+  // and a proposal, never a binding rule.
+  propose_ruling: ["append-typed-events"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
@@ -2159,10 +2169,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; else null." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_ruling: the correction itself, in one or two sentences; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
-          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees; else null." },
-          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative; else null." },
+          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_ruling: the rulings document to amend, by file name as the rulings knowledge base lists it. Else null." },
+          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_ruling: the EVIDENCE that proves the ruling wrong \u2014 the exact command and its exit code or output, or the run and verdict that showed it. Else null." },
           blockedBy: {
             type: ["array", "null"],
             items: { type: "string" },
@@ -2916,6 +2926,33 @@ async function executeCodexPlan(
             skippedMalformed(
               a.tool,
               "the KB source, the repo source, and the detail",
+            );
+          }
+          break;
+        case "propose_ruling":
+          // F39-1/F39-7 (pass 39): `kbSource` is the rulings document to amend,
+          // `text` the correction, `repoSource` the evidence that proves it.
+          // Reuses the plan's existing string fields rather than growing the
+          // schema — the two ruling-shaped actions then read alike.
+          if (a.kbSource && a.text && a.repoSource) {
+            record(
+              a.tool,
+              await operatorProposeRuling(
+                db,
+                ctx,
+                {
+                  ...base,
+                  doc: a.kbSource,
+                  text: a.text,
+                  evidence: a.repoSource,
+                },
+                authority,
+              ),
+            );
+          } else {
+            skippedMalformed(
+              a.tool,
+              "the rulings document, the correction, and the evidence",
             );
           }
           break;

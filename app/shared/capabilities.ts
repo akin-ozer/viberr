@@ -592,6 +592,35 @@ export function capabilityById(id: string): CapabilityDef | null {
   return byId.get(id) ?? null;
 }
 
+/**
+ * ADVISORY persona guidance, not an authority (F39-4, pass 39).
+ *
+ * `UNIFIED_CAP_CATALOG` holds two kinds of row. A row with a `group` is real:
+ * some runtime consumer enforces it and an admin has a toggle for it. A row
+ * with `group: null` is matrix-only — it rides the persona matrix and the
+ * stored grant list, nothing enforces it, and `capabilityPatchRefusal` refuses
+ * it by name. Every surface that RENDERS a deployment's stored grants already
+ * filters these out (`capability-catalog.ts` for the editor,
+ * `list_capabilities` for the controller) — except the controller's
+ * `get_project`, which shipped them shaped exactly like enforced grants.
+ *
+ * Live in pass 39 that cost a wrong answer: the controller read
+ * `move-task-to-review: direct` off `get_project`, never tried to change it,
+ * and told its owner "the Developer can advance a task to Review on its own
+ * even though I routed delivery through the operator" — three false claims
+ * drawn from a row that means none of them. An id outside the catalogue
+ * (retired) is not settable either, so it reads as advisory here too.
+ */
+export function capabilityIsAdvisory(id: string): boolean {
+  const def = UNIFIED_CAP_CATALOG.find((c) => c.id === id);
+  return def === undefined || def.group === null;
+}
+
+/** The one sentence every surface prints for an advisory grant row, so the
+ *  wording cannot drift between them. */
+export const ADVISORY_CAPABILITY_NOTE =
+  "persona guidance only: no runtime consumer enforces this, and it has no toggle";
+
 /** Exact-label lookup (used by the seed to normalize mock action strings). */
 export function capabilityByLabel(label: string): CapabilityDef | null {
   return byLabel.get(label) ?? null;

@@ -1,3 +1,4 @@
+import { scopeIsAdvisory } from "~/server/github/scope-flag.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -407,7 +408,11 @@ export function credentialAdvisories(
   // Ruling 360 (pass 38, F38-14): the check-runs read GitHub refused with this
   // token. Not a missing REQUIRED scope — merging never needed it — but the
   // reason every task page and accept dialog says "checks not readable".
-  const checks = openViolations.find((v) => v.scope === "checks:read");
+  // F39-5: the same list the timeline writer reads, so "advisory" cannot mean
+  // one thing on the card and another on the record.
+  const checks = openViolations.find(
+    (v) => v.scope === "checks:read" && scopeIsAdvisory(v.scope),
+  );
   if (checks) {
     advisories.push({
       id: "checks_read",

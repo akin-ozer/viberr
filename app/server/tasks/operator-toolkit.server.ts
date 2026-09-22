@@ -23,6 +23,7 @@ import {
   operatorDeliverForReview,
   operatorDispatchAgent,
   operatorFlagContextConflict,
+  operatorProposeRuling,
   OPERATOR_TIMELINE_DEFAULT,
   OPERATOR_TIMELINE_MAX,
   operatorOpenPacket,
@@ -558,6 +559,48 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "flag_context_conflict",
+    );
+    // F39-1/F39-7 (pass 39): the sibling of flag_context_conflict for the case
+    // where the KB is not merely disagreeing with the repo but WRONG, and the
+    // operator can prove it. Nothing else in the delivery loop can write the
+    // rulings, so a false ruling used to keep shipping as binding truth.
+    add(
+      tool(
+        "propose_ruling",
+        "Propose a change to the project's SETTLED rulings knowledge base, when work on this task has PROVEN one of its rules wrong or unachievable. Use it when your own answer to a human would otherwise be \"this needs a ruling change before X\": a gate command the host cannot run, a convention a review has settled differently, an environment fact agents keep re-deriving. The proposal is appended under a \"Proposed (not binding)\" heading in the named document, so it is read with the rule it contradicts by every run on this project; it never edits or removes a settled line, and it is NOT binding until a human or the controller promotes it. Bring evidence: the command and its output, or the run and verdict that showed it. This records a proposal, it does not unblock the task \u2014 if work is blocked on the decision, open a decision packet as well.",
+        {
+          doc: z
+            .string()
+            .describe(
+              "The document to amend, by file name as the rulings knowledge base lists it, e.g. 'environment-and-gates.md'.",
+            ),
+          text: z
+            .string()
+            .describe(
+              "What should change, in one or two sentences. State the correction, not the complaint.",
+            ),
+          evidence: z
+            .string()
+            .describe(
+              "What proves it: the exact command and its exit code or output, or the run/verdict that showed it.",
+            ),
+        },
+        async (args) =>
+          resultText(
+            await operatorProposeRuling(
+              db,
+              ctx,
+              {
+                ...base,
+                doc: prose(args.doc),
+                text: prose(args.text),
+                evidence: prose(args.evidence),
+              },
+              authority,
+            ),
+          ),
+      ),
+      "propose_ruling",
     );
   }
 

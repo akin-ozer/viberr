@@ -19,12 +19,28 @@ import {
   effortsFor,
 } from "~/server/runtimes/model-catalog.server";
 import {
+  ADVISORY_CAPABILITY_NOTE,
   ALWAYS_HUMAN_CAPABILITY_IDS,
   UNIFIED_CAP_CATALOG,
   capabilityById,
+  capabilityIsAdvisory,
   type CapabilityKind,
 } from "~/shared/capabilities";
+import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
+
+/**
+ * One capability row as `get_project` answers it (F39-4). `advisory` is present
+ * only on a `group: null` catalogue row: persona guidance nothing enforces and
+ * `update_agent_deployment` refuses. Its ABSENCE is the signal that a grant is
+ * real, so this shape is a contract, not a convenience.
+ */
+interface DeployedGrantView {
+  capabilityId: string;
+  mode: CapabilityMode;
+  label: string;
+  advisory?: string;
+}
 import { capabilityPatchRefusal,
   OPERATOR_CAP_MODES,
   SPECIALIST_CAP_MODES,
@@ -1408,7 +1424,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1493,13 +1509,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               // template it came from (null when it does not).
               resources: row.resources,
               templateDrift: row.templateDrift,
-              capabilities: row.capabilities.map((c) => ({
-                capabilityId: c.capabilityId,
-                mode: c.mode,
-                // A retired id that is no longer in the catalogue keeps its
-                // id as its label; nothing here assumes the lookup succeeds.
-                label: capabilityById(c.capabilityId)?.label ?? c.capabilityId,
-              })),
+              capabilities: row.capabilities.map((c) => {
+                const grant: DeployedGrantView = {
+                  capabilityId: c.capabilityId,
+                  mode: c.mode,
+                  // A retired id that is no longer in the catalogue keeps its
+                  // id as its label; nothing here assumes the lookup succeeds.
+                  label: capabilityById(c.capabilityId)?.label ?? c.capabilityId,
+                };
+                // F39-4: an ADVISORY row says so, in the reply, next to its
+                // mode. Both other renderers of these grants drop advisory
+                // rows entirely; this one cannot (they are really in
+                // `project.md` and really in the persona matrix), so it marks
+                // them instead. No `advisory` key ⇒ a real, enforced,
+                // settable grant.
+                if (capabilityIsAdvisory(c.capabilityId)) {
+                  grant.advisory = ADVISORY_CAPABILITY_NOTE;
+                }
+                return grant;
+              }),
             };
             return row.kind === "operator"
               ? { ...entry, autonomy: row.autonomy ?? "supervised" }

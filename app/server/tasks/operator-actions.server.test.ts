@@ -18,6 +18,8 @@ import {
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -52,7 +54,10 @@ import {
   operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
+  operatorProposeRuling,
   operatorSetGoal,
+  PROPOSED_RULINGS_HEADING,
+  RULING_PROPOSAL_TITLE,
   operatorResolvePacket,
   operatorSnapshot,
   operatorTransitionStage,
@@ -3439,6 +3444,193 @@ describe("auto-invoke on task creation", () => {
     const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
     expect(deliveringEngagement(t.frontmatter)).toBeNull();
     expect(listRunsForTask(store.db, store.slug, created.key)).toHaveLength(0);
+  });
+});
+
+describe("operatorProposeRuling", () => {
+  /**
+   * F39-1/F39-7 (pass 39, owner ruling): the operator can write a CORRECTION
+   * into the project's settled rulings, as a proposal, and nothing more.
+   *
+   * Before this the delivery loop had no writer for the rulings KB at all — the
+   * operator's toolkit had none, specialists have none, and the controller only
+   * runs when a human talks to it. Live, the rulings demanded
+   * `go test -race ./...`, the host had CGO off and no C compiler, the developer
+   * proved it, the reviewer re-proved it independently, and the false rule kept
+   * being injected into every run as binding truth while the operator could only
+   * say so in a comment.
+   */
+  async function seedRulingsKb(docBody: string): Promise<string> {
+    const { saveKnowledgeBase } = await import("~/server/org/resources.server");
+    const { resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const actor = { kind: "user" as const, userId: store.users.arda.id, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      store.db,
+      { name: "ax-rulings", refresh: "on change" },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+    const target = resolveStoreTarget(store.db, "kb", kb.id, {
+      dataRoot: store.dataRoot,
+    })!;
+    writeStoreDoc(store.db, target, [], "environment-and-gates.md", docBody, actor);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      rulingsKb: kb.dir,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return target.rootAbs;
+  }
+
+  it("appends a non-binding proposal into the named rulings document, with the event, audit and notification", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb(
+      "# Environment and gates\n\n- Every test must pass under `go test -race ./...`.\n",
+    );
+    const r = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "environment-and-gates.md",
+        text: "Strike the -race requirement: this host cannot run it.",
+        evidence: "`CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toContain("NOT binding");
+
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    // The settled line is untouched — a proposal never edits or removes one.
+    expect(body).toContain("- Every test must pass under `go test -race ./...`.");
+    // CANARY: drop the heading from `operatorProposeRuling` and this goes red;
+    // the proposal would then read as settled text.
+    expect(body).toContain(PROPOSED_RULINGS_HEADING);
+    expect(body).toContain("Nothing here is binding.");
+    expect(body).toContain("**[VIB-1,");
+    expect(body).toContain("Strike the -race requirement");
+    expect(body).toContain("exited 127");
+    // Filed AFTER the settled text, so a reader meets the rule first.
+    expect(body.indexOf("- Every test must pass")).toBeLessThan(
+      body.indexOf(PROPOSED_RULINGS_HEADING),
+    );
+
+    const top = task().timeline[0]!;
+    expect(top.type).toBe("quality");
+    expect(top.title).toBe(RULING_PROPOSAL_TITLE);
+    expect(top.text).toContain("Proposed, not binding");
+    expect(top.text).toContain("environment-and-gates.md");
+
+    expect(
+      listAuditEvents(store.db).some(
+        (e) => e.action === "task.operator.ruling_proposed" && e.taskKey === "VIB-1",
+      ),
+    ).toBe(true);
+    // A settled ruling is a human's to change, so the proposal must reach one.
+    expect(
+      listNotifications(store.db, store.users.arda.id).some(
+        (n) => n.title === RULING_PROPOSAL_TITLE,
+      ),
+    ).toBe(true);
+  });
+
+  it("a second proposal stacks under the same heading instead of duplicating it", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const base = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      doc: "environment-and-gates.md",
+    };
+    for (const [text, evidence] of [
+      ["First correction.", "run A"],
+      ["Second correction.", "run B"],
+    ]) {
+      const r = await operatorProposeRuling(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { ...base, text: text!, evidence: evidence! },
+        authority("full"),
+      );
+      expect(r.outcome).toBe("done");
+    }
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    expect(body.split(PROPOSED_RULINGS_HEADING)).toHaveLength(2);
+    expect(body).toContain("First correction.");
+    expect(body).toContain("Second correction.");
+  });
+
+  it("refuses by name when the project names no rulings KB, and when the document is not in it", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const noKb = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "whatever.md",
+        text: "x",
+        evidence: "y",
+      },
+      authority("full"),
+    );
+    expect(noKb.outcome).toBe("noop");
+    expect(noKb.message).toContain("names no rulings knowledge base");
+
+    await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const wrongDoc = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // CANARY: skip the existence check and this CREATES a settled-looking
+        // document nobody asked for, named by a typo.
+        doc: "enviroment-and-gates.md",
+        text: "x",
+        evidence: "y",
+      },
+      authority("full"),
+    );
+    expect(wrongDoc.outcome).toBe("noop");
+    expect(wrongDoc.message).toContain("is not a document in the rulings knowledge base");
+    expect(wrongDoc.message).toContain("environment-and-gates.md");
+  });
+
+  it("needs all three fields, and is denied without append-typed-events", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const thin = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", doc: "environment-and-gates.md", text: "x", evidence: "  " },
+      authority("full"),
+    );
+    expect(thin.outcome).toBe("noop");
+    expect(thin.message).toContain("evidence that proves it");
+
+    deployRoster([{ capabilityId: "append-typed-events", mode: "off" }]);
+    const denied = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "environment-and-gates.md",
+        text: "x",
+        evidence: "y",
+      },
+      authority("full"),
+    );
+    expect(denied.outcome).toBe("denied");
   });
 });
 

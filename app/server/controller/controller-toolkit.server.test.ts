@@ -10,6 +10,10 @@ import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
+import {
+  ADVISORY_CAPABILITY_NOTE,
+  capabilityIsAdvisory,
+} from "~/shared/capabilities";
 
 /**
  * Ruling 99 — the controller's permission matrix, driven arm by arm.
@@ -492,6 +496,62 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       expect(elsewhere.howToAnswer).toContain("answerAt");
     } finally {
       await clearPacket(PACKET_TASK);
+    }
+  });
+
+  /**
+   * F39-4 (pass 39): `get_project` never shapes ADVISORY persona guidance like
+   * an authority.
+   *
+   * `UNIFIED_CAP_CATALOG` holds matrix-only rows (`group: null`): stored in
+   * `project.md`, shown in the persona matrix, enforced by nothing, and refused
+   * by `update_agent_deployment`. The editor and `list_capabilities` both drop
+   * them; this read could not (they are really on the deployment) and used to
+   * emit them as `{capabilityId, mode, label}` — byte-identical to an enforced
+   * grant. Live, the controller read `move-task-to-review: direct` here, never
+   * attempted to change it, and told its owner that the Developer "can advance
+   * a task to Review on its own even though I routed delivery through the
+   * operator". Every clause false, all three drawn from this row.
+   */
+  it("F39-4: get_project marks advisory grants and leaves enforced ones unmarked", async () => {
+    interface Grant {
+      capabilityId: string;
+      mode: string;
+      label: string;
+      advisory?: string;
+    }
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const view = JSON.parse(await call(ids.projectAdmin, "get_project")) as {
+      agents: { profileId: string; capabilities: Grant[] }[];
+    };
+    const developer = view.agents.find((a) => a.profileId === "developer");
+    expect(developer, "the demo board deploys a developer").toBeTruthy();
+    const byId = new Map(developer!.capabilities.map((c) => [c.capabilityId, c]));
+
+    // The row that produced the false claim, and two more of the same kind.
+    for (const id of ["move-task-to-review", "run-unit-integration-validation"]) {
+      const row = byId.get(id);
+      expect(row, `${id} is deployed on the developer`).toBeTruthy();
+      // CANARY: drop the marking in `get_project` and this is `undefined` —
+      // the row goes back to reading as a granted authority at a mode.
+      expect(row!.advisory).toBe(ADVISORY_CAPABILITY_NOTE);
+      expect(row!.advisory).toContain("no toggle");
+    }
+
+    // An ENFORCED grant carries no such key: the marking must not become noise
+    // on the rows that are real.
+    const enforced = byId.get("execute-code-or-write-repo");
+    expect(enforced, "repo write is deployed on the developer").toBeTruthy();
+    expect(enforced!.advisory).toBeUndefined();
+    expect(enforced!.mode).toBe("direct");
+
+    // And the marking agrees with the write surface: exactly the ids
+    // `update_agent_deployment` refuses are the ones marked.
+    for (const row of developer!.capabilities) {
+      expect(
+        row.advisory !== undefined,
+        `${row.capabilityId} marking matches capabilityIsAdvisory`,
+      ).toBe(capabilityIsAdvisory(row.capabilityId));
     }
   });
 
