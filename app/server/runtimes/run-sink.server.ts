@@ -221,7 +221,7 @@ export interface RolloutStats {
   /** The rollout's compactions with their sizes; the sink audits and notes
    *  every one beyond what the stream already carried (Codex SDK 0.153
    *  streams no compaction item at all, measured live 2026-09-21). */
-  compactionEvents?: { preTokens: number; postTokens: number }[];
+  compactionEvents?: { preTokens: number; postTokens: number | null }[];
   firstCall?: { promptTokens: number; cacheRead: number; cacheWrite: number } | null;
 }
 

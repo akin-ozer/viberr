@@ -2285,11 +2285,14 @@ export interface OperatorTaskSnapshot {
    * Ruling 402 (F39-29): the CHAIN this task is one link of.
    *
    * The task's own goal text opens "Part of goal goal-4 (Cycle 4 — CLI: apply,
-   * get, watch, logs), link 1 of 5" — so Viberr tells the operator four other
-   * links exist and, until this, showed it none of them. `read_board` lists
-   * TASKS, and a pending link has no task yet, so the one read its own
-   * description names for the question ("work you are about to ask for may
-   * already have an owner") could not answer it.
+   * get, watch, logs), link 1" — it names the chain and this task's place in
+   * it, and nothing else. `read_board` lists TASKS, and a pending link has no
+   * task yet, so the one read its own description names for the question
+   * ("work you are about to ask for may already have an owner") could not
+   * answer it. This is now the ONLY live view of the chain an actor gets:
+   * ruling 404 removed the "of 5" that header used to carry, because a frozen
+   * total went stale the moment the chain grew (AX-21 told its own agent it
+   * was the last link while three more followed).
    *
    * Live on ax-clone AX-4 the operator planned a decision packet offering to
    * create a follow-on task for the missing `/logs` baseline. `ax logs` is

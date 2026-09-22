@@ -671,3 +671,95 @@ No mismatch. Two deliberate silences worth naming, since both could be read as o
 case-sensitively and missed `Bypassed:`, which made it look as though the task page hid the
 override. Re-checking cost a minute; filing it would have cost a ruling and been wrong.
 
+
+## 23. Rulings 405 and 406, confirmed by GitHub nine minutes after viberr refused
+
+The AX-18 sequence is the cleanest before/after this pass produced, because GitHub settled
+the question independently and viberr's own record shows both sides.
+
+**17:07:29** the Surface Developer reports the conflict resolved:
+
+> Resolved the only conflict in `internal/cli/render.go`, preserving AX-18 watch rendering
+> and retaining AX-17's shared helpers/current get columns. Committed as `d44e874` on
+> `ax-18` (parents `5ae0752`, `1d860bb`). `make gate` passed.
+
+**17:07:51** the operator pushes it, then plans `transition_stage`. Refused.
+**17:08:05** a second drive plans `transition_stage`. Refused, same sentence.
+**17:08:30** a third drive reads the refusal and plans `update_branch_from_base`, the exact
+remedy the refusal names. It succeeds and moves nothing — the branch is already current.
+**17:08:32** viberr writes "treating that as a deliberate hold", stamps `heldAtStage`, and
+pauses coordination.
+
+What the file held at that moment:
+
+```yaml
+  mergeable: conflicting
+  paths: { headSha: 5ae0752… }
+  headSha: d44e874…
+```
+
+What GitHub said at **17:17**, asked directly:
+
+```
+PR16 mergeable=MERGEABLE state=CLEAN
+```
+
+So the conflict was gone before the first refusal, viberr refused on a verdict measured
+against a superseded commit (ruling 405), and then blamed the operator for the consequence
+(ruling 406). Releasing it took a human stage move:
+
+```
+AX-18 stage= review waiting= agent held= null
+### 2026-09-22T17:17:02.144Z · transition · user:… (Arda)
+**Transition:** moved AX-18 from Verify to Review.
+```
+
+Both fixes carry a canary that reproduces the original text verbatim.
+
+## 24. Ruling 403's zero, measured rather than argued
+
+Six Codex rollouts, read hours after the runs finished:
+
+```
+rollout-2026-09-22T16-47-16-…  last@428/429  token_count_after=[]
+rollout-2026-09-22T16-42-53-…  last@340/341  token_count_after=[]
+rollout-2026-09-22T16-45-51-…  last@410/411  token_count_after=[]
+rollout-2026-09-22T16-40-01-…  last@524/525  token_count_after=[]
+rollout-2026-09-22T16-41-56-…  last@278/279  token_count_after=[]
+rollout-2026-09-22T16-37-52-…  last@297/298  token_count_after=[]
+```
+
+The compaction is the final line every time, so the post size is not late, it is absent.
+Against that, the Claude CLI's own `compact_boundary` envelopes on the controller path DO
+carry it — `post_tokens` 6371, 7507, 7279, 8284, never zero — which is why 2 of 84 notes on
+this board had a figure and 82 did not.
+
+## 25. Ruling 131's dependency floor, checked on the live board rather than in the test
+
+AX-5 stores `readiness: input_required` with `blockedBy: [goal-3 link 2, goal-4 link 1]`.
+Read as stored, its card would demand human input from a person who has nothing to give it.
+The single caller of `deriveReadiness` passes `dependenciesListed`, and the floor (rank 3)
+wins. Asked of the running app:
+
+```
+data-board-card="AX-5" … |AX-5|A|ax ssh: interactive shell into a live task|blocked|
+```
+
+Correct, and the surface says the true thing. No finding.
+
+## 26. The RBAC surface, audited where a non-member probe would land
+
+ax-clone carries all four project roles (2 admin, 1 maintainer, 1 contributor, 1 viewer).
+Membership is the outer gate (R15-4), enforced by the layout loader for everything nested
+under `projects/:slug` — so the interesting question is the routes that are NOT nested.
+Every one of them gates for itself:
+
+| route | guard |
+|---|---|
+| `projects/:slug/tasks/:key/attachments/:file` | `requireUser` + `requireProjectMember`, traversal-refusing resolver, `nosniff`, CSP `sandbox`, 50MB bound |
+| `resources/run-log` | `requireUser` + `requireProjectMember` |
+| `resources/session-export` | `requireUser` + `requireProjectMember` |
+| `resources/controller` | `requireAuth` + CSRF + `scopeIsReachable` (any-member) |
+| `resources/backend-login` | `requireUser`, keyed to the caller's own session |
+
+No gap found. Recorded because the absence is the result.

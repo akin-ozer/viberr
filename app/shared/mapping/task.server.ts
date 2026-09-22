@@ -493,9 +493,16 @@ export function mapPrReview(pr: PrRef | null): PrReviewState | null {
 
 /** F17-L6: GitHub's mergeability, shown only for an OPEN (review/accepted) PR —
  *  a settled (merged/closed) PR's conflict state is moot. Same state gate as
- *  {@link mapPrReview}. */
+ *  {@link mapPrReview}.
+ *
+ *  Ruling 405: and only while the verdict still belongs to the head that is
+ *  live. A "conflicts" pill painted over the commit that RESOLVED the conflict
+ *  is the same lie the acceptance gate used to tell, one surface over, so both
+ *  read the pin (`conflictingPrBlockedReason` is the gate). GitHub recomputes
+ *  after a push, so the honest display in that window is no pill at all. */
 export function mapPrMergeable(pr: PrRef | null): PrMergeable | null {
   if (!pr?.mergeable) return null;
+  if (pr.mergeableAt && pr.headSha && pr.mergeableAt !== pr.headSha) return null;
   return pr.state === "review" || pr.state === "accepted" ? pr.mergeable : null;
 }
 

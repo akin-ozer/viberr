@@ -2286,6 +2286,78 @@ describe("stranded auto-stage resume", () => {
     });
 
     /**
+     * Ruling 406 (F39-33), measured live on ax-clone AX-18.
+     *
+     * Viberr refused the transition -- "Open the conflict packet
+     * (update_branch_from_base) or deliver the revision instead of moving the
+     * task" -- and the operator planned exactly the action that sentence
+     * names. `operatorUpdateBranchFromBase` succeeded; the branch was already
+     * current, so it moved nothing and recorded no base refresh. A refresh is
+     * not a transition, a dispatch, a delivery or a packet, so Viberr wrote
+     * "the operator held it twice in a row without advancing, dispatching, or
+     * opening a packet", stamped `heldAtStage` and paused coordination on a
+     * task whose operator had done what it was told.
+     *
+     * The three clauses before this one were each added the same way (152(a),
+     * 202, 228). This one is not a fourth effect: it is the fact that the
+     * drive ACTED, which is what "held" was always meant to deny.
+     */
+    it("ruling 406: a nudged drive that CARRIED OUT its action is not a deliberate hold", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(id, taskKey, store2.slug, `t_${id}`, "2026-09-13T00:00:00.000Z", "2026-09-13T00:00:00.000Z");
+      };
+      const held = (taskKey: string) =>
+        readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
+
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-9", {
+          title: "refresh the branch Viberr asked for",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Do the thing the refusal named.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_acted", "VIB-9");
+
+      // CANARY: drop `|| ref.ownRun?.carriedOutAction === true` from
+      // nudgeMadeProgress and this returns false, `heldAtStage` is stamped,
+      // and the note lands on a drive that did exactly what Viberr asked.
+      const resumedAfterAction = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-9",
+        dataRoot: store2.dataRoot,
+        runId: "run_acted",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          // The drive ended where it started and delivered nothing -- exactly
+          // AX-18's shape. The only thing that distinguishes it is that it
+          // ACTED.
+          movedToStageId: "triage",
+          carriedOutAction: true,
+        },
+      });
+      expect(resumedAfterAction).toBe(true);
+      expect(held("VIB-9").frontmatter.heldAtStage).toBeNull();
+      expect(held("VIB-9").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+    });
+
+    /**
      * V18 (pass-31 review): the hold must survive LATER external triggers. The
      * one-nudge guard alone was per-drive, in-memory — every schedule firing
      * or machine trigger started an unmarked drive, the backstop paid one

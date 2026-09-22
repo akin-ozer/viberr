@@ -6140,10 +6140,12 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
  * Live on ax-clone AX-4 the operator planned a decision packet offering to
  * create a follow-on task for the missing `/logs` baseline. `ax logs` is
  * goal-4 link 5, waiting on AX-4 itself — the very task it was coordinating.
- * It could not have known: its goal text opens "Part of goal goal-4 … link 1
- * of 5", and the one read `read_board`'s own description names for that
- * question ("work you are about to ask for may already have an owner") lists
- * TASKS, and a pending link has none.
+ * It could not have known: its goal text opens "Part of goal goal-4 … link 1"
+ * and names no other link (ruling 404 removed the frozen total that used to
+ * say "of 5", because it went stale the moment the chain grew), and the one
+ * read `read_board`'s own description names for that question ("work you are
+ * about to ask for may already have an owner") lists TASKS, and a pending
+ * link has none.
  */
 describe("ruling 402: the snapshot carries this task's goal chain", () => {
   const ctx = () => ({ dataRoot: store.dataRoot });
@@ -6171,9 +6173,9 @@ describe("ruling 402: the snapshot carries this task's goal chain", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const chain = snapFor(created.activeTaskKey!).goalChain!;
-    // CANARY: drop `goalChain` and the operator sees "link 1 of 5" in its goal
-    // text with no way to learn what the other links are — which is how AX-4
-    // came to offer a task its own goal already planned.
+    // CANARY: drop `goalChain` and the operator sees "link 1" in its goal text
+    // with no way to learn that any other link exists — which is how AX-4 came
+    // to offer a task its own goal already planned.
     expect(chain.goalId).toBe(created.goalId);
     expect(chain.title).toBe("Cycle 4 — CLI");
     expect(chain.linkIndex).toBe(1);

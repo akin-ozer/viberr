@@ -2247,13 +2247,21 @@ function launch(
             const event = stats?.compactionEvents.at(-1) ?? null;
             if (stats && stats.compactionEvents.length > compactionsBefore && event) {
               const occurredAt = new Date().toISOString();
+              // Ruling 403: the rollout measures the post size from the first
+              // call AFTER the compaction, and this compaction is the run's
+              // last act -- there is no such call, so the figure is genuinely
+              // unknown here rather than zero. Say so.
+              const post =
+                event.postTokens === null
+                  ? "a summary"
+                  : `${Math.round(event.postTokens / 1000)}k tokens`;
               sink.line({
                 raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
                 display: {
                   t: occurredAt.slice(11, 19),
                   ev: "meta",
                   tag: "run·compacted·completion",
-                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${Math.round(event.postTokens / 1000)}k tokens`,
+                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${post}`,
                 },
                 facts: { compaction: { trigger: "completion", ...event } },
                 occurredAt,

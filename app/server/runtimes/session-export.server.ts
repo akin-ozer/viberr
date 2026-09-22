@@ -481,11 +481,24 @@ export function sessionContextTokens(
   return null;
 }
 
-/** One compaction as the rollout shows it: the last prompt the CLI sent
- *  before it and the first one after (0 when no later call landed). */
+/**
+ * One compaction as the rollout shows it: the last prompt the CLI sent before
+ * it, and the first one after.
+ *
+ * Ruling 403: `postTokens` is NULL until a later call measures it, never 0.
+ * The post size is read from the first `token_count` that follows the
+ * compaction marker, and ruling 376's completion compaction is the run's LAST
+ * act -- measured on ax-clone, the compaction is the final line of the rollout
+ * and no `token_count` ever follows it, so that read has nothing to fill from.
+ * A zero seeded as "not measured yet" used to survive all the way to the
+ * timeline, where 82 of this board's 84 compaction notes told a human that a
+ * 100k-213k token conversation had been summarized "to 0k tokens". Null is the
+ * value the whole chain already treats as unmeasured (`compactionNoteText`
+ * renders it "a summary"), so the sentinel is the absence it means.
+ */
 export interface CodexCompactionEvent {
   preTokens: number;
-  postTokens: number;
+  postTokens: number | null;
 }
 
 /** The compaction still waiting for the first prompt after it. */
@@ -554,7 +567,7 @@ export function codexRolloutRunStats(
   const pending: PendingCompaction = { event: null };
   const markCompaction = () => {
     if (pending.event) return; // the same compaction's second spelling
-    pending.event = { preTokens: lastPrompt, postTokens: 0 };
+    pending.event = { preTokens: lastPrompt, postTokens: null };
     stats.compactionEvents.push(pending.event);
   };
   for (const raw of transcriptLines(filePath)) {

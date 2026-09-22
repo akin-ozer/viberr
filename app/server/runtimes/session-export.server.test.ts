@@ -13,6 +13,7 @@ import {
   sessionContextTokens,
 } from "./session-export.server";
 import { userBackendHome } from "./user-homes.server";
+import { compactionNoteText } from "./run-context-events.server";
 
 /**
  * Session export: locate a provider transcript by session id (robust to the
@@ -427,10 +428,13 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
         line("2026-07-15T05:10:05.000Z", 0, "context_compacted"),
       ].join("\n") + "\n",
     );
+    // Ruling 403: nothing followed the compaction, so the post size was never
+    // measured. NULL, not 0 -- a zero here reaches the timeline as a figure.
     expect(codexRolloutRunStats(OWNER, older, null)).toMatchObject({
       compactions: 1,
-      compactionEvents: [{ preTokens: 30_000, postTokens: 0 }],
+      compactionEvents: [{ preTokens: 30_000, postTokens: null }],
     });
+    expect(codexRolloutRunStats(OWNER, older, null)!.compactionEvents[0]!.postTokens).not.toBe(0);
     // A compaction that is the run's LAST event (ruling 376): the request's
     // own line carries no prompt, but its total is the compacted context —
     // the post size and what the next resume replays.
@@ -456,5 +460,46 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
       compactionEvents: [{ preTokens: 125_535, postTokens: 8_033 }],
     });
     expect(codexRolloutRunStats(OWNER, "0000-missing", null)).toBeNull();
+  });
+
+  /**
+   * Ruling 403 (F39-30), the shape measured on ax-clone: ruling 376 compacts at
+   * the END of the run, so the compaction marker is the LAST line of the
+   * rollout and no call ever follows it to measure the summary. The size is
+   * unknown, and the sentence a human reads must say so.
+   *
+   * Live, before this fix: 82 of the board's 84 compaction notes read "the
+   * provider summarized <agent>'s conversation from 213k to 0k tokens".
+   */
+  it("a completion compaction with nothing after it has an unmeasured post size, and the note says so", () => {
+    const dir = codexDir("22");
+    const sid = "01a0ca03-b8cf-77c0-0000-000000000403";
+    writeFileSync(
+      path.join(dir, `rollout-2026-07-22T16-47-16-${sid}.jsonl`),
+      [
+        JSON.stringify({ timestamp: "2026-07-22T16:47:16.000Z", type: "session_meta", payload: { id: sid } }),
+        JSON.stringify({
+          timestamp: "2026-07-22T16:47:20.000Z",
+          type: "event_msg",
+          payload: { type: "token_count", info: { last_token_usage: { input_tokens: 111_733, cached_input_tokens: 0 } } },
+        }),
+        // The run's last act. Nothing follows, exactly as on disk.
+        JSON.stringify({ timestamp: "2026-07-22T16:47:25.000Z", type: "compacted", payload: { message: "", replacement_history: [] } }),
+      ].join("\n") + "\n",
+    );
+    const stats = codexRolloutRunStats(OWNER, sid, null);
+    const event = stats!.compactionEvents[0]!;
+    expect(event.preTokens).toBe(111_733);
+    // The assertion that goes red if the placeholder is a number again.
+    expect(event.postTokens).toBeNull();
+
+    // ...and the sentence the human reads never invents the figure.
+    const note = compactionNoteText(
+      "Surface Developer",
+      { trigger: "completion", preTokens: event.preTokens, postTokens: event.postTokens },
+      true,
+    );
+    expect(note).toContain("from 112k to a summary");
+    expect(note).not.toContain("0k");
   });
 });

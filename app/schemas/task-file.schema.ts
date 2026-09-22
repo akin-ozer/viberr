@@ -616,6 +616,17 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
+    // Ruling 405 (F39-32): the head `mergeable` was MEASURED on. GitHub
+    // recomputes mergeability asynchronously, so the read right after a push
+    // answers "unknown" and the reconciler keeps the last-known verdict for
+    // the same PR -- a rule written for an unread value, applied to a PR whose
+    // head has moved underneath it. Live on ax-clone AX-18: the operator
+    // resolved the conflict, pushed `d44e874`, and was refused the transition
+    // twice on a `conflicting` measured at `5ae0752`, the commit it had just
+    // superseded. `paths` has carried this pin since ruling 236 ("a list read
+    // for a DIFFERENT head than the one now live is dropped rather than shown
+    // stale"); the verdict that BLOCKS had none. Absent = never measured.
+    mergeableAt: z.string().min(1).nullish().catch(null),
     // Ruling 236 (owner, 2026-09-14): the repository paths this PR changes, so
     // the review queue can say which OTHER open PRs a merge would put into
     // conflict before a person finds out by pressing Accept. Pinned to the head
@@ -1558,6 +1569,11 @@ export function conflictingPrBlockedReason(
   const pr = fm.pr;
   if (!pr || pr.mergeable !== "conflicting") return null;
   if (pr.state === "merged" || pr.state === "closed") return null;
+  // Ruling 405: a conflict belongs to the head it was measured on. Once the
+  // head moves past it the verdict says nothing about what is there now, and
+  // this gate falls back to the rule the doc comment above already states:
+  // unknown never blocks, because the merge attempt is the authority.
+  if (pr.mergeableAt && pr.headSha && pr.mergeableAt !== pr.headSha) return null;
   // Ruling 291 (F37-126): this never names the rewrite. Viberr's own remedy is a
   // MERGE — `update_branch_from_base` "merge[s] the base into the branch and
   // push[es] it", and that same tool's text tells the operator to "never ask an

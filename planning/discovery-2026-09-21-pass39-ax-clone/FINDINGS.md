@@ -1190,3 +1190,110 @@ read the same misleading string.
 
 Fixed by adding `binutils-gold` to the image; `make gate` with cgo enabled now exits 0
 including the pinned lint, and the record on AX-9 was corrected by hand.
+
+## F39-30 · HIGH · Every compaction note says the agent's context was summarized to 0k
+
+82 of the board's 84 compaction notes read:
+
+> Context compacted: the provider summarized Surface Developer's conversation
+> **from 213k to 0k tokens** (auto).
+
+The two that carry a real figure say 18k and 22k. A conversation is not summarized to zero
+tokens, and this is the one number a human would use to judge whether the compaction was
+safe. It is on the record that files-are-truth says is testable.
+
+The zero is viberr's own. `markCompaction` seeds `{ preTokens: lastPrompt, postTokens: 0 }`
+and fills the post size from the first `token_count` line AFTER the marker. Ruling 376's
+completion compaction is the run's LAST act, so no such line exists. Measured on six
+rollouts, hours after the fact:
+
+```
+rollout-2026-09-22T16-47-16-…  compactions=2 last@428/429 token_count_after=[]
+rollout-2026-09-22T16-42-53-…  compactions=2 last@340/341 token_count_after=[]
+rollout-2026-09-22T16-45-51-…  compactions=2 last@410/411 token_count_after=[]
+```
+
+The compaction is the final line of the file every time. Not a race: the figure is
+genuinely unknowable there.
+
+The codebase already knew. The type's own comment: *"the first one after (0 when no later
+call landed)"*. And `run-sink.server.ts:533` guards `postTokens !== null && postTokens > 0`
+before trusting it. The sentinel meant "unmeasured" in every place except the sentence a
+human reads.
+
+Ruling 403. `postTokens` becomes `number | null`, null renders "a summary".
+
+## F39-31 · MEDIUM · A task tells its own agent it is the last link while three more follow
+
+goal-4 was created with 5 links. The controller added links 6, 7 and 8 on 2026-09-22.
+Nothing rewrites a chain task's frozen goal body, so:
+
+```
+STALE AX-21: says 'link 5 of 5' but goal-4 has 8 links
+STALE AX-4:  says 'link 1 of 5' but goal-4 has 8 links
+STALE AX-6:  says 'link 1 of 5' but goal-6 has 6 links
+```
+
+AX-21 was in flight. The goal body is the agent's ONLY channel for chain context — the
+operator skill's own rule is that an agent cannot read the timeline — so a specialist
+deciding how much to tie off was being told its chain ended with it.
+
+Ruling 402's doc comment quotes "link 1 of 5" as the thing that tells the operator other
+links exist, which made the stale total load-bearing in two places at once.
+
+Owner's call: stop claiming a total. Ruling 404.
+
+## F39-32 · HIGH · A conflict verdict outlived the commit that resolved it, and stranded the task
+
+AX-18's Surface Developer resolved the conflict in `internal/cli/render.go` and committed
+`d44e874`. The operator pushed it. Fifteen seconds later, twice:
+
+> `transition_stage` — AX-18's review PR #16 conflicts with the base branch. GitHub can't
+> merge it, so it can't be accepted.
+
+The stored verdict was measured at `5ae0752` — the commit `d44e874` had just superseded.
+GitHub said `UNKNOWN` at that moment (it recomputes asynchronously) and `MERGEABLE`/`CLEAN`
+nine minutes later. The conflict never existed on the head being judged.
+
+Both facts were in the same `pr:` block:
+
+```yaml
+  mergeable: conflicting          # no head
+  paths:
+    headSha: 5ae0752…             # where the last full read was taken
+  headSha: d44e874…               # what is actually there now
+```
+
+`paths` has carried that pin since ruling 236 — *"a list read for a DIFFERENT head than the
+one now live is dropped rather than shown stale"*. The verdict that BLOCKS had none. The
+reconciler's fallback rule ("an unread value keeps the last-known one for the same PR") was
+written for a read that FAILED; a PR is not a fixed thing, and its head had moved.
+
+Ruling 405. `pr.mergeableAt` travels with the verdict.
+
+## F39-33 · HIGH · Viberr told the operator what to do, then paused coordination for doing it
+
+The refusal above ends: *"Open the conflict packet (update_branch_from_base) or deliver the
+revision instead of moving the task."*
+
+The operator's next drive read it and reasoned correctly:
+
+> PR #16 conflicts with the base, so the transition was refused. Update the task branch from
+> base first; then re-deliver and re-review on the next invocation.
+
+It planned exactly `update_branch_from_base`. The call succeeded. Because the branch was
+already current it moved nothing and recorded no base refresh — and a base refresh is not a
+transition, a dispatch, a delivery or a packet, which are the four effects the stranded
+backstop recognises. So:
+
+> **Note:** this stage auto-advances, but the operator held it twice in a row without
+> advancing, dispatching, or opening a packet — treating that as a deliberate hold.
+> Coordination is paused here.
+
+`heldAtStage` was stamped and AX-18 sat at `waiting: human` until a person moved the stage by
+hand. Viberr named the remedy, the operator performed it, and viberr recorded that it had
+done nothing.
+
+This is the fourth amendment to the same verdict — ruling 152(a) added a transition that
+landed elsewhere, 202 added delivery, 228 added the wholly-refused plan. Ruling 406 stops
+enumerating effects and records the fact: the drive ACTED.

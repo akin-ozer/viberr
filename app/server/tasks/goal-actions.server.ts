@@ -123,11 +123,18 @@ function linkGoalText(
    *  to. Absent (a first start) leaves the declared text. */
   body?: string,
 ): string {
+  // Ruling 404 (F39-31): this header is FROZEN into the task's goal body at
+  // creation and never rewritten, so it may only state facts that cannot move.
+  // The chain's LENGTH moves -- the controller added links 6-8 to goal-4 on
+  // 2026-09-22 and three already-created tasks went on claiming "of 5", with
+  // AX-21 telling its own agent it was the last link of the chain while three
+  // more followed. A previous link's STATUS moves the same way. Both are gone:
+  // the goal id, the title, this link's own index and which task carried the
+  // previous link are settled the moment the task exists. The live chain is
+  // `goalChain` on the operator's snapshot (ruling 402), which is read fresh.
   const head =
-    `Part of goal ${goal.id} (${goal.title}), link ${link.index} of ${goal.links.length}.` +
-    (previous?.taskKey
-      ? ` The previous link was carried by ${previous.taskKey} (${previous.status}).`
-      : "");
+    `Part of goal ${goal.id} (${goal.title}), link ${link.index}.` +
+    (previous?.taskKey ? ` The previous link was carried by ${previous.taskKey}.` : "");
   return `${head}\n\n${(body ?? "").trim() || link.goal.trim() || link.title}`;
 }
 

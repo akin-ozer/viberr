@@ -4,6 +4,7 @@ import type { YamlMapping } from "~/server/files/frontmatter.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
   acceptanceBlockedReason,
+  conflictingPrBlockedReason,
   activeWorkRevision,
   currentVerdicts,
   deriveValidation,
@@ -19,6 +20,7 @@ import {
   type WorkRevision,
   DIVERGED_BRANCH_REMEDY,
 } from "./task-file.schema";
+import type { PrRef } from "./task-file.schema";
 
 describe("revision-bound review helpers (F10-15/F10-32)", () => {
   const rev1: WorkRevision = {
@@ -1326,5 +1328,53 @@ describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
       ).toBe(false);
     }
     expect(DIVERGED_BRANCH_REMEDY.length).toBeGreaterThan(80);
+  });
+});
+
+/**
+ * Ruling 405 (F39-32), measured live on ax-clone AX-18.
+ *
+ * The Surface Developer resolved the conflict in `internal/cli/render.go` and
+ * the operator pushed the merge commit `d44e874` to PR #16. GitHub recomputes
+ * mergeability asynchronously, so the next read answered "unknown" and the
+ * reconciler's rule -- "an unread value keeps the last-known one for the same
+ * PR" -- carried the `conflicting` measured at `5ae0752`, the commit that had
+ * just been superseded. The operator was refused `transition_stage` twice in
+ * fifteen seconds on a conflict that no longer existed, and the policy engine
+ * then told the human the operator had held the stage deliberately.
+ *
+ * `paths` has been pinned to its head since ruling 236. The verdict that
+ * BLOCKS had no pin at all.
+ */
+describe("ruling 405: a conflict verdict belongs to the head it was measured on", () => {
+  const prAt = (mergeableAt: string | null, headSha: string) => {
+    const pr: PrRef = {
+      number: 16,
+      state: "review",
+      title: "[AX-18] ax watch: the live event stream",
+      mergeable: "conflicting",
+      headSha,
+    };
+    // Absent, not null: an unpinned verdict is one no pass ever measured.
+    if (mergeableAt) pr.mergeableAt = mergeableAt;
+    return { pr };
+  };
+
+  it("blocks while the verdict and the live head are the same commit", () => {
+    const reason = conflictingPrBlockedReason(prAt("5ae0752", "5ae0752"), "AX-18");
+    expect(reason).toContain("conflicts with the base branch");
+    // Ruling 291: the remedy is a merge, and the sentence FORBIDS the rebase
+    // rather than leaving it open to the one reader with no tool.
+    expect(reason).toContain("merging the base INTO it");
+    expect(reason).toContain("never by rebasing");
+  });
+
+  it("does NOT block once the head has moved past the commit it was measured on", () => {
+    // The exact shape on disk at 17:08 on 2026-09-22.
+    expect(conflictingPrBlockedReason(prAt("5ae0752", "d44e874"), "AX-18")).toBeNull();
+  });
+
+  it("still blocks when the verdict was never pinned, so an old file is not silently unblocked", () => {
+    expect(conflictingPrBlockedReason(prAt(null, "d44e874"), "AX-18")).not.toBeNull();
   });
 });

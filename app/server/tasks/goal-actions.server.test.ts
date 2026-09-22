@@ -194,7 +194,11 @@ describe("chained goals", () => {
     })!;
     expect(task.parsed.frontmatter.goalRef).toEqual({ goalId, linkIndex: 1 });
     expect(task.parsed.goal).toContain(goalId);
-    expect(task.parsed.goal).toContain("link 1 of 3");
+    // Ruling 404: this header is frozen into the body, so it names this link's
+    // own index and nothing that can move. A chain LENGTH can move -- adding a
+    // link used to leave every earlier task claiming the old total.
+    expect(task.parsed.goal).toContain("link 1.");
+    expect(task.parsed.goal).not.toMatch(/link 1 of \d/);
   });
 
   it("the projection row carries the reconciled chain", async () => {
@@ -415,6 +419,62 @@ describe("chained goals", () => {
     const view = getGoalView(SLUG, goalId, { dataRoot: app.dataRoot })!;
     expect(view.links[0]!.status).toBe("done");
     expect(view.links[2]!.title).toBe("Link three, sharpened");
+  });
+
+  /**
+   * Ruling 404 (F39-31), the shape measured live on ax-clone.
+   *
+   * goal-4 was created with 5 links and its tasks were created against it. On
+   * 2026-09-22 the controller added links 6, 7 and 8. Nothing rewrites a task's
+   * frozen goal body, so AX-21 -- link 5, in flight -- went on telling its own
+   * agent "link 5 of 5": the LAST link of the chain, with three still to come.
+   * AX-4 and AX-6 carried the same stale total. The goal body is the agent's
+   * only channel for chain context (it cannot read the timeline), so the header
+   * may state only what cannot move.
+   */
+  it("a chain that grows leaves no task claiming a total that moved", async () => {
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Cycle with room to grow",
+        links: [
+          { title: "First", goal: "Do the first thing. Done when done." },
+          { title: "Second", goal: "Do the second thing. Done when done.", blockedBy: ["link 1"] },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const grownGoalId = created.goalId;
+    const firstKey = created.activeTaskKey!;
+    const bodyAtBirth = readTaskFile({ projectSlug: SLUG, taskKey: firstKey, dataRoot: app.dataRoot })!
+      .parsed.goal;
+    expect(bodyAtBirth).toContain("link 1.");
+
+    // The chain doubles AFTER the task exists -- exactly what the controller did.
+    for (const title of ["Third", "Fourth"]) {
+      await updateGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          goalId: grownGoalId,
+          action: { op: "add_link", title, goal: `Do ${title}. Done when done.`, blockedBy: ["link 2"] },
+        },
+        actorOf(contributorId, "selin@viberr.dev"),
+        { dataRoot: app.dataRoot },
+      );
+    }
+
+    // The frozen body is UNCHANGED and still true, because it never claimed a
+    // total. This is the assertion that goes red if "of N" comes back.
+    const bodyNow = readTaskFile({ projectSlug: SLUG, taskKey: firstKey, dataRoot: app.dataRoot })!
+      .parsed.goal;
+    expect(bodyNow).toBe(bodyAtBirth);
+    expect(bodyNow).not.toMatch(/link \d+ of \d+/);
+    expect(bodyNow).toContain(`Part of goal ${grownGoalId}`);
   });
 
   it("an unattended advance RE-PROVES the creator's live authority: a demoted creator parks the chain instead of escalating", async () => {

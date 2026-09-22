@@ -1154,10 +1154,13 @@ export async function maybeResumeStrandedOperator(
   // recorded as having "held the stage without advancing, dispatching, or
   // opening a packet" and coordination was declared paused on a task that was
   // being delivered.
+  // Ruling 406: and ANY action it carried out is progress. The three clauses
+  // above are effects Viberr thought to enumerate; this one is the fact.
   const nudgeMadeProgress =
     (ref.ownRun?.movedToStageId !== undefined &&
       ref.ownRun.movedToStageId !== ref.stageAtStart) ||
-    ref.ownRun?.delivered === true;
+    ref.ownRun?.delivered === true ||
+    ref.ownRun?.carriedOutAction === true;
   if (ref.strandedResume && !nudgeMadeProgress) {
     // Ruling 399: the same fact the stranded predicate already consulted.
     const planRefused = ref.ownRun?.planWhollyRefused === true;
@@ -2805,6 +2808,13 @@ async function executeCodexPlan(
         message: result.message,
         kind: result.outcome === "denied" ? "authority" : "state",
       });
+      return;
+    }
+    // Ruling 406: the drive acted. Stamped HERE, on the one funnel every plan
+    // step already passes through, so a new action shape is covered the day it
+    // is added instead of the day it is mistaken for a deliberate hold.
+    if (result.outcome === "done" && ctx.operatorRun) {
+      ctx.operatorRun.carriedOutAction = true;
     }
   };
   // B-6 (pass 24): OpenAI-strict structured output makes every plan field

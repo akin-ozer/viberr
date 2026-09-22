@@ -518,10 +518,17 @@ async function reconcileTaskUnlocked(
   // (merged/closed) PR drops it, because "conflicting" frozen on a merged PR is
   // a lie. This is the fact that told the human the truth about VM-4's failed
   // merge instead of blaming their credentials.
-  const mergeableLive =
-    pr?.mergeable !== undefined ? pr.mergeable : (cachedPr?.mergeable ?? null);
+  const mergeableMeasuredNow = pr?.mergeable !== undefined;
+  const mergeableLive = mergeableMeasuredNow ? pr.mergeable : (cachedPr?.mergeable ?? null);
   const mergeable =
     prState === "review" || prState === "accepted" ? mergeableLive : null;
+  // Ruling 405: the head this verdict was measured on travels WITH it. A value
+  // measured this pass is pinned to the head this pass read; a carried one
+  // keeps the pin it already had, so a conflict cannot outlive the commit that
+  // resolved it. Same discipline `paths` has carried since ruling 236.
+  const mergeableAt = mergeableMeasuredNow
+    ? (pr.headSha ?? null)
+    : (cachedPr?.mergeableAt ?? null);
   // R15-15 / R16-1 — OWNERSHIP. `findPrForBranch` matches on branch NAME alone,
   // and a task-key branch is not a unique identifier: task keys restart at 1 on
   // a new data root, so a brand-new VIB-1 gets branch `vib-1` — which on GitHub
@@ -678,7 +685,10 @@ async function reconcileTaskUnlocked(
     if (checks) owned.checks = checks;
     if (!checks && checksUnread) owned.checksUnread = checksUnread;
     if (review) owned.review = review;
-    if (mergeable) owned.mergeable = mergeable;
+    if (mergeable) {
+      owned.mergeable = mergeable;
+      if (mergeableAt) owned.mergeableAt = mergeableAt;
+    }
     // Ruling 236: measured this pass wins; otherwise the SAME PR's cached list
     // is carried, because a skipped read means "unchanged", not "unknown". A
     // list read for a DIFFERENT head than the one now live is dropped rather

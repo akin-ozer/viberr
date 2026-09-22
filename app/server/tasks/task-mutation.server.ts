@@ -97,6 +97,30 @@ export interface TaskMutationContext {
      */
     planWhollyRefused?: boolean;
     /**
+     * Ruling 406 (F39-33): this drive CARRIED OUT at least one planned action
+     * (an `outcome: "done"`), whatever effect it had.
+     *
+     * The settle-time "deliberate hold" verdict used to be reached by
+     * enumerating effects, and the list kept turning out to be short: ruling
+     * 152(a) added a transition that landed elsewhere, ruling 202 added
+     * delivery ("a drive whose single action was `deliver_for_review` was
+     * called a deliberate hold"), ruling 228 added the wholly-refused plan.
+     * Live on ax-clone AX-18 it happened a fourth time, and this time Viberr
+     * was punishing an operator for following Viberr's own instruction: the
+     * transition was refused with "Open the conflict packet
+     * (update_branch_from_base) ... instead of moving the task", the operator
+     * planned exactly that, the refresh succeeded as a no-op because the
+     * branch was already current -- and because a base refresh is not a
+     * transition, a dispatch, a delivery or a packet, Viberr recorded that the
+     * operator "held it twice in a row without advancing, dispatching, or
+     * opening a packet", set `heldAtStage` and paused coordination.
+     *
+     * An operator that ACTED did not hold. That is one fact about the drive
+     * rather than a list of the effects Viberr has thought of so far, so it
+     * does not need a fifth amendment the next time an action has a new shape.
+     */
+    carriedOutAction?: boolean;
+    /**
      * Ruling 400 (F39-27): the refusal sentences themselves, so the one
      * automatic retry can CARRY them instead of telling the operator to go
      * and read them.
