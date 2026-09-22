@@ -763,3 +763,44 @@ Every one of them gates for itself:
 | `resources/backend-login` | `requireUser`, keyed to the caller's own session |
 
 No gap found. Recorded because the absence is the result.
+
+## 27. The audit log, checked against decisions I made myself
+
+Five human actions this afternoon, then the CSV export read back. Every one is there, with
+the actor resolved and the option kind recorded — not just that a packet closed:
+
+| time | task | audit row | option kind |
+|---|---|---|---|
+| 17:02:59 | AX-21 | `task.packet.resolved` · arda@viberr.dev | `custom` (agent-authored ask-human options) |
+| 17:03:28 | AX-18 | `task.packet.resolved` · arda@viberr.dev | `redirect` |
+| 17:03:50 | AX-20 | `task.packet.resolved` · arda@viberr.dev | `question_reviewer` |
+| 17:31:03 | AX-18 | `task.packet.resolved` · arda@viberr.dev | `question_reviewer` |
+
+AX-23's acceptance is not a packet resolution and is recorded as its own chain, in order:
+
+```
+17:16:37  github.branch_update.acceptance  ax-23   {"status":"already_current"}
+17:16:40  github.pr.merged                 #17     arda@viberr.dev
+17:16:41  task.transition                  AX-23   {"to":"done","boundary":"human","via":"accept_completion"}
+```
+
+And the manual release of AX-18's stranded hold carries `"manual":true`, distinguishing it
+from the operator's own `auto` transitions, which carry no user id at all. 2,219 rows total.
+
+## 28. Custom stages and boundaries, and the sentence that resolves itself
+
+`project.md` declares six stages and five transitions, four `auto` and `review → done`
+`boundary: human, locked: true`. The Policy page renders exactly that — "6 stages · 5
+transition rules", Review → Done as "Human decision · locked · V1" — and then does the thing
+this pass has been rewarding everywhere else: instead of stating the general rule and
+leaving the reader to apply it, it resolves it against this project's live configuration.
+
+> By default a human accepts completion … The one exception is an operator running at full
+> autonomy with **Accept completion into Done** set to **Direct** … **On this project: the
+> operator (Operator) runs at full autonomy without the Direct accept grant, so the exception
+> is not active**: every task still needs a human to accept completion into Done.
+
+The RBAC table does the same with its own exceptions — it says maintainer-and-above may
+accept, then states plainly that a contributor who OWNS a task may accept it and resolve the
+non-acceptance options on its packets. A table that quietly contradicted its own footnote is
+the shape ruling 310 was about; this one names it. No finding.
