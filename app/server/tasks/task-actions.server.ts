@@ -3917,6 +3917,9 @@ export async function recordAgentCompletion(
           // that has not moved, and the packet below must not recommend asking
           // for it a second time.
           const noReworkBehind = prior !== undefined && !reworked;
+          // Ruling 416(b): every same-result verdict on this revision, fought
+          // or not, so a later packet can tell the question was answered here.
+          const reviews = prior?.result === verdict ? (prior.reviews ?? prior.rounds) + 1 : 1;
           const recorded: ReviewVerdict = {
             profileId: reviewerProfileId,
             revisionId: subjectId,
@@ -3930,6 +3933,7 @@ export async function recordAgentCompletion(
             reason: clipVerdictReason(replyText ?? ""),
             at: new Date().toISOString(),
             rounds,
+            reviews,
           };
           // Ruling 388: only a commit has a head sha to denormalize.
           if (rev) recorded.headSha = rev.headSha;

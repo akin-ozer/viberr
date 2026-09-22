@@ -1001,3 +1001,25 @@ note reading "from 140k to 10k tokens". That is the next live check.
 Board-wide, measured by replaying the pre-414 parser over the 69 rollouts that compacted on
 2026-09-22: every one of the 70 compactions came out as a sized event plus a sizeless
 phantom, and the task files hold 140 compaction notes for them.
+
+## 37. Ruling 410 verified live on Codex (AX-24)
+
+The operator's own round-two duty, on a board that runs every operator on Codex:
+
+```
+20:35:13  reviewer: request-changes on 78e764c            (round two)
+20:35:39  operator -> @Reviewer "Review the current AX-24 revision again without
+          requesting rework first. Because this is your second consecutive
+          request-changes verdict, enumerate every issue that would still block ..."
+20:45:51  reviewer: request-changes on 78e764c, the complete list (the answer)
+20:46:19  operator -> @Surface Developer "Rework AX-24 against the reviewer's complete
+          blocking set ..."
+20:54:44  pushed 952e62e
+21:08:13  reviewer: request-changes on 952e62e -> packet "3 times running"
+```
+
+Exactly the sequence ruling 410 prescribes: the question at two, one rework against the whole
+answer, a person at three. No human decision was spent on round two. The duty reached the
+operator through the skill; the agent-reply turn instruction still said "move back and
+rework" and was corrected (ruling 416(b)'s note). The round-three packet itself recommended
+the question again, which is ruling 416(b).

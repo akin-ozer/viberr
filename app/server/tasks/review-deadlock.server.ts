@@ -126,6 +126,15 @@ export interface ReviewDeadlock {
   rounds: number;
   /** The latest objection's own reason text, as the verdict stored it. */
   latestReason: string;
+  /**
+   * Ruling 416(b): the revision, newest first within this streak, on which the
+   * reviewer read unchanged work again and still objected (more `reviews` than
+   * `rounds`): its verdict-shaped answer to the completeness question. Null
+   * when no such answer is on record. Live on ax-clone AX-24 the operator put
+   * the question at round two, the reviewer answered on `78e764c`, one rework
+   * followed, and the round-three packet recommended asking again.
+   */
+  answeredOn: string | null;
 }
 
 /**
@@ -143,7 +152,16 @@ export function reviewDeadlockOf(
   const mine = fm.verdicts.filter((v) => v.profileId === profileId);
   const latest = mine[mine.length - 1];
   if (!latest || latest.result !== "request_changes") return null;
-  return { profileId, rounds, latestReason: latest.reason };
+  let answeredOn: string | null = null;
+  for (let i = mine.length - 1; i >= 0; i -= 1) {
+    const v = mine[i]!;
+    if (v.result !== "request_changes") break;
+    if ((v.reviews ?? v.rounds) > v.rounds) {
+      answeredOn = v.headSha ? v.headSha.slice(0, 7) : v.revisionId;
+      break;
+    }
+  }
+  return { profileId, rounds, latestReason: latest.reason, answeredOn };
 }
 
 /**
@@ -196,6 +214,8 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
   const handle = `@${input.reviewerName}`;
   const held = input.heldBy.length > 0 ? input.heldBy.join(", ") : "";
   const answered = input.noReworkBehind === true;
+  const answeredEarlier = !answered && input.deadlock.answeredOn !== null;
+  const questionSpent = answered || answeredEarlier;
   const revision = input.revisionLabel ? `\`${input.revisionLabel}\`` : "the same revision";
   const observations: TaskPacket["observations"] = [
     { k: "Reviewer", v: handle, code: false },
@@ -240,10 +260,17 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
           "delivered since its last verdict, so what it returned is its answer on work that has " +
           "not moved. That is what the completeness question asks for, and asking again would get " +
           "the same list. The move it leaves is one rework against exactly this verdict.\n\n"
-        : "Round two was the operator's: it was told to put the completeness question to this " +
-          "reviewer itself, one run with no rework behind it. So either it did and the objection " +
-          "outlived the answer, or it did not and this is the first time the question has been " +
-          "asked. The reviewer's own verdicts on the timeline say which.\n\n") +
+        : answeredEarlier
+          ? // Ruling 416(b): the same fact, one step removed.
+            `The completeness question has been answered in this streak: ${handle} read ` +
+            `\`${input.deadlock.answeredOn}\` again with nothing reworked behind it and returned the list ` +
+            "it would block on, and this objection has outlived that answer and the rework against it. " +
+            "Asking again would repeat it. What is left is whether this objection is real work the " +
+            "deliverable owes, or one it cannot give.\n\n"
+          : "Round two was the operator's: it was told to put the completeness question to this " +
+            "reviewer itself, one run with no rework behind it. So either it did and the objection " +
+            "outlived the answer, or it did not and this is the first time the question has been " +
+            "asked. The reviewer's own verdicts on the timeline say which.\n\n") +
       // Ruling 329: this ask lives in the BODY, which is read on the card and
       // nowhere else. It used to sit on an option's `d`, which `resolvePacket`
       // appends to the GOAL verbatim — so a sentence about a textarea became
@@ -267,14 +294,16 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
           // Ruling 416: never recommended on top of the answer it would ask for.
           (answered
             ? `It has just read ${revision} again, unchanged, and answered; asking again repeats that.`
-            : "A verdict is supposed to be the complete set, so the answer either ends the loop or " +
-              "shows it cannot be ended by reworking.") +
+            : answeredEarlier
+              ? `It answered this on \`${input.deadlock.answeredOn}\` in this streak; asking again repeats that.`
+              : "A verdict is supposed to be the complete set, so the answer either ends the loop or " +
+                "shows it cannot be ended by reworking.") +
           // Ruling 241: said BEFORE the choice, not discovered after it.
           (held
             ? ` ${input.taskKey} waits on ${held}, and Viberr refuses every agent run while it ` +
               "does, so the question is held with the task and put the moment the wait clears."
             : ""),
-        rec: !answered,
+        rec: !questionSpent,
         profileId: input.deadlock.profileId,
       },
       {
@@ -312,7 +341,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
             "review is judged against it. Hands the task back to the operator to carry on."
           : "Each round has found something real and the work is converging on it. Hands the task " +
             "back to the operator to carry on.",
-        rec: answered,
+        rec: questionSpent,
       },
       {
         kind: "force_accept",

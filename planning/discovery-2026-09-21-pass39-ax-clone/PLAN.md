@@ -60,6 +60,8 @@ per item and each one was applied to the source and observed failing.
 | 47 | A rework the provider refused fought no round (F39-42) | "provider refusals don't count" | **done**, ruling 416 |
 | 48 | GPT-6 Luna and Opus 5.5 for the agents (owner request) | "use gpt 6 luna and opus 5.5" | **SDKs upgraded** (Codex 0.156.0, Agent SDK 0.3.280); model switch through the controller pending the redeploy |
 | 49 | The operator can lease files to its own task (improvement point) | "operator sets it directly" | **done**, ruling 417 |
+| 50 | The rulings KB learns from review: missing conventions are proposed (improvement point) | "yes, missing conventions too" | **done**, ruling 418 |
+| 51 | A deadlock packet never recommends re-asking an answer given earlier in the streak (AX-24) | within ruling 416 | **done**, ruling 416(b) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

@@ -1156,6 +1156,13 @@ export const reviewVerdictSchema = z
      *  reviewer re-blocking an UNCHANGED revision is the strongest evidence
      *  there is that the deliverer cannot satisfy it. Absent reads 1. */
     rounds: z.number().int().min(1).default(1),
+    /** Ruling 416(b): how many times this reviewer returned this result on
+     *  this revision, fought round or not. More reviews than rounds means the
+     *  reviewer read the revision again with nothing reworked behind it: a
+     *  verdict-shaped answer to the completeness question, which the deadlock
+     *  packet must not recommend asking again. Absent reads as `rounds` (no
+     *  such re-read on record). */
+    reviews: z.number().int().min(1).optional(),
   })
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;

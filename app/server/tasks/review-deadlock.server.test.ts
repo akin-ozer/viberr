@@ -25,7 +25,7 @@ describe("ruling 329: what a deadlock option writes into the goal", () => {
   const packet = buildReviewDeadlockPacket({
     taskKey: "VIB-1",
     packetId: "pkt_1",
-    deadlock: { profileId: "reviewer", rounds: 2, latestReason: "Still three files." },
+    deadlock: { profileId: "reviewer", rounds: 2, latestReason: "Still three files.", answeredOn: null },
     reviewerName: "Code Reviewer",
     delivererName: "Developer",
     heldBy: [],

@@ -1529,6 +1529,21 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("A PERSON has decided");
   });
 
+  it("ruling 418: a reviewer's defect class becomes a proposed convention, on the turn the verdict arrives and on the stage rules", () => {
+    // CANARY: drop either sentence and the turn the verdict lands on, or every
+    // later manual/scheduled turn, says nothing about the rulings learning.
+    const reply = "Verdict: request-changes\n\ngit args are passed without --.";
+    const onVerdict = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
+    expect(onVerdict).toContain("also `propose_ruling` that convention");
+    expect(onVerdict).toContain("one per class, never one per finding");
+    // Ruling 410's round-two duty is on this turn too, not only in the skill.
+    // CANARY: drop that sentence and the only instruction on the turn a second
+    // objection lands on is "move back and rework", the loop 410 ended.
+    expect(onVerdict).toContain("At the SECOND consecutive objection from the same reviewer");
+    const later = buildCodexOperatorPrompt(snapshot({}), "manual");
+    expect(later).toContain("`propose_ruling` the convention in the rulings document it belongs to");
+  });
+
   it("ruling 413 reaches a Codex operator: collisions are explained in the shared instruction", () => {
     const collisions = [{ taskKey: "AX-21", prNumber: 15, paths: ["internal/cli/render.go"], partial: false }];
     // CANARY: drop `collisionsInstruction` from the wrapper; the field alone

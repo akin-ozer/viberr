@@ -1754,3 +1754,16 @@ projection (`classifyRunEnd`) so the counter and the card read one definition. A
 the rounds already fought. And when the objection has no rework behind it, the packet says so
 and recommends one rework against that verdict; the question stays offered, not recommended,
 and says it would repeat an answer.
+
+### The knowledge base stopped learning at 16:45 (improvement point, owner's call: ruling 418)
+
+The controller wrote the rulings KB through the day (surface contract, planning conventions,
+the v0.2 scope) and one operator proposal landed that morning. After 16:45 UTC nothing was
+added, while reviewers blocked on three defect CLASSES the next links will meet: git arguments
+with no `--` terminator (AX-19), a credential reaching status and logs (AX-22), and `apply`
+rebuilding a spec from Go structs and losing field presence (AX-24). None is a convention
+anywhere. `propose_ruling` existed and was framed only for proving a rule WRONG. The owner
+chose to widen it to MISSING conventions from review, non-binding until promoted.
+
+AX-24's round-three packet also recommended re-asking a question answered 30 minutes earlier
+in the same streak; ruling 416(b).

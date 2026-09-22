@@ -1741,6 +1741,30 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(raised.body).not.toContain("So either it did");
     });
 
+    it("ruling 416(b): an answer given EARLIER in the streak is not recommended again either", async () => {
+      // Live on ax-clone AX-24: round two at 20:35, the operator put the
+      // completeness question, the reviewer answered on the untouched revision
+      // at 20:45, one rework followed, and the round-three packet at 21:08
+      // recommended "Ask Reviewer what else it would block on".
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await reviewOnly(blocks(3)); // the answer: nothing reworked behind it
+      expect(taskFile().parsed.frontmatter.verdicts[0]).toMatchObject({ rounds: 2, reviews: 3 });
+      await review(blocks(4)); // one rework against it, still objecting
+
+      const raised = taskFile().parsed.packet!;
+      expect(raised.title).toContain("requested changes 3 times running");
+      // CANARY: drop `answeredOn` from `reviewDeadlockOf` (or stop recording
+      // `reviews`) and the question is recommended on top of its own answer.
+      expect(raised.options.filter((o) => o.rec).map((o) => o.t)).toEqual(["Let the rework continue"]);
+      const question = raised.options.find((o) => o.kind === "question_reviewer")!;
+      expect(question.rec).toBe(false);
+      expect(question.d).toContain("in this streak; asking again repeats that");
+      expect(raised.body).toContain("has been answered in this streak");
+      expect(raised.body).not.toContain("So either it did");
+    });
+
     it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
       /**
        * Ruling 237 raises the "N times running" packet from inside the locked
