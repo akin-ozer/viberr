@@ -661,6 +661,88 @@ describe("Codex structured operator completion", () => {
     expect(task().packet!.title).toBe("Which endpoint should this target?");
   });
 
+  /**
+   * F39-10 (pass 39, live on ax-clone AX-9): the same misblame, reached through
+   * a DIFFERENT door. `update-task-branch` was granted `direct` on that board
+   * and the operator planned `update_branch_from_base` at Review twice, twelve
+   * minutes apart. Both landed as `policy` events reading "refused by its
+   * capability policy" — against a grant that was wide open. What ruled the
+   * step out was the task's STAGE (ruling 162), which is state.
+   */
+  it("the acceptance boundary is a STATE refusal, not a policy one, on a grant that is wide open", async () => {
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            ...OPERATOR_POLICY,
+            { capabilityId: "update-task-branch", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            autonomy: "full",
+          },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        title: "Codex operator plan",
+        stage: "review",
+        readiness: "ready",
+        waiting: "none",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+      }),
+      goal: "Coordinate a finished implementation into review.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Refresh the branch before acceptance.",
+        actions: [
+          {
+            tool: "update_branch_from_base",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: null,
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      const narration = task().timeline.find((e) =>
+        e.text.includes("not carried out in full"),
+      );
+      expect(narration).toBeDefined();
+      expect(narration!.text).toContain("the acceptance boundary");
+      expect(narration!.text).toContain("did not apply to the task's current state");
+      // CANARY: return `denied` from `acceptanceBoundaryRefusal`'s arm and both
+      // of these flip — the sentence blames the policy and the type becomes the
+      // governance signal LV-03 reserves for a real one.
+      expect(narration!.text).not.toContain("refused by its capability policy");
+      expect(narration!.type).toBe("note");
+    });
+  });
+
   it("names BOTH reasons separately when a plan hits policy and state in one turn", async () => {
     // `stage-transitions: off` (authority) + an already-Done-style state
     // refusal from resolve_packet with no packet open.

@@ -641,7 +641,11 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     seedAt("review", { pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "clean" } });
     const git = fakeGit({ behind: 2 });
     const res = await act(git.exec);
-    expect(res.outcome).toBe("denied");
+    // F39-10: `noop`, not `denied`. What rules the step out is the task's
+    // STAGE; the operator's `update-task-branch` grant is untouched, and
+    // `narrateRefusedActions` files a `denied` under "refused by its capability
+    // policy" as a `policy` event — blaming a grant that is not the cause.
+    expect(res.outcome).toBe("noop");
     expect(res.message).toBe(
       "VIB-1 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.",
     );

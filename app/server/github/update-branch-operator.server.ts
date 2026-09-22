@@ -445,7 +445,15 @@ export async function operatorUpdateBranchFromBase(
         projectFile.parsed.frontmatter,
       )
     : null;
-  if (boundaryRefusal) return { outcome: "denied", message: boundaryRefusal };
+  // F39-10: `noop`, not `denied`. The operator's `update-task-branch` grant is
+  // whatever the project set it to — on the live ax-clone board it is `direct`,
+  // and this refusal fired twice anyway, because what rules the step out is the
+  // task's STAGE. Returned as `denied`, `narrateRefusedActions` files it under
+  // "refused by its capability policy" as a `policy` event, so the record sends
+  // a reader to the Agents page to loosen a grant that was never the cause.
+  // That is the misblame class LV-03 exists to prevent, and this type's own
+  // contract already says which field decides it.
+  if (boundaryRefusal) return { outcome: "noop", message: boundaryRefusal };
   // Ruling 163: a task at or past the review stage returns to it when the
   // conflict's redirect is resolved, so the resolved revision gets its verdict
   // where the reviewers are eligible. Decided here so the option's own text

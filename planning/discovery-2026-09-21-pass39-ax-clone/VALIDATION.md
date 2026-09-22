@@ -210,3 +210,25 @@ bar.
 - **Test-only defect found on the way**: `/id (kb_\w+)/` truncated a base64url id at a hyphen,
   so the F39-1 append test failed ~1 run in 6. Fixed to `[\w-]+`; swept the repo for the same
   shape (one other match, unrelated).
+
+## 8. Guardrails — the compression threshold, exercised against a real 62-event timeline
+
+Set through the policy action over HTTP (`intent=set-guardrail`, `id=compression-threshold`,
+`op=value`, `value=20`), then a human comment on AX-9 to drive a pass. Before and after were
+diffed event by event out of `task.md` itself, not from the UI:
+
+- **62 events before, 62 after** — one comment added by me, two routine operator comments
+  folded, the marker taking the oldest folded one's slot.
+- **Typed events lost: 0.** Every `transition`, `github`, `quality`, `policy`, `blocked`,
+  `note`, `agent`, `assign` and the `completion` survived — which is what the guardrail's own
+  description promises ("typed events are always kept").
+- **Human and controller comments lost: 0**, including Tomas's attachment note and all eleven
+  of Arda's. Ruling 257's protection holds.
+- The marker reads "_2 earlier routine comments compacted … human comments are never
+  compacted._" and **2 is the true count**: one slot reused, one event removed.
+
+Worth recording rather than filing: the operator's `@Arda Agreed—the corrected evidence
+settles the diagnosis…` was one of the two folded. It was addressed to a person and answered
+their question, and it is machine prose by the rule that decides. Nothing lied — the record
+says what it dropped and why — but "routine" and "addressed to a named human" are not the
+same predicate, and the second is cheap to check. Threshold restored to 40.

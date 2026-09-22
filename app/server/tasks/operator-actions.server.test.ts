@@ -4083,7 +4083,9 @@ describe("B2 — the operator may only withdraw ITS OWN packet", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", reason: "I have decided already" },
       authority("full"),
     );
-    expect(res.outcome).toBe("denied");
+    // F39-10: `noop`. `generate-packets` is granted `direct` here — what rules
+    // the withdrawal out is WHO raised the open packet, which is task state.
+    expect(res.outcome).toBe("noop");
     expect(res.message).toContain("not by you");
     // The question — and the profile the answer resumes — survives.
     expect(task().packet!.title).toBe("Which database should I migrate?");
@@ -5631,7 +5633,10 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("full"),
     );
-    expect(r.outcome).toBe("denied");
+    // F39-10: `noop`. `stage-transitions` is granted `direct` here — the PR's
+    // mergeability is task state, and a `denied` would file this on the
+    // timeline as a policy refusal against a grant that is wide open.
+    expect(r.outcome).toBe("noop");
     expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
     expect(r.message).toContain("VIB-1 stays at In Progress");
     expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");

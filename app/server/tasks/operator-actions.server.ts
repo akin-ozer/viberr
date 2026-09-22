@@ -1875,8 +1875,11 @@ export async function operatorResolvePacket(
   // human's resolution) never runs. `from` is stamped by the writer:
   // "operator" here, the agent's actor ref in `buildAgentQuestionPacket`.
   if (packet.from !== "operator" || packet.askedBy) {
+    // F39-10: `noop` — WHO raised the open packet is task state, the same kind
+    // of fact as "no open decision packet to resolve" one branch above, which
+    // has always been a noop. `generate-packets` is granted either way.
     return {
-      outcome: "denied",
+      outcome: "noop",
       message:
         `The open packet "${packet.title}" was raised by ${packet.from}, not by you. ` +
         "Only a human can resolve an agent's question. Answer it in a comment or leave it standing.",
@@ -3842,7 +3845,9 @@ export async function operatorTransitionStage(
   // `mergeable: conflicting` was already on the file.
   {
     const mergeEntry = mergeStageEntryRefusal(ctx, input.projectSlug, input.taskKey, input.toStageId);
-    if (mergeEntry) return { outcome: "denied", message: mergeEntry };
+    // F39-10: `noop` — the PR's mergeability and its delivered revision are
+    // task STATE, not a capability the project withheld.
+    if (mergeEntry) return { outcome: "noop", message: mergeEntry };
   }
   // Ruling 151 (owner, Q35-1): the boundary the project author declared is the
   // contract every human reads on the Policy page and in project.md, and a

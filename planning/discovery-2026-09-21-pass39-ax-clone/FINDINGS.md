@@ -292,6 +292,88 @@ actually ask-and-stop when there is none. Shape put to the owner as a design que
 
 ---
 
+## F39-9 · MEDIUM · Compaction deletes the operator's answer to a human and keeps the question
+
+**Provoked deliberately.** The compression guardrail was set to 20 over HTTP and a comment
+posted on AX-9 (62 events) to drive a pass. It behaved as advertised on every count I could
+check: 0 typed events lost, 0 human comments lost, 0 controller comments lost, and the marker's
+"_2 earlier routine comments compacted_" is the true number.
+
+**What it folded.** One of the two was this, at 05:17:05:
+
+> @Arda Agreed—the corrected evidence settles the diagnosis: `/usr/bin/ld` was present, and
+> the prior failure was the missing gold linker. I've submitted the non-binding correction
+> against `environment-and-gates.md`; the required reviewer run remains in flight, so no
+> workflow transition or acceptance action is warranted yet.
+
+That is the operator answering a person, by name, about a correction that person had just
+filed. Arda's question at 05:15 survives — it is human prose, protected. The answer is gone.
+Canonical `task.md` now reads as a human correcting the record and nobody replying, and
+`task.md` is what the next agent anchors on.
+
+**And the notification still quotes it.** `/notifications` carries the row verbatim —
+"Operator · mentioned you — '@Arda Agreed—the corrected evidence settles the diagnosis…'" —
+with a button to AX-9. Follow it and the comment is not there. Same shape as ruling 317, which
+protected a verdict's justification because a stored record pointed at it: a notification is a
+live pointer too, and viberr sent it precisely because the comment named a person.
+
+**Why it is not simply the designed behaviour.** `isRoutineComment` carves out eight cases by
+now, each one added after something that mattered was deleted: human prose (B-FD9), controller
+prose (257), verdict reasoning (317), evidence pointers (209), attachment pointers (211(e)),
+`toAgent` hand-offs, existing markers. Every one of them is "this comment is addressed or
+pointed at". A comment that @mentions a person is both, by viberr's own NEW-4 convention —
+agents and the operator MUST tag the human they answer, and the tag MUST notify.
+
+**Severity is MEDIUM, not HIGH**, because on this occasion the substance survived by luck: the
+operator had also filed the same content as a typed `quality` event (`propose_ruling`), which
+compaction never touches. A plain answer with no typed twin is lost outright.
+
+Shape put to the owner as a design question.
+
+
+---
+
+## F39-10 · HIGH · The record blames the capability policy for refusals no policy made
+
+**On AX-9's timeline, twice, twelve minutes apart:**
+
+> **The operator's plan was not carried out in full.** This step was refused by its capability
+> policy:
+> - `update_branch_from_base` — AX-9 is at Review, the acceptance boundary: the branch is
+>   brought up to date once, at acceptance time, and merged in the same ceremony.
+
+**On the same project's Agents page, at the same moment:** `update-task-branch — direct`. The
+capability is wide open. What ruled the step out is the task's STAGE (ruling 162). A person who
+follows that sentence to the policy surface finds nothing to change, and the obvious "fix" —
+widening a grant — would have done nothing, because it is already as wide as it goes. The
+event carries the coral `policy` shield, which the activity feed and every reader take as a
+governance signal.
+
+**This is a documented invariant, already stated in the code that broke it.**
+`OperatorActionResult` says it in as many words:
+
+> **noop = nothing to do / the task's state ruled it out** … A state conflict returned as
+> `denied` therefore tells the human the project's policy blocked work it never blocked — the
+> misblame class LV-03 exists to prevent.
+
+`narrateRefusedActions` splits on exactly that field, and does it correctly. Three refusals
+were on the wrong side of it:
+
+| Site | What actually ruled it out |
+|---|---|
+| `acceptanceBoundaryRefusal` (`update_branch_from_base`) | the task's stage |
+| `mergeStageEntryRefusal` (`transition_stage`, ruling 162) | the PR's mergeability / delivered revision |
+| the withdraw guard in `operatorResolvePacket` | who raised the open packet |
+
+All three are task state, and the third sits one branch below `"No open decision packet to
+resolve."`, which has always been a `noop`. Fixed by returning `noop`; nothing else changes,
+because the message is unchanged and the agent-facing string was already carrying the whole
+explanation. Test: `operator-run.server.test.ts` drives a real plan step at the boundary with
+`update-task-branch: direct` and asserts the event is a `note` that does not blame the policy.
+Canary: put `denied` back and both assertions flip.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
