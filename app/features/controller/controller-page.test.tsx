@@ -991,6 +991,6 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
   it("holds the examples while the viewer's Claude is not connected", async () => {
     renderPage(view({ conversation: null, available: false }), "?c=new");
     const example = await screen.findByRole("button", { name: "Which tasks have been open longest, and why?" });
-    expect((example as HTMLButtonElement).disabled).toBe(true);
+    expect(example).toHaveProperty("disabled", true);
   });
 });
