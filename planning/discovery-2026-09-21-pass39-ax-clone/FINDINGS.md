@@ -1522,30 +1522,40 @@ raised, a human decision spent) which is exactly the collision a lease exists to
 A lease proposed from the overlap above would have been the mechanism working ahead of the
 problem instead of after it.
 
-## F39-38 · MEDIUM · A ruling I made this pass changed WHEN a link starts, and the instruction that assumed otherwise was never swept
+## F39-38 · MEDIUM · The op that unblocks a link did not start it, and the reply talked about a different link
 
 Asked whether ten pending links were genuinely gated on AX-19 and AX-20, the controller
-judged correctly that `ax apply -f` was not — everything it writes through is merged — and
-cleared goal-4 link 2's wait. Then:
+judged correctly that `ax apply -f` was not, and found why it looked gated: **one clause of
+its acceptance** — "applying `examples/task.yaml` against a live control plane in a test
+produces a Task that reaches `Succeeded`" — needs the Executor and the Workspace controller.
+"One acceptance sentence was serialising the whole command behind both core tasks." It
+rewrote the acceptance to what the merged surface can prove, named what was explicitly NOT
+in the task, and cleared the wait.
+
+Then:
 
 ```
-AX-24 created 2026-09-22T19:12:06.394Z  goalRef (goal-4, 2)   ← viberr's fan-out, ruling 398
+AX-24 created 2026-09-22T19:12:06.394Z  goalRef (goal-4, 2)   ← the periodic tick
 AX-25 created 2026-09-22T19:12:10.988Z  goalRef None          ← the controller, 4.6s later
-goal-4 link 2 -> AX-24
 ```
 
-`adopt_task` refused the second correctly: *"Link 2 already has a task (AX-24). Only a
-pending link with no task can adopt one."* The guard held. What failed was the instruction
-before it: `adopt_task`'s field text still described ruling 243's world, where "a chain
-normally MAKES its link's task when it advances, and nothing could point a link at a task
-that already exists". Under ruling 398 a link starts in the same call that unblocks it, so
-creating its task first is guaranteed to duplicate.
+Its own account: *"two reads showed link 2 with no task, so I created one (AX-25) — and four
+seconds earlier the chain had already created AX-24."*
 
-Cost: an orphan task with an agent dispatched on it, building `ax apply -f` a second time on
-a second branch.
+Both reads were honest. `edit_link` is the most direct way to make a pending link startable
+and it was the ONLY `update_goal` op that did not advance the chain afterwards — `resume`,
+`skip_link` and `add_link` all set `advanceAfter`. So the link sat until the tick. And the
+reply could not have told the controller otherwise: `activeTaskKey` names the link the chain
+currently rides on, which since ruling 398's fan-out is a different link.
 
-**Ruling 398 is mine, from this pass.** I changed a timing and did not sweep the text that
-depended on it — the pass-28 "verify every consumer" lesson, one level up from code.
+`adopt_task` refused the duplicate correctly. The window that produced it was between the
+edit and the tick.
 
-The controller caught it itself: it read the refusal, renamed AX-25 to "DUPLICATE of AX-24 —
-do not work, archive me" and blocked it on AX-24. Ruling 411.
+**Two lessons.** Ruling 398 is mine, from this pass: I changed *when* a link starts without
+sweeping the op that makes one startable. And the first fix I wrote here was a doc warning
+asserting the behaviour already worked that way — which was false. The controller's account
+of its own mistake is what sent me to read `advanceAfter` instead of shipping it.
+
+Credit: it caught the duplicate, retitled AX-25 "DUPLICATE of AX-24 — do not work, archive
+me", held it on AX-24 so no run could start, and said plainly that archiving is a human
+surface it does not have. Ruling 411.

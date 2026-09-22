@@ -432,6 +432,57 @@ describe("chained goals", () => {
    * only channel for chain context (it cannot read the timeline), so the header
    * may state only what cannot move.
    */
+  /**
+   * Ruling 411 (F39-38), live on ax-clone.
+   *
+   * `edit_link` is the most direct way there is to make a pending link
+   * startable, and it was the ONLY op that did not advance the chain after
+   * itself -- `resume`, `skip_link` and `add_link` all set `advanceAfter`. So
+   * the link sat until the periodic tick, and a caller that read the goal back
+   * saw a startable link with no task. The controller did exactly that: it
+   * cleared goal-4 link 2's wait, read the goal twice, saw link 2 taskless
+   * both times, and created AX-25 to carry it -- while the tick had minted
+   * AX-24 four seconds earlier. Two tasks for one link.
+   */
+  it("ruling 411: clearing a pending link's wait starts it in the SAME call", async () => {
+    const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
+    const created = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Cycle whose second link is held",
+        links: [
+          { title: "First", goal: "Do the first thing. Done when done." },
+          { title: "Second", goal: "Do the second thing. Done when done.", blockedBy: ["link 1"] },
+        ],
+      },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const goalId = created.goalId;
+    const beforeEdit = getGoalView(SLUG, goalId, { dataRoot: app.dataRoot })!;
+    expect(beforeEdit.links[1]!.taskKey, "link 2 is held, so it has no task yet").toBeNull();
+
+    // The controller's move: clear the wait and nothing else.
+    const cleared = await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId, action: { op: "edit_link", index: 2, blockedBy: [] } },
+      actorOf(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+
+    // CANARY: drop `advanceAfter = true` from the edit and both of these fail
+    // -- the link is startable and taskless, which is the read that produced
+    // the duplicate.
+    const afterEdit = getGoalView(SLUG, goalId, { dataRoot: app.dataRoot })!;
+    expect(afterEdit.links[1]!.taskKey, "the link started in this call").not.toBeNull();
+    // ...and the reply NAMES it. `activeTaskKey` cannot: since ruling 398 the
+    // chain rides on several links at once, and it answers with link 1's task
+    // -- which is what the controller read before it created a second one.
+    expect(cleared.activeTaskKey).not.toBe(afterEdit.links[1]!.taskKey);
+    expect(cleared.message).toContain(`Link 2 started as ${afterEdit.links[1]!.taskKey}`);
+  });
+
   it("a chain that grows leaves no task claiming a total that moved", async () => {
     const { createGoal, updateGoal } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");

@@ -565,6 +565,8 @@ export async function updateGoal(
   let message = "";
   let retryLinkIndex: number | null = null;
   let advanceAfter = false;
+  /** Ruling 411: the pending link an `edit_link` unblocked, if any. */
+  let startedIndex: number | null = null;
   // Ruling 155: an active link's wait lives on its task. The goal-file lock
   // below is not re-entrant, and the task writer mirrors the list back onto
   // this very file, so the forward runs AFTER the lock is released.
@@ -747,6 +749,23 @@ export async function updateGoal(
           if (op.blockedBy !== undefined) {
             link.blockedBy = validateLinkWait(db, input.projectSlug, fm.id, link.index, fm.links, op.blockedBy);
             refuseLinkCycles(fm.id, fm.links);
+            // Ruling 411 (F39-38): editing a pending link's wait is the most
+            // direct way there is to make that link STARTABLE, and it was the
+            // one op that did not advance the chain afterwards -- `resume`,
+            // `skip_link` and `add_link` all do. So the link sat until the
+            // periodic tick, `update_goal` returned with `activeTaskKey` still
+            // naming the link before it, and a caller that read the goal back
+            // saw a startable link with no task. Live on ax-clone the
+            // controller cleared goal-4 link 2's wait, read the goal TWICE,
+            // saw link 2 taskless both times, created AX-25 to carry it -- and
+            // the tick had already minted AX-24 four seconds earlier. Two
+            // tasks for one link, one of them an orphan with an agent
+            // dispatched on it. `reconcileGoal` is convergent, so asking it
+            // here costs nothing when the wait still stands.
+            advanceAfter = true;
+            // Ruling 411: remember WHICH link this edit could have started, so
+            // the reply can name its task instead of the chain's current one.
+            if (link.blockedBy.length === 0) startedIndex = link.index;
           }
           const waitClause =
             op.blockedBy !== undefined
@@ -1012,11 +1031,20 @@ export async function updateGoal(
   }
   const after = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
   const fm = after?.parsed.frontmatter ?? parsed.frontmatter;
+  // Ruling 411: say which task the edit STARTED. `activeTaskKey` names the
+  // link the chain currently rides on, which since ruling 398's fan-out is
+  // usually a DIFFERENT link -- so a caller that unblocked link 2 and read
+  // this reply was told about link 1 and learned nothing about its own edit.
+  // Live, that caller created a second task for a link Viberr had just filled.
+  const startedKey =
+    startedIndex !== null
+      ? (fm.links.find((l) => l.index === startedIndex)?.taskKey ?? null)
+      : null;
   return {
     goalId: input.goalId,
     status: fm.status,
     activeTaskKey: activeTaskKeyOf(fm.links),
-    message,
+    message: startedKey ? `${message} Link ${startedIndex} started as ${startedKey}.` : message,
   };
 }
 

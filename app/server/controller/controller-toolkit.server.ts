@@ -3622,7 +3622,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_goal",
-      "Redirect a goal chain: rename it (title and/or description), pause, resume, cancel, skip a link, retry a failed link (a fresh task, rebuilt from that task's own current text), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable and nothing is deleted; every op is refused on one EXCEPT rename, which corrects what a settled chain is called without changing what it did (ruling 267). RULING 411: clearing a pending link's wait starts that link AT ONCE and Viberr creates its task in the same call, so never create a task for a link you are about to unblock -- you will get two, one the chain carries and one orphan with an agent already running on it.",
+      "Redirect a goal chain: rename it (title and/or description), pause, resume, cancel, skip a link, retry a failed link (a fresh task, rebuilt from that task's own current text), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable and nothing is deleted; every op is refused on one EXCEPT rename, which corrects what a settled chain is called without changing what it did (ruling 267). RULING 411: clearing a pending link's wait STARTS that link in the same call -- the reply's activeTaskKey names the task Viberr just created for it. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it.",
       {
         projectSlug: z.string().optional(),
         goalId: z.string(),
@@ -3643,7 +3643,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain, and the LINK must still have none: since ruling 398 a link starts the moment nothing makes it wait, so a link you just unblocked already has its own task and this is refused (ruling 411). Adopt a task that existed BEFORE the link could start, never one you made for it.",
+            "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain, and the LINK must still have none: a link starts the moment nothing makes it wait (ruling 398, in the unblocking call itself since ruling 411), so a link you just unblocked already has its own task and this is refused. Adopt a task that existed BEFORE the link could start, never one you made for it.",
           ),
         title: z.string().optional(),
         goal: z.string().optional(),
@@ -3655,7 +3655,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it. RULING 398: clearing a PENDING link's wait starts that link AT ONCE -- Viberr creates its task in the same call, it does not wait for a later tick. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it."),
+          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it. RULING 411: clearing a PENDING link's wait STARTS that link, in this same call -- Viberr creates its task before the reply returns and names it in activeTaskKey. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it."),
       },
       runWith(
         async (args: {
