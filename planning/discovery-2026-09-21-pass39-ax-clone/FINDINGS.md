@@ -933,6 +933,47 @@ list position.
 
 ---
 
+## What the controller did well (the goal asks; this is the answer)
+
+Three of this pass's questions were about the controller's own judgement rather than about
+viberr's code. Recording the answers, because they are not all flattering to viberr.
+
+**Does it build good knowledge bases?** Yes, and better than the bar. Asked to freeze an API
+surface contract so that "depends only on the interface" would be a claim an agent could
+check, it wrote `ax-clone-rulings/surface-contract.md` with a provenance section that
+distinguishes three levels in one document:
+
+> Section 1 was READ out of `internal/server/server.go` as `main` has it — the code AX-11
+> merged in PR #4. Section 2 was READ out of AX-2's delivered branch, PR #5 head `22e3daf`,
+> which was IN REVIEW and NOT merged when this was written, so section 2 is provisional until
+> that PR merges. Section 3 is not a read at all: it is a controller decision, and it says so.
+>
+> This document is DESCRIPTIVE, not aspirational. Where it and the code disagree, the CODE is
+> right: say so on your task timeline with the file and the line.
+
+I asked for provenance. It invented the three-way split, the provisional marker and the
+precedence rule on its own.
+
+**Does it keep the project KB current as the project evolves?** Yes, unprompted. When the
+cycle chains were re-cut so several tasks build at once, it added section 7 to
+`architecture.md` — a surface-ownership split between the Developer (core) and the Surface
+Developer (edge), with a read-across/never-write-across rule and a named escalation path. Its
+one wrong sentence in that section is F39-23, and it was wrong in viberr's favour: it assumed
+a product that enforces leases must show them somewhere.
+
+**Does it make good decisions about viberr?** It made the best one of the pass. Told to widen
+the board by cutting cycles into smaller links, it refused with three facts and the third was
+a defect I had not seen (F39-25 / ruling 398). It also declined to edit its own skill as
+self-modification, found a root cause I had missed (a global template carrying
+`effort: xhigh`), and said "I created the resource, I cannot grant it to myself" — which
+became ruling 390.
+
+**Where it is weak**: it asserts mechanisms it has not verified when the assertion is
+plausible and the product would be better if it were true (F39-23). Everything else it
+asserted this pass and I checked, held.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
