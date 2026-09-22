@@ -974,6 +974,55 @@ asserted this pass and I checked, held.
 
 ---
 
+## F39-26 · HIGH · The pause that explains what happened got it backwards
+
+Three consecutive AX-4 timeline entries, spanning 37 milliseconds:
+
+```
+11:08:34  note  operator        The operator's plan was not carried out in full.
+                                - open_packet — "Create a follow-on task for the
+                                  missing logs baseline" is a create_task option
+                                  with no task on it. Give newTask a title and a
+                                  goal … Without them the confirm would create
+                                  nothing.
+11:16:44  note  operator        (the same refusal, verbatim, on the retry)
+11:16:44  note  policy-engine   this stage auto-advances, but the operator held
+                                it twice in a row WITHOUT … OPENING A PACKET —
+                                treating that as a DELIBERATE HOLD. Coordination
+                                is paused here: RUN THE OPERATOR MANUALLY when
+                                the hold should end.
+```
+
+It tried to open a packet. Twice. Viberr refused the step both times, for a reason it
+stated precisely. Then Viberr said it had not tried, called that a deliberate choice, and
+told the reader to do the one thing that reproduces it.
+
+The remedy is the worst part. The operator had already been re-invoked once with the
+`plan-refused` instruction — *"Do NOT plan the same refused action again; it will be refused
+again and this is the only automatic nudge"* — and planned it again anyway. So "run the
+operator manually" is advice viberr had already tested and watched fail, in the run
+immediately before the one writing the advice.
+
+And the fact was never missing. `planWhollyRefused` is read **eleven lines above** the note,
+to decide the task is stranded at all (ruling 228). The same function held the truth and
+wrote its opposite.
+
+Ruling 202 fixed this exact sentence once before, for a drive that had DELIVERED, and its
+comment enumerates "the three other ways a drive can act — a transition by `movedToStageId`,
+a dispatch by the live-run check, a packet or a recommendation by `operatorLeftTaskStranded`".
+A refused plan is the fourth, and it was covered by nothing.
+
+Fixed as ruling 399. The pause stays, because something genuinely is wrong; only the account
+of it changes.
+
+**Two things worth separating out.** The operator re-planning a step it had just been told
+was refused is an agent-quality problem, not a viberr one — the instruction it got was clear
+and specific. And viberr's refusal message itself is excellent: it names the option, the
+missing fields, and why they matter ("the goal is the contract the new task is worked to").
+The machinery around this defect is good. The defect is one sentence at the end of it.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

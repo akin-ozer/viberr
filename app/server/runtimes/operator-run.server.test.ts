@@ -2026,6 +2026,93 @@ describe("stranded auto-stage resume", () => {
     });
 
     /**
+     * Ruling 399 (F39-26), live on ax-clone AX-4. The operator planned one
+     * `open_packet` twice; both times Viberr refused the step, because a
+     * `create_task` option carried no `newTask` title or goal. Then the
+     * backstop wrote, 37 milliseconds after the second refusal note:
+     *
+     *   "the operator held it twice in a row without advancing, dispatching,
+     *    or opening a packet — treating that as a deliberate hold. Coordination
+     *    is paused here: run the operator manually when the hold should end"
+     *
+     * Two falsehoods and a remedy that reproduces the problem. It DID try to
+     * open a packet, twice; nothing about it was deliberate; and running the
+     * operator again plans the same refused step, which is exactly what the one
+     * automatic retry had already proved.
+     *
+     * `planWhollyRefused` is read eleven lines above this note to decide the
+     * task is stranded at all — the fact was in the same function the whole
+     * time. This pass's signature shape, in the pause that is supposed to tell
+     * a human what happened.
+     */
+    it("ruling 399: a plan Viberr REFUSED is not a deliberate hold", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(
+            id,
+            taskKey,
+            store2.slug,
+            `t_${id}`,
+            "2026-09-13T00:00:00.000Z",
+            "2026-09-13T00:00:00.000Z",
+          );
+      };
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-9", {
+          title: "the refused plan",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Do the thing.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_refused", "VIB-9");
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-9",
+        dataRoot: store2.dataRoot,
+        runId: "run_refused",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          movedToStageId: "triage",
+          planWhollyRefused: true,
+        },
+      });
+      expect(resumed).toBe(false);
+      const parsed = readTaskFile({
+        projectSlug: store2.slug,
+        taskKey: "VIB-9",
+        dataRoot: store2.dataRoot,
+      })!.parsed;
+      // The pause itself is right and stays: something IS wrong here.
+      expect(parsed.frontmatter.heldAtStage).toBe("triage");
+      const note = parsed.timeline[0]!.text;
+      // CANARY: drop the `planRefused` branch and this note calls a refused
+      // plan a deliberate hold, which is what AX-4's timeline says verbatim.
+      expect(note).toContain("did not hold this stage");
+      expect(note).toContain("Every action it planned was refused");
+      expect(note).not.toContain("deliberate hold");
+      // …and the remedy no longer sends the reader at the one move that
+      // reproduces it.
+      expect(note).not.toContain("run the operator manually");
+      expect(note).toContain("take the action yourself");
+    });
+
+    /**
      * Ruling 202 (F37-22, live on SHOP-10). A nudged drive whose single action
      * was `deliver_for_review` — it pushed the branch and opened PR #8 — was
      * recorded by this backstop as having "held it twice in a row without
