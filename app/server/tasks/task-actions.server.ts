@@ -6369,6 +6369,16 @@ export async function releaseTasksOwnedBy(
 // -------------------------------------------------------------- transition
 
 /** Apply a declared workflow transition with its configured authority boundary. */
+
+/** Markdown blockquote, one `>` per line and no trailing space on a blank one
+ *  (ruling 381 quotes a person's move reason on the transition entry). */
+function quoteLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (line ? `> ${line}` : ">"))
+    .join("\n");
+}
+
 export async function transitionStage(
   db: DatabaseSync,
   input: {
@@ -6606,8 +6616,17 @@ export async function transitionStage(
     );
   }
 
-  // One normalization for the sentence and the audit row.
-  const movedReason = (input.reason ?? "").trim().replace(/\s+/g, " ");
+  // One normalization for the blockquote and the audit row. Horizontal runs
+  // collapse; LINE breaks survive, because a person writing two sentences about
+  // what has to change before the task comes back meant the break, and the
+  // quote below carries it. Three-or-more blank lines fold to one.
+  const movedReason = (input.reason ?? "")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "transition",
@@ -6617,8 +6636,12 @@ export async function transitionStage(
       ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
       : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.` +
         // Ruling 381: on the event itself, not in a separate note, so the
-        // operator reads the move and the reason as one fact.
-        (movedReason ? ` ${movedReason}` : ""),
+        // operator reads the move and the reason as one fact — and quoted, the
+        // way a packet decision quotes the resolver's words. Appending it as a
+        // bare clause ran the person's own sentence on after a full stop
+        // ("…to In Progress. the retry path is still unhandled"), which reads
+        // as a typo rather than as an instruction.
+        (movedReason ? `\n\n${quoteLines(movedReason)}` : ""),
     toAgent: false,
     evidence: null,
   };

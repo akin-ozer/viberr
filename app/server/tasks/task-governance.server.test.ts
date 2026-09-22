@@ -796,17 +796,22 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
         taskKey: "VIB-1",
         toStageId: "ready",
         manual: true,
-        reason: "make gate does not run the race test the rulings require. Add it.",
+        reason: "make gate does not run the race test the rulings require.\n\nAdd it.",
       },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
-    // On the transition entry ITSELF, which is where the operator reads it.
+    // On the transition entry ITSELF, which is where the operator reads it —
+    // QUOTED, so the person's own sentence does not run on after the move's
+    // full stop ("…to Ready. make gate does not run…"), and their line breaks
+    // survive into the quote.
     expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
-    expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Review to Ready");
-    expect(detail?.timeline[0]?.text).toContain("make gate does not run the race test");
+    expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Review to Ready.");
+    expect(detail?.timeline[0]?.text).toContain(
+      "\n\n> make gate does not run the race test the rulings require.\n>\n> Add it.",
+    );
   });
 
   it("ruling 381: a FORWARD manual move needs no reason", async () => {

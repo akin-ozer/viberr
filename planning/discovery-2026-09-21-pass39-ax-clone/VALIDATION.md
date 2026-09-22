@@ -250,10 +250,42 @@ same predicate, and the second is cheap to check. Threshold restored to 40.
   `VERDICT_REPORT_TITLE`. Removed.
 - Gates: lint, typecheck, build clean; `vitest run` 7282/7282.
 
-## 10. Ruling 381 — still to validate live
+## 10. Ruling 381 — validated live, against the real build
 
-The running container is the pre-381 build (`56612143`, 05:04Z). A restart kills the runs in
-flight, so the HTTP check is queued for the next point where no agent is working, and the
-image is already built. Everything in ruling 381 is covered by tests at the route level
-(both doors refuse a bare backward move and forward one), which is where the server contract
-lives; what the live check adds is the dialog on a real board.
+The ax-clone container is the pre-381 image and a restart kills the runs in flight, so the
+new build was run as a second instance on its own data root (`VIBERR_DATA_ROOT=…/live381`,
+port 5175, demo seed) — never a second writer on `docker-data`. Five POSTs as the project
+admin, through the routes the UI posts to:
+
+| # | Request | Answer |
+|---|---|---|
+| A | task page, Review → In Progress, no `reason` | `ok:false` · "Moving VIB-142 back from Review to In Progress needs a reason: …" |
+| B | the same move with a `reason` | `ok:true` · stage `impl` · "Moved VIB-142 to In Progress" |
+| C | FORWARD, In Progress → Review, bare | `ok:true` — a forward move asks nothing |
+| D | BOARD reorder onto an earlier column, no `reason` | `ok:false`, same sentence |
+| E | the same drop with a `reason` | `ok:true` · stage `impl` |
+
+On disk, the transition entry the move wrote:
+
+```markdown
+**Transition:** moved VIB-142 from Review to In Progress.
+
+> make gate does not run the race test the rulings require.
+> Add it before this comes back.
+```
+
+and the audit row: `task.transition · {"from":"review","to":"impl","boundary":"manual",
+"manual":true,"reason":"make gate does not run the race test the rulings require.\nAdd it
+before this comes back."}`.
+
+**One thing the live run caught that the tests did not.** The first build appended the reason
+as a bare clause, so the record read "…from Review to In Progress. the retry path is still
+unhandled" — the person's own sentence running on after a full stop, reading as a typo rather
+than as an instruction. It is a blockquote now, the way a packet decision quotes the
+resolver's words, and line breaks survive into it (`quoteLines`, no trailing space on a blank
+quote line). The test asserts the quoted form, so the shape is pinned.
+
+The dialog itself was driven in the browser on the same instance: it opens on the backward
+pick, keeps **Move back** disabled until there is a sentence, and the foot line reads "It goes
+on the transition entry, where the operator reads it."
+
