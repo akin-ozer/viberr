@@ -161,3 +161,49 @@ describe("getControllerSurface — the open conversation's runtime", () => {
     expect(() => open(store.users.selin)).toThrow();
   });
 });
+
+/**
+ * Ruling 419(f): a person is named on the controller page the way the rest of
+ * the app names them. A conversation stores its owner's email when it is
+ * created, and the transcript and the rail printed "arda@viberr.dev" beside
+ * every message the task timeline attributes to "Arda".
+ */
+describe("getControllerSurface — people are named by display name (ruling 419(f))", () => {
+  it("names the open thread's owner and every listed thread's owner, not their address", async () => {
+    // CANARY: return `c.userLabel` / the stored conversation unchanged.
+    const { createConversation } = await import("~/server/controller/controller-conversations.server");
+    const own = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: store.users.arda.email,
+      projectSlug: null,
+    });
+    createConversation(store.db, {
+      userId: store.users.murat.id,
+      userLabel: store.users.murat.email,
+      projectSlug: null,
+    });
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: own.id,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    expect(view.conversation?.userLabel).toBe(store.users.arda.name);
+    expect(view.conversations.map((c) => c.ownerLabel).sort()).toEqual(
+      [store.users.arda.name, store.users.murat.name].sort(),
+    );
+    expect(JSON.stringify(view.conversations)).not.toContain("@");
+  });
+
+  it("keeps the stored label for an owner who no longer has a row", async () => {
+    const { createConversation } = await import("~/server/controller/controller-conversations.server");
+    createConversation(store.db, { userId: "u_gone", userLabel: "gone@viberr.dev", projectSlug: null });
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: null,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    expect(view.conversations.find((c) => c.ownerLabel === "gone@viberr.dev")).toBeDefined();
+  });
+});

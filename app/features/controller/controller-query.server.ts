@@ -20,6 +20,7 @@ import {
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, type GoalView } from "~/server/tasks/goal-actions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -120,6 +121,25 @@ export function getControllerSurface(
   }
 
   const config = resolveControllerConfig(input.dataRoot);
+  // Ruling 419(f): a person is named on this page the way the rest of the app
+  // names them. A conversation stores its owner's EMAIL at creation (the
+  // controller's prompt keeps it: an address is unambiguous to a model), and
+  // the transcript and the rail printed that address beside every message
+  // where the task timeline says "Arda". Read at render time, so a rename
+  // shows at once; an owner with no row keeps the stored label.
+  const names = new Map<string, string>();
+  const nameOf = (userId: string, stored: string): string => {
+    let name = names.get(userId);
+    if (name === undefined) {
+      const found = userDisplayName(db, userId);
+      name = found === userId || !found.trim() ? stored : found;
+      names.set(userId, name);
+    }
+    return name;
+  };
+  if (conversation) {
+    conversation = { ...conversation, userLabel: nameOf(conversation.userId, conversation.userLabel) };
+  }
   return {
     // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
     // "is the controller available" is a question about the person looking at
@@ -133,7 +153,7 @@ export function getControllerSurface(
     conversations: rows.map((c) => ({
       id: c.id,
       title: c.title || "New conversation",
-      ownerLabel: c.userLabel,
+      ownerLabel: nameOf(c.userId, c.userLabel),
       own: c.userId === viewer.id,
       lastMessageAt: c.lastMessageAt,
       projectSlug: c.projectSlug,
