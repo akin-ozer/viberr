@@ -870,6 +870,69 @@ trigger, states both arms, and names the one fact that settles them.
 
 ---
 
+## F39-25 · HIGH · A goal could only ever put one task on the board
+
+**Found by the controller, not by me** — the only finding of this pass whose diagnosis I did
+not make. I told it to widen the board by cutting cycles into smaller links. It refused, with
+three facts, and the third one was a viberr defect:
+
+> "Smaller links will not widen the board. A chain creates link N+1's task only when link N
+> completes — `blockedBy` on a pending link doesn't change that, because the task doesn't
+> exist yet to be released. So concurrency equals the number of *active chains*, not the
+> number of links. Cutting cycle 3 from 4 links into 8 gives you the same one task at a time,
+> for twice as long."
+
+It is right, and it is in the code:
+
+```ts
+// reconcileGoal
+const index = currentLinkIndex(fm.links);   // the FIRST unsettled link. Singular.
+...
+} else if (link && !link.taskKey && link.status === "pending") {
+  startIndex = link.index;                  // and only that one is ever started
+}
+```
+
+Meanwhile the per-link `blockedBy` documents itself as the thing that holds a link: *"so a
+link that waits on a sibling chain's link is born held instead of paying a triage turn that
+has to discover the wait."* It had nothing to hold. A link's task did not exist until its
+predecessor finished, whatever it declared.
+
+The consequence is a product shape nobody chose: **board concurrency equals the number of
+active GOALS.** To run six tasks at once you write six goals, and the goal's structure gets
+dictated by the scheduler rather than by the work. The controller's own plan for the ax-clone
+board was to shard each cycle into short parallel chains for exactly this reason.
+
+Nothing lies about it — `create_goal`'s description says "an ordered chain … each later task
+is created when the previous link completes", and the controller read it correctly. So this is
+a design ceiling rather than a false statement, which is why it went to the owner as a design
+question. Owner's call (2026-09-22): fan out, no cap.
+
+Fixed as ruling 398. Three further defects surfaced while building it, each real on its own:
+
+- **A sequence was not expressible in one call.** To say "link 2 waits on link 1" you need
+  `goal-7 link 1`, and the goal id is minted while the goal is being written. Under chain
+  semantics the ORDER carried that meaning; once order stops holding anything, a sequential
+  goal would have taken a create plus one `update_goal` per link, against an id the author
+  never chose. `link 2` is now accepted on input and stored absolute.
+- **A dead wait would have gone silent.** The old advance discovered an unsatisfiable wait by
+  ATTEMPTING the start and catching the throw. A selector that skips unsatisfied links never
+  attempts it, so the link would have sat pending forever with nothing saying why. It parks
+  the goal by name now.
+- **A settled link's archived task killed every wait behind it.** `resolveDependencies` and
+  `validateDependencyRefs` both went straight to the task's state, so archiving a link's task
+  after it completed turned every `goal-N link M` wait on it into a dead one — and an
+  onFailure=continue ride-through refused its own next link in the name of the failure it was
+  riding past. `reconcileGoal` already refused to undo a link's settlement on an archive
+  ("archiving a COMPLETED link's task does not retroactively fail the link"); the two readers
+  did not know.
+
+Every pre-existing goal test relied on chain order and now declares it — 25 of them failed the
+first time the selector changed, which is the honest measure of how much meaning was riding on
+list position.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
