@@ -35,6 +35,32 @@ per item and each one was applied to the source and observed failing.
 | 22 | A non-commit task is not told its work went missing (F39-18) | — | **done**, ruling 391 |
 | 23 | The standing verdicts ride in the agent's anchor (F39-19) | — | **done**, ruling 392 |
 | 24 | The force dialog lists every gate it bypasses (F39-20) | — | **done**, ruling 393 |
+| 25 | A completed turn is a completed run, on both adapters (F39-21) | — | **done**, ruling 394 |
+| 26 | A figure the provider never reports is not a zero (F39-22) | — | **done**, ruling 395 |
+| 27 | File leases get a human surface (F39-23) | — | **done**, ruling 396 |
+| 28 | A report a failed run left standing is the operator's call (F39-24) | "the operator decides" | **done**, ruling 397 |
+| 29 | A goal starts every link nothing makes wait (F39-25) | — | **done**, ruling 398 (+ b, c, d) |
+| 30 | A plan Viberr refused is not a deliberate hold (F39-26) | — | **done**, ruling 399 |
+| 31 | The plan-refused retry carries the refusals (F39-27) | — | **done**, ruling 400 |
+| 32 | A finished task that committed nothing has no branch to be behind (F39-28) | — | **done**, ruling 401 |
+| 33 | The operator sees the chain it is one link of (F39-29) | — | **done**, ruling 402 |
+| 34 | A compaction size Viberr could not measure is not zero (F39-30) | — | **done**, ruling 403; premise corrected by 414 |
+| 35 | A frozen goal header states only facts that cannot move (F39-31) | "stop claiming a total" | **done**, ruling 404 |
+| 36 | A conflict verdict belongs to the head it was measured on (F39-32) | — | **done**, ruling 405 (+ b, c) |
+| 37 | An operator that acted did not hold (F39-33) | — | **done**, ruling 406 |
+| 38 | A never-commit-shaped delivery is not untraced (F39-34) | — | **done**, ruling 407 |
+| 39 | A partly refused plan is carried too (F39-35) | — | **done**, ruling 408 |
+| 40 | The plan schema may not contradict the guard (F39-36) | — | **done**, ruling 409 |
+| 41 | Round two of a review deadlock is the operator's (F39-37) | "let the operator make the call" | **done**, ruling 410 |
+| 42 | The op that unblocks a goal link starts it (F39-38) | — | **done**, ruling 411 |
+| 43 | A refused transition says why and names the way forward (F39-39) | — | **done**, ruling 412 |
+| 44 | The operator sees the cross-task PR collisions (improvement point) | owner: no deferral | **done**, ruling 413 |
+| 45 | One Codex compaction is recorded once, with its measured size (F39-40) | — | **done**, ruling 414 |
+| 46 | A person's decision never leaves the operator's view; a plan-only operator is never sent to a tool (F39-41) | — | **done**, ruling 415 |
+| 47 | A rework the provider refused fought no round (F39-42) | "provider refusals don't count" | **done**, ruling 416 |
+| 48 | GPT-6 Luna and Opus 5.5 for the agents (owner request) | "use gpt 6 luna and opus 5.5" | **SDKs upgraded** (Codex 0.156.0, Agent SDK 0.3.280); model switch through the controller pending the redeploy |
+| 49 | The operator can lease files to its own task (improvement point) | "operator sets it directly" | **in progress** |
+| — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list

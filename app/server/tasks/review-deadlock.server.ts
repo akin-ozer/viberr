@@ -173,6 +173,18 @@ export interface ReviewDeadlockPacketInput {
    * — the option's own description has to say what will really happen.
    */
   heldBy: readonly string[];
+  /**
+   * Ruling 416 (F39-42): the objection has NO rework behind it. The reviewer
+   * read the same revision again with no delivered round in between, so this
+   * verdict is its answer on work that has not moved: exactly what round two's
+   * completeness question asks for. Live on ax-clone AX-19 the operator put
+   * that question, the reviewer answered with three concrete blockers on the
+   * untouched revision, and the packet recommended asking it again. Absent in
+   * callers that predate it, which reads as false.
+   */
+  noReworkBehind?: boolean;
+  /** The short sha the objection was made on, for the sentence that names it. */
+  revisionLabel?: string | null;
 }
 
 /**
@@ -183,6 +195,8 @@ export interface ReviewDeadlockPacketInput {
 export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): TaskPacket {
   const handle = `@${input.reviewerName}`;
   const held = input.heldBy.length > 0 ? input.heldBy.join(", ") : "";
+  const answered = input.noReworkBehind === true;
+  const revision = input.revisionLabel ? `\`${input.revisionLabel}\`` : "the same revision";
   const observations: TaskPacket["observations"] = [
     { k: "Reviewer", v: handle, code: false },
     {
@@ -220,10 +234,16 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       // two things and the timeline says which. Stated rather than implied,
       // because the option below is the same one the operator was told to use
       // and a person should know whether it has already been spent.
-      "Round two was the operator's: it was told to put the completeness question to this " +
-      "reviewer itself, one run with no rework behind it. So either it did and the objection " +
-      "outlived the answer, or it did not and this is the first time the question has been " +
-      "asked. The reviewer's own verdicts on the timeline say which.\n\n" +
+      (answered
+        ? // Ruling 416: Viberr knows which, so it says which.
+          `This objection has no rework behind it: ${handle} read ${revision} again with nothing ` +
+          "delivered since its last verdict, so what it returned is its answer on work that has " +
+          "not moved. That is what the completeness question asks for, and asking again would get " +
+          "the same list. The move it leaves is one rework against exactly this verdict.\n\n"
+        : "Round two was the operator's: it was told to put the completeness question to this " +
+          "reviewer itself, one run with no rework behind it. So either it did and the objection " +
+          "outlived the answer, or it did not and this is the first time the question has been " +
+          "asked. The reviewer's own verdicts on the timeline say which.\n\n") +
       // Ruling 329: this ask lives in the BODY, which is read on the card and
       // nowhere else. It used to sit on an option's `d`, which `resolvePacket`
       // appends to the GOAL verbatim — so a sentence about a textarea became
@@ -243,19 +263,23 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         d:
           `${held ? "Queues" : "Starts"} ${input.reviewerName} with one question and no rework ` +
           "behind it: name everything you would still block on across your own surface, on the " +
-          "revision as it stands. A verdict is supposed to be the complete set, so the answer " +
-          "either ends the loop or shows it cannot be ended by reworking." +
+          "revision as it stands. " +
+          // Ruling 416: never recommended on top of the answer it would ask for.
+          (answered
+            ? `It has just read ${revision} again, unchanged, and answered; asking again repeats that.`
+            : "A verdict is supposed to be the complete set, so the answer either ends the loop or " +
+              "shows it cannot be ended by reworking.") +
           // Ruling 241: said BEFORE the choice, not discovered after it.
           (held
             ? ` ${input.taskKey} waits on ${held}, and Viberr refuses every agent run while it ` +
               "does, so the question is held with the task and put the moment the wait clears."
             : ""),
-        rec: true,
+        rec: !answered,
         profileId: input.deadlock.profileId,
       },
       {
         kind: "custom",
-        t: "Let the rework continue",
+        t: answered ? "Rework once against this verdict" : "Let the rework continue",
         /**
          * Ruling 329: an option's `d` BECOMES the contract.
          *
@@ -282,10 +306,13 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
          * is a promise the product never kept and a decision record that
          * describes a dialog.
          */
-        d:
-          "Each round has found something real and the work is converging on it. Hands the task " +
-          "back to the operator to carry on.",
-        rec: false,
+        d: answered
+          ? `Rework once against ${handle}'s latest verdict: it read ${revision} again with ` +
+            "nothing delivered in between, so that verdict is its complete set, and the next " +
+            "review is judged against it. Hands the task back to the operator to carry on."
+          : "Each round has found something real and the work is converging on it. Hands the task " +
+            "back to the operator to carry on.",
+        rec: answered,
       },
       {
         kind: "force_accept",

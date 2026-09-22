@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { TAGGED_FAILURE_KINDS, type RunFailureKind } from "~/shared/run-failure";
 import {
   runBoundaryLine,
   type LogLine,
@@ -16,6 +15,7 @@ import {
   type AgentRunRow,
 } from "./run-store.server";
 import { transcriptExists } from "./session-export.server";
+import { classifyRunEnd } from "./provider-refusal.server";
 
 /**
  * Projects agent_runs rows (+ their log lines) into the `RunView[]` the
@@ -74,32 +74,6 @@ export type { RunLogWindow };
 /** A projected run + its bounded-window metadata (P13-D-11). */
 export interface ProjectedRunView extends RunView {
   logWindow: RunLogWindow;
-}
-
-/**
- * Signatures that mean "the BACKEND wasn't available" (quota, rate limit,
- * overload, auth/credit) rather than "the task genuinely failed". Matched
- * case-insensitively against an errored run's raw log tail so the UI can offer
- * a retry on the other backend (D4) instead of surfacing a dead end.
- */
-const BACKEND_UNAVAILABLE_SIGNATURES = [
-  "usage limit",
-  "rate limit",
-  "quota",
-  "insufficient_quota",
-  "overloaded",
-  "capacity",
-  "temporarily unavailable",
-  "service unavailable",
-  "credit balance",
-  "billing",
-  "429",
-];
-
-function isBackendUnavailableError(raw: string[]): boolean {
-  // Only scan the tail — the failure is at the end of the stream.
-  const tail = raw.slice(-12).join("\n").toLowerCase();
-  return BACKEND_UNAVAILABLE_SIGNATURES.some((s) => tail.includes(s));
 }
 
 /**
@@ -196,46 +170,13 @@ function projectRow(
   // UI-38 fixed once already, and false twice over here: nothing streamed and
   // no session was lost.
   const noPrincipal = row.credential_user_id === null;
-  // Ruling 130(a): the CLASSIFIED terminal line is consulted first, for every
-  // run kind (four of pass 34's six live refusals were operator runs); the raw
-  // scan stays as the fallback for lines written before the class existed.
-  const terminal = [...lines].reverse().find((l) => l.ev === "err" && (l.failure || (l.tag ?? "").startsWith("run·")));
-  const failureKind: RunFailureKind | undefined =
-    row.state !== "error"
-      ? undefined
-      : (terminal?.failure?.kind ??
-        TAGGED_FAILURE_KINDS.find((k) => (terminal?.tag ?? "").endsWith(`·${k}`)));
-  // U35-11: the origin travels with the kind, so the footer can say "could
-  // not be reached from this deployment" instead of blaming the provider.
-  const failureOrigin: "provider" | "local" | undefined =
-    failureKind === "overloaded" && terminal?.failure?.origin
-      ? terminal.failure.origin
-      : undefined;
-  const classifiedUnavailable =
-    failureKind === "quota" ||
-    failureKind === "auth" ||
-    failureKind === "unavailable" ||
-    // The provider's own overload/5xx: the backend was not available for this
-    // run, so the retry-on-the-other-backend offer applies exactly as the raw
-    // "overloaded" signature below has always made it.
-    failureKind === "overloaded";
-  const taggedUnavailable = lines.some(
-    (l) => l.ev === "err" && l.tag === "run·unavailable",
+  // Ruling 130(a) / ruling 416: one classification of how the run ended,
+  // shared with the review-round counter so the two can never disagree.
+  const { failureKind, failureOrigin, failedBackendUnavailable } = classifyRunEnd(
+    row.state,
+    lines,
+    raw,
   );
-  // A real FALLBACK, which is what the note above says it is. As an `||` arm
-  // the raw prose scan also fired for runs that WERE classified — as something
-  // else — so a hung or turn-capped run whose log tail merely mentioned "rate
-  // limit", "429" or "quota" (an agent quoting an API error it handled, say)
-  // was reported as a backend-availability failure and offered a retry on the
-  // other backend, which fixes nothing. When the run carries a classification,
-  // that classification decides; the scan only speaks for lines written before
-  // the class existed.
-  const classified = failureKind !== undefined || taggedUnavailable;
-  const failedBackendUnavailable =
-    row.state === "error" &&
-    (classified
-      ? classifiedUnavailable || taggedUnavailable
-      : isBackendUnavailableError(raw));
   const view: ProjectedRunView = {
     id: row.thread_id,
     serverRunId: row.id,

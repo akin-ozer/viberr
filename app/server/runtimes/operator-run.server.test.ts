@@ -1368,7 +1368,8 @@ describe("pr-diverged turn instruction (both backends)", () => {
       ...over,
     };
   }
-  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt } = operatorPrompts;
+  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock, AGENT_REPORT_CAP_TOOLLESS } =
+    operatorPrompts;
 
   it("closed PR on an active task → ONE recovery packet with rework/archive/archive+deleteBranch, acceptance forbidden", () => {
     const prompt = buildOperatorTurnPrompt(snapshot(), "pr-diverged");
@@ -1475,6 +1476,73 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(
       buildCodexOperatorPrompt(snapshot({ unansweredRefusal: REFUSED_NOTE }), "manual"),
     ).toContain("Your last plan was refused in part");
+  });
+
+  /**
+   * Ruling 415 (F39-41), live on ax-clone AX-19. The owner's round-five answer
+   * ("changing what may block rather than asking again") reached one operator
+   * turn; the next, a scheduled resume, never saw it and asked again. The
+   * newest decision by then was "wait for the window", which says nothing
+   * about review, so the instruction must not tell the operator to follow the
+   * newest decision only.
+   */
+  const DECISIONS = [
+    { at: "2026-09-22T19:34:20.283Z", by: "Arda", decision: "wait for the Codex window to reopen.", words: "Wait for the window." },
+    {
+      at: "2026-09-22T19:27:09.023Z",
+      by: "Arda",
+      decision: "answered with a custom directive.",
+      words: "So I am changing what may block rather than asking again.",
+    },
+  ];
+
+  it("ruling 415: a person's decisions are named on every trigger, on both backends, older ones included", () => {
+    for (const trigger of ["packet-resolved", "manual", "agent-reply", "pr-diverged", "scheduled"] as const) {
+      const prompt = buildOperatorTurnPrompt(snapshot({ humanDecisions: DECISIONS }), trigger);
+      // CANARY: drop `humanDecisionsInstruction` from the wrapper and none of
+      // these carry it, which is the prompt AX-19's 20:13 turn got.
+      expect(prompt, trigger).toContain("A PERSON has decided things on this task");
+      expect(prompt, trigger).toContain("does not cancel an older one");
+      expect(prompt, trigger).toContain("do not ask again a question one of them has already answered");
+    }
+    const codex = buildCodexOperatorPrompt(snapshot({ humanDecisions: DECISIONS }), "scheduled");
+    expect(codex).toContain("A PERSON has decided things on this task");
+    // The snapshot the Codex plan reads carries the older decision's words.
+    expect(codex).toContain("rather than asking again");
+    expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("A PERSON has decided");
+  });
+
+  it("ruling 413 reaches a Codex operator: collisions are explained in the shared instruction", () => {
+    const collisions = [{ taskKey: "AX-21", prNumber: 15, paths: ["internal/cli/render.go"], partial: false }];
+    // CANARY: drop `collisionsInstruction` from the wrapper; the field alone
+    // arrived unexplained on every operator of the board it was written for.
+    expect(buildCodexOperatorPrompt(snapshot({ collisions }), "manual")).toContain(
+      "names the OTHER open review PRs whose diff touches a file",
+    );
+    expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("names the OTHER open review PRs");
+  });
+
+  it("ruling 415: a tool-less operator is handed an unfinished report, not an address", () => {
+    const withText = { ...STANDING, text: "Done on branch `ax-2`, commit `3e0396ab`." };
+    const codex = buildCodexOperatorPrompt(snapshot({ unfinishedReport: withText }), "manual");
+    // CANARY: drop the `standing.text` arm and this points at a tool again.
+    expect(codex).toContain("Here it is:\n\nDone on branch `ax-2`");
+    expect(codex).not.toContain("`read_timeline_entry` with that stamp");
+  });
+
+  it("ruling 415: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
+    const long = `${"finding ".repeat(1200)}`; // ~9,600 chars: past 4,000, inside 16,000
+    const codex = agentReportBlock("agent-reply", long, { toolless: true });
+    // CANARY: cap the tool-less report at 4,000 again and the findings past it
+    // are gone with nowhere to fetch them from, the SHOP-42 loss on Codex.
+    expect(codex).toContain(long.trim());
+    expect(codex).not.toContain("is CUT");
+    const huge = "x".repeat(AGENT_REPORT_CAP_TOOLLESS + 10);
+    const cut = agentReportBlock("agent-reply", huge, { toolless: true });
+    expect(cut).toContain("this turn cannot fetch the rest");
+    expect(cut).not.toMatch(/get_task|read_timeline_entry/);
+    // An operator with tools keeps ruling 285's cut and its address.
+    expect(agentReportBlock("agent-reply", long)).toContain("read_timeline_entry");
   });
 
   /**
@@ -3132,6 +3200,38 @@ describe("pending trigger queue", () => {
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
       .all()
       .map((row) => ({ id: String(row.id) }));
+
+  it("ruling 415: the Codex plan's snapshot never sends it to a tool it cannot call", async () => {
+    // A timeline longer than the six-entry window, so the window note is
+    // written, as it was on every ax-clone task by mid-afternoon.
+    writeTask(store3.dataRoot, store3.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store3.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+      timeline: Array.from({ length: 10 }, (_, i) => ({
+        occurredAt: `2026-09-22T20:${String(10 + i).padStart(2, "0")}:00.000Z`,
+        type: "note" as const,
+        actor: { kind: "system" as const, systemId: "schedule-runner" },
+        title: null,
+        text: `note ${i}`,
+        toAgent: false,
+        evidence: null,
+      })).reverse(),
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    await drive({ trigger: "manual" });
+    const prompt = adapter3.pending!.spec.prompt;
+    // CANARY: drop `{ toolless: true }` at the Codex call site and this is
+    // "Call get_task with events up to 50", which the same prompt says a
+    // Codex operator cannot do.
+    expect(prompt).toContain("You cannot call tools");
+    expect(prompt).toContain("This turn cannot fetch them");
+    expect(prompt).not.toContain("Call get_task with events");
+  });
 
   it("FR39: a queued scheduled re-check survives a later machine trigger", async () => {
     // CANARY: route `scheduled` back into the newest-wins `latest` slot — the

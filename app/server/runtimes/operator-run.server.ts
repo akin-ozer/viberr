@@ -80,6 +80,7 @@ import {
   operatorResolvePacket,
   resolveOperatorAuthority,
   OPERATOR_POLICY_SCOPE_NOTE,
+  OPERATOR_TIMELINE_DEFAULT,
   type OperatorActionResult,
   type OperatorAuthority,
   type OperatorAuthorityOverrides,
@@ -2455,7 +2456,17 @@ async function startCodexOperatorRun(
   /** R21-4: the identity (and any reserved row) claimed before the clone. */
   start: OperatorRunStart,
 ): Promise<RunOperatorResult> {
-  const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
+  // Ruling 415: this operator returns a plan and cannot call tools, so the
+  // snapshot carries content where it would otherwise carry an address.
+  const snapshot = operatorSnapshot(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    authority,
+    OPERATOR_TIMELINE_DEFAULT,
+    { toolless: true },
+  );
   // P14-RT-04 / KM-02: the operator's DECLARED org MCP servers mount on Codex
   // too. P13-KM-03 wired them into the Claude toolkit only, so the same grant
   // was real on one backend and decorative on the other — a Codex operator could
@@ -4084,27 +4095,44 @@ function transitionContextOf(input: RunOperatorInput): TransitionContext | undef
   };
 }
 
-function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string {
+/** Ruling 285's cut, for an operator that can fetch the rest. */
+const AGENT_REPORT_CAP = 4000;
+/** Ruling 415: the cut for one that cannot (a Codex plan). A reviewer's findings
+ *  past 4,000 characters were unreachable there, so it is handed far more. */
+export const AGENT_REPORT_CAP_TOOLLESS = 16000;
+
+export function agentReportBlock(
+  trigger: OperatorTrigger,
+  agentReply?: string,
+  opts: { toolless?: boolean } = {},
+): string {
   if (trigger !== "agent-reply" || !agentReply?.trim()) return "";
-  const report = agentReply.slice(0, 4000);
+  const cap = opts.toolless ? AGENT_REPORT_CAP_TOOLLESS : AGENT_REPORT_CAP;
+  const report = agentReply.slice(0, cap);
   // Ruling 285 (F37-120): the clip was already honest — it said "first 4,000
   // chars" — and honesty about a dead end is still a dead end. A thorough
   // reviewer's report runs past this routinely, and what is past it is where a
   // reviewer puts the findings it went out of its way to make: live on SHOP-42
   // the clipped half held two unowned defects, and the operator raised a packet
   // to a human saying it had not read them. Name the way out beside the cut.
-  const suffix =
-    agentReply.length > report.length
-      ? " (first 4,000 chars — the rest is NOT below)"
-      : "";
-  const more =
-    agentReply.length > report.length
-      ? "\n\nThis report is CUT. The full text is this task's newest agent comment on " +
+  const cut = agentReply.length > report.length;
+  const suffix = cut
+    ? ` (first ${cap.toLocaleString("en-US")} chars — the rest is NOT below)`
+    : "";
+  // Ruling 415: the way out is only worth naming to an operator that can take
+  // it. One that cannot is told the rest is out of reach, so it neither
+  // summarises the cut report as whole nor sends someone to fetch it.
+  const more = !cut
+    ? ""
+    : opts.toolless
+      ? "\n\nThis report is CUT, and this turn cannot fetch the rest. Say so if you " +
+        "summarise it or raise a packet about it, and never conclude it did not mention " +
+        "something: the rest is on the timeline for a person, not for you."
+      : "\n\nThis report is CUT. The full text is this task's newest agent comment on " +
         "the timeline: `get_task` prints its `occurredAt`, and `read_timeline_entry` " +
         "returns it whole. Read it before you summarise this report for a person, " +
         "before you raise a packet about it, and before you conclude it did not " +
-        "mention something."
-      : "";
+        "mention something.";
   return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\`${more}`;
 }
 
@@ -4651,8 +4679,52 @@ const operatorTurnInstruction = (
   // re-dispatching finished work; this one is about not re-planning a step
   // Viberr has already said no to.
   const refused = unansweredRefusalInstruction(args[0]);
-  return `${standing}${refused}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  // Ruling 415: what a person decided outranks the stage doctrine too, and it
+  // is the field a window cut used to hide. Ruling 413's collisions ride the
+  // same channel, because this instruction is the one BOTH backends read.
+  const decided = humanDecisionsInstruction(args[0]);
+  const colliding = collisionsInstruction(args[0]);
+  return `${standing}${refused}${decided}${colliding}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
 };
+
+/**
+ * Ruling 415 (F39-41): the decisions a person made on this task.
+ *
+ * Live on ax-clone AX-19 the owner answered round five in their own words,
+ * "I am changing what may block rather than asking again", and the run that
+ * answer set up was refused for quota. The next operator turn read a six-entry
+ * window that started after the answer, and asked the reviewer again. The
+ * newest decision was then "wait for the window", which says nothing about
+ * review, so this cannot tell the operator to follow the newest one only.
+ */
+export function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): string {
+  const decisions = snapshot.humanDecisions;
+  if (!decisions || decisions.length === 0) return "";
+  return (
+    `A PERSON has decided things on this task: \`humanDecisions\` carries ${decisions.length === 1 ? "that decision" : `all ${decisions.length}`}, ` +
+    "newest first, in their own words, read from the whole timeline. Read every one before you plan. " +
+    "Each stands until a later decision contradicts it, so a newer one about something else (waiting out a " +
+    "usage window, say) does not cancel an older one about how the work or its review is run. " +
+    "Do not plan a move any of them rules out, and do not ask again a question one of them has already answered. " +
+    "Where one set something up that has since failed or finished (a run it dispatched, a window it waited for), " +
+    "carry on from its intent. If one no longer fits what has happened since, open a decision packet that says what changed.\n\n"
+  );
+}
+
+/**
+ * Ruling 413's field, explained where a Codex operator will read it. The first
+ * version explained it only in the Claude toolkit's `read_task` description,
+ * and every operator on the board it was written for runs on Codex.
+ */
+export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
+  const collisions = snapshot.collisions;
+  if (!collisions || collisions.length === 0) return "";
+  return (
+    "`collisions` names the OTHER open review PRs whose diff touches a file this task's PR does, with the shared paths. " +
+    "A merge on either side puts the other into conflict, so before you deliver, refresh a branch or dispatch work into " +
+    "a shared file, read it and say in your directive which files another task is holding.\n\n"
+  );
+}
 
 /**
  * Ruling 408 (F39-35): what to say when Viberr refused part of the last plan.
@@ -4700,7 +4772,11 @@ function unfinishedReportInstruction(snapshot: OperatorTaskSnapshot): string {
     `READ THIS FIRST. Viberr recorded ${standing.actor}'s run as failed at ${standing.failedAt}, ` +
     `and that same agent posted a report at ${standing.reportedAt}, moments before. Both are on the timeline. ` +
     "Viberr could not tell whether the run finished, so it recorded a failure; the report is the agent's own account of what it did. " +
-    "Read the report (`read_timeline_entry` with that stamp returns it whole) before you dispatch anything. " +
+    // Ruling 415: an operator that cannot call tools is handed the report
+    // itself; the address is for one that can.
+    (standing.text
+      ? `Read the report before you dispatch anything. Here it is:\n\n${standing.text}\n\n`
+      : "Read the report (`read_timeline_entry` with that stamp returns it whole) before you dispatch anything. ") +
     "The failure note's \"nothing was delivered to a pull request\" is about the PULL REQUEST and says nothing about the workspace: " +
     "a commit the agent made is in the tree whether or not Viberr called the run a failure. " +
     "If the report says the work is done, committed and its gates pass, continue from it — deliver it, or take the next stage step — rather than running the agent again. " +
@@ -4727,7 +4803,7 @@ export function buildCodexOperatorPrompt(
   return (
     "# Task snapshot\n\n```json\n" +
     JSON.stringify(snapshot, null, 2) +
-    "\n```" + agentReportBlock(trigger, agentReply) +
+    "\n```" + agentReportBlock(trigger, agentReply, { toolless: true }) +
     "\n\n# Your decision\n\n" +
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +

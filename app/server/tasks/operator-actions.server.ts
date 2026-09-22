@@ -58,6 +58,7 @@ import { readGoalFile } from "~/server/files/goal-writer.server";
 import {
   activeWorkRevision,
   consecutiveRequestChanges,
+  PACKET_NOTE_MAX,
   PACKET_OPTION_KINDS,
   revisionLeftWorkspace,
   type ForeignBranchHead,
@@ -2339,6 +2340,9 @@ export interface OperatorTaskSnapshot {
     failedAt: string;
     /** The report's stamp, which `read_timeline_entry` takes. */
     reportedAt: string;
+    /** Ruling 415: the report itself, for an operator that cannot call
+     *  `read_timeline_entry` (a Codex plan). Absent for one that can. */
+    text?: string;
   };
   /**
    * Ruling 408 (F39-35): a refusal this task has not answered yet.
@@ -2377,6 +2381,36 @@ export interface OperatorTaskSnapshot {
    * open review PR, or when nothing overlaps.
    */
   collisions?: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
+  /**
+   * Ruling 415 (F39-41): every decision a PERSON made on this task, newest
+   * first, read from the WHOLE timeline, with their own words when they gave
+   * any.
+   *
+   * Ruling 284 keeps typed words out of the goal and said nothing was lost by
+   * it, because the words "reach the operator in their own `note` field on the
+   * re-queue". They reach exactly ONE turn. Live on ax-clone AX-19 the owner
+   * answered round five in their own words ("I am changing what may block
+   * rather than asking again"); the turn that note summoned dispatched the
+   * rework, the provider refused that run for quota three minutes later, and
+   * the next turn, forty minutes on, was a scheduled resume whose six-entry
+   * window started after the decision. It did the one thing the decision
+   * ruled out: it asked the reviewer again.
+   *
+   * The newest entry's words are whole; older ones are cut, and say so.
+   * Absent when no person has decided anything here.
+   */
+  humanDecisions?: {
+    /** The decision event's stamp. */
+    at: string;
+    /** Who decided, as the timeline names them. */
+    by: string;
+    /** What was chosen: the decision sentence, without its label. */
+    decision: string;
+    /** The person's own words (a directive, or the note under an option). */
+    words?: string;
+    /** Present when `words` was cut, saying where the rest is. */
+    clipped?: string;
+  }[];
   /** Ruling 302: how many entries this task's timeline HAS, against the
    *  `recentTimeline.length` shown. Present always, so a coordinator never has
    *  to infer from a full-looking window that it saw everything. */
@@ -2779,6 +2813,63 @@ function findUnansweredRefusal(
   return undefined;
 }
 
+/** Ruling 415: how many of a task's human decisions the snapshot carries. */
+export const HUMAN_DECISIONS_MAX = 5;
+/** Ruling 415: an OLDER decision's words are cut here, at the timeline
+ *  window's own per-entry cap; the newest is whole. */
+const OLDER_DECISION_WORDS_CAP = 1500;
+/** Every packet resolution a person makes is written with this label. */
+const DECISION_LEAD = "**Decision:**";
+
+/**
+ * Ruling 415 (F39-41): the decisions a person made on this task, newest
+ * first, over the WHOLE timeline rather than the snapshot's window.
+ *
+ * A decision is the `transition` event `resolvePacket` writes under a human
+ * actor, led by "**Decision:**"; the person's own words ride it as a
+ * blockquote, the one shape both the custom directive and the note under a
+ * listed option are written in.
+ */
+function findHumanDecisions(
+  timeline: readonly TaskFileEvent[],
+  toolless: boolean,
+): OperatorTaskSnapshot["humanDecisions"] {
+  const found: NonNullable<OperatorTaskSnapshot["humanDecisions"]> = [];
+  for (const event of timeline) {
+    if (found.length >= HUMAN_DECISIONS_MAX) break;
+    if (event.type !== "transition" || event.actor.kind !== "human") continue;
+    if (!event.text.startsWith(DECISION_LEAD)) continue;
+    const [lead = "", ...rest] = event.text.split(/\n\n/);
+    const quoted = rest
+      .join("\n\n")
+      .split("\n")
+      .filter((line) => line.startsWith(">"))
+      .map((line) => line.replace(/^> ?/, ""))
+      .join("\n")
+      .trim();
+    const entry: NonNullable<OperatorTaskSnapshot["humanDecisions"]>[number] = {
+      at: event.occurredAt,
+      by: event.actor.nameHint ?? "a person",
+      decision: lead.slice(DECISION_LEAD.length).trim(),
+    };
+    if (quoted) {
+      // The newest decision governs, so it is carried whole (it is bounded by
+      // the directive field's own limit); older ones are context.
+      const cap = found.length === 0 ? PACKET_NOTE_MAX : OLDER_DECISION_WORDS_CAP;
+      if (quoted.length > cap) {
+        entry.words = `${quoted.slice(0, cap - 1)}…`;
+        entry.clipped = toolless
+          ? `cut at ${cap.toLocaleString("en-US")} chars; this turn cannot fetch the rest`
+          : `cut at ${cap.toLocaleString("en-US")} chars; read_timeline_entry with this \`at\` returns it whole`;
+      } else {
+        entry.words = quoted;
+      }
+    }
+    found.push(entry);
+  }
+  return found.length > 0 ? found : undefined;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2786,7 +2877,15 @@ export function operatorSnapshot(
   taskKey: string,
   authority: OperatorAuthority,
   events: number = OPERATOR_TIMELINE_DEFAULT,
+  /**
+   * Ruling 415: `toolless` is a Codex operator, which returns a plan and "cannot
+   * call tools". Every note that names a tool (`get_task`, `read_timeline_entry`)
+   * sent it somewhere it cannot go, so for it the snapshot carries the content
+   * instead of the address, and says plainly when content is out of reach.
+   */
+  opts: { toolless?: boolean } = {},
 ): OperatorTaskSnapshot {
+  const toolless = opts.toolless === true;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) throw AppError.notFound(`Task ${taskKey} not found.`);
   const project = readProjectFile({
@@ -2957,8 +3056,9 @@ export function operatorSnapshot(
         text: clipped ? e.text.slice(0, 1497) + "…" : e.text,
       };
       if (clipped) {
-        row.clipped =
-          "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole";
+        row.clipped = toolless
+          ? "cut at 1,500 chars; this turn cannot fetch the rest"
+          : "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole";
       }
       return row;
     }),
@@ -2992,7 +3092,25 @@ export function operatorSnapshot(
     // pair is adjacent, but the window can end between them.
     ...((): Pick<OperatorTaskSnapshot, "unfinishedReport"> => {
       const found = findUnfinishedReport(file.parsed.timeline);
-      return found ? { unfinishedReport: found } : {};
+      if (!found) return {};
+      // Ruling 415: an operator that cannot call read_timeline_entry gets the
+      // report itself, bounded like any other long entry it is handed.
+      if (toolless) {
+        const report = file.parsed.timeline.find((e) => e.occurredAt === found.reportedAt);
+        if (report) {
+          found.text =
+            report.text.length > PACKET_NOTE_MAX
+              ? `${report.text.slice(0, PACKET_NOTE_MAX - 1)}…`
+              : report.text;
+        }
+      }
+      return { unfinishedReport: found };
+    })(),
+    // Ruling 415: whole timeline, for ruling 408's reason — a person's decision
+    // falls out of the window while it is still the one that governs.
+    ...((): Pick<OperatorTaskSnapshot, "humanDecisions"> => {
+      const found = findHumanDecisions(file.parsed.timeline, toolless);
+      return found ? { humanDecisions: found } : {};
     })(),
     // Ruling 408: whole timeline for the same reason — the refusal can fall
     // out of the window while still being the open question.
@@ -3143,10 +3261,18 @@ export function operatorSnapshot(
     // A window that does not say it is a window is how a coordinator states
     // part of a history as the whole of it.
     const older = snapshot.timelineTotal - snapshot.recentTimeline.length;
-    snapshot.timelineOlder =
-      `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. ` +
-      `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
-      "and read_timeline_entry with an occurredAt for one in full.";
+    const notShown = `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. `;
+    // Ruling 415: the address is only worth giving to an operator that can go
+    // there. For one that cannot, say where the parts of that history that
+    // still bind were carried instead.
+    snapshot.timelineOlder = toolless
+      ? notShown +
+        "This turn cannot fetch them. What in them still binds you is carried in this snapshot: " +
+        "`humanDecisions` (every decision a person made here, in their own words), `unansweredRefusal`, " +
+        "`unfinishedReport` and `goalChain`."
+      : notShown +
+        `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
+        "and read_timeline_entry with an occurredAt for one in full.";
   }
   return snapshot;
 }

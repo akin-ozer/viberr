@@ -1673,3 +1673,78 @@ every spelling before it is the same compaction. Its own size line measures it w
 closing it. `compactions` is the length of the event list, so the row and the notes count the
 same thing. The Codex fake adapter no longer emits a boundary line on success, which the real
 one never did. Old records stay as they are (no migration, owner's standing rule).
+
+## F39-41 · HIGH · A person's answer reached the operator once, and the operator then did what it ruled out
+
+AX-19, round five of a reviewer that kept paying out one finding at a time. At 19:27 the owner
+answered the deadlock packet in their own words:
+
+> Round five, and my round-four instruction was not honoured ... So I am changing what may
+> block rather than asking again.
+
+What happened to those words:
+
+```
+19:27:09  Decision (custom directive) -> the operator's note on the turn it summons
+19:29:24  that turn dispatches the rework and posts the standing rule to the reviewer
+19:32:47  the provider refuses the rework for quota, three minutes in, nothing committed
+19:34:20  Decision: wait for the Codex window (a listed option, with a note)
+20:13:00  scheduled resume: a NEW operator turn
+20:21:31  it asks the reviewer "report the complete set of issues you would still block on"
+```
+
+The 20:13 turn's prompt (read out of its rollout, `rollout-2026-09-22T20-13-02-01a0cac0-1a42-…`)
+contains neither "rather than asking again" nor the operator's own 19:29 "Standing rule"
+comment. Its `recentTimeline` held six entries of 109, the oldest at 19:32:47. The decision was
+five entries further back.
+
+Three things made that permanent rather than a window cut:
+
+1. **Ruling 284** keeps typed words out of the goal, and says nothing is lost because the words
+   "reach the operator in its own `note` field on the re-queue". They reach ONE turn. If that
+   turn's work is cut short, the next turn never sees them.
+2. **The window note sends the operator to a tool it does not have.** The snapshot says "Call
+   get_task with events up to 50 to widen this window, and read_timeline_entry with an
+   occurredAt for one in full." The Codex prompt, four lines below, says "You cannot call
+   tools." Every operator on this board is Codex, so the 103 older entries were unreachable by
+   construction. The same dead end sits in ruling 285's cut-report note ("the rest is NOT
+   below ... read_timeline_entry returns it whole") and in ruling 397's unfinished-report
+   instruction, which is mine from this pass.
+3. **My ruling 413 explained `collisions` only in the Claude toolkit's `read_task`
+   description.** The field reached every Codex operator on the board it was written for with
+   no explanation at all.
+
+Ruling 415. The snapshot carries `humanDecisions`: every decision a person made on the task,
+newest first, from the whole timeline, with their own words (the newest whole, older ones cut
+at the window's own 1,500 and saying so). The shared turn instruction, which both backends read,
+tells the operator that each stands until a later one contradicts it, because on AX-19 the
+newest decision was "wait for the window" and the one that mattered sat behind it. A tool-less
+operator is never sent to a tool: the window note says what it cannot fetch and where the parts
+that still bind were carried, an unfinished report comes as its text, and a long agent report is
+carried to 16,000 characters instead of 4,000 with an honest note past that. `collisions` is
+explained in the shared instruction too. Ruling 284 stands: typed words still never touch the
+goal.
+
+## F39-42 · MEDIUM · A rework the provider refused counted as a round, and the packet asked a question the reviewer had just answered
+
+Same incident, the other half. Ruling 242 (owner) counts a review round when the deliverer has
+ANY run since the reviewer's previous verdict, "because a rework dispatched that crashed is
+still a round fought". The 19:32 rework was not a crash: the provider refused it for quota. It
+counted anyway, so the reviewer's 20:36 verdict on the untouched revision `6f27413` took the
+count to six and raised a packet that:
+
+- said "6 times running" where five rounds had been fought, and
+- RECOMMENDED "Ask Reviewer what else it would block on", while its own body hedged ("either
+  it did and the objection outlived the answer, or it did not"). Viberr held the answer: two
+  verdicts on one revision with no fought round between them is exactly the question's shape.
+
+A narrower defect in the same line: a repeat with no round behind it reset the revision's
+`rounds` to 1 instead of keeping it, so an answer could take a fought round off the count.
+
+Ruling 416, the owner's call (2026-09-23): a deliverer run the PROVIDER refused (quota, auth,
+no credential, the provider's own overload; the classification the run card already prints)
+fought no round; a crash mid-work still did. The classification was extracted from the run
+projection (`classifyRunEnd`) so the counter and the card read one definition. A repeat keeps
+the rounds already fought. And when the objection has no rework behind it, the packet says so
+and recommends one rework against that verdict; the question stays offered, not recommended,
+and says it would repeat an answer.

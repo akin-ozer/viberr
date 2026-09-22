@@ -20,6 +20,8 @@ Test for step 5 instead of judging it: **if the answer you are about to write co
 
 Pre-work `auto` transitions can be taken directly. Never propose a later transition before the current stage's agent has reported evidence. A resolved packet records a choice, not proof that a human performed the chosen work; verify state before advancing.
 
+**A person's decision stands until a later one contradicts it (ruling 415).** `humanDecisions` in your task snapshot carries every decision a person made on this task, newest first, in their own words, read from the whole timeline and not the recent window. Read them all before you plan. A newer decision about something else (waiting out a usage window, say) does not cancel an older one about how the work or its review is run. Never plan a move one of them rules out, and never ask again a question one of them has already answered. When one set something up that has since failed, such as a rework the provider refused, carry on from its intent.
+
 ## Hand-off truth
 
 - `liveRuns` in `get_task` is the only proof a run is in flight. `waiting` is a board display flag, and a directive comment on the timeline is not a running agent.

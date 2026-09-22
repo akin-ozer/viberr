@@ -1430,9 +1430,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    */
   it("rulings 204 + 242: a second request_changes on the SAME revision counts a round only when the DELIVERER ran", async () => {
     writeReviewTask();
-    /** Ruling 242: the deliverer took a turn. A run row is the whole signal —
-     *  its state is irrelevant, because a rework that was dispatched and
-     *  crashed still means a round was fought. */
+    /** Ruling 242: the deliverer took a turn. A run row is the whole signal,
+     *  whatever its state, because a rework that was dispatched and crashed
+     *  still means a round was fought. Ruling 416 carves out one state: a run
+     *  the PROVIDER refused fought nothing (see the deadlock block below). */
     let delivererRuns = 0;
     const delivererRan = (): void => {
       delivererRuns += 1;
@@ -1630,6 +1631,115 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     };
     const blocks = (n: number) =>
       `Verdict: request_changes\n\n@operator objection number ${n}.`;
+
+    /**
+     * Ruling 416: a deliverer run that ENDED in error, classified as `kind`.
+     * `quota` is the provider refusing it; `idle_timeout` is the run hanging
+     * mid-work, which is the crash ruling 242 still counts.
+     */
+    const erroredRework = (kind: "quota" | "idle_timeout"): void => {
+      delivererRuns += 1;
+      const id = `run_rework_${delivererRuns}`;
+      upsertRun(store.db, {
+        id,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `rework-${delivererRuns}`,
+        role: "Developer",
+        kind: "primary",
+        backend: "codex",
+        model: "gpt-5.6-luna",
+        sdk: "codex",
+        agentName: "dev",
+        agentProfileId: "dev",
+        state: "error",
+      });
+      insertRunLine(store.db, {
+        runId: id,
+        seq: 0,
+        occurredAt: new Date().toISOString(),
+        raw: "",
+        display: {
+          t: "00:00:01",
+          ev: "err",
+          tag: `run·error·${kind}`,
+          text:
+            kind === "quota"
+              ? "Codex refused the agent run: the account is over its usage limit."
+              : "The run produced nothing for the whole idle window.",
+          failure: emptyRunFailureFacts(kind),
+        },
+      });
+    };
+    /** A verdict with NO rework dispatched before it (`review` always reworks). */
+    const reviewOnly = async (reply: string) => {
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: runId, state: "finished" },
+      );
+    };
+    const roundsOnTheRevision = () => taskFile().parsed.frontmatter.verdicts[0]?.rounds;
+
+    it("ruling 416: a rework the PROVIDER refused fought no round, a crash still did, and a repeat keeps the rounds fought", async () => {
+      // Live on ax-clone AX-19: the rework was refused for quota three minutes
+      // in, with nothing committed, and the reviewer's next verdict on the
+      // untouched revision counted as a sixth round.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      expect(roundsOnTheRevision()).toBe(2);
+
+      // CANARY (a): count every errored run again and this reads 3.
+      // CANARY (b): let a repeat with no round behind it fall back to 1, as it
+      // did, and this reads 1: an answer took a fought round OFF the count.
+      erroredRework("quota");
+      await reviewOnly(blocks(3));
+      expect(roundsOnTheRevision()).toBe(2);
+      expect(taskFile().parsed.packet, "two rounds, however many verdicts, is not a deadlock").toBeNull();
+
+      // A rework that hung mid-work is still a round fought (ruling 242 stands).
+      erroredRework("idle_timeout");
+      await reviewOnly(blocks(4));
+      expect(roundsOnTheRevision()).toBe(3);
+      expect(taskFile().parsed.packet?.title).toContain("requested changes 3 times running");
+    });
+
+    it("ruling 416: the packet on an objection with no rework behind it recommends one rework against it, never asking again", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await review(blocks(3));
+      const first = taskFile().parsed.packet!;
+      // A fought third round: the question is still the recommended move.
+      expect(first.options.find((o) => o.rec)?.kind).toBe("question_reviewer");
+
+      // A person answers it (cleared here), the rework is refused for quota,
+      // and the reviewer reads the untouched revision again: its answer.
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.packet = null;
+        },
+      );
+      erroredRework("quota");
+      await reviewOnly(blocks(4));
+
+      const raised = taskFile().parsed.packet!;
+      // CANARY: pass `noReworkBehind: false` from the verdict writer and the
+      // recommended option is the question the reviewer has just answered.
+      const recommended = raised.options.filter((o) => o.rec);
+      expect(recommended.map((o) => o.t)).toEqual(["Rework once against this verdict"]);
+      expect(recommended[0]!.kind).toBe("custom");
+      const question = raised.options.find((o) => o.kind === "question_reviewer")!;
+      expect(question.rec).toBe(false);
+      expect(question.d).toContain("asking again repeats that");
+      expect(raised.body).toContain("no rework behind it");
+      expect(raised.body).not.toContain("So either it did");
+    });
 
     it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
       /**

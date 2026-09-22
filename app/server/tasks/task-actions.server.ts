@@ -187,8 +187,8 @@ import {
   getRun,
   listRunsForTaskRows,
   patchRun,
-  profileRanSince,
 } from "~/server/runtimes/run-store.server";
+import { deliveredRoundSince } from "~/server/runtimes/provider-refusal.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   refusedPrincipalUserId,
@@ -3896,12 +3896,27 @@ export async function recordAgentCompletion(
           // just paid for. Ruling 237 forbids that verdict in its prompt, which
           // is the construction ruling 186 refused; this is the part that
           // notices when the model does something else.
+          //
+          // Ruling 416 (owner, 2026-09-23): a deliverer run the PROVIDER refused
+          // fought no round. On ax-clone AX-19 a quota refusal three minutes into
+          // the rework counted, and the reviewer's re-verdict on untouched code
+          // raised "6 times running". A crash mid-work still counts.
           const deliverer = deliveringEngagement(parsed.frontmatter);
           const reworked =
             !prior ||
             !deliverer ||
-            profileRanSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
-          const rounds = prior?.result === verdict && reworked ? prior.rounds + 1 : 1;
+            deliveredRoundSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
+          // A repeat of the same result KEEPS the rounds already fought on this
+          // revision when no new one was (ruling 416): it used to fall back to
+          // 1, so a question run answered on a revision that had already cost
+          // two rounds took one of them off the deadlock count.
+          const rounds =
+            prior?.result === verdict ? (reworked ? prior.rounds + 1 : prior.rounds) : 1;
+          // Ruling 416: this objection has no rework behind it (the reviewer
+          // read the same untouched revision again), so it is an ANSWER on work
+          // that has not moved, and the packet below must not recommend asking
+          // for it a second time.
+          const noReworkBehind = prior !== undefined && !reworked;
           const recorded: ReviewVerdict = {
             profileId: reviewerProfileId,
             revisionId: subjectId,
@@ -3964,6 +3979,10 @@ export async function recordAgentCompletion(
                 // packet, so the card's promise is built from the hold the
                 // resolution will meet — not one read a moment earlier.
                 heldBy: parsed.frontmatter.blockedBy,
+                // Ruling 416: an objection with no rework behind it is the
+                // reviewer's answer on unchanged work, not a fresh round.
+                noReworkBehind,
+                revisionLabel: rev ? rev.headSha.slice(0, 7) : null,
               });
               parsed.frontmatter.waiting = "human";
               // Ruling 137 says a packet withdraws the standing acceptance

@@ -60,6 +60,7 @@ import {
   RULING_PROPOSAL_TITLE,
   operatorResolvePacket,
   operatorSnapshot,
+  OPERATOR_TIMELINE_DEFAULT,
   operatorTransitionStage,
   operatorAutonomyFor,
   operatorBackendFor,
@@ -6247,6 +6248,140 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     expect(
       snapWith([dispatched("2026-09-22T17:09:00.000Z"), REFUSAL]).unansweredRefusal,
     ).toBeUndefined();
+  });
+});
+
+/**
+ * Ruling 415 (F39-41), live on ax-clone AX-19.
+ *
+ * The owner answered round five in their own words: "I am changing what may
+ * block rather than asking again". Ruling 284 keeps typed words out of the
+ * goal, so the words reached the operator once, as the note on the turn they
+ * summoned. That turn dispatched the rework, the provider refused it for quota,
+ * and the next turn (a scheduled resume, forty minutes on) read a six-entry
+ * window that started after the decision. It asked the reviewer again. And it
+ * is a Codex plan, which "cannot call tools", so the window's own advice to
+ * widen it with `get_task` pointed somewhere it could not go.
+ */
+describe("ruling 415: a person's decisions never fall out of the operator's view", () => {
+  const PERSON = { kind: "human" as const, userId: "u_arda", nameHint: "Arda" };
+  const decided = (at: string, text: string) => ({
+    occurredAt: at,
+    type: "transition" as const,
+    actor: PERSON,
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  });
+  const ROUND_FIVE = decided(
+    "2026-09-22T19:27:09.023Z",
+    "**Decision:** answered with a custom directive. Operator re-engages with it.\n\n" +
+      "> Round five. So I am changing what may block rather than asking again.\n" +
+      ">\n" +
+      "> The work: dispatch the Developer on the current finding.",
+  );
+  const WAIT = decided(
+    "2026-09-22T19:34:20.283Z",
+    "**Decision:** wait for the Codex window to reopen. An operator run is scheduled.\n\n" +
+      "> Wait for the window. Not retrying on Claude.",
+  );
+  const filler = (i: number) => ({
+    occurredAt: `2026-09-22T20:${String(10 + i).padStart(2, "0")}:00.000Z`,
+    type: "note" as const,
+    actor: { kind: "system" as const, systemId: "schedule-runner" },
+    title: null,
+    text: `filler ${i}`,
+    toAgent: false,
+    evidence: null,
+  });
+  function snap(timeline: unknown[], opts: { toolless?: boolean } = {}) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "g",
+      // SAFETY: every entry is built from the literals above, each of which is
+      // a complete task-file event; `writeTask` serializes them unchanged.
+      timeline: timeline as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+      OPERATOR_TIMELINE_DEFAULT,
+      opts,
+    );
+  }
+  // Newest first, as a task file holds its timeline.
+  const history = () => [...Array.from({ length: 8 }, (_, i) => filler(7 - i)), WAIT, ROUND_FIVE];
+
+  it("carries every decision, newest first, from past the window, with the person's words", () => {
+    const s = snap(history(), { toolless: true });
+    // The window alone holds neither decision: this is AX-19's 20:13 turn.
+    expect(s.recentTimeline.some((e) => e.text.includes("Decision"))).toBe(false);
+    // CANARY: drop the `humanDecisions` block and this is undefined.
+    expect(s.humanDecisions).toEqual([
+      {
+        at: WAIT.occurredAt,
+        by: "Arda",
+        decision: "wait for the Codex window to reopen. An operator run is scheduled.",
+        words: "Wait for the window. Not retrying on Claude.",
+      },
+      {
+        at: ROUND_FIVE.occurredAt,
+        by: "Arda",
+        decision: "answered with a custom directive. Operator re-engages with it.",
+        words:
+          "Round five. So I am changing what may block rather than asking again.\n\n" +
+          "The work: dispatch the Developer on the current finding.",
+      },
+    ]);
+  });
+
+  it("cuts an OLDER decision's words and says where the rest is, per backend", () => {
+    const long = decided("2026-09-22T19:00:00.000Z", `**Decision:** answered.\n\n> ${"x".repeat(2000)}`);
+    const toolless = snap([WAIT, long], { toolless: true }).humanDecisions![1]!;
+    expect(toolless.words!.length).toBe(1500);
+    expect(toolless.clipped).toBe("cut at 1,500 chars; this turn cannot fetch the rest");
+    const withTools = snap([WAIT, long]).humanDecisions![1]!;
+    expect(withTools.clipped).toContain("read_timeline_entry");
+    // The newest is the one that governs, so it is carried whole.
+    expect(snap([long]).humanDecisions![0]!.clipped).toBeUndefined();
+  });
+
+  it("never sends a tool-less operator to a tool: the window note says where the binding parts went", () => {
+    const toolless = snap(history(), { toolless: true }).timelineOlder!;
+    // CANARY: drop the `toolless` arm and this names get_task again.
+    expect(toolless).not.toMatch(/get_task|read_timeline_entry/);
+    expect(toolless).toContain("cannot fetch them");
+    expect(toolless).toContain("`humanDecisions`");
+    // An operator WITH tools keeps the address, which works for it.
+    expect(snap(history()).timelineOlder).toContain("Call get_task");
+  });
+
+  it("hands a tool-less operator the unfinished report itself", () => {
+    const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", role: "Implementation" };
+    const report = {
+      occurredAt: "2026-09-22T08:33:08.181Z",
+      type: "comment" as const,
+      actor: AGENT,
+      title: null,
+      text: "Done on branch `ax-2`, commit `3e0396ab`. make gate passes.",
+      toAgent: false,
+      evidence: null,
+    };
+    const failure = {
+      ...report,
+      occurredAt: "2026-09-22T08:33:08.205Z",
+      type: "blocked" as const,
+      text: "The Implementation agent run did not complete. Nothing was delivered to a pull request.",
+    };
+    // CANARY: drop the `toolless` report copy and the instruction can only
+    // point at read_timeline_entry, which a Codex plan cannot call.
+    expect(snap([failure, report], { toolless: true }).unfinishedReport?.text).toBe(report.text);
+    expect(snap([failure, report]).unfinishedReport?.text).toBeUndefined();
   });
 });
 
