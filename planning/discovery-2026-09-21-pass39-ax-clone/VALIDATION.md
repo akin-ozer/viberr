@@ -1122,3 +1122,56 @@ unprompted within five minutes:
 `project.md` `fileLeases` holds both, and the audit has two `project.file_leases.updated` rows
 with `by: operator` and the holder. The next AX-21 delivery that touches `internal/cli/cli.go`
 is the first chance to see a lease refuse a push.
+
+## 41. Rulings 419, 420 and 421 on the live instance (build `da626a22`, deployed 22:59 UTC)
+
+**Before the deploy, an isolated preview.** A production build served from a COPY of the data
+root (`projects/`, `state/`, `agents/`, `kb/`, `skills/`; no `runtimes/`, no writer lock) on
+port 5174, with a different `VIBERR_SECRET_ENCRYPTION_KEY` so no sealed PAT or pasted key could
+decrypt, and the dev credential variables blanked. It could not reach GitHub or bill a run: the
+page showed "Claude not connected". The session cookie is shared across ports, so the owner's
+sign-in carried over. Production mode was needed because better-auth names the cookie
+`__Secure-viberr.session_token` there. Layout bugs the preview caught before any user did: the
+phone switcher overflowed the head (a select's min-content is its longest option), fixed with
+`min-width: 0` and `flex: 1 1 0`.
+
+**Ruling 419, measured live** (`/projects/ax-clone/controller`, 6 chains, 3 conversations):
+
+| | before | after |
+|---|---|---|
+| desktop 1440×900: Conversations panel top | 4,419px | 141px |
+| desktop: page scroll height | 4,700px (10,876 at 840px) | 1,393px |
+| desktop: rail | scrolls with the page, 4,539px | sticky, 760px, own scroll (3,645px) |
+| phone 375×812: page scroll height | 18,234px | 5,253px |
+| phone: lands at | the transcript's end, header scrolled off | the top; composer at y=667 |
+| phone: horizontal scroll | none | none (375 = 375) |
+| phone: reply text column | 234px | 263px |
+| console role label | "Controller · supporting" | "Controller" |
+| finished-turn footer | "thread can be re-engaged" | "send a message to continue the conversation" |
+| settled chains | full link lists (goal-1 479px) | folded: "4 of 4 done" |
+
+The Cancel goal dialog on goal-4 (opened in the preview, closed with "Keep it running", nothing
+posted) read: "A cancelled chain cannot be resumed, and none of its 2 unstarted links will ever
+start. … goal-6 link 1, goal-6 link 2, goal-6 link 3 and goal-6 link 5 wait on those unstarted
+links and would wait forever unless their waits are changed."
+
+**Ruling 420, live:** the Goals rail reads "waits on goal-4 link 2 (AX-24), goal-4 link 5
+(AX-21), goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5), goal-5 link 2, goal-5 link 4,
+goal-4 link 3 (AX-17, done), goal-4 link 4 (AX-18, done) and goal-4 link 8 (AX-23, done)".
+Before: "… goal-5 link 2 and goal-5 link 4 (goal-4 link 3 (AX-17), … are done)".
+
+**Ruling 421, the first operator turn after the deploy used it.** AX-20's reviewer run was
+killed by the deploy. The re-invoked operator's first turn (23:00:34) dispatched the reviewer
+with "If changes remain, name the complete set of blockers on this revision, including anything
+you would otherwise defer to a later round", flagged `completeness: true`. The task file shows:
+
+```
+  - profileId: reviewer
+    ...
+    question:
+      kind: completeness
+      runId: run_-CyaNrs8trRb
+      at: 2026-09-22T23:00:36.276Z
+```
+
+The verdict that run returns is the second half of the check.
