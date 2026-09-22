@@ -511,3 +511,40 @@ head"), `REVISION` and `VERDICT`. Four acceptances, four disclosures, all matchi
 
 Recorded as a validation rather than a finding: this is the machinery working.
 
+## 18. Guardrails and a derived metric, checked against the files
+
+The goal asks that "what viberr SHOWS matches what HAPPENED — files-are-truth means the record
+is testable, so test it". Two surfaces tested this way, both clean. Recorded because a pass
+that only lists defects misreports the product.
+
+**The four declared guardrails do what they say.** `project.md` carries them with `true: true`;
+each was read against the code that enforces it rather than taken on the flag:
+
+| guardrail | enforced at |
+|---|---|
+| `meaningful-comment` | `comment-guardrails.server.ts`; drops log line "agent reply dropped by the meaningful-comment guardrail" |
+| `no-duplicate-summary` | `prepareAgentReplyEvent` → `prepared.duplicate`, F22-12 |
+| `compression-threshold: 40 events` | `compactTimelineEvents`, `events.length <= threshold` |
+| `evidence-separation` | evidence refs on the typed event, never inline |
+
+The third is the one worth stating, because six live tasks are past forty events and none has
+folded anything. That is not the guardrail failing — its own description says *"typed events
+are always kept"*, and `compactTimelineEvents` folds only ROUTINE comments older than
+`keepRecent`, never a transition, an `agent`, a `blocked`, a `quality` or a verdict
+justification (ruling 317). An ax-clone timeline is almost entirely typed events, so there is
+nothing to fold. The declaration and the behaviour agree; what is long is the part the rule
+promises to keep.
+
+**The Long timelines metric matches the files exactly.** Counted independently, by grepping
+`^### <ISO>` per `task.md` and filtering to more than forty:
+
+```
+files:     AX-2 (51)  AX-3 (58)  AX-4 (82)  AX-9 (62)  AX-11 (63)  AX-12 (51)
+Insights:  6 · AX-2  AX-3  AX-4  AX-9  AX-11  AX-12
+```
+
+Same six, same boundary. The code comment explains the boundary it chose and why — strictly
+greater than, because `compactTimelineEvents` opens `if (events.length <= threshold) return`,
+so a task sitting exactly ON it is not one the fold is managing. A derived metric agreeing
+with the canonical files, at a boundary defined by the machinery rather than guessed at.
+
