@@ -108,7 +108,12 @@ ruling 377(a) exists to prevent is no longer available to make.
   is what that edit called for. The append path is unit-tested with a canary (route it through
   the replace arm and the first section is destroyed); folded into the next controller turn
   that has a real reason to build a document in pieces.
-- `propose_ruling` — needs an operator run with a proven contradiction. The natural trigger
+- `propose_ruling` — **mounted and live**, confirmed off a real operator run's own
+  `run_inputs` on the rebuilt instance:
+  `['post_comment', 'open_packet', 'resolve_packet', 'set_goal', 'run_agent',
+  'transition_stage', 'deliver_for_review', 'update_branch_from_base', 'accept_completion',
+  'flag_context_conflict', 'set_dependencies', 'propose_ruling']`. Its BEHAVIOUR needs an
+  operator run with a proven contradiction. The natural trigger
   was consumed by the correction above; the rulings now instruct the next task that touches
   tests to run `go test -race ./...` and report command, exit code and output so a human can
   settle that bullet, which is precisely the shape the tool serves.
