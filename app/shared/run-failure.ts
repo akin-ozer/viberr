@@ -128,8 +128,23 @@ export interface RunFailureFacts {
  * authentication. Its TLS sibling matched only by accident, through `\btls\b`
  * inside a `close_notify` message.
  */
+/**
+ * Ruling 389 (F39-16): the additions at the end are Codex's own transport
+ * vocabulary, which this list did not speak.
+ *
+ * Live on ax-clone AX-11 the provider said, verbatim, "Reconnecting... waiting
+ * for network (Connection failed: error sending request)" — reqwest's standard
+ * transport failure, which the Rust CLI surfaces unchanged. The list had
+ * "connection error" but not "connection failed", and nothing for "error
+ * sending request". So the classifier fell through to `unknown`, and a network
+ * blip cost twice: the packet told the owner to "Review its authentication and
+ * runtime configuration" one line above the provider's own words saying the
+ * network dropped, and it came out as a generic stalled-work packet
+ * recommending "Redirect with sharper guidance" instead of the backend-failure
+ * packet that offers waiting and retrying.
+ */
 export const LOCAL_NETWORK_FAILURE_RE =
-  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify/i;
+  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error|failed)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify|error sending request|waiting for network|stream (?:closed|ended) unexpectedly/i;
 
 /** The machine code such a failure carries, when it names one
  *  (`UNKNOWN_CERTIFICATE_VERIFICATION_ERROR`, `ECONNRESET`, `ERR_TLS_...`),

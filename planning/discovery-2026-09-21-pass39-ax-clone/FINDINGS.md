@@ -555,6 +555,35 @@ identify what a verdict was given ON, which no boolean can do.
 
 ---
 
+## F39-16 · MEDIUM · The packet told the owner to check auth, above the provider saying the network dropped
+
+AX-11's deliverer committed `fe7232b`, reported `make gate` and `go test -race ./...` green,
+and then its run died. The packet:
+
+> **Work stalled: pick a recovery path**
+> The Implementation agent run failed: Codex run failed: Codex execution failed. **Review its
+> authentication and runtime configuration.** Coordination is paused until a human chooses how
+> to proceed.
+>
+> | Provider said | `Reconnecting... waiting for network (Connection failed: error sending request)` |
+
+Viberr captured the true cause and printed the wrong one directly above it.
+`LOCAL_NETWORK_FAILURE_RE` has "connection **error**" and not "connection **failed**", and
+nothing for "error sending request" — reqwest's standard transport failure, which the Codex
+Rust CLI surfaces unchanged.
+
+**It is not only wording.** `kind` selects the packet: `backendFailure` (quota / auth /
+unavailable / overloaded) builds one that offers waiting and retrying; `unknown` builds the
+generic stalled-work packet whose **recommended** option is "Redirect with sharper guidance".
+So a dropped connection was about to buy a re-prompted specialist run, on a task whose work
+was already committed and green — the exact "read the workspace before starting anything
+over" hazard viberr's own note two lines up warns about.
+
+Same shape as ruling 384 and F39-13, in a third place: viberr holds the fact and a fixed
+sentence speaks over it.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

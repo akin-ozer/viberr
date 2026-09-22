@@ -1026,6 +1026,14 @@ describe("codex failure classification survives redaction into runFailureReason 
       "Reconnecting... 2/5 (stream disconnected before completion: failed to lookup address information: Name does not resolve)",
       "stream error: temporary failure in name resolution",
       "IO error: peer closed connection without sending TLS close_notify",
+      // Ruling 389 (F39-16), verbatim from the live packet on ax-clone AX-11.
+      // reqwest's own transport failure, which the Rust CLI surfaces unchanged.
+      // The list had "connection error" and not "connection failed", so this
+      // classified `unknown`: the packet told the owner to review their
+      // authentication one line above the provider saying the network dropped,
+      // and it came out as a stalled-work packet recommending a re-prompt
+      // instead of the backend-failure packet that offers waiting.
+      "Reconnecting... waiting for network (Connection failed: error sending request)",
     ]) {
       // CANARY: drop the new alternatives from LOCAL_NETWORK_FAILURE_RE and the
       // first two classify `unknown` and tell the reader to check their auth.

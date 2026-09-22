@@ -30,6 +30,7 @@ per item and each one was applied to the source and observed failing.
 | 17 | The Settings badge counts violations, not advisories (F39-13) | — | **done**, ruling 386 |
 | 18 | A move and its withdrawal land in order (F39-14) | — | **done**, ruling 387 |
 | 19 | A non-commit delivery is reviewable like a commit (F39-15) | — | **done**, ruling 388 |
+| 20 | Codex's transport prose classifies as a network failure (F39-16) | — | **done**, ruling 389 |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list
