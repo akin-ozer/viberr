@@ -32,13 +32,33 @@ export interface PillView {
  * pill — flatly contradicting the page-level "Not synced yet" freshness chip,
  * and read by maintainers as "this branch is up to date with main".
  */
-export type SyncState = "merged" | "behind_main" | "synced" | "unknown";
+/**
+ * Ruling 401 (F39-28): `no_branch` exists for the same reason `unknown` does,
+ * one step further along.
+ *
+ * A task can finish without ever committing anything — a report, a design
+ * note, an upstream comparison delivered as an attachment (ruling 391 settled
+ * that such work is delivered work). Viberr allocates its branch NAME at
+ * creation, so the row existed and carried whatever the last compare said.
+ * Live on ax-clone AX-12 — done, `noChanges: true`, no PR, zero commits, and
+ * no `ax-12` anywhere on the remote or in the mirror — that row read
+ * "behind main" in a RISK fill: a demand, on finished work, for a branch that
+ * does not exist and never will. It could not clear, because nothing about a
+ * completed task moves again.
+ */
+export type SyncState =
+  | "merged"
+  | "behind_main"
+  | "synced"
+  | "unknown"
+  | "no_branch";
 
 export const SYNC_PILL = {
   merged: { kind: "done", label: "merged", quiet: true },
   behind_main: { kind: "risk", label: "behind main" },
   synced: { kind: "ready", label: "synced", quiet: true },
   unknown: { kind: "neutral", label: "not compared" },
+  no_branch: { kind: "neutral", label: "no branch", quiet: true },
 } satisfies Record<SyncState, PillView>;
 
 export function syncPill(state: SyncState): PillView {

@@ -1056,6 +1056,54 @@ reads better.
 
 ---
 
+## F39-28 · MEDIUM · A red pill on a finished task, for a branch that does not exist
+
+Found by diffing the GitHub page's Execution branches table against GitHub itself — the pass's
+first method, on a surface I had not yet checked.
+
+The page:
+
+```
+AX-12  Upstream fidelity check: our named surface vs. github.com/google/ax
+       ax-12        no PR        behind main        <- risk fill
+```
+
+GitHub:
+
+```
+$ gh api repos/akin-ozer/ax-clone/branches --jq '.[].name'
+ax-16 ax-19 ax-20 ax-4 main
+```
+
+No `ax-12`. Not in the mirror either. AX-12 is **done**, `noChanges: true`, zero commits, no
+PR — it delivered an upstream comparison as an attachment, which ruling 391 settled is real
+delivered work.
+
+What produced the pill: viberr allocates a task's branch NAME at creation, so the row exists
+from birth; the sync column then reads the newest reconcile's `behindBy` for that task file.
+AX-12's recorded revision is `workRevision.branch: main`, head `76dabee` — main's head at the
+time, now twenty commits back. So the comparison is real, and it is a comparison of something
+other than what the row claims to be about.
+
+The result is a standing false alarm with no exit: a `risk`-filled demand, on work that is
+finished, naming a branch nobody can update because it was never created. It cannot clear,
+because nothing about a completed task moves again.
+
+`SyncState` already carries the precedent. UI-05 added `unknown` ("not compared") because
+*"'we never measured this' is NOT 'synced'"*. This is the same sentence one step further
+along: we measured something, and it was not this branch. Fixed as ruling 401 with a
+`no_branch` state, evaluated before the compare — because the compare is exactly what
+produces the wrong answer.
+
+**Checked and not a finding**, for the record: the page's "14 task-key branches" count
+includes rows whose remote branch was deleted on merge, but every one of those rows renders
+`merged`, so the state is disclosed per row and the count is a count of task records. And
+AX-4 reads "behind main" where GitHub says `diverged` (ahead 2, behind 20) — incomplete, but
+"behind" is the actionable half and `update_branch_from_base` merges rather than
+fast-forwards, so the word matches the remedy.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
