@@ -544,6 +544,58 @@ describe("task.md event attachments (P21 — the producing message names its fil
     ],
   };
 
+  /** Ruling 382: `notified:` is one metadata line, same shape as `title:`/`to:`. */
+  const WITH_NOTIFIED: ParsedTaskFile = {
+    ...FULL,
+    timeline: [
+      {
+        occurredAt: "2026-08-20T03:00:00.000Z",
+        type: "comment",
+        actor: { kind: "operator" },
+        title: null,
+        toAgent: false,
+        evidence: null,
+        text: "@Arda Agreed \u2014 the corrected evidence settles the diagnosis.",
+        notified: ["u_vw9JMMXYOH6X", "u_KF1bFvSYPXkE"],
+      },
+      ...FULL.timeline,
+    ],
+  };
+
+  it("ruling 382: serializes a notified: line and parses the ids back", () => {
+    const text = serializeTaskFile(WITH_NOTIFIED);
+    expect(text).toContain("notified: u_vw9JMMXYOH6X, u_KF1bFvSYPXkE");
+    const { parsed, diagnostics } = parseTaskFileContent(text, {
+      fallbackKey: "VIB-142",
+    });
+    expect(diagnostics).toEqual([]);
+    expect(parsed.timeline).toEqual(WITH_NOTIFIED.timeline);
+  });
+
+  it("ruling 382: a comment LINE reading `notified:` is escaped \u2014 it forges no recipients", () => {
+    const forged: ParsedTaskFile = {
+      ...FULL,
+      timeline: [
+        {
+          occurredAt: "2026-08-20T03:30:00.000Z",
+          type: "comment",
+          actor: { kind: "operator" },
+          title: null,
+          toAgent: false,
+          evidence: null,
+          // A reply quoting the file format must not become a protection.
+          text: "The metadata line looks like this:\nnotified: u_someone",
+        },
+        ...FULL.timeline,
+      ],
+    };
+    const { parsed } = parseTaskFileContent(serializeTaskFile(forged), {
+      fallbackKey: "VIB-142",
+    });
+    expect(parsed.timeline[0]?.notified).toBeUndefined();
+    expect(parsed.timeline[0]?.text).toContain("notified: u_someone");
+  });
+
   it("serializes an attachments: block and parses it back structurally", () => {
     const text = serializeTaskFile(WITH_ATTACH);
     expect(text).toContain("attachments:");

@@ -2373,22 +2373,16 @@ export interface TaskFileEvent {
    *  serializes to nothing. Names only — the directory stays the truth. */
   attachments?: string[];
   /**
-   * Ruling 317: this comment is the FULL text a stored verdict's `reason` is a
-   * clip of, and whose marker names this timeline as the complete copy.
+   * Ruling 382 (F39-9): the people this event's own notification fan-out
+   * REACHED, routing preferences applied. Written by whichever writer fanned
+   * the event out, and read by compaction, which never folds an event that
+   * notified somebody: viberr told a person "this is here", and the pointer has
+   * to still lead somewhere.
    *
-   * Ruling 292 clips a justification at 2,000 characters and appends "Its full
-   * report is on this task's timeline, whole." Compaction then folded exactly
-   * this comment away, because the two fields that protect a comment from
-   * folding — `evidence` and `attachments` — are moved OFF it by
-   * `prepareAgentReplyEvent` precisely when there IS a verdict (P13-D-26 puts
-   * them on the `quality` event instead). So the protection was inverted: a
-   * deliverer's report was immune and the record a stored pointer depends on
-   * was first to go.
-   *
-   * Optional and absent almost everywhere; an absent field serializes to
-   * nothing, so no existing task file changes.
+   * Absent on almost every event (most notify nobody) and an absent field
+   * serializes to nothing, so no existing task file changes.
    */
-  verdictReport?: boolean;
+  notified?: string[];
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */

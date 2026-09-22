@@ -232,3 +232,28 @@ settles the diagnosis…` was one of the two folded. It was addressed to a perso
 their question, and it is machine prose by the rule that decides. Nothing lied — the record
 says what it dropped and why — but "routine" and "addressed to a named human" are not the
 same predicate, and the second is cheap to check. Threshold restored to 40.
+
+## 9. Ruling 382 (F39-9) — what compaction may delete
+
+- `TaskFileEvent.notified` holds the recipients the fan-out REACHED, written as one
+  `notified: <id, id>` metadata line. Round-trip asserted byte-stable, and a comment whose
+  TEXT contains a line reading `notified: u_someone` is escaped on write and comes back as
+  prose with `notified` undefined — quoting the file format forges no protection.
+- Enforced on the NEW-4 writer table rather than in one place: all six comment writers stamp,
+  and `operatorPromptAgent` (ruling 232, audience: the agent) still notifies nobody and
+  stamps nothing. Canary: remove the stamp from one writer and only that row fails, by name
+  (`postAgentComment (an agent's mid-run comment tool) notified Arda but stamped no event`).
+- An EMPTY `notified:` list is not a protection — a hand-edited file cannot buy immunity by
+  carrying the key with nothing after it.
+- Dead code found on the way: `verdictReport?: boolean` was declared on `TaskFileEvent` and
+  never written or read by anything; ruling 317's protection is keyed on
+  `VERDICT_REPORT_TITLE`. Removed.
+- Gates: lint, typecheck, build clean; `vitest run` 7282/7282.
+
+## 10. Ruling 381 — still to validate live
+
+The running container is the pre-381 build (`56612143`, 05:04Z). A restart kills the runs in
+flight, so the HTTP check is queued for the next point where no agent is working, and the
+image is already built. Everything in ruling 381 is covered by tests at the route level
+(both doors refuse a bare backward move and forward one), which is where the server contract
+lives; what the live check adds is the dialog on a real board.

@@ -22,6 +22,8 @@ per item and each one was applied to the source and observed failing.
 | 9 | Controller doctrine: project bring-up, rulings currency, advisory caps | — | **done** |
 | 10 | A C compiler in the image so `-race` can run | "Add a C compiler" | **done**, untracked Dockerfile layer |
 | 11 | A manual move BACKWARD says why (F39-8) | "Required backward, optional forward" | **done**, ruling 381 |
+| 12 | A state refusal is not a policy refusal (F39-10) | — | **done** |
+| 13 | Compaction keeps a comment somebody was notified about (F39-9) | "protect any comment that notified someone" | **done**, ruling 382 |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list

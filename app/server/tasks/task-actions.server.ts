@@ -228,6 +228,7 @@ import {
   mentionNotifiesUser,
   notifyMentionedUsers,
   withAmbiguityDisclosure,
+  stampNotifiedRecipients,
 } from "./mention-notify.server";
 import { userDisplayName } from "./user-display-name.server";
 
@@ -1581,7 +1582,10 @@ export async function appendComment(
   // Mention fan-out (notification kind `mention`, contracts §4) — the shared
   // helper every comment writer (human AND agent) funnels through (NEW-4).
   const actorName = userName(db, actor.userId);
-  const mentionedUserIds = notifyMentionedUsers(db, {
+  const mentionedUserIds = await stampNotifiedRecipients(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    event.occurredAt,
+    notifyMentionedUsers(db, {
     text,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -1594,7 +1598,8 @@ export async function appendComment(
       initials: initialsOfName(actorName),
       tone: avatarTone(db, actor.userId),
     },
-  });
+    }),
+  );
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -2840,7 +2845,7 @@ export async function postAgentReplyComment(
         );
       }
     });
-  const finalizeReply = () => {
+  const finalizeReply = async () => {
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // When a producing note stood in for a suppressed reply, the reason stays
     // honest (the REPLY was dropped/deduped even though a files note landed);
@@ -2859,18 +2864,23 @@ export async function postAgentReplyComment(
     // handle inside a fence that evidence-separation cut away still notifies.
     // The producing-note fallback keeps its own text (a suppressed duplicate's
     // mentions were already delivered by the mid-run comment it repeats).
-    notifyMentionedUsers(db, {
-      text:
-        prepared.status === "event" && !prepared.duplicate
-          ? prepared.mentionSourceText
-          : event.text,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      from: createActorResolver(db, {
-        agentNames: agentNamesByProfile(db, input.projectSlug),
-      })(input.actorRef),
-      occurredAt: event.occurredAt,
-    });
+    // Ruling 382: and the event records who it reached, so compaction keeps it.
+    await stampNotifiedRecipients(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      event.occurredAt,
+      notifyMentionedUsers(db, {
+        text:
+          prepared.status === "event" && !prepared.duplicate
+            ? prepared.mentionSourceText
+            : event.text,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, input.projectSlug),
+        })(input.actorRef),
+        occurredAt: event.occurredAt,
+      }),
+    );
   };
   // Returns the write promise so a caller (the operator react loop) can await
   // the reply landing before it re-reads the task. Errors are never propagated
@@ -2945,7 +2955,7 @@ export async function postAgentReplyComment(
   // audit row and the human notifications, not the reply, and re-posting the
   // reply to recover them would duplicate it on the timeline.
   try {
-    finalizeReply();
+    await finalizeReply();
   } catch (finalizeCause) {
     logger.error("agent reply finalize failed — reply posted, audit/notify lost", {
       taskKey: input.taskKey,
@@ -3624,17 +3634,22 @@ export async function recordAgentCompletion(
   // HERE, before the nothing-to-record early return, which the pure-dedup case
   // (the exact dispatch trigger: repeated body + cc line) hits.
   if (prepared.status === "event" && prepared.duplicatedText !== null) {
-    notifyMentionedUsers(db, {
-      // B-FD8b: pre-trim form, so an added @tag inside a separated fence counts.
-      text: prepared.mentionSourceText,
-      projectSlug,
-      taskKey,
-      from: createActorResolver(db, {
-        agentNames: agentNamesByProfile(db, projectSlug),
-      })(actorRef),
-      occurredAt: prepared.event.occurredAt,
-      skipUserIds: mentionedUserIdsOf(db, prepared.duplicatedText),
-    });
+    // Ruling 382: and the event records who it reached, so compaction keeps it.
+    await stampNotifiedRecipients(
+      taskRef(ctx, projectSlug, taskKey),
+      prepared.event.occurredAt,
+      notifyMentionedUsers(db, {
+        // B-FD8b: pre-trim form, so an added @tag inside a separated fence counts.
+        text: prepared.mentionSourceText,
+        projectSlug,
+        taskKey,
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, projectSlug),
+        })(actorRef),
+        occurredAt: prepared.event.occurredAt,
+        skipUserIds: mentionedUserIdsOf(db, prepared.duplicatedText),
+      }),
+    );
   }
   // Nothing to record at all. Evidence rows and attachments each count as
   // something: a run whose prose was suppressed but that still produced evidence
@@ -4097,17 +4112,22 @@ export async function recordAgentCompletion(
     // directive explicitly instructs the agent to tag the commenter, so this
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
     if (postsReplyEvent) {
-      notifyMentionedUsers(db, {
-        // B-FD8b: the PRE-trim reply text — a handle inside a separated
-        // evidence fence must still reach the tagged human's inbox.
-        text: prepared.mentionSourceText,
-        projectSlug,
-        taskKey,
-        from: createActorResolver(db, {
-          agentNames: agentNamesByProfile(db, projectSlug),
-        })(actorRef),
-        occurredAt: prepared.event.occurredAt,
-      });
+      // Ruling 382: and the event records who it reached, so compaction keeps it.
+      await stampNotifiedRecipients(
+        taskRef(ctx, projectSlug, taskKey),
+        prepared.event.occurredAt,
+        notifyMentionedUsers(db, {
+          // B-FD8b: the PRE-trim reply text — a handle inside a separated
+          // evidence fence must still reach the tagged human's inbox.
+          text: prepared.mentionSourceText,
+          projectSlug,
+          taskKey,
+          from: createActorResolver(db, {
+            agentNames: agentNamesByProfile(db, projectSlug),
+          })(actorRef),
+          occurredAt: prepared.event.occurredAt,
+        }),
+      );
     }
     // The deduped-reply case is fanned out earlier (before the nothing-to-record
     // early return), so it is NOT repeated here — see notifyAddedReplyMentions.
@@ -5921,14 +5941,19 @@ export async function operatorPromptAgent(
   // question naming Stripe, Adyen, and Mock-only"), re-issued on every rework
   // round. The call stays, carrying the audience, so the rule lives at the one
   // fan-out seam and the non-delivery report is still computed for the timeline.
-  notifyMentionedUsers(db, {
-    text: commentText,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    from: OPERATOR_NOTIFY_FROM,
-    occurredAt: comment.occurredAt,
-    audience: "agent",
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    comment.occurredAt,
+    notifyMentionedUsers(db, {
+      text: commentText,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      from: OPERATOR_NOTIFY_FROM,
+      occurredAt: comment.occurredAt,
+      audience: "agent",
+    }),
+  );
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");

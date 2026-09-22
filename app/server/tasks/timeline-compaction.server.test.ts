@@ -274,6 +274,49 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect(kept!.attachments).toEqual(["shop-15-checkout.png", "shop-15-orders.png"]);
   });
 
+  /**
+   * Ruling 382 (F39-9), live on ax-clone AX-9. The operator answered Arda by
+   * name about a correction he had just filed; his question survived as human
+   * prose and the answer was folded, so canonical task.md — the file the next
+   * agent anchors on — read as a person correcting the record and nobody
+   * replying. The notification row still quoted the comment and still offered a
+   * button to the task, so following it landed on a page the text was no longer
+   * on.
+   */
+  it("ruling 382: never folds a comment whose notification reached somebody", () => {
+    const answered = (i: number): TaskFileEvent => ({
+      ...comment(i),
+      text: "@Arda Agreed — the corrected evidence settles the diagnosis.",
+      notified: ["u_arda"],
+    });
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
+      ...Array.from({ length: 4 }, (_, i) => comment(60 - i)),
+      answered(55),
+      ...Array.from({ length: 4 }, (_, i) => comment(50 - i)),
+    ];
+    // CANARY: drop the `notified` clause from `isRoutineComment` and the reply
+    // disappears into the marker's count while its notification still quotes it.
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    expect(out.length).toBeLessThan(events.length); // the rest still folds
+    const kept = out.find((e) => (e.notified?.length ?? 0) > 0);
+    expect(kept, "a comment somebody was notified about must survive verbatim").toBeTruthy();
+    expect(kept!.text).toContain("@Arda");
+  });
+
+  it("ruling 382: an empty recipient list is not a protection", () => {
+    // The field is written only when the fan-out reached someone, but a file
+    // edited by hand can carry `notified:` with nothing after it; that is not
+    // evidence anybody was told.
+    const events = [
+      ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
+      { ...comment(55), notified: [] },
+      ...Array.from({ length: 4 }, (_, i) => comment(50 - i)),
+    ];
+    const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
+    expect(out.find((e) => e.occurredAt === comment(55).occurredAt && e.title !== COMPACTION_TITLE)).toBeUndefined();
+  });
+
   it("stays idempotent with agent replies in the mix", () => {
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(100 + i)),

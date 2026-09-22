@@ -35,6 +35,7 @@ import { normalizeEscapedNewlines } from "./model-prose.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
+  stampNotifiedRecipients,
 } from "./mention-notify.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
@@ -182,9 +183,10 @@ export async function postAgentComment(
     input.actorRef.kind === "controller" ? "controller" : "agent",
   );
   const text = note ? `${ambiguity}\n\n${note}` : ambiguity;
+  const occurredAt = new Date().toISOString();
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
+      occurredAt,
       type: "comment",
       actor: input.actorRef,
       title: null,
@@ -210,14 +212,20 @@ export async function postAgentComment(
   // NEW-4: a mid-run agent comment that tags a person notifies them, same as
   // any other comment — the tag is a real ping, not decoration. NEW-5: the
   // `from` chip is the agent's own name, not its runtime label.
-  notifyMentionedUsers(db, {
-    text,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    from: createActorResolver(db, {
-      agentNames: agentNamesByProfile(db, input.projectSlug),
-    })(input.actorRef),
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    occurredAt,
+    notifyMentionedUsers(db, {
+      text,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      occurredAt,
+      from: createActorResolver(db, {
+        agentNames: agentNamesByProfile(db, input.projectSlug),
+      })(input.actorRef),
+    }),
+  );
 }
 
 /** One answer choice offered alongside an agent question. */

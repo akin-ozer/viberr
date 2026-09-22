@@ -4,6 +4,8 @@ import {
   type CreateNotificationInput,
   createNotification,
 } from "~/server/projections/notifications.server";
+import { updateTaskFile } from "~/server/files/task-writer.server";
+import { logger } from "~/server/logging/logger.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
 
@@ -530,4 +532,39 @@ export function mentionedUserIdsOf(
   projectSlug?: string,
 ): Set<string> {
   return new Set(resolveIn(db, text, projectSlug).userIds);
+}
+
+/**
+ * Ruling 382 (F39-9): record on the event itself who its notification reached,
+ * so compaction can see it.
+ *
+ * A separate, tiny write rather than a field on the first one: the fan-out runs
+ * AFTER the event lands (a comment the duplicate-summary guardrail suppresses
+ * must notify nobody, which is only knowable once the write has decided), so
+ * the recipients do not exist yet when the event is built. The event is the
+ * newest on the timeline at this point, well inside compaction's keep-recent
+ * window, so nothing can fold it in between.
+ *
+ * A no-op when the fan-out reached nobody, which is the overwhelming majority
+ * of comments. Never throws: the notification and the comment are both already
+ * real, and failing to annotate one is not worth losing either.
+ */
+export async function stampNotifiedRecipients(
+  ref: { projectSlug: string; taskKey: string; dataRoot?: string },
+  occurredAt: string,
+  reached: string[],
+): Promise<string[]> {
+  if (reached.length === 0) return reached;
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      const event = parsed.timeline.find((e) => e.occurredAt === occurredAt);
+      if (event) event.notified = reached;
+    });
+  } catch (error) {
+    logger.warn("could not record an event's notification recipients", {
+      taskKey: ref.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+  return reached;
 }

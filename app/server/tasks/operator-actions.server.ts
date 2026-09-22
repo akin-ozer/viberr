@@ -107,6 +107,7 @@ import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
+  stampNotifiedRecipients,
 } from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
@@ -839,13 +840,18 @@ async function writeOperatorComment(
   // B-FD8b: scan the caller's ORIGINAL text, not the stored post-trim form — a
   // handle inside a fenced block that evidence-separation cut away must still
   // notify (the record lost the line; the ping must not be lost with it).
-  notifyMentionedUsers(db, {
-    text,
-    projectSlug,
-    taskKey,
-    from: { kind: "agent", name: "Operator" },
-    occurredAt: event.occurredAt,
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, projectSlug, taskKey),
+    event.occurredAt,
+    notifyMentionedUsers(db, {
+      text,
+      projectSlug,
+      taskKey,
+      from: { kind: "agent", name: "Operator" },
+      occurredAt: event.occurredAt,
+    }),
+  );
   if (variant === "recommend") {
     recordAudit(db, {
       action: "task.operator.recommended",
@@ -939,6 +945,7 @@ async function addRecommendation(
     `**Recommendation:** ${rec.label}. ${reasoning}`,
   );
   let wasNew = false;
+  const reasoningAt = new Date().toISOString();
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     const existing = parsed.frontmatter.recommendations.find(
       (r) =>
@@ -982,7 +989,7 @@ async function addRecommendation(
     }
     parsed.frontmatter.waiting = "human";
     parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
+      occurredAt: reasoningAt,
       type: "comment",
       actor: { kind: "operator" },
       title: null,
@@ -1002,12 +1009,18 @@ async function addRecommendation(
     details: { kind: rec.kind },
   });
   // NEW-4: recommendation reasoning that tags a person pings them too.
-  notifyMentionedUsers(db, {
-    text: commentText,
-    projectSlug,
-    taskKey,
-    from: { kind: "agent", name: "Operator" },
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, projectSlug, taskKey),
+    reasoningAt,
+    notifyMentionedUsers(db, {
+      text: commentText,
+      projectSlug,
+      taskKey,
+      occurredAt: reasoningAt,
+      from: { kind: "agent", name: "Operator" },
+    }),
+  );
   // Ping the supervisors: a supervised operator recommendation is a decision
   // waiting on a human. Without this, the recommendation card only appears if
   // someone happens to open the task — the bell and "Waiting on you" inbox stay
