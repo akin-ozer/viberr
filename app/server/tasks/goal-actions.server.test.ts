@@ -61,7 +61,6 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
     // `startLinkTask`'s catch (the chain never parks).
     const { createGoal, getGoalView } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
-    const { setTaskArchived } = await import("./task-actions.server");
     const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
       Promise.resolve({ runId: "run_x", queued: false, backend: "claude" as const, autonomy: "supervised" as const }),
     );
@@ -91,6 +90,17 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
       actorOf(contributorId, "selin@viberr.dev"),
       ctx,
     );
+    // Ruling 398: a link's task is created when its declared wait is SATISFIED,
+    // so goal-1 link 2 has to be done before goal-2 link 1 can carry a task at
+    // all. Completing it here is what makes the rest of this test about the
+    // thing it is about: the wait RIDES onto the created task, and stays on it
+    // as the record of what it waited for.
+    const { reconcileGoal: reconcile1 } = await import("./goal-actions.server");
+    const goal1Links = () => getGoalView(SLUG, goal1.goalId, ctx)!.links;
+    await closeTaskToDone(goal1Links()[0]!.taskKey!);
+    await reconcile1(app.db, SLUG, goal1.goalId, ctx);
+    await closeTaskToDone(goal1Links()[1]!.taskKey!);
+    await reconcile1(app.db, SLUG, goal1.goalId, ctx);
     const goal2 = await createGoal(
       app.db,
       {
@@ -105,8 +115,13 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
       ctx,
     );
     const first = readTaskFile({ projectSlug: SLUG, taskKey: goal2.activeTaskKey!, dataRoot: app.dataRoot })!.parsed;
-    expect(first.frontmatter.blockedBy).toEqual([`${goal1.goalId} link 2`]);
-    expect(first.frontmatter.waiting).toBe("none");
+    // Ruling 398 changed what "born held" means here. A link's task is created
+    // once its declared wait is SATISFIED, so the wait is enforced BEFORE the
+    // task exists rather than after: the list rides on at birth and the release
+    // engine, seeing every entry already done, clears it in the same breath.
+    // The declaration is still on the timeline, which is the record that
+    // survives.
+    expect(first.frontmatter.blockedBy).toEqual([]);
     expect(first.timeline.some((e) => e.title === "Waits on other work")).toBe(true);
     // The hand-over is fire-and-forget behind a dynamic import: poll for it.
     const deadline = Date.now() + 4000;
@@ -126,19 +141,11 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
       ),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("goal-999 is not a goal in this project") });
 
-    // Link 2 of goal-2 waits on goal-1 link 1 = goal1's first task. Archive
-    // that task, then complete goal-2 link 1 by hand: the chain tries to start
-    // link 2, the wait can never be satisfied, and the chain parks.
-    await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: goal1.activeTaskKey!, archived: true }, actorOf(orgAdminId, "arda@viberr.dev"), ctx);
-    await closeTaskToDone(goal2.activeTaskKey!);
-    const { reconcileGoal } = await import("./goal-actions.server");
-    await reconcileGoal(app.db, SLUG, goal2.goalId, ctx);
-    const parked = getGoalView(SLUG, goal2.goalId, ctx)!;
-    expect(parked.status).toBe("attention");
-    // Ruling 398: the park now names the LINK and the reason, instead of
-    // reporting a creation attempt that fanning out never makes.
-    expect(parked.history.some((h) => /Chain paused \(attention\): link 2's wait can never complete/.test(h.text))).toBe(true);
-    expect(parked.links[1]!.taskKey).toBeNull();
+    // Ruling 398(b) retired the second half of this test: goal-1 link 1 is
+    // DONE here, and a settled link satisfies a wait on it however its task
+    // ended, so archiving that task no longer makes the wait dead. A wait that
+    // genuinely can never complete — a link that FAILED — parks the chain by
+    // name, and that is asserted in the ruling-398 suite below.
   });
 });
 
@@ -581,9 +588,11 @@ describe("chained goals", () => {
 
     const view = getGoalView(SLUG, created.goalId, { dataRoot: app.dataRoot })!;
     expect(view.description).toBe(description);
-    // The real history is the app's own single line; nothing was forged in.
-    expect(view.history).toHaveLength(1);
-    expect(view.history[0]!.text).toContain("Goal created");
+    // The real history is the app's own lines; nothing was forged in. Ruling
+    // 398 added a second: `createGoal` reconciles, and the reconcile records
+    // the links it started.
+    expect(view.history.length).toBeGreaterThanOrEqual(1);
+    expect(view.history.some((h) => h.text.includes("Goal created"))).toBe(true);
     expect(
       view.history.some((h) => h.text.includes("without review")),
     ).toBe(false);
@@ -1435,15 +1444,31 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
       {
         projectSlug: SLUG,
         title: "Held chain",
-        links: [{ title: "Log view", goal: "Held. Done when merged.", blockedBy: [`${base.goalId} link 2`] }],
+        // Ruling 398: born free, then held by the edit below — which is the
+        // door this test is about.
+        links: [{ title: "Log view", goal: "Held. Done when merged." }],
       },
       actor,
       ctx,
     );
+    // Ruling 398: the link's task exists only once its wait is satisfied, and
+    // the wait rides on at birth. Ruling 155 is about editing an ACTIVE link's
+    // wait through its task, so the wait is put back here — by the very door
+    // this test exercises — to reach that state.
     const taskKey = held.activeTaskKey!;
     const task = () => readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.frontmatter;
     const link = () => readGoalFile({ projectSlug: SLUG, goalId: held.goalId, dataRoot: app.dataRoot })!.parsed.frontmatter.links[0]!;
     expect(link().status).toBe("active");
+    await updateGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        goalId: held.goalId,
+        action: { op: "edit_link", index: 1, blockedBy: [`${base.goalId} link 2`] },
+      },
+      actor,
+      ctx,
+    );
     expect(task().blockedBy).toEqual([`${base.goalId} link 2`]);
 
     await expect(
@@ -1514,7 +1539,9 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
         ctx,
       ),
     ).rejects.toMatchObject({
-      message: expect.stringContaining("a link cannot wait on a LATER link of its own chain"),
+      // Ruling 398(c): position no longer implies order, so a forward wait is
+      // ordinary. What is refused is the CYCLE this particular edit closes.
+      message: expect.stringContaining("would close a cycle"),
     });
     expect(task().blockedBy).toEqual([]);
   });
@@ -2301,5 +2328,82 @@ describe("ruling 398: links start together when nothing makes them wait", () => 
     expect(
       parked.history.some((h) => /link 2's wait can never complete/.test(h.text)),
     ).toBe(true);
+  });
+});
+
+/**
+ * Ruling 398(c): a forward wait is ordinary once position means nothing.
+ *
+ * The guard that stood here ("a link cannot wait on a LATER link of its own
+ * chain — the chain runs in order") was right while position WAS the order. It
+ * outlived that, and the ax-clone controller hit it the same afternoon ruling
+ * 398 was written: it wanted goal-6's failure-semantics audit held behind the
+ * link that ADDS the routes it audits, four positions later in the same goal,
+ * and had no way to say so. Its words: "The pre-398 server refused it … so as it
+ * stands link 2 will start ahead of the routes it is supposed to audit."
+ */
+describe("ruling 398(c): a link may wait on any sibling except in a cycle", () => {
+  const ctx = () => ({ dataRoot: app.dataRoot });
+  const actor = () => actorOf(contributorId, "selin@viberr.dev");
+
+  async function make(links: { title: string; goal: string; blockedBy?: string[] }[]) {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const created = await createGoal(
+      app.db,
+      { projectSlug: SLUG, title: "Forward waits", links },
+      actor(),
+      ctx(),
+    );
+    return getGoalView(SLUG, created.goalId, ctx())!;
+  }
+
+  it("accepts a wait on a LATER sibling and holds the link behind it", async () => {
+    // CANARY: restore the `ref.link > linkIndex` refusal and this throws.
+    const view = await make([
+      { title: "Audit the routes", goal: "A. Done when merged.", blockedBy: ["link 2"] },
+      { title: "Add the routes", goal: "B. Done when merged." },
+    ]);
+    expect(view.links[1]!.taskKey).toBeTruthy();
+    expect(view.links[0]!.taskKey).toBeNull();
+    expect(view.links[0]!.blockedBy).toEqual([`${view.id} link 2`]);
+  });
+
+  it("still refuses a link that waits on itself", async () => {
+    await expect(
+      make([{ title: "Only link here", goal: "x.", blockedBy: ["link 1"] }]),
+    ).rejects.toMatchObject({ status: 400, message: /cannot wait on itself/ });
+  });
+
+  it("refuses a cycle that runs through a sibling", async () => {
+    // What actually has to be refused now: neither could ever start.
+    await expect(
+      make([
+        { title: "First of the pair", goal: "a.", blockedBy: ["link 2"] },
+        { title: "Second of the pair", goal: "b.", blockedBy: ["link 1"] },
+      ]),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: /wait on each other, so none of them could ever start/,
+    });
+  });
+
+  it("refuses a three-link cycle, naming the loop", async () => {
+    await expect(
+      make([
+        { title: "Cycle link one", goal: "a.", blockedBy: ["link 3"] },
+        { title: "Cycle link two", goal: "b.", blockedBy: ["link 1"] },
+        { title: "Cycle link three", goal: "c.", blockedBy: ["link 2"] },
+      ]),
+    ).rejects.toMatchObject({ message: /link 1 waits on link 3 waits on link 2 waits on link 1/ });
+  });
+
+  it("accepts a diamond, which is not a cycle", async () => {
+    const view = await make([
+      { title: "The join at the top", goal: "j.", blockedBy: ["link 2", "link 3"] },
+      { title: "Left hand branch", goal: "l.", blockedBy: ["link 4"] },
+      { title: "Right hand branch", goal: "r.", blockedBy: ["link 4"] },
+      { title: "The common root", goal: "root." },
+    ]);
+    expect(view.links.map((l) => l.taskKey !== null)).toEqual([false, false, false, true]);
   });
 });

@@ -1921,7 +1921,11 @@ describe("task anchoring (ruling 121)", () => {
         { title: "Second", goal: "Do the second thing. Done when merged.", blockedBy: ["VIB-142"] },
       ],
     });
-    expect(created).toMatch(/^\[done\] Goal goal-\d+ created with 2 links; link 1 is VIB-\d+\.$/);
+    // Ruling 398: the message names every link that started, because more than
+    // one can. Link 2 waits on VIB-142, so only link 1 starts here.
+    expect(created).toMatch(
+      /^\[done\] Goal goal-\d+ created with 2 links; 1 started now \(link 1 is VIB-\d+\)\.$/,
+    );
     const goalId = /goal-\d+/.exec(created)![0];
     // SAFETY: `get_goal` answers `json(goalView)`, whose `links` are the
     // schema-parsed GoalLink[] (index and blockedBy always present).
