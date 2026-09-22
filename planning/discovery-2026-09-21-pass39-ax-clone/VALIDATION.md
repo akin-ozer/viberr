@@ -942,3 +942,28 @@ case working: no open review PR, or nothing overlapping.
 
 Before this, the same fact existed only on the human review queue, and every cross-task
 correlation on the board was done by a person.
+
+## 35. Ruling 396's whole loop: settings panel to agent prompt
+
+Section 31 got the lease into `project.md`. The claim still untested was the other half —
+that "every agent on this project is told which paths are leased before it starts". Read out
+of the first agent run dispatched after the window reopened (AX-22's, at 20:14 UTC):
+
+```
+### Files another task owns right now (ruling 245)
+Do NOT change these. They are leased until their holder merges, and a delivery that
+touches one is refused before it reaches GitHub.
+- `internal/sandbox/**`, `internal/runtime/**` → **AX-20** — AX-20 is rewriting the
+  sandbox stdout/stderr lifetime and its adoption path; AX-21 and AX-5 both wait on
+  that fix landing.
+```
+
+Human types it in settings → `project.md` holds it → the delivery guard enforces it → and
+the agent is told, with the reason quoted verbatim, before it starts. That is the complete
+loop ruling 396 was written for, and the part that was rendered by nothing when this pass
+began.
+
+Note what the agent receiving it is: AX-22's Gateway work, which has no business in
+`internal/sandbox` at all. The injection is unconditional rather than targeted, which is the
+right call here: an agent that learns the boundary before it reaches for the file never
+spends the run finding out.
