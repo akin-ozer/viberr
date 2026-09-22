@@ -374,6 +374,41 @@ Canary: put `denied` back and both assertions flip.
 
 ---
 
+## F39-11 · MEDIUM · 27KB of markdown went onto the record as one line
+
+AX-12's deliverer finished the upstream fidelity report and its reply landed on canonical
+`task.md` like this:
+
+```
+@Arda\n\n# AX-12 — upstream fidelity check\n\nDate: 2026-09-22 UTC\n\n## Scope and conclusion\n\n…
+```
+
+27,597 characters, **146 literal `\n` sequences and not one real newline**. Every heading,
+table row and list item of a structured report, run together on a single line with the escape
+showing.
+
+**It is not viberr's escaping.** The run log has the model's own structured reply, and its
+`summary` field already carried the doubled escape: the model escaped its own JSON string
+twice. Viberr stored exactly what it was handed.
+
+**It is still viberr's record.** `task.md` is the file the next agent re-anchors on, and this
+one now carries a 27KB unreadable block in the middle of it. Viberr already sanitizes what
+agents hand it — evidence cells are parsed and capped, structural lines are escaped, verdict
+reasons are clipped, raw output is separated onto disk — so accepting a body whose line breaks
+are visibly broken is the odd one out.
+
+Frequency, measured across every task file on the board: **1 occurrence** in several hundred
+comments. Rare, and total when it happens: it hit the single largest deliverable on the board.
+
+Fixed with a deliberately narrow predicate — more than 200 characters, at least two `\n`
+sequences, and **no real newline anywhere**. Prose that long never runs without a single
+break, and a snippet that legitimately contains `\n` inside a string literal sits in a body
+with real breaks around it (asserted). Only the newline escape is repaired; `\t`, `\"` and
+`\\` are left exactly as written. It runs before every other guardrail, because a body that
+is one 27KB line defeats the evidence-separation fence scan too.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

@@ -2645,18 +2645,22 @@ async function prepareAgentReplyEvent(
   // Anti-noise guardrails on AGENT replies (owner ruling Q3): trivial status
   // chatter is rejected; raw output dumps are trimmed to a head + reference
   // (the full transcript stays in the agent logs). Both per-project toggles.
-  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
-    "./comment-guardrails.server"
-  );
+  const { guardrailOn, isMeaninglessComment, separateEvidence, repairDoubledNewlines } =
+    await import("./comment-guardrails.server");
+  // Ruling 383: FIRST — before the fence scan, the duplicate compare and the
+  // mention source are taken from it. This path is the one that took 27KB of
+  // markdown onto AX-12 as a single line. Not a guardrail toggle: a body whose
+  // breaks are double-escaped is damaged however the project is configured.
+  const replyBody = repairDoubledNewlines(replyText);
   if (
     guardrailOn(ctx, projectSlug, "meaningful-comment") &&
-    isMeaninglessComment(replyText)
+    isMeaninglessComment(replyBody)
   ) {
     return { status: "dropped" };
   }
   const separated = guardrailOn(ctx, projectSlug, "evidence-separation")
-    ? separateEvidence(replyText)
-    : replyText;
+    ? separateEvidence(replyBody)
+    : replyBody;
   // The reply directive tells the agent to tag the human it answers, so an
   // ambiguous name is a NEW-4 failure with no other surface: the agent cannot
   // retag itself and the fan-out below would drop the handle in silence
@@ -2672,9 +2676,9 @@ async function prepareAgentReplyEvent(
   // `text` and the un-separated form (`separated === replyText` when the
   // evidence-separation guardrail is off, so no second disclosure pass).
   const candidates =
-    separated === replyText
+    separated === replyBody
       ? [text]
-      : [text, withAmbiguityDisclosure(db, replyText, projectSlug)];
+      : [text, withAmbiguityDisclosure(db, replyBody, projectSlug)];
   const duplicatedText = duplicatedOwnCommentText(
     db,
     ctx,
@@ -2695,7 +2699,7 @@ async function prepareAgentReplyEvent(
       toAgent: false,
       evidence: null,
     },
-    mentionSourceText: replyText,
+    mentionSourceText: replyBody,
     duplicate: duplicatedText !== null,
     duplicatedText,
   };

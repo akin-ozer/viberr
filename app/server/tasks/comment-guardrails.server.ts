@@ -38,6 +38,33 @@ export function isMeaninglessComment(text: string | null | undefined): boolean {
 }
 
 /** A fenced block longer than this many lines is an evidence dump, not prose. */
+/**
+ * Ruling 383 (F39-11): repair a body whose line breaks arrived DOUBLE-ESCAPED.
+ *
+ * Live on ax-clone AX-12 the deliverer returned a 27,597-character upstream
+ * fidelity report whose `summary` carried 146 literal `\n` sequences and not
+ * one real newline — the model escaped its own JSON string twice. Viberr stored
+ * exactly what it was handed, so canonical `task.md` took 27KB of markdown as a
+ * single line with `\n` showing between every heading, and that file is what
+ * the next agent re-anchors on.
+ *
+ * Whose fault it is does not change whose record it is. The predicate is
+ * deliberately narrow, so no real text can match it: a body with at least two
+ * `\n` sequences, NO real newline anywhere, and more than 200 characters. Prose
+ * that long never runs without a single break, and a snippet that legitimately
+ * contains `\n` inside a string literal sits in a body that has real breaks
+ * around it. Only the newline escape is repaired — `\t`, `\"` and `\\` are left
+ * exactly as written, because none of them costs a reader the document.
+ */
+export function repairDoubledNewlines(text: string): string {
+  if (text.length <= 200) return text;
+  if (text.includes("\n")) return text;
+  // `\\r\\n` contains a `\\n`, so one pattern counts both forms.
+  const escaped = text.match(/\\n/g);
+  if (!escaped || escaped.length < 2) return text;
+  return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+}
+
 export const EVIDENCE_MAX_FENCE_LINES = 12;
 
 /**
@@ -109,7 +136,9 @@ export function applyCommentGuardrails(input: {
     return { text: null, dropped: "meaningless", trimmedBy: [] };
   }
 
-  let text = input.text;
+  // Ruling 383: before every other guardrail reads it, because a body that is
+  // one 27KB line defeats the evidence-separation fence scan too.
+  let text = repairDoubledNewlines(input.text);
   const trimmedBy: CommentTrim[] = [];
   if (input.evidence) {
     const separated = separateEvidence(text);

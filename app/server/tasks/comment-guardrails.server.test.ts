@@ -4,6 +4,7 @@ import {
   commentOutcomeMessage,
   isMeaninglessComment,
   separateEvidence,
+  repairDoubledNewlines,
   EVIDENCE_MAX_FENCE_LINES,
 } from "./comment-guardrails.server";
 
@@ -144,5 +145,51 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
       dropped: null,
       trimmedBy: [],
     });
+  });
+});
+
+/**
+ * Ruling 383 (F39-11) — live on ax-clone AX-12: the deliverer returned a
+ * 27,597-character upstream fidelity report whose `summary` carried 146 literal
+ * `\n` sequences and not one real newline. Viberr stored what it was handed, so
+ * canonical `task.md` took 27KB of markdown as a single line with `\n` showing
+ * between every heading — and that file is what the next agent re-anchors on.
+ */
+describe("repairDoubledNewlines (ruling 383)", () => {
+  const long = (body: string) => body + "x".repeat(220);
+
+  it("repairs a long body whose breaks are all escaped", () => {
+    const damaged = long("# Report\\n\\nDate: today\\n\\n## Scope\\n\\nText ");
+    const fixed = repairDoubledNewlines(damaged);
+    expect(fixed).toContain("# Report\n\nDate: today");
+    expect(fixed).not.toContain("\\n");
+  });
+
+  it("leaves a body that has ANY real newline alone", () => {
+    // The shape a code snippet makes: a real document that happens to quote
+    // `\n` inside a string literal. CANARY: drop the real-newline check and
+    // this body's snippet is rewritten.
+    const snippet = long('Here is the escape:\n\n```go\nfmt.Print("a\\nb\\nc")\n```\n\nDone ');
+    expect(repairDoubledNewlines(snippet)).toBe(snippet);
+  });
+
+  it("leaves a SHORT body alone, and one with a single escape", () => {
+    expect(repairDoubledNewlines("a\\nb")).toBe("a\\nb");
+    expect(repairDoubledNewlines(long("one escape only \\n "))).toBe(
+      long("one escape only \\n "),
+    );
+  });
+
+  it("repairs \\r\\n too, and touches no other escape", () => {
+    const damaged = long('# T\\r\\n\\r\\nkeep \\t and \\" and \\\\ ');
+    const fixed = repairDoubledNewlines(damaged);
+    expect(fixed).toContain("# T\n\nkeep");
+    expect(fixed).toContain('\\t and \\" and \\\\');
+  });
+
+  it("runs ahead of every other guardrail", () => {
+    const damaged = long("# Report\\n\\nBody ");
+    const out = applyCommentGuardrails({ text: damaged, meaningful: true, evidence: true });
+    expect(out.text).toContain("# Report\n\nBody");
   });
 });
