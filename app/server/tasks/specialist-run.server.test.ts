@@ -2807,6 +2807,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(withKb).toContain(
       "- Read-only exception: the knowledge-base folder `/data/kb/ax-clone-rulings` is yours to READ.",
     );
+    expect(withKb).toContain("is yours to READ. It holds the rulings and conventions");
     expect(withKb).toContain("Never write, create or delete anything in it.");
     // The write exception's closing sentence no longer forbids the reads.
     expect(withKb).toContain(
@@ -2817,7 +2818,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       withKb.indexOf("Work ONLY inside the current working directory"),
     );
     const twoKbs = buildAnalyzePrompt({ ...base, kbReadDirs: ["/data/kb/a", "/data/kb/b"] });
-    expect(twoKbs).toContain("folders `/data/kb/a`, `/data/kb/b` are yours to READ");
+    expect(twoKbs).toContain("folders `/data/kb/a`, `/data/kb/b` are yours to READ. They hold");
     const without = buildAnalyzePrompt(base);
     expect(without).not.toContain("Read-only exception");
     expect(without).toContain("Everything else outside the working directory stays off-limits.");

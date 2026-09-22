@@ -3198,7 +3198,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       (kbDirs.length > 0
         ? `- Read-only exception: the knowledge-base ` +
           (kbDirs.length === 1 ? `folder ${kbDirs[0]} is` : `folders ${kbDirs.join(", ")} are`) +
-          ` yours to READ. They hold the rulings and conventions this work is held to, ` +
+          ` yours to READ. ${kbDirs.length === 1 ? "It holds" : "They hold"} the rulings and conventions this work is held to, ` +
           `indexed in your instructions, and reading the documents you need there is ` +
           `part of the task, not a step outside it. Never write, create or delete ` +
           `anything in ${kbDirs.length === 1 ? "it" : "them"}.\n`
