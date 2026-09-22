@@ -3439,6 +3439,17 @@ describe("app.css controller layout (ruling 419)", () => {
     );
   });
 
+  it("ruling 425(b): a wait list's entries line up in columns, and stack in the narrow rail", () => {
+    // Measured in a production preview: at 1440 wide the rail gives the list
+    // 258px, and a third column truncated every title after four words; at
+    // 375 it showed "ax log…". CANARY: drop the container query.
+    expect(ruleBody(CODE, ".ctl-link-waits")).toMatch(/container-type:\s*inline-size/);
+    expect(ruleBody(CODE, ".ctl-link-waits li")).toMatch(/grid-template-columns:\s*subgrid/);
+    const narrow = CODE.match(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/);
+    expect(narrow, "the narrow-list container query must exist").toBeTruthy();
+    expect(narrow![1]).toMatch(/\.ctl-wait-title\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*white-space:\s*normal/);
+  });
+
   it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {
     // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);

@@ -68,6 +68,8 @@ per item and each one was applied to the source and observed failing.
 | 55 | A run may read the knowledge-base folders its index points at (F39-45) | — | **done**, ruling 422 |
 | 56 | Another task's PR named with a possessive is not a delivery instruction (F39-46) | — | **done**, ruling 423 |
 | 57 | The operator reads where the branch refresh is refused before it plans (F39-47) | — | **done**, ruling 424 |
+| 58 | Operator formatting renders on its cards; the packet note's example fits every packet (U39-7) | — | **done** (UI copy and rendering, no ruling) |
+| 59 | A chain link says what holds it in words a person can follow (U39-8) | owner: "focus on the controller page" (design call, marked) | **done**, ruling 425 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

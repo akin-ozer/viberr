@@ -125,6 +125,15 @@ what they strand, and record an optional reason.
   `operator-recommendations.test.tsx` "inline format" (a canary on each of the two renders goes
   red) and the P21 custom-answer test pins the placeholder.
 
+- **U39-8 (MED) — the Goals rail says what a link waits on in addresses, and calls a held link
+  active.** Live on ax-clone (measured 2026-09-23 00:00): goal-6 link 1 read "active" over AX-6,
+  which sits in Triage held by ten links. Goal-6 link 5's wait was a thirteen-entry sentence of
+  references ("goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5) …") that a person can only
+  decode by scrolling to each chain. Goal-4 link 5 read "waits on AX-20 AX-21", AX-21 being its
+  own task. **Fixed: ruling 425** (default, owner may revisit): held links read "held"; each wait
+  is a count ("waits on 6 · 4 done") that opens to state, key and title per entry; the link's own
+  task sits beside its title.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

@@ -1,4 +1,9 @@
-import { holdEntriesSentence, joinDependencyEntries } from "~/shared/dependencies";
+import {
+  isDeadDependencyState,
+  joinDependencyEntries,
+  parseDependencyRef,
+  type DependencyRender,
+} from "~/shared/dependencies";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TurnStep } from "./turn-step";
 import {
@@ -763,6 +768,112 @@ const LINK_PILL = {
   { kind: PillKind; label: string }
 >;
 
+/**
+ * Ruling 425(a): a link whose task exists but is still held by unfinished work.
+ * The chain calls it `active` from the moment its task is created, and live on
+ * ax-clone goal-6 link 1 read "active" over AX-6, which sat in Triage waiting
+ * on ten other links.
+ */
+const HELD_PILL = { kind: "info", label: "held" } satisfies { kind: PillKind; label: string };
+
+/** Ruling 425(b): the one word each entry of a wait list gets. */
+function waitStateWord(entry: DependencyRender): string {
+  switch (entry.state) {
+    case "done":
+      return "done";
+    case "open":
+      // A goal link with no task has not been started by its chain yet.
+      return entry.taskKey ? "open" : "not started";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    case "missing":
+      return "missing";
+  }
+}
+
+/**
+ * Ruling 425(b): the title of the work a wait entry names, when this page holds
+ * the chain it belongs to. A reference like `goal-4 link 6` is an address;
+ * a person reading the rail needs to know what it is.
+ */
+export function waitEntryTitle(entry: DependencyRender, goals: readonly GoalView[]): string | null {
+  const ref = parseDependencyRef(entry.ref);
+  if (ref?.kind === "goal") {
+    return goals.find((g) => g.id === ref.goal)?.links.find((l) => l.index === ref.link)?.title ?? null;
+  }
+  if (!entry.taskKey) return null;
+  for (const g of goals) {
+    const link = g.links.find((l) => l.taskKey === entry.taskKey);
+    if (link) return link.title;
+  }
+  return null;
+}
+
+/**
+ * Ruling 425(b): what a link waits on, as a count a person can scan and a list
+ * they can open.
+ *
+ * The rail printed every entry as one sentence of addresses. Live on ax-clone,
+ * goal-6's fifth link read "waits on goal-6 link 3, goal-4 link 5 (AX-21),
+ * goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5), goal-5 link 2, goal-5
+ * link 3 (AX-22), goal-5 link 4, goal-4 link 2 (AX-24, done) …", thirteen
+ * entries, none of them named by what it is. The summary says how many are
+ * still open, how many are done, and how many can never finish; the list
+ * gives each one its state, a link to its task or chain, and its title.
+ */
+function LinkWaits({
+  entries,
+  goals,
+}: {
+  entries: readonly DependencyRender[];
+  goals: readonly GoalView[];
+}) {
+  const location = useLocation();
+  const open = entries.filter((e) => e.state !== "done");
+  const done = entries.filter((e) => e.state === "done");
+  const dead = open.filter((e) => isDeadDependencyState(e.state)).length;
+  const summary =
+    open.length === 0
+      ? `waited on ${entries.length === 1 ? "one entry" : `${entries.length}`}, all done`
+      : `waits on ${open.length}${done.length > 0 ? ` · ${done.length} done` : ""}`;
+  return (
+    <details className="ctl-link-waits" data-link-wait>
+      <summary>
+        {summary}
+        {dead > 0 && <span className="ctl-wait-dead"> · {dead} can never finish</span>}
+      </summary>
+      <ul>
+        {[...open, ...done].map((e) => {
+          const title = waitEntryTitle(e, goals);
+          return (
+            <li key={e.ref} data-state={e.state}>
+              <span className="ctl-wait-state">{waitStateWord(e)}</span>
+              {e.taskKey ? (
+                <Link className="mono" to={`../tasks/${e.taskKey}`} relative="path">
+                  {e.taskKey}
+                </Link>
+              ) : e.goalId ? (
+                <Link
+                  className="mono"
+                  to={{ pathname: location.pathname, search: location.search, hash: e.goalId }}
+                >
+                  {e.ref}
+                </Link>
+              ) : (
+                <span className="mono">{e.ref}</span>
+              )}
+              {/* Always the third cell, so the row's subgrid stays aligned. */}
+              <span className="ctl-wait-title">{title}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
 /** How many history entries a chain shows before "Show all". */
 const HISTORY_PREVIEW = 6;
 
@@ -959,24 +1070,31 @@ function GoalCard({
       </summary>
       <ol className="ctl-links">
         {goal.links.map((l) => {
-          const lp = LINK_PILL[l.status] ?? LINK_PILL.pending;
+          const held =
+            l.status === "active" && (l.waits ?? []).some((e) => e.state !== "done");
+          const lp = held ? HELD_PILL : (LINK_PILL[l.status] ?? LINK_PILL.pending);
           return (
             <li key={l.index} className={l.index === goal.currentIndex ? "on" : ""}>
               <Pill kind={lp.kind} sm>
                 {lp.label}
               </Pill>
-              <span className="ctl-link-title">{l.title}</span>
-              {l.blockedBy.length > 0 && (
-                <span className="sub" data-link-wait>
-                  {/* Ruling 359 (356's sentence): a done entry reads as done. */}
-                  waits on {l.waits ? holdEntriesSentence(l.waits) : joinDependencyEntries(l.blockedBy)}
-                </span>
-              )}
+              {/* Ruling 425(c): the link's OWN task sits beside its title. After
+                  the wait sentence it read as one more thing waited on: "waits
+                  on AX-20 AX-21", where AX-21 was the link's own task. */}
               {l.taskKey && (
                 <Link className="mono ctl-link-task" to={`../tasks/${l.taskKey}`} relative="path">
                   {l.taskKey}
                 </Link>
               )}
+              <span className="ctl-link-title">{l.title}</span>
+              {l.blockedBy.length > 0 &&
+                (l.waits ? (
+                  <LinkWaits entries={l.waits} goals={goals} />
+                ) : (
+                  <span className="sub" data-link-wait>
+                    waits on {joinDependencyEntries(l.blockedBy)}
+                  </span>
+                ))}
               {canRedirect && !settled && l.status === "failed" && (
                 <span className="ctl-link-acts">
                   <button

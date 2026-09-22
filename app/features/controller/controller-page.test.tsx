@@ -111,8 +111,141 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
       history: [],
     };
     const { container } = renderPage(view({ goals: [goal] }));
-    await screen.findByText("waits on goal-1 link 2 (JC-4) and JC-6 (done)");
+    // Ruling 425(b): the states now read as a count and a list, never as a
+    // flat list of addresses in which JC-6 looks as waited-on as JC-4.
+    await screen.findByText("waits on 1 · 1 done");
+    const rows = [...container.querySelectorAll("[data-link-wait] li")].map((li) => [
+      li.getAttribute("data-state"),
+      li.querySelector(".ctl-wait-state")?.textContent,
+      li.querySelector(".mono")?.textContent,
+    ]);
+    expect(rows).toEqual([
+      ["open", "open", "JC-4"],
+      ["done", "done", "JC-6"],
+    ]);
     expect(container.textContent).not.toContain("waits on goal-1 link 2, JC-6");
+  });
+
+  /**
+   * Ruling 425 (pass 39, the controller page for end users). Live on ax-clone:
+   * goal-6 link 1 read "active" over AX-6, which sat in Triage held by ten
+   * other links; goal-6 link 5 printed thirteen entries as one sentence of
+   * addresses ("goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5) …"); and
+   * goal-4 link 5 read "waits on AX-20 AX-21", AX-21 being its own task.
+   */
+  describe("ruling 425: a chain link says what holds it in words a person can follow", () => {
+    function chains(): NonNullable<ControllerSurfaceView["goals"]> {
+      const base = {
+        status: "active" as const,
+        createdBy: "u_arda",
+        createdByLabel: "Arda",
+        onFailure: "pause" as const,
+        description: "",
+        createdAt: null,
+        updatedAt: null,
+        history: [],
+      };
+      return [
+        {
+          ...base,
+          id: "goal-4",
+          title: "Cycle 4",
+          currentIndex: 5,
+          links: [
+            { index: 5, title: "ax logs: the server route and the command", goal: "L.", taskKey: "AX-21", status: "active", note: null, redeclared: false, blockedBy: ["AX-20"], waits: [{ ref: "AX-20", label: "AX-20", state: "open", taskKey: "AX-20", goalId: null }] },
+            { index: 6, title: "ax delete, and the deletion cascade rule", goal: "D.", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
+          ],
+        },
+        {
+          ...base,
+          id: "goal-6",
+          title: "Cycle 6",
+          currentIndex: 1,
+          links: [
+            {
+              index: 1,
+              title: "End-to-end test harness",
+              goal: "E.",
+              taskKey: "AX-6",
+              status: "active",
+              note: null,
+              redeclared: false,
+              blockedBy: ["goal-4 link 5", "goal-4 link 6", "AX-24", "goal-9 link 1"],
+              waits: [
+                { ref: "goal-4 link 5", label: "goal-4 link 5 (AX-21)", state: "open", taskKey: "AX-21", goalId: "goal-4" },
+                { ref: "goal-4 link 6", label: "goal-4 link 6", state: "open", taskKey: null, goalId: "goal-4" },
+                { ref: "AX-24", label: "AX-24", state: "done", taskKey: "AX-24", goalId: null },
+                { ref: "goal-9 link 1", label: "goal-9 link 1", state: "cancelled", taskKey: null, goalId: "goal-9" },
+              ],
+            },
+            {
+              index: 2,
+              title: "Released once its waits are done",
+              goal: "R.",
+              taskKey: "AX-7",
+              status: "active",
+              note: null,
+              redeclared: false,
+              blockedBy: ["AX-24"],
+              waits: [{ ref: "AX-24", label: "AX-24", state: "done", taskKey: "AX-24", goalId: null }],
+            },
+          ],
+        },
+      ];
+    }
+
+    it("(a) a link whose task is still held reads held, and one whose waits are all done reads active", async () => {
+      // CANARY: drop `held` and use LINK_PILL[l.status] alone.
+      const { container } = renderPage(view({ goals: chains() }));
+      await screen.findByText("End-to-end test harness");
+      const pillOf = (title: string) =>
+        [...container.querySelectorAll(".ctl-links li")]
+          .find((li) => li.querySelector(".ctl-link-title")?.textContent === title)
+          ?.querySelector(".pill")?.textContent;
+      expect(pillOf("End-to-end test harness")).toBe("held");
+      expect(pillOf("ax logs: the server route and the command")).toBe("held");
+      expect(pillOf("Released once its waits are done")).toBe("active");
+      expect(pillOf("ax delete, and the deletion cascade rule")).toBe("pending");
+    });
+
+    it("(b) the wait list is a count that opens to each entry's state, link and title", async () => {
+      // CANARY: render the old one-sentence `holdEntriesSentence` instead of `LinkWaits`.
+      const { container } = renderPage(view({ goals: chains() }));
+      await screen.findByText("End-to-end test harness");
+      const waits = [...container.querySelectorAll("details[data-link-wait]")];
+      const harness = waits.find((d) => d.closest("li")?.querySelector(".ctl-link-title")?.textContent === "End-to-end test harness")!;
+      expect(harness.querySelector("summary")?.textContent).toBe("waits on 3 · 1 done · 1 can never finish");
+      const rows = [...harness.querySelectorAll("li")].map((li) => ({
+        state: li.querySelector(".ctl-wait-state")?.textContent,
+        ref: li.querySelector(".mono")?.textContent,
+        href: li.querySelector("a.mono")?.getAttribute("href") ?? null,
+        title: li.querySelector(".ctl-wait-title")?.textContent || null,
+      }));
+      expect(rows).toEqual([
+        // A goal link with a task names the task, and the link's title.
+        { state: "open", ref: "AX-21", href: "/projects/viberr-core/tasks/AX-21", title: "ax logs: the server route and the command" },
+        // A goal link the chain has not started names the link, and opens that chain.
+        { state: "not started", ref: "goal-4 link 6", href: "/projects/viberr-core/controller#goal-4", title: "ax delete, and the deletion cascade rule" },
+        // A wait on a cancelled chain's link is marked, and nothing on the page names it.
+        { state: "cancelled", ref: "goal-9 link 1", href: "/projects/viberr-core/controller#goal-9", title: null },
+        // Done entries come last.
+        { state: "done", ref: "AX-24", href: "/projects/viberr-core/tasks/AX-24", title: null },
+      ]);
+      const released = waits.find((d) => d.closest("li")?.querySelector(".ctl-link-title")?.textContent === "Released once its waits are done")!;
+      expect(released.querySelector("summary")?.textContent).toBe("waited on one entry, all done");
+    });
+
+    it("(c) a link's own task sits before its title, never after what it waits on", async () => {
+      // CANARY: move the `ctl-link-task` link back after the waits.
+      const { container } = renderPage(view({ goals: chains() }));
+      await screen.findByText("End-to-end test harness");
+      const li = [...container.querySelectorAll(".ctl-links > li")].find(
+        (n) => n.querySelector(".ctl-link-title")?.textContent === "ax logs: the server route and the command",
+      )!;
+      const order = [...li.children].map((c) => c.className.split(" ").find((k) => k.startsWith("ctl-") || k === "pill") ?? c.tagName);
+      expect(order.indexOf("ctl-link-task")).toBeLessThan(order.indexOf("ctl-link-title"));
+      expect(order.indexOf("ctl-link-title")).toBeLessThan(order.indexOf("ctl-link-waits"));
+    });
   });
 
   /**

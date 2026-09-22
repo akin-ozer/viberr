@@ -6183,7 +6183,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   border-radius: var(--radius-small);
 }
 .ctl-links li.on { background: var(--tint-well); }
-.ctl-link-title { min-width: 0; }
+/* Ruling 425(c): the title takes the rest of the row beside its pill and task,
+   and wraps inside it, instead of dropping under them whole. */
+.ctl-link-title { flex: 1 1 12rem; min-width: 0; }
 .ctl-link-task { color: var(--blue-pressed); text-decoration: none; font-size: .75rem; }
 .ctl-link-task:hover { text-decoration: underline; }
 .ctl-link-acts { display: inline-flex; gap: .25rem; margin-left: auto; }
@@ -6213,6 +6215,58 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .ctl-goal-history li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem; }
 .ctl-goal-history li > :first-child { color: var(--faint); white-space: nowrap; }
+/* Ruling 425(b): what a link waits on, a count that opens to its entries, in
+   the chain disclosure's own quiet language. */
+.ctl-link-waits {
+  flex-basis: 100%; min-width: 0; font-size: .75rem; color: var(--muted);
+  container-type: inline-size;
+}
+.ctl-link-waits > summary {
+  cursor: pointer; list-style: none;
+  display: inline-flex; align-items: center; gap: .375rem;
+  border-radius: var(--radius-small);
+}
+.ctl-link-waits > summary::-webkit-details-marker { display: none; }
+.ctl-link-waits > summary::after {
+  content: ""; width: 6px; height: 6px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+}
+.ctl-link-waits[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
+.ctl-link-waits > summary:hover { color: var(--fg); }
+.ctl-wait-dead { color: var(--danger); }
+/* One grid for the list and a subgrid per row, so the keys and titles line up
+   down the list while each row stays a list item. */
+.ctl-link-waits ul {
+  list-style: none; margin: .25rem 0 .125rem; padding: 0;
+  display: grid; grid-template-columns: max-content max-content minmax(0, 1fr);
+  column-gap: .5rem; row-gap: .125rem;
+}
+.ctl-link-waits li {
+  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
+  align-items: baseline;
+}
+.ctl-link-waits li .mono { color: var(--blue-pressed); text-decoration: none; }
+.ctl-link-waits li a.mono:hover { text-decoration: underline; }
+.ctl-wait-state { color: var(--faint); white-space: nowrap; }
+.ctl-wait-title {
+  color: var(--fg); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ctl-link-waits li[data-state="done"] .ctl-wait-title { color: var(--muted); }
+.ctl-link-waits li:is([data-state="failed"], [data-state="cancelled"], [data-state="missing"]) .ctl-wait-state {
+  color: var(--danger);
+}
+/* The rail is narrow at every width (258px of list on a 1440px screen), so
+   there an entry is two lines: its key and state, then its title across the
+   whole row, wrapping, rather than an ellipsis after four words. */
+@container (max-width: 30rem) {
+  .ctl-link-waits ul { grid-template-columns: max-content minmax(0, 1fr); row-gap: .375rem; }
+  .ctl-link-waits li > .mono { grid-column: 1; grid-row: 1; }
+  .ctl-link-waits li > .ctl-wait-state { grid-column: 2; grid-row: 1; }
+  .ctl-wait-title { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
+  .ctl-wait-title:empty { display: none; }
+}
 /* Ruling 419(c): the reason a cancel or a skip records, under its consequence. */
 .ctl-confirm-reason { margin-top: 1rem; }
 @media (prefers-reduced-motion: reduce) {
