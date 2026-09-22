@@ -829,3 +829,41 @@ One defect found BY the audit: the `doc.append` description cited **F39-1** for 
 is read by every controller run; fixed.
 
 Nothing is outstanding.
+
+## 30. The deploy, and ruling 407 confirmed on the running build
+
+Deployed `7f972b2b` at 19:34 UTC, carrying rulings 403-412. `/resources/health` reports
+`status ok · revision 7f972b2b`, matching HEAD.
+
+Before the fix, /insights read:
+
+> **Branch & PR traceability · 95%** — 18 of 19 delivered tasks carry branch + PR — **AX-12**
+
+After, on the same board and the same data:
+
+> **Branch & PR traceability · 100%** — 19 of 19 delivered tasks carry branch + PR
+
+AX-12 still has no PR and never will; it is no longer counted as owing one.
+
+Ruling 395's fix is visible on the same page and still holding: the prompt-cache table reads
+`not reported` for the Codex run kinds rather than `0.000`.
+
+## 31. Ruling 396's lease panel, used for the collision it exists to prevent
+
+The panel renders on the deployed build ("0 leases · No file leases. Every task may change
+any file its work needs."). Added the real one: `internal/sandbox/**` and
+`internal/runtime/**`, held by AX-20, because AX-20 is rewriting the sandbox stdout/stderr
+lifetime and both AX-21 and AX-5 are waiting on that fix landing. Saved, and the file says:
+
+```yaml
+fileLeases:
+  - paths:
+      - internal/sandbox/**
+      - internal/runtime/**
+    taskKey: AX-20
+    reason: AX-20 is rewriting the sandbox stdout/stderr lifetime and its adoption path; AX-21 and AX-5 both wait on that fix landing.
+```
+
+The whitespace-separated glob line split as designed, the holder picker wrote the task key,
+and the reason is stored for the refusal to quote. This is the lease the improvement point
+above says nothing proposes: it took a human noticing, which is the point being made.
