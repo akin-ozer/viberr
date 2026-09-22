@@ -1559,3 +1559,33 @@ of its own mistake is what sent me to read `advanceAfter` instead of shipping it
 Credit: it caught the duplicate, retitled AX-25 "DUPLICATE of AX-24 — do not work, archive
 me", held it on AX-24 so no run could start, and said plainly that archiving is a human
 surface it does not have. Ruling 411.
+
+## F39-39 · MEDIUM · The refusal that stopped coordination said only that the move was not allowed
+
+AX-18, 19:27. The reviewer had just delivered, at my request, a complete blocker list — as a
+comment, explicitly "not a new verdict", which is exactly what I asked for. So `validation`
+stayed `changed` (from the earlier base refresh) rather than becoming `failing`.
+
+The operator planned the obvious next move, Review back to Verify, to rework against the
+list. It got:
+
+> **Coordination stopped:** the `transition_stage` step failed (No allowed transition from
+> Review to Verify.). The remaining plan was not executed.
+
+viberr is **right** to refuse. Ruling 163 licenses exactly one backward move for a `changed`
+revision — into the review stage, for its re-verdict — and the task was already there. But
+the message carries none of that, and the same function holds every fact needed to say it:
+
+```ts
+const backward = toIndex >= 0 && toIndex < fromIndex;                 // true
+existing.parsed.frontmatter.validation                                 // "changed"
+const changedReworkTarget = ... verdictStageOf(...)                    // the review stage
+const isReworkMove = ...                                               // false
+```
+
+Two costs. The step THROWS rather than being refused, so the abort took the rest of the
+operator's plan with it and the task landed on a human. And the way forward existed the
+whole time: ruling 133 lets the engaged deliverer run at **every** stage, so the rework
+never needed the transition at all.
+
+Ruling 399's shape, in the sentence whose only job is to explain a refusal. Ruling 412.

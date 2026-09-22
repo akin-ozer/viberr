@@ -6618,8 +6618,29 @@ export async function transitionStage(
     // the toast / route error), so the copy ban applies to it exactly as it
     // applies to a JSX string — see `app/features/copy-ban.test.ts`, which now
     // scans user-facing `AppError` messages under `app/server/**` too.
+    //
+    // Ruling 412 (F39-39): and it says WHY, when the answer is in this scope.
+    // A BACKWARD move is refused for one of two reasons this function has
+    // already computed — `validation` licenses no rework at all, or it
+    // licenses exactly one target and this is not it — and the bare sentence
+    // named neither. Live on ax-clone AX-18 the operator planned Review to
+    // Verify to rework against a reviewer's complete blocker list, got "No
+    // allowed transition from Review to Verify.", and the THROW aborted the
+    // rest of its plan: "Coordination stopped". The task sat on a human. The
+    // way forward existed and nothing said so: ruling 133 lets the engaged
+    // deliverer run at EVERY stage, so the rework never needed the move.
+    const why = backward
+      ? existing.parsed.frontmatter.validation === "changed" && changedReworkTarget
+        ? ` The revision changed after the last verdict, so the only backward move is into ${stageName(project, changedReworkTarget)} for a re-verdict.`
+        : existing.parsed.frontmatter.validation === "failing"
+          ? ""
+          : " A backward move is rework, and rework needs a failing verdict or a revision that changed after one; this task has neither."
+      : "";
+    const wayOut = backward
+      ? " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task."
+      : "";
     throw AppError.validation(
-      `No allowed transition from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
+      `No allowed transition from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.${why}${wayOut}`,
     );
   }
 

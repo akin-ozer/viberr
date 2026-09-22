@@ -5283,6 +5283,49 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
   }
 
+  /**
+   * Ruling 412 (F39-39), live on ax-clone AX-18.
+   *
+   * The operator planned Review to Verify to rework against a reviewer's
+   * complete blocker list. `validation` was `changed` rather than `failing`
+   * (the list arrived as a comment, not a verdict), so ruling 163 licensed
+   * exactly one backward move, into the review stage, where the task already
+   * was. It got "No allowed transition from Review to Verify." and nothing
+   * else -- and because the step THROWS rather than being refused, the rest of
+   * its plan was abandoned: "Coordination stopped". The task sat on a human.
+   *
+   * Both the reason and the way out were in that function's own scope.
+   */
+  it("ruling 412: a refused backward move says WHY, and names the way forward", async () => {
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge");
+    const opCtx = { dataRoot: store.dataRoot, operatorAuthorized: true };
+    let refused = "";
+    try {
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", rework: true },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+    } catch (thrown) {
+      refused = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    expect(refused, "the move must still be refused").not.toBe("");
+
+    // CANARY: drop the `why`/`wayOut` clauses and this is the bare sentence
+    // AX-18's operator was given before it stopped coordinating.
+    expect(refused).toContain("No allowed transition from Merge to In Progress");
+    expect(refused, "names the fact that licenses the one legal move").toContain(
+      "The revision changed after the last verdict",
+    );
+    expect(refused, "names the ONE backward move that is allowed").toContain("into Review");
+    expect(refused, "names the move that needs no transition at all").toContain(
+      "engaged deliverer runs at every stage",
+    );
+  });
+
   it("ruling 163 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
     // Canary: require `validation === "failing"` again in transitionStage's
     // `isReworkMove`. Live: KNC-20's operator was refused "No allowed
