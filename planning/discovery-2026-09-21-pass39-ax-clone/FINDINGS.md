@@ -513,6 +513,48 @@ withdrawal sites were checked and are already correct.
 
 ---
 
+## F39-15 · HIGH · Ruling 385 held a task nothing could release — and the board demonstrated it
+
+Ruling 385 made the required reviewer hold a task whose deliverable is not a commit. AX-12,
+the same task that produced the ruling, then showed what that hold costs when nothing
+downstream of it knows about non-commit work. Within twenty minutes of the deploy:
+
+```
+stage: review    waiting: human    validation: none    verdicts: []
+2026-09-22T07:24:15Z · quality · Reviewer
+  title: Changes requested
+  **Validation:** none. Review & validation requested changes.
+2026-09-22T07:26:41Z · note · operator
+  **Coordination stopped:** the `transition_stage` step failed
+  (No allowed transition from Review to Verify.). The remaining plan was not executed.
+```
+
+Three things, one cause — **everything downstream of review was keyed on `workRevision`**:
+
+1. **The verdict was never stored.** `if (rev && reviewerProfileId)` — no revision, no record.
+   The reviewer's request-changes exists only as prose on the timeline.
+2. **`deriveValidation` opens with `if (!activeWorkRevision(...)) return "none"`.** So the
+   record printed "**Validation:** none. Review & validation requested changes." in one
+   sentence.
+3. **`requiredReviewerApproved` needs an approve bound to the active revision.** With no
+   revision it returns false forever, so ruling 385's hold was **unsatisfiable**: force-accept
+   was the only door. And with `validation: none`, ruling 163's backward rework move was not
+   licensed either, so the operator's own route out was shut and coordination stopped.
+
+That is a path with no way out, and I shipped the hold that closed it. Ruling 388 gives a
+non-commit delivery the identity everything else already had: `deliveredAt`, stamped when the
+DELIVERER saves files, and `reviewSubjectId` as the one place that decides what a review binds
+to — the revision id, or `files:<deliveredAt>`. A later save moves it and stales the old
+verdict, which is the same rule a new revision follows. A reviewer's own captures never move
+it (they are evidence for the verdict being written, and stamping them would stale it on the
+way in); a person's upload never did (ruling 379 writes no list).
+
+It also **removed** the plumbing ruling 385 added an hour earlier: `runSavedFiles(timeline)`
+threaded through seven call sites became one frontmatter field, because the same fact has to
+identify what a verdict was given ON, which no boolean can do.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

@@ -23,7 +23,6 @@ import {
   requiredReviewerRefusals,
   resolveRequiredReviewers,
   type RequiredReviewerView,
-  runSavedFiles,
 } from "~/server/tasks/required-reviewers.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import {
@@ -371,11 +370,6 @@ function acceptanceBlockReason(
     blockedPacket: boolean;
     /** Ruling 178: the project's resolved rules, from the projected row. */
     requiredReviewers: readonly RequiredReviewerView[];
-    /** Ruling 385: a run on this task saved files — a deliverable that is not a
-     *  commit, and one the project's required reviewer still owes a verdict on.
-     *  Computed by the caller, like `blockedPacket`, because it lives on the
-     *  timeline rather than in the frontmatter. */
-    savedFiles: boolean;
   },
 ): string | null {
   return (
@@ -395,10 +389,7 @@ function acceptanceBlockReason(
     acceptanceBlockedReason(fm) ??
     // Ruling 178: and every reviewer the PROJECT declares, engaged or not —
     // the same position it holds in `acceptanceRefusalReasons`.
-    requiredReviewerRefusals(ctx.requiredReviewers, {
-      ...fm,
-      savedFiles: ctx.savedFiles,
-    })[0] ??
+    requiredReviewerRefusals(ctx.requiredReviewers, fm)[0] ??
     verdictGateReason(fm, ctx.validation, fm.key) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Same sentence the writers refuse with.
@@ -543,7 +534,6 @@ export function rebuildTaskFile(
     validation: derivedValidation,
     blockedPacket,
     requiredReviewers,
-    savedFiles: runSavedFiles(parsed.timeline),
   });
 
   // Ruling 225 (F37-45): a task resting on a CLOCK is not waiting on a person.

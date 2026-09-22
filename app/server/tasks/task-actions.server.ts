@@ -6,10 +6,7 @@ import { holdRefusalFor, resolveDependencies } from "~/server/projections/depend
 import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import {
-  requiredReviewerRefusals,
-  runSavedFiles,
-} from "./required-reviewers.server";
+import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd } from "~/shared/run-failure";
 import type {
@@ -35,6 +32,8 @@ import {
   revisionLeftWorkspace,
   type RevisionDeparture,
   activeWorkRevision,
+  reviewSubjectId,
+  type ReviewVerdict,
   consecutiveRequestChanges,
   deliveringEngagement,
   type Engagement,
@@ -704,6 +703,8 @@ export async function createTask(
   const frontmatter: TaskFrontmatter = {
     key,
     title,
+    // Ruling 388: nothing delivered yet.
+    deliveredAt: null,
     stage: stageId,
     // No transition has happened yet — the previous stage is a fact only a
     // real move writes.
@@ -2635,6 +2636,30 @@ function duplicatedOwnCommentText(
 }
 
 /** Build the reply event without writing so completion effects can land atomically. */
+/**
+ * Ruling 388 (F39-15): record a DELIVERER's saved files as this task's
+ * non-commit delivery, and therefore as what a review of it binds to.
+ *
+ * Only the delivering engagement moves it. A reviewer's own captures are
+ * EVIDENCE for the verdict it is writing, not a new thing to review — stamping
+ * those would make the subject move under the verdict and stale it on the way
+ * in. Same division `workRevision` already draws: the deliverer mints, everyone
+ * else judges. A person's upload never reaches here at all (ruling 379 writes a
+ * plain note with no list).
+ */
+function stampNonCommitDelivery(
+  fm: TaskFrontmatter,
+  actorRef: FileActorRef,
+  attachments: readonly string[] | null,
+  at: string,
+): void {
+  if (!attachments || attachments.length === 0) return;
+  if (actorRef.kind !== "agent") return;
+  const deliverer = deliveringEngagement(fm);
+  if (!deliverer || deliverer.profileId !== actorRef.profileId) return;
+  fm.deliveredAt = at;
+}
+
 async function prepareAgentReplyEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2837,6 +2862,12 @@ export async function postAgentReplyComment(
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift(event);
+      stampNonCommitDelivery(
+        parsed.frontmatter,
+        input.actorRef,
+        attachments,
+        event.occurredAt,
+      );
       if (compactOn) {
         parsed.timeline = compactTimelineEvents(
           parsed.timeline,
@@ -3780,17 +3811,26 @@ export async function recordAgentCompletion(
         // Ruling 161: a discarded revision is not a subject. A verdict must
         // never pin to a head that no longer exists, so it is recorded as
         // prose (the reply) and binds to nothing.
+        //
+        // Ruling 388: but a task whose deliverable is a saved FILE does have a
+        // subject, and used to fall into that same hole — the verdict was never
+        // stored, so `validation` stayed `none`, the rework route ruling 163
+        // licenses stayed shut, and after ruling 385 the required-reviewer gate
+        // could never be satisfied either. Live on ax-clone AX-12 that was a
+        // dead end: a reviewer returned request-changes on the report, and the
+        // record said "**Validation:** none" in the same sentence.
         const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+        const subjectId = reviewSubjectId(parsed.frontmatter);
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
-        if (rev && reviewerProfileId) {
+        if (subjectId && reviewerProfileId) {
           // Ruling 204: the overwrite keeps the latest verdict and would keep
           // nothing else. A reviewer that returns the SAME result on the SAME
           // revision has reviewed twice, and that is the only signal saying the
           // deliverer could not move — precisely the case where no new revision
           // is ever minted, so a count of distinct revisions stays at 1 forever.
           const prior = parsed.frontmatter.verdicts.find(
-            (v) => v.profileId === reviewerProfileId && v.revisionId === rev.id,
+            (v) => v.profileId === reviewerProfileId && v.revisionId === subjectId,
           );
           // Ruling 242 (F37-69): a repeat verdict counts as a new ROUND only if
           // a round was actually fought — the DELIVERER RAN between the two.
@@ -3815,26 +3855,28 @@ export async function recordAgentCompletion(
             !deliverer ||
             profileRanSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
           const rounds = prior?.result === verdict && reworked ? prior.rounds + 1 : 1;
+          const recorded: ReviewVerdict = {
+            profileId: reviewerProfileId,
+            revisionId: subjectId,
+            result: verdict,
+            // Ruling 292: a verdict's justification is a STORED record a
+            // person reads on the task page, and it was a bare `.slice` -
+            // the write-side shape ruling 288 closed for a goal. The cut
+            // stays (a verdict reason is a paragraph, not a report), and it
+            // now says it was cut and where the whole of it is: the agent's
+            // own report, on the same timeline, which is never truncated.
+            reason: clipVerdictReason(replyText ?? ""),
+            at: new Date().toISOString(),
+            rounds,
+          };
+          // Ruling 388: only a commit has a head sha to denormalize.
+          if (rev) recorded.headSha = rev.headSha;
           parsed.frontmatter.verdicts = [
             ...parsed.frontmatter.verdicts.filter(
               (v) =>
-                !(v.profileId === reviewerProfileId && v.revisionId === rev.id),
+                !(v.profileId === reviewerProfileId && v.revisionId === subjectId),
             ),
-            {
-              profileId: reviewerProfileId,
-              revisionId: rev.id,
-              headSha: rev.headSha,
-              result: verdict,
-              // Ruling 292: a verdict's justification is a STORED record a
-              // person reads on the task page, and it was a bare `.slice` -
-              // the write-side shape ruling 288 closed for a goal. The cut
-              // stays (a verdict reason is a paragraph, not a report), and it
-              // now says it was cut and where the whole of it is: the agent's
-              // own report, on the same timeline, which is never truncated.
-              reason: clipVerdictReason(replyText ?? ""),
-              at: new Date().toISOString(),
-              rounds,
-            },
+            recorded,
           ];
           // Ruling 237 (F37-57): a SECOND consecutive objection from this same
           // reviewer is a decision for a person, and viberr raises it rather
@@ -3977,6 +4019,12 @@ export async function recordAgentCompletion(
          */
         if (verdict) replyEvent = { ...replyEvent, title: VERDICT_REPORT_TITLE };
         parsed.timeline.unshift(replyEvent);
+        stampNonCommitDelivery(
+          parsed.frontmatter,
+          actorRef,
+          replyEvent.attachments ?? null,
+          replyEvent.occurredAt,
+        );
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
         // this run's own mid-run comment), but the run still produced evidence
@@ -3997,6 +4045,12 @@ export async function recordAgentCompletion(
         };
         if (attachments) producing.attachments = attachments;
         parsed.timeline.unshift(producing);
+        stampNonCommitDelivery(
+          parsed.frontmatter,
+          actorRef,
+          attachments,
+          producing.occurredAt,
+        );
       }
       if (verdict) {
         const verdictEvent: TaskFileEvent = {
@@ -9495,11 +9549,7 @@ export async function resolvePacket(
           project,
           existing.parsed.frontmatter,
           input.taskKey,
-          {
-            blockedPacket: false,
-            noChange,
-            savedFiles: runSavedFiles(existing.parsed.timeline),
-          },
+          { blockedPacket: false, noChange },
         );
         if (refusal) throw AppError.conflict(refusal);
       }
@@ -9570,11 +9620,7 @@ export async function resolvePacket(
                     fresh.parsed.frontmatter,
                     input.taskKey,
                     // F28-L1: the same verified-empty result the outer gate saw.
-                    {
-                      blockedPacket: false,
-                      noChange,
-                      savedFiles: runSavedFiles(fresh.parsed.timeline),
-                    },
+                    { blockedPacket: false, noChange },
                   )
                 : null;
               if (refusal) throw AppError.conflict(refusal);
@@ -9690,10 +9736,6 @@ export async function resolvePacket(
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
           noChange,
-          // Ruling 385: read from the pre-lock copy. Files a run saved are on
-          // the timeline permanently, so the value cannot go stale downward,
-          // and this is the same read the outer gate above made.
-          savedFiles: runSavedFiles(existing.parsed.timeline),
         });
         if (refusal) throw AppError.conflict(refusal);
         // R20-2 (F20-6): a server-proved no-change acceptance repairs the flag so
@@ -11941,10 +11983,6 @@ function acceptanceRefusalReason(
 interface AcceptanceRefusalOptions {
   blockedPacket: boolean;
   noChange?: AcceptanceNoChangeCheck;
-  /** Ruling 385: a run on this task saved files — a deliverable that is not a
-   *  commit, which the project's required reviewer still owes a verdict on.
-   *  Passed in because it lives on the timeline, not in the frontmatter. */
-  savedFiles?: boolean;
 }
 
 /**
@@ -11983,10 +12021,7 @@ function acceptanceRefusalReasons(
     // operator engaged), so a task whose operator never ran the project's
     // reviewer was acceptable on another agent's verdict. Same order in the
     // projection's `acceptanceBlockReason`.
-    ...requiredReviewerRefusals(project.requiredReviewers, {
-      ...fm,
-      savedFiles: opts.savedFiles === true,
-    }),
+    ...requiredReviewerRefusals(project.requiredReviewers, fm),
     // R20-2 / F20-6: when the live probe already looked at the branch and found
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
@@ -12071,20 +12106,13 @@ export interface ForceAcceptDisclosure {
  */
 export function forceAcceptDisclosure(
   project: ProjectContext,
-  /** Ruling 385: `timeline` joins the slice, because a run that saved FILES
-   *  delivered work a required reviewer still owes a verdict on. */
-  parsed: {
-    frontmatter: TaskFrontmatter;
-    packet: TaskPacket | null;
-    timeline: readonly { attachments?: string[] }[];
-  },
+  parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null },
   taskKey: string,
   opts: { noChange?: AcceptanceNoChangeCheck } = {},
 ): ForceAcceptDisclosure {
   const fm = parsed.frontmatter;
   const refusalOpts: AcceptanceRefusalOptions = {
     blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
-    savedFiles: runSavedFiles(parsed.timeline),
   };
   if (opts.noChange) refusalOpts.noChange = opts.noChange;
   const gates = acceptanceRefusalReasons(project, fm, taskKey, refusalOpts);
@@ -12711,7 +12739,6 @@ export function acceptanceRefusalFor(
         existing.parsed.frontmatter.readiness === "blocked" &&
         existing.parsed.packet?.type === "blocked",
       noChange,
-      savedFiles: runSavedFiles(existing.parsed.timeline),
     },
   );
 }
@@ -12818,10 +12845,8 @@ export function resolveAcceptanceAffordance(
   }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
-  const savedFiles = runSavedFiles(existing.parsed.timeline);
   const blockedReason = acceptanceRefusalReason(project, fm, input.taskKey, {
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
-    savedFiles,
   });
   return {
     hasAuthority,
@@ -12830,7 +12855,6 @@ export function resolveAcceptanceAffordance(
     // F19-7: what a packet resolution would hit — see the field's docstring.
     blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
       blockedPacket: false,
-      savedFiles,
     }),
     canAccept: hasAuthority && atBoundary && blockedReason === null,
     terminallyBlocked: acceptanceTerminallyBlocked(fm),

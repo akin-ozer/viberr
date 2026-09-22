@@ -320,6 +320,7 @@ function fm(input: {
     key: input.key,
     title: input.title,
     stage: input.stage,
+    deliveredAt: null,
     previousStageId: null,
     heldAtStage: null,
     goalRef: null,

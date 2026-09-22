@@ -36,6 +36,7 @@ const FULL: ParsedTaskFile = {
     archived: false,
     validation: "changed",
     workRevision: null,
+    deliveredAt: null,
     verdicts: [],
     baseRefreshes: [],
     branch: "vib-142-attach-workspace",

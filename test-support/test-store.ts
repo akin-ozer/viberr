@@ -119,6 +119,7 @@ export function baseTaskFrontmatter(
   return {
     key,
     title: `Task ${key}`,
+    deliveredAt: null,
     schedules: [],
     queuedQuestions: [],
     stage: "triage",

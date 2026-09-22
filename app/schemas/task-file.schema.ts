@@ -1126,11 +1126,15 @@ export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
 export const reviewVerdictSchema = z
   .object({
     profileId: z.string().min(1),
-    /** The workRevision.id this verdict judged — a verdict on an OLD revision is
-     *  automatically stale once a new revision is minted. */
+    /** What this verdict judged: the `workRevision.id`, or — ruling 388, when
+     *  the deliverable is not a commit — `files:<deliveredAt>`. Either way a
+     *  verdict on an OLD subject is automatically stale once a new one appears.
+     *  `reviewSubjectId` is the one place that decides which. */
     revisionId: z.string().min(1),
-    /** Denormalized head SHA for display/traceability. */
-    headSha: z.string().min(1),
+    /** Denormalized head SHA for display/traceability. Ruling 388: absent when
+     *  the subject is not a commit, and every reader of it already had to cope
+     *  with having no sha to name. */
+    headSha: z.string().min(1).optional(),
     result: z.enum(REVIEW_VERDICT_RESULTS),
     reason: z.string().default(""),
     at: z.string().min(1),
@@ -1238,6 +1242,21 @@ const taskFrontmatterFields = {
   validation: z.enum(VALIDATION_VALUES),
   /** F10-15: the immutable work revision currently under review (or null). */
   workRevision: workRevisionSchema.nullable(),
+  /**
+   * Ruling 388 (F39-15): when a RUN last delivered work that is not a commit.
+   *
+   * A research task, a design note, an audit: the deliverable is the files the
+   * run saved into `attachments/`, and there is no revision to bind a review
+   * to. Everything downstream of review was keyed on `workRevision`, so such a
+   * task could not hold a verdict, could not derive a validation from one, and
+   * after ruling 385 could not be accepted either. This is the identity the
+   * review binds to instead, and a later run that saves files moves it, which
+   * is what makes the old verdict stale — the same rule a new revision follows.
+   *
+   * A person's own upload never sets it: an uploaded fixture is an input to the
+   * work, not the work (ruling 379).
+   */
+  deliveredAt: z.string().nullable().default(null),
   /** F10-15: per-engagement verdicts, each bound to the revision it judged. */
   verdicts: z.array(reviewVerdictSchema),
   /** Ruling 132 (pass 34, F34-14): every base refresh the operator's
@@ -1335,6 +1354,10 @@ export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
 type ReviewState = {
   engagements: Engagement[];
   workRevision: WorkRevision | null;
+  /** Ruling 388: the non-commit delivery this task's review binds to. Optional
+   *  so the existing call sites (which all pass whole frontmatter) need no
+   *  change. */
+  deliveredAt?: string | null;
   verdicts: ReviewVerdict[];
   /** R19-8: this task was verified to have nothing to deliver. Optional so the
    *  existing call sites (which all pass whole frontmatter) need no change. */
@@ -1350,14 +1373,34 @@ export function requiredReviewers(fm: { engagements: Engagement[] }): Engagement
   return fm.engagements.filter((e) => !e.delivers && e.verdictCapable);
 }
 
-/** Verdicts bound to the CURRENT work revision — older ones are stale (F10-32). */
+/**
+ * Ruling 388: what a review on this task binds to right now.
+ *
+ * The active work revision, or — when the deliverable is not a commit — the
+ * moment a run last saved files. ONE place decides it, so the verdict writer,
+ * the staleness rule, the derived validation and the required-reviewer gate can
+ * never disagree about what was reviewed. Null when the task has delivered
+ * nothing at all, which is ruling 161's case: nobody owes a verdict.
+ */
+export function reviewSubjectId(fm: {
+  workRevision: WorkRevision | null;
+  deliveredAt?: string | null;
+}): string | null {
+  const rev = activeWorkRevision(fm.workRevision);
+  if (rev) return rev.id;
+  return fm.deliveredAt ? `files:${fm.deliveredAt}` : null;
+}
+
+/** Verdicts bound to the CURRENT subject — older ones are stale (F10-32,
+ *  ruling 388). */
 export function currentVerdicts(fm: {
   workRevision: WorkRevision | null;
+  deliveredAt?: string | null;
   verdicts: ReviewVerdict[];
 }): ReviewVerdict[] {
-  const rev = activeWorkRevision(fm.workRevision);
-  if (!rev) return [];
-  return fm.verdicts.filter((v) => v.revisionId === rev.id);
+  const subject = reviewSubjectId(fm);
+  if (!subject) return [];
+  return fm.verdicts.filter((v) => v.revisionId === subject);
 }
 
 /** The DERIVED review-state cache written into `validation` (F10-15): failing if
@@ -1367,8 +1410,14 @@ export function currentVerdicts(fm: {
 export function deriveValidation(
   fm: ReviewState,
 ): (typeof VALIDATION_VALUES)[number] {
-  // Ruling 161: a discarded revision owes nobody a verdict.
-  if (!activeWorkRevision(fm.workRevision)) return "none";
+  // Ruling 161: a discarded revision owes nobody a verdict. Ruling 388: neither
+  // does a task that has delivered nothing at all — but a task whose deliverable
+  // is a saved FILE has delivered, and used to be forced to `none` here however
+  // its reviewer had ruled. Live on ax-clone AX-12 that printed "**Validation:**
+  // none. Review & validation requested changes." in one sentence, and left the
+  // operator with no rework route, because ruling 163's backward move needs a
+  // `failing` or `changed` validation to license it.
+  if (!reviewSubjectId(fm)) return "none";
   const required = requiredReviewers(fm);
   const cur = currentVerdicts(fm);
   const verdictOf = (profileId: string) =>
@@ -1629,6 +1678,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "archived",
   "validation",
   "workRevision",
+  "deliveredAt",
   "verdicts",
   // Ruling 132: same reason as `blockedBy`.
   "baseRefreshes",
@@ -2072,6 +2122,15 @@ export function parseTaskFrontmatter(
       data,
       "workRevision",
       taskFrontmatterFields.workRevision,
+      null,
+    ),
+    // Ruling 388: absent on every file written before it existed, which reads
+    // as "this task has delivered no files" — the truth for all of them.
+    deliveredAt: tolerant(
+      diagnostics,
+      data,
+      "deliveredAt",
+      taskFrontmatterFields.deliveredAt,
       null,
     ),
     // Per-ROW (F18): one malformed verdict drops only itself, never the whole

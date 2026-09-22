@@ -76,10 +76,49 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     expect(requiredReviewers(fm).map((r) => r.profileId)).toEqual(["reviewer"]);
   });
 
-  it("deriveValidation: none without a revision", () => {
+  it("deriveValidation: none when nothing has been delivered at all", () => {
     expect(
       deriveValidation({ engagements: [reviewerA], workRevision: null, verdicts: [] }),
     ).toBe("none");
+  });
+
+  /**
+   * Ruling 388 (F39-15), live on ax-clone AX-12. A research task delivers a
+   * report, not a commit. Keyed on `workRevision` alone this was forced to
+   * `none` however the reviewer had ruled, which printed "**Validation:** none.
+   * Review & validation requested changes." in one sentence and shut the rework
+   * route ruling 163 licenses, because that needs `failing` or `changed`.
+   */
+  it("ruling 388: a verdict on a non-commit DELIVERY derives like any other", () => {
+    const at = "2026-09-22T06:23:28.646Z";
+    const onFiles = (result: "approve" | "request_changes") => ({
+      profileId: "reviewer",
+      revisionId: `files:${at}`,
+      result,
+      reason: "",
+      at,
+      rounds: 1,
+    });
+    const base = {
+      engagements: [deliverer, reviewerA],
+      workRevision: null,
+      deliveredAt: at,
+    };
+    // CANARY: restore `if (!activeWorkRevision(...)) return "none"` and all
+    // three of these become "none".
+    expect(deriveValidation({ ...base, verdicts: [onFiles("request_changes")] })).toBe(
+      "failing",
+    );
+    expect(deriveValidation({ ...base, verdicts: [onFiles("approve")] })).toBe("healthy");
+    expect(deriveValidation({ ...base, verdicts: [] })).toBe("changed");
+    // A LATER delivery moves the subject, so the old verdict stops counting.
+    expect(
+      deriveValidation({
+        ...base,
+        deliveredAt: "2026-09-22T09:00:00.000Z",
+        verdicts: [onFiles("approve")],
+      }),
+    ).toBe("changed");
   });
 
   it("deriveValidation: request_changes on the current revision → failing", () => {

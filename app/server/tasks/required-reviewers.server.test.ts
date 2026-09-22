@@ -167,10 +167,14 @@ function seed(
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
+/** Ruling 388: when the deliverer saved the report — the task's non-commit
+ *  delivery, and the identity its review binds to. */
+const REPORT_AT = "2026-09-22T06:23:28.646Z";
+
 /** An agent reply that saved a report into the task's `attachments/` dir. */
 function reportEvent(): TaskFileEvent {
   return {
-    occurredAt: "2026-09-22T06:23:28.646Z",
+    occurredAt: REPORT_AT,
     type: "comment",
     actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Implementation" },
     title: null,
@@ -260,7 +264,12 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
    */
   it("ruling 385: holds a report-only task — delivered work, no commit", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
-    seed(store, { stage: "review", waiting: "human" }, null, [reportEvent()]);
+    seed(
+      store,
+      { stage: "review", waiting: "human", deliveredAt: REPORT_AT },
+      null,
+      [reportEvent()],
+    );
     // CANARY: restore `if (!rev && !fm.pr) return []` and this is null.
     const reason = resolveAcceptanceAffordance(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
@@ -273,7 +282,12 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
 
   it("ruling 385: the review queue agrees, so the two surfaces cannot drift", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
-    seed(store, { stage: "review", waiting: "human" }, null, [reportEvent()]);
+    seed(
+      store,
+      { stage: "review", waiting: "human", deliveredAt: REPORT_AT },
+      null,
+      [reportEvent()],
+    );
     const rows = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
@@ -282,6 +296,76 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     expect(rows.working.find((t) => t.key === "VIB-1")?.blockReason).toContain(
       "Required reviewer Code Reviewer",
     );
+  });
+
+  /**
+   * Ruling 388 (F39-15). Ruling 385 held the task; nothing could satisfy the
+   * hold. `requiredReviewerApproved` keyed on `workRevision`, so with no commit
+   * it returned false whatever the reviewer did — and the verdict writer would
+   * not have stored an approval to read anyway. Live on AX-12 that was a dead
+   * end with force-accept as the only door.
+   */
+  it("ruling 388: an approval bound to the DELIVERY satisfies the hold", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        deliveredAt: REPORT_AT,
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${REPORT_AT}`,
+            result: "approve",
+            reason: "The report covers every command and names its sources.",
+            at: "2026-09-22T07:24:15.357Z",
+            rounds: 1,
+          },
+        ],
+      },
+      null,
+      [reportEvent()],
+    );
+    // CANARY: key `requiredReviewerApproved` on `workRevision` again and this
+    // is the refusal sentence forever.
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+        { dataRoot: store.dataRoot },
+      ).blockedReason,
+    ).toBeNull();
+  });
+
+  it("ruling 388: a LATER delivery stales the approval, like a new revision", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        // The deliverer saved again after the verdict, so the subject moved.
+        deliveredAt: "2026-09-22T09:00:00.000Z",
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${REPORT_AT}`,
+            result: "approve",
+            reason: "Approved the earlier draft.",
+            at: "2026-09-22T07:24:15.357Z",
+            rounds: 1,
+          },
+        ],
+      },
+      null,
+      [reportEvent()],
+    );
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+        { dataRoot: store.dataRoot },
+      ).blockedReason,
+    ).toContain("Required reviewer Code Reviewer");
   });
 
   it("ruling 385: a person's own upload is an INPUT and holds nothing", () => {

@@ -4,6 +4,7 @@ import type {
 } from "~/schemas/project-file.schema";
 import {
   activeWorkRevision,
+  reviewSubjectId,
   type PrRef,
   type ReviewVerdict,
   type WorkRevision,
@@ -86,25 +87,13 @@ export interface RequiredReviewerTaskState {
   verdicts: ReviewVerdict[];
   pr: PrRef | null;
   /**
-   * Ruling 385 (F39-12(c)): the task's runs SAVED FILES — a deliverable that
-   * is not a commit. Computed by the caller with {@link runSavedFiles}, because
-   * it lives on the timeline rather than in the frontmatter.
+   * Ruling 385 (F39-12(c)) / ruling 388: when a DELIVERER last saved files —
+   * this task's non-commit delivery. It started life as a timeline scan the
+   * callers threaded in; it is frontmatter now, because the same fact has to
+   * identify what a verdict was given ON, which no reader can reconstruct from
+   * a boolean.
    */
-  savedFiles?: boolean;
-}
-
-/**
- * Ruling 385: did a RUN on this task produce files?
- *
- * `event.attachments` is written only where a run saved something into the
- * task's `attachments/` dir. A person's own upload (ruling 379) writes a plain
- * `note` and no list, which is right: an uploaded fixture is an INPUT to the
- * work, not the work, and holding a review on it would be a different mistake.
- */
-export function runSavedFiles(
-  timeline: readonly { attachments?: string[] }[],
-): boolean {
-  return timeline.some((e) => (e.attachments?.length ?? 0) > 0);
+  deliveredAt?: string | null;
 }
 
 /**
@@ -115,14 +104,18 @@ export function runSavedFiles(
  */
 export function requiredReviewerApproved(
   rule: Pick<RequiredReviewerView, "profileId">,
-  fm: Pick<RequiredReviewerTaskState, "workRevision" | "verdicts">,
+  fm: Pick<RequiredReviewerTaskState, "workRevision" | "deliveredAt" | "verdicts">,
 ): boolean {
-  const rev = activeWorkRevision(fm.workRevision);
-  if (!rev) return false;
+  // Ruling 388: the subject, not the revision. Keyed on `workRevision` alone
+  // this returned false forever on a task whose deliverable is a saved file —
+  // an approval could not be stored, so the gate ruling 385 added could never
+  // be satisfied and force-accept was the only way out.
+  const subject = reviewSubjectId(fm);
+  if (!subject) return false;
   return fm.verdicts.some(
     (v) =>
       v.profileId === rule.profileId &&
-      v.revisionId === rev.id &&
+      v.revisionId === subject &&
       v.result === "approve",
   );
 }
@@ -150,7 +143,7 @@ export function requiredReviewerRefusals(
 ): string[] {
   if (rules.length === 0) return [];
   const rev = activeWorkRevision(fm.workRevision);
-  if (!rev && !fm.pr && !fm.savedFiles) return [];
+  if (!rev && !fm.pr && !fm.deliveredAt) return [];
   const subject = rev
     ? `revision ${rev.headSha.slice(0, 7)}`
     : fm.pr?.headSha
