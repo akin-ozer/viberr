@@ -978,6 +978,10 @@ export async function action({ request, params }: Route.ActionArgs) {
           toStageId,
           manual: true,
         };
+        // Ruling 381: why the person moved it. Required going BACKWARD, which
+        // the server decides (it is the side that knows the stage order).
+        const moveReason = String(formData.get("reason") ?? "").trim();
+        if (moveReason) move.reason = moveReason;
         if (acceptsCompletion) move.ack = acceptanceAck(formData);
         // F32-10 (pass 32): a no-op move must not be narrated as a move. The
         // server's idempotent short-circuit now pays the same gate as a real

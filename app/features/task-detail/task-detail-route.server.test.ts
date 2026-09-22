@@ -982,6 +982,16 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
     expect(result.data.error).toContain("change the task stage");
   });
 
+  it("ruling 381: that same backward move with no reason is refused, after the authority gate", async () => {
+    // Runs BEFORE the move below, which lands VIB-145 on triage for good.
+    // SAFETY: the route answers its refusal envelope, not the transition arm.
+    const result = (await postIntent("VIB-145", ids.arda, {
+      intent: "transition", to: "triage",
+    })) as ActionRefusal;
+    expect(result.init.status).toBe(400);
+    expect(result.data.error).toContain("needs a reason");
+  });
+
   it("an admin can move across a non-boundary edge (manual override), with a toast", async () => {
     // triage is not a declared boundary FROM VIB-145's stage — allowed only
     // because the dropdown move is `manual`. (The transition comment it writes
@@ -989,7 +999,7 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
     // SAFETY: arda is a project admin, so the move returns the transition arm —
     // the only success arm carrying `stage`.
     const result = (await postIntent("VIB-145", ids.arda, {
-      intent: "transition", to: "triage",
+      intent: "transition", to: "triage", reason: "scope was never agreed",
     })) as { ok: true; intent: string; stage: string; toast: string };
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("triage");

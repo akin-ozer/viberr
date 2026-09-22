@@ -1965,13 +1965,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "move_task",
-      "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation.",
+      "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation. A move to an EARLIER stage requires `reason` (ruling 381).",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         toStageId: z.string().describe("Target stage id (from get_project)."),
+        reason: z
+          .string()
+          .optional()
+          .describe(
+            "Required for a move BACKWARD (ruling 381): what should change before the task comes back. It lands on the transition entry and the operator acts on it.",
+          ),
       },
-      runWith(async (args: { projectSlug?: string; taskKey?: string; toStageId: string }) => {
+      runWith(async (args: { projectSlug?: string; taskKey?: string; toStageId: string; reason?: string }) => {
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "move tasks");
@@ -2008,6 +2014,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           toStageId: args.toStageId,
           manual: true,
         };
+        // Ruling 381: the same sentence the board's dialog collects. The
+        // controller is a door onto the same act, so it asks the same thing —
+        // and `transitionStage` refuses the move without it rather than
+        // trusting the caller to have read the schema.
+        if (args.reason?.trim()) move.reason = args.reason.trim();
         const moved = await transitionStage(db, move, actor, { dataRoot });
         return `[done] ${key} is now in stage ${moved.stage}.`;
       }),

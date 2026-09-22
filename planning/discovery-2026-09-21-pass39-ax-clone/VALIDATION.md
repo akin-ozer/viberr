@@ -114,6 +114,40 @@ ruling 377(a) exists to prevent is no longer available to make.
   is what that edit called for. The append path is unit-tested with a canary (route it through
   the replace arm and the first section is destroyed); folded into the next controller turn
   that has a real reason to build a document in pieces.
+## 7. `propose_ruling` (ruling 378) — fired on its own, from a real contradiction
+
+Told on the AX-9 timeline that the Developer's "this image lacks the `ld` linker" was a
+misdiagnosis, with the reproduction and the fix, the operator filed this into
+`environment-and-gates.md` — the document every run on the board reads:
+
+```markdown
+## Proposed (not binding)
+
+Raised by an operator from evidence on a task. **Nothing here is binding.** A human or the
+controller promotes an entry into the settled text above, or deletes it.
+
+- **[AX-9, 2026-09-22]** Amend the host-toolchain wording to state that cgo-enabled
+  `make gate` and the race gate are runnable and passed on this host. The earlier linker
+  failure was caused by the missing gold linker while `/usr/bin/ld` was present, so no
+  cgo/race environment exception remains.
+  Evidence: `go run …/golangci-lint@v2.6.0 --version` exited 0; `make gate` with CGO
+  enabled exited 0; `CGO_ENABLED=1 go test -race ./...` exited 0. `/usr/bin/ld` was GNU ld
+  2.44; the prior failure was `gcc -fuse-ld=gold` unable to find the gold linker while only
+  ld.bfd was installed, and binutils-gold was then installed.
+```
+
+…with the typed `quality` event on the task, a note to the owner, **no settled line touched**,
+and this, unprompted: *"the required reviewer run remains in flight, so no workflow
+transition or acceptance action is warranted yet."* The thing the operator could previously
+only say in a comment now lives beside the rule it corrects.
+
+One defect the first live use exposed and this pass fixed: the entry read
+"Evidence: Evidence: …" — both surfaces label the field, and a model answering a field called
+`evidence` writes the label into the value. The writer strips one leading label now, with a
+canary.
+
+### The tool surface
+
 - `propose_ruling` — **mounted and live**, confirmed off a real operator run's own
   `run_inputs` on the rebuilt instance:
   `['post_comment', 'open_packet', 'resolve_packet', 'set_goal', 'run_agent',
@@ -154,3 +188,25 @@ project-scoped, so it genuinely does not know the task, and a refusal writes not
 task timeline — so "which task did Priya try to force-accept?" is not answerable from the
 record. Honest about what it does record; incomplete as forensics. A nitpick by this pass's
 bar.
+
+## Ruling 381 (F39-8) — a manual move BACKWARD says why
+
+- **Server.** `transitionStage` takes `reason` and refuses a backward `manual` move without
+  one, **after** the authority gate. Order proven by `policy-rbac.server.test.ts`, which
+  expects a contributor's backward move to be 403, not 400: putting the check first turned
+  that case into a validation error and the suite went red.
+- **The reason is on the transition entry**, not in a note beside it — the operator reads the
+  move and its instruction as one fact. `task-governance.server.test.ts` asserts the sentence
+  in the event text and `transitionDetails.reason`; canary (drop the check) resolves instead
+  of rejecting.
+- **Every door.** Task-page stage menu, board drag, and the board's keyboard move all open the
+  same `MoveBackConfirm`; `controller-toolkit`'s `move_task` takes `reason` and is refused
+  without it. Forward moves are untouched and still one click (asserted, both surfaces).
+- **Apply is never a dead end.** An applied operator recommendation carries the card's own
+  words (`detail`, else `label`) as the reason, so a backward Apply never asks a human to
+  retype what the operator already wrote — asserted on the transition entry in
+  `task-actions.server.test.ts`.
+- **Gates.** `npm run lint`, `npm run typecheck`, `npm run build` clean; `vitest run` 7277/7277.
+- **Test-only defect found on the way**: `/id (kb_\w+)/` truncated a base64url id at a hyphen,
+  so the F39-1 append test failed ~1 run in 6. Fixed to `[\w-]+`; swept the repo for the same
+  shape (one other match, unrelated).

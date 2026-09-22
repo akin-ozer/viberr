@@ -890,16 +890,41 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.to).toBe("done");
   });
 
-  it("F19-37: a move to any OTHER stage still goes in one click — only the last stage is an acceptance", async () => {
+  it("F19-37: a FORWARD move to another stage still goes in one click — only the last stage is an acceptance", async () => {
     const { submitted, getByLabelText, getByRole, queryByText } = renderPage({
       myRole: "admin",
+      task: { stage: "triage" },
     });
+    fireEvent.click(getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "Review" }));
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("transition");
+    expect(submitted[0]!.to).toBe("review");
+    expect(submitted[0]!.reason).toBeUndefined();
+    expect(queryByText(/accepts this completion/)).toBeNull();
+  });
+
+  it("ruling 381: a BACKWARD move asks why first, and sends the answer with the move", async () => {
+    // The seventh writer on this menu. A send-back is the strongest instruction
+    // a human posts on a board and it used to be mute; the operator then
+    // inferred the work from an older decision. Canary: submit straight from
+    // `onTransition` and `submitted` fills on the menu click, with no reason.
+    const { container, submitted, getByLabelText, getByRole, getByText } =
+      renderPage({ myRole: "admin" });
     fireEvent.click(getByLabelText("Change stage (currently Review)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Triage" }));
+    expect(submitted).toHaveLength(0);
+    expect(getByText("Move back to Triage?")).toBeTruthy();
+    // It does not move until the reason exists.
+    const confirm = findButton(container, "Move back")!;
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    const why = container.ownerDocument.querySelector("dialog textarea")!;
+    fireEvent.change(why, { target: { value: "  the retry path is unhandled  " } });
+    fireEvent.click(findButton(container, "Move back")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("transition");
     expect(submitted[0]!.to).toBe("triage");
-    expect(queryByText(/accepts this completion/)).toBeNull();
+    expect(submitted[0]!.reason).toBe("the retry path is unhandled");
   });
 });
 

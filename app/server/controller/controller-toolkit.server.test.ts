@@ -514,7 +514,9 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       name: "append-probe",
       doc: { path: "gates.md", content: "# Gates\n\n- Run every gate." },
     });
-    const kbId = /id (kb_\w+)/.exec(created)?.[1];
+    // `newId` is base64url, so the id can carry `-` and `_`: `\w+` would stop
+    // at a hyphen and hand the next call a truncated id ~1 run in 6.
+    const kbId = /id (kb_[\w-]+)/.exec(created)?.[1];
     expect(kbId, created).toBeTruthy();
     // SAFETY: the expectation above fails the test when the reply carried no
     // id, so every use below is on the matched group.
@@ -1070,12 +1072,21 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
       toStageId: "impl",
     });
     expect(denied).toContain("[denied]");
-    const moved = await call(ids.maintainer, "move_task", {
+    // Ruling 381: backward, so the controller is held to the same sentence the
+    // board's dialog collects — and the refusal comes AFTER the tier gate, so
+    // the contributor above is still told about their role, not about a field.
+    const mute = await call(ids.maintainer, "move_task", {
       taskKey: "VIB-142",
       toStageId: "impl",
     });
+    expect(mute).toContain("needs a reason");
+    const moved = await call(ids.maintainer, "move_task", {
+      taskKey: "VIB-142",
+      toStageId: "impl",
+      reason: "the retry path is still unhandled",
+    });
     expect(moved).toContain("[done]");
-    // Restore for later arms.
+    // Restore for later arms. Forward, so it asks nothing.
     const restored = await call(ids.maintainer, "move_task", {
       taskKey: "VIB-142",
       toStageId: "review",

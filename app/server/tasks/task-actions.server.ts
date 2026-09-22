@@ -6368,6 +6368,21 @@ export async function transitionStage(
      *  manual/approval RBAC tier is not re-demanded from them. Never set by a
      *  route; forging it from a request would bypass the board-management tier. */
     recommendationAuthorized?: boolean;
+    /**
+     * Ruling 381 (F39-8): WHY a person moved it. A manual stage move is one of
+     * the strongest signals a human sends — not ready, do this first, I
+     * disagree with the verdict — and it used to be mute: the event read
+     * "moved AX-9 from Review to Verify" and nothing else, while the
+     * operator's own playbook told it to "read why (their note, decision, or
+     * steer) and act on it". Live in pass 39 a send-back carried a specific
+     * instruction, the field did not exist, and the operator inferred the work
+     * from an older decision and dispatched the wrong thing.
+     *
+     * REQUIRED on a manual BACKWARD move (the one that always means
+     * something), optional going forward. Rides the transition event's own
+     * sentence, which is where the operator already looks.
+     */
+    reason?: string;
     /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
      *  Only consulted when this move lands on the TERMINAL stage — the server
      *  reads that as accepting the completion (see below) — and threaded
@@ -6451,6 +6466,7 @@ export async function transitionStage(
     backward &&
     (existing.parsed.frontmatter.validation === "failing" ||
       (changedReworkTarget !== null && input.toStageId === changedReworkTarget));
+  const movingBack = input.manual === true && backward && !ctx.operatorAuthorized;
   if (!boundary && !input.manual && !isReworkMove) {
     // F19-39: this string is RENDERED to a human (an `AppError` message becomes
     // the toast / route error), so the copy ban applies to it exactly as it
@@ -6524,6 +6540,18 @@ export async function transitionStage(
     } else {
       requireAction(db, project, actor, "approve-transition", "change the task stage");
     }
+    // Ruling 381 (F39-8): a manual move BACKWARD says why, or it does not
+    // happen. AFTER the authority gate on purpose — someone who may not move
+    // the task at all is refused for that, not told to write a reason they
+    // could never use. No exemption: the operator's rework route never reaches
+    // this arm (it carries operator authority and its verdict), and an applied
+    // recommendation arrives with the card's own words as the reason. A forward
+    // move is ordinary progress and asks nothing.
+    if (movingBack && !(input.reason ?? "").trim()) {
+      throw AppError.validation(
+        `Moving ${input.taskKey} back from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)} needs a reason: the operator reads it to decide what to do next, and without one it has to guess. Say what should change before this comes back.`,
+      );
+    }
   } else if (boundary!.boundary === "auto") {
     // An auto boundary crossed by a human (the UI always sends manual:true, but
     // a server-side caller that omits `manual` — e.g. applyRecommendation on a
@@ -6553,6 +6581,8 @@ export async function transitionStage(
     );
   }
 
+  // One normalization for the sentence and the audit row.
+  const movedReason = (input.reason ?? "").trim().replace(/\s+/g, " ");
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "transition",
@@ -6560,7 +6590,10 @@ export async function transitionStage(
     title: null,
     text: ctx.operatorAuthorized
       ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
-      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
+      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.` +
+        // Ruling 381: on the event itself, not in a separate note, so the
+        // operator reads the move and the reason as one fact.
+        (movedReason ? ` ${movedReason}` : ""),
     toAgent: false,
     evidence: null,
   };
@@ -6687,6 +6720,7 @@ export async function transitionStage(
     boundary: boundary?.boundary ?? "manual",
   };
   if (input.manual) transitionDetails.manual = true;
+  if (movedReason) transitionDetails.reason = movedReason;
   if (ctx.operatorAuthorized) transitionDetails.by = "operator";
   recordAudit(db, {
     action: "task.transition",
@@ -8689,6 +8723,9 @@ export async function reorderTask(
      *  and an ordinary column move is ack-free. Three states, documented on
      *  `assertAcceptanceDisclosure`. */
     ack?: AcceptanceDisclosure | null;
+    /** Ruling 381 (F39-8): why a person dragged it BACK; forwarded verbatim to
+     *  the manual transition, which requires one for a backward move. */
+    reason?: string;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -8731,6 +8768,10 @@ export async function reorderTask(
     // Ruling 88: see the `ack` field above — the key is set only when the caller
     // is a disclosure-bearing door, so an in-process reorder stays omitted.
     if ("ack" in input) move.ack = input.ack ?? null;
+    // Ruling 381: a backward DRAG is the same act as the stage menu's move, so
+    // it answers the same question rather than being refused with nowhere to
+    // type the answer.
+    if (input.reason) move.reason = input.reason;
     await transitionStage(db, move, actor, ctx);
   }
 
@@ -13973,6 +14014,13 @@ export async function applyRecommendation(
     };
     if (!declaredEdge) move.manual = true;
     if (asCoordination("approve-transition")) move.recommendationAuthorized = true;
+    // Ruling 381: a backward move says why. On this path the card IS the why —
+    // the operator wrote it — so its own words ride onto the transition entry
+    // instead of the human being asked to retype them into a dialog they never
+    // see. `detail` is the operator's reasoning; `label` is the button text and
+    // is never empty, so the move can never be refused for a reason the Apply
+    // click has no way to supply.
+    move.reason = (rec.detail ?? "").trim() || rec.label;
     // Ruling 88: a recommended move onto the TERMINAL stage is an acceptance
     // (`transitionStage` routes it to `acceptCompletion` — the real merge), and
     // that is exactly the F19-3 card whose Apply the ceremony now fronts. The

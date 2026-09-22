@@ -753,16 +753,77 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Triage to In Progress");
   });
 
-  it("allows a BACKWARD manual move (review→ready) for a maintainer", async () => {
+  /**
+   * Ruling 381 (F39-8): a manual move BACKWARD says why.
+   *
+   * It used to be mute — the event read "moved VIB-1 from Review to Ready" and
+   * nothing else — while the operator's own playbook told it to read the
+   * human's reason and act on it. Live in pass 39 a send-back carried a
+   * specific instruction, there was no field for it, and the operator inferred
+   * the work from an older decision and dispatched the wrong thing.
+   */
+  it("ruling 381: a BACKWARD manual move is refused without a reason, and carries it when given", async () => {
     const store = prepared();
     withTask(store, { stage: "review" });
+    // CANARY: drop the `movingBack` guard and this resolves — the move lands
+    // with nothing on the record saying why, which is the whole defect.
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    // It says what to do about it, not just that it refused.
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true, reason: "   " },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      userMessage: expect.stringContaining("needs a reason"),
+    });
+    // Nothing moved on a refusal.
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.stage).toBe("review");
+
     const task = await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "ready",
+        manual: true,
+        reason: "make gate does not run the race test the rulings require. Add it.",
+      },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    // On the transition entry ITSELF, which is where the operator reads it.
+    expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
+    expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Review to Ready");
+    expect(detail?.timeline[0]?.text).toContain("make gate does not run the race test");
+  });
+
+  it("ruling 381: a FORWARD manual move needs no reason", async () => {
+    const store = prepared();
+    withTask(store);
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("impl");
+    // CANARY: require it on every manual move and this fails — ordinary
+    // progress would demand an essay.
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toContain(
+      "moved VIB-1 from Triage to In Progress",
+    );
   });
 
   it("rejects a manual move to an unknown stage", async () => {

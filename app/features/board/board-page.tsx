@@ -55,6 +55,7 @@ import { AgentBadge, AgentGlyph } from "~/ui/identity";
 import { connectionPill } from "~/features/github/github-pills";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
+import { MoveBackConfirm } from "~/features/task-detail/move-back-confirm";
 import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
@@ -1975,6 +1976,13 @@ export function BoardPage({
    *  the resting stop is then the first card the layout draws (`rovingKey`). */
   const [focusKey, setFocusKey] = useState<string | null>(null);
   /** B1: a move into the final stage waits here for an explicit confirmation. */
+  /** Ruling 381: a backward drag waiting on its reason. */
+  const [pendingMoveBack, setPendingMoveBack] = useState<{
+    taskKey: string;
+    from: string;
+    to: string;
+    beforeKey: string;
+  } | null>(null);
   const [pendingAccept, setPendingAccept] = useState<{
     taskKey: string;
     to: string;
@@ -2083,6 +2091,21 @@ export function BoardPage({
       });
       return;
     }
+    // Ruling 381: dragging a card BACK is the same act as picking an earlier
+    // stage from the task page's menu, and the server requires a reason for
+    // either. Without this the drag would simply be refused, with nowhere to
+    // type the answer.
+    const fromIdx = columns.findIndex((c) => c.stage.id === active.fromStage);
+    const toIdx = columns.findIndex((c) => c.stage.id === resolution.to);
+    if (toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx) {
+      setPendingMoveBack({
+        taskKey: active.key,
+        from: active.fromStage,
+        to: resolution.to,
+        beforeKey: resolution.beforeKey ?? "",
+      });
+      return;
+    }
     submitReorder(active.key, resolution.to, resolution.beforeKey ?? "");
   };
 
@@ -2096,6 +2119,9 @@ export function BoardPage({
     // `acceptCompletion` — the real merge). It is the echo of what the ceremony
     // above just displayed; without it the server refuses the acceptance.
     disclosure?: AcceptanceDisclosure,
+    // Ruling 381: why the card went back. Required by the server for a
+    // backward move; collected by `MoveBackConfirm` before this is called.
+    reason?: string,
   ) => {
     // The request is drawn at once (landing preview in the target lane, the
     // card hidden in its own); the arrival pulse waits for the server's yes.
@@ -2110,6 +2136,7 @@ export function BoardPage({
     fd.set("taskKey", taskKey);
     fd.set("to", to);
     fd.set("beforeKey", beforeKey);
+    if (reason) fd.set("reason", reason);
     if (disclosure) {
       for (const [field, value] of Object.entries(
         acceptanceDisclosureFields(disclosure),
@@ -2130,6 +2157,15 @@ export function BoardPage({
     // B1: the keyboard path reaches the same acceptance the drag does.
     if (toStageId === finalStageId) {
       setPendingAccept({ taskKey, to: toStageId, beforeKey: "" });
+      return;
+    }
+    // Ruling 381: and the same reason dialog. A keyboard user who skipped this
+    // would meet a bare 400 with no field to answer it in — the drag's own
+    // dead end, one door over.
+    const fromIdx = columns.findIndex((c) => c.stage.id === fromStage);
+    const toIdx = columns.findIndex((c) => c.stage.id === toStageId);
+    if (toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx && fromStage) {
+      setPendingMoveBack({ taskKey, from: fromStage, to: toStageId, beforeKey: "" });
       return;
     }
     submitReorder(taskKey, toStageId, "");
@@ -2586,6 +2622,29 @@ export function BoardPage({
           the gesture and the confirmation shows the CURRENT PR head, not the one
           the drag started on. A lookup that MISSES is handled by the effect
           above (clear + toast), never by this silent `&&`. */}
+      {pendingMoveBack && (
+        <MoveBackConfirm
+          taskKey={pendingMoveBack.taskKey}
+          taskTitle={
+            allTasks.find((t) => t.key === pendingMoveBack.taskKey)?.title ?? ""
+          }
+          fromStageName={
+            columns.find((c) => c.stage.id === pendingMoveBack.from)?.stage.name ??
+            pendingMoveBack.from
+          }
+          toStageName={
+            columns.find((c) => c.stage.id === pendingMoveBack.to)?.stage.name ??
+            pendingMoveBack.to
+          }
+          busy={transitionFetcher.state !== "idle"}
+          onCancel={() => setPendingMoveBack(null)}
+          onConfirm={(reason) => {
+            const move = pendingMoveBack;
+            setPendingMoveBack(null);
+            submitReorder(move.taskKey, move.to, move.beforeKey, undefined, reason);
+          }}
+        />
+      )}
       {pendingAccept && pendingAcceptTask && (
         <AcceptOnBoardConfirm
           task={pendingAcceptTask}

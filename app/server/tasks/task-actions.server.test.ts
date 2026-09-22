@@ -3429,6 +3429,11 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("impl");
+    // Ruling 381: the move is BACKWARD, and Apply never asks the human for a
+    // sentence — the card's own words are the reason, and they land on the
+    // transition entry where the operator reads them.
+    const applied = task(store).timeline.find((e) => e.type === "transition");
+    expect(applied?.text).toContain("Move the task back to In Progress");
   });
 
   it("ruling 327: the packet door dates the Done record when it WRITES it, not when the ceremony began", async () => {
@@ -3671,7 +3676,8 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
 
   it("a drop on any OTHER column stays ack-free", async () => {
     // The board move is only an acceptance when it lands on the final column;
-    // everywhere else it is the plain governed move it always was.
+    // everywhere else it is the plain governed move it always was. (Backward, so
+    // ruling 381 asks for the sentence the drop already collects.)
     const store = prepared();
     seedReviewed(store);
     await reorderTask(
@@ -3682,6 +3688,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         toStageId: "impl",
         beforeKey: null,
         ack: null,
+        reason: "the retry path is still unhandled",
       },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
@@ -4236,7 +4243,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
 
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true, reason: "the migration is still missing" },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );

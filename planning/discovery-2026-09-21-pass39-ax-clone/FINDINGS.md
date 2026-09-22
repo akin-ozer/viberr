@@ -251,6 +251,47 @@ rather than letting it finish.*
 
 ---
 
+## F39-8 · HIGH · A human moves a task and cannot say why — and the operator is told to read the reason
+
+**The gap, end to end.** The `transition` intent reads exactly two things from the form:
+`to` and, for a move into the final stage, the acceptance disclosure
+(`project.task.tsx:966`). `transitionStage` (`task-actions.server.ts:6347`) has no `reason`
+or `note` in its input at all. The UI sends `_csrf`, `intent`, `to` and nothing else
+(`task-detail-page.tsx:646-656`). The event it writes is the whole record:
+
+> **Transition:** moved AX-9 from Review to Verify.
+
+A manual stage move is one of the strongest signals a person sends — *not ready*, *do this
+first*, *I disagree with the verdict* — and it is mute. Every other governed human action
+carries its words: a packet resolution has a note, a force-accept has a reason, a comment is
+all words. This one has none.
+
+**What the operator is told to do with the reason that does not exist**
+(`viberr-app-expertise.skill.md`, Hand-off truth):
+
+> After a human moves the task, read why (their note, decision, or steer) and act on it. **If
+> the reason is not visible, ask them with one @mention comment and stop.**
+
+**What it cost, live.** AX-9 was approved and at Review. I moved it back to Verify to ask for
+one specific change — the rulings require `go test -race` but `make gate` does not run it, so
+the gate does not enforce its own rule — and passed a `note` describing exactly that. The
+field does not exist, so it was dropped. The operator, finding no reason attached to the
+move, did not ask and stop; it reached for the most recent prior decision and dispatched:
+
+> @Developer Honor Arda's 2026-09-22 decision: rerun the required race gate on a cgo-capable
+> host … Do not change scope unless verification exposes a real defect; commit only if a
+> necessary fix is made.
+
+That is a re-verification of something already verified, not the change that was asked for.
+Nobody lied and nothing was lost from the record — the record never had it. A run was spent
+on the wrong work, and a person who typed their reason had no way to know it went nowhere.
+
+**Both halves need fixing**: the transition needs to carry a reason, and the operator needs to
+actually ask-and-stop when there is none. Shape put to the owner as a design question.
+
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

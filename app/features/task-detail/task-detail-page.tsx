@@ -25,6 +25,7 @@ import {
 } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
+import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -641,12 +642,16 @@ export function TaskDetailPage({
     // Ruling 88: set ONLY for the stage-move-into-Done case, which the server
     // reads as an acceptance and gates on the disclosure like any other accept.
     disclosure?: AcceptanceDisclosure,
+    // Ruling 381: WHY, for a move backward. The server requires it there and
+    // refuses without it, so the dialog below collects it first.
+    reason?: string,
   ) => {
     if (transitionBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "transition");
     fd.set("to", toStageId);
+    if (reason) fd.set("reason", reason);
     if (disclosure) {
       for (const [field, value] of Object.entries(
         acceptanceDisclosureFields(disclosure),
@@ -664,8 +669,17 @@ export function TaskDetailPage({
   // last surface where dropping a card on Done merged silently. Same ceremony,
   // and the confirmed click still posts `transition` (the server's own
   // stage-move contract writes the acceptance from there).
+  /** Ruling 381: the move the operator has to act on, so it carries its reason. */
+  const [confirmMoveBack, setConfirmMoveBack] = useState<string | null>(null);
+  const stageIndexOf = (id: string) => task.stages.findIndex((s) => s.id === id);
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
+    const fromIdx = stageIndexOf(task.stage);
+    const toIdx = stageIndexOf(toStageId);
+    if (toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx) {
+      setConfirmMoveBack(toStageId);
+      return;
+    }
     if (toStageId === terminalStageId && task.stage !== terminalStageId) {
       setConfirmAccept({
         mode: "stage-move",
@@ -976,6 +990,24 @@ export function TaskDetailPage({
         />
       </div>
 
+      {confirmMoveBack && (
+        <MoveBackConfirm
+          taskKey={task.key}
+          taskTitle={task.title}
+          fromStageName={stage?.name ?? task.stage}
+          toStageName={
+            task.stages.find((s) => s.id === confirmMoveBack)?.name ??
+            confirmMoveBack
+          }
+          busy={transitionBusy}
+          onCancel={() => setConfirmMoveBack(null)}
+          onConfirm={(reason) => {
+            const to = confirmMoveBack;
+            setConfirmMoveBack(null);
+            submitTransition(to, undefined, reason);
+          }}
+        />
+      )}
       {confirmAccept && (
         <AcceptConfirm
           task={task}
