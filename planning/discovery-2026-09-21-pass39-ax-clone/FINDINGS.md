@@ -1514,6 +1514,13 @@ cross-task fact viberr already has and already computes, and it costs a projecti
 Not raised as a defect: nothing states a falsehood, the feature is explicitly informational,
 and the collisions above have not yet cost this board a merge. Worth doing before they do.
 
+**Done, 2026-09-22 — ruling 413.** The owner's standing instruction is not to defer, so this
+shipped rather than staying an observation. `OperatorTaskSnapshot.collisions` carries the
+other open review PRs, their numbers, the shared paths and ruling 236's `partial` flag, and
+`read_task` says what it is for. Ruling 236's intersection was extracted as `prPathOverlaps`
+and is now used by both callers instead of re-derived — ruling 407's lesson applied on the
+way in rather than after.
+
 ### The file-lease system is manual and nothing proposes a lease
 
 Ruling 396 gave file leases a human surface. Nothing SUGGESTS one — and AX-20 and AX-21

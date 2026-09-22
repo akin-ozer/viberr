@@ -87,6 +87,41 @@ export interface PrOverlap {
   partial: boolean;
 }
 
+/** Ruling 413: one side of the pairwise intersection, as either caller has it. */
+export interface PrDiffPaths {
+  taskKey: string;
+  prNumber: number;
+  changed: readonly string[];
+  truncated: boolean;
+}
+
+/**
+ * Ruling 236's pairwise path intersection, as a pure rule.
+ *
+ * Extracted (ruling 413) because the operator needs the same answer the review
+ * queue renders, and ruling 407 is the standing lesson about re-deriving a
+ * predicate in a second surface instead of reusing it.
+ */
+export function prPathOverlaps(
+  mine: PrDiffPaths,
+  others: readonly PrDiffPaths[],
+): PrOverlap[] {
+  const minePaths = new Set(mine.changed);
+  const found: PrOverlap[] = [];
+  for (const other of others) {
+    if (other.taskKey === mine.taskKey) continue;
+    const shared = other.changed.filter((path) => minePaths.has(path));
+    if (shared.length === 0) continue;
+    found.push({
+      taskKey: other.taskKey,
+      prNumber: other.prNumber,
+      paths: shared,
+      partial: mine.truncated || other.truncated,
+    });
+  }
+  return found;
+}
+
 export interface ReviewQueueRow {
   key: string;
   title: string;
@@ -401,25 +436,19 @@ export function getReviewQueue(
       diffs.set(t.key, { changed: paths.changed, truncated: paths.truncated });
     }
   }
+  const sides: PrDiffPaths[] = rows.flatMap((row) => {
+    const diff = row.pr ? diffs.get(row.key) : undefined;
+    return diff
+      ? [{ taskKey: row.key, prNumber: row.pr!.number, changed: diff.changed, truncated: diff.truncated }]
+      : [];
+  });
   for (const row of rows) {
     const mineDiff = diffs.get(row.key);
     if (!row.pr || !mineDiff) continue;
-    const mine = new Set(mineDiff.changed);
-    const found: PrOverlap[] = [];
-    for (const other of rows) {
-      if (other.key === row.key || !other.pr) continue;
-      const theirs = diffs.get(other.key);
-      if (!theirs) continue;
-      const shared = theirs.changed.filter((path) => mine.has(path));
-      if (shared.length === 0) continue;
-      found.push({
-        taskKey: other.key,
-        prNumber: other.pr.number,
-        paths: shared,
-        partial: mineDiff.truncated || theirs.truncated,
-      });
-    }
-    row.pr.overlaps = found;
+    row.pr.overlaps = prPathOverlaps(
+      { taskKey: row.key, prNumber: row.pr.number, changed: mineDiff.changed, truncated: mineDiff.truncated },
+      sides,
+    );
   }
 
   const isReady = (r: ReviewQueueRow): boolean =>

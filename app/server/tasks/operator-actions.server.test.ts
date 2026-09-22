@@ -6178,6 +6178,71 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     expect(snapWith([moved("2026-09-22T17:17:02.144Z"), REFUSAL]).unansweredRefusal).toBeUndefined();
   });
 
+  /**
+   * Ruling 413 (improvement point, pass 39): the operator sees the collision
+   * viberr already computes.
+   *
+   * Ruling 236 has intersected the open review PRs' diffs since pass 37 and
+   * rendered the answer on ONE surface, the human's review queue. The operator
+   * decides what to dispatch, when to deliver and whether to refresh a branch,
+   * and `get_task` was single-task -- which the ax-clone controller named as
+   * its third weakness: "every cross-task correlation on this board is
+   * currently done by you". Live, all five open PRs carried an overlap while
+   * AX-20 and AX-21 spent a run, a packet and a human answer on a collision in
+   * `internal/sandbox/local.go`.
+   */
+  it("ruling 413: the snapshot names the other open PRs this task's diff collides with", () => {
+    const prAt = (number: number, changed: string[]) => ({
+      number,
+      state: "review" as const,
+      title: `PR ${number}`,
+      paths: { headSha: "a".repeat(40), changed, truncated: false },
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        branch: "vib-1",
+        pr: prAt(11, ["internal/sandbox/local.go", "internal/cli/render.go"]),
+      }),
+      goal: "mine",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        branch: "vib-2",
+        pr: prAt(13, ["internal/sandbox/local.go", "internal/runtime/executor.go"]),
+      }),
+      goal: "collides on the sandbox file",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        stage: "impl",
+        branch: "vib-3",
+        pr: prAt(14, ["docs/manifests.md"]),
+      }),
+      goal: "touches nothing of mine",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // CANARY: drop the `collisions` block and this is undefined, which is what
+    // every operator on the ax-clone board was given.
+    const collisions = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    ).collisions;
+    expect(collisions).toEqual([
+      {
+        taskKey: "VIB-2",
+        prNumber: 13,
+        paths: ["internal/sandbox/local.go"],
+        partial: false,
+      },
+    ]);
+  });
+
   it("ruling 408: says nothing once something has been dispatched since", () => {
     expect(
       snapWith([dispatched("2026-09-22T17:09:00.000Z"), REFUSAL]).unansweredRefusal,

@@ -9,6 +9,8 @@ import {
 } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { resolveDependencies } from "~/server/projections/dependencies.server";
+import { listProjectTasks } from "~/server/projections/board-query.server";
+import { prPathOverlaps } from "~/server/projections/review-queue.server";
 import {
   misdirectedOptionPromise,
   misdirectedPromiseRefusal,
@@ -2356,6 +2358,25 @@ export interface OperatorTaskSnapshot {
    * dispatched an agent since.
    */
   unansweredRefusal?: { at: string; text: string };
+  /**
+   * Ruling 413: the OTHER open review PRs whose diff shares a file with this
+   * task's, by shared path.
+   *
+   * Viberr has computed this since ruling 236 and rendered it on exactly one
+   * surface, the human's review queue, described there as "read-only and quiet
+   * by design". The operator is the actor that decides what to dispatch, when
+   * to deliver and whether to refresh a branch, and it had no cross-task view
+   * at all: asked where it was weakest, the ax-clone controller answered that
+   * `get_task` is single-task, "so every cross-task correlation on this board
+   * is currently done by you". Ruling 402 gave it the goal chain for the same
+   * reason; this is the other fact viberr already holds.
+   *
+   * Read live on ax-clone: all five open PRs carried one, and AX-20 and AX-21
+   * had already spent a run, a decision packet and a human answer on a
+   * collision in `internal/sandbox/local.go`. Absent when this task has no
+   * open review PR, or when nothing overlaps.
+   */
+  collisions?: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
   /** Ruling 302: how many entries this task's timeline HAS, against the
    *  `recentTimeline.length` shown. Present always, so a coordinator never has
    *  to infer from a full-looking window that it saw everything. */
@@ -2978,6 +2999,33 @@ export function operatorSnapshot(
     ...((): Pick<OperatorTaskSnapshot, "unansweredRefusal"> => {
       const found = findUnansweredRefusal(file.parsed.timeline);
       return found ? { unansweredRefusal: found } : {};
+    })(),
+    // Ruling 413: ruling 236's intersection, reused rather than re-derived.
+    ...((): Pick<OperatorTaskSnapshot, "collisions"> => {
+      const mine = fm.pr;
+      if (!mine || mine.state !== "review" || !mine.paths?.changed.length) return {};
+      const sides = listProjectTasks(db, projectSlug, { dataRoot: ctx.dataRoot }).flatMap((t) =>
+        t.pr && t.pr.state === "review" && t.pr.paths?.changed.length
+          ? [
+              {
+                taskKey: t.key,
+                prNumber: t.pr.number,
+                changed: t.pr.paths.changed,
+                truncated: t.pr.paths.truncated,
+              },
+            ]
+          : [],
+      );
+      const found = prPathOverlaps(
+        {
+          taskKey,
+          prNumber: mine.number,
+          changed: mine.paths.changed,
+          truncated: mine.paths.truncated,
+        },
+        sides,
+      );
+      return found.length > 0 ? { collisions: found } : {};
     })(),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.
