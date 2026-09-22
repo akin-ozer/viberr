@@ -911,3 +911,34 @@ Two things the sweep surfaced that reading the files would not have:
 AX-24 still reads "link 2 of 8" in its frozen header: it was created at 19:12, and ruling
 404 deployed at 19:34. Correct by design (no migration); the next chain task will carry the
 new form, and that is the live check to make when the board resumes.
+
+## 34. Schedules held across the pause, and ruling 413 verified in the prompt itself
+
+The Codex usage window reopened at 20:12 UTC. All four tasks that carried a scheduled
+`run-operator` picked themselves up at **20:13**, unattended, across a container restart in
+between:
+
+```
+[20:13:25] AX-19:verify/agent  AX-20:review/agent  AX-22:review/agent  AX-24:review/agent
+```
+
+One packet answer set all four (ruling 326's cross-task resolution), the schedule survived
+two redeploys because it lives in the task file, and nothing was run against the rate-limited
+account in the meantime.
+
+**Ruling 413, read out of the operator's own run input** rather than asserted:
+
+```json
+"collisions": [
+  { "taskKey": "AX-18", "prNumber": 16, "paths": ["internal/cli/render.go"], "partial": false },
+  { "taskKey": "AX-19", "prNumber": 11, "paths": ["docs/manifests.md", "internal/apis/types.go"], "partial": false },
+  { "taskKey": "AX-20", ... }
+]
+```
+
+The shared files are named individually, so a directive can say which file another task is
+holding. Two of the four resumed runs carry no `collisions` key at all, which is the absent
+case working: no open review PR, or nothing overlapping.
+
+Before this, the same fact existed only on the human review queue, and every cross-task
+correlation on the board was done by a person.
