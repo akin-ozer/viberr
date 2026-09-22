@@ -1126,6 +1126,108 @@ describe("dispatchGate — absent means the catalog default (hunt 2026-08-29)", 
   });
 });
 
+/**
+ * Ruling 421 (F39-43). Ruling 410 has the operator ask a reviewer that keeps
+ * objecting for everything it would still block on, and on ax-clone every
+ * operator folded that question into the review of a fresh rework. Nothing
+ * recorded that it had, so three deadlock packets in 25 minutes (AX-20, AX-22,
+ * AX-24) recommended asking again the question their own verdict had answered.
+ * The dispatch that puts the question now stamps the engagement with its run.
+ */
+describe("ruling 421: a dispatch that puts the completeness question says so", () => {
+  it("stamps the reviewer's engagement with THIS run's id; a plain dispatch stamps nothing", async () => {
+    // CANARY: drop the stamp in `dispatchAgentRun` (or stop threading
+    // `completeness` through `operatorDispatchAgent`) and `question` stays empty.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const plain = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Review the revision." },
+      authority("supervised"),
+    );
+    expect(plain.outcome).toBe("done");
+    const engaged = () => task().frontmatter.engagements.find((e) => e.profileId === "reviewer");
+    expect(engaged()?.question ?? null).toBeNull();
+    await interruptRunningRuns("VIB-1");
+
+    const asked = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        prompt: "Review the rework, and name everything you would still block on.",
+        completeness: true,
+      },
+      authority("supervised"),
+    );
+    expect(asked.outcome).toBe("done");
+    const newest = listRunsForTask(store.db, store.slug, "VIB-1")
+      .filter((r) => r.kind === "reviewer")
+      .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""))
+      .at(-1)!;
+    expect(engaged()?.question).toMatchObject({ kind: "completeness", runId: newest.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("the Claude operator's run_agent tool threads `completeness` to the stamp", async () => {
+    // CANARY: drop `if (args.completeness) input.completeness = true` from the
+    // toolkit's run_agent handler and the engagement carries no question.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("supervised"),
+    });
+    const runAgent = toolkit.tools.find((t) => t.name === "run_agent")!;
+    // SAFETY: the handler validates its own arguments; this is the shape the
+    // tool's schema declares.
+    await runAgent.handler(
+      { profileId: "reviewer", prompt: "Name everything you would still block on.", completeness: true } as never,
+      {} as never,
+    );
+    const run = listRunsForTask(store.db, store.slug, "VIB-1").find((r) => r.kind === "reviewer")!;
+    expect(
+      task().frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question,
+    ).toMatchObject({ kind: "completeness", runId: run.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("a recommended completeness run carries the flag on its card, and Apply stamps it", async () => {
+    // CANARY: drop `rec.completeness` from the recommend arm or from Apply.
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Name everything you would block on.", completeness: true },
+      authority("supervised"),
+    );
+    const card = task().frontmatter.recommendations[0]!;
+    expect(card).toMatchObject({ kind: "run_agent", profileId: "reviewer", completeness: true });
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: card.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const run = listRunsForTask(store.db, store.slug, "VIB-1").find((r) => r.kind === "reviewer")!;
+    expect(
+      task().frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question,
+    ).toMatchObject({ kind: "completeness", runId: run.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+});
+
 describe("operatorDispatchAgent — supporting posture (delivers derivation)", () => {
   it("a verdict-capable, non-repo-write profile auto-engages as SUPPORTING and runs as a reviewer", async () => {
     // resolveDeliversIntent: no explicit hint, unengaged, and no repo-write

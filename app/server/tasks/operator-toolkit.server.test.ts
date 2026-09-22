@@ -604,6 +604,29 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain("Refused on any other kind");
   });
 
+  it("ruling 421: run_agent publishes `completeness`, and get_task names it with the round-two question", async () => {
+    // CANARY: drop the `completeness` field from run_agent's schema, and the
+    // Claude operator has no way to say the question was put.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("dispatch-agents", "direct");
+        return auth;
+      })(),
+    });
+    const declared = JSON.stringify(
+      (await publishedSchemas(toolkit.mcpServers.viberr)).get("run_agent"),
+    );
+    expect(declared).toContain('"completeness"');
+    expect(declared).toContain("records the verdict that run returns as the reviewer's complete set");
+    const getTask = toolkit.tools.find((t) => t.name === "get_task")!;
+    expect(getTask.description).toContain("Pass `completeness: true` on that `run_agent` (ruling 421)");
+  });
+
   /**
    * Ruling 164 (pass 35, F35-14): the tool that AUTHORS options says the title
    * is a promise, names the two kinds that keep it, and declares `toStage`.

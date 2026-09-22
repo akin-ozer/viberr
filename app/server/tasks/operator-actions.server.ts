@@ -929,6 +929,8 @@ interface RecommendationInput {
   label: string;
   /** accept_completion — ruling 137: the work revision the offer binds to. */
   forHeadSha?: string;
+  /** run_agent — ruling 421: the run puts the completeness question. */
+  completeness?: boolean;
 }
 
 async function addRecommendation(
@@ -950,6 +952,7 @@ async function addRecommendation(
   if (rec.profileId) recommendation.profileId = rec.profileId;
   if (rec.prompt) recommendation.prompt = rec.prompt;
   if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
+  if (rec.completeness) recommendation.completeness = true;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
   if (rec.forHeadSha) recommendation.forHeadSha = rec.forHeadSha;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
@@ -973,6 +976,7 @@ async function addRecommendation(
     } else if (
       existing.prompt !== recommendation.prompt ||
       existing.delivers !== recommendation.delivers ||
+      existing.completeness !== recommendation.completeness ||
       existing.label !== recommendation.label ||
       existing.forHeadSha !== recommendation.forHeadSha
     ) {
@@ -992,6 +996,8 @@ async function addRecommendation(
       } else {
         delete existing.delivers;
       }
+      if (recommendation.completeness) existing.completeness = true;
+      else delete existing.completeness;
       // Ruling 137: a re-recommended acceptance re-binds to the revision it
       // was authored against, or the card keeps a stale binding.
       if (recommendation.forHeadSha !== undefined) {
@@ -3910,6 +3916,9 @@ export async function operatorDispatchAgent(
     delivers?: boolean;
     /** The operator's stated reason, when it gave one. */
     reason?: string;
+    /** Ruling 421: this run puts ruling 410's completeness question, so the
+     *  verdict it returns is recorded as the reviewer's complete set. */
+    completeness?: boolean;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -3982,6 +3991,7 @@ export async function operatorDispatchAgent(
     // Persist the EXPLICIT hint so Apply dispatches what this arm announced —
     // the card used to drop it and Apply re-derived, sometimes the opposite.
     if (input.delivers !== undefined) rec.delivers = input.delivers;
+    if (input.completeness) rec.completeness = true;
     await addRecommendation(
       db,
       ctx,
@@ -4057,6 +4067,7 @@ export async function operatorDispatchAgent(
     // the same rule as the trace above, and an explicit `true` is what asks
     // assignSpecialist for a delivery hand-off.
     if (input.delivers !== undefined) promptInput.delivers = input.delivers;
+    if (input.completeness) promptInput.completeness = true;
     let prompted: Awaited<ReturnType<typeof operatorPromptAgent>>;
     try {
       prompted = await operatorPromptAgent(db, promptInput, ctx);
@@ -4095,6 +4106,7 @@ export async function operatorDispatchAgent(
     profileId: input.profileId,
   };
   if (input.delivers !== undefined) dispatch.delivers = input.delivers;
+  if (input.completeness) dispatch.completeness = true;
   let result: Awaited<ReturnType<typeof startAgentRun>>;
   try {
     result = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx(ctx));

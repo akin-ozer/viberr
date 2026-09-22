@@ -1765,6 +1765,86 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(raised.body).not.toContain("So either it did");
     });
 
+    /**
+     * Ruling 421 (F39-43). The shape measured three times on ax-clone in 25
+     * minutes: after a rework, the operator dispatched the review WITH ruling
+     * 410's question folded in ("provide one complete verdict with every
+     * remaining blocker"), the reviewer answered, and the packet that answer
+     * raised recommended asking the question again, because nothing on record
+     * said it had been asked.
+     */
+    const reviewAsked = async (reply: string, stampRun: "this" | "another" = "this") => {
+      rework();
+      const runId = await finishedRunWith(reply);
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          const own = f.frontmatter.engagements.find((e) => e.profileId === "reviewer");
+          own!.question = {
+            kind: "completeness",
+            runId: stampRun === "this" ? runId : "run_some_other_dispatch",
+            at: new Date().toISOString(),
+          };
+        },
+      );
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: runId, state: "finished" },
+      );
+    };
+
+    it("ruling 421: the verdict of a run that put the question IS the answer, and the packet it raises recommends one rework", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await reviewAsked(blocks(3));
+
+      const verdict = taskFile().parsed.frontmatter.verdicts[0]!;
+      // CANARY: drop the `answersQuestion` stamp in the verdict writer.
+      expect(verdict.answers).toBe("completeness");
+      // Consumed: the stamp answers exactly one verdict.
+      expect(
+        taskFile().parsed.frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question ?? null,
+      ).toBeNull();
+
+      const raised = taskFile().parsed.packet!;
+      expect(raised.title).toContain("requested changes 3 times running");
+      // CANARY: stop passing `askedWithThisReview` to the packet builder and
+      // the question is recommended on top of the answer it just received.
+      expect(raised.options.filter((o) => o.rec).map((o) => o.t)).toEqual(["Rework once against this verdict"]);
+      const question = raised.options.find((o) => o.kind === "question_reviewer")!;
+      expect(question.rec).toBe(false);
+      expect(question.d).toContain("It was asked this with its review of");
+      expect(raised.body).toContain("answer to the completeness question");
+      expect(raised.body).not.toContain("So either it did");
+    });
+
+    it("ruling 421: a stamp from another run never makes this verdict an answer", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await reviewAsked(blocks(3), "another");
+      // CANARY: match the stamp by kind alone, not by run id, and this verdict
+      // is taken for an answer nobody asked for.
+      expect(taskFile().parsed.frontmatter.verdicts[0]!.answers).toBeUndefined();
+      const raised = taskFile().parsed.packet!;
+      expect(raised.options.find((o) => o.rec)?.kind).toBe("question_reviewer");
+    });
+
+    it("ruling 421: an answer given with an EARLIER review in the streak is not asked for again either", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await reviewAsked(blocks(2)); // round two, the question folded in: answered
+      await review(blocks(3)); // one rework against it, still objecting
+      const raised = taskFile().parsed.packet!;
+      expect(raised.options.filter((o) => o.rec).map((o) => o.t)).toEqual(["Let the rework continue"]);
+      expect(raised.body).toContain("was asked for everything it would block on with its review of");
+      expect(raised.body).not.toContain("read `");
+    });
+
     it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
       /**
        * Ruling 237 raises the "N times running" packet from inside the locked

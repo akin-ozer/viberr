@@ -1756,7 +1756,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: var(--tint-well);
 }
 .obs .k { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); padding-top: .125rem; }
-.obs code { font-family: var(--font-mono); font-size: .75rem; }
+/* Ruling 419(e): a code observation keeps its own lines. The conflict packet's
+   `git` row is git's multi-line output ("Auto-merging a.go" / "CONFLICT (content):
+   …"), and without this it ran together into one line, live on ax-clone AX-24. */
+.obs code { font-family: var(--font-mono); font-size: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* R17-1: a divergence warning row inside an acceptance dialog — the reviewed
    revision moved on, so the value reads in the warning tone. */
 .obs.warn { border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 55%); background: var(--rose-light); }

@@ -3920,6 +3920,15 @@ export async function recordAgentCompletion(
           // Ruling 416(b): every same-result verdict on this revision, fought
           // or not, so a later packet can tell the question was answered here.
           const reviews = prior?.result === verdict ? (prior.reviews ?? prior.rounds) + 1 : 1;
+          // Ruling 421 (F39-43): the run that returned this verdict was the one
+          // that put the completeness question, so this verdict IS the answer.
+          // Keyed by run id and consumed here, so no later verdict inherits it.
+          const asked = parsed.frontmatter.engagements.find(
+            (e) => e.profileId === reviewerProfileId,
+          );
+          const answersQuestion =
+            asked?.question?.kind === "completeness" && asked.question.runId === runId;
+          if (asked?.question && asked.question.runId === runId) asked.question = null;
           const recorded: ReviewVerdict = {
             profileId: reviewerProfileId,
             revisionId: subjectId,
@@ -3935,6 +3944,11 @@ export async function recordAgentCompletion(
             rounds,
             reviews,
           };
+          // Kept across a same-result overwrite on this revision, as `reviews`
+          // is: a later round here must not erase that the question was answered.
+          if (answersQuestion || (prior?.result === verdict && prior.answers === "completeness")) {
+            recorded.answers = "completeness";
+          }
           // Ruling 388: only a commit has a head sha to denormalize.
           if (rev) recorded.headSha = rev.headSha;
           parsed.frontmatter.verdicts = [
@@ -3987,6 +4001,8 @@ export async function recordAgentCompletion(
                 // reviewer's answer on unchanged work, not a fresh round.
                 noReworkBehind,
                 revisionLabel: rev ? rev.headSha.slice(0, 7) : null,
+                // Ruling 421: this run put the completeness question.
+                askedWithThisReview: answersQuestion,
               });
               parsed.frontmatter.waiting = "human";
               // Ruling 137 says a packet withdraws the standing acceptance
@@ -6036,6 +6052,8 @@ export async function operatorPromptAgent(
     /** The agent's @mention handle (e.g. its name), prepended to the prompt so
      *  the comment reads as directing the agent by name ("@dev implement …"). */
     handle: string;
+    /** Ruling 421: this directive puts the completeness question. */
+    completeness?: boolean;
   },
   ctx: TaskMutationContext = {},
 ): Promise<StartAgentRunResult> {
@@ -6102,6 +6120,7 @@ export async function operatorPromptAgent(
       directive,
     };
     if (input.delivers !== undefined) dispatch.delivers = input.delivers;
+    if (input.completeness) dispatch.completeness = true;
     started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
@@ -14237,6 +14256,8 @@ export async function applyRecommendation(
     // Apply installs exactly what was recommended — re-deriving here could
     // flip a "supporting" recommendation into a delivery hand-off.
     if (rec.delivers !== undefined) dispatch.delivers = rec.delivers;
+    // Ruling 421: a recommended completeness question is stamped on Apply too.
+    if (rec.completeness) dispatch.completeness = true;
     await startAgentRun(db, dispatch, runActor, runCtx);
   } else if (rec.kind === "transition" && rec.toStageId) {
     // Owner ruling 2026-07-26: the operator may recommend a move OFF the

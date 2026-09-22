@@ -3427,6 +3427,11 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
   });
 
+  it("ruling 419(e): a packet's code observation keeps its line breaks", () => {
+    // CANARY: drop `white-space: pre-wrap` from `.obs code`.
+    expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);
+  });
+
   it("shows the thread switcher only in the one-column layout, and no key hint on touch", () => {
     expect(ruleBody(CODE, ".ctl-picker")).toMatch(/display:\s*none/);
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-picker")).toMatch(/display:\s*block/);

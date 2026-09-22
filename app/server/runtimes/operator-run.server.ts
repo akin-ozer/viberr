@@ -2229,6 +2229,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             items: { type: "string" },
             description: "For lease_files ONLY (ruling 417): the path globs to lease to THIS task until it merges, as narrow as the shared files (`*` within one segment, `**` across segments), and put the reason in `text`. First come, first served: a path another active task already holds is refused by name. Null for every other tool.",
           },
+          completeness: {
+            type: ["boolean", "null"],
+            description: "For run_agent ONLY (ruling 421): true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
+          },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
           // default set. Null → use the packet type's default options.
@@ -2292,7 +2296,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "paths"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "paths", "completeness"],
       },
     },
   },
@@ -2324,6 +2328,9 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 417: lease_files — `.optional()` so plans persisted before the
   // field existed still replay across a restart-resume.
   paths: z.array(z.string()).nullable().optional(),
+  // Ruling 421: run_agent's completeness question — `.optional()` for the same
+  // replay reason.
+  completeness: z.boolean().nullable().optional(),
   packetOptions: z
     .array(
       z.strictObject({
@@ -2924,6 +2931,7 @@ async function executeCodexPlan(
             if (a.text) dispatch.prompt = a.text;
             if (a.delivers != null) dispatch.delivers = a.delivers;
             if (a.reason) dispatch.reason = a.reason;
+            if (a.completeness) dispatch.completeness = true;
             const dispatched = await operatorDispatchAgent(db, ctx, dispatch, authority);
             // R20-9: only a dispatch that actually LANDED is a consultation — a
             // denied or no-op one consulted nobody (noteConsultedProfile).
@@ -4353,6 +4361,9 @@ function operatorTurnDoctrine(
       // Ruling 410: the sentence above is round ONE. Live on ax-clone the skill
       // carried the round-two duty (AX-24, 20:35) while this said otherwise.
       "At the SECOND consecutive objection from the same reviewer (`reviewers[].consecutiveRequestChanges` 2), do not rework yet: run that reviewer once with no rework behind it and ask for everything it would still block on, then rework ONCE against the whole answer (ruling 410). " +
+      // Ruling 421 (F39-43): the question has to be RECORDED as asked, or the
+      // deadlock packet recommends asking it again on top of the answer.
+      "Whenever a `run_agent` puts that question to a reviewer, alone or folded into the review of a fresh rework, set `completeness: true` on it: Viberr then records the verdict that run returns as the complete set, and a later deadlock packet recommends one rework against it instead of the question you already asked (ruling 421). " +
       // Ruling 418 (owner): this is the turn a reviewer's verdict arrives on,
       // and it returns before the stage rules, so the duty is stated here too.
       "If the objection is a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it, also `propose_ruling` that convention in the rulings document it belongs to, with the verdict as the evidence: one per class, never one per finding. " +
@@ -4611,7 +4622,7 @@ function stageRule(snapshot: OperatorTaskSnapshot): string {
     // complete list per revision (specialist-run.server.ts), so a later
     // round that introduces a class it could have named earlier is a defect
     // in the REVIEW, and the operator is the one who can see it.
-    "- SAME reviewer, a DIFFERENT objection each round (`consecutiveRequestChanges` \u2265 2 with the earlier findings actually fixed): its verdict is supposed to be the COMPLETE set it would block on for that revision, so a fresh class appearing now is either something the rework introduced, something that was unreachable until an earlier blocker cleared, or a review that is being paid for one finding at a time. You will usually not have to act on this yourself: the SECOND consecutive objection from one reviewer opens a decision packet for the person who owns the task (ruling 237), and a packet pauses your coordination until they answer, so the case reaches you already decided. When you are reading a task where it has NOT (the packet slot was taken, or the project does not let you open packets), the move is to ask the reviewer and require the answer before the next rework: `run_agent` THE REVIEWER with `delivers: false` and that question as its prompt \u2014 \u201cname everything you would still block on across your owned surface, now\u201d. `post_comment` is narration for the humans and reaches no agent: a question you only comment can never be answered, and the turn ends having done nothing. Do not send the deliverer back into another round until the reviewer has answered.\n" +
+    "- SAME reviewer, a DIFFERENT objection each round (`consecutiveRequestChanges` \u2265 2 with the earlier findings actually fixed): its verdict is supposed to be the COMPLETE set it would block on for that revision, so a fresh class appearing now is either something the rework introduced, something that was unreachable until an earlier blocker cleared, or a review that is being paid for one finding at a time. You will usually not have to act on this yourself: the SECOND consecutive objection from one reviewer opens a decision packet for the person who owns the task (ruling 237), and a packet pauses your coordination until they answer, so the case reaches you already decided. When you are reading a task where it has NOT (the packet slot was taken, or the project does not let you open packets), the move is to ask the reviewer and require the answer before the next rework: `run_agent` THE REVIEWER with `delivers: false`, `completeness: true` (ruling 421: the verdict it returns is then recorded as the answer) and that question as its prompt \u2014 \u201cname everything you would still block on across your owned surface, now\u201d. `post_comment` is narration for the humans and reaches no agent: a question you only comment can never be answered, and the turn ends having done nothing. Do not send the deliverer back into another round until the reviewer has answered.\n" +
     // Ruling 418 (owner): the rulings KB learns from review. Live on ax-clone
     // the reviewers blocked on git option injection (AX-19), credentials in
     // status (AX-22) and lost field presence (AX-24), and none became a

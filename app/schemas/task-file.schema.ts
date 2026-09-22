@@ -299,6 +299,26 @@ export const engagementSchema = z
      *  live profile" rule intact, so an ADMIN's profile-backend change still takes
      *  effect on the next run — the retry pin and a profile edit stay distinct. */
     pinnedBackend: z.enum(["codex", "claude"]).nullable().optional(),
+    /**
+     * Ruling 421 (F39-43): the run this engagement is answering the
+     * completeness question in. Ruling 410 has the operator ask a reviewer
+     * that keeps objecting for EVERYTHING it would still block on, and every
+     * operator on ax-clone folded that question into the review that follows
+     * a rework. Nothing recorded that it had, so three deadlock packets in 25
+     * minutes recommended asking again the question the very verdict they
+     * escalated had answered. The dispatch that puts the question stamps it
+     * here with its run id; the verdict THAT run returns is recorded as the
+     * answer (`ReviewVerdict.answers`) and consumes it. Keyed by run, so a
+     * stamp a later run did not carry can never attach to that run's verdict.
+     */
+    question: z
+      .object({
+        kind: z.literal("completeness"),
+        runId: z.string().min(1),
+        at: z.string().min(1),
+      })
+      .nullable()
+      .optional(),
   })
   .loose();
 export type Engagement = z.infer<typeof engagementSchema>;
@@ -398,6 +418,9 @@ export const recommendationSchema = z
      *  re-derived the posture and could install the opposite one). Absent =
      *  no hint (Apply derives, exactly like a hint-less dispatch). */
     delivers: z.boolean().optional(),
+    /** run_agent — ruling 421: the recommended run puts the completeness
+     *  question, so Apply stamps it exactly as a direct dispatch would. */
+    completeness: z.boolean().optional(),
     /** transition — the target stage id. */
     toStageId: z.string().optional(),
     /** Button label, e.g. "Run Developer". */
@@ -1163,6 +1186,13 @@ export const reviewVerdictSchema = z
      *  packet must not recommend asking again. Absent reads as `rounds` (no
      *  such re-read on record). */
     reviews: z.number().int().min(1).optional(),
+    /** Ruling 421: the reviewer answered the completeness question on this
+     *  revision in the current same-result streak: a run that put it
+     *  (`Engagement.question`) returned this result here. Kept across the
+     *  per-revision overwrite, as `reviews` is, so a later round on the same
+     *  revision does not erase it. The deadlock packet reads it as the
+     *  question spent. */
+    answers: z.literal("completeness").optional(),
   })
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;

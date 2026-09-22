@@ -1089,6 +1089,14 @@ export interface StartAgentRunInput {
    * cannot file one.
    */
   withholdVerdict?: boolean;
+  /**
+   * Ruling 421 (F39-43): this run puts ruling 410's completeness question, so
+   * the verdict it returns is the reviewer's complete blocking set. Stamped on
+   * the engagement with this run's id once the run exists (`Engagement.question`)
+   * and read back by the verdict writer, which records the verdict as the
+   * answer. The deadlock packet then stops recommending the question it asked.
+   */
+  completeness?: boolean;
 }
 
 export async function startAgentRun(
@@ -2150,6 +2158,18 @@ async function dispatchAgentRun(
   // remove the plugin the run is reading (run-service removes it at settle).
   pending.reservation = null;
   pending.skillPlugin = null;
+
+  // Ruling 421: the run that puts the completeness question says so on its
+  // engagement, keyed by THIS run's id, so the verdict it returns is recorded
+  // as the answer. A refused run answers nothing, so it stamps nothing.
+  if (input.completeness && outcome !== "refused") {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      const own = parsed.frontmatter.engagements.find(
+        (e) => e.profileId === engagement.profileId,
+      );
+      if (own) own.question = { kind: "completeness", runId, at: new Date().toISOString() };
+    });
+  }
 
   // P19-G8/G11: the run's INPUTS, on the run, before its first provider line.
   // Everything here was already resolved above and, until now, thrown away.

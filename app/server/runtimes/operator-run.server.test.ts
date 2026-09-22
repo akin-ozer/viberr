@@ -1275,6 +1275,15 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     expect(item.required).toContain("paths");
   });
 
+  it("ruling 421: the plan schema carries run_agent's `completeness`, required like every other field", () => {
+    // CANARY: drop the property or its `required` entry, and a strict Codex
+    // plan can never say the question was put.
+    const schema = operatorPlanSchemaFor(authority({ "dispatch-agents": "direct" }));
+    const item = schema.properties.actions.items;
+    expect(item.properties.completeness.type).toEqual(["boolean", "null"]);
+    expect(item.required).toContain("completeness");
+  });
+
   it("dispatchGate: an ABSENT dispatch-agents grant keeps run_agent — pre-rework deployments store only the retired ids (hunt 2026-08-29)", () => {
     // The owner's live deployments carry `assign-primary-specialist` +
     // `summon-reviewers` and no `dispatch-agents` row; the plain gate read
@@ -1527,6 +1536,17 @@ describe("pr-diverged turn instruction (both backends)", () => {
     // The snapshot the Codex plan reads carries the older decision's words.
     expect(codex).toContain("rather than asking again");
     expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("A PERSON has decided");
+  });
+
+  it("ruling 421: the completeness question is flagged on the turn a verdict arrives and in the stage rules", () => {
+    // The turn a second objection lands on tells the operator to set it.
+    // CANARY: drop the ruling-421 sentence from the agent-reply branch.
+    const reply = "Verdict: request-changes\n\nStill blocking.";
+    const onVerdict = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
+    expect(onVerdict).toContain("set `completeness: true` on it");
+    // And the stage rules' fallback arm names it with the dispatch it goes on.
+    const later = buildCodexOperatorPrompt(snapshot({}), "manual");
+    expect(later).toContain("`completeness: true` (ruling 421");
   });
 
   it("ruling 418: a reviewer's defect class becomes a proposed convention, on the turn the verdict arrives and on the stage rules", () => {
@@ -3270,6 +3290,64 @@ describe("pending trigger queue", () => {
           reason: "Rewriting the sandbox lifetime; AX-21 waits on it.",
         },
       ]);
+    });
+  });
+
+  it("ruling 421: a Codex plan's run_agent with `completeness` stamps the engagement with the run it started", async () => {
+    const project = readProjectFile({ projectSlug: store3.slug, dataRoot: store3.dataRoot })!;
+    writeProject(store3.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Reviewer",
+            role: "Review & validation",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ],
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    await drive({ trigger: "manual" });
+    // CANARY: drop `if (a.completeness) dispatch.completeness = true` from the
+    // executor and the engagement carries no question.
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "run_agent",
+            profileId: "reviewer",
+            delivers: false,
+            toStageId: null,
+            packetType: null,
+            text: "Review the rework and name everything you would still block on.",
+            reason: null,
+            packetOptions: null,
+            kbSource: null,
+            repoSource: null,
+            blockedBy: null,
+            paths: null,
+            completeness: true,
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      const task = readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!;
+      const engaged = task.parsed.frontmatter.engagements.find((e) => e.profileId === "reviewer");
+      const reviewerRun = store3.db
+        .prepare(`SELECT id FROM agent_runs WHERE agent_profile_id = 'reviewer' ORDER BY rowid DESC LIMIT 1`)
+        .get();
+      expect(engaged?.question).toMatchObject({ kind: "completeness", runId: String(reviewerRun?.id) });
     });
   });
 
