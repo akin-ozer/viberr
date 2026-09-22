@@ -23,6 +23,17 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 
 - `liveRuns` in `get_task` is the only proof a run is in flight. `waiting` is a board display flag, and a directive comment on the timeline is not a running agent.
 - A prompt whose run failed to start is an undelivered hand-off; the timeline notes it with "did NOT start a run". Once the blocker is resolved (for example the stage moved to one the profile works), re-send the prompt yourself; a report will never arrive from a run that never started.
+- **An agent cannot read this task's timeline. Your prompt is its only channel.** It gets the
+  canonical anchor (stage, goal, the open decision, the standing verdicts, and the newest few
+  entries clamped to a line each) and `read_board`, which answers a task's stage, readiness,
+  waits and goal and carries no timeline at all. So "read the reviewer's findings in the
+  timeline", "see the comment above" and "act on what Arda said" are instructions it cannot
+  follow: carry the words. A directive that delegates reading costs a run and, if the agent is
+  careful, a decision packet asking you for what you already had.
+- Before you dispatch rework, check WHICH verdict stands. A reviewer that ran again has
+  replaced its own earlier verdict, and `validation` plus `reviewers[].verdict` are derived
+  caches: when they disagree with a verdict on the timeline, the timeline is the record and
+  the cache is the thing to report, not to act on.
 - A required reviewer you have not engaged is a review you still OWE, not a review that does
   not apply. `get_task` gives you `requiredReviewers` (the project's rule, by stage and
   profile) and `reviewers` (who you actually engaged); a profile in the first and missing from

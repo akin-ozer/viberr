@@ -618,6 +618,41 @@ than offering a button that nothing behind it could honour.
 
 ---
 
+## F39-19 · HIGH · The operator told an agent to read a timeline no agent can read
+
+AX-12, verbatim, from the operator to its deliverer:
+
+> @Developer Act on Arda's latest steer: **read the Reviewer's request-changes findings in the
+> timeline**, correct the report attachment accordingly, and save the corrected report again.
+
+Six minutes later the Developer raised a decision packet:
+
+> **Reviewer findings needed.** Please paste the Reviewer's request-changes findings into the
+> next directive, or provide an authenticated/readable task-timeline view. … The Viberr task
+> page redirects to sign-in.
+
+**The agent was right.** A specialist's whole view of the record is:
+
+- the canonical anchor, which clamps every timeline entry to **220 characters** — shorter than
+  any verdict worth reworking against;
+- `read_board`, whose own description is "its title, stage, readiness, what it waits on,
+  whether it is archived, and its goal" — **no timeline**;
+- nothing else. It tried the task page over HTTP and got the sign-in redirect, which is right.
+
+So the directive named a source the agent cannot reach, and the agent spent a run and a human
+decision asking for what the operator already had in front of it. The operator's own playbook
+says to do the opposite — "`run_agent` the delivering profile with **the concrete findings as
+its prompt**" — and it delegated the reading instead.
+
+Both halves fixed. The doctrine now says it as a fact about the machinery rather than a style
+note: *an agent cannot read this task's timeline; your prompt is its only channel*, with "see
+the comment above" and "act on what Arda said" named as the same mistake. And the anchor now
+carries **the standing verdicts whole** (ruling 392) — stored, already clipped at 2,000
+characters by ruling 292, and the one part of the record a rework run cannot proceed without.
+On this incident that alone would have prevented the packet.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

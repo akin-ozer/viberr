@@ -199,6 +199,66 @@ describe("canonicalTaskAnchor", () => {
     expect(anchor).toContain("Postgres");
   });
 
+  /**
+   * Ruling 392 (F39-19), live on ax-clone AX-12: the operator wrote
+   * "@Developer … read the Reviewer's request-changes findings in the timeline",
+   * and no agent can. `read_board` answers stage, readiness, waits, archived and
+   * goal, with no timeline at all; this anchor is every other word an agent
+   * gets, and it clamps each entry to 220 characters — shorter than any verdict
+   * worth reworking against. The deliverer raised a decision packet asking a
+   * human to paste them, which cost a run and a human decision.
+   */
+  it("ruling 392: the standing verdicts ride WHOLE, because rework has nowhere else to read them", () => {
+    const reason =
+      "Blocking findings:\n\n- internal/store/store.go:825 snapshot errors occur " +
+      "after the WAL is synced, so Create returns an error while Get sees the object. " +
+      "X".repeat(600);
+    const anchor = canonicalTaskAnchor({
+      parsed: parsed({
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          validation: "failing",
+          workRevision: {
+            id: "rev_1",
+            headSha: "c".repeat(40),
+            treeSha: "t".repeat(40),
+            branch: "vib-1",
+            createdAt: "2026-09-22T04:48:51.861Z",
+            sourceProfileId: "developer",
+          },
+          verdicts: [
+            {
+              profileId: "reviewer",
+              revisionId: "rev_1",
+              headSha: "c".repeat(40),
+              result: "request_changes",
+              reason,
+              at: "2026-09-22T07:24:15.357Z",
+              rounds: 1,
+            },
+          ],
+        }),
+      }),
+      stageName: "In Progress",
+    });
+    // CANARY: drop the verdict section and the findings are reachable from
+    // NOWHERE an agent can read — the 220-char timeline clamp is the only
+    // other copy.
+    expect(anchor).toContain("Review verdicts that stand right now");
+    expect(anchor).toContain("request_changes");
+    expect(anchor).toContain("internal/store/store.go:825");
+    // Whole, not clamped to the timeline's 220.
+    expect(anchor).toContain("X".repeat(500));
+    // And it says which verdict is the live one, because a superseded verdict
+    // is exactly what AX-12's operator dispatched rework against.
+    expect(anchor.replace(/\s+/g, " ")).toContain("has been superseded by these");
+  });
+
+  it("ruling 392: a task with no standing verdict gains no section", () => {
+    const anchor = canonicalTaskAnchor({ parsed: parsed(), stageName: "In Progress" });
+    expect(anchor).not.toContain("Review verdicts that stand right now");
+  });
+
   it("includes the newest N timeline events and clamps the prompt budget", () => {
     const event = (n: number): TaskFileEvent => ({
       occurredAt: `2026-07-2${n}T10:00:00.000Z`,

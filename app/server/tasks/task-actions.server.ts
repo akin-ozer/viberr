@@ -32,6 +32,7 @@ import {
   revisionLeftWorkspace,
   type RevisionDeparture,
   activeWorkRevision,
+  currentVerdicts,
   reviewSubjectId,
   type ReviewVerdict,
   consecutiveRequestChanges,
@@ -1657,6 +1658,15 @@ export interface CommentToAgentResult extends AppendCommentResult {
 const ANCHOR_GOAL_MAX_CHARS = 1500;
 const ANCHOR_EVENT_MAX_CHARS = 220;
 const ANCHOR_EVENT_COUNT = 5;
+/**
+ * Ruling 392 (F39-19): how much of a standing verdict's reason the anchor
+ * carries. Generous on purpose — ruling 292 already clips a stored reason at
+ * 2,000 characters, so this is the WHOLE of what viberr kept, and it is the one
+ * thing a rework run cannot proceed without.
+ */
+const ANCHOR_VERDICT_MAX_CHARS = 2000;
+/** At most this many, newest first. One per reviewer is the normal shape. */
+const ANCHOR_VERDICT_COUNT = 3;
 
 function anchorActorLabel(actor: FileActorRef): string {
   switch (actor.kind) {
@@ -1761,6 +1771,43 @@ export function canonicalTaskAnchor(input: {
     lines.push(
       `"${anchorClamp(packet.title, ANCHOR_EVENT_MAX_CHARS)}"${options ? ` — options: ${options}` : ""}`,
     );
+  }
+  /**
+   * Ruling 392 (F39-19): the verdicts that STAND, with their reasons whole.
+   *
+   * Live on ax-clone AX-12 the operator wrote "@Developer … read the Reviewer's
+   * request-changes findings in the timeline" — and no agent can. `read_board`
+   * answers a task's stage, readiness, waits, archived flag and goal, and no
+   * timeline at all; this anchor is every other word an agent gets, and it
+   * clamps each entry to 220 characters, which is shorter than any verdict
+   * worth reworking against. The deliverer did the right thing and raised a
+   * decision packet asking a human to paste them, which cost a run and a human
+   * decision to answer.
+   *
+   * The operator's playbook already says to carry the findings in its prompt.
+   * This is the half that does not depend on it remembering: the reasons are
+   * stored, bounded, and about the work in front of the agent.
+   */
+  const standing = currentVerdicts(fm).slice(0, ANCHOR_VERDICT_COUNT);
+  if (standing.length > 0) {
+    lines.push("");
+    lines.push("### Review verdicts that stand right now");
+    lines.push(
+      "These are the stored verdicts on the revision under review, whole. Nothing " +
+        "else on this task is a verdict, and an older one you remember has been " +
+        "superseded by these.",
+    );
+    for (const v of standing) {
+      const on = v.headSha ? ` on \`${v.headSha.slice(0, 12)}\`` : "";
+      lines.push(
+        `- **${v.profileId}** — ${v.result}${on} (${v.at}):`,
+      );
+      lines.push(
+        v.reason.trim()
+          ? anchorClamp(v.reason, ANCHOR_VERDICT_MAX_CHARS)
+          : "_No reason recorded._",
+      );
+    }
   }
   const recent = timeline.slice(0, input.events ?? ANCHOR_EVENT_COUNT);
   if (recent.length > 0) {

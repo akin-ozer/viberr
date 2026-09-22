@@ -33,6 +33,7 @@ per item and each one was applied to the source and observed failing.
 | 20 | Codex's transport prose classifies as a network failure (F39-16) | — | **done**, ruling 389 |
 | 21 | The controller's grant request outlives its conversation (F39-17) | "surface a grant request to an admin" | **done**, ruling 390 |
 | 22 | A non-commit task is not told its work went missing (F39-18) | — | **done**, ruling 391 |
+| 23 | The standing verdicts ride in the agent's anchor (F39-19) | — | **done**, ruling 392 |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list
