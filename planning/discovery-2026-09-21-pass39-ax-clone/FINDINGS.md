@@ -1478,3 +1478,46 @@ that records the verdict — so the operator's next turn finds `waiting: human` 
 decision already gone.
 
 Owner's call: give the operator the move rather than the memory. Ruling 410.
+
+## Improvement points (not defects, and labelled as such)
+
+The goal asks for improvement points in the operator's runtime as well as its bugs. These
+are things viberr does correctly but incompletely; none of them is a lie or a lost piece of
+work, so none became a ruling.
+
+### The one cross-task fact viberr already computes, and does not give the operator
+
+Ruling 236 computes, for every row of the review queue, which OTHER open pull request that
+row's diff collides with, by shared repository path. Read live, all five open PRs carry one:
+
+```
+AX-18  PR #16  collides with AX-21
+AX-19  PR #11  collides with AX-22
+AX-20  PR #13  collides with AX-22
+AX-21  PR #15  collides with AX-18
+AX-22  PR #18  collides with AX-19, AX-20
+```
+
+`PrOverlap` is consumed by exactly one surface, `review-page.tsx`, which describes it as
+"read-only and quiet by design: it orders nothing". `OperatorTaskSnapshot` has no overlap
+field, and the operator is the actor that decides what to dispatch, when to deliver, and
+whether to refresh a branch from its base.
+
+This is the concrete half of what the controller named as the operator's third weakness:
+
+> The operator cannot see another task's reviewer findings; `get_task` is single-task. So
+> every cross-task correlation on this board is currently done by you.
+
+Ruling 402 gave the operator its goal chain for the same reason. The overlap is the other
+cross-task fact viberr already has and already computes, and it costs a projection read.
+
+Not raised as a defect: nothing states a falsehood, the feature is explicitly informational,
+and the collisions above have not yet cost this board a merge. Worth doing before they do.
+
+### The file-lease system is manual and nothing proposes a lease
+
+Ruling 396 gave file leases a human surface. Nothing SUGGESTS one — and AX-20 and AX-21
+spent an afternoon contending over `internal/sandbox/local.go` (AX-21 blocked, a packet
+raised, a human decision spent) which is exactly the collision a lease exists to prevent.
+A lease proposed from the overlap above would have been the mechanism working ahead of the
+problem instead of after it.
