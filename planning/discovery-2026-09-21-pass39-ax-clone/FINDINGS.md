@@ -1287,6 +1287,12 @@ human reads.
 
 Ruling 403. `postTokens` becomes `number | null`, null renders "a summary".
 
+**Corrected by F39-40 / ruling 414.** The measurement above is wrong about why. My script
+looked for a `token_count` AFTER the LAST marker. The compaction's own size line sits
+BETWEEN its two markers, and `compactions=2` in every row was the tell: one compaction,
+counted twice. The size was measurable all along. Ruling 403's null is still right for a
+marker with genuinely nothing after it, but that was never this board's case.
+
 ## F39-31 · MEDIUM · A task tells its own agent it is the last link while three more follow
 
 goal-4 was created with 5 links. The controller added links 6, 7 and 8 on 2026-09-22.
@@ -1597,28 +1603,73 @@ never needed the transition at all.
 
 Ruling 399's shape, in the sentence whose only job is to explain a refusal. Ruling 412.
 
-### A human cannot defer a task, only run it now
+### ~~A human cannot defer a task, only run it now~~ WITHDRAWN: the control exists
 
-Ruling 153 gave schedules a real implementation: the clamps are validated (VALIDATION §12),
-the operator and controller both hold `schedule_task_action`, and viberr's own quota packet
-offers "Wait for the window and pick the task back up automatically" as an option — which
-is a scheduled `run-operator`, written into the task file:
+I wrote this note from the task page's "Run operator" button without reading the control
+beside it. It was wrong, and it would have sent a fresh implementer to build a duplicate.
 
-```yaml
-schedules:
-  - id: sch_cVPdfHEKd5YC
-    action: run-operator
-    dueAt: 2026-09-22T20:13:00.000Z
+`OperatorRunControl` (`app/features/task-detail/execution-profile.tsx`) renders a
+`DelayPicker` labelled "When the operator run starts" with Now, in 5 min, in 1 hour, in 6
+hours and in 24 hours. A picked delay turns the button into "Schedule", and pending runs list
+under the control with a cancel. It is deliberately left ALIVE when running now is refused
+(an open packet, or a backend the owner cannot run), because `scheduleTaskAction` refuses
+neither. `task-disposition.test.tsx` ("the when-picker offers the five delays") and
+`execution-profile.test.tsx` ("refuses the run NOW but keeps SCHEDULING alive") cover it.
+
+The one true residue is that the delays are fixed offsets, so a person cannot say "at the
+reset time" the way viberr's quota packet can. That is a nitpick, recorded so the next pass
+does not re-find it.
+
+## F39-40 · HIGH · Every compaction viberr performed was recorded twice, once as one that never happened
+
+Ruling 376 compacts a Codex run at completion. On the ax-clone board, every one of those
+compactions left TWO timeline notes and two `task.agent.compaction` audit rows, 2 to 11 ms
+apart, with the same "from" size:
+
+```
+17:07:08.472  Context compacted at the end of the run: Viberr summarized Developer's
+              conversation from 195k to 0k tokens while its prompt cache was still warm ...
+17:07:08.475  Context compacted: the provider summarized Developer's conversation from 195k
+              to 0k tokens (auto). ... Viberr re-injected the task anchor so it re-reads the
+              record before it continues.
 ```
 
-A person has no way to ask for that. The task page offers "Run operator" (now) and nothing
-else. So the capability exists, is enforced, is reachable by two agents and by one packet
-that happens to offer it, and is unreachable by the human whose board it is.
+Counted across every task file: **69 completion notes, 71 "(auto)" notes, and 69 of the auto
+notes are a completion note's twin** (same size, under two seconds apart). The other two are
+not genuine either: they are ONE mid-run provider compaction on AX-12, noted twice 2 ms
+apart ("from 242k to 18k tokens" and "from 242k to 22k tokens"). So the board holds **140
+compaction notes for 70 compactions: every compaction viberr has seen, recorded twice.** A
+completion's phantom tells a supervisor the provider replaced the agent's context mid-work
+and that the agent re-read the record "before it continues", on a run that had already
+finished. The run card said "1 compaction" for the same run (the row took the max of three
+spelling tallies), so the record disagreed with itself.
 
-Live cost, small but real: AX-18 is resting at `waiting: human` with no schedule while the
-Codex window is shut. The four tasks beside it will pick themselves up at 20:13 because a
-packet offered it; AX-18 will sit until a person remembers.
+**The cause is in the rollout, and it is also why F39-30 read "0k".** The CLI writes one
+compaction like this (AX-24, `rollout-2026-09-22T19-12-52-…`, lines 402-405):
 
-Not raised as a defect — nothing lies and no work is lost — but it is the shape of "making a
-user do something absurd" in miniature: wait by the keyboard for a clock the product can
-already read.
+```
+402  compacted                                 <- first spelling
+403  event_msg thread_settings_applied
+404  event_msg token_count input=0 total=9083  <- the compaction's own size line
+405  event_msg item_completed ContextCompaction <- second spelling
+```
+
+`codexRolloutRunStats` deduplicated spellings with a pending holder, and the size line
+CLOSED it. So line 405 opened a second compaction with no size. Replaying the parser over all
+69 rollouts that compacted that day: every compaction came out as a pair, the first sized
+(101k to 9k, 117k to 9k, 242k to 17k ...) and the second a phantom with nothing. The run
+service reported `compactionEvents.at(-1)`, which is the phantom, and the rollout fold then
+noted the "leftover" event as trigger `auto`. The real 9k was measured and never shown.
+
+**My mistake, twice over.** Ruling 403 said the figure was "genuinely unknowable" because
+the compaction was the file's last line. My script checked for a size AFTER the last
+marker, and the size sat between the markers. Then I wrote the ruling-403 test from what I
+believed, with a comment saying its fixture was "exactly as on disk". It was not, and no
+fixture in the suite had the real four-line shape, which is why a parser that turned every
+compaction into two passed everything.
+
+Ruling 414. The compaction stays open until the next REAL call (a prompt above zero), so
+every spelling before it is the same compaction. Its own size line measures it without
+closing it. `compactions` is the length of the event list, so the row and the notes count the
+same thing. The Codex fake adapter no longer emits a boundary line on success, which the real
+one never did. Old records stay as they are (no migration, owner's standing rule).

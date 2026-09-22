@@ -483,26 +483,33 @@ export function sessionContextTokens(
 
 /**
  * One compaction as the rollout shows it: the last prompt the CLI sent before
- * it, and the first one after.
+ * it, and the size of the context it left.
  *
- * Ruling 403: `postTokens` is NULL until a later call measures it, never 0.
- * The post size is read from the first `token_count` that follows the
- * compaction marker, and ruling 376's completion compaction is the run's LAST
- * act -- measured on ax-clone, the compaction is the final line of the rollout
- * and no `token_count` ever follows it, so that read has nothing to fill from.
- * A zero seeded as "not measured yet" used to survive all the way to the
- * timeline, where 82 of this board's 84 compaction notes told a human that a
- * 100k-213k token conversation had been summarized "to 0k tokens". Null is the
- * value the whole chain already treats as unmeasured (`compactionNoteText`
- * renders it "a summary"), so the sentinel is the absence it means.
+ * Ruling 403: `postTokens` is NULL when nothing measured it, never 0. A zero
+ * seeded as "not measured yet" survived all the way to the timeline, where it
+ * told a human that a 100k-213k token conversation had been summarized "to 0k
+ * tokens". Null is the value the whole chain treats as unmeasured
+ * (`compactionNoteText` renders it "a summary").
+ *
+ * Ruling 414 corrected why it was missing. The CLI writes one compaction as
+ * `compacted`, then its own size line (a `token_count` whose prompt is 0 and
+ * whose total is the compacted context), then a `ContextCompaction` item. The
+ * size line used to CLOSE the compaction, so the item opened a second one with
+ * no size, and that phantom was the event every note printed. The size was
+ * measured the whole time.
  */
 export interface CodexCompactionEvent {
   preTokens: number;
   postTokens: number | null;
 }
 
-/** The compaction still waiting for the first prompt after it. */
-interface PendingCompaction {
+/**
+ * The compaction whose other spellings may still arrive. It stays open from
+ * its first marker until the next REAL call (a `token_count` with a prompt): a
+ * context can only need compacting again once a call has grown it, so a marker
+ * before that call is the same compaction written another way.
+ */
+interface OpenCompaction {
   event: CodexCompactionEvent | null;
 }
 
@@ -512,11 +519,12 @@ export interface CodexRolloutRunStats {
   peakPromptTokens: number;
   /** The last call's prompt — the size a resume replays. */
   lastPromptTokens: number;
-  /** Context compactions the CLI recorded in the window. */
+  /** Context compactions the CLI recorded in the window: the length of
+   *  `compactionEvents`, so the run row and the notes count the same thing. */
   compactions: number;
   /** One entry per compaction in the window, in order: the last prompt the
-   *  CLI sent before it and the first one after (0 when the rollout ended
-   *  before another call landed). The sizes the timeline note prints. */
+   *  CLI sent before it and the context it left (its own size line, else the
+   *  first call after it, else null). The sizes the timeline note prints. */
   compactionEvents: CodexCompactionEvent[];
   /** Calls seen in the window; 0 means the rollout said nothing about it. */
   calls: number;
@@ -557,18 +565,16 @@ export function codexRolloutRunStats(
   // top-level `compacted` line carrying the replacement history (0.153, the
   // shape measured live on 2026-09-21), an `event_msg` whose item is a
   // `ContextCompaction` (written beside it), and an older `context_compacted`
-  // event. One compaction can appear under two of them, so the count is the
-  // LARGEST of the three tallies, never their sum; the sizes come from the
-  // prompt figures around the first marker of each compaction.
-  const tallies = { compacted: 0, item: 0, event: 0 };
+  // event. One compaction appears under two of them, with its own size line
+  // BETWEEN the two (ruling 414), so every marker until the next real call is
+  // the same compaction.
   let lastPrompt = 0;
-  // The compaction still waiting for the first prompt after it (a holder, so
-  // the marking below is one statement the flow analysis can follow).
-  const pending: PendingCompaction = { event: null };
+  // A holder, so the marking below is one statement the flow analysis follows.
+  const open: OpenCompaction = { event: null };
   const markCompaction = () => {
-    if (pending.event) return; // the same compaction's second spelling
-    pending.event = { preTokens: lastPrompt, postTokens: null };
-    stats.compactionEvents.push(pending.event);
+    if (open.event) return; // the same compaction, spelled again
+    open.event = { preTokens: lastPrompt, postTokens: null };
+    stats.compactionEvents.push(open.event);
   };
   for (const raw of transcriptLines(filePath)) {
     const line = codexRolloutLineSchema.parse(raw);
@@ -577,18 +583,14 @@ export function codexRolloutRunStats(
     // across two runs than to lose the only figure a run has.
     if (Number.isFinite(since) && Number.isFinite(at) && at < since) continue;
     if (line.type === "compacted") {
-      tallies.compacted += 1;
       markCompaction();
       continue;
     }
     if (line.type !== "event_msg" || !line.payload) continue;
-    if (line.payload.type === "context_compacted") {
-      tallies.event += 1;
-      markCompaction();
-      continue;
-    }
-    if (line.payload.type === "item_completed" && line.payload.item?.type === "ContextCompaction") {
-      tallies.item += 1;
+    if (
+      line.payload.type === "context_compacted" ||
+      (line.payload.type === "item_completed" && line.payload.item?.type === "ContextCompaction")
+    ) {
       markCompaction();
       continue;
     }
@@ -597,19 +599,22 @@ export function codexRolloutRunStats(
     const prompt = usage?.input_tokens ?? 0;
     if (prompt <= 0) {
       // The compaction request's own line: no prompt, but `total_tokens` is
-      // the compacted context — the size a resume replays when no later call
-      // followed (ruling 376's completion compaction is the run's last event).
+      // the compacted context, the size a resume replays. It MEASURES the
+      // open compaction and does not end it (ruling 414): the CLI writes the
+      // compaction's second spelling after it.
       const compacted = usage?.total_tokens ?? 0;
-      if (pending.event && compacted > 0) {
-        pending.event.postTokens = compacted;
-        pending.event = null;
+      if (open.event && open.event.postTokens === null && compacted > 0) {
+        open.event.postTokens = compacted;
         stats.lastPromptTokens = compacted;
       }
       continue;
     }
-    if (pending.event) {
-      pending.event.postTokens = prompt;
-      pending.event = null;
+    if (open.event) {
+      // A real call ends the compaction. Its prompt is the post size only
+      // when the compaction's own size line never came: it already carries
+      // the work done since.
+      if (open.event.postTokens === null) open.event.postTokens = prompt;
+      open.event = null;
     }
     lastPrompt = prompt;
     stats.calls += 1;
@@ -623,7 +628,7 @@ export function codexRolloutRunStats(
     stats.lastPromptTokens = prompt;
     if (prompt > stats.peakPromptTokens) stats.peakPromptTokens = prompt;
   }
-  stats.compactions = Math.max(tallies.compacted, tallies.item, tallies.event);
+  stats.compactions = stats.compactionEvents.length;
   return stats;
 }
 

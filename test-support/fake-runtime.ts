@@ -110,8 +110,12 @@ function createFakeAdapter(backend: RealBackend): RuntimeAdapter {
       };
       cb.onPhase?.("Compacting context", "at the end of the run");
       const occurredAt = new Date().toISOString();
-      if (outcome.compacted) {
-        // What the Claude adapter emits: the boundary as this run's fact.
+      // What the Claude adapter emits: the boundary as this run's fact. The
+      // Codex adapter emits NOTHING on success, because the app-server's reply
+      // carries no sizes and the run service reads the compaction off the
+      // rollout instead; a fake that emitted here would note it a second time
+      // (ruling 414).
+      if (outcome.compacted && backend === "claude") {
         cb.onLine({
           raw: JSON.stringify({ type: "test", backend, compaction: outcome }),
           display: {

@@ -129,6 +129,16 @@ function startTestRun(
   return startRun(db, { ...input, agentProfileId, credentialUserId });
 }
 
+/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 414). */
+interface RolloutEventPayload {
+  type: string;
+  turn_id?: string;
+  item?: { type: string; id: string };
+  info?: {
+    last_token_usage: { input_tokens: number; cached_input_tokens: number; total_tokens: number };
+  };
+}
+
 describe("run-service lifecycle", () => {
   it("startRun materializes a run + persists lines + reaches finished", async () => {
     const script = instantScript([
@@ -2659,6 +2669,82 @@ describe("compaction at completion (ruling 376)", () => {
     const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
     expect(audit).toHaveLength(1);
     expect(audit[0]?.details).toMatchObject({ trigger: "completion", backend: "codex", preTokens: 123_508, postTokens: 6_914 });
+  });
+
+  /**
+   * Ruling 414 (F39-40). The CLI writes ONE compaction as two spellings with
+   * its own size line between them. Live on ax-clone, every one of the 69
+   * completion compactions left TWO timeline notes and two audit rows 2-11 ms
+   * apart: "Viberr summarized ... at the end of the run" and "the provider
+   * summarized ... (auto)", the second a compaction that never happened. Both
+   * printed the phantom's missing size ("to 0k tokens", then "to a summary")
+   * while the rollout had measured the real one.
+   */
+  it("on Codex one completion compaction is ONE note and ONE audit row, with the size the rollout measured", async () => {
+    const { writeFileSync, mkdirSync, appendFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const sid = "01a0ca89-0673-71c3-93c8-208b9564c414";
+    const dir = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id, "codex-home", "sessions", "2026", "09", "22");
+    mkdirSync(dir, { recursive: true });
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+    const ev = (ts: string, payload: RolloutEventPayload) =>
+      JSON.stringify({ timestamp: ts, type: "event_msg", payload });
+    const usage = (input: number, total: number) => ({
+      type: "token_count",
+      info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0, total_tokens: total } },
+    });
+    const rollout = path.join(dir, `rollout-2026-09-22T19-12-52-${sid}.jsonl`);
+    writeFileSync(
+      rollout,
+      [
+        JSON.stringify({ timestamp: at(60_000), type: "session_meta", payload: { id: sid } }),
+        ev(at(60_100), usage(190_309, 191_202)),
+      ].join("\n") + "\n",
+    );
+    queueFakeRun({
+      ...finished(sid, 190_309),
+      backend: "codex",
+      lines: [
+        { t: "1", ev: "init", tag: "thread.started", text: "thread" },
+        { t: "2", ev: "result", tag: "turn.completed", text: "done", stats: { dur: 100, api: 90, turns: 1, cost: 0, in: 190_309, cached: 0, out: 200 } },
+      ],
+      extraFacts: [undefined, undefined],
+    });
+    // The app-server compacts the thread and the CLI writes exactly what it
+    // wrote for AX-24 at 19:28:58.
+    queueFakeCompaction("codex", { compacted: true, preTokens: null, postTokens: null }, () => {
+      appendFileSync(
+        rollout,
+        [
+          JSON.stringify({ timestamp: at(60_300), type: "compacted", payload: { message: "", replacement_history: [] } }),
+          ev(at(60_301), { type: "thread_settings_applied" }),
+          ev(at(60_302), usage(0, 9_083)),
+          ev(at(60_303), { type: "item_completed", item: { type: "ContextCompaction", id: "c1" } }),
+        ].join("\n") + "\n",
+      );
+    });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "codex", model: "gpt-5.6-luna", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const run = getRun(store.db, runId)!;
+    expect(run.compactions).toBe(1);
+    expect(run.last_prompt_tokens).toBe(9_083);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
+    // Canary: the phantom second event is a second row, trigger "auto".
+    expect(audit.map((e) => e.details)).toEqual([
+      expect.objectContaining({ trigger: "completion", preTokens: 190_309, postTokens: 9_083 }),
+    ]);
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const notes = task.parsed.timeline.filter(
+      (e) => e.type === "note" && e.title === "Context compacted" && e.text.includes("190k"),
+    );
+    expect(notes.map((n) => n.text)).toEqual([expect.stringContaining("at the end of the run")]);
+    expect(notes[0]!.text).toContain("from 190k to 9k tokens");
+    expect(notes[0]!.text).not.toContain("(auto)");
   });
 
   it("a refused compaction leaves the run finished with its size, and says why on the log", async () => {

@@ -342,6 +342,16 @@ describe("buildResumeScript", () => {
  * Rulings 369 and 372: the size a resume would replay, read off the provider's
  * own transcript, and a Codex run's per-call figures read off its rollout.
  */
+/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 414). */
+interface RolloutEventPayload {
+  type: string;
+  turn_id?: string;
+  item?: { type: string; id: string };
+  info?: {
+    last_token_usage: { input_tokens: number; cached_input_tokens: number; total_tokens: number };
+  };
+}
+
 describe("sessionContextTokens and codexRolloutRunStats", () => {
   const usage = (input: number, write: number, read: number) => ({
     input_tokens: input,
@@ -463,15 +473,99 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
   });
 
   /**
-   * Ruling 403 (F39-30), the shape measured on ax-clone: ruling 376 compacts at
-   * the END of the run, so the compaction marker is the LAST line of the
-   * rollout and no call ever follows it to measure the summary. The size is
-   * unknown, and the sentence a human reads must say so.
-   *
-   * Live, before this fix: 82 of the board's 84 compaction notes read "the
-   * provider summarized <agent>'s conversation from 213k to 0k tokens".
+   * Ruling 414 (F39-40): the shape the CLI really writes for ONE compaction,
+   * copied line for line from an ax-clone rollout (AX-24, 19:28:58). Two
+   * spellings of the compaction with its own size line BETWEEN them:
+   * `compacted`, `thread_settings_applied`, the `token_count` whose prompt is
+   * 0 and whose total is the compacted context, then the `ContextCompaction`
+   * item. The size line closed the compaction, so the item after it opened a
+   * SECOND one with no size: every completion compaction on the board was
+   * noted twice, once as a provider "(auto)" compaction that never happened,
+   * and the size a human read came from the phantom while the measured 9k sat
+   * unread in the first event.
    */
-  it("a completion compaction with nothing after it has an unmeasured post size, and the note says so", () => {
+  it("the CLI's two spellings around the compaction's own size line are ONE compaction, sized", () => {
+    const dir = codexDir("22");
+    const sid = "01a0ca89-0673-71c3-93c8-208b9564cad6";
+    const ev = (ts: string, payload: RolloutEventPayload) =>
+      JSON.stringify({ timestamp: ts, type: "event_msg", payload });
+    const usage = (input: number, total: number) => ({
+      type: "token_count",
+      info: {
+        last_token_usage: { input_tokens: input, cached_input_tokens: 0, total_tokens: total },
+      },
+    });
+    writeFileSync(
+      path.join(dir, `rollout-2026-09-22T19-12-52-${sid}.jsonl`),
+      [
+        JSON.stringify({ timestamp: "2026-09-22T19:12:52.000Z", type: "session_meta", payload: { id: sid } }),
+        ev("2026-09-22T19:28:27.364Z", usage(190_309, 191_202)),
+        ev("2026-09-22T19:28:27.374Z", { type: "task_complete", turn_id: "t1" }),
+        ev("2026-09-22T19:28:29.177Z", { type: "task_started", turn_id: "t2" }),
+        JSON.stringify({ timestamp: "2026-09-22T19:28:58.469Z", type: "token_usage_record", payload: { usage: { input_tokens: 191_893 } } }),
+        JSON.stringify({ timestamp: "2026-09-22T19:28:58.485Z", type: "compacted", payload: { message: "", replacement_history: [] } }),
+        ev("2026-09-22T19:28:58.487Z", { type: "thread_settings_applied" }),
+        ev("2026-09-22T19:28:58.496Z", usage(0, 9_083)),
+        ev("2026-09-22T19:28:58.500Z", { type: "item_completed", item: { type: "ContextCompaction", id: "c1" } }),
+      ].join("\n") + "\n",
+    );
+    const stats = codexRolloutRunStats(OWNER, sid, null)!;
+    // Canary: let the size line close the compaction again and this is two
+    // events, the second `{ preTokens: 190_309, postTokens: null }`.
+    expect(stats.compactionEvents).toEqual([{ preTokens: 190_309, postTokens: 9_083 }]);
+    // The row's count and the notes' count are the same number.
+    expect(stats.compactions).toBe(1);
+    expect(stats.lastPromptTokens).toBe(9_083);
+    expect(stats.calls).toBe(1);
+  });
+
+  it("a real call after the compaction ends it: the next marker is a new compaction", () => {
+    const dir = codexDir("22");
+    const sid = "01a0ca89-0673-71c3-93c8-208b9564ca02";
+    const ev = (ts: string, payload: RolloutEventPayload) =>
+      JSON.stringify({ timestamp: ts, type: "event_msg", payload });
+    const call = (ts: string, input: number, total = input) =>
+      ev(ts, { type: "token_count", info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0, total_tokens: total } } });
+    const compaction = (ts: string, size: number) => [
+      JSON.stringify({ timestamp: ts, type: "compacted", payload: { message: "", replacement_history: [] } }),
+      call(ts, 0, size),
+      ev(ts, { type: "item_completed", item: { type: "ContextCompaction", id: ts } }),
+    ];
+    writeFileSync(
+      path.join(dir, `rollout-2026-09-22T20-00-00-${sid}.jsonl`),
+      [
+        JSON.stringify({ timestamp: "2026-09-22T20:00:00.000Z", type: "session_meta", payload: { id: sid } }),
+        call("2026-09-22T20:00:01.000Z", 240_000),
+        // Mid-run: the provider compacts, and the agent carries on working.
+        ...compaction("2026-09-22T20:00:02.000Z", 17_000),
+        call("2026-09-22T20:00:03.000Z", 22_000),
+        call("2026-09-22T20:00:04.000Z", 150_000),
+        // The run's end: Viberr compacts it (ruling 376).
+        ...compaction("2026-09-22T20:00:05.000Z", 9_000),
+      ].join("\n") + "\n",
+    );
+    const stats = codexRolloutRunStats(OWNER, sid, null)!;
+    expect(stats.compactionEvents).toEqual([
+      // Its own size line measured it; the next call's prompt does not
+      // overwrite that with a figure that includes new work.
+      { preTokens: 240_000, postTokens: 17_000 },
+      { preTokens: 150_000, postTokens: 9_000 },
+    ]);
+    expect(stats.compactions).toBe(2);
+    expect(stats.lastPromptTokens).toBe(9_000);
+  });
+
+  /**
+   * Ruling 403 (F39-30): a compaction marker with nothing measurable after it
+   * (a CLI that died after writing it, or one that writes no size line) has
+   * an unknown post size, and the sentence a human reads must say so.
+   *
+   * Ruling 414 corrected the premise this test once stated. The completion
+   * compaction on disk is NOT a lone final marker: its size line sits between
+   * two spellings (see the test above), and the figure was measurable all
+   * along. This is the genuinely unmeasured case, which the null still serves.
+   */
+  it("a compaction with nothing after it has an unmeasured post size, and the note says so", () => {
     const dir = codexDir("22");
     const sid = "01a0ca03-b8cf-77c0-0000-000000000403";
     writeFileSync(
@@ -483,7 +577,7 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
           type: "event_msg",
           payload: { type: "token_count", info: { last_token_usage: { input_tokens: 111_733, cached_input_tokens: 0 } } },
         }),
-        // The run's last act. Nothing follows, exactly as on disk.
+        // A marker with nothing after it: no size line, no later call.
         JSON.stringify({ timestamp: "2026-07-22T16:47:25.000Z", type: "compacted", payload: { message: "", replacement_history: [] } }),
       ].join("\n") + "\n",
     );

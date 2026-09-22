@@ -2247,10 +2247,10 @@ function launch(
             const event = stats?.compactionEvents.at(-1) ?? null;
             if (stats && stats.compactionEvents.length > compactionsBefore && event) {
               const occurredAt = new Date().toISOString();
-              // Ruling 403: the rollout measures the post size from the first
-              // call AFTER the compaction, and this compaction is the run's
-              // last act -- there is no such call, so the figure is genuinely
-              // unknown here rather than zero. Say so.
+              // Ruling 414: the CLI writes this compaction's own size line
+              // between its two spellings, so the rollout has measured it.
+              // Ruling 403: when it has not (a marker with nothing after it),
+              // the figure is unknown rather than zero. Say so.
               const post =
                 event.postTokens === null
                   ? "a summary"
