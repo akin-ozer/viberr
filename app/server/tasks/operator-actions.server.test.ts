@@ -6133,3 +6133,68 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     });
   });
 });
+
+/**
+ * Ruling 402 (F39-29): the operator can see the chain it is one link of.
+ *
+ * Live on ax-clone AX-4 the operator planned a decision packet offering to
+ * create a follow-on task for the missing `/logs` baseline. `ax logs` is
+ * goal-4 link 5, waiting on AX-4 itself — the very task it was coordinating.
+ * It could not have known: its goal text opens "Part of goal goal-4 … link 1
+ * of 5", and the one read `read_board`'s own description names for that
+ * question ("work you are about to ask for may already have an owner") lists
+ * TASKS, and a pending link has none.
+ */
+describe("ruling 402: the snapshot carries this task's goal chain", () => {
+  const ctx = () => ({ dataRoot: store.dataRoot });
+
+  function snapFor(taskKey: string) {
+    return operatorSnapshot(store.db, ctx(), store.slug, taskKey, authority("full"));
+  }
+
+  it("names every link, including the ones that are still only a plan", async () => {
+    const { createGoal } = await import("./goal-actions.server");
+    deployRoster(DEFAULT_POLICY);
+    const created = await createGoal(
+      store.db,
+      {
+        projectSlug: store.slug,
+        title: "Cycle 4 — CLI",
+        links: [
+          { title: "ax CLI skeleton", goal: "Skeleton. Done when merged." },
+          { title: "ax logs: the route and the command", goal: "Logs. Done when merged.", blockedBy: ["link 1"] },
+        ],
+      },
+      { userId: store.users.arda.id, label: "arda@viberr.dev" },
+      ctx(),
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const chain = snapFor(created.activeTaskKey!).goalChain!;
+    // CANARY: drop `goalChain` and the operator sees "link 1 of 5" in its goal
+    // text with no way to learn what the other links are — which is how AX-4
+    // came to offer a task its own goal already planned.
+    expect(chain.goalId).toBe(created.goalId);
+    expect(chain.title).toBe("Cycle 4 — CLI");
+    expect(chain.linkIndex).toBe(1);
+    expect(chain.links).toEqual([
+      { index: 1, title: "ax CLI skeleton", status: "active", taskKey: created.activeTaskKey, blockedBy: [] },
+      {
+        index: 2,
+        title: "ax logs: the route and the command",
+        status: "pending",
+        // The whole point: planned, owned by the chain, and carrying NO task —
+        // exactly what `read_board` cannot show.
+        taskKey: null,
+        blockedBy: [`${created.goalId} link 1`],
+      },
+    ]);
+  });
+
+  it("says nothing for a task that belongs to no goal", () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    expect(snapFor("VIB-1").goalChain).toBeUndefined();
+  });
+});
+

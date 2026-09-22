@@ -52,6 +52,7 @@ import {
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
 import { RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
+import { readGoalFile } from "~/server/files/goal-writer.server";
 import {
   activeWorkRevision,
   consecutiveRequestChanges,
@@ -2280,6 +2281,36 @@ export interface OperatorTaskSnapshot {
      *  packet is decided and waits for the edited goal, so do not re-ask. */
     awaiting: "goal_edit" | null;
   } | null;
+  /**
+   * Ruling 402 (F39-29): the CHAIN this task is one link of.
+   *
+   * The task's own goal text opens "Part of goal goal-4 (Cycle 4 — CLI: apply,
+   * get, watch, logs), link 1 of 5" — so Viberr tells the operator four other
+   * links exist and, until this, showed it none of them. `read_board` lists
+   * TASKS, and a pending link has no task yet, so the one read its own
+   * description names for the question ("work you are about to ask for may
+   * already have an owner") could not answer it.
+   *
+   * Live on ax-clone AX-4 the operator planned a decision packet offering to
+   * create a follow-on task for the missing `/logs` baseline. `ax logs` is
+   * goal-4 link 5, waiting on AX-4 itself — the very task it was coordinating.
+   * Absent for a task that belongs to no goal.
+   */
+  goalChain?: {
+    goalId: string;
+    title: string;
+    /** This task's own link index within the chain. */
+    linkIndex: number;
+    links: {
+      index: number;
+      title: string;
+      status: string;
+      /** The task carrying it, or null while the link is still only a plan —
+       *  which is exactly the case `read_board` cannot see. */
+      taskKey: string | null;
+      blockedBy: string[];
+    }[];
+  };
   recentTimeline: OperatorTimelineRow[];
   /**
    * Ruling 397 (F39-24): a run Viberr recorded as FAILED that had already
@@ -2870,6 +2901,32 @@ export function operatorSnapshot(
       }
       return row;
     }),
+    // Ruling 402: the chain, when this task is a link of one.
+    ...((): Pick<OperatorTaskSnapshot, "goalChain"> => {
+      const ref = fm.goalRef;
+      if (!ref) return {};
+      const goal = readGoalFile({
+        projectSlug,
+        goalId: ref.goalId,
+        dataRoot: ctx.dataRoot,
+      });
+      if (!goal) return {};
+      const g = goal.parsed.frontmatter;
+      return {
+        goalChain: {
+          goalId: g.id,
+          title: g.title,
+          linkIndex: ref.linkIndex,
+          links: g.links.map((l) => ({
+            index: l.index,
+            title: l.title,
+            status: l.status,
+            taskKey: l.taskKey,
+            blockedBy: l.blockedBy,
+          })),
+        },
+      };
+    })(),
     // Ruling 397: scanned over the WHOLE timeline, not the window above — the
     // pair is adjacent, but the window can end between them.
     ...((): Pick<OperatorTaskSnapshot, "unfinishedReport"> => {

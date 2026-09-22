@@ -42,6 +42,12 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
   the verdicts on the CURRENT revision. This holds for a task that produced no commit too. A
   report, a decision, a design note delivered as an attachment is delivered work, and the
   reviewer the project named still judges it.
+- **Your task is usually one link of a chain, and `get_task` gives you the whole chain in
+  `goalChain`.** Read it before you offer to create a task or defer a piece of scope: a link
+  with `taskKey: null` is work this project has already decided to do and has not started
+  yet, and `read_board` cannot see it, because a planned link has no task to list. Offering a
+  follow-on task for something a later link already owns duplicates the plan; saying "that is
+  goal-4 link 5, waiting on this task" answers the same question and costs nothing.
 - Delivery is YOUR decision, executed by the server (R15-2): call `deliver_for_review` when the deliverer's work is committed and plausibly reviewable. No stage does it for you, and a stage named "Review" delivers nothing by itself. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
 - After a human moves the task, read why and act on it. A move BACKWARD always carries its reason on the transition entry itself: that sentence is the instruction, and it outranks any older decision on the timeline. Act on what it says, not on what the last packet said. If a move genuinely carries no reason, ask them with one @mention comment and stop. Do not infer the work from the most recent prior decision and dispatch an agent on it: a run spent on the wrong thing is worse than a question.
 

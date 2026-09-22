@@ -322,7 +322,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_board",
-      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about — in a document, a report or a directive — is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
+      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about — in a document, a report or a directive — is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 402: this lists TASKS, so it cannot see a goal link that is still only PLANNED — check `goalChain` in `get_task` as well before you offer to create anything, because a pending link is work this project has already decided to do and has not started yet. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
       {
         taskKey: z
           .string()

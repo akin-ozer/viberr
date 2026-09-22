@@ -1104,6 +1104,44 @@ fast-forwards, so the word matches the remedy.
 
 ---
 
+## F39-29 · HIGH · The operator is told it is link 1 of 5 and shown one link
+
+Found by asking why AX-4's operator wanted to create a task the project had already planned.
+
+Its goal text opens:
+
+> Part of goal goal-4 (Cycle 4 — CLI: apply, get, watch, logs), **link 1 of 5**.
+
+And it planned a decision packet offering to *"Create a follow-on task for the missing logs
+baseline"*. But `ax logs` **is goal-4 link 5**, and its declared wait is `AX-4` — the very
+task the operator was coordinating. It was about to ask a human to authorise a duplicate of
+the next-but-three item in its own chain.
+
+It could not have known. Checked all three ways it might have:
+
+| | |
+|---|---|
+| `OperatorTaskSnapshot` | no `goalRef`, no links — only `goal`, the link's own text |
+| operator toolkit | no goal read of any kind (17 tools, none of them `get_goal`) |
+| `read_board` | lists TASKS; goal-4 link 5 is pending and has no task |
+
+The third is the sharp one, because `read_board`'s own description sends the operator there
+for exactly this question:
+
+> "Call it BEFORE you offer a create_task option or write a blockedBy … work you are about to
+> ask for **may already have an owner**."
+
+Sound instruction. The tool it names cannot answer it, because the owner of planned work is
+the plan, and the plan is a goal file the operator cannot read. Ruling 392's shape from the
+other end: there, the operator told an agent to read something it could not reach; here,
+viberr told the operator to check something it could not see.
+
+Fixed as ruling 402: `goalChain` on the snapshot — every link with its index, title, status,
+`taskKey` and declared wait — plus `read_board` saying what it cannot see, and the operator
+skill saying that a link with `taskKey: null` is work already decided and not yet started.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
