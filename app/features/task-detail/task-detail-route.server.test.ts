@@ -133,6 +133,36 @@ async function postIntent(
   } as never);
 }
 
+/**
+ * F39-6 (pass 39): the one intent that arrives as MULTIPART. A person attaching
+ * a file is the writer the attachments directory never had — viberr's own
+ * controller planned around it and the only route was the data volume.
+ */
+async function postFile(
+  key: string,
+  userId: string,
+  name: string,
+  body: string,
+): Promise<ActionData | ActionRefusal> {
+  const { action } = await import("~/routes/project.task");
+  const { cookie, sessionId } = await app.cookieFor(userId);
+  const csrf = await app.csrfFor(sessionId);
+  const form = new FormData();
+  form.set("_csrf", csrf);
+  form.set("intent", "attach-file");
+  form.set("file", new File([body], name));
+  // SAFETY: as in postIntent — the action reads `request` and `params` only.
+  return await action({
+    request: app.request(`/projects/viberr-core/tasks/${key}`, {
+      method: "POST",
+      cookie,
+      body: form,
+    }),
+    params: { slug: "viberr-core", key },
+    context: {},
+  } as never);
+}
+
 /* --------------------------------------------------- loader (read-only) */
 
 describe("loader — VIB-142 fidelity", () => {
@@ -1747,5 +1777,95 @@ describe("ruling 320 — the loader-to-page wire", () => {
       "utf8",
     );
     expect(jsx).toContain("queuedQuestions={loaderData.queuedQuestions}");
+  });
+});
+
+describe("attach-file (F39-6) — the human writer, end to end through the route", () => {
+  const attachmentsOf = async (key: string) => {
+    const { listTaskAttachments } = await import(
+      "~/server/files/task-attachments.server"
+    );
+    return listTaskAttachments("viberr-core", key, app.dataRoot).map((a) => a.name);
+  };
+
+  it("a CONTRIBUTOR attaches a file: it lands, the timeline says so, the audit names them", async () => {
+    const result = await postFile(
+      "VIB-141",
+      ids.selin,
+      "ax-upstream-manifests.yaml",
+      "apiVersion: ax.io/v1alpha1\nkind: Task\n",
+    );
+    expect(result).toMatchObject({ ok: true, intent: "attach-file" });
+    // SAFETY: the assertion above proved this is the `attach-file` success arm,
+    // which is the only member of the action's union carrying `toast` for this
+    // intent.
+    const ok = result as Extract<ActionData, { intent: "attach-file" }>;
+    expect(ok.toast).toContain("ax-upstream-manifests.yaml");
+    // The toast says what the file is FOR, because that is the reason to attach
+    // one at all.
+    expect(ok.toast).toContain("can read it");
+    expect(await attachmentsOf("VIB-141")).toContain("ax-upstream-manifests.yaml");
+
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const top = readTaskFile({
+      projectSlug: "viberr-core",
+      taskKey: "VIB-141",
+      dataRoot: app.dataRoot,
+    })!.parsed.timeline[0]!;
+    expect(top.title).toBe("Attachment added");
+    expect(top.text).toContain("ax-upstream-manifests.yaml");
+    expect(top.actor.kind).toBe("human");
+
+    const { listAuditEvents } = await import("../../../test-support/audit-log");
+    expect(
+      listAuditEvents(app.db).some(
+        (e) =>
+          e.action === "task.attachment.added" &&
+          e.taskKey === "VIB-141" &&
+          e.actorUserId === ids.selin,
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a NON-MEMBER, and refuses a type the serving route would not render", async () => {
+    // CANARY: drop `requireAction(… "attach-file" …)` in attachTaskFile and the
+    // non-member writes into a project they cannot even see.
+    await expect(
+      postFile("VIB-141", ids.deniz, "sneaky.txt", "x"),
+    ).rejects.toBeDefined();
+
+    // SAFETY: an extension outside the upload whitelist throws AppError, which
+    // the route renders through `appErrorResponse` — the refusal arm.
+    const badType = (await postFile(
+      "VIB-141",
+      ids.selin,
+      "page.html",
+      "<script>",
+    )) as ActionRefusal;
+    expect(badType.data.ok).toBe(false);
+    expect(badType.data.error).toContain("does not store");
+    expect(await attachmentsOf("VIB-141")).not.toContain("page.html");
+  });
+
+  it("refuses an empty submit by name", async () => {
+    const { action } = await import("~/routes/project.task");
+    const { cookie, sessionId } = await app.cookieFor(ids.selin);
+    const csrf = await app.csrfFor(sessionId);
+    const form = new FormData();
+    form.set("_csrf", csrf);
+    form.set("intent", "attach-file");
+    // SAFETY: as in postIntent, the action reads `request` and `params` only;
+    // and a submit with no file part takes the intent's own 400 arm.
+    const result = (await action({
+      request: app.request("/projects/viberr-core/tasks/VIB-141", {
+        method: "POST",
+        cookie,
+        body: form,
+      }),
+      params: { slug: "viberr-core", key: "VIB-141" },
+      context: {},
+    } as never)) as ActionRefusal;
+    expect(result.data.ok).toBe(false);
+    expect(result.data.error).toContain("Choose a file");
   });
 });

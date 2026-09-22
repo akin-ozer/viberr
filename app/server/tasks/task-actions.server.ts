@@ -1,3 +1,7 @@
+import {
+  writeTaskAttachment,
+  type WrittenAttachment,
+} from "~/server/files/task-attachments.server";
 import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
@@ -947,6 +951,85 @@ type TaskMetadataPatch = {
  * `urgent` is kept as a derived mirror of `priority === "urgent"` so the board
  * highlight / "risk" filter that read it keep agreeing with the graded scale.
  */
+/**
+ * F39-6 (pass 39): a PERSON attaches a file to a task.
+ *
+ * The attachments directory had three readers and no human writer: the browser
+ * MCP's `--output-dir` and the agent evidence drop could put files there,
+ * nobody could. Viberr's own controller, asked where a human-supplied artifact
+ * would genuinely help this project, named the task and the file and explained
+ * why — "a human-supplied fixture stops the decoder from being tested against a
+ * fixture it wrote for itself" — and the only way to do it was writing into the
+ * server's data volume by hand.
+ *
+ * Contributor-and-above (`attach-file`), the same tier that grooms a task's
+ * metadata and for the same reason: it adds evidence and changes no gate. The
+ * writer refuses a traversing or dot-prefixed name, an extension this product
+ * can neither render nor read back, and anything over the size cap. An archived
+ * task takes no attachments, like every other edit.
+ */
+export async function attachTaskFile(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    name: string;
+    data: Uint8Array;
+  },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ attachment: WrittenAttachment }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "attach-file", "attach a file to a task");
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
+  const existing = readTaskFile(ref);
+  if (!existing) {
+    throw AppError.notFound(`No task ${input.taskKey} in ${input.projectSlug}.`);
+  }
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before attaching a file.`,
+    );
+  }
+  const attachment = writeTaskAttachment(
+    input.projectSlug,
+    input.taskKey,
+    input.name,
+    input.data,
+    ctx.dataRoot,
+  );
+  const kb = Math.max(1, Math.round(attachment.bytes / 1024));
+  await updateTaskFile(ref, (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Attachment added",
+      text:
+        `Attached \`${attachment.name}\` (${kb} KB)` +
+        `${attachment.replaced ? ", replacing a file of the same name" : ""}. ` +
+        "Agents on this task read it from the task's attachments.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.attachment.added",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      name: attachment.name,
+      bytes: attachment.bytes,
+      replaced: attachment.replaced,
+    },
+  });
+  return { attachment };
+}
+
 export async function setTaskMetadata(
   db: DatabaseSync,
   input: {

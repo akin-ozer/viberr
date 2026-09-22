@@ -46,6 +46,7 @@ import {
   resolveAcceptanceAffordance,
   resolvePacket,
   setOwner,
+  attachTaskFile,
   setTaskArchived,
   setTaskMetadata,
   transitionStage,
@@ -855,6 +856,34 @@ export async function action({ request, params }: Route.ActionArgs) {
               },
               { status: 409 },
             );
+      }
+      case "attach-file": {
+        // F39-6: the human writer the attachments panel never had. Multipart,
+        // one file per submit; `attachTaskFile` does the authorization
+        // (`attach-file`, contributor+), the name/extension/size refusals, the
+        // timeline note and the audit row.
+        const file = formData.get("file");
+        if (!(file instanceof File) || file.size === 0) {
+          return data(
+            { ok: false as const, error: "Choose a file to attach." },
+            { status: 400 },
+          );
+        }
+        const { attachment } = await attachTaskFile(
+          db,
+          {
+            projectSlug,
+            taskKey,
+            name: file.name,
+            data: new Uint8Array(await file.arrayBuffer()),
+          },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `${attachment.name} attached${attachment.replaced ? " (replaced)" : ""} · agents on this task can read it`,
+        };
       }
       case "archive-task":
       case "restore-task": {

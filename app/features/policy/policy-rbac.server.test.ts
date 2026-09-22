@@ -18,6 +18,7 @@ import {
   createTask,
   releaseOwner,
   setOwner,
+  attachTaskFile,
   setTaskMetadata,
   transitionStage,
   updateTaskGoal,
@@ -437,6 +438,27 @@ function matrixDrivers() {
               projectSlug: store.slug,
               taskKey: "VIB-1",
               priority: "high",
+            },
+            actor,
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+    ],
+    // F39-6 (pass 39): the human attachment writer. Same tier as the metadata
+    // above, its own action so the Policy table can answer "who may attach the
+    // fixture?" — which it could not while the write rode `edit-task-meta`.
+    "attach-file": [
+      {
+        label: "attachTaskFile",
+        run: async (actor) => {
+          await attachTaskFile(
+            store.db,
+            {
+              projectSlug: store.slug,
+              taskKey: "VIB-1",
+              name: "fixture.yaml",
+              data: new TextEncoder().encode("kind: Task\n"),
             },
             actor,
             { dataRoot: store.dataRoot },
@@ -1737,6 +1759,7 @@ describe("the matrix itself is pinned, not just the call sites", () => {
     "accept-completion": ["admin", "maintainer"],
     "update-goal": ["admin", "maintainer"],
     "edit-task-meta": ["admin", "maintainer", "contributor"],
+    "attach-file": ["admin", "maintainer", "contributor"],
     "run-agents": ["admin", "maintainer"],
     "reorder-board": ["admin", "maintainer"],
     "reconcile-github": ["admin", "maintainer"],

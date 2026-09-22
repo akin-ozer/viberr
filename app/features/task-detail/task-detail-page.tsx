@@ -934,6 +934,10 @@ export function TaskDetailPage({
             browserExpected={deployedSpecialists.some(
               (s) => s.capabilities?.browser,
             )}
+            // F39-6: a contributor and above may attach a file, and an
+            // archived task takes no edits (the server refuses either way —
+            // this is what stops a person meeting the refusal).
+            canAttach={roleCan(role, "attach-file") && !archived}
           />
         ) : null}
 

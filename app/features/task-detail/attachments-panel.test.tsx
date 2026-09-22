@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
+import type { ReactNode } from "react";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { AttachmentsPanel } from "./attachments-panel";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
@@ -108,6 +110,69 @@ function evidenceEvent(label: string): TimelineEventRender {
     evidence: [{ label, add: "+2", del: "−0" }],
   };
 }
+
+/**
+ * F39-6 (pass 39): the human attach control.
+ *
+ * The attachments directory had three readers and no human writer, and this
+ * panel only rendered at all when a browser-capable agent was deployed — so
+ * the one surface that could have told a person they may attach a fixture was
+ * the one surface that did not exist for them. Viberr's own controller planned
+ * around a human attaching an authoritative file; there was no way to do it.
+ */
+describe("AttachmentsPanel attach control (F39-6)", () => {
+  /** `AttachFile` uses `useFetcher`, so it needs a data router. */
+  const renderPanel = (ui: ReactNode) => {
+    const Stub = createRoutesStub([
+      { path: "/t", Component: () => <>{ui}</>, action: async () => ({ ok: true }) },
+    ]);
+    return render(<Stub initialEntries={["/t"]} />);
+  };
+
+  it("renders the panel and the control for a viewer who may attach, with no browser agent", () => {
+    // CANARY: restore `if (!browserExpected) return null` and this renders
+    // nothing at all — the empty-panel rule from when agents were the only
+    // writers.
+    const { container } = renderPanel(
+      <AttachmentsPanel base={BASE} attachments={[]} canAttach />,
+    );
+    expect(container.textContent).toContain("Attachments");
+    expect(container.textContent).toContain("Attach a file");
+    // It says what the file is FOR, which is the whole reason a human attaches
+    // one — not "upload".
+    expect(container.textContent).toContain("read by the agents");
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    // The picker offers exactly what the server will accept, and never the
+    // types the serving route refuses to render inline.
+    expect(input!.accept).toContain(".yaml");
+    expect(input!.accept).toContain(".png");
+    expect(input!.accept).not.toContain(".html");
+    expect(input!.accept).not.toContain(".svg");
+  });
+
+  it("stays silent for a viewer who may NOT attach and has no browser agent", () => {
+    const { container } = renderPanel(
+      <AttachmentsPanel base={BASE} attachments={[]} />,
+    );
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("offers the control beside an existing list, and never without the grant", () => {
+    const withGrant = renderPanel(
+      <AttachmentsPanel base={BASE} attachments={[entry("report.pdf")]} canAttach />,
+    );
+    expect(withGrant.container.textContent).toContain("Attach a file");
+    cleanup();
+    const without = renderPanel(
+      <AttachmentsPanel base={BASE} attachments={[entry("report.pdf")]} />,
+    );
+    expect(without.container.textContent).toContain("report.pdf");
+    expect(without.container.textContent).not.toContain("Attach a file");
+    expect(without.container.querySelector('input[type="file"]')).toBeNull();
+  });
+
+});
 
 describe("TimelineItem evidence linkify", () => {
   it("links a cited filename that names a REAL attachment", () => {

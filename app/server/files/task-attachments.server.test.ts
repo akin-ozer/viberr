@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  MAX_UPLOAD_BYTES,
+  UPLOADABLE_EXTENSIONS,
   attachmentContentType,
   attachmentNamesSince,
   countTaskAttachments,
@@ -10,6 +12,7 @@ import {
   listTaskAttachments,
   pruneBrowserWorkingArtifacts,
   resolveTaskAttachment,
+  writeTaskAttachment,
 } from "./task-attachments.server";
 
 /** R19-19 — the attachments read side: directory-is-truth listing, traversal
@@ -246,5 +249,88 @@ describe("browser working artifacts (ruling 105)", () => {
     expect(attachmentContentType("page-snap.yml").type).toContain("text/plain");
     expect(attachmentContentType("page-snap.yml").inline).toBe(true);
     expect(attachmentContentType("data.csv").type).toContain("text/plain");
+  });
+});
+
+/**
+ * F39-6 (pass 39): the human writer. The directory had three readers and no way
+ * for a PERSON to put a file in it — viberr's own controller planned around a
+ * human attaching an authoritative fixture, and the only route was writing into
+ * the data volume by hand.
+ */
+describe("writeTaskAttachment", () => {
+  const setRoot = () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    mkdirSync(path.join(root, "projects", "p1", "tasks", "VIB-1"), {
+      recursive: true,
+    });
+    return root;
+  };
+  const write = (name: string, body = "kind: Task\n") =>
+    writeTaskAttachment("p1", "VIB-1", name, new TextEncoder().encode(body), root);
+
+  it("writes the file, creates the directory, and reports a replace", () => {
+    setRoot();
+    const first = write("fixture.yaml");
+    expect(first).toEqual({ name: "fixture.yaml", bytes: 11, replaced: false });
+    expect(listTaskAttachments("p1", "VIB-1", root).map((a) => a.name)).toEqual([
+      "fixture.yaml",
+    ]);
+    // The read side must be able to serve exactly what the write side accepted.
+    expect(attachmentContentType("fixture.yaml").inline).toBe(true);
+    const again = write("fixture.yaml", "kind: Workspace\n");
+    expect(again.replaced).toBe(true);
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(1);
+  });
+
+  it("refuses a traversing or separator-bearing name", () => {
+    setRoot();
+    for (const bad of ["../escape.txt", "sub/dir.txt", "..", "a/../../b.txt"]) {
+      // CANARY: write to `path.join(dir, name)` instead of through
+      // `resolveStoreSegment` and these land outside the task directory.
+      expect(() => write(bad), bad).toThrow();
+    }
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
+  });
+
+  it("refuses a dot-prefixed name, which the scanner would then hide", () => {
+    setRoot();
+    expect(() => write(".hidden.txt")).toThrow(/cannot start with a dot/);
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
+  });
+
+  it("refuses an extension this product can neither render nor read back", () => {
+    setRoot();
+    // CANARY: widen UPLOADABLE_EXTENSIONS to allow these and a stored page is
+    // served from the app origin — the stored XSS the serving rules prevent.
+    for (const bad of ["page.html", "icon.svg", "run.js", "tool.sh", "blob.bin", "noext"]) {
+      expect(() => write(bad), bad).toThrow(/does not store/);
+    }
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
+    // And the whitelist is exactly what the two read paths can handle.
+    for (const good of [".png", ".pdf", ".txt", ".md", ".json", ".yaml", ".csv", ".diff", ".patch"]) {
+      expect(UPLOADABLE_EXTENSIONS.has(good), good).toBe(true);
+    }
+    for (const bad of [".html", ".svg", ".js"]) {
+      expect(UPLOADABLE_EXTENSIONS.has(bad), bad).toBe(false);
+    }
+  });
+
+  it("refuses a file over the size cap", () => {
+    setRoot();
+    const tooBig = new Uint8Array(MAX_UPLOAD_BYTES + 1);
+    expect(() =>
+      writeTaskAttachment("p1", "VIB-1", "big.bin", tooBig, root),
+    ).toThrow();
+    // Named by the reason a reader can act on, not by the extension check.
+    expect(() =>
+      writeTaskAttachment("p1", "VIB-1", "big.txt", tooBig, root),
+    ).toThrow(/may be up to/);
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
+  });
+
+  it("refuses an empty name", () => {
+    setRoot();
+    expect(() => write("   ")).toThrow(/Give the file a name/);
   });
 });

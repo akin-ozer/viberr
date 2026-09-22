@@ -1,4 +1,8 @@
+import { useRef } from "react";
+import { useFetcher } from "react-router";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
+import { UPLOADABLE_EXTENSIONS } from "~/server/files/task-attachments.server";
+import { useCsrfToken } from "~/ui/csrf-input";
 import { prettySize } from "~/features/kb-browser/tree";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -20,6 +24,12 @@ export { IMAGE_RE };
  * empty "Attachments (0)" from being noise on every task.
  * Member-gated upstream: the loader ships `[]` to non-members (same bar as the
  * run console), and the serving route re-checks membership on every fetch.
+ *
+ * F39-6 (pass 39): a PERSON can put a file here now. The panel therefore also
+ * renders when the viewer may attach one — previously it stayed silent on every
+ * task without a browser-capable agent, which was right when agents were the
+ * only writers and is wrong now: the one surface that would tell a human they
+ * may attach a fixture was the one that did not exist.
  */
 
 export function AttachmentsPanel({
@@ -28,6 +38,7 @@ export function AttachmentsPanel({
   total,
   producers = {},
   browserExpected = false,
+  canAttach = false,
 }: {
   /** `/projects/<slug>/tasks/<KEY>/attachments` — built by the route, which is
    *  the one place that actually knows the URL params. */
@@ -47,13 +58,16 @@ export function AttachmentsPanel({
   /** D8: a deployed agent holds `use-browser`, so browser evidence is promised
    *  for this task even before the first file lands. */
   browserExpected?: boolean;
+  /** F39-6: the viewer holds `attach-file` on this project and the task is not
+   *  archived, so the drop control renders. */
+  canAttach?: boolean;
 }) {
   // Image previews open the in-app lightbox on a plain click (owner request
   // 2026-08-21); the anchors stay real links for modified clicks. Called
   // before the empty-state return — hooks run unconditionally.
   const lightbox = useAttachmentLightbox();
   if (attachments.length === 0) {
-    if (!browserExpected) return null;
+    if (!browserExpected && !canAttach) return null;
     return (
       <section className="panel" data-comment-anchor="attachments">
         <div className="panel-head">
@@ -61,10 +75,11 @@ export function AttachmentsPanel({
           <h2>Attachments</h2>
         </div>
         <p className="empty">
-          No attachments yet. A browser-capable agent on this task saves the
-          screenshots and files it captures here, and none have landed. They appear
-          the next time such an agent runs and produces evidence.
+          {browserExpected
+            ? "No attachments yet. A browser-capable agent on this task saves the screenshots and files it captures here, and none have landed. They appear the next time such an agent runs and produces evidence."
+            : "No attachments yet. Anything you attach here is read by the agents that run on this task — a fixture, a transcript, a spec they would otherwise have to guess at."}
         </p>
+        {canAttach && <AttachFile />}
       </section>
     );
   }
@@ -84,6 +99,7 @@ export function AttachmentsPanel({
           {attachments.length === 1 ? "1 file" : `${attachments.length} files`}
         </span>
       </div>
+      {canAttach && <AttachFile />}
       {moreNotShown && (
         <p className="ntf-truncated sub">
           Showing the most recent {attachments.length} of {total} files.
@@ -145,5 +161,55 @@ export function AttachmentsPanel({
         </a>
       ))}
     </section>
+  );
+}
+
+/**
+ * F39-6: one file, one submit. A label wrapping a hidden input rather than a
+ * button that clicks one, so the control is reachable by keyboard and by a
+ * screen reader without any script; the fetcher posts the same `attach-file`
+ * intent a `curl` would.
+ *
+ * `accept` is built from the server's own whitelist, so the picker cannot offer
+ * a file the writer would refuse — the refusal still exists server-side, this
+ * just stops a person meeting it.
+ */
+function AttachFile() {
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const csrf = useCsrfToken();
+  const input = useRef<HTMLInputElement>(null);
+  const busy = fetcher.state !== "idle";
+  const error = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null;
+  return (
+    <div className="attach-add">
+      <label className={`btn ghost sm${busy ? " busy" : ""}`}>
+        <Icon name={busy ? "refresh" : "file"} className={busy ? "spin" : ""} />
+        {busy ? "Attaching…" : "Attach a file"}
+        <input
+          ref={input}
+          type="file"
+          disabled={busy}
+          accept={[...UPLOADABLE_EXTENSIONS].sort().join(",")}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (!file) return;
+            const body = new FormData();
+            body.set("intent", "attach-file");
+            body.set("_csrf", csrf);
+            body.set("file", file);
+            fetcher.submit(body, {
+              method: "post",
+              encType: "multipart/form-data",
+            });
+            // Let the same file be chosen again after a refused upload.
+            event.currentTarget.value = "";
+          }}
+        />
+      </label>
+      <span className="sub">
+        Agents on this task read what you attach here.
+      </span>
+      {error && <p className="form-err">{error}</p>}
+    </div>
   );
 }
