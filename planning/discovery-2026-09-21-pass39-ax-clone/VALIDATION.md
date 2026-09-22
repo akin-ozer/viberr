@@ -641,3 +641,33 @@ link 2 and goal-5 link 4"* — comma-joined with a final "and", and a link that 
 its key while a still-planned one does not, which is exactly the distinction a reader needs.
 The Blocked by panel lists all ten. No "+N more", no cut.
 
+## 22. Every board card against every task file
+
+The board is the surface people actually look at, so it is the one most worth diffing. Read
+the 21 rendered cards out of the DOM and every task's frontmatter off disk, independently.
+
+| card says | files say | cards |
+|---|---|---|
+| `blocked` | `readiness: input_required`, non-empty `blockedBy` | AX-5, AX-6 |
+| `agent working` | `waiting: agent` | 7 |
+| `agent working` + `validation failing` | `validation: failing` | AX-18, AX-19, AX-21 |
+| `merged` + PR number | `pr.state: merged`, number matches | 11 |
+| `accepted` | `stage: done`, `pr: null` | AX-12 |
+| (absent) | `archived: true` | AX-8, AX-10 |
+
+No mismatch. Two deliberate silences worth naming, since both could be read as omissions:
+
+- **`validation: changed` renders no chip** (AX-17, AX-20) while `failing` does. Correct under
+  ruling 365's card rule — one status chip plus PROBLEM chips. A changed revision awaiting
+  review is not a problem, it is the normal next state.
+- **A force-accepted task's card reads `accepted`**, the same as any completion with no PR.
+  Checked before calling it a gap, and the record turns out to be complete everywhere it
+  matters: `acceptance: forced` and `validation: bypassed` in the frontmatter, the completion
+  event naming BOTH bypassed gates (ruling 393's list, verbatim on the task page), the audit
+  row, and the Activity stream. The board card is a scannable summary of what needs
+  attention, and a completed task needs none. Not a finding.
+
+**A note on method**: I nearly filed that last one. My first page scan searched for `bypass`
+case-sensitively and missed `Bypassed:`, which made it look as though the task page hid the
+override. Re-checking cost a minute; filing it would have cost a ruling and been wrong.
+
