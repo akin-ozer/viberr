@@ -134,6 +134,7 @@ import {
 import {
   acceptanceNoChangeCheck,
   noChangeApplies,
+  noChangeCandidate,
   noChangeCompletionEvent,
 } from "./no-change-completion.server";
 import {
@@ -146,6 +147,8 @@ import {
   type DispatchHeldError,
 } from "./specialist-run.server";
 import {
+  acceptanceOfferBasis,
+  readRequiredReviewers,
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "./required-reviewers.server";
@@ -4315,6 +4318,7 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
+    const requiredHere = readRequiredReviewers(input.projectSlug, ctx);
     // Ruling 137: the offer binds to the revision it describes, so a later
     // delivery can withdraw it by name and the card can say which one.
     const offer: RecommendationInput = {
@@ -4333,9 +4337,21 @@ export async function operatorAcceptCompletion(
       input.projectSlug,
       input.taskKey,
       offer,
-      isNoChange
-        ? `The review is clean and there is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
-        : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`,
+      // Ruling 384 (F39-12): the first clause is DERIVED, never asserted. The
+      // card used to open "The review is clean and the work meets the goal" on
+      // every acceptance offer — live on AX-12 that sentence sat on a task with
+      // `verdicts: []`, `validation: none` and no reviewer ever engaged. The
+      // second clause keys on whether a PR EXISTS (`noChangeCandidate`), not on
+      // the agent's `noChanges` flag, which is the R20-2 lesson: an envelope
+      // that forgets the flag must not make the card promise a merge for a task
+      // that has no pull request and never will (R19-8, regressed through the
+      // flag).
+      `${acceptanceOfferBasis(file.parsed.frontmatter, requiredHere)} ` +
+        (isNoChange
+          ? `There is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+          : noChangeCandidate(file.parsed.frontmatter)
+            ? `Accepting completion moves ${input.taskKey} to ${doneName}. There is no pull request on this task, so nothing is merged.`
+            : `Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`),
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",

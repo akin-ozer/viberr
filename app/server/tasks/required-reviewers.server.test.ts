@@ -9,6 +9,7 @@ import {
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
+  TaskFileEvent,
   Engagement,
   ReviewVerdict,
   TaskFrontmatter,
@@ -151,12 +152,33 @@ function reviewedByOther(patch: Partial<TaskFrontmatter> = {}): Partial<TaskFron
   };
 }
 
-function seed(store: TestStore, patch: Partial<TaskFrontmatter>, packet: TaskPacket | null = null): void {
+function seed(
+  store: TestStore,
+  patch: Partial<TaskFrontmatter>,
+  packet: TaskPacket | null = null,
+  /** Ruling 385: what a run saved into `attachments/`, on the event that saved it. */
+  timeline: TaskFileEvent[] = [],
+): void {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", patch),
     packet,
+    timeline,
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
+/** An agent reply that saved a report into the task's `attachments/` dir. */
+function reportEvent(): TaskFileEvent {
+  return {
+    occurredAt: "2026-09-22T06:23:28.646Z",
+    type: "comment",
+    actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Implementation" },
+    title: null,
+    text: "The upstream fidelity report is complete and attached.",
+    toAgent: false,
+    evidence: null,
+    attachments: ["AX-12-upstream-fidelity-report.md"],
+  };
 }
 
 function actor(user: { id: string; email: string }) {
@@ -220,6 +242,63 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
   it("does not hold planning work: no active revision and no pull request", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, { stage: "review", waiting: "human", noChanges: true });
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+        { dataRoot: store.dataRoot },
+      ).blockedReason,
+    ).toBeNull();
+  });
+
+  /**
+   * Ruling 385 (owner, 2026-09-22; F39-12(c)), live on ax-clone AX-12. The task
+   * was a standalone upstream-fidelity check: the deliverer wrote a 27KB
+   * report, attached it, committed nothing and opened no PR. The gate held on
+   * git alone, so the project's own rule — "Reviewer reviews at Review" — owed
+   * nothing, and the task reached an enabled one-click Accept with
+   * `verdicts: []`. Any task whose deliverable is not a commit walked through.
+   */
+  it("ruling 385: holds a report-only task — delivered work, no commit", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(store, { stage: "review", waiting: "human" }, null, [reportEvent()]);
+    // CANARY: restore `if (!rev && !fm.pr) return []` and this is null.
+    const reason = resolveAcceptanceAffordance(
+      { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+      { dataRoot: store.dataRoot },
+    ).blockedReason;
+    expect(reason).toContain("Required reviewer Code Reviewer");
+    // No sha to name, so it names what there IS to review.
+    expect(reason).toContain("the work delivered on this task");
+  });
+
+  it("ruling 385: the review queue agrees, so the two surfaces cannot drift", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(store, { stage: "review", waiting: "human" }, null, [reportEvent()]);
+    const rows = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(rows.ready.map((t) => t.key)).not.toContain("VIB-1");
+    expect(rows.working.find((t) => t.key === "VIB-1")?.blockReason).toContain(
+      "Required reviewer Code Reviewer",
+    );
+  });
+
+  it("ruling 385: a person's own upload is an INPUT and holds nothing", () => {
+    // Ruling 379's human attachment writes a plain `note` with no list — an
+    // uploaded fixture is something the work reads, not something it produced.
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(store, { stage: "review", waiting: "human", noChanges: true }, null, [
+      {
+        occurredAt: "2026-09-22T05:05:20.040Z",
+        type: "note",
+        actor: { kind: "human", userId: store.users.arda.id, nameHint: "Arda" },
+        title: "Attachment added",
+        text: "Attached `live-fixture.yaml` (1 KB).",
+        toAgent: false,
+        evidence: null,
+      },
+    ]);
     expect(
       resolveAcceptanceAffordance(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },

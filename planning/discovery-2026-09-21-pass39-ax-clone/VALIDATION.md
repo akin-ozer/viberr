@@ -289,3 +289,32 @@ The dialog itself was driven in the browser on the same instance: it opens on th
 pick, keeps **Move back** disabled until there is a sentence, and the foot line reads "It goes
 on the transition entry, where the operator reads it."
 
+
+## 11. Rulings 384 and 385 (F39-12) — the acceptance card and the required reviewer
+
+The finding came out of the board, not out of the code: AX-12 was created by the controller
+at my request, its deliverer wrote a report and attached it, and within four minutes the task
+was sitting at Review with an **enabled** one-click Accept whose card read "The review is
+clean and the work meets the goal". The file said `validation: none`, `verdicts: []`, no
+reviewer engaged, no PR. Three separate defects behind one sentence:
+
+- **(a)** the clause was a fixed string, never a reading — ruling 384;
+- **(b)** "merges the review PR" for a task with no PR, which R19-8 had already deleted once
+  and which came back because its fix keyed on the agent's `noChanges` flag rather than on
+  `!pr` — ruling 384;
+- **(c)** the project's required reviewer owed nothing, because the gate held on git alone —
+  ruling 385, owner's call: hold on delivered work in whatever form.
+
+Validated by test rather than by a live POST, because the container is the pre-fix image and
+the fix is in the gate stack both readers share. Canaries run red:
+
+- restore either fixed sentence → the ruling-384 assertions fail;
+- restore `if (!rev && !fm.pr) return []` → the report-only task is acceptable again on BOTH
+  surfaces (the affordance and the review queue), which is the drift the two-reader wiring
+  exists to prevent.
+
+Gates: lint, typecheck, build clean; `vitest run` 7291/7291.
+
+**What it means for the live board**: AX-12 is still at Review with that card standing. Once
+the container takes the new image, the same task will show the Reviewer it owes and the card
+will say there is no verdict — which is the honest state it was in all along.

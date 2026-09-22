@@ -85,6 +85,26 @@ export interface RequiredReviewerTaskState {
   workRevision: WorkRevision | null;
   verdicts: ReviewVerdict[];
   pr: PrRef | null;
+  /**
+   * Ruling 385 (F39-12(c)): the task's runs SAVED FILES — a deliverable that
+   * is not a commit. Computed by the caller with {@link runSavedFiles}, because
+   * it lives on the timeline rather than in the frontmatter.
+   */
+  savedFiles?: boolean;
+}
+
+/**
+ * Ruling 385: did a RUN on this task produce files?
+ *
+ * `event.attachments` is written only where a run saved something into the
+ * task's `attachments/` dir. A person's own upload (ruling 379) writes a plain
+ * `note` and no list, which is right: an uploaded fixture is an INPUT to the
+ * work, not the work, and holding a review on it would be a different mistake.
+ */
+export function runSavedFiles(
+  timeline: readonly { attachments?: string[] }[],
+): boolean {
+  return timeline.some((e) => (e.attachments?.length ?? 0) > 0);
 }
 
 /**
@@ -109,9 +129,20 @@ export function requiredReviewerApproved(
 
 /**
  * The gate: one refusal sentence per rule whose reviewer has no current
- * approval, in rule order. A task with no active work revision and no pull
- * request (planning work, or a discarded revision — ruling 161) is not held:
- * there is nothing for the reviewer to judge.
+ * approval, in rule order.
+ *
+ * Ruling 385 (owner, 2026-09-22; F39-12(c)): the gate holds on DELIVERED WORK,
+ * in whatever form the task delivered it — a work revision, a pull request, or
+ * files a run saved. It used to hold on git alone, and ax-clone AX-12 walked
+ * straight through: a standalone research task whose deliverable was a 27KB
+ * report, attached, no commit and no PR, reached an enabled one-click Accept
+ * with `verdicts: []` while the board's own rule said "Reviewer reviews at
+ * Review". Any task whose deliverable is not a commit skipped its project's
+ * required reviewer, silently.
+ *
+ * A task that produced NOTHING is still not held — that is ruling 161's case
+ * (planning work, or a discarded revision), and there really is nothing to
+ * judge.
  */
 export function requiredReviewerRefusals(
   rules: readonly RequiredReviewerView[],
@@ -119,12 +150,15 @@ export function requiredReviewerRefusals(
 ): string[] {
   if (rules.length === 0) return [];
   const rev = activeWorkRevision(fm.workRevision);
-  if (!rev && !fm.pr) return [];
+  if (!rev && !fm.pr && !fm.savedFiles) return [];
   const subject = rev
     ? `revision ${rev.headSha.slice(0, 7)}`
     : fm.pr?.headSha
       ? `revision ${fm.pr.headSha.slice(0, 7)}`
-      : `pull request #${fm.pr?.number ?? "?"}`;
+      : fm.pr
+        ? `pull request #${fm.pr.number}`
+        : // Ruling 385: no git subject at all — name what there IS to review.
+          "the work delivered on this task";
   return rules
     .filter((rule) => !requiredReviewerApproved(rule, fm))
     .map(
@@ -132,4 +166,43 @@ export function requiredReviewerRefusals(
         `Required reviewer ${rule.agentName} (project rule at ${rule.stageName}) has not approved ${subject}. ` +
         `Run the review at ${rule.stageName}, or an admin can force-accept.`,
     );
+}
+
+/**
+ * Ruling 384 (F39-12): the acceptance card's opening clause, DERIVED.
+ *
+ * The card used to open with a fixed sentence — "The review is clean and the
+ * work meets the goal" — on every acceptance offer the operator filed. Live on
+ * ax-clone AX-12 that sentence sat on a task with `verdicts: []`,
+ * `validation: none` and no reviewer ever engaged: the deliverer wrote a report,
+ * the operator moved the task Design → Build → Verify → Review in three minutes
+ * saying "advance to Review **for the required reviewer verdict**", and then,
+ * on its next turn, offered a one-click acceptance asserting the review was
+ * clean. The state that would have refuted it was on the file the whole time.
+ *
+ * So the clause says what the record holds, and nothing else: who approved the
+ * revision being accepted, or that nobody did.
+ */
+export function acceptanceOfferBasis(
+  fm: RequiredReviewerTaskState,
+  rules: readonly RequiredReviewerView[],
+): string {
+  const rev = activeWorkRevision(fm.workRevision);
+  const approvals = rev
+    ? fm.verdicts.filter((v) => v.revisionId === rev.id && v.result === "approve")
+    : [];
+  if (approvals.length === 0) {
+    // Named, because "no verdict" reads as an oversight and the reader needs to
+    // know whether the project even asked for one.
+    return rules.length > 0
+      ? `No review verdict is recorded on this task, and the project requires ${rules
+          .map((r) => r.agentName)
+          .join(", ")} at ${rules.map((r) => r.stageName).join(", ")}.`
+      : "No review verdict is recorded on this task.";
+  }
+  const names = approvals.map((v) => {
+    const rule = rules.find((r) => r.profileId === v.profileId);
+    return rule?.agentName ?? v.profileId;
+  });
+  return `${names.join(", ")} approved \`${rev!.headSha.slice(0, 7)}\`.`;
 }

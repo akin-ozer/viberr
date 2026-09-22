@@ -157,6 +157,40 @@ function seedTask(stage: string): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
+/** Ruling 384: a delivered, reviewed, approved task with a live review PR —
+ *  the shape an acceptance card's merge clause is true for. */
+function seedAcceptable(stage: string): void {
+  const sha = "a".repeat(40);
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", {
+      stage,
+      ownerUserId: store.users.arda.id,
+      operator: { assignedAtStageId: "triage" },
+      title: "Operator drive",
+      branch: "vib-1-work",
+      workRevision: {
+        id: "rev_1",
+        headSha: sha,
+        treeSha: "t".repeat(40),
+        branch: "vib-1-work",
+        createdAt: "2026-07-25T09:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      engagements: [
+        { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+      ],
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: sha, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: sha, mergeable: "clean" },
+    }),
+    goal: "Prove the operator drives the task.",
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -1860,7 +1894,11 @@ describe("operatorTransitionStage", () => {
    */
   it("F19-26: a supervised transition to the TERMINAL stage produces an ACCEPTANCE card, not a disguised move", async () => {
     deployRoster(DEFAULT_POLICY);
-    seedTask("review");
+    // Ruling 384: a task that HAS a reviewed pull request, so the merge clause
+    // the case is about is a true one. The no-PR and no-verdict shapes are
+    // their own cases below — this fixture used to be neither, and the card
+    // promised a merge for a task with nothing to merge (R19-8, regressed).
+    seedAcceptable("review");
     const r = await operatorTransitionStage(
       store.db,
       { dataRoot: store.dataRoot },
@@ -1878,6 +1916,8 @@ describe("operatorTransitionStage", () => {
     expect(recs[0]!.label).toContain("Done");
     expect(recs[0]!.detail).toMatch(/Accepting completion moves/i);
     expect(recs[0]!.detail).toMatch(/merges the review PR/i);
+    // Ruling 384: and it OPENS by naming the approval it rests on.
+    expect(recs[0]!.detail).toMatch(/approved `[0-9a-f]{7}`/);
     // The pre-fix harm, gone from every string the human reads: a bland move
     // that never says "accept" or "merge" over an irreversible merge.
     const rendered = [r.message, recs[0]!.label, recs[0]!.detail].join("\n");
@@ -1887,6 +1927,35 @@ describe("operatorTransitionStage", () => {
     expect(
       listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
     ).toHaveLength(1);
+  });
+
+  /**
+   * Ruling 384 (F39-12), live on ax-clone AX-12. The deliverer wrote a report,
+   * committed nothing and opened no PR. The operator moved the task Design →
+   * Build → Verify → Review in three minutes, its own plan reasoning saying
+   * "advance to Review **for the required reviewer verdict**" — and then, on
+   * the next turn, filed a one-click acceptance card reading "The review is
+   * clean and the work meets the goal. … merges the review PR when GitHub is
+   * reachable." `verdicts` was `[]`, `validation` was `none`, no reviewer was
+   * ever engaged, and there was no pull request to merge. Both halves of the
+   * sentence were fixed prose over state the file already held.
+   */
+  it("ruling 384: the card does not claim a review nobody gave, or a merge with no PR", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    const detail = task().frontmatter.recommendations[0]!.detail;
+    // CANARY: restore either fixed sentence and one of these fails.
+    expect(detail).not.toMatch(/review is clean/i);
+    expect(detail).not.toMatch(/merges the review PR/i);
+    expect(detail).toContain("No review verdict is recorded on this task");
+    expect(detail).toContain("no pull request on this task, so nothing is merged");
   });
 
   /**

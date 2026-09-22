@@ -409,6 +409,62 @@ is one 27KB line defeats the evidence-separation fence scan too.
 
 ---
 
+## F39-12 · HIGH · "The review is clean" — on a task nobody reviewed
+
+AX-12 was the standalone upstream-fidelity task. Its deliverer wrote a report, attached it,
+committed nothing and opened no pull request. The operator moved it Design → Build → Verify →
+Review in three minutes. Its own plan reasoning for the last of those, in the run log:
+
+> The fidelity report is complete, posted, and attached with sources, comparisons, gaps, and
+> unverifiable items. **Advance to Review for the required reviewer verdict.**
+
+Sixty-one seconds later, with no reviewer run in between, it filed this card:
+
+> **Accept completion and move AX-12 to Done**
+> The review is clean and the work meets the goal. Accepting completion moves AX-12 to Done
+> and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted
+> (merge pending).
+
+The file at that moment: `validation: none`, `verdicts: []`, `engagements` holding only the
+developer (`verdictCapable: false`), `pr` absent. **Apply was enabled, with no refusal
+anywhere on the page.**
+
+### (a) The sentence is a fixed string, not a reading
+
+`operator-actions.server.ts` writes that detail on every acceptance offer it files. It is the
+[ground truth displaced by prose] shape exactly: viberr HAS `validation`, `verdicts[]` and the
+project's `requiredReviewers`, and a hand-written sentence overrode all three. **Fixed** — the
+clause is derived now: who approved the revision being accepted, or "No review verdict is
+recorded on this task, and the project requires Reviewer at Review."
+
+### (b) "merges the review PR" for a task with no PR — R19-8, regressed through the flag
+
+R19-8 already fixed this once: "the card must not promise a merge — the old single sentence
+told a human that applying it 'merges the review PR', for a task that has no PR and never
+will." Its fix keys on `noChangeApplies`, which is `noChanges === true && !pr` — the agent's
+own flag AND no PR. AX-12's deliverer never set the flag, so the card fell through to the
+merge promise. R20-2 had already learned this for the ACCEPT path and says so in its comment:
+probe on `!fm.pr` alone, "because an envelope that forgot the flag left the server refusing
+with advice that would open an EMPTY PR". The card never got the same treatment. **Fixed** —
+the merge clause keys on `noChangeCandidate` (no PR), not on the flag.
+
+### (c) The required reviewer was never owed anything — design question
+
+`requiredReviewerRefusals` opens with:
+
+```ts
+const rev = activeWorkRevision(fm.workRevision);
+if (!rev && !fm.pr) return [];   // "nothing for the reviewer to judge"
+```
+
+AX-12 has neither, so the project rule "Reviewer reviews at Review" held nothing. The
+carve-out came from ruling 161, which is about a DISCARDED revision — genuinely nothing to
+judge. A research task is not that: AX-12 produced a 27KB report whose entire purpose was to
+be checked, and the board's own rule said who should check it. As it stands, **any task whose
+deliverable is not a commit skips its project's required reviewer silently.** Put to the owner.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

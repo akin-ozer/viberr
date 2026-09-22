@@ -6,7 +6,10 @@ import { holdRefusalFor, resolveDependencies } from "~/server/projections/depend
 import type { FileLease } from "~/shared/file-leases";
 import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import { requiredReviewerRefusals } from "./required-reviewers.server";
+import {
+  requiredReviewerRefusals,
+  runSavedFiles,
+} from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd } from "~/shared/run-failure";
 import type {
@@ -9485,7 +9488,11 @@ export async function resolvePacket(
           project,
           existing.parsed.frontmatter,
           input.taskKey,
-          { blockedPacket: false, noChange },
+          {
+            blockedPacket: false,
+            noChange,
+            savedFiles: runSavedFiles(existing.parsed.timeline),
+          },
         );
         if (refusal) throw AppError.conflict(refusal);
       }
@@ -9556,7 +9563,11 @@ export async function resolvePacket(
                     fresh.parsed.frontmatter,
                     input.taskKey,
                     // F28-L1: the same verified-empty result the outer gate saw.
-                    { blockedPacket: false, noChange },
+                    {
+                      blockedPacket: false,
+                      noChange,
+                      savedFiles: runSavedFiles(fresh.parsed.timeline),
+                    },
                   )
                 : null;
               if (refusal) throw AppError.conflict(refusal);
@@ -9672,6 +9683,10 @@ export async function resolvePacket(
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
           noChange,
+          // Ruling 385: read from the pre-lock copy. Files a run saved are on
+          // the timeline permanently, so the value cannot go stale downward,
+          // and this is the same read the outer gate above made.
+          savedFiles: runSavedFiles(existing.parsed.timeline),
         });
         if (refusal) throw AppError.conflict(refusal);
         // R20-2 (F20-6): a server-proved no-change acceptance repairs the flag so
@@ -11919,6 +11934,10 @@ function acceptanceRefusalReason(
 interface AcceptanceRefusalOptions {
   blockedPacket: boolean;
   noChange?: AcceptanceNoChangeCheck;
+  /** Ruling 385: a run on this task saved files — a deliverable that is not a
+   *  commit, which the project's required reviewer still owes a verdict on.
+   *  Passed in because it lives on the timeline, not in the frontmatter. */
+  savedFiles?: boolean;
 }
 
 /**
@@ -11957,7 +11976,10 @@ function acceptanceRefusalReasons(
     // operator engaged), so a task whose operator never ran the project's
     // reviewer was acceptable on another agent's verdict. Same order in the
     // projection's `acceptanceBlockReason`.
-    ...requiredReviewerRefusals(project.requiredReviewers, fm),
+    ...requiredReviewerRefusals(project.requiredReviewers, {
+      ...fm,
+      savedFiles: opts.savedFiles === true,
+    }),
     // R20-2 / F20-6: when the live probe already looked at the branch and found
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
@@ -12042,13 +12064,20 @@ export interface ForceAcceptDisclosure {
  */
 export function forceAcceptDisclosure(
   project: ProjectContext,
-  parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null },
+  /** Ruling 385: `timeline` joins the slice, because a run that saved FILES
+   *  delivered work a required reviewer still owes a verdict on. */
+  parsed: {
+    frontmatter: TaskFrontmatter;
+    packet: TaskPacket | null;
+    timeline: readonly { attachments?: string[] }[];
+  },
   taskKey: string,
   opts: { noChange?: AcceptanceNoChangeCheck } = {},
 ): ForceAcceptDisclosure {
   const fm = parsed.frontmatter;
   const refusalOpts: AcceptanceRefusalOptions = {
     blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
+    savedFiles: runSavedFiles(parsed.timeline),
   };
   if (opts.noChange) refusalOpts.noChange = opts.noChange;
   const gates = acceptanceRefusalReasons(project, fm, taskKey, refusalOpts);
@@ -12675,6 +12704,7 @@ export function acceptanceRefusalFor(
         existing.parsed.frontmatter.readiness === "blocked" &&
         existing.parsed.packet?.type === "blocked",
       noChange,
+      savedFiles: runSavedFiles(existing.parsed.timeline),
     },
   );
 }
@@ -12781,8 +12811,10 @@ export function resolveAcceptanceAffordance(
   }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
+  const savedFiles = runSavedFiles(existing.parsed.timeline);
   const blockedReason = acceptanceRefusalReason(project, fm, input.taskKey, {
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
+    savedFiles,
   });
   return {
     hasAuthority,
@@ -12791,6 +12823,7 @@ export function resolveAcceptanceAffordance(
     // F19-7: what a packet resolution would hit — see the field's docstring.
     blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
       blockedPacket: false,
+      savedFiles,
     }),
     canAccept: hasAuthority && atBoundary && blockedReason === null,
     terminallyBlocked: acceptanceTerminallyBlocked(fm),
