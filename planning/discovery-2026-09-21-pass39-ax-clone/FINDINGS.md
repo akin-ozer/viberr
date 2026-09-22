@@ -680,6 +680,84 @@ blind, and an override is the case that most needs it.
 
 ---
 
+## F39-21 · CRITICAL · A finished run reported as a failed one, and its work abandoned
+
+The worst finding of the pass, caught twice inside ten minutes on the live board.
+
+At 08:33 UTC the AX-2 timeline recorded these three events inside 53 milliseconds:
+
+```
+08:33:08.181  comment  agent  "@operator Done on branch `ax-2`, commit `3e0396ab...`.
+                               ... `make gate` and `go test -race ./...` pass."
+08:33:08.205  blocked  agent  "The Implementation agent run did not complete. ...
+                               Nothing was delivered to a pull request ..."
+08:33:08.234  blocked  operator "Work stalled: pick a recovery path."
+```
+
+Viberr wrote down the agent's completion report and then, in the next breath, told the owner
+the run had not completed. AX-3 did the same thing eight minutes later.
+
+**The work was real and it was still there.** `tasks/AX-2/workspace/ax-clone` is on branch
+`ax-2` with a clean tree at `3e0396a`, "[AX-2] Implement reconciler framework and status
+helpers": 1,531 insertions across seven files, four of them tests. AX-3 carries two commits,
+`04c8c50` and `4a9a588`.
+
+**What the provider actually streamed** (`runtimes/codex/run_Ys0uzCRS_twA.jsonl`, last four
+lines):
+
+```
+item.completed  agent_message  {"evidence":[{"label":"make gate","add":"1 passed"},...],
+                                "summary":"@operator Done on branch `ax-2`, ...",
+                                "verdict":null,"question":null}
+turn.completed  usage{ input 2,310,342 / output 26,375 }
+error           "Reconnecting... waiting for network (Connection failed: error sending request)"
+compacted       source viberr, trigger completion
+```
+
+A complete, schema-valid outcome envelope. Then the provider's own `turn.completed`. Then
+the socket died — while Viberr ran its **own** end-of-run compaction (ruling 376), which is
+an `app-server` call and needs the network. Viberr's optional housekeeping, failing, is what
+converted a successful run into a failed one.
+
+The defect is one line, and the docstring above it states the rule it gets wrong:
+
+```ts
+// codex-runtime.server.ts — "Success is gated on seeing `turn.completed`
+// with no TOP-LEVEL `turn.failed`/`error`"
+if (sawTurnCompleted && !sawFatalError) return settle("finished");
+```
+
+A conjunction over the whole stream, blind to **order**. That rule is right for an error that
+arrives before or instead of completion and wrong for one that arrives after it. The thrown
+path was worse still: the `catch` never consulted `sawTurnCompleted` at all. The Claude
+adapter had the same hole — a terminal non-error `result` followed by a thrown stream error
+fell straight through to `settleError`.
+
+**What it cost.** Both tasks sat `waiting: human`, `readiness: blocked` for hours behind a
+packet whose observations were all true and whose premise was false. Its **recommended**
+option:
+
+> *Retry @developer on Codex now: this deployment could not reach the provider, nothing was
+> changed* — `rec: true`
+
+Every option on the packet was a recovery from a failure that had not happened, and none of
+them said "the agent finished." Ruling 333 had already taught the failure note not to claim
+"No changes were delivered" — it duly reported "the run had 1 turn behind it when it
+stopped" — but a softened sentence on a wrong verdict is still a wrong verdict.
+
+Fixed as ruling 394: both adapters track whether anything was in flight after the last
+completed turn, and a drop behind a finished turn settles `finished` and is recorded on its
+own `run·transport·after-turn` line — deliberately not an `err` line, since
+`runFailureReason` reads the last of those as the run's cause and this run has no cause.
+
+Its sibling, same morning, same regex family as ruling 389: AX-3's drop read
+`Reconnecting... 5/5 (request timed out)`. `LOCAL_NETWORK_FAILURE_RE` listed
+`connection timed out` and not `request timed out`, so the network drop classified `unknown`
+and the packet told the owner to *"Review its authentication and runtime configuration"* —
+the exact sentence ruling 389 exists to prevent, one variant of wording away.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

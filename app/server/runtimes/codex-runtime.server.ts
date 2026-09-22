@@ -18,6 +18,7 @@ import type {
 } from "@openai/codex-sdk";
 import {
   answeredStep,
+  postTurnTransportLine,
   RUN_PHASE,
   stepUpdateForLine,
   type RunCallbacks,
@@ -765,6 +766,16 @@ export function createCodexAdapter(
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawTurnCompleted = false;
       let sawFatalError = false;
+      /**
+       * Ruling 394: work the agent started AFTER its last completed turn.
+       *
+       * `turn.completed` clears it; a new turn or a new item sets it. It is the
+       * difference between a transport failure that CUT work short and one that
+       * arrived when the agent had already stopped — which is the difference
+       * between a failed run and a finished one, and the old flat conjunction
+       * below could not tell them apart.
+       */
+      let workAfterLastTurn = false;
       // F22-08: the SDK streams the real failure reason as a `turn.failed` /
       // `error` event (e.g. "You've hit your usage limit — try again Sep 18"),
       // then throws a bare `"Codex Exec exited with code 1: Reading prompt from
@@ -939,6 +950,29 @@ export function createCodexAdapter(
         });
       };
 
+      /**
+       * Ruling 394: did the run's work stand finished when this failure landed?
+       *
+       * The old gate was `sawTurnCompleted && !sawFatalError` — a conjunction
+       * over the WHOLE stream, blind to order. This asks the question that
+       * decides the outcome instead: the provider announced a completed turn,
+       * and nothing has started since.
+       */
+      const turnStoodComplete = () => sawTurnCompleted && !workAfterLastTurn;
+
+      /**
+       * Record a transport failure that arrived after the turn completed.
+       *
+       * Deliberately NOT {@link emitAdapterFailure}: that stamps a typed
+       * `failure` record onto the line, and `runFailureReason` reads the last
+       * such line as the run's cause. This run has no cause — it finished. The
+       * drop is still written down, because hiding it would be its own lie, but
+       * it is written as what it is.
+       */
+      const emitPostTurnTransport = (detail: string) => {
+        cb.onLine(postTurnTransportLine(detail));
+      };
+
       const run = async () => {
         // Before anything can be awaited: the SDK import, the `codex` spawn and
         // the first turn all run with no event at all, and that window is what
@@ -1041,8 +1075,13 @@ export function createCodexAdapter(
             );
             if (facts.sessionId) sessionId = facts.sessionId;
             const type = event.type;
+            if (type === "turn.started" || type === "item.started") {
+              // Ruling 394: something is in flight again.
+              workAfterLastTurn = true;
+            }
             if (type === "turn.completed") {
               sawTurnCompleted = true;
+              workAfterLastTurn = false;
               // Running turn count so the live Turns counter climbs across a
               // multi-turn run (codex reports no cumulative num_turns).
               turnCount += 1;
@@ -1093,6 +1132,20 @@ export function createCodexAdapter(
             return settle("error");
           }
           if (interrupted) return settle("interrupted");
+          // Ruling 394: the turn had completed and nothing was in flight, so
+          // the iterator threw on teardown, not on the work. Live this was the
+          // socket dying under Viberr's OWN end-of-run compaction — its
+          // housekeeping turning a finished run into a failed one.
+          if (turnStoodComplete()) {
+            const thrown = classifyCodexFailure(error, "execution", lastFatalMessage);
+            logger.info("codex transport dropped after the turn completed", {
+              runId: spec.runId,
+              runOutcome: "finished",
+            });
+            emitPostTurnTransport(thrown.providerText || thrown.message);
+            if (thread.id) sessionId = thread.id;
+            return settle("finished");
+          }
           logger.error("codex thread error", {
             runId: spec.runId,
             err: safeCodexError(error),
@@ -1111,6 +1164,13 @@ export function createCodexAdapter(
 
         if (interrupted) return settle("interrupted");
         if (sawTurnCompleted && !sawFatalError) return settle("finished");
+        // Ruling 394: a fatal event that landed AFTER the completed turn, with
+        // nothing started since. Same judgement as the catch above — the work
+        // stood finished, so the drop is transport and the run is not failed.
+        if (turnStoodComplete()) {
+          emitPostTurnTransport(lastFatalMessage ?? "the provider stream ended in an error");
+          return settle("finished");
+        }
         // A fatal `turn.failed` / `error` event can arrive WITHOUT the iterator
         // throwing (F22-08): classify it from the event message so the failure
         // is surfaced instead of settling error silently.
