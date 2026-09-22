@@ -1144,6 +1144,14 @@ skill saying that a link with `taskKey: null` is work already decided and not ye
 
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
+- **`mode: off` is written unquoted, which YAML 1.1 reads as `false`.** 21 instances in the
+  live store, all of them `capabilities[].mode`, and it is the ONLY ambiguous bare value the
+  store contains (no `on`/`yes`/`no` anywhere). Viberr itself is correct — the `yaml` package
+  parses YAML 1.2 core, where `off` is a string — but "files are truth" means other tools read
+  these files, and `python3 -c "yaml.safe_load(...)"` returns `False` here. Harmless in
+  practice, since `off` and `false` mean the same thing to a reader; recorded so the next pass
+  does not re-derive it, and because quoting the enum in the serializer would cost nothing.
+  (Found by misreading it myself.)
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
   `ax-clone/AX-9`; a controller turn reads `/cnv_tjVMn13JkW-0` — a leading slash, no project,
   and not a task at all. Honest about the cost, misleading about the subject. One label.

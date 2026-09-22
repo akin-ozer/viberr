@@ -608,3 +608,36 @@ Both attributed to a real person, both carrying `bypassedGates` as a LIST — wh
 393 working: the audit records every gate an override passed, not the first one a
 single-reason helper picked. AX-12's row is the one that produced that ruling.
 
+## 21. A sweep of viberr's own claims, and ruling 384 visible as a before/after
+
+Grouped every system- and operator-authored timeline claim across the 23 tasks by its opening
+sentence, normalised (keys, SHAs and numbers masked), and spot-checked the frequent ones
+against the frontmatter behind them. Nothing new broke. Two results worth keeping.
+
+**Ruling 384 is visible on this board as a before/after, in one query.** The acceptance
+recommendation:
+
+```
+AX-1  21:04  "The review is clean and the work meets the goal."
+AX-7  21:28  "The review is clean and the work meets the goal."
+AX-9  05:20  "The review is clean and the work meets the goal."
+AX-11 08:08  "Reviewer approved `fe7232b`."
+AX-2  10:13  "Reviewer approved `22e3daf`."
+AX-3  10:39  "Reviewer approved `e3dde83`."   … and every acceptance since
+```
+
+The generic sentence stops dead at the deploy and the specific one starts. Eight acceptances
+since have named the reviewer and the revision.
+
+**The delivery-state sentence holds up too.** Nine occurrences of the two-fact form, e.g.
+*"`ax-11` is already up to date with `main`. Origin's copy of `ax-11` (`7b13ba1`) is 1 commit
+behind the workspace head: call `deliver_for_review` to push it. Do not ask a person to
+push."* Base and origin are separate facts, the remedy names the tool, and the last clause
+forbids the failure mode (ruling 235's shape).
+
+**A ten-entry wait renders without truncating.** AX-6 now waits on ten links after the CLI
+additions. The sentence reads *"Other work: goal-4 link 2, goal-4 link 3 (AX-17), … goal-5
+link 2 and goal-5 link 4"* — comma-joined with a final "and", and a link that HAS a task shows
+its key while a still-planned one does not, which is exactly the distinction a reader needs.
+The Blocked by panel lists all ten. No "+N more", no cut.
+
