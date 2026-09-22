@@ -2235,10 +2235,17 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "retry_other_backend only: the backend to re-run the failed agent on — it must be the OTHER one. Null lets the server pick the opposite of the backend that failed.",
                 },
+                // Ruling 409 (F39-36): this said "retry_other_backend only" while
+                // ruling 237 REFUSES a `question_reviewer` option that has no
+                // profileId. Live on ax-clone AX-18 the operator reached for
+                // exactly that option, read this description, correctly left
+                // the field null, and was refused twice -- then the task was
+                // stranded and a human had to act. Two kinds need it, so both
+                // are named.
                 profileId: {
                   type: ["string", "null"],
                   description:
-                    "retry_other_backend only: the agent profile to re-run. Null re-runs the agent whose run failed.",
+                    "TWO kinds need this, null on every other. `retry_other_backend`: the agent profile to re-run (null re-runs the agent whose run failed). `question_reviewer`: REQUIRED — the profileId of the reviewer the question is put to, which must be a reviewer this task actually has (`reviewers[].profileId`); an option without it is refused, because the resolution would promise \"ask X\" and have nobody to start.",
                 },
                 deleteBranch: {
                   type: ["boolean", "null"],
@@ -4736,7 +4743,7 @@ export function buildCodexOperatorPrompt(
       dependencyRelease,
       refusedSteps,
     ) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal — the deliverable plus its acceptance criteria — because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal — the deliverable plus its acceptance criteria — because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `question_reviewer` to put ONE question to a reviewer with no rework behind it (REQUIRED: its `profileId`, from `reviewers[].profileId` — an option that names no reviewer is refused), which is the move when a reviewer has blocked twice and you want its complete blocking set rather than another round of one finding at a time, `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );

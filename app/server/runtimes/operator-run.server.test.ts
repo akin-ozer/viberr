@@ -1478,6 +1478,52 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   /**
+   * Ruling 409 (F39-36), live on ax-clone AX-18.
+   *
+   * Ruling 237 REFUSES a `question_reviewer` option that names no reviewer
+   * ("A question_reviewer option needs the reviewer it asks"). The option's own
+   * `profileId` description told the operator the field was
+   * "retry_other_backend only", and `question_reviewer` appeared nowhere in the
+   * packet-authoring guidance at all. So the operator reached for the option
+   * this product recommends for a review deadlock, read the schema, correctly
+   * left the field null, and was refused twice -- and the task stranded.
+   *
+   * Load-bearing after ruling 410, which makes putting that question the
+   * operator's own move at the second objection.
+   */
+  it("ruling 409: the plan schema and the guidance both say a question_reviewer names its reviewer", () => {
+    const schema = JSON.stringify(
+      operatorPlanSchemaFor({
+        policy: new Map<string, CapabilityMode>([
+          ["append-typed-events", "direct"],
+          ["generate-packets", "direct"],
+          ["stage-transitions", "direct"],
+          ["dispatch-agents", "direct"],
+        ]),
+        autonomy: "supervised",
+        backend: "codex",
+        model: defaultModelFor("codex"),
+        effort: "",
+        name: "Operator",
+        skills: [],
+        kb: [],
+        mcps: [],
+        persona: null,
+        deployed: true,
+        humanGatedBeforeWork: false,
+      }),
+    );
+    // CANARY: restore "retry_other_backend only" and the first two fail.
+    expect(schema).toContain("question_reviewer");
+    expect(schema).toContain("reviewers[].profileId");
+    expect(schema).not.toContain("retry_other_backend only: the agent profile to re-run");
+
+    const prompt = buildCodexOperatorPrompt(snapshot({}), "manual");
+    expect(prompt).toContain("`question_reviewer`");
+    expect(prompt).toContain("an option that names no reviewer is refused");
+  });
+
+  /**
    * Ruling 400 (F39-27): the plan-refused retry QUOTES the refusals.
    *
    * It used to say "The refusals are on the timeline, and each one names what

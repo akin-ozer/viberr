@@ -55,12 +55,24 @@ import {
 /**
  * Consecutive `request_changes` rounds from ONE reviewer that raise the packet.
  *
- * Two, on the owner's call. One is ordinary review. Two means the objection
- * outlived either a rework or the deliverer's answer that it had nothing in
- * scope to change, and every loop measured on this board (SHOP-5, SHOP-6,
- * SHOP-10) was already unmistakable by then.
+ * THREE, on the owner's call of 2026-09-22 (ruling 410). It was two, on the
+ * owner's earlier call, and that was right about where a rework stops being
+ * the obvious move -- but wrong about whose move it is. Measured on ax-clone:
+ * the "ask the reviewer for its complete blocking set instead of reworking
+ * again" call was made five times in one afternoon (AX-4, AX-19, AX-20, AX-18,
+ * AX-22) and every one of them was made by the OWNER, because Viberr raised
+ * the packet on the second verdict and the operator's turn found `waiting:
+ * human` with the decision already taken out of its hands. Its own response to
+ * a second request-changes, every time, was the same mechanical loop: move
+ * Review to Verify, post a rework directive, start the deliverer.
+ *
+ * So round two is now the OPERATOR's: it puts the completeness question to the
+ * reviewer itself, one run with no rework behind it. Viberr escalates to a
+ * person at three, which means the loop survived that question -- which is the
+ * decision a person should actually be given, instead of the one the operator
+ * could have taken.
  */
-export const REVIEW_DEADLOCK_ROUNDS = 2;
+export const REVIEW_DEADLOCK_ROUNDS = 3;
 
 /**
  * The question the `question_reviewer` resolution puts to the reviewer.
@@ -200,9 +212,18 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       `${input.taskKey}, with no approve in between` +
       (input.delivererName ? `, and @${input.delivererName} has reworked against each one` : "") +
       ". " +
-      "Two rounds is where another rework stops being the obvious move: either the reviewer is " +
-      "paying out its findings one at a time, or it is asking for something this deliverable " +
-      "cannot give it. Nothing was dispatched on this objection: the task is on you.\n\n" +
+      "Three rounds is past where another rework stops being the obvious move: either the " +
+      "reviewer is paying out its findings one at a time, or it is asking for something this " +
+      "deliverable cannot give it. Nothing was dispatched on this objection: the task is on " +
+      "you.\n\n" +
+      // Ruling 410: the operator owns round two, so this packet means one of
+      // two things and the timeline says which. Stated rather than implied,
+      // because the option below is the same one the operator was told to use
+      // and a person should know whether it has already been spent.
+      "Round two was the operator's: it was told to put the completeness question to this " +
+      "reviewer itself, one run with no rework behind it. So either it did and the objection " +
+      "outlived the answer, or it did not and this is the first time the question has been " +
+      "asked. The reviewer's own verdicts on the timeline say which.\n\n" +
       // Ruling 329: this ask lives in the BODY, which is read on the card and
       // nowhere else. It used to sit on an option's `d`, which `resolvePacket`
       // appends to the GOAL verbatim — so a sentence about a textarea became

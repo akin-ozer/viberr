@@ -1577,7 +1577,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * The owner's remedy was to escalate rather than gate: the operator keeps
    * every move, and the second objection reaches a person by itself.
    */
-  describe("ruling 237: the second consecutive objection escalates to a person", () => {
+  describe("ruling 237 as amended by 410: the THIRD consecutive objection escalates to a person", () => {
     const reviewerInput = (profileId: string) => ({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -1654,9 +1654,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
        */
       writeReviewTask();
       await review(blocks(1));
+      // Ruling 410: round two is the operator's and raises nothing, so the
+      // round that ESCALATES is the third -- which is the one the unrelated
+      // packet has to be standing in front of.
+      await review(blocks(2));
 
       // An unrelated decision — a backend failure, the live shape — is open
-      // when the second objection lands.
+      // when the escalating objection lands.
       const { updateTaskFile } = await import("~/server/files/task-writer.server");
       await updateTaskFile(
         { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
@@ -1675,7 +1679,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
       );
 
-      await review(blocks(2));
+      await review(blocks(3));
 
       // The automatic clear site: no person is involved at all. The verdict was
       // written while the stalled packet stood, so ruling 237 skipped the
@@ -1686,7 +1690,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // covered because it is the same defect, not because it has bitten.
       const raised = taskFile().parsed.packet;
       expect(raised, "the escalation was dropped for good").not.toBeNull();
-      expect(raised!.title).toContain("requested changes 2 times running");
+      expect(raised!.title).toContain("requested changes 3 times running");
       // ...and it says why it is arriving late, rather than appearing from
       // nowhere on a task whose last visible event was a packet withdrawal.
       const note = taskFile().parsed.timeline.find((e) =>
@@ -1721,6 +1725,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
       );
       await review(blocks(2));
+      await review(blocks(3));
       expect(taskFile().parsed.packet?.title).toBe("Which of the two contracts wins?");
 
       const { resolvePacket } = await import("./task-actions.server");
@@ -1738,7 +1743,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       const raised = taskFile().parsed.packet;
       expect(raised, "the escalation was dropped when the person answered").not.toBeNull();
-      expect(raised!.title).toContain("requested changes 2 times running");
+      expect(raised!.title).toContain("requested changes 3 times running");
 
       // A packet that arrives with nobody told is not an escalation. The first
       // draft of this retry wrote the packet and stopped there — no inbox row,
@@ -1747,7 +1752,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // retryReviewDeadlockEscalation.
       const { listNotifications } = await import("~/server/projections/notifications.server");
       const inbox = listNotifications(store.db, store.users.arda.id, { limit: 50 });
-      const told = inbox.find((n) => (n.title ?? "").includes("requested changes 2 times running"));
+      const told = inbox.find((n) => (n.title ?? "").includes("requested changes 3 times running"));
       expect(told, "the escalation reached nobody's inbox").toBeTruthy();
       // Ruling 237's own rule: the policy engine raised this, not the operator.
       expect(told!.from?.name ?? "").toBe("Policy engine");
@@ -1756,7 +1761,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(audited.at(-1)!.details).toMatchObject({ retried: true });
     });
 
-    it("opens the packet on the second, not the first", async () => {
+    it("opens the packet on the third, not the second: round two is the operator's (ruling 410)", async () => {
       writeReviewTask();
 
       await review(blocks(1));
@@ -1766,12 +1771,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.packet).toBeNull();
 
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet;
       // CANARY: delete the `openReviewDeadlockPacket` call in
       // `recordAgentCompletion` and this is null — the exact state SHOP-5 sat
       // in for four rounds.
       expect(packet).not.toBeNull();
-      expect(packet?.title).toContain("requested changes 2 times running");
+      expect(packet?.title).toContain("requested changes 3 times running");
       expect(packet?.body).toContain("@reviewer");
       // The deliverer is named, so the person reading the card knows who has
       // been reworking against it.
@@ -1837,6 +1843,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet!;
       expect(packet.options[0]?.kind).toBe("question_reviewer");
 
@@ -2060,6 +2067,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const { resolvePacket } = await import("./task-actions.server");
       // Longer than the old silent cap, shorter than the refusal — the exact
       // band SHOP-76's decision fell into.
@@ -2085,6 +2093,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const { resolvePacket } = await import("./task-actions.server");
       const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
       const before = taskFile().parsed.timeline.length;
@@ -2120,6 +2129,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask({ blockedBy: ["VIB-9"] });
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet!;
       expect(packet.options[0]?.kind).toBe("question_reviewer");
       // Said BEFORE the choice. CANARY: drop `heldBy` from the packet build and
@@ -2186,9 +2196,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         ).n;
       writeReviewTask();
       await review(blocks(1));
+      // Ruling 410: round two goes BACK to the operator on purpose -- that is
+      // the round it now owns. The claim under test is about the round that
+      // ESCALATES, so the baseline is taken after it.
+      await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
       const before = operatorRuns();
 
-      await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
+      await review(blocks(3), "reviewer", { dispatchedByName: "operator" });
       expect(taskFile().parsed.packet).not.toBeNull();
       expect(operatorRuns()).toBe(before);
       // The task is on a person, which is what the card claims.
@@ -2207,6 +2221,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
 
       const timeline = taskFile().parsed.timeline;
       const noteAt = timeline.findIndex((e) => e.text.startsWith("**Decision packet:**"));
@@ -2227,6 +2242,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet!;
       const opt = (kind: string) => packet.options.find((o) => o.kind === kind)!;
 
@@ -2289,6 +2305,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       // SAFETY: `actor_json` is TEXT on `notifications`; the packet rows were
       // just written by the escalation above.
       const rows = store.db
@@ -2324,10 +2341,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       );
 
       await review(blocks(2));
+      await review(blocks(3));
       expect(taskFile().parsed.packet).toBeNull();
       // The verdict itself still lands: closing the task does not erase what a
       // reviewer found.
-      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(2);
+      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(3);
     });
 
     it("ruling 137: no acceptance offer survives beside the packet", async () => {
@@ -2353,6 +2371,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       expect(taskFile().parsed.packet).not.toBeNull();
       expect(
         taskFile().parsed.frontmatter.recommendations.map((r) => r.id),

@@ -1407,3 +1407,60 @@ actually took; 408 because the carry is inside the wholly-refused branch. The pa
 viberr reasoning about a drive by what it FAILED to produce rather than by what it did.
 
 Ruling 408.
+
+## F39-36 · HIGH · The operator reached for the option viberr recommends, and the schema told it not to
+
+AX-18, 18:04. The operator's own reasoning, recorded on the refusal note:
+
+> Reviewer has issued two consecutive request-changes outcomes; the latest developer rework
+> is delivered, but the current revision has no approval. Hold for the owner's governed
+> choice before commissioning another review/rework round.
+
+It planned an `open_packet` with a `question_reviewer` option. Refused:
+
+> `open_packet` — A question_reviewer option needs the reviewer it asks — "Run one complete
+> review of the current revision" names none. Pass profileId, or put the question in a
+> comment instead.
+
+The refusal is correct (ruling 237) and well worded. The problem is what the operator was
+told beforehand. The option-level `profileId` in the Codex plan schema said:
+
+> "retry_other_backend only: the agent profile to re-run. Null re-runs the agent whose run
+> failed."
+
+And `question_reviewer` appears **nowhere** in the packet-authoring guidance, which names
+seven other kinds (`edit_goal`, `retry_other_backend`, `accept_completion`,
+`block_on_policy`, `archive_task`, `discard_branch`, `resolve_remote_collision`) and their
+required fields.
+
+So the model read the schema it is structurally constrained by, concluded correctly that the
+field did not apply to its option, and was refused for omitting it — twice, because the one
+automatic retry re-planned the same step. Then the task stranded and a human had to move the
+stage by hand.
+
+This is ruling 377's shape one layer in: not a surface lying to a person, a schema lying to
+the model it constrains. Ruling 409.
+
+## F39-37 · HIGH · Five identical human decisions in one afternoon, on a call the operator could make
+
+Found by asking the controller where the operator is weakest. It answered with my own
+behaviour:
+
+> The "reviewer is paying out findings one at a time → ask it for the complete blocking set"
+> call has now been made by **you**, not the operator, on AX-4, AX-19 (16:42:46), AX-20
+> (17:03:50) and AX-18 (17:31:03). […] In every one of those, the operator's response to the
+> second request-changes was the same mechanical loop: move Review→Verify, post a rework
+> directive, start the Developer.
+
+A fifth followed on AX-22 at 21:47. The cause it named:
+
+> It is the **policy engine**, not the operator, that counts consecutive verdicts and opens
+> the packet. Nothing in its skill file or in `get_task` carries *"what the human decided in
+> this situation last time"* — task.md holds only this task's decisions. Until something
+> does, you will keep making this call once per task.
+
+Verified: `REVIEW_DEADLOCK_ROUNDS = 2`, and the packet is raised inside the same locked write
+that records the verdict — so the operator's next turn finds `waiting: human` and the
+decision already gone.
+
+Owner's call: give the operator the move rather than the memory. Ruling 410.

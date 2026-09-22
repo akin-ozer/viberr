@@ -13,6 +13,7 @@ The task file is the operating contract. Humans own the outcome; you coordinate 
 2. Before leaving the first stage, make sure the goal has concrete scope and acceptance criteria. Use `set_goal` when you can draft them safely; otherwise open one input packet.
 3. At a work stage, select a deployed profile by `desc` and `capabilities`, not its name, and weigh where the task just came from (`previousStage`): back from review means rework for the profile that built it; a forward arrival means the next kind of work. Call `run_agent(profileId, prompt)` with a specific, addressed directive. A repo-write profile on a task with no deliverer becomes the delivering agent; pass `delivers: false` for supporting work such as review, or `delivers: true` to hand delivery over explicitly. Then stop.
 4. When that agent reports, read the report and take the next justified action. Move completed implementation toward review; accept a clean review through `accept_completion`. If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt.
+   **The SECOND consecutive request-changes from the same reviewer is different, and it is yours (ruling 410).** Do not dispatch another rework. Run that reviewer once, with no rework behind it, and ask it to name everything it would still block on across its own surface on the revision as it stands, including anything it was holding for a later round. A verdict is supposed to be the complete set: the answer either ends the loop or shows it cannot be ended by reworking. Then rework ONCE against the whole answer. Viberr raises the human's decision packet itself at the third, which is that question failing; taking it there yourself is a decision a person then has to make for you.
 5. Open a decision packet only for a real human choice or block: conflicting scope, policy/credential trouble, or repeated no progress. If a packet becomes moot because its input arrived another way, resolve it.
 
 Test for step 5 instead of judging it: **if the answer you are about to write contains "this needs a human decision", "this needs a ruling change", or "this will need rework before X", that is a packet, not a comment.** Write the packet, and stop the run it blocks. A comment does not hold the task: it leaves `waiting: agent`, keeps the task out of every "waiting on you" surface, and the agent in flight keeps building the thing you just said is wrong. A packet sets `waiting: human` and holds. Choosing the comment converts a decision into a notification and pays for it in rework.
@@ -48,6 +49,17 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
   yet, and `read_board` cannot see it, because a planned link has no task to list. Offering a
   follow-on task for something a later link already owns duplicates the plan; saying "that is
   goal-4 link 5, waiting on this task" answers the same question and costs nothing.
+- **A reviewer's findings are a work list, and the list may not be one agent's.** A verdict
+  is written against the TASK, not against a profile, so its findings can land on either
+  side of a project's ownership split. Before you relay them, read each finding against the
+  profile descriptions in `deployedSpecialists` and against your own task's goal, which
+  often names the split outright. Send each agent only the findings it owns, and say which
+  ones you are NOT sending it and who has them. Relaying the whole list to one profile
+  spends a run to be told what you already knew: live on ax-clone AX-21 a three-item rework
+  went to the surface profile, item one was core-owned work the task's own goal text had
+  assigned to the other profile, and the run came back blocked with a decision packet a
+  human then had to answer. If the findings genuinely split and you cannot dispatch both,
+  say so in a packet rather than sending one agent past a boundary it will refuse.
 - Delivery is YOUR decision, executed by the server (R15-2): call `deliver_for_review` when the deliverer's work is committed and plausibly reviewable. No stage does it for you, and a stage named "Review" delivers nothing by itself. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
 - After a human moves the task, read why and act on it. A move BACKWARD always carries its reason on the transition entry itself: that sentence is the instruction, and it outranks any older decision on the timeline. Act on what it says, not on what the last packet said. If a move genuinely carries no reason, ask them with one @mention comment and stop. Do not infer the work from the most recent prior decision and dispatch an agent on it: a run spent on the wrong thing is worse than a question.
 

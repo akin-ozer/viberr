@@ -804,3 +804,28 @@ The RBAC table does the same with its own exceptions — it says maintainer-and-
 accept, then states plainly that a contributor who OWNS a task may accept it and resolve the
 non-acceptance options on its packets. A table that quietly contradicted its own footnote is
 the shape ruling 310 was about; this one names it. No finding.
+
+## 29. Disposition audit — all 34 findings, before claiming anything is finished
+
+Pass 16's lesson ("run this before any 'fixed everything' claim") applied to this pass. The
+audit matched each `F39-*` heading against the rulings that cite it, then checked the
+leftovers in code rather than trusting the write-up:
+
+- **30 of 34** are cited by a numbered ruling (377–408).
+- **F39-2** (the model picker offers no plain `opus`) carries an explicit non-fix
+  disposition: *"Noted, not blocking: `opus[1m]` was set for the controller and runs."*
+- **F39-1, F39-3, F39-10** were fixed without a numbered ruling, which is why the heading
+  match missed them. Verified in code, not in the write-up:
+  - `instance_health({ probe })` ships, with *"PROBE BEFORE YOU PROMISE A GATE: a gate
+    command whose binary you never checked is a promise every task on the board inherits
+    and quietly fails"* in the tool description.
+  - `save_knowledge_base` takes `doc.append: true`, described as the way to build a long
+    document a section at a time.
+  - The `update-task-branch` boundary refusal returns `noop`, so the record stops blaming a
+    capability policy that refused nothing.
+
+One defect found BY the audit: the `doc.append` description cited **F39-1** for the
+7,356-byte failure that is actually **F39-3**. A wrong cross-reference in a tool description
+is read by every controller run; fixed.
+
+Nothing is outstanding.
