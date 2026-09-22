@@ -468,3 +468,46 @@ internal/server/**                        AX-11  "owns internal/server until its
 One of them is spent (AX-11 merged as PR #4), and the panel says so and offers to clear it.
 That is the finding proven at full strength: this was not a hypothetical gap.
 
+## 17. The revision-bound review model, exercised end to end on AX-4
+
+The goal asks for "required reviewers and revision-bound verdicts, work-revision drift". AX-4
+exercised all of it without being staged, and it held.
+
+Three verdicts across three revisions, as the file records them:
+
+```
+workRevision  rev_XRtSwQ4idByJ  32656382
+  request_changes  rev_xZoyw4KHN_GQ  ed4a600b   stale
+  request_changes  rev_d6UVLDpVEUtt  db6e4c59   stale
+  approve          rev_XRtSwQ4idByJ  32656382   BINDS
+validation: healthy
+```
+
+Each verdict stays pinned to the revision it judged; only the current one derives
+`validation`. Two superseded `request_changes` sit on the record without blocking, which is
+the whole point of the model — they are history, not a gate.
+
+The sequence that produced it:
+
+1. Reviewer requests changes on `ed4a600b`. Rework. New revision `db6e4c59`.
+2. Reviewer requests changes again. **Viberr opens the ruling-237 deadlock packet itself** at
+   the second consecutive objection, with three options and a recommendation.
+3. I took its recommendation (`question_reviewer`) rather than another rework round, with the
+   reasoning in the note: both objections had found something real — the latest was a genuine
+   `send on closed channel` race between `client.go:737` and `:764` — so this was a reviewer
+   paying findings out one at a time, not one that could never pass the work.
+4. The reviewer answered with the complete blocking set and **no fresh verdict**, exactly as
+   the option promises.
+5. The rework fixed all three. `update_branch_from_base` brought ax-4 up to date (20 commits,
+   merge commit `3265638`), which MOVED the head — the drift case — and the timeline says so:
+   *"The review PR's head now equals the reviewed revision."*
+6. Reviewer approved `32656382`. `validation: healthy`.
+
+**Drift never became a problem because the acceptance ceremony discloses it.** Every accept
+dialog this pass carried the same three rows — `MERGES` (PR, state, and the honest "checks not
+readable / GitHub refused this credential's read (HTTP 403)"), `BRANCH` ("brought up to date
+with main first; if the base has moved, that merge commit is pushed and becomes the merge
+head"), `REVISION` and `VERDICT`. Four acceptances, four disclosures, all matching the file.
+
+Recorded as a validation rather than a finding: this is the machinery working.
+
