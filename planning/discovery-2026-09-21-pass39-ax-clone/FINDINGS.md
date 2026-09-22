@@ -465,6 +465,35 @@ deliverable is not a commit skips its project's required reviewer silently.** Pu
 
 ---
 
+## F39-13 · MEDIUM · A red "4" on Settings, for four things the project does not require
+
+The ax-clone rail carried a bold red **4** beside Settings. `countOpenPolicyViolations` is
+what renders it, in `.count.violations` (`color: var(--danger); font-weight: 700`). The four
+rows, from the audit log:
+
+```
+github.scope_violation.opened | {"scope": "checks:read"}   × 4
+```
+
+Every one of them is the scope **ruling 360 settled as not required** ("merging never needed
+it") and **ruling 380(b) taught the timeline and the credential card to call an advisory**.
+380(b) said "one `ADVISORY_SCOPES` list now drives both". There were three surfaces, not two:
+the row stays `open` by design, so the count kept lighting the badge — a red number pointing a
+person at a page where nothing can be done about it (the fix, if you want one, is on GitHub,
+and the credential card already says so).
+
+Fixed on the same list. The record is untouched (ruling 360's call); only the count learns.
+`listScopeViolations` still returns them, and a scope the project really does require still
+counts, beside them (asserted).
+
+**Considered and left**: the notification `kind` for these is still `"policy"`. Its TEXT is
+already right after 380(b) — "Credential advisory: the active PAT has no `checks:read`, which
+this project does not require" — and the kind drives routing and grouping, not the words a
+person reads. Changing it would split one policy-engine stream into two for a distinction the
+sentence already makes.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

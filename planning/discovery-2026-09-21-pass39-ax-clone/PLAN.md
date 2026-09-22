@@ -27,6 +27,7 @@ per item and each one was applied to the source and observed failing.
 | 14 | A double-escaped body is repaired, not stored (F39-11) | — | **done**, ruling 383 |
 | 15 | The acceptance card stops claiming a review nobody gave (F39-12 a/b) | — | **done**, ruling 384 |
 | 16 | A required reviewer holds delivered work, not just commits (F39-12 c) | "hold it on any delivered work" | **done**, ruling 385 |
+| 17 | The Settings badge counts violations, not advisories (F39-13) | — | **done**, ruling 386 |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list

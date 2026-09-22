@@ -7,6 +7,7 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { emitProjectionEvent } from "~/server/events/projection-events.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { scopeIsAdvisory } from "~/shared/credential-scopes";
 
 /**
  * Scope-violation records (Phase 7 — replaces the phase-4 policy-event
@@ -77,15 +78,23 @@ export function countOpenPolicyViolations(
   db: DatabaseSync,
   projectSlug: string,
 ): number {
-  // SAFETY: a `COUNT(*)` aggregate yields exactly one row whose `n` is the
-  // integer SQLite counted — 0 when nothing matched, never no row.
-  const row = db
+  // Ruling 386 (F39-13): an ADVISORY scope is not a violation, and this badge
+  // is the third surface to learn it. Ruling 360 settled that `checks:read` is
+  // not required and that keeping its record is still worth it; ruling 380(b)
+  // made the timeline event and the credential card say so from one list. The
+  // row stayed `open` either way, so this count kept rendering it in
+  // `.count.violations` — bold `--danger` on the Settings row — and on the live
+  // ax-clone board every one of the four it counted was `checks:read`. A red
+  // number pointing at a page where nothing can be done about it.
+  // SAFETY: the SELECT names exactly one column, `scope`, which 0001_baseline
+  // declares TEXT NOT NULL — so every row yields exactly this shape.
+  const rows = db
     .prepare(
-      `SELECT COUNT(*) AS n FROM scope_violations
+      `SELECT scope FROM scope_violations
        WHERE project_slug = ? AND status = 'open'`,
     )
-    .get(projectSlug) as { n: number };
-  return row.n;
+    .all(projectSlug) as { scope: string }[];
+  return rows.filter((r) => !scopeIsAdvisory(r.scope)).length;
 }
 
 /** Newest-first listing; optionally filtered by status. */
