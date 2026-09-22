@@ -968,6 +968,59 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(agents).toContain("[done]");
   });
 
+  /**
+   * Ruling 390 (F39-17). The controller cannot attach a resource to itself —
+   * ruling 108 makes that a deployment decision with no in-app override for
+   * anyone — and live in pass 39 that left an owner's standing rule in a
+   * knowledge base nobody had told the controller to read, with the ask
+   * existing only as prose in a conversation about to end.
+   */
+  it("request_resource_grant records an ask it cannot answer, and refuses one naming nothing real", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "instance-standing-rules",
+      doc: { path: "standing-rules.md", content: "# Rule 1\n\nEvery agent runs at max." },
+    });
+    expect(created).toContain("[done]");
+
+    const asked = await call(ids.orgAdmin, "request_resource_grant", {
+      kind: "kb",
+      name: "instance-standing-rules",
+      reason: "It carries the model rule Arda set, as its heading.",
+    });
+    expect(asked).toContain("[done]");
+    // The remedy is the deployment change, never a button this page could own.
+    expect(asked).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
+    expect(asked).toContain("do not say you have the resource until it is");
+
+    // Idempotent: asking again is the same ask, not a second one on a person.
+    const again = await call(ids.orgAdmin, "request_resource_grant", {
+      kind: "kb",
+      name: "instance-standing-rules",
+      reason: "Asked once more.",
+    });
+    expect(again).toContain("Already open");
+
+    // CANARY: drop the existence check and this records an ask whose remedy
+    // would not work, sitting on an admin's screen forever.
+    const bogus = await call(ids.orgAdmin, "request_resource_grant", {
+      kind: "skills",
+      name: "no-such-skill",
+      reason: "Nothing here.",
+    });
+    expect(bogus).toContain("[denied]");
+    expect(bogus).toContain("Create it first");
+  });
+
+  it("request_resource_grant is org-admin only, like every other instance-scope write", async () => {
+    const denied = await call(ids.contributor, "request_resource_grant", {
+      kind: "kb",
+      name: "instance-standing-rules",
+      reason: "A member should not reach this.",
+    });
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("org admin");
+  });
+
   it("create_project is open to a plain org member (FR5 parity): the gate passed and only the GitHub-connection validation refused", async () => {
     const reply = await call(ids.contributor, "create_project", {
       name: "Member Made",

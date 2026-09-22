@@ -23,6 +23,7 @@ import {
   type ConversationScope,
 } from "./controller-conversations.server";
 import { notVisible } from "./controller-tool-guards.server";
+import { openRequestsContextLine } from "./controller-requests.server";
 
 /**
  * The controller's per-turn CONTEXT READ (ruling 121).
@@ -547,11 +548,15 @@ export function gatherControllerContext(
       askerRole(db, grant, input.user.id),
     );
   }
+  // Ruling 390 (F39-17): an ask the controller raised and nobody has answered
+  // comes back every turn, in every scope. The whole failure it closes is a
+  // standing fact that lived only in a conversation that ended.
+  const pending = openRequestsContextLine(input.dataRoot);
   const surface = input.surface ? `\nThey are looking at: ${input.surface}\n` : "";
   let text =
     `Context gathered by the server when this turn started (a read as of ${at}; ` +
     `the store is the truth for anything that changed since, and every action still runs through a tool):\n\n` +
-    `${body}\n${surface}`;
+    `${body}\n${pending}${surface}`;
   if (text.length > CONTEXT_BLOCK_CHARS) {
     const marker = "\n[... context cut to its budget ...]\n";
     text = text.slice(0, CONTEXT_BLOCK_CHARS - marker.length) + marker;

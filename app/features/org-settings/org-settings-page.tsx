@@ -17,6 +17,7 @@ import { useOrgAction } from "./use-org-action";
 import { UsersPanel } from "./users-panel";
 import {
   ControllerAdminPanel,
+  type ControllerGrantRequestView,
   type ControllerConfigView,
   type ControllerSectionLocks,
 } from "./controller-admin-panel";
@@ -80,6 +81,7 @@ export function OrgSettingsPage({
   auditEventsOrgScoped,
   controllerConfig,
   controllerLocks,
+  controllerRequests,
 }: {
   view: OrgSettingsView;
   meId: string;
@@ -97,6 +99,8 @@ export function OrgSettingsPage({
   controllerConfig: ControllerConfigView;
   /** Ruling 108: per-section deployment locks the panel renders read-only. */
   controllerLocks: ControllerSectionLocks;
+  /** Ruling 390: open grant requests the controller raised for itself. */
+  controllerRequests: ControllerGrantRequestView[];
 }) {
   // F32-2 (pass 32): a `user`-scoped stream also receives broadcasts — the
   // `resource.updated` fact a KB re-index (watcher or manual), a skill/MCP
@@ -219,6 +223,7 @@ export function OrgSettingsPage({
             <ControllerAdminPanel
               config={controllerConfig}
               locks={controllerLocks}
+              requests={controllerRequests}
               // KB grants are stored and resolved by store DIR; the picker
               // shows the display name, like the global-profile editor.
               kbs={view.kbs.map((k) => ({ dir: k.dir, name: k.name, uri: k.uri }))}

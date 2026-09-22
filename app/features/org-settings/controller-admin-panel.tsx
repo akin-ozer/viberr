@@ -59,7 +59,10 @@ export interface ControllerKbOption {
 // (P07-G, pass 32) — the panel used to carry hand-copied mirrors with a drift
 // test standing between them. Re-exported for the route's loader typing.
 export type { ControllerSectionLocks } from "~/shared/controller-locks";
-import type { ControllerSectionLocks } from "~/shared/controller-locks";
+import type {
+  ControllerSection,
+  ControllerSectionLocks,
+} from "~/shared/controller-locks";
 import {
   CONTROLLER_SECTION_LABEL,
   CONTROLLER_UNLOCK_ENV,
@@ -190,6 +193,19 @@ function GrantChips({
   );
 }
 
+/** Ruling 390: one open grant request, as the panel renders it. The remedy
+ *  sentence is computed on the server so the page and the controller's own
+ *  context read the identical words. */
+export interface ControllerGrantRequestView {
+  id: string;
+  kind: Exclude<ControllerSection, "instructions">;
+  name: string;
+  reason: string;
+  askedAt: string;
+  askedByLabel: string;
+  remedy: string;
+}
+
 /** The lock note's element id — locked grant groups point at it (D04-U9). */
 const LOCK_NOTE_ID = "controller-lock-note";
 
@@ -199,6 +215,7 @@ export function ControllerAdminPanel({
   kbs,
   skills,
   mcps,
+  requests,
 }: {
   config: ControllerConfigView;
   /** Ruling 108: which sections this deployment allows editing. */
@@ -207,6 +224,8 @@ export function ControllerAdminPanel({
   kbs: ControllerKbOption[];
   skills: string[];
   mcps: string[];
+  /** Ruling 390: open grant requests the controller raised for itself. */
+  requests: ControllerGrantRequestView[];
 }) {
   const action = useOrgAction();
   const uid = useId();
@@ -337,6 +356,40 @@ export function ControllerAdminPanel({
             Agent resources, which changes what the controller loads.
           </span>
         </p>
+      )}
+      {requests.length > 0 && (
+        /**
+         * Ruling 390 (F39-17): grants the controller asked for and cannot make.
+         *
+         * It is a DISCLOSURE, not a control, and deliberately so: ruling 108
+         * put these grants outside the app, so a Grant button here would be
+         * promising something no code on this page can do. Each row prints the
+         * variable, the value and the restart, which is the real answer.
+         */
+        <div className="pol-note" data-testid="controller-grant-requests">
+          <Icon name="inbox" />
+          <span>
+            <strong>
+              {requests.length === 1
+                ? "The controller has asked for 1 grant it cannot make"
+                : `The controller has asked for ${requests.length} grants it cannot make`}
+              :
+            </strong>
+            <ul className="tight">
+              {requests.map((r) => (
+                <li key={r.id}>
+                  <code className="mono">{r.name}</code> (
+                  {CONTROLLER_SECTION_LABEL[r.kind]}): {r.reason || "no reason given"}
+                  <br />
+                  <span className="sub">
+                    Asked {r.askedAt} by {r.askedByLabel || "someone"}.{" "}
+                    {r.remedy}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </span>
+        </div>
       )}
       <ModelEffortFields
         uid={uid}

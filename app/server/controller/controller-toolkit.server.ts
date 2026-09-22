@@ -75,6 +75,13 @@ import {
 } from "~/server/org/org-users.server";
 import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import {
+  raiseResourceRequest,
+  REQUESTABLE_KINDS,
+  resourceRequestRemedy,
+  type RequestableKind,
+} from "./controller-requests.server";
+import { CONTROLLER_SECTION_LABEL } from "~/shared/controller-locks";
+import {
   listKnowledgeBases,
   listMcpServers,
   mcpStoreAccessNote,
@@ -632,6 +639,80 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "read_knowledge_doc",
     );
   }
+
+  /** Ruling 390: the grant keys that exist for one locked section — what a
+   *  request may name, and what the refusal lists when it names nothing real.
+   *  A KB is granted by its store DIRECTORY (F33-8), never by its id. */
+  const knownResourceNames = (kind: RequestableKind): string[] =>
+    kind === "kb"
+      ? listKnowledgeBases(db, { dataRoot }).map((kb) => kb.dir)
+      : kind === "skills"
+        ? listSkills(db, { dataRoot }).map((sk) => sk.name)
+        : listMcpServers(db).map((m) => m.name);
+
+  add(
+    tool(
+      "request_resource_grant",
+      "Ask for a skill, knowledge base or MCP server to be attached to YOUR OWN profile, when you have created or found one your next conversation needs. Org admins only. You cannot grant it yourself (ruling 108 makes controller grants a deployment decision, with no in-app override for anyone), and this is how the ask survives the conversation: it goes on the record, it appears on Org settings for whoever runs this deployment, and it comes back in your own turn context until it is answered. Idempotent per (kind, name) while open, so re-asking never stacks duplicates on a person. Naming a resource that does not exist is refused: create it first.",
+      {
+        kind: z
+          .enum(REQUESTABLE_KINDS)
+          .describe("Which of your locked sections the grant belongs to."),
+        name: z
+          .string()
+          .describe(
+            "The resource's grant key exactly as its list tool prints it (a KB's `grantKey`, a skill's name, an MCP's name).",
+          ),
+        reason: z
+          .string()
+          .describe(
+            "Why your next conversation needs it, in one or two sentences. An admin reads this and nothing else about the ask.",
+          ),
+      },
+      runWith((args: { kind: RequestableKind; name: string; reason: string }) => {
+        requireOrgAdmin("ask for a resource grant");
+        const name = args.name.trim();
+        if (!name) throw AppError.validation("Which resource?");
+        // Ruling 390: refuse an ask nobody can answer. A request naming a
+        // resource the store does not have would sit on an admin's screen
+        // forever, and the remedy it prints would not work.
+        const known = knownResourceNames(args.kind);
+        if (!known.includes(name)) {
+          return (
+            `[denied] No ${CONTROLLER_SECTION_LABEL[args.kind].replace(" grants", "")} named "${name}" exists on this instance. ` +
+            (known.length > 0
+              ? `Create it first. Present: ${known.join(", ")}.`
+              : "Create it first.")
+          );
+        }
+        const { request, created } = raiseResourceRequest(
+          {
+            kind: args.kind,
+            name,
+            reason: args.reason,
+            askedByUserId: actor.userId ?? "",
+            askedByLabel: actor.label,
+          },
+          dataRoot,
+        );
+        if (created) {
+          recordAudit(db, {
+            action: "controller.resource_grant.requested",
+            actor,
+            subjectKind: "agent_profile",
+            subjectId: "controller",
+            details: { kind: request.kind, name: request.name },
+          });
+        }
+        return (
+          `[done] ${created ? "Recorded" : "Already open"}: a grant request for the ${CONTROLLER_SECTION_LABEL[request.kind].replace(" grants", "")} ` +
+          `"${request.name}" (${request.id}). ${resourceRequestRemedy(request.kind)} ` +
+          `It is on Org settings and in your own turn context until it is answered; do not say you have the resource until it is.`
+        );
+      }),
+    ),
+    "request_resource_grant",
+  );
 
   add(
     tool(

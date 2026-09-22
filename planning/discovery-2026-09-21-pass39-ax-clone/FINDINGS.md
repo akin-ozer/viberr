@@ -584,6 +584,40 @@ sentence speaks over it.
 
 ---
 
+## F39-17 · MEDIUM · A standing instruction to the controller survives exactly one conversation
+
+The owner's rule for this instance — controller on opus/high, **every other agent on luna at
+MAX** — was stated once, hours before the first task existed. Three profiles honour it. The
+fourth, `surface-developer`, was deployed in a later conversation at **`effort: xhigh`**.
+
+Asked where such a rule could live so that tomorrow's controller reads it without being told
+again, the controller did something better than answer. It:
+
+- read the mechanism correctly and unprompted: **a skill is injected verbatim every turn; a
+  knowledge base is injected as an INDEX of names and headings**, bodies on demand (confirmed
+  against `kb-injection.server.ts` — "the index names every document, with its size and its
+  heading outline");
+- refused to edit `controller-guide` or `controller-handbook`, calling that self-modification.
+  Ruling 108 locks both for everyone, so it was right;
+- wrote the rule into a NEW knowledge base with **the rule as the heading**, because the
+  heading is the part that reaches the prompt;
+- found the deeper cause I had missed: the **global template** `surface-developer` carried
+  `effort: xhigh` as its default, so every future `deploy_agent` would have reproduced it. It
+  fixed the template as well as the deployment;
+- and then stopped, in its own words: *"I created the resource, I cannot grant it to myself."*
+
+So the ask existed only as prose in a conversation about to end, and the document sat in the
+store unread. Owner's call: keep the controller out of its own resources and give the ask a
+durable, human-visible home.
+
+One thing the owner's chosen option assumed and the product does not have: **no admin can
+grant it in-app.** Ruling 108 makes controller grants a deployment decision, "locked out of
+in-app editing for EVERYONE, org admins included", unlocked only by an environment variable
+and a restart. So the request surface names the variable, the value and the restart rather
+than offering a button that nothing behind it could honour.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
