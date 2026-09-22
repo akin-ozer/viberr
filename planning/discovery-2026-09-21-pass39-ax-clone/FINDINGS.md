@@ -974,6 +974,56 @@ asserted this pass and I checked, held.
 
 ---
 
+
+### The agents it wrote, judged by what they did under pressure
+
+Three specialists, all `gpt-5.6-luna` at `effort: max` as the owner required, selected by
+capability rather than name. The controller split implementation in two along
+architecture.md section 7 — a core `Developer` (`internal/apis`, `store`, `controller`,
+`sandbox`, `runtime`) and a `Surface Developer` (`internal/server`, `client`, `cli`,
+`cmd/ax`, `docs`, `examples`) — and wrote the boundary into the persona itself:
+
+> You READ those packages freely — you must, to build against them honestly. You do not
+> edit them. If your task genuinely cannot be done without a change on the other side of
+> that line … you stop and say so on the timeline: name the file, name the change, name why
+> your task needs it, and let the operator decide. **Reaching across quietly is the one
+> failure mode this split exists to prevent, and it shows up later as an unmergeable
+> branch, not as an error now.**
+
+It also assigns the unowned files (`go.mod`, `Makefile`, `.golangci.yml`) a rule of their
+own, and says the rulings knowledge base wins over the agent's instincts.
+
+That instruction closed the loop live. On AX-21 the Surface Developer needed a one-line fix
+in `internal/sandbox/local.go` — core-owned. It stopped, named the file, named the change,
+named why, and raised it as a decision rather than reaching across:
+
+> Blocked on core-owned `internal/sandbox/local.go`: stderr pipe ends are reversed, so real
+> Task stderr cannot reach the log store. Surface changes and tests are uncommitted on
+> branch `ax-21`; no new commit SHA and no PR URL.
+
+A persona written on day one producing exactly the behaviour it describes, on a collision
+it could not have anticipated, is the strongest evidence in this pass that the controller
+writes agents rather than job titles.
+
+### The knowledge base it keeps
+
+Five documents, and it added `v0-2-scope.md` when the owner settled that the agent-workload
+half of upstream `ax` becomes a named v0.2 rather than a seventh cycle. It is the best
+single artefact the controller produced: nine omissions, each with the AX-12 disposition
+that sourced it; a section separating deliberate divergences from gaps; and a cost section
+that states, before anyone starts, that the work amends a human ruling and will turn
+AX-14's drift test red — with the instruction not to route around it:
+
+> THAT IS THE MECHANISM WORKING, not a defect and not a regression to route around. The fix
+> is to write the new fields into the reference; never to weaken or skip the drift test.
+
+It also kept the document consistent with a change it had made an hour earlier, moving
+`describe`, `delete` and `ctx` OUT of the v0.2 list because they had just become goal-4
+links 6-8 ("Do not re-file them here").
+
+One flaw, and it is a copy slip rather than a reasoning one: the section headed "Two
+divergences that are decisions, not gaps" contains four bullets.
+
 ## F39-26 · HIGH · The pause that explains what happened got it backwards
 
 Three consecutive AX-4 timeline entries, spanning 37 milliseconds:
