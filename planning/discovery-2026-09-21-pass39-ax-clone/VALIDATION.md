@@ -1175,3 +1175,36 @@ you would otherwise defer to a later round", flagged `completeness: true`. The t
 ```
 
 The verdict that run returns is the second half of the check.
+
+## 42. Ruling 421 end to end, and ruling 422 live (builds `da626a22` and `594d3766`)
+
+**Ruling 421, all three open review loops.** After the 22:59 deploy the operators flagged their
+next review dispatches with `completeness: true` without being asked: AX-20 (23:00:36,
+`run_-CyaNrs8trRb`), AX-22 (23:09, `run_Mq5ulEtFW_jq`) and AX-24 (23:09, `run_uKj-cBg1rwD4`), each
+stamped on the reviewer's engagement. All three reviewers answered with `request_changes`, and
+each verdict carries `answers: completeness`. The three packets raised at 23:11-23:19 (AX-20
+round 6, AX-22 round 7, AX-24 round 6) all read:
+
+> This objection is @Reviewer's answer to the completeness question: the run that returned it was
+> asked for everything @Reviewer would still block on, on `c5001a3`, and this is the list. Asking
+> again would get the same list. The move it leaves is one rework against exactly this verdict.
+
+The recommended (pre-selected) option on each is "Rework once against this verdict". "Ask
+Reviewer what else it would block on" is unrecommended, with "It was asked this with its review
+of `c5001a3` and answered; asking again repeats that." Before 421, four packets in 45 minutes
+recommended the question.
+
+**Ruling 422: the developer that refused now reads.** Deployed at 23:23 with no run in flight
+(all three tasks were waiting on my decisions, so the deploy cost nothing). The first runs on
+the new build:
+
+- AX-20 developer (`rollout-…T23-24-56`), the same role whose 22:13 report said "the
+  workspace-only filesystem boundary prevented access": its contract now reads "- Read-only
+  exception: the knowledge-base folder `/data/kb/ax-clone-rulings` is yours to READ …", and its
+  first commands are `cat /data/kb/ax-clone-rulings/architecture.md && cat
+  /data/kb/ax-clone-rulings/environment-and-gates.md`.
+- AX-24 surface developer (`…T23-25-31`): `cat …/surface-contract.md && cat …/architecture.md`.
+- Operator runs (`.operator-scratch`) carry no workspace contract, and so no exception, as intended.
+
+**Ruling 419(f) and (h), live:** the transcript labels my messages "Arda", not the address, and
+all six chains carry "About this chain".
