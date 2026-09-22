@@ -30,7 +30,53 @@ default and marked **(default, owner may revisit)**.
   revision-shaped (`noReworkBehind`, `reviews > rounds`); the question was put on the first read of
   a reworked revision, and the round-2 answer predates the `reviews` field. Resolved as the owner:
   "Let the rework continue", with the reason and the one blocker (exit status lost across a
-  control-plane restart).
+  control-plane restart). **It is the norm, not a one-off: three packets in 25 minutes.**
+  AX-22 22:24 (round 5; the 22:17 directive said "Report all remaining blockers against this
+  revision", the answer was two credential leaks) and AX-24 22:31 (round 4; the 22:20 directive
+  said "Provide one complete verdict with every remaining blocker, including anything you might
+  otherwise defer", the answer was one blocker). Every operator on this board folds ruling 410's
+  question into the review that follows a rework, which is the efficient move, and every
+  packet then recommended spending a reviewer run to ask it again.
+
+- **F39-44 (MED) — "waits on" sentences read a pending entry as done.** Ruling 356 put the done
+  entries in a trailing parenthesis, `A (B is done)`. A goal link that has a task prints that
+  task in a parenthesis too (`goal-2 link 1 (BNB-2)`), so the group reads as the last pending
+  entry's annotation. "Other work: goal-1 link 2 (JC-3 is done)", pinned verbatim by a test, says
+  goal-1 link 2 is done. It is the pending one. Live on the ax-clone Goals rail: "waits on
+  goal-2 link 2 (AX-19), goal-3 link 2 (AX-20), goal-3 link 4 and goal-4 link 7 (AX-4, goal-2
+  link 3 (AX-16) ... are done)" names AX-4 as goal-4 link 7's task. The same helper writes the
+  task page's "Other work", the hold refusal, the run control, the operator's queue refusal and
+  the skipped-schedule note.
+
+### The controller page, for the person using it (measured 2026-09-23, ax-clone, 6 chains)
+
+- **U39-1 (MED) — Conversations and New sit under every goal chain.** Desktop 1440×900: the
+  Conversations panel starts 4,419px down the page. Phone 375×812: 5,576px down, after the
+  whole transcript. Starting or switching a conversation, the page's primary navigation, costs
+  five or more screens of scrolling.
+- **U39-2 (MED) — the page is a 10,876px scroll with ~3,000px of empty column.** The rail
+  (goals 4,262px) scrolls with the page, and the grid row stretches the main column to the
+  rail's height. The transcript scrolls inside the page, beside a rail that does not stick.
+  On a phone the transcript is uncapped (12,625px) and the page scrolls to its end on every load
+  (`scrollIntoView` scrolls every ancestor), past the header.
+- **U39-3 (MED) — Cancel goal is one unconfirmed, irreversible click.** `cancel` is terminal:
+  `resume` refuses a cancelled chain. Any other chain's link that waits on this chain's unstarted
+  links then waits forever (`resolveDependencies` F37-63). The button is a plain ghost beside
+  Pause and never sends the `reason` the route accepts. Skip on a failed link has the same shape.
+- **U39-4 (LOW) — every chain renders every link, finished ones included.** Completed goal-1
+  takes 479px to say four links are done. No chain states its progress.
+- **U39-5 (LOW) — the controller console speaks task-engagement vocabulary.** "Controller ·
+  supporting" (`roleShort` maps every non-delivering run to "supporting") and "thread can be
+  re-engaged" on a conversation with no task.
+- **U39-6 (LOW) — "⌘↵ sends" on every keyboard.** The page's and the dock's composers print the
+  Mac glyph over a handler that takes Ctrl too. UI-55 fixed this elsewhere, and P13-D-39 called
+  the comment composer "the last user-visible ⌘ in `app/`". It was not.
+
+**Design calls made without the owner (default, owner may revisit):** New conversation lives
+in the page head. On a phone a native select in the head switches threads. The rail puts
+conversations first, sticks beside the conversation and scrolls itself. The transcript stays a
+capped scroller at every width. Settled chains fold to one line. Cancel and Skip confirm, name
+what they strand, and record an optional reason.
 
 ---
 

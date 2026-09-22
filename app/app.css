@@ -5462,7 +5462,24 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
      review 2026-09-08). One selector more settles it, the `.dock .dock-panel`
      precedent in the 720px block. */
   .ctl-wrap .ctl-layout { grid-template-columns: minmax(0, 1fr); }
-  .ctl-wrap .ctl-transcript { max-height: none; }
+  /* Ruling 419(b): the transcript stays a capped scroller here too. Uncapped,
+     a phone's page WAS the conversation (12,625px measured on ax-clone), so
+     the composer, the goals and the thread list all sat below it. The cap
+     leaves room for the head (which wraps to two rows) and the composer. */
+  .ctl-wrap .ctl-transcript { max-height: calc(100dvh - 360px); min-height: 260px; }
+  /* Ruling 419(d): a narrow column cannot afford a frame inside a frame. The
+     transcript panel's padding, the reply card's own padding and its 92% cap
+     left a 234px text column on a 375px phone; the dock already gives a reply
+     the full width (`.dock-msgs .ctl-msg`), and the page now does too. */
+  .ctl-wrap .ctl-transcript { padding: .5rem; }
+  .ctl-wrap .ctl-msg { max-width: 100%; }
+  .ctl-wrap .ctl-msg.from-user { max-width: 92%; }
+  /* One column: the rail flows after the conversation instead of pinning. */
+  .ctl-wrap .ctl-side { position: static; max-height: none; overflow-y: visible; }
+  /* The phone's thread switcher takes the head's second row. Two classes, for
+     the reason given above: the base rules come later in the sheet. */
+  .ctl-wrap .ctl-head-acts { flex: 1 1 100%; margin-left: 0; }
+  .ctl-wrap .ctl-picker { display: block; flex: 1 1 0; min-width: 0; width: 100%; max-width: none; }
 }
 
 /* ============================================================
@@ -5893,8 +5910,23 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: .75rem;
 }
+.ctl-head-text { flex: 1 1 14rem; min-width: 0; }
+/* Ruling 419(a): New conversation (and, on a phone, the thread switcher) at
+   the page's top edge, where they are reachable from anywhere on it. */
+.ctl-head-acts {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-left: auto;
+  /* Lets the switcher inside shrink: a select's min-content is its LONGEST
+     option, and a thread title can be a paragraph. */
+  min-width: 0;
+}
+/* The switcher is the phone's list; the wide layout has the rail's. */
+.ctl-picker { display: none; max-width: 16rem; min-width: 0; }
 .ctl-head h1 {
   font-family: var(--font-display);
   font-size: 1.25rem;
@@ -5910,9 +5942,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   place-items: center;
   flex: none;
 }
-/* The "not connected" pill sits with the title it describes; only the Home
-   link claims the right edge (it used to be the pill, 800px from its noun). */
-.ctl-home { margin-left: auto; }
+/* The "not connected" pill sits with the title it describes; only the action
+   group claims the right edge (it used to be the pill, 800px from its noun). */
 /* No `align-items: start`: the row stretches, the transcript fills its column
    and the composer anchors at the bottom the way a chat surface should,
    instead of the page ending two-thirds of the way up. */
@@ -5928,12 +5959,26 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   gap: .75rem;
   min-width: 0;
 }
+/* Ruling 419(b): the rail is its own scroller, pinned beside the conversation.
+   It used to scroll with the page and stretch the row to its own height: live
+   on ax-clone six goal chains made the rail 4,539px tall, the main column
+   stretched to match, and below the composer and the logs sat ~3,000px of
+   empty column. Capped at the scrollport (under the top bar, clear of the dock
+   button in its corner), the rail scrolls itself and the page ends where the
+   conversation does. */
 .ctl-side {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100dvh - var(--topbar-h) - var(--dock-clear));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+.ctl-wrap.standalone .ctl-side { top: 1.5rem; max-height: calc(100dvh - 3rem); }
 .ctl-transcript {
   display: flex;
   flex-direction: column;
@@ -6066,25 +6111,47 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   white-space: nowrap;
 }
 .ctl-goals { display: flex; flex-direction: column; gap: .75rem; }
+.ctl-goals-count { margin-left: auto; }
+/* Ruling 419(d): a chain is a <details>. Spacing is margins, not a flex gap:
+   a details element only became a flex container in recent engines. */
 .ctl-goal {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-box);
   padding: .5rem .75rem;
+}
+.ctl-goal > summary {
   display: flex;
   flex-direction: column;
-  gap: .5rem;
+  gap: .25rem;
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--radius-small);
 }
-.ctl-goal header {
+.ctl-goal > summary::-webkit-details-marker { display: none; }
+.ctl-goal-line {
   display: flex;
   align-items: center;
   gap: .5rem;
-  flex-wrap: wrap;
-  font-size: .88rem;
+  font-size: .75rem;
 }
+.ctl-goal-progress { margin-left: auto; color: var(--muted); white-space: nowrap; }
+/* The same chevron the capability disclosure draws (`.cap-advisory`). */
+.ctl-goal-line::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .14s ease;
+}
+.ctl-goal[open] .ctl-goal-line::after { transform: rotate(225deg) translate(-1px, -1px); }
+.ctl-goal-title { font-size: .88rem; line-height: 1.35; }
 .ctl-goal-id { color: var(--muted); font-size: .75rem; }
 .ctl-links {
   list-style: none;
-  margin: 0;
+  margin: .5rem 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -6105,7 +6172,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-link-task:hover { text-decoration: underline; }
 .ctl-link-acts { display: inline-flex; gap: .25rem; margin-left: auto; }
 .ctl-link-note { flex-basis: 100%; }
-.ctl-goal-acts { display: flex; gap: .5rem; }
+.ctl-goal-acts { display: flex; gap: .5rem; margin-top: .5rem; }
+/* Ruling 419(c): the reason a cancel or a skip records, under its consequence. */
+.ctl-confirm-reason { margin-top: 1rem; }
+@media (prefers-reduced-motion: reduce) {
+  .ctl-goal-line::after { transition: none; }
+}
+/* Ruling 419(d): a touch screen has no key to name. */
+@media (pointer: coarse) {
+  .kbd-hint { display: none; }
+}
 
 /* The org-settings Controller tab (admin config of the controller itself).
    Ruling 106: the fields inside are the agent editor's own (.field/.flabel,

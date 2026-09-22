@@ -852,7 +852,7 @@ describe("startSpecialistRun", () => {
       ),
     ).rejects.toMatchObject({
       status: 400,
-      message: expect.stringContaining("VIB-1 waits on VIB-2 (VIB-3 is done) and Viberr is holding it"),
+      message: expect.stringContaining("VIB-1 waits on VIB-2 and VIB-3 (done) and Viberr is holding it"),
     });
   });
 

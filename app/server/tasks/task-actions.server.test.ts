@@ -338,7 +338,7 @@ describe("createTask", () => {
       { dataRoot: store.dataRoot },
     );
     const mixed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-101", dataRoot: store.dataRoot })!.parsed;
-    expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 (VIB-2 is done)");
+    expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 and VIB-2 (done)");
 
     /**
      * Ruling 255 (pass 37, F37-84): one creation is one instant.

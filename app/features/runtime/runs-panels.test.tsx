@@ -179,6 +179,22 @@ describe("AgentLogsPanel", () => {
     expect(getByText("streaming: raw output stays here as evidence, never in the transcript")).toBeTruthy();
   });
 
+  it("ruling 419(d): a finished controller turn is continued from the composer, and wears no role", () => {
+    // Live on the ax-clone controller page: "Controller · supporting" and "run
+    // finished at 00:56; thread can be re-engaged", two pieces of a task
+    // engagement's vocabulary on a surface with no task and no engagement.
+    // CANARY: drop the `kind === "controller"` footer branch, or the
+    // `roleShort` null, and one half fails.
+    const run = mkRun({ id: "controller", kind: "controller", role: "Controller", state: "done", lifecycle: "finished", finished: "0:56",
+      who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" } });
+    const { container, getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{}} />,
+    );
+    expect(getByText("turn finished at 0:56; send a message to continue the conversation")).toBeTruthy();
+    expect(container.textContent).not.toContain("re-engaged");
+    expect(container.querySelector(".rsel-role")).toBeNull();
+  });
+
   it("done thread: 'run finished at …' footer, no cursor", () => {
     const run = mkRun({ state: "done", lifecycle: "finished", finished: "9:41" });
     const { container, getByText } = render(

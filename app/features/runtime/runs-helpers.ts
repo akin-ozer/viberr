@@ -89,7 +89,7 @@ export function runLabel(run: RunView): string {
   return run.who.name + (run.who.role ? " · " + run.who.role : "");
 }
 
-export function roleShort(run: RunView): string {
+export function roleShort(run: RunView): string | null {
   // Kind is data on the run row — never string-match the role label (run rows
   // now carry the engagement's live role snapshot, not a kind literal).
   //
@@ -101,6 +101,12 @@ export function roleShort(run: RunView): string {
   // "reviewer" is written for EVERY non-delivering run, so it claimed verdict
   // authority for supporting engagements that hold none. Same mapping the
   // Agents roster applies under F10-20.
+  //
+  // Ruling 419(d): a controller turn has no engagement at all, so it has no
+  // role to print. It fell through to "supporting" and the controller page's
+  // console read "Controller · supporting", an engagement role on a surface
+  // that has no task.
+  if (run.kind === "controller") return null;
   return run.op ? "operator" : run.kind === "primary" ? "delivering" : "supporting";
 }
 

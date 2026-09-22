@@ -89,6 +89,12 @@ describe("runLabel / roleShort", () => {
     // engagement role), so roleShort keys on kind, never the label.
     expect(roleShort({ ...base, kind: "reviewer", role: "Anything" })).toBe("supporting");
   });
+
+  it("ruling 419(d): a controller turn has no engagement, so it prints no role", () => {
+    // Live on the ax-clone controller page the console read "Controller ·
+    // supporting". Canary: drop the `kind === "controller"` return.
+    expect(roleShort({ ...base, kind: "controller", role: "Controller" })).toBeNull();
+  });
 });
 
 describe("runStatePill (ruling 11 lifecycle mapping)", () => {

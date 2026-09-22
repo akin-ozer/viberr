@@ -3393,3 +3393,45 @@ describe("app.css stage colour presets (ruling 364)", () => {
     expect(CODE).toMatch(/\.pj-meter\.is-empty span\[data-stage-color\] \{\s*flex: 1;\s*background: color-mix\(in srgb, var\(--stage\), transparent 82%\);\s*\}/);
   });
 });
+
+/**
+ * Ruling 419(b): the controller page's rail scrolls itself and the conversation
+ * stays a capped scroller at every width. jsdom has no layout, so the rules that
+ * produce the layout are pinned here; the live measurements are in the ruling
+ * (rail 4,539px scrolling with the page, a 12,625px phone transcript).
+ */
+describe("app.css controller layout (ruling 419)", () => {
+  const ruleBody = (css: string, selector: string): string => {
+    const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
+    expect(m, `${selector} must have a rule`).toBeTruthy();
+    return m![1]!;
+  };
+  const collapse = () => CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
+
+  it("pins the rail beside the conversation and makes it its own scroller", () => {
+    // CANARY: drop `position: sticky` or `overflow-y: auto` from `.ctl-side`.
+    const side = ruleBody(CODE, ".ctl-side");
+    expect(side).toMatch(/position:\s*sticky/);
+    expect(side).toMatch(/align-self:\s*start/);
+    expect(side).toMatch(/overflow-y:\s*auto/);
+    // Capped at the scrollport: under the top bar, clear of the dock button.
+    expect(side).toMatch(/max-height:\s*calc\(100dvh - var\(--topbar-h\) - var\(--dock-clear\)\)/);
+  });
+
+  it("keeps the transcript a capped scroller in the one-column layout", () => {
+    // CANARY: restore `.ctl-wrap .ctl-transcript { max-height: none; }`.
+    const narrow = ruleBody(collapse(), ".ctl-wrap .ctl-transcript");
+    expect(narrow).not.toMatch(/max-height:\s*none/);
+    expect(narrow).toMatch(/max-height:\s*calc\(100dvh - \d+px\)/);
+    // One column: the rail flows after the conversation instead of pinning.
+    expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
+  });
+
+  it("shows the thread switcher only in the one-column layout, and no key hint on touch", () => {
+    expect(ruleBody(CODE, ".ctl-picker")).toMatch(/display:\s*none/);
+    expect(ruleBody(collapse(), ".ctl-wrap .ctl-picker")).toMatch(/display:\s*block/);
+    const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/);
+    expect(coarse, "a coarse-pointer block must exist").toBeTruthy();
+    expect(coarse![1]).toMatch(/\.kbd-hint\s*\{\s*display:\s*none;\s*\}/);
+  });
+});

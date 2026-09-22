@@ -220,7 +220,7 @@ function AgentPicker({
         <RunGlyph run={cur} />
         <span className="rsel-nm">
           {cur.who.name}
-          <span className="rsel-role"> · {roleShort(cur)}</span>
+          {roleShort(cur) && <span className="rsel-role"> · {roleShort(cur)}</span>}
         </span>
         <span className={"rdot " + cur.state} />
         <Icon name="chevron" className="caret" />
@@ -1110,11 +1110,17 @@ export function AgentLogsPanel({
               // broken template rather than as the fact. Same treatment as
               // `SessionIdChip` above, and worse here because the glyph landed
               // inside a sentence instead of in a value slot.
-              cur!.finished
-              ? "run finished at " +
-                finishedClock(cur!.finished, hydrated) +
-                "; thread can be re-engaged"
-              : "run finished; thread can be re-engaged"
+              // Ruling 419(d): a controller conversation is not re-engaged,
+              // it is continued, and the way to do that is the composer.
+              cur!.kind === "controller"
+              ? (cur!.finished
+                  ? "turn finished at " + finishedClock(cur!.finished, hydrated)
+                  : "turn finished") + "; send a message to continue the conversation"
+              : cur!.finished
+                ? "run finished at " +
+                  finishedClock(cur!.finished, hydrated) +
+                  "; thread can be re-engaged"
+                : "run finished; thread can be re-engaged"
             : cur!.state === "error"
               ? // Ruling 130(a): the SENTENCE follows the classified failure
                 // for every run kind; the retry clause follows the OFFER.

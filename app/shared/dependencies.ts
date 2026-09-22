@@ -228,10 +228,30 @@ export function joinDependencyEntries(entries: readonly string[]): string {
  * way and nothing here can promise more than that.
  */
 export function holdEntriesSentence(entries: readonly DependencyRender[]): string {
-  const done = entries.filter((e) => e.state === "done").map((e) => e.label);
+  const done = entries.filter((e) => e.state === "done");
   const pending = entries.filter((e) => e.state !== "done").map((e) => e.label);
   if (done.length === 0 || pending.length === 0) {
     return joinDependencyEntries(entries.map((e) => e.label));
   }
-  return `${joinDependencyEntries(pending)} (${joinDependencyEntries(done)} ${done.length === 1 ? "is" : "are"} done)`;
+  return joinDependencyEntries([...pending, ...done.map(doneLabel)]);
+}
+
+/**
+ * F39-44: a done entry carries its OWN tag, never a parenthesis after the list.
+ *
+ * Ruling 356 said the done entries in a trailing group, `A (B is done)`. But a
+ * goal link that has a task already prints its task in a parenthesis, `goal-2
+ * link 1 (BNB-2)`, so the group read as the LAST pending entry's annotation:
+ * "Other work: goal-1 link 2 (JC-3 is done)" says goal-1 link 2 is done, the
+ * opposite of the fact, and "goal-4 link 7 (AX-4, goal-2 link 3 (AX-16) … are
+ * done)" named AX-4 as goal-4 link 7's task. Live on ax-clone's Goals rail,
+ * nine entries deep. A tag on each done entry cannot attach to a neighbour: the
+ * one parenthesis an entry prints is its own, and it now holds the state beside
+ * the task key (`goal-2 link 1 (BNB-2, done)`).
+ */
+function doneLabel(entry: DependencyRender): string {
+  const own = entry.taskKey ? ` (${entry.taskKey})` : "";
+  return own && entry.label.endsWith(own)
+    ? `${entry.label.slice(0, -1)}, done)`
+    : `${entry.label} (done)`;
 }

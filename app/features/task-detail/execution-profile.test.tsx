@@ -217,7 +217,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     const note = container.querySelector("[data-hold-note]")!;
     expect(note.textContent).toBe(
       // Ruling 356: JC-3 is done in the fixture, and reads as done.
-      "Waiting on other work (goal-1 link 2 (JC-3 is done)). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
+      "Waiting on other work (goal-1 link 2 and JC-3 (done)). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
     );
     expect(note.className).toContain("sub");
     expect(runButton(container).disabled).toBe(false);
@@ -257,7 +257,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(btn!.disabled).toBe(true);
     // The server's own sentence, from the shared `holdRefusal`.
     expect(container.textContent).toContain(
-      "waits on goal-1 link 2 (JC-3 is done) and Viberr is holding it",
+      "waits on goal-1 link 2 and JC-3 (done) and Viberr is holding it",
     );
     expect(container.textContent).toContain("running an agent on it is refused");
   });
@@ -267,8 +267,9 @@ describe("ruling 131(d): the run control on a held task", () => {
     // fixture always carried JC-3 as done; until ruling 356 the assertion
     // above REQUIRED "waits on goal-1 link 2 and JC-3".
     const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
-    expect(container.textContent).toContain("waits on goal-1 link 2 (JC-3 is done) and Viberr is holding it");
-    expect(container.textContent).not.toContain("waits on goal-1 link 2 and JC-3");
+    expect(container.textContent).toContain("waits on goal-1 link 2 and JC-3 (done) and Viberr is holding it");
+    // F39-44: JC-3 is never printed bare, so it can never read as waited on.
+    expect(container.textContent).not.toMatch(/JC-3(?! \(done\))/);
   });
 
   it("ruling 355: an entry that can never complete is named, not promised a release", () => {

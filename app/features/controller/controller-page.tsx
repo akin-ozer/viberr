@@ -5,6 +5,7 @@ import {
   Link,
   useFetcher,
   useLocation,
+  useNavigate,
   useRevalidator,
   useSearchParams,
 } from "react-router";
@@ -24,6 +25,7 @@ import { sseScopes } from "~/features/live-updates/event-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -73,6 +75,25 @@ export const CLAUDE_NOT_CONNECTED =
  * controller-dock-query.server.ts); the two route loaders resolve it.
  */
 export const NEW_CONVERSATION_PARAM = "new";
+
+/**
+ * Where a conversation (or, with `null`, the blank composer) lives on this
+ * surface. One builder for the rail, the phone picker and the header's New, so
+ * the three cannot disagree about what a missing `c` means (U33-8) or drop the
+ * org admin's `all` view in one place and keep it in another.
+ */
+function conversationHref(
+  params: URLSearchParams,
+  showingAll: boolean,
+  conversationId: string | null,
+): string {
+  const next = new URLSearchParams(params);
+  // A missing `c` means "the newest thread here", so New asks for the blank
+  // composer explicitly.
+  next.set("c", conversationId ?? NEW_CONVERSATION_PARAM);
+  if (!showingAll) next.delete("all");
+  return `?${next.toString()}`;
+}
 
 export function ControllerPage({
   view,
@@ -140,7 +161,7 @@ export function ControllerPage({
         <span className="ctl-head-icon">
           <Icon name="cpu" />
         </span>
-        <div>
+        <div className="ctl-head-text">
           <h1>{view.controllerName}</h1>
           <p className="fine dim">
             {view.conversation?.taskKey
@@ -155,12 +176,28 @@ export function ControllerPage({
             member with Claude connected converses normally while this one
             cannot, which the old instance-wide wording could not express. */}
         {!view.available && <Pill kind="risk">Claude not connected</Pill>}
-        {!projectSlug && (
-          <Link to="/" className="btn sm ctl-home">
-            <Icon name="arrow" className="r180" />
-            Home
+        {/* Ruling 419(a): the page's two navigation moves live at its top.
+            "New" sat in the Conversations panel's head, and on a project the
+            rail stacks that panel UNDER every goal chain: live on ax-clone it
+            began 4,419px down on a desktop and 5,576px down on a phone, so
+            starting a conversation took five screens of scrolling. */}
+        <div className="ctl-head-acts">
+          <ConversationPicker view={view} />
+          <Link
+            className="btn sm"
+            to={conversationHref(params, view.showingAll, null)}
+            data-new-conversation
+          >
+            <Icon name="plus" />
+            New conversation
           </Link>
-        )}
+          {!projectSlug && (
+            <Link to="/" className="btn sm">
+              <Icon name="arrow" className="r180" />
+              Home
+            </Link>
+          )}
+        </div>
       </header>
       <div className="ctl-layout">
         <div className="ctl-main">
@@ -188,7 +225,12 @@ export function ControllerPage({
             </>
           )}
         </div>
+        {/* Ruling 419(a)/(b): the conversations lead the rail and the goal
+            chains follow, and on a desktop the rail is its own scroller beside
+            the conversation (app.css `.ctl-side`), so a long chain list neither
+            buries the list above it nor stretches the page beside it. */}
         <aside className="ctl-side">
+          <ConversationList view={view} />
           {view.goals !== null && (
             <GoalsPanel
               goals={view.goals}
@@ -197,7 +239,6 @@ export function ControllerPage({
               viewerId={view.viewerId}
             />
           )}
-          <ConversationList view={view} />
         </aside>
       </div>
     </main>
@@ -339,30 +380,56 @@ function ConversationRuntime({
   );
 }
 
+/**
+ * Ruling 419(a): the phone's conversation switcher, in the page head.
+ *
+ * Below the two-column breakpoint the rail stacks under the conversation, so on
+ * a phone the list of threads was the LAST thing on the page — after a
+ * transcript measured at 12,625px and six goal chains. A native select is the
+ * control a phone already knows how to present, and it names the open thread
+ * where a person looks first. The rail's list stays for the wide layout, where
+ * app.css hides this one (`.ctl-picker`).
+ */
+function ConversationPicker({ view }: { view: ControllerSurfaceView }) {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  if (view.conversations.length === 0) return null;
+  const active = view.conversation?.id ?? "";
+  return (
+    <select
+      className="ctl-picker"
+      aria-label="Conversation"
+      value={active}
+      onChange={(e) =>
+        navigate(conversationHref(params, view.showingAll, e.target.value || null))
+      }
+    >
+      {/* The blank composer is a place too: a person who pressed New is not
+          reading any thread, and the select must not claim they are. */}
+      {!active && <option value="">New conversation</option>}
+      {view.conversations.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.taskKey ? `${c.taskKey} · ${c.title}` : c.title}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function ConversationList({ view }: { view: ControllerSurfaceView }) {
   const [params] = useSearchParams();
   // U33-8: what is OPEN, not what the URL asked for. With no `?c=` the loader
   // opens this scope's newest thread (the dock's rule), and the rail has to
   // mark the row the transcript is actually showing.
   const active = view.conversation?.id ?? null;
-  const href = (c: ConversationListItem | null) => {
-    const next = new URLSearchParams(params);
-    // A missing `c` now means "the newest thread here", so New has to ask for
-    // the blank composer explicitly.
-    next.set("c", c ? c.id : NEW_CONVERSATION_PARAM);
-    if (!view.showingAll) next.delete("all");
-    return `?${next.toString()}`;
-  };
+  const href = (c: ConversationListItem) => conversationHref(params, view.showingAll, c.id);
   return (
     <section className="panel ctl-convs">
+      {/* Ruling 419(a): New moved to the page head, where it is reachable
+          from wherever this panel happens to be. */}
       <div className="panel-head">
         <Icon name="message" />
         <h2>Conversations</h2>
-        <div className="right">
-          <Link className="btn sm ghost" to={href(null)}>
-            New
-          </Link>
-        </div>
       </div>
       {view.viewerIsOrgAdmin && (
         <p className="fine xs dim ctl-all-toggle">
@@ -411,13 +478,17 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
 }
 
 function Transcript({ view }: { view: ControllerSurfaceView }) {
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLElement | null>(null);
   const count = view.messages.length;
   useEffect(() => {
-    // Optional-chained CALL, the same idiom date-picker/label-input use: jsdom's
-    // Element carries no `scrollIntoView`, and pinning this surface's copy in a
-    // component test must not depend on a browser-only scroll nicety.
-    endRef.current?.scrollIntoView?.({ block: "end" });
+    // Ruling 419(b): scroll the TRANSCRIPT, never the page. This used to be
+    // `scrollIntoView` on an end marker, which scrolls every scrollable
+    // ancestor too: on a phone the page itself jumped to the bottom of a
+    // 12,625px conversation, past the header, the thread switcher and the
+    // goals, on every load and every new message. The transcript is its own
+    // capped scroller at every width now, so only its own box moves.
+    const box = scrollRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
   }, [count, view.turn.working]);
 
   if (!view.conversation) {
@@ -453,7 +524,11 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
     );
   }
   return (
-    <section className="panel ctl-transcript" aria-label="Conversation transcript">
+    <section
+      ref={scrollRef}
+      className="panel ctl-transcript"
+      aria-label="Conversation transcript"
+    >
       <div className="ctl-msgs">
         {view.messages.map((m) => (
           <article
@@ -494,7 +569,6 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
             <TurnStep turn={view.turn} />
           </div>
         )}
-        <div ref={endRef} />
       </div>
     </section>
   );
@@ -513,6 +587,10 @@ function Composer({
 }) {
   const [text, setText] = useState("");
   const location = useLocation();
+  // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // this keyboard has (UI-55's rule, which P13-D-39 applied to the comment
+  // composer and this one missed).
+  const sendHint = useModifierHint("↵");
   const busy = send.state !== "idle";
   // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
   // takes them. `setText("")` used to run at submit, optimistically, and
@@ -574,7 +652,12 @@ function Composer({
       />
       <div className="ctl-composer-foot">
         <span className="fine xs dim">
-          Acts with your permissions · refusals say why · ⌘↵ sends
+          Acts with your permissions · refusals say why
+          {/* A touch screen has no key to name; app.css drops this on a
+              coarse pointer (`.kbd-hint`). */}
+          <span className="kbd-hint" suppressHydrationWarning>
+            {` · ${sendHint} sends`}
+          </span>
         </span>
         <button
           type="button"
@@ -641,11 +724,17 @@ function GoalsPanel({
   /** Ruling 260: the viewer, so a chain's own creator gets its controls. */
   viewerId: string;
 }) {
+  const running = goals.filter((g) => !isSettled(g)).length;
   return (
     <section className="panel ctl-goals" aria-label="Goal chains">
       <div className="panel-head">
         <Icon name="flag" />
         <h2>Goals</h2>
+        {goals.length > 0 && (
+          <span className="fine xs dim ctl-goals-count">
+            {running} running · {goals.length - running} settled
+          </span>
+        )}
       </div>
       {goals.length === 0 ? (
         <p className="empty sm">
@@ -658,6 +747,7 @@ function GoalsPanel({
           <GoalCard
             key={g.id}
             goal={g}
+            goals={goals}
             csrf={csrf}
             // Ruling 260 (F37-91): the server's gate is creator OR run-agents
             // (`requireGoalAuthority`). The page knew only the role half, so a
@@ -674,12 +764,51 @@ function GoalsPanel({
   );
 }
 
+function isSettled(goal: GoalView): boolean {
+  return goal.status === "completed" || goal.status === "cancelled";
+}
+
+/**
+ * Ruling 419(c): the links in OTHER chains that a cancel would strand.
+ *
+ * A cancelled chain never starts another link (`reconcileGoal` returns early on
+ * a terminal chain, and every link op refuses on it), so a wait on one of its
+ * links that has no task yet resolves as `cancelled` from then on and never
+ * releases (`resolveDependencies`, F37-63). A link that already has a task is
+ * not stranded: its wait follows the task, which stays on the board. The page
+ * holds every chain, so it can name them before the click rather than leave
+ * the dead-dependency note to explain it afterwards.
+ */
+export function linksStrandedByCancel(goal: GoalView, goals: readonly GoalView[]): string[] {
+  const dying = new Set(
+    goal.links
+      .filter((l) => !l.taskKey && l.status !== "done" && l.status !== "skipped")
+      .map((l) => `${goal.id} link ${l.index}`),
+  );
+  const stranded: string[] = [];
+  for (const other of goals) {
+    if (other.id === goal.id || isSettled(other)) continue;
+    for (const link of other.links) {
+      if (link.status === "done" || link.status === "skipped") continue;
+      if (link.blockedBy.some((ref) => dying.has(ref))) {
+        stranded.push(`${other.id} link ${link.index}`);
+      }
+    }
+  }
+  return stranded;
+}
+
+type GoalConfirm = { kind: "cancel" } | { kind: "skip"; index: number; title: string };
+
 function GoalCard({
   goal,
+  goals,
   csrf,
   canRedirect,
 }: {
   goal: GoalView;
+  /** Every chain on the board, for what a cancel would strand in the others. */
+  goals: readonly GoalView[];
   csrf: string;
   canRedirect: boolean;
 }) {
@@ -692,6 +821,8 @@ function GoalCard({
     if (op.data.toast) push(op.data.toast, op.data.ok ? "success" : "error");
     else if (!op.data.ok && op.data.error) push(op.data.error, "error");
   }, [op.state, op.data, push]);
+  const [confirm, setConfirm] = useState<GoalConfirm | null>(null);
+  const [reason, setReason] = useState("");
 
   const busy = op.state !== "idle";
   const act = (fields: Record<string, string>) => {
@@ -702,17 +833,48 @@ function GoalCard({
     for (const [k, v] of Object.entries(fields)) body.set(k, v);
     op.submit(body, { method: "post" });
   };
+  const ask = (next: GoalConfirm) => {
+    setReason("");
+    setConfirm(next);
+  };
   const pill = GOAL_PILL[goal.status];
-  const settled = goal.status === "completed" || goal.status === "cancelled";
+  const settled = isSettled(goal);
+  const done = goal.links.filter((l) => l.status === "done").length;
+  const skipped = goal.links.filter((l) => l.status === "skipped").length;
+  const unstarted = goal.links.filter(
+    (l) => !l.taskKey && l.status !== "done" && l.status !== "skipped",
+  ).length;
+  const stranded = confirm?.kind === "cancel" ? linksStrandedByCancel(goal, goals) : [];
+  const reasonField = (
+    <label className="field ctl-confirm-reason">
+      <span className="flabel">Why (optional, recorded on the chain&apos;s history)</span>
+      <textarea
+        rows={2}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        maxLength={500}
+      />
+    </label>
+  );
   return (
-    <article className="ctl-goal">
-      <header>
-        <span className="ctl-goal-id mono">{goal.id}</span>
-        <strong>{goal.title}</strong>
-        <Pill kind={pill.kind} sm>
-          {pill.label}
-        </Pill>
-      </header>
+    // Ruling 419(d): a chain is a disclosure. A settled one folds to its head
+    // line: live on ax-clone the completed goal-1 took 479px of rail to say
+    // four links were done. `open` is only the starting state; React leaves a
+    // person's own toggle alone until the chain settles or reopens.
+    <details className="ctl-goal" open={!settled} data-goal={goal.id}>
+      <summary>
+        <span className="ctl-goal-line">
+          <span className="ctl-goal-id mono">{goal.id}</span>
+          <Pill kind={pill.kind} sm>
+            {pill.label}
+          </Pill>
+          <span className="ctl-goal-progress" data-goal-progress>
+            {done} of {goal.links.length} done
+            {skipped > 0 && ` · ${skipped} skipped`}
+          </span>
+        </span>
+        <strong className="ctl-goal-title">{goal.title}</strong>
+      </summary>
       <ol className="ctl-links">
         {goal.links.map((l) => {
           const lp = LINK_PILL[l.status] ?? LINK_PILL.pending;
@@ -747,7 +909,7 @@ function GoalCard({
                     type="button"
                     className="btn ghost sm"
                     disabled={busy}
-                    onClick={() => act({ op: "skip_link", index: String(l.index) })}
+                    onClick={() => ask({ kind: "skip", index: l.index, title: l.title })}
                   >
                     Skip
                   </button>
@@ -779,16 +941,67 @@ function GoalCard({
               Pause
             </button>
           )}
+          {/* Ruling 419(c): cancel is terminal (resume refuses a cancelled
+              chain) and it strands waits elsewhere, so it is ruling 149's
+              destructive class: the danger face, and a confirm first. */}
           <button
             type="button"
-            className="btn ghost sm"
+            className="btn ghost sm danger"
             disabled={busy}
-            onClick={() => act({ op: "cancel" })}
+            onClick={() => ask({ kind: "cancel" })}
           >
             Cancel goal
           </button>
         </footer>
       )}
-    </article>
+      {confirm?.kind === "cancel" && (
+        <ConfirmDialog
+          screenLabel="Cancel goal dialog"
+          title={`Cancel ${goal.id}?`}
+          body={
+            `A cancelled chain cannot be resumed, and none of its ${unstarted} unstarted ` +
+            `link${unstarted === 1 ? "" : "s"} will ever start. Tasks it already started stay on the ` +
+            "board with their work, and its record stays readable." +
+            (stranded.length > 0
+              ? ` ${joinDependencyEntries(stranded)} ${stranded.length === 1 ? "waits" : "wait"} on ` +
+                `those unstarted links and would wait forever unless ${stranded.length === 1 ? "its wait is" : "their waits are"} changed.`
+              : "")
+          }
+          confirmLabel="Cancel goal"
+          cancelLabel="Keep it running"
+          busy={busy}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            const why = reason.trim();
+            act(why ? { op: "cancel", reason: why } : { op: "cancel" });
+            setConfirm(null);
+          }}
+        >
+          {reasonField}
+        </ConfirmDialog>
+      )}
+      {confirm?.kind === "skip" && (
+        <ConfirmDialog
+          screenLabel="Skip link dialog"
+          title={`Skip link ${confirm.index}?`}
+          body={
+            `"${confirm.title}" will never run, and a skipped link cannot be retried. ` +
+            "The chain moves past it, and anything that waits on it is released as if it were done."
+          }
+          confirmLabel="Skip link"
+          cancelLabel="Keep it"
+          busy={busy}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            const why = reason.trim();
+            const index = String(confirm.index);
+            act(why ? { op: "skip_link", index, reason: why } : { op: "skip_link", index });
+            setConfirm(null);
+          }}
+        >
+          {reasonField}
+        </ConfirmDialog>
+      )}
+    </details>
   );
 }

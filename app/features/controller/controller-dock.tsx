@@ -24,6 +24,7 @@ import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 
@@ -183,6 +184,9 @@ function DockShell({ context }: { context: DockContext }) {
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
+  // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // this keyboard has (UI-55; the page's composer shares the rule).
+  const sendHint = useModifierHint("↵");
   const restored = useRef(false);
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -690,7 +694,12 @@ function DockShell({ context }: { context: DockContext }) {
                 aria-label="Message to the controller"
               />
               <div className="ctl-composer-foot">
-                <span className="fine xs dim">Acts with your permissions · ⌘↵ sends</span>
+                <span className="fine xs dim">
+                  Acts with your permissions
+                  <span className="kbd-hint" suppressHydrationWarning>
+                    {` · ${sendHint} sends`}
+                  </span>
+                </span>
                 <button
                   type="button"
                   className="btn primary sm"
