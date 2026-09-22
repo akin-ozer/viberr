@@ -570,3 +570,41 @@ operator paths and this is the first controller-path evidence: the carried sessi
 134k to 7.5k while the prefix is still warm, which is exactly what ruling 376 promised. No
 finding — the misreading was mine, and checking it cost less than asserting it would have.
 
+## 20. The audit log and the PR records, against GitHub
+
+Two more surfaces tested the same way. Both clean.
+
+**Five open PRs at once, and viberr's record of each matches GitHub exactly.** Read from
+`gh pr list` and from the five `task.md` files independently:
+
+```
+gh:      16 ax-18 MERGEABLE/CLEAN   15 ax-21   14 ax-17   13 ax-20   11 ax-19
+viberr:  AX-18 pr#16 mergeable=clean  AX-21 #15  AX-17 #14  AX-20 #13  AX-19 #11
+```
+
+Every `mergeable` agrees, every `review` is null on both sides, and `checks: null` matches
+the 403 the credential really gets. The GitHub record holds under five concurrent
+deliveries, which is the load this board had never put on it before today.
+
+**The audit log's counts match the world.** 1,944 events exported as JSON:
+
+| action | audit | independently |
+|---|---|---|
+| `github.pr.merged` | 11 | `gh pr list --state merged` → 11 |
+| `github.branch_update.acceptance` | 11 | one base refresh per acceptance |
+| `task.archived` | 2 | AX-8, AX-10 on the board |
+| `goal.completed` | 1 | goal-1 |
+| `task.acceptance.forced` | 2 | both accounted for, below |
+
+The two force-accepts are the interesting row, because an override is the one action whose
+record has to be complete:
+
+```
+2026-09-22T08:49  arda@viberr.dev    AX-12  bypassedGates: [2 gates]
+2026-09-21T21:14  nadia.kaya@...     AX-8   bypassedGates: [1 gate]
+```
+
+Both attributed to a real person, both carrying `bypassedGates` as a LIST — which is ruling
+393 working: the audit records every gate an override passed, not the first one a
+single-reason helper picked. AX-12's row is the one that produced that ruling.
+
