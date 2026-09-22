@@ -360,3 +360,32 @@ Within an hour of the deploy the ax-clone board produced all three, unprompted:
 And the same hour produced ruling 391: AX-12's delivery attempt printed "If the agent
 produced work, it never reached the task branch. Re-run the delivering agent" about a report
 that was written, attached, and recorded in `deliveredAt`.
+
+## 14. Ruling 389, verified live on the next failure the board produced
+
+AX-3's developer run hit the same dropped connection twice. Before the deploy, twice:
+
+> The Implementation agent run failed: Codex run failed: Codex execution failed. **Review its
+> authentication and runtime configuration.**
+> options: `redirect` (**recommended**) · `request_edit` · `hold_runtime_debug`
+
+After it, on the very next occurrence, unprompted:
+
+> **Codex could not be reached from this deployment: the connection failed before the provider
+> answered. Nothing about Arda's account or the task is wrong; the fault is on this
+> deployment's network path (TLS, DNS or a proxy). Retry in a few minutes, or run it on Claude
+> now.**
+> options: `retry_other_backend` · `request_edit` ("Retry @developer on Codex now: this
+> deployment could not reach the provider, nothing was changed") · `redirect` ·
+> `hold_runtime_debug`
+
+Both halves of the ruling: the sentence stopped contradicting the provider text captured one
+line below it, and `kind` moved the packet from the generic stalled-work shape onto the
+backend-failure one. The cross-backend option is honest about itself too, unprompted: "This
+failure was on this deployment's own network path, which the other provider is reached over
+too, so this is a change of model rather than a fix."
+
+*Actor note: from here the board is driven as Nadia Kaya (ax-clone admin, one of the pass-39
+RBAC probe users). Resetting Arda's password to sign the browser pane back in revoked Arda's
+own sessions, which is correct behaviour and my own mistake; the probe sessions were
+unaffected.*
