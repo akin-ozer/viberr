@@ -8,6 +8,7 @@ import {
   mapPrChecks,
   mapPrChecksUnread,
   prChecksRead,
+  mapPrMergeable,
   mapPrReview,
   mapTaskProjectionRow,
   nextScheduleDueAt,
@@ -798,5 +799,44 @@ describe("ruling 349: withLiveRun reads the run row into the display state", () 
     const human = summarize(row({ waiting: "human", readiness: "input_required" }), false);
     expect(human.displayReadiness).toBe("input_required");
     expect(withLiveRun(human, "queued").displayReadiness).toBe("input_required");
+  });
+});
+
+/**
+ * Ruling 405(b): every surface reads the verdict's head pin, or two of them
+ * disagree.
+ *
+ * `conflictingPrBlockedReason` (the acceptance gate), the GitHub page and the
+ * review queue all go through this mapping. The task page did NOT -- it read
+ * `task.pr.mergeable` raw -- so a conflict measured on a commit that has since
+ * been superseded would still paint "conflicts" there while the gate let the
+ * task through. Found by checking my own fix's consumers, which is the third
+ * time this pass a change reached some of them and not all.
+ */
+describe("ruling 405(b): mapPrMergeable honours the head the verdict was measured on", () => {
+  const pr = (mergeable: "conflicting" | "clean", at: string | null, headSha: string) => {
+    const ref = {
+      number: 15,
+      state: "review" as const,
+      title: "[VIB-1] work",
+      mergeable,
+      headSha,
+    };
+    if (at) return { ...ref, mergeableAt: at };
+    return ref;
+  };
+
+  it("shows a conflict measured on the head that is live", () => {
+    expect(mapPrMergeable(pr("conflicting", "e763b9f", "e763b9f"))).toBe("conflicting");
+  });
+
+  it("shows NOTHING once the head has moved past the commit it was measured on", () => {
+    // CANARY: drop the pin check and this returns "conflicting" -- the pill
+    // the task page used to paint over the commit that fixed it.
+    expect(mapPrMergeable(pr("conflicting", "e763b9f", "d20be15"))).toBeNull();
+  });
+
+  it("still shows an unpinned verdict, so an old file is not silently cleared", () => {
+    expect(mapPrMergeable(pr("conflicting", null, "d20be15"))).toBe("conflicting");
   });
 });

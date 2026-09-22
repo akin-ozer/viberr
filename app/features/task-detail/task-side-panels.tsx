@@ -20,6 +20,7 @@ import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, checksUnreadPill, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import { mapPrMergeable } from "~/shared/mapping/task.server";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -306,9 +307,13 @@ export function GithubTrace({
             page alone, so this card read "PR #16 · in review" while the accept
             click answered 409. The reconciler drops the fact for a settled PR,
             so a merged or closed one never wears it. */}
-        {task.pr && mergeablePill(task.pr.mergeable ?? null) && (
-          <Pill kind={mergeablePill(task.pr.mergeable ?? null)!.kind} sm>
-            {mergeablePill(task.pr.mergeable ?? null)!.label}
+        {/* Ruling 405(b): through `mapPrMergeable`, not off the raw field. The
+            GitHub page and the review queue both read the verdict's head pin,
+            and a task page painting "conflicts" over the commit that resolved
+            it would disagree with them and with the acceptance gate. */}
+        {task.pr && mergeablePill(mapPrMergeable(task.pr)) && (
+          <Pill kind={mergeablePill(mapPrMergeable(task.pr))!.kind} sm>
+            {mergeablePill(mapPrMergeable(task.pr))!.label}
           </Pill>
         )}
       </div>
