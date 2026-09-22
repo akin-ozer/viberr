@@ -1596,3 +1596,29 @@ whole time: ruling 133 lets the engaged deliverer run at **every** stage, so the
 never needed the transition at all.
 
 Ruling 399's shape, in the sentence whose only job is to explain a refusal. Ruling 412.
+
+### A human cannot defer a task, only run it now
+
+Ruling 153 gave schedules a real implementation: the clamps are validated (VALIDATION §12),
+the operator and controller both hold `schedule_task_action`, and viberr's own quota packet
+offers "Wait for the window and pick the task back up automatically" as an option — which
+is a scheduled `run-operator`, written into the task file:
+
+```yaml
+schedules:
+  - id: sch_cVPdfHEKd5YC
+    action: run-operator
+    dueAt: 2026-09-22T20:13:00.000Z
+```
+
+A person has no way to ask for that. The task page offers "Run operator" (now) and nothing
+else. So the capability exists, is enforced, is reachable by two agents and by one packet
+that happens to offer it, and is unreachable by the human whose board it is.
+
+Live cost, small but real: AX-18 is resting at `waiting: human` with no schedule while the
+Codex window is shut. The four tasks beside it will pick themselves up at 20:13 because a
+packet offered it; AX-18 will sit until a person remembers.
+
+Not raised as a defect — nothing lies and no work is lost — but it is the shape of "making a
+user do something absurd" in miniature: wait by the keyboard for a clock the product can
+already read.
