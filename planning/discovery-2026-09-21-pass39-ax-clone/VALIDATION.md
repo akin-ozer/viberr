@@ -1091,3 +1091,34 @@ of the new decision, exactly as bounded.
 Packets resolved through the task pages this hour: AX-19 (round 6), AX-22 (round 4) and AX-24
 (round 3), each "Let the rework continue" with a note that bounds the one rework to the
 reviewer's own complete list. AX-18 accepted: PR #16 merged at 21:45:52 UTC (`acfaaf3`).
+
+## 40. Rulings 414 and 417 verified live (2026-09-22 22:08-22:15 UTC, build `faa3d417`)
+
+**Ruling 414: one Codex compaction is one record, with its measured size.** The first three
+completion compactions on the new build, read from the task files and, independently, from the
+audit export (`/org/settings/audit-export?format=json&project=ax-clone&since=2026-09-22T21:54:00Z`):
+
+| task | timeline note (the only one for that run) | audit row `task.agent.compaction` |
+|---|---|---|
+| AX-20 reviewer | "from 116k to 8k tokens" 22:08:37.979 | `trigger: completion, preTokens: 116475, postTokens: 8248` |
+| AX-19 developer | (same shape) 22:13:51 | `trigger: completion, preTokens: 118844, postTokens: 8885` |
+| AX-22 developer | "from 103k to 9k tokens" 22:14:46.817 | `trigger: completion, preTokens: 103142, postTokens: 8916` |
+
+One note per run, no "(auto)" twin, one audit row per run, and every size is a measured
+figure. Before 414 each of these would have been two notes and two rows, one of them a
+compaction that never happened.
+
+**Ruling 417: the operator leases files itself.** Two operators used `lease_files`
+unprompted within five minutes:
+
+- AX-24, 22:11:38: leased exactly `internal/cli/cli.go`, `internal/cli/cli_test.go`,
+  `internal/client/client.go` ("AX-24's open PR overlaps AX-21 on these paths ... hold only the
+  shared paths until merge"). The three paths are the ones `collisions` named. It did not lease
+  a tree.
+- AX-19, 22:15:25: leased `docs/manifests.md`. AX-22, which also changes it, got the policy
+  note "Files leased by another task: AX-19 now holds `docs/manifests.md` (leased by its
+  operator: ...)" on its own timeline.
+
+`project.md` `fileLeases` holds both, and the audit has two `project.file_leases.updated` rows
+with `by: operator` and the holder. The next AX-21 delivery that touches `internal/cli/cli.go`
+is the first chance to see a lease refuse a push.

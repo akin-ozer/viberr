@@ -11,6 +11,29 @@ stood before the clear is in git history (`445dd449`).
 
 ---
 
+## Found in the unattended 8-hour run (2026-09-23, from 01:07 local)
+
+The owner asked for eight hours with no questions and a focus on the controller page for end
+users. Design choices that would normally go to the owner are made here with the recommended
+default and marked **(default, owner may revisit)**.
+
+- **F39-43 (MED) — the round-5 deadlock packet recommends a question the operator asked in the
+  run it escalates, and one a person declined earlier in the same streak.** AX-20, 22:08 UTC on
+  2026-09-22: packet `pkt_qV5rjpJypcwX` "Reviewer has requested changes 5 times running". Its
+  recommended option is "Ask Reviewer what else it would block on". But the run whose verdict
+  raised it was dispatched at 21:59:29 with "provide the complete blocking set across your review
+  surface, including anything you might otherwise defer" (the operator's ruling-410 question), and
+  the answer was ONE blocker. Earlier in the same streak (18:48) the owner resolved the round-3
+  packet with "Rework, not another question. I asked this reviewer for its complete set at round 2
+  and it answered". The body hedges instead ("either it did ... or it did not ... The reviewer's
+  own verdicts on the timeline say which"). Why the structure missed it: 416's signals are
+  revision-shaped (`noReworkBehind`, `reviews > rounds`); the question was put on the first read of
+  a reworked revision, and the round-2 answer predates the `reviews` field. Resolved as the owner:
+  "Let the rework continue", with the reason and the one blocker (exit status lost across a
+  control-plane restart).
+
+---
+
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **A full 40-character sha scrolls a task page sideways on a phone.** At 375 px two `code.mono`
