@@ -32,6 +32,7 @@ per item and each one was applied to the source and observed failing.
 | 19 | A non-commit delivery is reviewable like a commit (F39-15) | — | **done**, ruling 388 |
 | 20 | Codex's transport prose classifies as a network failure (F39-16) | — | **done**, ruling 389 |
 | 21 | The controller's grant request outlives its conversation (F39-17) | "surface a grant request to an admin" | **done**, ruling 390 |
+| 22 | A non-commit task is not told its work went missing (F39-18) | — | **done**, ruling 391 |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list

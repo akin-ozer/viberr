@@ -339,3 +339,24 @@ will say there is no verdict — which is the honest state it was in all along.
 
 Accepting the schedule on a held task without a warning is right rather than a gap: the hold
 can be released before the due time, and the refusal at fire time says precisely why.
+
+## 13. Three of the pass's own fixes, verified on the live board rather than by test
+
+Within an hour of the deploy the ax-clone board produced all three, unprompted:
+
+- **Ruling 384** — AX-11's acceptance card now opens with a reading instead of a claim:
+  "**Reviewer approved `fe7232b`.** Accepting completion moves AX-11 to Done and merges the
+  review PR…". The fixed sentence it replaced said the review was clean on a task with
+  `verdicts: []`.
+- **Ruling 386 (F39-10)** — the operator reached for `update_branch_from_base` at the
+  acceptance boundary again, and the record now says "**This step did not apply to the task's
+  current state**" as a plain `note`. The same refusal on AX-9 twelve hours earlier was filed
+  under "refused by its capability policy" as a `policy` event, against a grant set to
+  `direct`.
+- **Ruling 388** — AX-12's `validation` moved off `none`. With a review subject that is not a
+  commit, the derivation now runs: `changed` while the verdict is pending, where it used to
+  be pinned at `none` however the reviewer ruled.
+
+And the same hour produced ruling 391: AX-12's delivery attempt printed "If the agent
+produced work, it never reached the task branch. Re-run the delivering agent" about a report
+that was written, attached, and recorded in `deliveredAt`.
