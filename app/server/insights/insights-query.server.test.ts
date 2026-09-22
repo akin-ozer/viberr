@@ -470,6 +470,7 @@ function insertTask(
     branch?: string | null;
     prJson?: string | null;
     revisionSha?: string | null;
+    githubJson?: string | null;
     packetJson?: string | null;
     eventCount?: number;
     createdAt?: string | null;
@@ -479,9 +480,9 @@ function insertTask(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, waiting, urgent,
         archived, validation, owner_user_id, branch, pr_json,
-        work_revision_sha, packet_json, event_count, created_at,
+        work_revision_sha, github_json, packet_json, event_count, created_at,
         source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, 'ready', ?, 0, ?, 'none', ?, ?, ?, ?, ?, ?, ?,
+     VALUES (?, ?, ?, ?, 'ready', ?, 0, ?, 'none', ?, ?, ?, ?, ?, ?, ?, ?,
              ?, 'hash', '2026-08-01T00:00:00.000Z')`,
   ).run(
     t.project ?? "gp",
@@ -494,6 +495,7 @@ function insertTask(
     t.branch ?? null,
     t.prJson ?? null,
     t.revisionSha ?? null,
+    t.githubJson ?? null,
     t.packetJson ?? null,
     t.eventCount ?? 0,
     t.createdAt ?? "2026-08-20T00:00:00.000Z",
@@ -791,6 +793,60 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     // Ruling 290: and it NAMES the one that cannot be traced. A traceability
     // metric that reports "1 of 2" and will not say which is withholding the
     // only fact a person reads it for. CANARY: return the count alone.
+    expect(g.traceability.untraced).toEqual(["gp/VIB-2"]);
+  });
+
+  /**
+   * Ruling 407 (F39-34), live on ax-clone AX-12.
+   *
+   * AX-12's deliverable was an upstream-fidelity REPORT, delivered as 20
+   * attachments: `noChanges: true`, zero commits, force-accepted, Done. It
+   * carries a `workRevision`, so Insights counted it as a delivery, found no
+   * PR, and published "18 of 19 delivered tasks carry branch + PR" with AX-12
+   * named as the one that does not -- a shortfall that can never be closed,
+   * because nothing about a finished task moves again.
+   *
+   * Ruling 391 settled that a report is delivered work; ruling 401 dropped the
+   * same task's "behind main" pill for the same reason, on the same predicate.
+   * This is that predicate, in the surface that still demanded a PR.
+   */
+  it("ruling 407: a delivery that was never commit-shaped is not an untraced one", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertTask(db, { key: "VIB-1", branch: "vib-1", prJson: '{"number":9}', revisionSha: "a".repeat(40) });
+    // AX-12's shape: done, a revision on the record, no PR, no commits.
+    insertTask(db, {
+      key: "VIB-2",
+      stage: "done",
+      branch: "vib-2",
+      revisionSha: "b".repeat(40),
+      githubJson: JSON.stringify({ commits: [] }),
+    });
+
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop `&& !commitless(t)` and this reads 1 of 2, 50%, naming
+    // gp/VIB-2 -- which is AX-12's row on the live page, verbatim.
+    expect(g.traceability.deliveredTasks).toBe(1);
+    expect(g.traceability.tracedTasks).toBe(1);
+    expect(g.traceability.pct).toBe(1);
+    expect(g.traceability.untraced).toEqual([]);
+  });
+
+  it("ruling 407: a task that DID commit and never opened a PR is still untraced", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // Same terminal stage, same missing PR -- but it committed, so the demand
+    // for a pull request is one somebody could have met.
+    insertTask(db, {
+      key: "VIB-2",
+      stage: "done",
+      branch: "vib-2",
+      revisionSha: "b".repeat(40),
+      githubJson: JSON.stringify({ commits: [{ sha: "c".repeat(7) }] }),
+    });
+
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.traceability.deliveredTasks).toBe(1);
     expect(g.traceability.untraced).toEqual(["gp/VIB-2"]);
   });
 

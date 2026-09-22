@@ -388,10 +388,19 @@ const govTaskSchema = z.object({
   branch: z.string().nullable(),
   pr_json: z.string().nullable(),
   work_revision_sha: z.string().nullable(),
+  // Ruling 407: read for its `commits` alone — whether this task's delivery
+  // was commit-shaped at all.
+  github_json: z.string().nullable(),
   packet_json: z.string().nullable(),
   event_count: z.number(),
   created_at: z.string().nullable(),
 });
+
+/** Ruling 407: the one field the commit-shape test reads. */
+const githubCommitsSchema = z
+  .object({ commits: z.array(z.unknown()).catch([]) })
+  .transform((g) => g.commits)
+  .catch([]);
 
 const govProjectSchema = z.object({
   slug: z.string(),
@@ -476,7 +485,7 @@ function oversightSummary(
     db
       .prepare(
         `SELECT project_slug, task_key, stage, waiting, owner_user_id, archived,
-                branch, pr_json, work_revision_sha, packet_json, event_count,
+                branch, pr_json, work_revision_sha, github_json, packet_json, event_count,
                 created_at
          FROM task_projections ${clause}`,
       )
@@ -531,8 +540,27 @@ function oversightSummary(
   // 2. Key↔branch↔PR traceability over DELIVERED tasks: a delivered revision
   // or a recorded PR. A branch alone is not a delivery — ruling 122 allocates
   // the name at first dispatch, before any work exists (ruling 143, U34-9).
+  //
+  // Ruling 407 (F39-34): a delivery that was never commit-shaped has no branch
+  // and no PR to carry, so counting it here states a demand that can NEVER be
+  // met — on finished work, in a metric whose whole point (ruling 290) is to
+  // name exceptions a person can act on. Live: ax-clone AX-12 delivered an
+  // upstream-fidelity REPORT as 20 attachments, `noChanges: true`, zero
+  // commits, force-accepted and Done; Insights read its `workRevision`, found
+  // no PR, and reported "18 of 19 delivered tasks carry branch + PR" naming
+  // AX-12 as the one that does not. Ruling 391 settled that a report is
+  // delivered work and ruling 401 dropped the same task's "behind main" pill
+  // on the same reasoning, with the same predicate — terminal stage, no PR, no
+  // commits — which is reused here rather than re-derived. A task that DID
+  // commit and never opened a PR is still untraceable and still counted.
+  const commitless = (t: z.infer<typeof govTaskSchema>): boolean => {
+    const terminal = roles.get(t.project_slug)?.terminalId ?? null;
+    if (terminal == null || t.stage !== terminal) return false;
+    if (t.pr_json != null) return false;
+    return parsedJson(githubCommitsSchema, t.github_json, []).length === 0;
+  };
   const delivered = tasks.filter(
-    (t) => t.work_revision_sha != null || t.pr_json != null,
+    (t) => (t.work_revision_sha != null || t.pr_json != null) && !commitless(t),
   );
   const untracedTasks = delivered.filter(
     (t) => t.branch == null || t.pr_json == null,

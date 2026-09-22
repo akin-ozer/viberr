@@ -1347,3 +1347,25 @@ done nothing.
 This is the fourth amendment to the same verdict — ruling 152(a) added a transition that
 landed elsewhere, 202 added delivery, 228 added the wholly-refused plan. Ruling 406 stops
 enumerating effects and records the fact: the drive ACTED.
+
+## F39-34 · MEDIUM · A permanent traceability failure, drawn on a task that delivered a report
+
+/insights, read live:
+
+> **Branch & PR traceability · 95%** — 18 of 19 delivered tasks carry branch + PR — **AX-12**
+
+AX-12's deliverable was the upstream-fidelity comparison against `github.com/google/ax`,
+delivered as 20 attachments. `noChanges: true`, zero commits, no PR, force-accepted, Done.
+It carries a `workRevision`, so the metric counts it as a delivery, finds no PR, and reports
+it as the exception.
+
+The demand can never be met. Nothing about a finished task moves again, so AX-12 will sit in
+that card at 95% forever, named as the failure.
+
+Ruling 290 built these cards specifically to count exceptions a person can ACT on, and to
+name them rather than withhold the name. This inverts it: the name is there, and there is
+nothing to do with it.
+
+Same shape as F39-28 (ruling 401), which dropped the same task's "behind main" pill on the
+same reasoning — a demand, drawn as a problem, on finished work, for a branch that does not
+exist. I fixed one surface and not the other. Ruling 407.
