@@ -1521,3 +1521,31 @@ spent an afternoon contending over `internal/sandbox/local.go` (AX-21 blocked, a
 raised, a human decision spent) which is exactly the collision a lease exists to prevent.
 A lease proposed from the overlap above would have been the mechanism working ahead of the
 problem instead of after it.
+
+## F39-38 · MEDIUM · A ruling I made this pass changed WHEN a link starts, and the instruction that assumed otherwise was never swept
+
+Asked whether ten pending links were genuinely gated on AX-19 and AX-20, the controller
+judged correctly that `ax apply -f` was not — everything it writes through is merged — and
+cleared goal-4 link 2's wait. Then:
+
+```
+AX-24 created 2026-09-22T19:12:06.394Z  goalRef (goal-4, 2)   ← viberr's fan-out, ruling 398
+AX-25 created 2026-09-22T19:12:10.988Z  goalRef None          ← the controller, 4.6s later
+goal-4 link 2 -> AX-24
+```
+
+`adopt_task` refused the second correctly: *"Link 2 already has a task (AX-24). Only a
+pending link with no task can adopt one."* The guard held. What failed was the instruction
+before it: `adopt_task`'s field text still described ruling 243's world, where "a chain
+normally MAKES its link's task when it advances, and nothing could point a link at a task
+that already exists". Under ruling 398 a link starts in the same call that unblocks it, so
+creating its task first is guaranteed to duplicate.
+
+Cost: an orphan task with an agent dispatched on it, building `ax apply -f` a second time on
+a second branch.
+
+**Ruling 398 is mine, from this pass.** I changed a timing and did not sweep the text that
+depended on it — the pass-28 "verify every consumer" lesson, one level up from code.
+
+The controller caught it itself: it read the refusal, renamed AX-25 to "DUPLICATE of AX-24 —
+do not work, archive me" and blocked it on AX-24. Ruling 411.

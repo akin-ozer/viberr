@@ -161,6 +161,42 @@ describe("the tool surface itself encodes the invariants", () => {
     expect(loading.loaded).toEqual([]);
     expect(loading.deferred).toHaveLength(toolkit.tools.length);
   });
+
+  /**
+   * Ruling 411 (F39-38), live on ax-clone.
+   *
+   * Ruling 398 made a link start the MOMENT nothing makes it wait -- in the
+   * same call that clears the wait, not on a later tick. `update_goal`'s own
+   * guidance still described the world before it, where `adopt_task` existed
+   * precisely because "a chain normally MAKES its link's task when it advances"
+   * (ruling 243). So the controller cleared goal-4 link 2's wait, Viberr
+   * created AX-24 for it at 19:12:06, the controller created AX-25 for the same
+   * link 4.6 seconds later, and `adopt_task` correctly refused it ("Link 2
+   * already has a task"). AX-25 was left an orphan with an agent dispatched on
+   * it, building `ax apply -f` a second time on a second branch.
+   *
+   * The guard held. The instruction that produced the collision did not.
+   */
+  it("ruling 411: update_goal says a link you unblock starts AT ONCE, so do not pre-make its task", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const updateGoal = toolkit.tools.find((t) => t.name === "update_goal");
+    expect(updateGoal, "update_goal must exist for this to mean anything").toBeTruthy();
+    // The instruction text lives on each zod field's `.describe()`, which is
+    // what the model is shown. Read the shape, not a stringify of the schema:
+    // Zod 4 keeps descriptions off the serialized `def`.
+    const described = updateGoal!.description;
+    // CANARY: drop either sentence and the controller is told what it was told
+    // when it made AX-25.
+    expect(described).toContain("starts that link AT ONCE");
+    expect(described).toContain("never create a task for a link you are about to unblock");
+    expect(described).toContain("RULING 411");
+  });
 });
 
 /**
