@@ -15,12 +15,18 @@ $ curl -s localhost:5173/resources/health | jq -r '.toolchain.go'
 ```
 
 And the gate the project's own rulings required, which two agents had independently proved
-unrunnable, on a real checkout of the clone:
+unrunnable — now run by **the reviewer itself, inside the container, on the concurrent
+store**, off its own run log:
 
 ```
-$ CGO_ENABLED=1 go test -race ./...     # in a clone of akin-ozer/ax-clone
-ok  github.com/akin-ozer/ax-clone/internal/apis
+$ CGO_ENABLED=1 go test -race ./...            # reviewer run run_sQPo2vnvVv1E, exit 0
+ok  github.com/akin-ozer/ax-clone/cmd/ax        1.010s
+ok  github.com/akin-ozer/ax-clone/internal/apis 1.016s
+ok  github.com/akin-ozer/ax-clone/internal/store 1.044s
 ```
+
+The bullet the rulings could not settle — "a data race is a defect, not a flake", against a
+WAL and a watch feed nobody could race-test — is now a gate that actually runs.
 
 ## 1. `attach-file` (ruling 379) — the whole matrix, over HTTP
 
@@ -124,3 +130,27 @@ ruling 377(a) exists to prevent is no longer available to make.
   rulings KB now says two false things (golangci-lint "NOT preinstalled", and the race gate
   unrunnable), the operator has been told so with evidence in a packet resolution, and the
   new tool is in the running build.
+
+## 6. The audit log matches what actually happened
+
+405 rows exported from the live instance. Every refusal the RBAC probe provoked is there —
+13 for 13 — each naming the actor, the RBAC action, a human sentence for it, the project and
+the member's role at the time:
+
+```json
+{ "actorLabel": "ravi.mehta@viberr.dev", "action": "project.authority.denied",
+  "subjectKind": "project", "subjectId": "ax-clone",
+  "details": { "action": "force-accept-completion",
+               "what": "force-accept past the review gate",
+               "projectSlug": "ax-clone", "memberRole": "maintainer" } }
+```
+
+Including the new one: `priya.raman@viberr.dev … attach-file`. A non-member's attempt is
+audited as `any-member`, which is the same shape the 404 gives them — the record does not
+leak the project's existence to them and does not hide the attempt from an admin.
+
+**Noted, not worked:** these rows carry `taskKey: null`. The authority check is
+project-scoped, so it genuinely does not know the task, and a refusal writes nothing to a
+task timeline — so "which task did Priya try to force-accept?" is not answerable from the
+record. Honest about what it does record; incomplete as forensics. A nitpick by this pass's
+bar.
