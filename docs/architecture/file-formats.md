@@ -528,7 +528,12 @@ Notes:
   (ISO or null) — advisory metadata that reaches the operator only (R26-1) and is
   searchable on the board and in ⌘K; `acceptance: forced` when an admin force-accepted;
   `goalRef: { goalId, linkIndex }` back-reference to a chained goal; `engagements[].pinnedBackend`
-  (set by a `retry_other_backend` resolution so the switch sticks, F27-B1); `pr.checks`,
+  (set by a `retry_other_backend` resolution so the switch sticks, F27-B1);
+  `engagements[].question: { kind: completeness, runId, at }` (ruling 421: the run that is
+  putting the completeness question to this reviewer, consumed by the verdict that run returns);
+  `verdicts[].reviews` (ruling 416(b): same-result reviews of the revision, fought or not) and
+  `verdicts[].answers: completeness` (ruling 421: the reviewer answered the completeness question
+  on this revision in the current same-result streak); `pr.checks`,
   `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`,
   `pr.closure` (reconciler cache, shown above; the closure's `answered` is the packet
   resolution's); each `schedules[]`
