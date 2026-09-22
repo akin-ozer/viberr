@@ -257,6 +257,9 @@ export interface RunOperatorInput {
    *  was refused in full, not because it left an auto stage idle. The two read
    *  differently to the operator and the turn instruction says which. */
   planRefusedNudge?: boolean;
+  /** Ruling 400: the refusal sentences the previous drive collected, quoted
+   *  into this retry's instruction so it never has to go and find them. */
+  refusedPlanSteps?: { tool: string; message: string }[];
   /** transition trigger — what just moved (display names) and who moved it.
    *  `transitionByHuman` null = the operator's own move (continue the flow);
    *  a name = a human decided it, and the turn instruction tells the operator
@@ -1280,7 +1283,13 @@ export async function maybeResumeStrandedOperator(
     strandedResume: true,
     dataRoot: ref.dataRoot,
   };
-  if (ref.ownRun?.planWhollyRefused === true) nudge.planRefusedNudge = true;
+  if (ref.ownRun?.planWhollyRefused === true) {
+    nudge.planRefusedNudge = true;
+    // Ruling 400: carry the refusals into the retry's own instruction.
+    if (ref.ownRun.refusedPlanSteps?.length) {
+      nudge.refusedPlanSteps = ref.ownRun.refusedPlanSteps;
+    }
+  }
   void runOperator(db, nudge).catch((error) => {
     logger.error("stranded-operator resume failed", {
       taskKey: ref.taskKey,
@@ -2481,6 +2490,7 @@ async function startCodexOperatorRun(
     input.resolvedOption,
     input.planRefusedNudge ? "plan-refused" : input.strandedResume,
     input.dependencyRelease,
+    input.refusedPlanSteps,
   );
   const orgMcpServers = mcp.servers;
 
@@ -3038,6 +3048,11 @@ async function executeCodexPlan(
   // is narrated on its own terms and is not this.
   if (ctx.operatorRun && plan.actions.length > 0 && refused.length === plan.actions.length) {
     ctx.operatorRun.planWhollyRefused = true;
+    // Ruling 400: the sentences, not just the flag. The retry quotes them.
+    ctx.operatorRun.refusedPlanSteps = refused.map((r) => ({
+      tool: r.tool,
+      message: r.message,
+    }));
   }
 }
 
@@ -3234,6 +3249,7 @@ async function startRealOperatorRun(
     input.resolvedOption,
     input.planRefusedNudge ? "plan-refused" : input.strandedResume,
     input.dependencyRelease,
+    input.refusedPlanSteps,
   );
 
   const spec: StartRunInput = {
@@ -4199,6 +4215,9 @@ function operatorTurnDoctrine(
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
+  /** Ruling 400: the refusals a `plan-refused` retry is being re-invoked over,
+   *  quoted into its instruction rather than pointed at. */
+  refusedSteps?: { tool: string; message: string }[],
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -4425,10 +4444,20 @@ function operatorTurnDoctrine(
   const resumeContext = !strandedResume
     ? ""
     : strandedResume === "plan-refused"
-      ? // Ruling 228: this drive did not decide to wait — it was stopped. The
-        // refusals are already on the timeline with their remedies in them, so
-        // the one thing to forbid is planning the same refused step again.
-        "You are re-invoked ONCE because EVERY action your previous run planned was refused, so nothing happened at all. The refusals are on the timeline, and each one names what to do instead — read them and follow them. " +
+      ? // Ruling 228: this drive did not decide to wait — it was stopped.
+        // Ruling 400: and the refusals are QUOTED here rather than pointed at.
+        // "They are on the timeline, read them" is the instruction ruling 392
+        // retired for agents, committed a level up: live on ax-clone AX-4 the
+        // operator was told exactly this, planned the same malformed
+        // `create_task` option again, and the board recorded a deliberate hold
+        // on a task nobody had decided to hold.
+        "You are re-invoked ONCE because EVERY action your previous run planned was refused, so nothing happened at all. " +
+        (refusedSteps?.length
+          ? `Here is what was refused, in full:\n${refusedSteps
+              .map((r) => `- \`${r.tool}\` — ${r.message}`)
+              .join("\n")}\nEach one names what was wrong with the step. Fix that, or do something else. ` +
+            "Re-planning any of the steps above unchanged produces the identical refusal. "
+          : "The refusals are on the timeline, and each one names what to do instead — read them and follow them. ") +
         "Do NOT plan the same refused action again; it will be refused again and this is the only automatic nudge. Take an action you are actually permitted to take, or, if there genuinely is none, `open_decision_packet` telling the human what you wanted to do, why you cannot, and what you need from them. Do not end this turn with nothing recorded. "
       : "You are re-invoked ONCE because your previous run ended with this auto-advance stage idle: nothing pending, nothing dispatched, no packet. This is the only automatic nudge — nothing re-invokes you again for the same idle stage. " +
         "Either take the advancing action now (transition, dispatch, or deliver per the stage rule below), or, if the goal or a human directive tells you to HOLD this stage, record the hold so it is a decision instead of a stall: `open_decision_packet` asking the human to confirm the hold (offer options to resume, adjust the goal, or keep holding). Do not end this turn with the stage idle and nothing recorded. ";
@@ -4643,6 +4672,8 @@ export function buildCodexOperatorPrompt(
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
+  /** Ruling 400: quoted into a plan-refused retry's instruction. */
+  refusedSteps?: { tool: string; message: string }[],
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -4661,6 +4692,7 @@ export function buildCodexOperatorPrompt(
       resolvedOption,
       strandedResume,
       dependencyRelease,
+      refusedSteps,
     ) +
     "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal — the deliverable plus its acceptance criteria — because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
@@ -4680,6 +4712,8 @@ export function buildOperatorTurnPrompt(
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
+  /** Ruling 400: quoted into a plan-refused retry's instruction. */
+  refusedSteps?: { tool: string; message: string }[],
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
@@ -4696,6 +4730,7 @@ export function buildOperatorTurnPrompt(
       resolvedOption,
       strandedResume,
       dependencyRelease,
+      refusedSteps,
     )
   );
 }

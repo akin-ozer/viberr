@@ -97,6 +97,17 @@ export interface TaskMutationContext {
      */
     planWhollyRefused?: boolean;
     /**
+     * Ruling 400 (F39-27): the refusal sentences themselves, so the one
+     * automatic retry can CARRY them instead of telling the operator to go
+     * and read them.
+     *
+     * Ruling 392 settled this shape for agents — an instruction that delegates
+     * reading costs a run — and the plan-refused nudge was committing it a
+     * level up, against a reader whose own timeline window clamps entries and
+     * whose attention is the thing being spent.
+     */
+    refusedPlanSteps?: { tool: string; message: string }[];
+    /**
      * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
      * PR or moved its head under full autonomy — the event that used to queue
      * a `delivered` operator turn behind this very drive's lease. The drive

@@ -1023,6 +1023,39 @@ The machinery around this defect is good. The defect is one sentence at the end 
 
 ---
 
+## F39-27 · MEDIUM · The retry that exists to break a loop told the operator to go and read
+
+F39-26's other half, found by asking why the operator repeated a step it had just been told
+not to repeat.
+
+The `plan-refused` nudge — ruling 228's single automatic retry, the last paid drive before
+coordination pauses — said:
+
+> "The refusals are on the timeline, and each one names what to do instead — read them and
+> follow them."
+
+That is the instruction ruling 392 retired for agents, three days earlier, in this same pass:
+*"An agent cannot read this task's timeline. Your prompt is its only channel … A directive
+that delegates reading costs a run."* The operator CAN read its timeline, so it is not the
+same defect exactly — but it is the same bet, made at the worst moment: the one turn whose
+entire purpose is to stop a loop, spending its instruction budget on a pointer instead of the
+content.
+
+The refusal sentences were three lines away. `narrateRefusedActions` has them as
+`RefusedPlanStep[]`, and the very next statement sets `planWhollyRefused = true` on the run
+context that the nudge reads. Nothing was missing; nothing was joined up.
+
+Fixed as ruling 400: the sentences ride from the refusal to the retry's prompt and are quoted
+in full. The standing prohibition is kept in both branches rather than lost to the quote.
+
+**Honest note on what this does and does not fix.** The operator planning a malformed option
+twice is agent quality, not a viberr defect — the `newTask` contract is a `strictObject` whose
+`title` and `goal` are required and precisely described, and the refusal message names both.
+Ruling 400 removes viberr's contribution to the loop. It does not guarantee the operator
+reads better.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

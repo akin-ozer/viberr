@@ -1441,6 +1441,81 @@ describe("pr-diverged turn instruction (both backends)", () => {
     );
   });
 
+  /**
+   * Ruling 400 (F39-27): the plan-refused retry QUOTES the refusals.
+   *
+   * It used to say "The refusals are on the timeline, and each one names what
+   * to do instead — read them and follow them", which is the instruction
+   * ruling 392 retired for agents, one level up. Live on ax-clone AX-4 the
+   * operator got exactly that, planned the same malformed `create_task` option
+   * again, and the board recorded a deliberate hold on a task nobody held.
+   */
+  const REFUSED = [
+    {
+      tool: "open_packet",
+      message:
+        '"Create a follow-on task for the missing logs baseline" is a create_task option with no task on it. Give newTask a title and a goal.',
+    },
+  ];
+
+  it("ruling 400: the plan-refused retry carries the refusal text", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "plan-refused",
+      undefined,
+      REFUSED,
+    );
+    // CANARY: stop passing `refusedSteps` and this falls back to "read them on
+    // the timeline", which is the sentence AX-4's operator was given.
+    expect(prompt).toContain("Here is what was refused, in full");
+    expect(prompt).toContain("create_task option with no task on it");
+    expect(prompt).toContain("Each one names what was wrong with the step");
+    // The standing prohibition is shared by both branches, not lost to the quote.
+    expect(prompt).toContain("Do NOT plan the same refused action again");
+    expect(prompt).not.toContain("read them and follow them");
+  });
+
+  it("ruling 400: falls back to the timeline only when there is nothing to quote", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "plan-refused",
+    );
+    expect(prompt).toContain("EVERY action your previous run planned was refused");
+    expect(prompt).toContain("read them and follow them");
+    expect(prompt).not.toContain("Here is what was refused");
+  });
+
+  it("ruling 400: the Codex plan prompt carries it too", () => {
+    const prompt = buildCodexOperatorPrompt(
+      snapshot(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "plan-refused",
+      undefined,
+      REFUSED,
+    );
+    expect(prompt).toContain("create_task option with no task on it");
+  });
+
   it("ruling 397: says nothing at all when no report is standing", () => {
     expect(buildOperatorTurnPrompt(snapshot(), "manual")).not.toContain("READ THIS FIRST");
   });
