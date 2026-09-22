@@ -34,6 +34,7 @@ per item and each one was applied to the source and observed failing.
 | 21 | The controller's grant request outlives its conversation (F39-17) | "surface a grant request to an admin" | **done**, ruling 390 |
 | 22 | A non-commit task is not told its work went missing (F39-18) | — | **done**, ruling 391 |
 | 23 | The standing verdicts ride in the agent's anchor (F39-19) | — | **done**, ruling 392 |
+| 24 | The force dialog lists every gate it bypasses (F39-20) | — | **done**, ruling 393 |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
 ## Why F39-2 is not on the list

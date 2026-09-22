@@ -27,6 +27,7 @@ const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: false,
   atBoundary: false,
   blockedReason: null,
+  blockedGates: [],
   blockedReasonViaPacket: null,
   canAccept: false,
   terminallyBlocked: false,

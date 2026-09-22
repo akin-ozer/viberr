@@ -653,6 +653,33 @@ On this incident that alone would have prevented the packet.
 
 ---
 
+## F39-20 · MEDIUM · The force dialog showed one bypassed gate; the audit recorded two
+
+Found by force-accepting AX-12 for real, which was the honest call: the Reviewer had approved
+at 08:08 and viberr could not bind the verdict, so the gate could never clear itself.
+
+The dialog I confirmed:
+
+> **BYPASSING** Waiting on 1 required reviewer approval of the current revision.
+
+The audit row it wrote:
+
+```json
+"bypassedGates": [
+  "Waiting on 1 required reviewer approval of the current revision.",
+  "Required reviewer Reviewer (project rule at Review) has not approved revision 76dabee."
+]
+```
+
+U35-3 built one shared builder for exactly this, after KNC-10 recorded a skipped stage
+boundary and never the failing verdict beside it. Its docstring says the builder exists "so
+the timeline, the audit log and the confirm dialog list the same bypasses" — and the dialog
+was the one that never received the list, because the task page passes
+`acceptance.blockedReason`, the FIRST gate. Ruling 88's premise is that you cannot accept
+blind, and an override is the case that most needs it.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

@@ -104,6 +104,68 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
     expect(force).toContain("Bypassing");
   });
 
+  /**
+   * Ruling 393 (F39-20), live on ax-clone AX-12. U35-3 made the audit row and
+   * the forced completion event name EVERY bypassed gate so an override could
+   * not be under-reported, and said in its own docstring that "the timeline,
+   * the audit log and the confirm dialog list the same bypasses". The dialog
+   * was the one that never received the list: a human confirmed "Bypassing:
+   * Waiting on 1 required reviewer approval of the current revision." and the
+   * audit row recorded that gate AND the project's required-reviewer rule.
+   */
+  it("ruling 393: force lists EVERY gate it bypasses, not just the first", () => {
+    const gates = [
+      "Waiting on 1 required reviewer approval of the current revision.",
+      "Required reviewer Reviewer (project rule at Review) has not approved revision 76dabee.",
+    ];
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({})}
+        workRevisionSha={null}
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode: "force" }}
+        blockedReason={gates[0]!}
+        blockedGates={gates}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const text =
+      container.ownerDocument.querySelector(
+        'dialog[data-screen-label="Accept completion dialog"]',
+      )?.textContent ?? "";
+    // CANARY: drop `blockedGates` from the Bypassing row and the second gate
+    // is invisible to the person authorizing the override, while the audit row
+    // records it.
+    expect(text).toContain("Bypassing");
+    for (const gate of gates) expect(text).toContain(gate);
+  });
+
+  it("ruling 393: a single gate still reads as one sentence, not a list", () => {
+    const only = "Waiting on 1 required reviewer approval of the current revision.";
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({})}
+        workRevisionSha={null}
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode: "force" }}
+        blockedReason={only}
+        blockedGates={[only]}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(dialog.textContent).toContain(only);
+    expect(dialog.querySelector("ul.tight")).toBeNull();
+  });
+
   it("shows NO Withdraws row when there is no open decision", () => {
     expect(withPacket(null)).not.toContain("Withdraws");
   });

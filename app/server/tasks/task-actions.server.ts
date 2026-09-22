@@ -12813,6 +12813,21 @@ export interface AcceptanceAffordance {
   /** null when acceptance would succeed right now; else the exact refusal. */
   blockedReason: string | null;
   /**
+   * Ruling 393 (F39-20): EVERY standing refusal, in gate order — what a
+   * force-accept would bypass, whole.
+   *
+   * `blockedReason` is the first one, which is right for the one-line "Not
+   * acceptable yet" summary and wrong for the force dialog: U35-3 made the
+   * audit row and the forced completion event name every gate precisely so the
+   * record could not under-report an override, and its own docstring says "the
+   * timeline, the audit log and the confirm dialog list the same bypasses" —
+   * but the dialog only ever received the first. Live on ax-clone AX-12 a human
+   * confirmed "Bypassing: Waiting on 1 required reviewer approval of the
+   * current revision." and the audit row recorded that gate AND the project's
+   * required-reviewer rule.
+   */
+  blockedGates: string[];
+  /**
    * F19-7: the refusal a PACKET `accept_completion` resolution would hit.
    *
    * `resolvePacket` evaluates the same contract with `blockedPacket: false` —
@@ -12868,6 +12883,7 @@ export function resolveAcceptanceAffordance(
     hasAuthority: false,
     atBoundary: false,
     blockedReason: null,
+    blockedGates: [],
     blockedReasonViaPacket: null,
     canAccept: false,
     terminallyBlocked: false,
@@ -12906,13 +12922,18 @@ export function resolveAcceptanceAffordance(
   }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
-  const blockedReason = acceptanceRefusalReason(project, fm, input.taskKey, {
+  // Ruling 393: the WHOLE list once, and the first of it is `blockedReason`.
+  // Computing them separately is how the dialog and the audit row came to
+  // disagree about what an override was bypassing.
+  const blockedGates = acceptanceRefusalReasons(project, fm, input.taskKey, {
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
   });
+  const blockedReason = blockedGates[0] ?? null;
   return {
     hasAuthority,
     atBoundary,
     blockedReason,
+    blockedGates,
     // F19-7: what a packet resolution would hit — see the field's docstring.
     blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
       blockedPacket: false,

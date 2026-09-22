@@ -389,3 +389,25 @@ too, so this is a change of model rather than a fix."
 RBAC probe users). Resetting Arda's password to sign the browser pane back in revoked Arda's
 own sessions, which is correct behaviour and my own mistake; the probe sessions were
 unaffected.*
+
+## 15. Force-accept, exercised for real on AX-12
+
+Not manufactured: AX-12's Reviewer approved at 08:08 and viberr could not bind the verdict
+(the report predates `deliveredAt`, so `reviewSubjectId` was null), which left a gate nothing
+could clear. A human who has read the approval overriding that gate is what force-accept is
+for. Through the real ceremony in the browser:
+
+- The dialog disclosed **MERGES** ("Nothing: completed with no changes. ax-12 carries no
+  commits, so no pull request was opened"), **REVISION** `76dabeeea598`, **VERDICT** "awaiting
+  verdict", **BYPASSING**, and "Admin override. The bypassed gate is recorded to the audit log."
+- The file took `acceptance: forced`; the completion event names every bypassed gate; the
+  audit row carries `bypassedGates` as a LIST, which is KNC-10's own fix.
+- And the dialog listed ONE gate where the record listed TWO, which is F39-20 / ruling 393.
+
+Two things verified on the way, unprompted by me:
+
+- **Ruling 382** — the operator's `@Arda Acknowledged…` reply now carries
+  `notified: u_vw9JMMXYOH6X` in the file, so compaction can never fold the answer and keep the
+  question.
+- **Ruling 386** — the Settings rail carries no red badge: the four advisory `checks:read`
+  rows are recorded and no longer counted as violations.

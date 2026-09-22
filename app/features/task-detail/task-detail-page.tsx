@@ -1048,6 +1048,16 @@ export function TaskDetailPage({
                 }
               : { mode: confirmAccept.mode }
           }
+          // Ruling 393 (F39-20): the gate LIST, for the force path only — the
+          // dialog's "Bypassing" row and the audit row must name the same set.
+          // The packet and clean paths keep their single refusal, which is the
+          // right sentence for each: one is about a click the server will
+          // refuse, the other about a gate the resolution clears.
+          blockedGates={
+            confirmAccept.mode === "force" && !forcedCeremony
+              ? acceptance.blockedGates
+              : []
+          }
           blockedReason={
             // Ruling 164 + F19-7: the `force_accept` option is a PACKET
             // resolution, so it clears the packet before the override runs.

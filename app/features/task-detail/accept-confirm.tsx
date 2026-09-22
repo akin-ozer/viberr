@@ -158,6 +158,18 @@ export function AcceptConfirm({
    *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
    *  packet resolution would hit, never the open packet it clears (F19-7). */
   blockedReason,
+  /**
+   * Ruling 393 (F39-20): EVERY gate a force-accept would bypass, in gate order.
+   *
+   * U35-3 made the audit row and the forced completion event name all of them
+   * so the record could not under-report an override; its docstring says "the
+   * timeline, the audit log and the confirm dialog list the same bypasses", and
+   * the dialog was the one that never got the list. Live on ax-clone AX-12 a
+   * human confirmed one bypassed gate and the audit recorded two. Empty (or
+   * absent, for the packet mode, which has its own single refusal) falls back
+   * to `blockedReason` alone.
+   */
+  blockedGates = [],
   blockedReasonAuthoritative = true,
   /** F32-11 (pass 32): the OPEN decision packet this acceptance withdraws
    *  (its title), or null. Accepting a task with an open packet used to clear
@@ -196,6 +208,8 @@ export function AcceptConfirm({
   /** R19-B: the human GitHub approval carrying the verdict gate, or null. */
   verdictSatisfiedBy?: string | null;
   blockedReason: string | null;
+  /** Ruling 393: every gate a force-accept bypasses, in gate order. */
+  blockedGates?: readonly string[];
   /** Ruling 162's interlock applies to the refusal the SERVER will re-decide
    *  from the same facts (the task page reads the live task file through
    *  `resolveAcceptanceAffordance`), so a dialog quoting it may disable its own
@@ -535,7 +549,19 @@ export function AcceptConfirm({
                   Ruling 162 (pass 35): that click is not offered either; the
                   confirm below is disabled and described by this row. */}
               <span className="k">{force ? "Bypassing" : "Blocked"}</span>
-              <span>{blockedReason}</span>
+              {/* Ruling 393: on the FORCE path every gate, because that is what
+                  the audit row and the completion event will say it bypassed.
+                  Everywhere else the first one is the refusal, and a list would
+                  be noise about a click the server is going to refuse anyway. */}
+              {force && blockedGates.length > 1 ? (
+                <ul className="tight">
+                  {blockedGates.map((gate) => (
+                    <li key={gate}>{gate}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span>{blockedReason}</span>
+              )}
             </div>
           )}
           {openPacketTitle && (
