@@ -967,3 +967,37 @@ Note what the agent receiving it is: AX-22's Gateway work, which has no business
 `internal/sandbox` at all. The injection is unconditional rather than targeted, which is the
 right call here: an agent that learns the boundary before it reaches for the file never
 spends the run finding out.
+
+## 36. Ruling 403 verified live, and the same record exposing ruling 414
+
+The first compaction on the post-403 build, AX-24's reviewer at 20:21:29 UTC, left this on
+the timeline:
+
+```
+20:21:29.527  Context compacted at the end of the run: Viberr summarized Reviewer's
+              conversation from 140k to a summary while its prompt cache was still warm ...
+20:21:29.530  Context compacted: the provider summarized Reviewer's conversation from 140k
+              to a summary (auto). ...
+```
+
+**Ruling 403 does what it was coded to do:** "to a summary", never "to 0k tokens" again.
+
+**And the same pair is F39-40 on the live build.** Two notes 3 ms apart for one compaction,
+the second a provider "(auto)" compaction that never happened. The rollout
+(`rollout-2026-09-22T20-13-30-01a0cac0-…`) says what really happened:
+
+```
+290  compacted
+291  event_msg thread_settings_applied
+292  event_msg token_count input=0 total=9894   <- the size, measured
+293  event_msg item_completed ContextCompaction
+```
+
+So "a summary" was not the honest answer either: the size was 9,894 tokens, in the file, 13
+ms after the marker. Ruling 403's null rendered a phantom's missing figure truthfully; ruling
+414 removes the phantom. After ruling 414 deploys, the same rollout shape must produce ONE
+note reading "from 140k to 10k tokens". That is the next live check.
+
+Board-wide, measured by replaying the pre-414 parser over the 69 rollouts that compacted on
+2026-09-22: every one of the 70 compactions came out as a sized event plus a sizeless
+phantom, and the task files hold 140 compaction notes for them.
