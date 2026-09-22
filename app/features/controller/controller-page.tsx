@@ -26,6 +26,7 @@ import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { controllerExamples } from "./controller-examples";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -95,6 +96,22 @@ function conversationHref(
   return `?${next.toString()}`;
 }
 
+/** The one form a message is sent with, from the composer or an example. */
+function sendForm(
+  csrf: string,
+  text: string,
+  surface: string,
+  conversationId: string | null,
+): FormData {
+  const body = new FormData();
+  body.set("_csrf", csrf);
+  body.set("intent", "send");
+  body.set("text", text);
+  body.set("surface", surface);
+  if (conversationId) body.set("conversationId", conversationId);
+  return body;
+}
+
 export function ControllerPage({
   view,
   projectSlug,
@@ -109,6 +126,7 @@ export function ControllerPage({
 }) {
   const csrf = useCsrfToken();
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const revalidator = useRevalidator();
   useLiveUpdates(
     useMemo(
@@ -220,7 +238,16 @@ export function ControllerPage({
             </ConversationRuntime>
           ) : (
             <>
-              <Transcript view={view} />
+              <Transcript
+                view={view}
+                examples={controllerExamples(projectSlug ? { kind: "board" } : { kind: "instance" })}
+                examplesDisabled={!view.available || send.state !== "idle"}
+                onExample={(text) =>
+                  send.submit(sendForm(csrf, text, `${location.pathname}${location.search}`, null), {
+                    method: "post",
+                  })
+                }
+              />
               <Composer view={view} csrf={csrf} send={send} conversationId={null} />
             </>
           )}
@@ -477,7 +504,18 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
   );
 }
 
-function Transcript({ view }: { view: ControllerSurfaceView }) {
+function Transcript({
+  view,
+  examples = [],
+  examplesDisabled = false,
+  onExample,
+}: {
+  view: ControllerSurfaceView;
+  /** Ruling 419(g): ruling 314's examples, on the blank transcript only. */
+  examples?: string[];
+  examplesDisabled?: boolean;
+  onExample?: (text: string) => void;
+}) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const count = view.messages.length;
   useEffect(() => {
@@ -518,6 +556,23 @@ function Transcript({ view }: { view: ControllerSurfaceView }) {
               </Link>
               .
             </p>
+          )}
+          {/* Ruling 314 as the dock has it: clicking one SENDS it. */}
+          {examples.length > 0 && onExample && (
+            <ul className="ctl-examples">
+              {examples.map((example) => (
+                <li key={example}>
+                  <button
+                    type="button"
+                    className="ctl-example"
+                    onClick={() => onExample(example)}
+                    disabled={examplesDisabled}
+                  >
+                    {example}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </section>
@@ -615,14 +670,10 @@ function Composer({
   const submit = () => {
     const value = text.trim();
     if (!value || busy || disabled) return;
-    const body = new FormData();
-    body.set("_csrf", csrf);
-    body.set("intent", "send");
-    body.set("text", value);
-    body.set("surface", `${location.pathname}${location.search}`);
-    if (conversationId) body.set("conversationId", conversationId);
     pending.current = value;
-    send.submit(body, { method: "post" });
+    send.submit(sendForm(csrf, value, `${location.pathname}${location.search}`, conversationId), {
+      method: "post",
+    });
   };
   return (
     <div className="ctl-composer">

@@ -320,7 +320,10 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     // the deployment: since ruling 127 it holds no credential to blame.
     expect(container.textContent).toContain("Claude not connected");
     expect(container.textContent).not.toContain("backend unavailable");
-    expect(container.textContent).not.toContain("on this instance");
+    // The blame, not the words: ruling 419(g) puts ruling 314's instance
+    // examples on this page, and one of them asks about the agent profiles
+    // "on this instance", which blames nothing.
+    expect(container.textContent).not.toMatch(/unavailable[^.]*on this instance/i);
   });
 
   it("says nothing of the sort to a viewer who HAS connected Claude", async () => {
@@ -957,5 +960,37 @@ describe("ruling 419(d): the send hint names the key this keyboard has", () => {
     expect(foot.textContent).not.toContain("⌘");
     // The hint is its own element, which a touch screen drops (app.css).
     expect(foot.querySelector(".kbd-hint")!.textContent).toBe(" · Ctrl ↵ sends");
+  });
+});
+
+describe("ruling 419(g): the page's blank transcript offers ruling 314's examples", () => {
+  it("lists the board examples and SENDS the one clicked, as the dock does", async () => {
+    // CANARY: drop the `ctl-examples` list from the blank transcript.
+    const posted: Record<string, string>[] = [];
+    renderPage(view({ conversation: null }), "?c=new", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, conversationId: "cnv_new" };
+    });
+    const example = await screen.findByRole("button", {
+      name: "What is waiting on me right now, and what is waiting on an agent?",
+    });
+    expect(screen.getAllByRole("button").filter((b) => b.className === "ctl-example")).toHaveLength(3);
+    await act(async () => {
+      fireEvent.click(example);
+    });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      _csrf: "tok",
+      intent: "send",
+      text: "What is waiting on me right now, and what is waiting on an agent?",
+    });
+    expect(posted[0]!.conversationId).toBeUndefined();
+  });
+
+  it("holds the examples while the viewer's Claude is not connected", async () => {
+    renderPage(view({ conversation: null, available: false }), "?c=new");
+    const example = await screen.findByRole("button", { name: "Which tasks have been open longest, and why?" });
+    expect((example as HTMLButtonElement).disabled).toBe(true);
   });
 });
