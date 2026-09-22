@@ -32,7 +32,7 @@
 > ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §1 and §2 (a turn runs on the
 > asker's own Claude account), §5 (`instance_health`'s new per-backend shape, and a dated
 > correction to ruling 107). Updated 2026-09-11 for pass 36 cluster 4 (ruling 183, U36-3,
-> U36-4, U36-5, G36-1): §3 and §4.1 (`save_knowledge_base` and `save_skill` answer with the
+> U36-4, U36-5, G36-1): §3 and §4.1 (`save_knowledge_base` takes `doc.append` (ruling 377/F39-1: add to the end, create when absent, no `replace`/`replaces` because an append destroys nothing, and the two modes together are refused) so a long document is built in bounded calls instead of one large one; `save_knowledge_base` and `save_skill` answer with the
 > id and grantKey, a `disk:<dir>` id whose folder has a row updates that row, `save_skill`
 > refuses a body that is not a skill, `update_agent_deployment` takes `skills` / `mcps` /
 > `kbs` for every kind) and §4.2 (the reply lists every changed field old → new, the
@@ -464,8 +464,10 @@ legitimately preserves advisory and retired ids a strict catalogue check would r
 
 For every such catalogue there is a read the same person may call first, and the write's
 description names it. `get_project` returns each deployment's RESOLVED grants (every
-governed id at the mode the runtime applies, with its label), model, effort and, for the
-operator, autonomy, derived by the Agents page's own `assembleAgentRoster` from the
+stored id at the mode the runtime applies, with its label — and, ruling 377(a), an
+`advisory` note on a matrix-only row, which is persona guidance nothing enforces and
+`update_agent_deployment` refuses; no such key means a real, settable grant), model, effort
+and, for the operator, autonomy, derived by the Agents page's own `assembleAgentRoster` from the
 projection (every agent writer reprojects before it returns), so the controller reads what
 the roster renders: an absent `deliver-review-pr` at the project's delivery-gate mode, the
 grant-required family at `off`. `list_capabilities` (instance scope, any signed-in person,
@@ -521,7 +523,7 @@ pinned, non-interactive chip.
 
 | Tool | What it returns | Gate |
 |---|---|---|
-| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projections, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and the run concurrency snapshot `{cap, lane, live, queued}` (`lane` is the ruling-152(b) coordination lane beyond the cap) | Open to anyone: nothing here names another person or any deployment configuration. The browser executable **path** stays org-admin only (`browserDetail`) |
+| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projections, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and the run concurrency snapshot `{cap, lane, live, queued}` (`lane` is the ruling-152(b) coordination lane beyond the cap). Ruling 377(b): an optional `probe: string[]` (≤ 8 bare names) answers `present` + version, or `present: false` + the reason, for any command the fixed `toolchain` struct does not name — the gate binary a project declares and nothing could verify | Open to anyone: nothing here names another person or any deployment configuration; a probe reports presence and version, never a path. The browser executable **path** stays org-admin only (`browserDetail`) |
 | `read_run_log` | A bounded page of a run's console: `run {…, logLines}`, `page {firstSeq, lastSeq, olderExist, newerExist, next}`, `lines[{seq, at, display}]`. Default 200 newest lines, max 500, in either direction; `since` together with `before` is refused | A member of the run's project; a controller turn's log follows conversation ownership with org-admin supervision. A missing run, a forbidden project and a forbidden conversation all answer the same not-visible sentence |
 | `read_store_doc` | One store document with `truncated` reported honestly | org admin |
 

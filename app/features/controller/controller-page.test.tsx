@@ -556,23 +556,43 @@ describe("the open conversation's execution", () => {
     const cells = [...container.querySelectorAll(".run-cell")].map(plain);
     expect(cells[0]).toMatch(/^Elapsed01:0[56]$/);
     expect(cells.slice(1)).toEqual(["Turns3", "Tokens1.2k", "Runtimeclaude-opus-4-8"]);
-    expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Interrupt" })).toBeTruthy();
+
+    // F39 (owner decision): while the turn streams, its console is DISCLOSED
+    // on this card — open by default, because it was always on the page
+    // before, just a full viewport below with the conversation in between.
+    const trigger = screen.getByRole("button", { name: "Hide console" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     // The console, with the turn's line and the transcript-shaped footer.
     expect(screen.getByText("Agent logs")).toBeTruthy();
     expect(screen.getByText("Reading the board.")).toBeTruthy();
     expect(container.textContent).toContain("never in the transcript");
-    // The strip sits above the transcript; the console below the composer.
+    // CANARY: restore the scroll-to-anchor `onViewLogs` and the console goes
+    // back below the composer — this query null, and the order four items.
+    expect(
+      container.querySelector(".runbar .runbar-console")?.textContent,
+    ).toContain("Agent logs");
     const main = container.querySelector(".ctl-main")!;
-    const order = [...main.children].map((el) => el.className.split(" ")[0]);
-    expect(order).toEqual(["runbar", "panel", "ctl-composer", "panel"]);
+    expect([...main.children].map((el) => el.className.split(" ")[0])).toEqual([
+      "runbar",
+      "panel",
+      "ctl-composer",
+    ]);
+
+    // And it collapses, which is the whole point of a disclosure.
+    fireEvent.click(trigger);
+    expect(screen.queryByText("Agent logs")).toBeNull();
+    const closed = screen.getByRole("button", { name: "Show console" });
+    expect(closed.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(closed);
+    expect(screen.getByText("Agent logs")).toBeTruthy();
   });
 
   it("hides Interrupt from a viewer who may not stop the turn", async () => {
     renderPage(working({ canInterruptTurn: false, viewerOwnsActive: false }), "?c=cnv_b");
     await screen.findByText("Live run");
     expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
-    expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide console" })).toBeTruthy();
   });
 
   it("Interrupt confirms first, then posts the conversation and the run", async () => {

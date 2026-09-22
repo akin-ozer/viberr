@@ -77,7 +77,7 @@ export function AttachmentsPanel({
         <p className="empty">
           {browserExpected
             ? "No attachments yet. A browser-capable agent on this task saves the screenshots and files it captures here, and none have landed. They appear the next time such an agent runs and produces evidence."
-            : "No attachments yet. Anything you attach here is read by the agents that run on this task — a fixture, a transcript, a spec they would otherwise have to guess at."}
+            : "No attachments yet. Anything you attach here is read by the agents that run on this task: a fixture, a transcript, a spec they would otherwise have to guess at."}
         </p>
         {canAttach && <AttachFile />}
       </section>

@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
 import { ThinkingOrb } from "thinking-orbs";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
@@ -278,12 +285,23 @@ export function LiveRunPanel({
   onInterrupt,
   canInterrupt,
   interrupting,
+  console: consoleSlot = null,
+  consoleOpen = false,
 }: {
   runtime: RunView[];
   onViewLogs: (id: string) => void;
   onInterrupt: (runId: string) => void;
   canInterrupt: boolean;
   interrupting: boolean;
+  /** F39 (owner decision): the streaming console for THIS run, rendered inside
+   *  the card. A live run's output belongs with the strip that describes it —
+   *  measured on the controller page, the panel it used to live in sat 886px
+   *  (a full viewport) below, with the conversation in between, so the control
+   *  that reached it read as navigation, jumped out of the conversation and
+   *  offered no way back. A caller that passes nothing keeps the old layout. */
+  console?: ReactNode;
+  /** Whether {@link console} is showing, so the trigger can name what it does. */
+  consoleOpen?: boolean;
 }) {
   const running = runtime.filter((r) => r.state === "running");
   const [selId, setSelId] = useState<string | null>(running.length ? running[0]!.id : null);
@@ -377,9 +395,20 @@ export function LiveRunPanel({
           </div>
         </div>
         <div className="run-actions">
-          <button type="button" className="btn ghost sm" onClick={() => onViewLogs(run.id)}>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => onViewLogs(run.id)}
+            aria-expanded={consoleSlot !== null ? consoleOpen : undefined}
+          >
             <Icon name="term" />
-            View logs
+            {consoleSlot === null
+              ? // No inline slot: the caller still keeps its console elsewhere,
+                // and the old jump-to-anchor wording is the honest one there.
+                "View logs"
+              : consoleOpen
+                ? "Hide console"
+                : "Show console"}
           </button>
           {canInterrupt && (
             /* Ruling 150: a stop discards the work in flight, so the trigger
@@ -398,6 +427,9 @@ export function LiveRunPanel({
             </button>
           )}
         </div>
+        {consoleOpen && consoleSlot !== null && (
+          <div className="runbar-console">{consoleSlot}</div>
+        )}
       </div>
     </div>
   );

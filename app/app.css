@@ -5681,6 +5681,21 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    chip is the hit area and the keyboard reaches it) and the input itself is
    taken out of flow rather than `display:none`, which would make it
    unfocusable. */
+/* F39 (owner decision): the live run's console, disclosed inside the card that
+   describes it. It used to live in a panel a full viewport below, with the
+   conversation in between, reached by a button that read as navigation. */
+.runbar-console {
+  margin-top: .75rem;
+  border-top: 1px solid color-mix(in srgb, var(--fg), transparent 88%);
+  padding-top: .75rem;
+}
+.runbar-console > .panel {
+  border: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
 .attach-add {
   display: flex;
   align-items: center;

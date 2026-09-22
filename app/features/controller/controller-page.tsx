@@ -273,15 +273,31 @@ function ConversationRuntime({
     body.set("runId", run.serverRunId);
     stop.submit(body, { method: "post" });
   };
+  // F39 (owner decision): the console is a DISCLOSURE on the live-run card, not
+  // a jump. It used to select the thread and scroll to a panel that was already
+  // on the page — measured here, 886px below the strip with the whole
+  // conversation in between, so the control read as navigation, took the reader
+  // out of the conversation, and offered nothing to get back with.
+  // Open by default: before F39 the console was ALWAYS on the page, just a
+  // viewport away. The disclosure is there to move it and to let a reader
+  // collapse it, not to take the stream away until someone asks for it.
+  const [consoleOpen, setConsoleOpen] = useState(true);
+  /** Is any run of this conversation streaming right now? */
+  const live = runtime.some((r) => r.state === "running");
+  /** One console, wherever it renders — the props cannot drift between the two
+   *  positions because there is only one object. */
+  const logProps = {
+    runtime,
+    sel,
+    onSel: setSel,
+    linesByThread,
+    streamError,
+    olderByThread,
+    onLoadOlder: loadOlder,
+  };
   const onViewLogs = (threadId: string) => {
     setSel(threadId);
-    requestAnimationFrame(() => {
-      // Optional-chained CALL, as the transcript's own scroll: jsdom's Element
-      // carries no `scrollIntoView`.
-      document
-        .querySelector('[data-comment-anchor="agent-logs"]')
-        ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    });
+    setConsoleOpen((open) => !open);
   };
 
   return (
@@ -293,20 +309,14 @@ function ConversationRuntime({
           onInterrupt={(id) => setConfirmInterrupt(id)}
           canInterrupt={view.canInterruptTurn}
           interrupting={stopping}
+          consoleOpen={consoleOpen}
+          console={<AgentLogsPanel {...logProps} />}
         />
       )}
       {children}
-      {runtime.length > 0 && (
-        <AgentLogsPanel
-          runtime={runtime}
-          sel={sel}
-          onSel={setSel}
-          linesByThread={linesByThread}
-          streamError={streamError}
-          olderByThread={olderByThread}
-          onLoadOlder={loadOlder}
-        />
-      )}
+      {/* The archive. While a turn streams its console lives on the card above,
+          so this is the settled-runs view — one panel either way, never two. */}
+      {runtime.length > 0 && !live && <AgentLogsPanel {...logProps} />}
       {/* D6: stopping a turn discards what it was about to apply, which is
           ruling 149's destructive class, so the commit keeps the shared
           `danger` default. Ruling 150 puts the same red on the trigger: the

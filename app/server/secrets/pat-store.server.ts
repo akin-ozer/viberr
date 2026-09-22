@@ -1,4 +1,4 @@
-import { scopeIsAdvisory } from "~/server/github/scope-flag.server";
+import { scopeIsAdvisory } from "~/shared/credential-scopes";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {

@@ -701,7 +701,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed.",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-1: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole).",
       {
         id: z
           .string()
@@ -718,7 +718,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         doc: z
           .strictObject({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
-            content: z.string().describe("The WHOLE file. There is no append; what you omit is gone."),
+            content: z
+              .string()
+              .describe(
+                "The WHOLE file — what you omit is gone — UNLESS `append` is set, when it is the text to add at the end.",
+              ),
+            append: z
+              .boolean()
+              .optional()
+              .describe(
+                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one.",
+              ),
             replace: z
               .boolean()
               .optional()
@@ -740,7 +750,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           id?: string;
           name: string;
           refresh?: KbRefreshMode;
-          doc?: { path: string; content: string; replace?: boolean; replaces?: string };
+          doc?: {
+            path: string;
+            content: string;
+            append?: boolean;
+            replace?: boolean;
+            replaces?: string;
+          };
         }) => {
           requireOrgAdmin("manage knowledge bases");
           const saved = await saveKnowledgeBase(
@@ -771,6 +787,38 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // rulings KB — injected into EVERY run on the project — is one call
             // away from being erased by a model writing the obvious filename.
             const before = readStoreDoc(target, [args.doc.path]);
+            // F39-1: APPEND. It cannot destroy anything, so rulings 257 and
+            // 305 (the collision guard and the version check) do not apply —
+            // they exist to stop a whole-document replace deleting text the
+            // writer never read. Mixing the two modes would be a caller that
+            // does not know which it meant, so it is refused rather than
+            // resolved.
+            if (args.doc.append === true) {
+              if (args.doc.replace !== undefined || args.doc.replaces !== undefined) {
+                return (
+                  `${head} Nothing was written. append cannot be combined with ` +
+                  "replace or replaces: an append adds to the end and destroys nothing, " +
+                  "a replace overwrites the whole document. Send one or the other."
+                );
+              }
+              const joined = before
+                ? `${before.text.replace(/\s+$/, "")}\n\n${args.doc.content.trim()}\n`
+                : `${args.doc.content.trim()}\n`;
+              const appended = writeStoreDoc(
+                db,
+                target,
+                [],
+                args.doc.path,
+                joined,
+                auditActor,
+                { overwrite: true },
+              );
+              return (
+                `${head} Appended ${args.doc.content.trim().length} bytes to ` +
+                `${appended.path.join("/")}${before ? "" : " (created)"}; it is now ` +
+                `${appended.bytes} bytes. Nothing was replaced.`
+              );
+            }
             // Ruling 305: a whole-document replace names the version it read.
             // `writeStoreDoc`'s own collision guard (ruling 257) asks whether
             // the file EXISTS; this asks whether it is still the one you read.

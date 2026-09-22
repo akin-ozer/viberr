@@ -1166,9 +1166,12 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     );
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
     // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
-    // `set_dependencies` (in-Viberr, no outside effect), so it is 9.
-    expect(tools).toHaveLength(9);
+    // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
+    // 378 added `propose_ruling`, also in-Viberr and also destroying nothing,
+    // so it is 10.
+    expect(tools).toHaveLength(10);
     expect(tools).toContain("set_dependencies");
+    expect(tools).toContain("propose_ruling");
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).toContain("flag_context_conflict");
   });

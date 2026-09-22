@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { scopeIsAdvisory as isAdvisoryScope } from "~/shared/credential-scopes";
 import {
   type AuditActor,
   SYSTEM_ACTOR,
@@ -44,26 +45,12 @@ export const POLICY_ENGINE_ACTOR = {
 };
 
 /**
- * F39-5 (pass 39): the scopes a project does NOT require, where a refusal is
- * worth saying and is not a violation.
- *
- * Ruling 360 settled the substance for `checks:read` and `credentialAdvisories`
- * says so in as many words — *"Not a missing REQUIRED scope — merging never
- * needed it"* — but the TIMELINE writer never learned it. Live in pass 39, one
- * minute apart, viberr told its owner both of these about the same fact: the
- * task record said **"Policy violation: active PAT is missing `checks:read`"**
- * under a red shield, and the credential card said **"All required scopes
- * proven."** Both true by their own definitions, and the pair is a lie.
- *
- * ONE list, read by the timeline writer and by the credential card, so they
- * cannot drift again.
+ * F39-5 (pass 39): advisory vs required scopes live in `~/shared/credential-scopes`
+ * so the timeline writer here and the credential card in `pat-store.server.ts`
+ * read ONE list; re-exported because callers of this module expect them here.
  */
-export const ADVISORY_SCOPES: ReadonlySet<string> = new Set(["checks:read"]);
+export { ADVISORY_SCOPES, scopeIsAdvisory } from "~/shared/credential-scopes";
 
-/** Is a refusal on `scope` an advisory rather than a violation? */
-export function scopeIsAdvisory(scope: string): boolean {
-  return ADVISORY_SCOPES.has(scope);
-}
 
 /**
  * The sentence for a refusal on a scope the project REQUIRES — a genuine
@@ -82,7 +69,7 @@ export function credentialAdvisoryText(scope: string, consequence: string): stri
 
 /** The right sentence for `scope`, whichever kind it is. */
 export function scopeFlagText(scope: string, consequence: string): string {
-  return scopeIsAdvisory(scope)
+  return isAdvisoryScope(scope)
     ? credentialAdvisoryText(scope, consequence)
     : policyViolationText(scope, consequence);
 }
@@ -93,9 +80,9 @@ export function policyUpdateText(scope: string): string {
   //
   // F39-5: an advisory scope's clearing note must not say "violation" either,
   // or the resolution contradicts the flag that opened it.
-  const opened = scopeIsAdvisory(scope) ? "advisory" : "violation";
+  const opened = isAdvisoryScope(scope) ? "advisory" : "violation";
   return (
-    `**${scopeIsAdvisory(scope) ? "Credential" : "Policy"} update:** \`${scope}\` granted on the project credential. ` +
+    `**${isAdvisoryScope(scope) ? "Credential" : "Policy"} update:** \`${scope}\` granted on the project credential. ` +
     `The earlier ${opened} is resolved, and operations needing \`${scope}\` will work now.`
   );
 }
@@ -188,7 +175,7 @@ export async function flagScopeViolation(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         text: input.detail,
-        advisory: scopeIsAdvisory(input.scope),
+        advisory: isAdvisoryScope(input.scope),
       },
       ctx,
     );
@@ -230,7 +217,7 @@ export async function resolveScopeViolationWithEvent(
         projectSlug: violation.projectSlug,
         taskKey: violation.taskKey,
         text: policyUpdateText(violation.scope),
-        advisory: scopeIsAdvisory(violation.scope),
+        advisory: isAdvisoryScope(violation.scope),
       },
       ctx,
     );

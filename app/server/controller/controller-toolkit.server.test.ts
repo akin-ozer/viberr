@@ -500,6 +500,83 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
+   * F39-1 (pass 39): a long rulings document is BUILT, not sent whole.
+   *
+   * Live, the controller's second KB document — 7,356 bytes of markdown with Go
+   * snippets and tables — came back `InputValidationError: … could not be
+   * parsed as JSON`. It recovered by re-emitting a shorter version, which cost
+   * it the whole document over again. Rulings 257 and 305 (the collision guard
+   * and the version check) exist to stop a whole-document REPLACE deleting text
+   * the writer never read; an append deletes nothing, so it needs neither.
+   */
+  it("F39-1: doc.append builds a document in bounded calls and destroys nothing", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "append-probe",
+      doc: { path: "gates.md", content: "# Gates\n\n- Run every gate." },
+    });
+    const kbId = /id (kb_\w+)/.exec(created)?.[1];
+    expect(kbId, created).toBeTruthy();
+    // SAFETY: the expectation above fails the test when the reply carried no
+    // id, so every use below is on the matched group.
+    const kb = kbId!;
+
+    const appended = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb,
+      name: "append-probe",
+      doc: {
+        path: "gates.md",
+        content: "## Proposed\n\n- Strike the race gate.",
+        append: true,
+      },
+    });
+    expect(appended).toContain("Appended");
+    expect(appended).toContain("Nothing was replaced");
+
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built; `text` is
+    // its own field.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", {
+        id: kb,
+        path: "gates.md",
+      }),
+    ) as { text: string };
+    // CANARY: route append through the replace arm and the first section is
+    // gone — which is exactly the failure rulings 257/305 guard against.
+    expect(read.text).toContain("- Run every gate.");
+    expect(read.text).toContain("- Strike the race gate.");
+    expect(read.text.indexOf("Run every gate")).toBeLessThan(
+      read.text.indexOf("Strike the race gate"),
+    );
+
+    // An append to a name that does not exist CREATES it — building a document
+    // must not need a separate first call.
+    const fresh = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb,
+      name: "append-probe",
+      doc: { path: "new-doc.md", content: "first section", append: true },
+    });
+    expect(fresh).toContain("(created)");
+
+    // The two modes are never resolved for the caller: a call that asks for
+    // both does not know which it meant.
+    const mixed = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb,
+      name: "append-probe",
+      doc: { path: "gates.md", content: "x", append: true, replace: true },
+    });
+    expect(mixed).toContain("Nothing was written");
+    expect(mixed).toContain("cannot be combined");
+    // SAFETY: as above — the refused call must have written nothing.
+    const after = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", {
+        id: kb,
+        path: "gates.md",
+      }),
+    ) as { text: string };
+    expect(after.text).toContain("- Run every gate.");
+  });
+
+  /**
    * F39-4 (pass 39): `get_project` never shapes ADVISORY persona guidance like
    * an authority.
    *

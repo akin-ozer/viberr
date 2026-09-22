@@ -424,8 +424,26 @@ export function TaskDetailPage({
     acceptanceHasAuthority: acceptance.hasAuthority,
     acceptanceTerminallyBlocked: acceptance.terminallyBlocked,
   });
-  const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
+  const { shownLogSel, selectLog, onViewLogs, onAgentLog, consoleOpen } =
     useLogSelection(runtime);
+  /** F39: is any run of this task streaming? While one is, its console is
+   *  disclosed on the run card; otherwise the settled-runs panel holds it. */
+  const liveRun = runtime.some((r) => r.state === "running");
+  /** ONE console element for both positions, so the props cannot drift. */
+  const agentLogs = (
+    <AgentLogsPanel
+      runtime={runtime}
+      sel={shownLogSel}
+      onSel={selectLog}
+      linesByThread={linesByThread}
+      {...(onRetryBackend ? { onRetryBackend } : {})}
+      retryBackends={retryBackends}
+      retrying={runBusy}
+      streamError={streamError}
+      olderByThread={olderByThread}
+      onLoadOlder={loadOlder}
+    />
+  );
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
     if (ownerBusy) return;
@@ -836,6 +854,8 @@ export function TaskDetailPage({
             onInterrupt={(id) => setConfirmInterrupt(id)}
             canInterrupt={canInterrupt}
             interrupting={runBusy}
+            consoleOpen={consoleOpen}
+            console={runsVisible ? agentLogs : null}
           />
         ) : null}
 
@@ -891,20 +911,9 @@ export function TaskDetailPage({
           schedules={schedules}
         />
 
-        {runtime.length > 0 && runsVisible ? (
-          <AgentLogsPanel
-            runtime={runtime}
-            sel={shownLogSel}
-            onSel={selectLog}
-            linesByThread={linesByThread}
-            {...(onRetryBackend ? { onRetryBackend } : {})}
-            retryBackends={retryBackends}
-            retrying={runBusy}
-            streamError={streamError}
-            olderByThread={olderByThread}
-            onLoadOlder={loadOlder}
-          />
-        ) : null}
+        {/* The archive. While a run streams, its console is disclosed on the
+            run card above instead — one console either way, never two. */}
+        {runtime.length > 0 && runsVisible && !liveRun ? agentLogs : null}
         {/* UI-30: raw console output, the `{ } raw` wire envelopes and the
             provider session id are project-member material (the two routes that
             serve the same data require membership). Say so rather than render an

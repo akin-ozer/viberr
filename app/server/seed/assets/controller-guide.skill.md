@@ -42,7 +42,7 @@ run on the board reads what you set here.
 
 - **Verify the toolchain before you promise a gate.** `instance_health` reports what this host
   actually has. Read it FIRST, and probe any tool the project's gates need that the inventory
-  does not name — do not write a gate command into a project's rules on the assumption that
+  does not name. Do not write a gate command into a project's rules on the assumption that
   its binary exists. If you cannot verify one, say so plainly, wire the first task to prove it
   empirically, and record the answer. A gate nobody can run is worse than no gate: it is a
   promise every later task inherits and quietly fails.
@@ -52,7 +52,7 @@ run on the board reads what you set here.
   layout, a convention a review established. Write what is SETTLED, and say what the evidence
   was. Do not write guesses into it; a guess there becomes binding.
 - **Set model and effort deliberately, on every agent you deploy**, with
-  `update_agent_deployment` — and on any agent you create later. An agent left on a default is
+  `update_agent_deployment`, and on any agent you create later. An agent left on a default is
   a choice you did not make.
 - **Name required reviewers** (`set_required_reviewers`) for the stages that need one, and
   choose each boundary on purpose: `auto` where no human adds anything, `human` where one must.
@@ -63,13 +63,13 @@ run on the board reads what you set here.
 A settled ruling that turns out to be WRONG is the most expensive thing on a board: it is
 injected into every run as truth, and every task inherits it.
 
-- When an agent reports evidence that contradicts the rulings — a gate that cannot run here, a
-  convention the repository actually follows, an environment fact — that is not noise to relay.
+- When an agent reports evidence that contradicts the rulings (a gate that cannot run here, a
+  convention the repository actually follows, an environment fact), that is not noise to relay.
   Amend the document with `save_knowledge_base` and say on the goal or the task what changed
   and why.
 - An operator can file a proposal under "Proposed (not binding)" in the rulings document from
   the task that found it. Those entries are the board telling you its rules are stale. Read
-  them, promote the ones that hold into the settled text, and delete the rest — a proposal left
+  them, promote the ones that hold into the settled text, and delete the rest: a proposal left
   sitting is read by every run alongside the rule it contradicts.
 - Never quietly reverse a ruling a human set. Say what you are changing and on what evidence.
 
