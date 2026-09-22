@@ -9,6 +9,12 @@ import {
   type Dirent,
 } from "node:fs";
 import { AppError } from "~/server/errors/app-error.server";
+import {
+  INLINE_TYPES,
+  MAX_UPLOAD_BYTES,
+  READABLE_TEXT_EXTENSIONS,
+  UPLOADABLE_EXTENSIONS,
+} from "~/shared/attachment-kinds";
 import path from "node:path";
 import {
   resolveStoreSegment,
@@ -287,37 +293,7 @@ export function resolveTaskAttachment(
 
 /** Extension → inline content type. Anything absent here is served as a
  *  download (`application/octet-stream`), never rendered on the app origin. */
-/** Extensions `readTaskAttachmentText` returns as text. Exported so the
- *  upload whitelist can be their union with the inline set (F39-6). */
-export const READABLE_TEXT_EXTENSIONS = new Set([
-  ".txt",
-  ".log",
-  ".md",
-  ".json",
-  ".yml",
-  ".yaml",
-  ".csv",
-  ".diff",
-  ".patch",
-]);
 
-const INLINE_TYPES = new Map<string, string>([
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".webp", "image/webp"],
-  [".gif", "image/gif"],
-  [".pdf", "application/pdf"],
-  [".txt", "text/plain; charset=utf-8"],
-  [".log", "text/plain; charset=utf-8"],
-  [".md", "text/plain; charset=utf-8"],
-  [".json", "application/json"],
-  // Ruling 105: yaml/csv join the inert-text set so the in-app read-only
-  // viewer can fetch them. Plain text on purpose — never a renderable type.
-  [".yml", "text/plain; charset=utf-8"],
-  [".yaml", "text/plain; charset=utf-8"],
-  [".csv", "text/plain; charset=utf-8"],
-]);
 
 export function attachmentContentType(name: string): {
   type: string;
@@ -332,23 +308,13 @@ export function attachmentContentType(name: string): {
 
 // ------------------------------------------------------- the human writer
 
-/**
- * What a PERSON may attach (F39-6). Exactly the extensions this product can
- * either render inline or read back as text — the union of the two sets above.
- * A file viberr can neither show nor read is not evidence, it is a blob, and
- * storing it would make the panel a file manager.
- *
- * Deliberately NOT a deny-list: `.html`, `.svg` and `.js` are absent because
- * the read side refuses to render them inline, and a stored page served from
- * this origin is the stored-XSS the serving rules were written to prevent.
- */
-export const UPLOADABLE_EXTENSIONS: ReadonlySet<string> = new Set([
-  ...INLINE_TYPES.keys(),
-  ...READABLE_TEXT_EXTENSIONS,
-]);
 
-/** One attachment's byte ceiling: evidence, not a payload. */
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+export {
+  MAX_UPLOAD_BYTES,
+  READABLE_TEXT_EXTENSIONS,
+  UPLOADABLE_EXTENSIONS,
+} from "~/shared/attachment-kinds";
 
 export interface WrittenAttachment {
   name: string;

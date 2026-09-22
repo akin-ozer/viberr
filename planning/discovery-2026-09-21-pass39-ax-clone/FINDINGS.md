@@ -248,3 +248,22 @@ decision / a ruling change / rework before X", that is a packet, not a comment �
 stop the work it blocks.* And add the converse to the hand-off truth section: *a comment does
 not stop a run; if the run in flight is now building the wrong thing, say so and interrupt it
 rather than letting it finish.*
+
+---
+
+## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
+
+- **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
+  `ax-clone/AX-9`; a controller turn reads `/cnv_tjVMn13JkW-0` — a leading slash, no project,
+  and not a task at all. Honest about the cost, misleading about the subject. One label.
+- **The model picker's two lists disagree about Opus.** The live `supportedModels()` catalogue
+  for this account offers `opus[1m]` and no plain `opus`; the curated fallback offers plain
+  `opus`. Which one you can pick depends on whether the live fetch succeeded. Not a defect:
+  `claudeModelRunsVerbatim` already stops a picker rewriting a stored value the runtime would
+  run verbatim (pass 34, F34-7), so nothing is silently changed. (F39-2)
+- **An auto-boundary chain costs one operator run per stage.** AX-1 walked
+  Design→Build→Verify→Review with no work at Build or Verify: five operator runs to one
+  specialist run. Documented behaviour (a transition re-triggers the operator), and on an
+  all-Codex fleet it is nearly free — but on a six-stage board it is the dominant run count,
+  and Insights' own "Coordination overhead" metric cannot measure it because Codex reports
+  no cost. Worth a look if a board ever puts its fleet on a metered backend.

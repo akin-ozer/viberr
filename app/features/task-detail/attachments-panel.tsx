@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useFetcher } from "react-router";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
-import { UPLOADABLE_EXTENSIONS } from "~/server/files/task-attachments.server";
+import { UPLOADABLE_EXTENSIONS } from "~/shared/attachment-kinds";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { prettySize } from "~/features/kb-browser/tree";
 import { Icon } from "~/ui/icon";
