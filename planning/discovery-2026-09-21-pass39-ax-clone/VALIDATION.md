@@ -411,3 +411,60 @@ Two things verified on the way, unprompted by me:
   question.
 - **Ruling 386** — the Settings rail carries no red badge: the four advisory `checks:read`
   rows are recorded and no longer counted as violations.
+
+## 16. Rulings 394-396, verified on the live board
+
+**Ruling 394 — three occurrences in one morning, all measured off the rollouts.**
+
+| run | task, role | stream ending | what viberr did |
+|---|---|---|---|
+| `run_Ys0uzCRS_twA` | AX-2, developer | envelope → `turn.completed` → error | "did not complete", packet recommending a re-run |
+| `run_JT8sukKPkMs2` | AX-3, developer | envelope → `turn.completed` → error | same |
+| `run_PmefJ4iUKtTQ` | AX-4, **operator** | error → plan → `turn.completed` → error | same, and the plan was the one action that cleared the gate |
+
+The third is the sharpest: the CLI printed its reconnect banner MID-turn, recovered,
+emitted a complete decision plan ("engage the reviewer on revision ed4a600"), and completed
+the turn. `sawFatalError` is sticky, so under the old gate no ordering of that stream could
+ever have settled `finished`. Substituting `!sawFatalError` back for `!workAfterLastTurn`
+fails three tests, two in each direction — which is why the predicate is about ORDER and not
+about whether an error was ever seen.
+
+**The work was real.** `tasks/AX-2/workspace/ax-clone` sat on branch `ax-2`, clean tree, at
+`3e0396a`: 1,531 insertions across seven files, four of them tests. AX-3 carried `04c8c50`
+and `4a9a588`.
+
+**Recovered through the product, not by hand.** Both packets resolved with `redirect` and a
+note naming the commit, the gates the agent reported green, and "do not re-run the Developer".
+AX-2 walked Design → Build → Verify → Review in three minutes and AX-3 followed; both are now
+open pull requests on `akin-ozer/ax-clone` (#5 and #6) carrying the work viberr had written
+off. AX-4's operator packet resolved with its own lost plan quoted back to it.
+
+**Ruling 395, on the deployed build** (`revision ed5c88b4c255`), `/insights` prompt cache:
+
+```
+operator    93  45%  not reported  574.5K  n/a    0  not reported
+primary     22  15%  not reported   51.4M  n/a    0  not reported
+reviewer    14   0%  not reported   16.8M  n/a    0  not reported
+controller   6   0%       447.9K     6.0M  0.075  0  6 × 1h
+login      135  34%       447.9K     74.7M 0.006  0  6 × 1h
+```
+
+The Codex groups say "not reported" where they printed `0` and `0.000`; the Claude row keeps
+its real figures, and the mixed credential row reports the Claude half rather than swallowing
+it. Measured basis: 101 of 101 Codex usage envelopes under this data root carry
+`cache_write_input_tokens: 0`.
+
+**Ruling 396, on the deployed build.** `/projects/ax-clone/settings` now renders
+`[data-panel="file-leases"]`, and it came up holding **three leases that were already there** —
+declared by the controller, enforced at every delivery on this board, and invisible to every
+human surface until the panel shipped:
+
+```
+internal/controller/**, internal/apis/**  AX-2   "owns both until it merges"
+internal/sandbox/**                       AX-3   "owns internal/sandbox until it merges"
+internal/server/**                        AX-11  "owns internal/server until its PR merges"
+```
+
+One of them is spent (AX-11 merged as PR #4), and the panel says so and offers to clear it.
+That is the finding proven at full strength: this was not a hypothetical gap.
+
