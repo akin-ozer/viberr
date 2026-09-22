@@ -1023,3 +1023,71 @@ answer, a person at three. No human decision was spent on round two. The duty re
 operator through the skill; the agent-reply turn instruction still said "move back and
 rework" and was corrected (ruling 416(b)'s note). The round-three packet itself recommended
 the question again, which is ruling 416(b).
+
+## 38. The owner's model switch: GPT-6 Luna and Opus 5.5, verified at every layer
+
+Deployed `faa3d417` at 21:54 UTC (the owner's call to kill AX-20's in-flight review rather
+than wait). `/resources/health` reported `revision: faa3d417256e`; the container carries
+`codex-cli 0.156.0` and `2.1.280 (Claude Code)`.
+
+**The account's model list, by client version.** The first Codex run on the new build wrote its
+own `models_cache.json` (the run's private CODEX_HOME, ruling 181):
+
+```
+fetched_at 2026-09-22T21:54:51Z  client 0.156.0
+  gpt-6-astra, gpt-6-sol, gpt-6-luna [low..max], gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5
+```
+
+The shared home's cache, fetched by 0.153.4 at 21:07, lists no `gpt-6-sol` or `gpt-6-luna`.
+That is `minimal_client_version: 0.155.0` doing exactly what it says.
+
+**The switch went through the controller**, one instruction. It read its own standing rule,
+listed the global agents, checked `instance_health` for the SDK versions, then:
+`save_global_agent` x3 (developer, reviewer, surface-developer), `update_agent_deployment` x4
+(operator, developer, reviewer, surface-developer), and `save_knowledge_base` replacing the
+standing rule with a version guard (`replaces: 131f7d50ffb4`). It read `get_project` back to
+confirm, flagged the one run that had started on the old model, and changed nothing else.
+On disk: all seven profiles `model: gpt-6-luna`, `effort: max`; Rule 1 of the standing rules
+now names gpt-6-luna and Opus 5.5 and says gpt-5.6-luna must not be deployed or templated.
+
+**Opus 5.5, with no setting changed.** The controller's own run (`run_mAefMwf38FA-`) opened
+with `model: claude-opus-5-5[1m]`, `claude_code_version: 2.1.280`: the stored `opus[1m]`
+alias now resolves to 5.5. The Controller tab's description changed with it, from "Opus 5 with
+1M context" before the deploy to "Opus 5.5 with 1M context" after. Every controller turn this
+pass before 21:54 ran on `claude-opus-5[1m]`.
+
+**GPT-6 Luna in the rollouts themselves** (`turn_context.model`): the AX-20 operator at
+21:58:41, the AX-20 reviewer it re-dispatched, and the AX-19, AX-22 and AX-24 operators, all
+`gpt-6-luna` / `max`. The one exception is the AX-20 review boot recovery restarted at 21:55:26,
+a minute before the switch, on `gpt-5.6-luna`; it was interrupted from the task page and the
+operator re-dispatched it on the new model.
+
+The controller noticed one more thing and said so rather than guessing: a fixed line in its own
+context still read "Opus 5 ... claude-opus-5[1m]". Its prompt is recorded on the session's
+first request and replayed until compaction (ruling 373's `snapshot`), so the model identity
+the CLI wrote at the start of the conversation outlives a model change. It trusted the SDK's
+session start record over that line, which is the right call; noted, not worked, since the
+next completion compaction re-renders it.
+
+## 39. Ruling 415 verified live: the decision the operator lost is now in its prompt
+
+AX-19's operator turn at 21:59:41 UTC (read out of its rollout):
+
+```
+humanDecisions: 5
+  21:59:40 Arda | Let the rework continue ...        | Rework ONCE against exactly the four blockers ...
+  19:34:20 Arda | wait for the Codex window ...      | Wait for the window. Not retrying on Claude ...
+  19:27:09 Arda | answered with a custom directive   | Round five, and my round-four instruction was not honoured ...
+  18:48:39 Arda | answered with a custom directive   | Round four, and the pattern has changed ...
+  17:41:28 Arda | Let the rework continue ...        | Rework, not another question. I asked this reviewer ...
+timelineOlder: "111 older entries are not shown, newest first. This turn cannot fetch them.
+  What in them still binds you is carried in this snapshot: `humanDecisions` ..."
+```
+
+The round-five words that the 20:13 turn never saw are there, and the window note no longer
+sends a Codex plan to a tool. The operator's plan: `run_agent developer` with the four blockers
+of the new decision, exactly as bounded.
+
+Packets resolved through the task pages this hour: AX-19 (round 6), AX-22 (round 4) and AX-24
+(round 3), each "Let the rework continue" with a note that bounds the one rework to the
+reviewer's own complete list. AX-18 accepted: PR #16 merged at 21:45:52 UTC (`acfaaf3`).
