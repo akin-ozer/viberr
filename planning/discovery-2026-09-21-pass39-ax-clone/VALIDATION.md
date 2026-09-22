@@ -867,3 +867,47 @@ fileLeases:
 The whitespace-separated glob line split as designed, the holder picker wrote the task key,
 and the reason is stored for the refusal to quote. This is the lease the improvement point
 above says nothing proposes: it took a human noticing, which is the point being made.
+
+## 32. Ruling 225 on the live board: a clock is not a person
+
+Five tasks carry `waiting: human` in their files. The board header reads:
+
+> 22 tasks · **1 waiting on a human in this project**
+
+That is correct, and the cards say why. Four of the five rest on a scheduled operator
+pick-up after the Codex usage window reopens, and viberr derives `schedule` for exactly that
+shape (ruling 225: `waiting: human` in the file, no packet, no recommendation, nothing a
+human could accept, and a pending occurrence that will pick the task back up on its own):
+
+```
+AX-18  review   waiting on a human
+AX-19  verify   resumes 23:13
+AX-20  review   resumes 23:13
+AX-22  review   resumes 23:13
+AX-24  review   resumes 23:13
+```
+
+Only AX-18 genuinely owes a person anything, and it is the one the header counts. A board
+that counted the file's value would have demanded attention on four tasks that are resting
+by design.
+
+## 33. The visual sweep, dark and light, phone and desktop
+
+Board, task detail and the controller conversation, at 375x812 and at the pane's desktop
+width, in both colour schemes. No layout breakage: the board's filter chips wrap, cards keep
+their pill rows, the task hero's stage/status/goal chips stay on one line, and the
+controller's long prose with inline code spans wraps cleanly at phone width.
+
+Two things the sweep surfaced that reading the files would not have:
+
+- The `blocked` pill renders on AX-5 and AX-6 at phone width, which is ruling 131's
+  dependency floor (validated in section 25) reaching the smallest surface.
+- AX-24's goal body carries the controller's ownership fence verbatim, and it names the
+  tasks that hold the other side: *"`internal/controller`, `internal/runtime`,
+  `internal/sandbox` and `internal/store` are core-owned AND are being actively rewritten
+  right now on AX-19 and AX-20 — read them freely, write nothing in them."* That is the
+  cross-task awareness the controller has and the operator does not.
+
+AX-24 still reads "link 2 of 8" in its frozen header: it was created at 19:12, and ruling
+404 deployed at 19:34. Correct by design (no migration); the next chain task will carry the
+new form, and that is the live check to make when the board resumes.
