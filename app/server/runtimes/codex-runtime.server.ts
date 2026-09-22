@@ -57,10 +57,11 @@ import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server"
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
- * v0.153.4 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
+ * v0.156.0 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
  * DECLARED dependency so this line cannot go stale again; 0.146.0 → 0.153.4
  * moved the SDK's surface in three additive places, listed on that constant,
- * and none of the event shapes this adapter or the wire normalizer reads).
+ * and none of the event shapes this adapter or the wire normalizer reads;
+ * 0.153.4 → 0.156.0 moved only the pinned CLI).
  * `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
@@ -108,8 +109,21 @@ import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server"
  * source) and `login status` markers `backend-login` parses. `--add-dir` still
  * reads "writable alongside the primary workspace", so the ruling-109 carve-out
  * (ruling 185: `danger-full-access`, always) stands.
+ *
+ * 0.156.0 (2026-09-23, from 0.153.4, owner's request for GPT-6 Luna): the
+ * SDK's own `dist` is byte-identical, so only the pinned CLI moved. The move
+ * is the point: the account's server-sent model list is filtered by client
+ * version, and GPT-6 Luna and GPT-6 Sol declare `minimal_client_version`
+ * 0.155.0, so a 0.153.4 client was never offered either (its cached list, read
+ * off the account's own home, had no `gpt-6-*` but Astra). Re-checked on the
+ * 0.156.0 binary: every flag the SDK emits parses (a real `exec` with all of
+ * them reached the API and stopped at the 401 of an empty home), every config
+ * key `codexConfigForRun` writes is present, as are `thread/compact/start`,
+ * the `contextCompaction` item and the `login` markers `backend-login` reads.
+ * `--help` after a value flag now exits 2 where 0.153.4 exited 0, which is the
+ * CLI's argument parser, not a flag it lost.
  */
-export const CODEX_SDK_VERIFIED_VERSION = "0.153.4";
+export const CODEX_SDK_VERIFIED_VERSION = "0.156.0";
 
 /** Narrow injectable seam, derived from the installed SDK's public types. */
 export type CodexThread = Pick<Thread, "id" | "runStreamed">;

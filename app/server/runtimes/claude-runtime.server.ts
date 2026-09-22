@@ -58,7 +58,11 @@ import {
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
- * (`@anthropic-ai/claude-agent-sdk`, verified v0.3.261). `query()` returns a
+ * (`@anthropic-ai/claude-agent-sdk`, verified v0.3.280, bundling Claude Code
+ * 2.1.280: every option below, the `Query` methods called on it, the result
+ * and init fields read and the native-binary resolver `backend-login` mirrors
+ * were re-checked against it; its `opus` alias resolves to `claude-opus-5-5`,
+ * where 2.1.261's resolved to `claude-opus-5`). `query()` returns a
  * `Query` (async generator of `SDKMessage`) whose yielded objects are the
  * SAME envelopes documented in runtime-adapters.md §1.3 (system·init with
  * session_id/model/tools, assistant/user with tool_use/tool_result blocks,

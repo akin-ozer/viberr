@@ -131,10 +131,14 @@ describe("curated catalog", () => {
     // on a ChatGPT-plan Codex account and must not be what a model-less operator
     // falls back to. Sol stays offered, just no longer first/default. Codex CLI
     // 0.153 (SDK 0.153.4) added GPT-6 Astra as its own default; here it is
-    // offered second, never the default, for the same reason.
+    // offered second, never the default, for the same reason. 0.156.0 is the
+    // first pinned client the account's server sends GPT-6 Sol and Luna to
+    // (`minimal_client_version` 0.155.0), so they are offered from it on.
     expect(cat.models.map((m) => m.value)).toEqual([
       "gpt-5.6-terra",
       "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-luna",
       "gpt-5.5",
@@ -147,7 +151,7 @@ describe("curated catalog", () => {
     // `xhigh`, the rest reach `max`.
     const effortsOf = (id: string) => cat.models.find((m) => m.value === id)?.efforts;
     expect(effortsOf("gpt-5.5")).toEqual(["low", "medium", "high", "xhigh"]);
-    for (const id of ["gpt-5.6-terra", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"]) {
+    for (const id of ["gpt-5.6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna"]) {
       expect(effortsOf(id), id).toEqual(["low", "medium", "high", "xhigh", "max"]);
     }
     expect(cat.defaultModel).toBe("gpt-5.6-terra");
