@@ -1409,6 +1409,42 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(prompt).not.toContain("archive_task");
   });
 
+  /**
+   * Ruling 397 (F39-24): the owner chose "the operator decides" over a new
+   * packet option, so the fact has to reach the operator's own turn. It is
+   * prepended by the wrapper rather than by any one trigger's branch, because
+   * every early-returning branch is a turn that can be about to re-dispatch
+   * work that is already done.
+   */
+  const STANDING = {
+    actor: "agent",
+    failedAt: "2026-09-22T08:33:08.205Z",
+    reportedAt: "2026-09-22T08:33:08.181Z",
+  };
+
+  it("ruling 397: a standing report is named FIRST, on every trigger", () => {
+    for (const trigger of ["packet-resolved", "manual", "agent-reply", "pr-diverged"] as const) {
+      const prompt = buildOperatorTurnPrompt(snapshot({ unfinishedReport: STANDING }), trigger);
+      // CANARY: drop `unfinishedReportInstruction` from the wrapper and none of
+      // these carry it, which is the prompt AX-2's operator actually got.
+      expect(prompt, trigger).toContain("READ THIS FIRST");
+      expect(prompt, trigger).toContain(STANDING.reportedAt);
+      expect(prompt, trigger).toContain("is about the PULL REQUEST");
+      expect(prompt, trigger).toContain("read_timeline_entry");
+      // It must not read as an order to accept the report either.
+      expect(prompt, trigger).toContain("Re-dispatch only when the report is plainly partial");
+    }
+    // And the Codex plan prompt, which is a different builder over the same
+    // instruction, carries it too.
+    expect(buildCodexOperatorPrompt(snapshot({ unfinishedReport: STANDING }), "manual")).toContain(
+      "READ THIS FIRST",
+    );
+  });
+
+  it("ruling 397: says nothing at all when no report is standing", () => {
+    expect(buildOperatorTurnPrompt(snapshot(), "manual")).not.toContain("READ THIS FIRST");
+  });
+
   it("the Codex plan prompt carries the same instruction plus the archive_task option vocabulary", () => {
     const prompt = buildCodexOperatorPrompt(snapshot(), "pr-diverged");
     expect(prompt).toContain("closed WITHOUT merging");

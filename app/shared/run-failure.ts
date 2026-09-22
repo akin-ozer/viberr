@@ -147,6 +147,24 @@ export const LOCAL_NETWORK_FAILURE_RE =
   /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error|failed)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify|error sending request|waiting for network|request timed out|\breconnecting\b|stream (?:closed|ended) unexpectedly/i;
 
 /**
+ * Ruling 397 (F39-24): the lead of the sentence a failed run writes onto the
+ * task timeline, and the matcher that finds it again.
+ *
+ * They live together so they cannot drift. The operator has to be able to spot
+ * this event among the several kinds of `blocked` event a task carries, because
+ * it is the one that may be standing directly on top of a finished report: the
+ * reply is written first and the failure a few milliseconds later, and the
+ * failure's own words ("Nothing was delivered to a pull request") are about the
+ * PR while a reader takes them to be about the work.
+ */
+export function runDidNotCompleteLead(role: string, roleLabel: string): string {
+  return `The ${role} ${roleLabel} run did not complete`;
+}
+
+/** Matches what {@link runDidNotCompleteLead} writes, for any role. */
+export const RUN_DID_NOT_COMPLETE_RE = /^The \S[^\n]{0,80}? run did not complete[.:]/;
+
+/**
  * Ruling 394 (F39-21): the tag on the line a run carries when its transport
  * died AFTER the agent's turn had already completed.
  *

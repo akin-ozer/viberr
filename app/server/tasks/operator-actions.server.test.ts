@@ -6019,3 +6019,117 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
     expect(reviewerRow()?.consecutiveRequestChanges).toBe(0);
   });
 });
+
+/**
+ * Ruling 397 (F39-24): a report a failed run left standing.
+ *
+ * Live on ax-clone AX-2, 24 milliseconds apart:
+ *   08:33:08.181  comment  agent  "Done on branch `ax-2`, commit `3e0396ab` …
+ *                                  `make gate` and `go test -race ./...` pass."
+ *   08:33:08.205  blocked  agent  "The Implementation agent run did not complete …
+ *                                  Nothing was delivered to a pull request."
+ * 1,531 committed lines sat in the workspace and the recommended recovery was
+ * to build them again. Ruling 394 stops the common cause; this is what the
+ * operator is told when it happens anyway.
+ */
+describe("ruling 397: the snapshot names a report a failed run left standing", () => {
+  const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", role: "Implementation" };
+  const REPORT = {
+    occurredAt: "2026-09-22T08:33:08.181Z",
+    type: "comment" as const,
+    actor: AGENT,
+    title: null,
+    text: "Done on branch `ax-2`, commit `3e0396ab`. make gate and go test -race both pass.",
+    toAgent: false,
+    evidence: null,
+  };
+  const FAILURE = {
+    occurredAt: "2026-09-22T08:33:08.205Z",
+    type: "blocked" as const,
+    actor: AGENT,
+    title: null,
+    text: "The Implementation agent run did not complete. Codex could not be reached from this deployment. Nothing was delivered to a pull request.",
+    toAgent: false,
+    evidence: null,
+  };
+  const dispatched = (at: string) => ({
+    occurredAt: at,
+    type: "agent" as const,
+    actor: { kind: "operator" as const },
+    title: null,
+    text: "Started a Codex run for the Implementation agent.",
+    toAgent: false,
+    evidence: null,
+  });
+
+  function snapWith(timeline: unknown[]) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "g",
+      // SAFETY: every entry is built from the literals above, each of which is
+      // a complete task-file event; `writeTask` serializes them unchanged.
+      timeline: timeline as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+  }
+
+  it("finds the pair and carries both stamps", () => {
+    // CANARY: drop `findUnfinishedReport` from the snapshot and this is
+    // undefined, which is the state that let the operator re-dispatch AX-2.
+    expect(snapWith([FAILURE, REPORT]).unfinishedReport).toEqual({
+      actor: "agent",
+      failedAt: FAILURE.occurredAt,
+      reportedAt: REPORT.occurredAt,
+    });
+  });
+
+  it("says nothing once something has been dispatched since", () => {
+    // The decision this fact exists to inform has been made; repeating it every
+    // turn is noise.
+    expect(
+      snapWith([dispatched("2026-09-22T08:40:00.000Z"), FAILURE, REPORT]).unfinishedReport,
+    ).toBeUndefined();
+  });
+
+  it("says nothing when the failed run posted no report", () => {
+    const note = {
+      occurredAt: "2026-09-22T08:33:00.000Z",
+      type: "note" as const,
+      actor: AGENT,
+      title: null,
+      text: "Context compacted.",
+      toAgent: false,
+      evidence: null,
+    };
+    expect(snapWith([FAILURE, note]).unfinishedReport).toBeUndefined();
+  });
+
+  it("ignores a blocked event that is not a run failure", () => {
+    const asked = { ...FAILURE, text: "I cannot reach the repository and have stopped." };
+    expect(snapWith([asked, REPORT]).unfinishedReport).toBeUndefined();
+  });
+
+  it("finds a pair that falls outside the timeline window the prompt renders", () => {
+    // The window caps how many rows the prompt shows; the pair can sit below
+    // it, and the fact is about the task rather than about the window.
+    const filler = Array.from({ length: 12 }, (_, i) => ({
+      ...REPORT,
+      occurredAt: `2026-09-22T09:${String(10 + i).padStart(2, "0")}:00.000Z`,
+      type: "note" as const,
+      actor: { kind: "system" as const, systemId: "policy-engine" },
+      text: `filler ${i}`,
+    }));
+    expect(snapWith([...filler, FAILURE, REPORT]).unfinishedReport).toEqual({
+      actor: "agent",
+      failedAt: FAILURE.occurredAt,
+      reportedAt: REPORT.occurredAt,
+    });
+  });
+});

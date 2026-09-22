@@ -51,6 +51,7 @@ import {
   unpushedRevisionOf,
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
+import { RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
 import {
   activeWorkRevision,
   consecutiveRequestChanges,
@@ -2280,6 +2281,29 @@ export interface OperatorTaskSnapshot {
     awaiting: "goal_edit" | null;
   } | null;
   recentTimeline: OperatorTimelineRow[];
+  /**
+   * Ruling 397 (F39-24): a run Viberr recorded as FAILED that had already
+   * posted its report moments earlier, with nothing dispatched since.
+   *
+   * Ruling 394 stops the common cause of this, but a genuinely cut run can
+   * still leave a partial report, and the failure event's own sentence
+   * ("Nothing was delivered to a pull request") is about the PR while a reader
+   * takes it to be about the work. Live on ax-clone AX-2 the report said "Done
+   * on branch ax-2, commit 3e0396ab, make gate and go test -race both pass",
+   * and the sentence two lines below it said the run did not complete; a human
+   * had to read the workspace to find out which was true.
+   *
+   * Absent once anything has been dispatched since: the decision this carries
+   * has been made by then, and repeating it every turn is noise.
+   */
+  unfinishedReport?: {
+    /** The agent, as `recentTimeline` names actors. */
+    actor: string;
+    /** The failure event's stamp. */
+    failedAt: string;
+    /** The report's stamp, which `read_timeline_entry` takes. */
+    reportedAt: string;
+  };
   /** Ruling 302: how many entries this task's timeline HAS, against the
    *  `recentTimeline.length` shown. Present always, so a coordinator never has
    *  to infer from a full-looking window that it saw everything. */
@@ -2628,6 +2652,41 @@ export interface OperatorTimelineRow {
   clipped?: string;
 }
 
+/**
+ * Ruling 397: find a report a failed run left standing, if one is still the
+ * open question on this task.
+ *
+ * The scan walks the timeline newest-first and stops at the first `agent`
+ * event, which is Viberr recording that a run STARTED: once something has been
+ * dispatched, the decision this fact exists to inform has already been made.
+ * The pair is written milliseconds apart by one code path — the reply first,
+ * the failure second — so they are adjacent among that agent's own events.
+ */
+function findUnfinishedReport(
+  timeline: readonly TaskFileEvent[],
+): OperatorTaskSnapshot["unfinishedReport"] {
+  const actorOf = (e: TaskFileEvent) =>
+    e.actor.kind === "human" ? (e.actor.nameHint ?? "human") : e.actor.kind;
+  for (let i = 0; i < timeline.length; i++) {
+    const event = timeline[i]!;
+    // Something was dispatched after the failure: the question is settled.
+    if (event.type === "agent") return undefined;
+    if (event.type !== "blocked") continue;
+    if (!RUN_DID_NOT_COMPLETE_RE.test(event.text)) continue;
+    const actor = actorOf(event);
+    for (let j = i + 1; j < timeline.length; j++) {
+      const older = timeline[j]!;
+      if (actorOf(older) !== actor) continue;
+      // The same agent's own previous event. A comment is its report; anything
+      // else means this run posted none and there is nothing to weigh.
+      if (older.type !== "comment") return undefined;
+      return { actor, failedAt: event.occurredAt, reportedAt: older.occurredAt };
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2811,6 +2870,12 @@ export function operatorSnapshot(
       }
       return row;
     }),
+    // Ruling 397: scanned over the WHOLE timeline, not the window above — the
+    // pair is adjacent, but the window can end between them.
+    ...((): Pick<OperatorTaskSnapshot, "unfinishedReport"> => {
+      const found = findUnfinishedReport(file.parsed.timeline);
+      return found ? { unfinishedReport: found } : {};
+    })(),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.
     recommendations: {

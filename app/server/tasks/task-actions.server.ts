@@ -8,7 +8,7 @@ import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
-import { formatUsd } from "~/shared/run-failure";
+import { formatUsd, runDidNotCompleteLead } from "~/shared/run-failure";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -5292,9 +5292,12 @@ export async function applyAgentCompletionEffects(
             turns: thisRunRow?.turns ?? 0,
             attachments: runAttachments.length,
           });
+    // Ruling 397: the lead is built by the shared helper the operator's snapshot
+    // matches on, so the sentence and its matcher cannot drift apart.
+    const lead = runDidNotCompleteLead(input.role, roleLabel);
     const failureText = classified
-      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason}${outcomeClause} ${described.remedy}${providerBlock}`
-      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${outcomeClause}${
+      ? `${lead}. ${described.reason}${outcomeClause} ${described.remedy}${providerBlock}`
+      : `${lead}: ${endSentence(reasonText)}${outcomeClause}${
           failure?.kind === "max_turns"
             ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
             : failure?.kind === "max_budget"

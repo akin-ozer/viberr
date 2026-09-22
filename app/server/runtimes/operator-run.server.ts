@@ -4570,8 +4570,45 @@ function dependenciesInstruction(
  */
 const operatorTurnInstruction = (
   ...args: Parameters<typeof operatorTurnDoctrine>
-): string =>
-  `${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+): string => {
+  // Ruling 397: a report a failed run left standing outranks every trigger's
+  // own doctrine, because it changes what the next action should BE. It goes
+  // first for the same reason the capability-gap remedy goes last: every
+  // early-returning branch below is a turn that can be about to re-dispatch
+  // work that is already done.
+  const standing = unfinishedReportInstruction(args[0]);
+  return `${standing}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+};
+
+/**
+ * Ruling 397 (F39-24): what to say when Viberr recorded a run as failed and the
+ * same agent had posted a report moments before.
+ *
+ * Owner's call (2026-09-22): the operator decides, rather than a human picking
+ * a new packet option. So this is written as a decision with both arms and the
+ * one fact that settles it — the failure note's "nothing was delivered" is
+ * about the PULL REQUEST, and the operator reads it as being about the work.
+ *
+ * Live on ax-clone AX-2 the two events were 24 milliseconds apart: "Done on
+ * branch `ax-2`, commit `3e0396ab` … `make gate` and `go test -race ./...`
+ * pass", then "The Implementation agent run did not complete … Nothing was
+ * delivered to a pull request." 1,531 committed lines sat in the workspace and
+ * the recommended recovery was to build them again.
+ */
+function unfinishedReportInstruction(snapshot: OperatorTaskSnapshot): string {
+  const standing = snapshot.unfinishedReport;
+  if (!standing) return "";
+  return (
+    `READ THIS FIRST. Viberr recorded ${standing.actor}'s run as failed at ${standing.failedAt}, ` +
+    `and that same agent posted a report at ${standing.reportedAt}, moments before. Both are on the timeline. ` +
+    "Viberr could not tell whether the run finished, so it recorded a failure; the report is the agent's own account of what it did. " +
+    "Read the report (`read_timeline_entry` with that stamp returns it whole) before you dispatch anything. " +
+    "The failure note's \"nothing was delivered to a pull request\" is about the PULL REQUEST and says nothing about the workspace: " +
+    "a commit the agent made is in the tree whether or not Viberr called the run a failure. " +
+    "If the report says the work is done, committed and its gates pass, continue from it — deliver it, or take the next stage step — rather than running the agent again. " +
+    "Re-dispatch only when the report is plainly partial, and when you do, say in the prompt what is already in the tree so it is not built twice.\n\n"
+  );
+}
 
 /** Codex cannot call the in-process tools, so it returns a constrained plan. */
 

@@ -839,6 +839,37 @@ That is how this finding took five minutes longer than it should have.
 
 ---
 
+## F39-24 · MEDIUM · The failure note stands on top of the report and outranks it
+
+F39-21's other half, and the one ruling 394 cannot close. 394 stops a completed turn being
+called a failure; it cannot stop a genuinely cut run from leaving a report behind.
+
+The two events on AX-2, 24 milliseconds apart:
+
+```
+08:33:08.181  comment  agent  "Done on branch `ax-2`, commit `3e0396ab`.
+                               make gate and go test -race ./... pass."
+08:33:08.205  blocked  agent  "The Implementation agent run did not complete …
+                               Nothing was delivered to a pull request."
+```
+
+"Nothing was delivered to a pull request" is **true**, and it is about the pull request. A
+reader takes it to be about the work. Ruling 333 already softened the old absolute ("No
+changes were delivered") into a clause that names the turns and files behind the run — but a
+softened sentence sitting on top of a completion report still reads as the verdict on it,
+because it is newer and because it is the one the packet quotes.
+
+The operator had the report in its own snapshot window the whole time (rows are capped at
+1,500 chars and this one was 450), and re-dispatched anyway. Nothing in its turn instruction
+told it that a failure event can be standing on a finished report, or which of the two to
+believe.
+
+Owner's call: the operator decides, rather than the human picking a new packet option. Fixed
+as ruling 397 — the snapshot names the pair, and the turn instruction leads with it on every
+trigger, states both arms, and names the one fact that settles them.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
