@@ -1369,3 +1369,41 @@ nothing to do with it.
 Same shape as F39-28 (ruling 401), which dropped the same task's "behind main" pill on the
 same reasoning — a demand, drawn as a problem, on finished work, for a branch that does not
 exist. I fixed one surface and not the other. Ruling 407.
+
+## F39-35 · HIGH · The operator re-planned a step viberr had just refused, because the plan was only PARTLY refused
+
+AX-18, 17:07:51. The operator's plan:
+
+```
+actions: ['deliver_for_review', 'transition_stage']
+```
+
+The delivery ran — it pushed `d44e874` to PR #16. The transition was refused. So:
+
+```js
+if (ctx.operatorRun && plan.actions.length > 0 && refused.length === plan.actions.length) {
+    ctx.operatorRun.planWhollyRefused = true;
+    ctx.operatorRun.refusedPlanSteps = refused.map(...);   // ruling 400's carry
+}
+```
+
+`1 !== 2`. Nothing recorded. Fourteen seconds later the next drive planned:
+
+```
+actions: ['transition_stage']
+```
+
+…and was refused with a byte-identical message. Those two drives are precisely what tripped
+the two-in-a-row hold in F39-33, which stranded the task and cost a human stage move.
+
+Ruling 400 exists because "the refusals are on the timeline, read them" does not work. It is
+gated on the rarer half of the cases. The commoner half — a plan that got somewhere and was
+stopped partway — recorded nothing and taught the next drive nothing.
+
+**The finding behind the finding:** three rulings in this pass (399, 406, 408) all tripped on
+the same partial-versus-whole boundary. 399 because `planWhollyRefused` was false when one
+step had succeeded; 406 because the effect list did not include the action the operator
+actually took; 408 because the carry is inside the wholly-refused branch. The pattern is
+viberr reasoning about a drive by what it FAILED to produce rather than by what it did.
+
+Ruling 408.

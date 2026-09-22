@@ -6132,6 +6132,57 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
       reportedAt: REPORT.occurredAt,
     });
   });
+
+  /**
+   * Ruling 408 (F39-35), live on ax-clone AX-18.
+   *
+   * The operator planned `[deliver_for_review, transition_stage]`. The delivery
+   * RAN -- it pushed `d44e874` to PR #16 -- and the transition was refused, so
+   * `refused.length !== plan.actions.length` and ruling 400's carry (which
+   * records only a WHOLLY refused plan) stored nothing. Fourteen seconds later
+   * the next drive planned `transition_stage` again and was refused with a
+   * byte-identical message, and the two of them tripped the two-in-a-row hold.
+   */
+  const REFUSAL = {
+    occurredAt: "2026-09-22T17:07:51.797Z",
+    type: "note" as const,
+    actor: { kind: "operator" as const },
+    title: null,
+    text:
+      "**The operator's plan was not carried out in full.** This step did not apply to the task's current state:\n\n" +
+      "- `transition_stage` — AX-18's review PR #16 conflicts with the base branch.",
+    toAgent: false,
+    evidence: null,
+  };
+  const moved = (at: string) => ({
+    occurredAt: at,
+    type: "transition" as const,
+    actor: { kind: "operator" as const },
+    title: null,
+    text: "**Transition:** moved AX-18 from Verify to Review.",
+    toAgent: false,
+    evidence: null,
+  });
+
+  it("ruling 408: a PARTIALLY refused plan is carried, not just a wholly refused one", () => {
+    // CANARY: drop `findUnansweredRefusal` from the snapshot and this is
+    // undefined — the state in which AX-18's next drive re-planned the step
+    // Viberr had just refused.
+    expect(snapWith([REFUSAL]).unansweredRefusal).toEqual({
+      at: REFUSAL.occurredAt,
+      text: REFUSAL.text,
+    });
+  });
+
+  it("ruling 408: says nothing once the operator has moved the task since", () => {
+    expect(snapWith([moved("2026-09-22T17:17:02.144Z"), REFUSAL]).unansweredRefusal).toBeUndefined();
+  });
+
+  it("ruling 408: says nothing once something has been dispatched since", () => {
+    expect(
+      snapWith([dispatched("2026-09-22T17:09:00.000Z"), REFUSAL]).unansweredRefusal,
+    ).toBeUndefined();
+  });
 });
 
 /**

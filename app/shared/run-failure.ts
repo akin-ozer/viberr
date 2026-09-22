@@ -234,3 +234,16 @@ export function formatUsd(amount: number): string {
   if (amount >= 1) return `$${amount.toFixed(2)}`;
   return `$${amount.toFixed(4).replace(/0{1,2}$/, "")}`;
 }
+
+/**
+ * Ruling 408: the lead sentence of the note Viberr writes when an operator plan
+ * step did not run, and the matcher that finds it again.
+ *
+ * Paired here for the same reason {@link RUN_DID_NOT_COMPLETE_RE} is: the
+ * writer is in `operator-run.server.ts` and the reader is in
+ * `operator-actions.server.ts`, and a silent drift between them turns the
+ * carry back into the "read them on the timeline" instruction ruling 400
+ * retired.
+ */
+export const PLAN_NOT_CARRIED_OUT_LEAD = "**The operator's plan was not carried out in full.**";
+export const PLAN_NOT_CARRIED_OUT_RE = /^\*\*The operator's plan was not carried out in full\.\*\*/;

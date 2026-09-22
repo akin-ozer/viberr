@@ -51,7 +51,7 @@ import {
   unpushedRevisionOf,
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
-import { RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
+import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
 import { readGoalFile } from "~/server/files/goal-writer.server";
 import {
   activeWorkRevision,
@@ -2338,6 +2338,24 @@ export interface OperatorTaskSnapshot {
     /** The report's stamp, which `read_timeline_entry` takes. */
     reportedAt: string;
   };
+  /**
+   * Ruling 408 (F39-35): a refusal this task has not answered yet.
+   *
+   * Ruling 400 made the plan-refused retry CARRY its refusals instead of
+   * saying "read them on the timeline" -- but it records them only when the
+   * plan was WHOLLY refused (`refused.length === plan.actions.length`), which
+   * is the rarer half. Live on ax-clone AX-18 the operator planned
+   * `[deliver_for_review, transition_stage]`; the delivery RAN, the transition
+   * was refused, so nothing was recorded -- and fourteen seconds later the
+   * next drive planned `transition_stage` again and was refused with a
+   * byte-identical message. That second wasted drive is what tripped the
+   * two-in-a-row hold (ruling 406).
+   *
+   * Partial or whole, a refusal the operator has not acted on is the most
+   * important thing about the task. Absent once it has moved the task or
+   * dispatched an agent since.
+   */
+  unansweredRefusal?: { at: string; text: string };
   /** Ruling 302: how many entries this task's timeline HAS, against the
    *  `recentTimeline.length` shown. Present always, so a coordinator never has
    *  to infer from a full-looking window that it saw everything. */
@@ -2721,6 +2739,25 @@ function findUnfinishedReport(
   return undefined;
 }
 
+/**
+ * Ruling 408: the newest refusal note with nothing done since.
+ *
+ * Same walk as {@link findUnfinishedReport} and the same stop rule: a
+ * `transition` or an `agent` event means the operator got somewhere after the
+ * refusal, so it has been answered and carrying it would be noise.
+ */
+function findUnansweredRefusal(
+  timeline: readonly TaskFileEvent[],
+): OperatorTaskSnapshot["unansweredRefusal"] {
+  for (const event of timeline) {
+    if (event.type === "transition" || event.type === "agent") return undefined;
+    if (event.actor.kind !== "operator") continue;
+    if (!PLAN_NOT_CARRIED_OUT_RE.test(event.text)) continue;
+    return { at: event.occurredAt, text: event.text };
+  }
+  return undefined;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2935,6 +2972,12 @@ export function operatorSnapshot(
     ...((): Pick<OperatorTaskSnapshot, "unfinishedReport"> => {
       const found = findUnfinishedReport(file.parsed.timeline);
       return found ? { unfinishedReport: found } : {};
+    })(),
+    // Ruling 408: whole timeline for the same reason — the refusal can fall
+    // out of the window while still being the open question.
+    ...((): Pick<OperatorTaskSnapshot, "unansweredRefusal"> => {
+      const found = findUnansweredRefusal(file.parsed.timeline);
+      return found ? { unansweredRefusal: found } : {};
     })(),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.

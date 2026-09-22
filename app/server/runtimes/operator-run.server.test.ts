@@ -1442,6 +1442,42 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   /**
+   * Ruling 408 (F39-35): ruling 400 quotes the refusals of a WHOLLY refused
+   * plan. Live on ax-clone AX-18 the plan was `[deliver_for_review,
+   * transition_stage]` — the delivery ran, so nothing was recorded, and the
+   * next drive re-planned the refused transition and was refused identically.
+   * The carry is the same sentence for the partial case, reaching the ordinary
+   * turn rather than the paid nudge.
+   */
+  const REFUSED_NOTE = {
+    at: "2026-09-22T17:07:51.797Z",
+    text:
+      "**The operator's plan was not carried out in full.** This step did not apply:\n\n" +
+      "- `transition_stage` — AX-18's review PR #16 conflicts with the base branch.",
+  };
+
+  it("ruling 408: an unanswered refusal is quoted in full, on every trigger", () => {
+    for (const trigger of ["packet-resolved", "manual", "agent-reply", "pr-diverged"] as const) {
+      const prompt = buildOperatorTurnPrompt(
+        snapshot({ unansweredRefusal: REFUSED_NOTE }),
+        trigger,
+      );
+      // CANARY: drop `unansweredRefusalInstruction` from the wrapper and none
+      // of these carry it — the prompt AX-18's second drive actually got.
+      expect(prompt, trigger).toContain("Your last plan was refused in part");
+      expect(prompt, trigger).toContain("conflicts with the base branch");
+      expect(prompt, trigger).toContain("Do NOT plan the same refused action again");
+      // It names the consequence the operator cannot otherwise see (ruling 406).
+      expect(prompt, trigger).toContain("recorded as a hold on the stage");
+      // And it never sends the reader to the timeline (ruling 392/400).
+      expect(prompt, trigger).not.toContain("read them and follow them");
+    }
+    expect(
+      buildCodexOperatorPrompt(snapshot({ unansweredRefusal: REFUSED_NOTE }), "manual"),
+    ).toContain("Your last plan was refused in part");
+  });
+
+  /**
    * Ruling 400 (F39-27): the plan-refused retry QUOTES the refusals.
    *
    * It used to say "The refusals are on the timeline, and each one names what

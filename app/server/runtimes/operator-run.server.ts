@@ -143,6 +143,7 @@ import {
   describeRunFailure,
   type DescribeRunFailureInput,
 } from "~/server/tasks/run-failure-remedy.server";
+import { PLAN_NOT_CARRIED_OUT_LEAD } from "~/shared/run-failure";
 import {
   noteModelAvailabilityFromFailure,
   clearModelMark,
@@ -3119,7 +3120,9 @@ async function narrateRefusedActions(
         ? `${were(byAuthority)} refused by its capability policy:\n\n${list(byAuthority)}`
         : `${did(byState)} not apply to the task's current state:\n\n${list(byState)}`;
   const text =
-    `**The operator's plan was not carried out in full.** ${body}` +
+    // Ruling 408: the lead is a shared constant, because the next turn's carry
+    // finds this note by it.
+    `${PLAN_NOT_CARRIED_OUT_LEAD} ${body}` +
     (reasoning.trim()
       ? `\n\nWhat it intended:\n\n> ${reasoning.trim().replace(/\n/g, "\n> ")}`
       : "");
@@ -4636,8 +4639,37 @@ const operatorTurnInstruction = (
   // early-returning branch below is a turn that can be about to re-dispatch
   // work that is already done.
   const standing = unfinishedReportInstruction(args[0]);
-  return `${standing}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  // Ruling 408: and a refusal nothing has answered, for the same reason — it
+  // changes what the next action can BE. After the report, which is about not
+  // re-dispatching finished work; this one is about not re-planning a step
+  // Viberr has already said no to.
+  const refused = unansweredRefusalInstruction(args[0]);
+  return `${standing}${refused}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
 };
+
+/**
+ * Ruling 408 (F39-35): what to say when Viberr refused part of the last plan.
+ *
+ * Ruling 400 settled the shape for a WHOLLY refused plan — quote the refusals,
+ * do not send the reader to the timeline. This is the same sentence for the
+ * commoner case, a plan that did some of its work and was refused the rest,
+ * which recorded nothing and taught the next drive nothing. Live on ax-clone
+ * AX-18 that cost a second identical refusal fourteen seconds later, and the
+ * pair of them tripped the two-in-a-row hold.
+ */
+function unansweredRefusalInstruction(snapshot: OperatorTaskSnapshot): string {
+  const refusal = snapshot.unansweredRefusal;
+  if (!refusal) return "";
+  return (
+    `READ THIS FIRST. Your last plan was refused in part, at ${refusal.at}, and nothing has been ` +
+    "done on this task since. Here is that note, in full:\n\n" +
+    `${refusal.text}\n\n` +
+    "Each entry names what was wrong with the step. Do NOT plan the same refused action again: " +
+    "it will be refused the same way, and two drives that change nothing are recorded as a hold on the stage. " +
+    "Do the thing a refusal names, change what made the step impossible, or open a decision packet saying " +
+    "which refusal you cannot get past and why.\n\n"
+  );
+}
 
 /**
  * Ruling 397 (F39-24): what to say when Viberr recorded a run as failed and the
