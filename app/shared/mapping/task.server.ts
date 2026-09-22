@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { liveMergeable } from "~/features/github/github-pills";
 import type {
   AgentRef,
   ForeignBranchHead,
@@ -501,9 +502,9 @@ export function mapPrReview(pr: PrRef | null): PrReviewState | null {
  *  read the pin (`conflictingPrBlockedReason` is the gate). GitHub recomputes
  *  after a push, so the honest display in that window is no pill at all. */
 export function mapPrMergeable(pr: PrRef | null): PrMergeable | null {
-  if (!pr?.mergeable) return null;
-  if (pr.mergeableAt && pr.headSha && pr.mergeableAt !== pr.headSha) return null;
-  return pr.state === "review" || pr.state === "accepted" ? pr.mergeable : null;
+  const live = liveMergeable(pr);
+  if (!live) return null;
+  return pr!.state === "review" || pr!.state === "accepted" ? live : null;
 }
 
 /**

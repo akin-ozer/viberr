@@ -152,6 +152,31 @@ export function mergeablePill(
 }
 
 /**
+ * Ruling 405: the verdict, but only while it still belongs to the live head.
+ *
+ * GitHub recomputes mergeability asynchronously, so the read right after a
+ * push answers "unknown" and the reconciler keeps the last-known verdict for
+ * the same PR — which is right when a READ failed and wrong when the head has
+ * moved underneath it. `mergeableAt` is the head it was measured on.
+ *
+ * Lives here, in the client-safe module, because BOTH sides need it: the
+ * server mapping (`mapPrMergeable`) that feeds the GitHub page and the review
+ * queue, and the task page's own pill. Ruling 405(b) put it in the server
+ * module first, which the task page could not import at all.
+ */
+export function liveMergeable(
+  pr: {
+    mergeable?: "clean" | "conflicting" | "unknown" | null;
+    mergeableAt?: string | null;
+    headSha?: string | null;
+  } | null,
+): "clean" | "conflicting" | "unknown" | null {
+  if (!pr?.mergeable) return null;
+  if (pr.mergeableAt && pr.headSha && pr.mergeableAt !== pr.headSha) return null;
+  return pr.mergeable;
+}
+
+/**
  * Connection pill from the typed `checkRepoAccess` result (spec §7.9c: the
  * pill must not claim `connected` in any degraded state — no design exists
  * for these, so the labels below are the authored V1 vocabulary, documented

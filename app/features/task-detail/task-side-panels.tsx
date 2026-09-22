@@ -19,8 +19,7 @@ import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { checksPill, checksUnreadPill, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
-import { mapPrMergeable } from "~/shared/mapping/task.server";
+import { checksPill, checksUnreadPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -311,9 +310,9 @@ export function GithubTrace({
             GitHub page and the review queue both read the verdict's head pin,
             and a task page painting "conflicts" over the commit that resolved
             it would disagree with them and with the acceptance gate. */}
-        {task.pr && mergeablePill(mapPrMergeable(task.pr)) && (
-          <Pill kind={mergeablePill(mapPrMergeable(task.pr))!.kind} sm>
-            {mergeablePill(mapPrMergeable(task.pr))!.label}
+        {task.pr && mergeablePill(liveMergeable(task.pr)) && (
+          <Pill kind={mergeablePill(liveMergeable(task.pr))!.kind} sm>
+            {mergeablePill(liveMergeable(task.pr))!.label}
           </Pill>
         )}
       </div>
