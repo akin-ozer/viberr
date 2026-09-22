@@ -3,7 +3,7 @@
 Viberr drives its own controller to build a Go clone of `google/ax` in
 `akin-ozer/ax-clone`. The observer (this pass) never writes clone code.
 
-- `FINDINGS.md` — numbered findings (F39-N), each with evidence and a proposed fix.
+- `FINDINGS.md` — what is still OPEN (nitpicks noted, not worked) and the controller assessment. Solved findings were cleared; each lives in its ruling (377-418) in `docs/architecture/decisions.md`, mapped in `PLAN.md`.
 - `TIMELINE.md` — what happened, in order, with timestamps.
 - `PROMPTS.md` — exactly what the controller was told.
 
