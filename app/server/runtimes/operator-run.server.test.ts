@@ -1251,11 +1251,28 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
     // 378 added `propose_ruling`, also in-Viberr and also destroying nothing,
     // so it is 10.
+    // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
+    // with delivery and the count stays 10.
     expect(tools).toHaveLength(10);
     expect(tools).toContain("set_dependencies");
     expect(tools).toContain("propose_ruling");
     expect(tools).not.toContain("deliver_for_review");
+    expect(tools).not.toContain("lease_files");
     expect(tools).toContain("flag_context_conflict");
+  });
+
+  it("ruling 417: lease_files is offered exactly where delivery is", () => {
+    // CANARY: map it to a grant nobody holds and a Codex operator can never
+    // lease, which is every operator on the board the ruling was written for.
+    expect(operatorPlanToolsFor(authority({ "deliver-review-pr": "direct" }))).toContain("lease_files");
+    expect(operatorPlanToolsFor(authority({ "deliver-review-pr": "off", "dispatch-agents": "direct" }))).not.toContain(
+      "lease_files",
+    );
+    // The plan schema carries the field it needs, required like every other.
+    const schema = operatorPlanSchemaFor(authority({ "deliver-review-pr": "direct" }));
+    const item = schema.properties.actions.items;
+    expect(item.properties.paths.type).toEqual(["array", "null"]);
+    expect(item.required).toContain("paths");
   });
 
   it("dispatchGate: an ABSENT dispatch-agents grant keeps run_agent — pre-rework deployments store only the retired ids (hunt 2026-08-29)", () => {
@@ -3200,6 +3217,46 @@ describe("pending trigger queue", () => {
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
       .all()
       .map((row) => ({ id: String(row.id) }));
+
+  it("ruling 417: a Codex plan's lease_files step lands the lease on the project", async () => {
+    await drive({ trigger: "manual" });
+    // CANARY: drop the executor's `lease_files` case and the step is skipped
+    // as an unknown tool; the project holds no lease.
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "lease_files",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "Rewriting the sandbox lifetime; AX-21 waits on it.",
+            reason: null,
+            packetOptions: null,
+            kbSource: null,
+            repoSource: null,
+            blockedBy: null,
+            paths: ["internal/sandbox/**"],
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      const leases = readProjectFile({ projectSlug: store3.slug, dataRoot: store3.dataRoot })!.parsed
+        .frontmatter.fileLeases;
+      expect(leases).toEqual([
+        {
+          paths: ["internal/sandbox/**"],
+          taskKey: "VIB-1",
+          reason: "Rewriting the sandbox lifetime; AX-21 waits on it.",
+        },
+      ]);
+    });
+  });
 
   it("ruling 415: the Codex plan's snapshot never sends it to a tool it cannot call", async () => {
     // A timeline longer than the six-entry window, so the window note is

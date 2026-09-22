@@ -59,7 +59,7 @@ per item and each one was applied to the source and observed failing.
 | 46 | A person's decision never leaves the operator's view; a plan-only operator is never sent to a tool (F39-41) | — | **done**, ruling 415 |
 | 47 | A rework the provider refused fought no round (F39-42) | "provider refusals don't count" | **done**, ruling 416 |
 | 48 | GPT-6 Luna and Opus 5.5 for the agents (owner request) | "use gpt 6 luna and opus 5.5" | **SDKs upgraded** (Codex 0.156.0, Agent SDK 0.3.280); model switch through the controller pending the redeploy |
-| 49 | The operator can lease files to its own task (improvement point) | "operator sets it directly" | **in progress** |
+| 49 | The operator can lease files to its own task (improvement point) | "operator sets it directly" | **done**, ruling 417 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

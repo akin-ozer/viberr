@@ -24,6 +24,7 @@ import {
   operatorDispatchAgent,
   operatorFlagContextConflict,
   operatorProposeRuling,
+  operatorLeaseFiles,
   OPERATOR_TIMELINE_DEFAULT,
   OPERATOR_TIMELINE_MAX,
   operatorOpenPacket,
@@ -902,6 +903,32 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         },
       ),
       "deliver_for_review",
+    );
+    // Ruling 417 (owner): lease the files this task will land to it, first
+    // come first served. Same gate as delivery: a lease orders deliveries.
+    add(
+      tool(
+        "lease_files",
+        "LEASE shared files to THIS task until it merges (ruling 417). Use it when `collisions` shows another open PR changing a file this task must also change and this task should land first: from then on any other task whose delivery changes a leased path is refused before it reaches GitHub, and every agent on the project is told who holds what before it starts. First come, first served: a path another active task already holds is refused by name, and the holder keeps it. Lease exactly the shared paths, never a whole tree to be safe, and say in your directives which files are held. Every other task whose open PR changes a newly leased path is told on its own timeline that its next delivery is refused. The lease releases itself when this task finishes; a person can clear it on the project's settings page.",
+        {
+          paths: z
+            .array(z.string())
+            .describe("The path globs to lease: `*` matches within one segment, `**` across segments. As narrow as the shared files."),
+          reason: z
+            .string()
+            .describe("Why this task holds them, in one sentence. Every task the lease refuses is shown it."),
+        },
+        async (args) =>
+          resultText(
+            await operatorLeaseFiles(
+              db,
+              ctx,
+              { ...base, paths: args.paths.map((p) => prose(p)), reason: prose(args.reason) },
+              authority,
+            ),
+          ),
+      ),
+      "lease_files",
     );
   }
 

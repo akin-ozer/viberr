@@ -75,6 +75,7 @@ import {
   operatorSetGoal,
   operatorFlagContextConflict,
   operatorProposeRuling,
+  operatorLeaseFiles,
   operatorSnapshot,
   operatorTransitionStage,
   operatorResolvePacket,
@@ -2093,6 +2094,10 @@ const OPERATOR_PLAN_TOOLS = [
   // false ruling. `text` carries the correction, `kbSource` the document to
   // amend, `repoSource` the evidence.
   "propose_ruling",
+  // Ruling 417 (owner): lease shared files to THIS task until it merges. The
+  // plan mirror of the Claude toolkit's `lease_files`; `paths` carries the
+  // globs and `text` the reason.
+  "lease_files",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -2127,6 +2132,9 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // F39-1/F39-7: same gate as `flag_context_conflict` — it writes a typed event
   // and a proposal, never a binding rule.
   propose_ruling: ["append-typed-events"],
+  // Ruling 417: a lease orders DELIVERIES, so it rides delivery authority —
+  // resolved via deliverGate below, like `deliver_for_review` itself.
+  lease_files: ["deliver-review-pr"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
@@ -2139,7 +2147,7 @@ export function operatorPlanToolsFor(
   authority: OperatorAuthority,
 ): OperatorPlanTool[] {
   const permitted = OPERATOR_PLAN_TOOLS.filter((toolName) =>
-    toolName === "deliver_for_review"
+    toolName === "deliver_for_review" || toolName === "lease_files"
       ? deliverGate(authority) !== "deny"
       : toolName === "update_branch_from_base"
         ? updateBranchGate(authority) !== "deny"
@@ -2165,10 +2173,14 @@ export function operatorPlanToolsFor(
   // OUTSIDE Viberr — a pushed branch, an opened PR. `operatorDeliverForReview`
   // refuses either way, so advertising them only buys a billed turn spent
   // planning a push that cannot happen.
+  // Ruling 417: `lease_files` rides the delivery gate, so the fallback that
+  // withholds delivery withholds it too; advertising it would buy a turn
+  // spent planning a lease `operatorLeaseFiles` refuses.
   return permitted.length
     ? [...permitted]
     : OPERATOR_PLAN_TOOLS.filter(
-        (t) => t !== "deliver_for_review" && t !== "update_branch_from_base",
+        (t) =>
+          t !== "deliver_for_review" && t !== "update_branch_from_base" && t !== "lease_files",
       );
 }
 
@@ -2203,7 +2215,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_ruling: the correction itself, in one or two sentences; else null." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_ruling: the correction itself, in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_ruling: the rulings document to amend, by file name as the rulings knowledge base lists it. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_ruling: the EVIDENCE that proves the ruling wrong \u2014 the exact command and its exit code or output, or the run and verdict that showed it. Else null." },
@@ -2211,6 +2223,11 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             type: ["array", "null"],
             items: { type: "string" },
             description: "For set_dependencies ONLY: the FULL list of what this task waits on, as task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty array clears the wait. Null for every other tool.",
+          },
+          paths: {
+            type: ["array", "null"],
+            items: { type: "string" },
+            description: "For lease_files ONLY (ruling 417): the path globs to lease to THIS task until it merges, as narrow as the shared files (`*` within one segment, `**` across segments), and put the reason in `text`. First come, first served: a path another active task already holds is refused by name. Null for every other tool.",
           },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
@@ -2275,7 +2292,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "paths"],
       },
     },
   },
@@ -2304,6 +2321,9 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 131: set_dependencies — the FULL list; `.optional()` so plans
   // persisted before the field existed still replay across a restart-resume.
   blockedBy: z.array(z.string()).nullable().optional(),
+  // Ruling 417: lease_files — `.optional()` so plans persisted before the
+  // field existed still replay across a restart-resume.
+  paths: z.array(z.string()).nullable().optional(),
   packetOptions: z
     .array(
       z.strictObject({
@@ -3015,6 +3035,19 @@ async function executeCodexPlan(
             );
           }
           break;
+        case "lease_files": {
+          // Ruling 417: `paths` are the globs, `text` (or `reason`) why.
+          const why = a.text || a.reason;
+          if (a.paths && a.paths.length > 0 && why) {
+            record(
+              a.tool,
+              await operatorLeaseFiles(db, ctx, { ...base, paths: a.paths, reason: why }, authority),
+            );
+          } else {
+            skippedMalformed(a.tool, "the paths to lease and the reason they are held");
+          }
+          break;
+        }
       }
     } catch (error) {
       // ABORT the remaining plan on a governed-action failure: executing later
@@ -4722,7 +4755,11 @@ export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
   return (
     "`collisions` names the OTHER open review PRs whose diff touches a file this task's PR does, with the shared paths. " +
     "A merge on either side puts the other into conflict, so before you deliver, refresh a branch or dispatch work into " +
-    "a shared file, read it and say in your directive which files another task is holding.\n\n"
+    "a shared file, read it and say in your directive which files another task is holding. " +
+    // Ruling 417: the move a collision now has.
+    "If this task should land first and must change a shared file, lease exactly those paths to it " +
+    "with `lease_files`: first come, first served, and the other task's next delivery that changes them " +
+    "is refused until this one merges. Never lease a path this task does not need.\n\n"
   );
 }
 

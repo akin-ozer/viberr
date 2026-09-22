@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaseConflictFor, leaseRefusal, matchesGlob, type FileLease } from "./file-leases";
+import { globsOverlap, leaseConflictFor, leaseRefusal, matchesGlob, type FileLease } from "./file-leases";
 
 /**
  * Ruling 245 (pass 37, F37-74). A lease decides whether a delivery is refused,
@@ -69,6 +69,54 @@ const LEASES: FileLease[] = [
   { paths: ["pnpm-lock.yaml"], taskKey: "SHOP-11", reason: "regenerating for the cart importer" },
   { paths: ["Makefile", "make/**"], taskKey: "SHOP-19", reason: "splitting it into fragments" },
 ];
+
+/**
+ * Ruling 417: two leases whose globs overlap refuse each other's deliveries, so
+ * neither holder can ever land. The exact-duplicate check this replaces caught
+ * `internal/**` twice and missed every real case.
+ */
+describe("globsOverlap", () => {
+  it("a directory lease overlaps any lease inside it, in either order", () => {
+    // CANARY: fall back to `a === b` and all three read false.
+    expect(globsOverlap("internal/sandbox/**", "internal/sandbox/local.go")).toBe(true);
+    expect(globsOverlap("internal/sandbox/local.go", "internal/**")).toBe(true);
+    expect(globsOverlap("internal/**", "internal/sandbox/**")).toBe(true);
+  });
+
+  it("siblings and disjoint trees do not overlap", () => {
+    expect(globsOverlap("internal/sandbox/**", "internal/runtime/**")).toBe(false);
+    expect(globsOverlap("internal/cli/render.go", "internal/cli/apply.go")).toBe(false);
+    expect(globsOverlap("docs/**", "internal/**")).toBe(false);
+  });
+
+  it("`*` stays inside a segment on both sides", () => {
+    expect(globsOverlap("make/*.mk", "make/test.mk")).toBe(true);
+    expect(globsOverlap("make/*.mk", "make/sub/test.mk")).toBe(false);
+    // Two star patterns meet when their literal heads and tails are compatible.
+    expect(globsOverlap("internal/*/types.go", "internal/apis/*.go")).toBe(true);
+    expect(globsOverlap("src/*.ts", "src/*.go")).toBe(false);
+    expect(globsOverlap("src/a*", "src/b*")).toBe(false);
+  });
+
+  it("`**` in the middle spans zero segments too, and `a/**` covers `a` itself", () => {
+    expect(globsOverlap("a/**/b.go", "a/b.go")).toBe(true);
+    expect(globsOverlap("a/**", "a")).toBe(true);
+    expect(globsOverlap("a/**/z", "a/b/c/z")).toBe(true);
+    expect(globsOverlap("a/**/z", "a/b/c/y")).toBe(false);
+  });
+
+  it("a `**` inside a segment is answered overlapping, the safe direction", () => {
+    expect(globsOverlap("src/**.ts", "docs/readme.md")).toBe(true);
+  });
+
+  it("agrees with matchesGlob on every literal path", () => {
+    const globs = ["internal/**", "internal/*/x.go", "a/**/b", "make/*.mk", "docs/api.md"];
+    const paths = ["internal/sandbox/x.go", "internal/x.go", "a/b", "a/q/r/b", "make/t.mk", "docs/api.md", "other"];
+    for (const g of globs) {
+      for (const p of paths) expect(globsOverlap(g, p), `${g} vs ${p}`).toBe(matchesGlob(p, g));
+    }
+  });
+});
 
 describe("leaseConflictFor", () => {
   it("names the first changed path another task holds, and its holder", () => {

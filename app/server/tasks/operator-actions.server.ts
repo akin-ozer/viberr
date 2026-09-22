@@ -93,7 +93,13 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { backendDispatchHold } from "~/server/runtimes/backend-quota.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  resolveProjectFilePath,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
+import { leaseHeldAgainst } from "~/server/tasks/file-leases.server";
+import { matchesGlob } from "~/shared/file-leases";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import {
@@ -2171,6 +2177,173 @@ export async function operatorProposeRuling(
   return {
     outcome: "done",
     message: `Proposed against \`${rulingsDir}/${name}\`. It is NOT binding: a human promotes or deletes it.`,
+  };
+}
+
+/** Ruling 417: the audit action shared with the settings page's lease writer. */
+const FILE_LEASES_AUDIT_ACTION = "project.file_leases.updated";
+
+/**
+ * Ruling 417 (owner, 2026-09-23): the operator leases files to ITS OWN task.
+ *
+ * Ruling 245 gave the project leases ("this task owns these paths until it
+ * merges") and ruling 396 a human surface, but only a person on the settings
+ * page, or the controller when a person asked it, could declare one. The
+ * operator is the first to SEE two open PRs sharing a file (ruling 413) and
+ * could do nothing about it: on ax-clone AX-20 and AX-21 collided on
+ * `internal/sandbox/local.go` and it cost an agent run, a decision packet and
+ * the owner's answer. The owner chose the direct door over a proposal a person
+ * adopts: first come, first served, and a person clears one on the settings
+ * page.
+ *
+ * Gated on DELIVERY authority, not a new grant: a lease orders deliveries, and
+ * an operator that cannot deliver has nothing to land first. Refused by name
+ * when another active task already holds an overlapping path. Every other task
+ * whose open PR changes a newly leased path is told on its own timeline, since
+ * its next delivery is now refused.
+ */
+export async function operatorLeaseFiles(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; paths: string[]; reason: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const paths = [...new Set(input.paths.map((p) => p.trim()).filter(Boolean))];
+  const reason = input.reason.trim();
+  if (paths.length === 0 || !reason) {
+    return {
+      outcome: "noop",
+      message:
+        "A lease needs at least one path and the reason it is held: the reason is what every task it refuses is shown. Nothing was leased.",
+    };
+  }
+  if (deliverGate(authority) === "deny") {
+    return {
+      outcome: "denied",
+      message:
+        "This operator may not deliver on this project, so it has nothing to land first and nothing to lease files for.",
+    };
+  }
+  const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+  const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!project || !task) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (taskClosure(task.parsed.frontmatter, project.parsed.frontmatter.stages).closed) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is closed, and a lease held by a finished task binds nobody (ruling 245(b)). Nothing was leased.`,
+    };
+  }
+  const leaseCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
+  let refusal: string | null = null;
+  let fresh: string[] = [];
+  // Checked INSIDE the project file's lock, so two operators leasing at once
+  // cannot both win the same path.
+  await updateProjectFile(
+    { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
+    (parsed) => {
+      const leases = parsed.frontmatter.fileLeases ?? [];
+      const mine = new Set(
+        leases.filter((l) => l.taskKey === input.taskKey).flatMap((l) => l.paths),
+      );
+      fresh = paths.filter((p) => !mine.has(p));
+      if (fresh.length === 0) return;
+      const held = leaseHeldAgainst(input.projectSlug, leases, input.taskKey, fresh, leaseCtx);
+      if (held) {
+        refusal =
+          `\`${held.glob}\` is already held by ${held.taskKey} (${held.reason || "no reason given"}), ` +
+          `and it overlaps what ${input.taskKey} asked for. First come, first served: the lease stays with ` +
+          `${held.taskKey}. Keep ${input.taskKey}'s work off those paths, wait for ${held.taskKey} to merge ` +
+          "(set_dependencies), or open a decision packet if a person should move the lease.";
+        return;
+      }
+      parsed.frontmatter.fileLeases = [...leases, { paths: fresh, taskKey: input.taskKey, reason }];
+    },
+  );
+  if (refusal) return { outcome: "noop", message: refusal };
+  if (fresh.length === 0) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} already holds ${paths.map((p) => `\`${p}\``).join(", ")}. Nothing changed.`,
+    };
+  }
+  rebuildPath(
+    db,
+    resolveProjectFilePath({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot }),
+    { dataRoot: ctx.dataRoot },
+  );
+  const list = fresh.map((p) => `\`${p}\``).join(", ");
+  const at = new Date().toISOString();
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: at,
+      type: "note",
+      actor: { kind: "operator" },
+      title: "Files leased",
+      text:
+        `**The operator leased ${list} to ${input.taskKey} until it merges:** ${reason} ` +
+        "Any other task whose delivery changes these paths is refused before it reaches GitHub. " +
+        "A person can clear the lease on the project's settings page.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: FILE_LEASES_AUDIT_ACTION,
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { leased: fresh.join(", "), holder: input.taskKey, by: "operator" },
+  });
+  // Every other task whose OPEN PR changes a newly leased path: its next
+  // delivery is refused from now on, and it hears that now rather than at the
+  // refused push.
+  const affected = listProjectTasks(db, input.projectSlug, { dataRoot: ctx.dataRoot }).flatMap((t) => {
+    if (t.key === input.taskKey || !t.pr || t.pr.state !== "review") return [];
+    const hit = (t.pr.paths?.changed ?? []).find((path) => fresh.some((glob) => matchesGlob(path, glob)));
+    return hit ? [{ key: t.key, pr: t.pr.number, path: hit }] : [];
+  });
+  for (const other of affected) {
+    const text =
+      `**${input.taskKey} now holds ${list}** (leased by its operator: ${reason}). ` +
+      `PR #${other.pr} changes \`${other.path}\`, so ${other.key}'s next delivery is refused until ` +
+      `${input.taskKey} merges. Drop that change, wait for ${input.taskKey}, or ask a person to clear ` +
+      "the lease on the project's settings page.";
+    await updateTaskFile(taskRef(ctx, input.projectSlug, other.key), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: at,
+        type: "policy",
+        actor: { kind: "operator" },
+        title: "Files leased by another task",
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reproject(db, ctx, input.projectSlug, other.key);
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: other.key,
+        kind: "policy",
+        title: "Files leased by another task",
+        text,
+        occurredAt: at,
+        from: OPERATOR_NOTIFY_FROM,
+      },
+      ctx,
+    );
+  }
+  return {
+    outcome: "done",
+    message:
+      `Leased ${list} to ${input.taskKey} until it merges.` +
+      (affected.length > 0
+        ? ` ${affected.map((a) => `${a.key} (PR #${a.pr})`).join(", ")} changes one of them and was told its next delivery is refused.`
+        : ""),
   };
 }
 

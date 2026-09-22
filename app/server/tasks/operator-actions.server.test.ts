@@ -55,6 +55,7 @@ import {
   operatorOpenPacket,
   operatorPostComment,
   operatorProposeRuling,
+  operatorLeaseFiles,
   operatorSetGoal,
   PROPOSED_RULINGS_HEADING,
   RULING_PROPOSAL_TITLE,
@@ -3514,6 +3515,108 @@ describe("auto-invoke on task creation", () => {
     const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
     expect(deliveringEngagement(t.frontmatter)).toBeNull();
     expect(listRunsForTask(store.db, store.slug, created.key)).toHaveLength(0);
+  });
+});
+
+/**
+ * Ruling 417 (owner, 2026-09-23): the operator leases files to its OWN task,
+ * first come first served. On ax-clone AX-20 and AX-21 collided on
+ * `internal/sandbox/local.go`, which cost an agent run, a decision packet and
+ * the owner's answer: the operator saw the collision (ruling 413) and had no
+ * move to make about it.
+ */
+describe("operatorLeaseFiles (ruling 417)", () => {
+  const prAt = (number: number, changed: string[]) => ({
+    number,
+    state: "review" as const,
+    title: `PR ${number}`,
+    paths: { headSha: "a".repeat(40), changed, truncated: false },
+  });
+  function seedBoard(): void {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        branch: "vib-2",
+        pr: prAt(13, ["internal/sandbox/local.go", "internal/runtime/executor.go"]),
+        ownerUserId: store.users.arda.id,
+      }),
+      goal: "collides on the sandbox file",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        stage: "impl",
+        branch: "vib-3",
+        pr: prAt(14, ["docs/manifests.md"]),
+      }),
+      goal: "touches nothing leased",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const leases = () =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.fileLeases;
+  const lease = (taskKey: string, paths: string[], reason = "rewriting the sandbox lifetime") =>
+    operatorLeaseFiles(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey, paths, reason },
+      authority("full"),
+    );
+  const timelineOf = (taskKey: string) =>
+    readTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot })!.parsed.timeline;
+
+  it("leases to its own task, records it, and tells the task whose open PR it now blocks", async () => {
+    seedBoard();
+    // CANARY: drop the write and the project holds no lease; drop the
+    // affected-task loop and VIB-2 learns at its next refused push.
+    const r = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(r.outcome).toBe("done");
+    expect(leases()).toEqual([
+      { paths: ["internal/sandbox/**"], taskKey: "VIB-1", reason: "rewriting the sandbox lifetime" },
+    ]);
+    expect(r.message).toContain("VIB-2 (PR #13)");
+    expect(timelineOf("VIB-1")[0]).toMatchObject({ type: "note", title: "Files leased" });
+    const told = timelineOf("VIB-2")[0]!;
+    expect(told.type).toBe("policy");
+    expect(told.text).toContain("`internal/sandbox/local.go`");
+    expect(told.text).toContain("next delivery is refused");
+    // VIB-3's PR touches nothing leased and is told nothing.
+    expect(timelineOf("VIB-3").some((e) => e.title === "Files leased by another task")).toBe(false);
+    expect(
+      listNotifications(store.db, store.users.arda.id).some((n) => n.title === "Files leased by another task"),
+    ).toBe(true);
+    expect(
+      listAuditEvents(store.db).some(
+        (e) => e.action === "project.file_leases.updated" && e.taskKey === "VIB-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("first come, first served: an overlapping path another active task holds is refused by name", async () => {
+    seedBoard();
+    await lease("VIB-1", ["internal/sandbox/**"]);
+    // CANARY: drop `leaseHeldAgainst` and VIB-2 gets a lease on a file VIB-1
+    // holds, and each task's delivery is then refused by the other's.
+    const r = await lease("VIB-2", ["internal/sandbox/local.go"], "mine too");
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("`internal/sandbox/**` is already held by VIB-1");
+    expect(r.message).toContain("First come, first served");
+    expect(leases()).toHaveLength(1);
+  });
+
+  it("is idempotent for what the task already holds, and refused without delivery authority", async () => {
+    seedBoard();
+    await lease("VIB-1", ["internal/sandbox/**"]);
+    const again = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(again.outcome).toBe("noop");
+    expect(again.message).toContain("already holds");
+    expect(leases()).toHaveLength(1);
+
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "deliver-review-pr", mode: "off" }]);
+    const denied = await lease("VIB-1", ["docs/**"]);
+    expect(denied.outcome).toBe("denied");
+    expect(leases()).toHaveLength(1);
   });
 });
 

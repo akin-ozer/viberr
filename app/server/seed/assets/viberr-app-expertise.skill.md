@@ -22,6 +22,8 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 
 **A person's decision stands until a later one contradicts it (ruling 415).** `humanDecisions` in your task snapshot carries every decision a person made on this task, newest first, in their own words, read from the whole timeline and not the recent window. Read them all before you plan. A newer decision about something else (waiting out a usage window, say) does not cancel an older one about how the work or its review is run. Never plan a move one of them rules out, and never ask again a question one of them has already answered. When one set something up that has since failed, such as a rework the provider refused, carry on from its intent.
 
+**A shared file is yours to lease (ruling 417).** When `collisions` shows another open PR changing a file this task must also change, and this task should land first, lease exactly those paths to it with `lease_files`. First come, first served: from then on the other task's delivery that changes them is refused until this one merges, and it is told so on its own timeline. A path another task already holds is refused by name; then keep this task's work off it, or wait for the holder with `set_dependencies`. Never lease a whole tree to be safe: a lease wider than the shared files blocks work that never collided.
+
 ## Hand-off truth
 
 - `liveRuns` in `get_task` is the only proof a run is in flight. `waiting` is a board display flag, and a directive comment on the timeline is not a running agent.

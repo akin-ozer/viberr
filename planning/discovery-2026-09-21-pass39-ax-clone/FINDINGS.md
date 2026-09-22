@@ -1535,6 +1535,12 @@ raised, a human decision spent) which is exactly the collision a lease exists to
 A lease proposed from the overlap above would have been the mechanism working ahead of the
 problem instead of after it.
 
+**Done, 2026-09-23 — ruling 417, the owner's call ("operator sets it directly").** The
+operator leases files to its OWN task with `lease_files`, first come first served, on both
+backends. Building it found a latent defect in the human path: the settings writer refused
+only an identical glob twice, so two overlapping leases could stand and refuse each other's
+deliveries forever. Both writers now refuse overlap between active holders.
+
 ## F39-38 · MEDIUM · The op that unblocks a link did not start it, and the reply talked about a different link
 
 Asked whether ten pending links were genuinely gated on AX-19 and AX-20, the controller

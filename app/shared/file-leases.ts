@@ -79,6 +79,71 @@ export function matchesGlob(path: string, glob: string): boolean {
   return new RegExp(`^${pattern}$`).test(p);
 }
 
+/** A glob's segment pattern: `*` within it, never `/`. */
+function segmentsIntersect(a: string, b: string): boolean {
+  const aStar = a.includes("*");
+  const bStar = b.includes("*");
+  // A literal meets a pattern exactly when the pattern matches it.
+  if (!aStar && !bStar) return a === b;
+  if (!aStar) return matchesGlob(a, b);
+  if (!bStar) return matchesGlob(b, a);
+  // Both carry a star: some string matches both exactly when their literal
+  // heads are compatible (one a prefix of the other) and their literal tails
+  // are too. Each star can absorb the other pattern's middle, so nothing
+  // between the first and last star can rule a string out.
+  const head = (s: string) => s.slice(0, s.indexOf("*"));
+  const tail = (s: string) => s.slice(s.lastIndexOf("*") + 1);
+  const [ha, hb, ta, tb] = [head(a), head(b), tail(a), tail(b)];
+  return (ha.startsWith(hb) || hb.startsWith(ha)) && (ta.endsWith(tb) || tb.endsWith(ta));
+}
+
+/**
+ * Ruling 417: can one path fall under BOTH globs?
+ *
+ * Two leases whose globs overlap refuse each other's deliveries: a task that
+ * changes a path both cover is refused by the lease it does not hold, so
+ * neither can ever land. An exact-duplicate check (`internal/**` twice) misses
+ * every real case (`internal/**` against `internal/sandbox/local.go`), which is
+ * why a lease is now refused on overlap, the first to declare winning.
+ *
+ * Same two wildcards as {@link matchesGlob}, walked segment by segment: `**`
+ * matches any number of whole segments, including none.
+ */
+export function globsOverlap(a: string, b: string): boolean {
+  const split = (g: string) =>
+    g
+      .replace(/^\.\//, "")
+      .replace(/\/+$/, "")
+      .split("/")
+      .filter(Boolean);
+  const as = split(a);
+  const bs = split(b);
+  if (as.length === 0 || bs.length === 0) return false;
+  // `matchesGlob` lets a `**` INSIDE a segment (`src/**.ts`) span directories,
+  // which this segment walk cannot model. Such a glob is answered "overlaps":
+  // a lease wrongly refused is a sentence a person can act on, and two leases
+  // wrongly allowed refuse each other's deliveries for good.
+  const partialGlobstar = (segs: string[]) => segs.some((s) => s !== "**" && s.includes("**"));
+  if (partialGlobstar(as) || partialGlobstar(bs)) return true;
+  const memo = new Map<string, boolean>();
+  const meet = (i: number, j: number): boolean => {
+    const key = `${i},${j}`;
+    const known = memo.get(key);
+    if (known !== undefined) return known;
+    let result: boolean;
+    if (i === as.length && j === bs.length) result = true;
+    else if (i < as.length && as[i] === "**")
+      // Zero segments, or one segment (then possibly more) under the globstar.
+      result = meet(i + 1, j) || (j < bs.length && meet(i, j + 1));
+    else if (j < bs.length && bs[j] === "**") result = meet(i, j + 1) || (i < as.length && meet(i + 1, j));
+    else if (i === as.length || j === bs.length) result = false;
+    else result = segmentsIntersect(as[i]!, bs[j]!) && meet(i + 1, j + 1);
+    memo.set(key, result);
+    return result;
+  };
+  return meet(0, 0);
+}
+
 /** A changed path that another task's lease covers. */
 export interface LeaseConflict {
   path: string;
