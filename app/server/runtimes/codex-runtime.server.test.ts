@@ -2176,6 +2176,30 @@ describe("ruling 394: the transport died after the turn completed", () => {
     ).toBe(true);
   });
 
+  it("finishes when the provider RECOVERED from a blip and then completed the turn", async () => {
+    // Live on ax-clone AX-4 (run_PmefJ4iUKtTQ), the third occurrence of this
+    // shape in one morning and the sharpest: the CLI printed its reconnect
+    // banner mid-turn, recovered, emitted a complete operator decision plan
+    // (engage the reviewer on revision ed4a600 — the one action that would
+    // have cleared AX-4's review gate), and completed the turn. `sawFatalError`
+    // is sticky, so the old gate could never settle this finished however the
+    // stream ended, and Viberr threw the plan away and asked a human to
+    // "Re-run the operator now".
+    const { lines, exit } = await runWith(
+      fakeCodexThenThrow(
+        [
+          { type: "turn.started" },
+          { type: "error", message: DROP },
+          ENVELOPE,
+          TURN_DONE,
+        ],
+        new Error(DROP),
+      ),
+    );
+    expect(exit).toMatchObject({ outcome: "finished" });
+    expect(lines.some((l) => l.raw.includes("3e0396ab"))).toBe(true);
+  });
+
   it("still FAILS a run cut off while work was in flight", async () => {
     // The whole point of the order test: turn 1 completed, the agent started
     // another item, and THAT is what the drop cut. Nothing stands finished.
