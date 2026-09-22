@@ -6,6 +6,7 @@ import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import {
   DangerZone,
+  FileLeasesPanel,
   MembersPanel,
   ProjectPanel,
   RepoPanel,
@@ -1354,6 +1355,8 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     repoFootprintTasks: 0,
     branchCleanupOnMerge: true,
     requiredReviewers: [],
+    fileLeases: [],
+    leaseCandidates: [],
     reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
   };
 
@@ -1510,6 +1513,8 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     repoFootprintTasks: 0,
     branchCleanupOnMerge: true,
     requiredReviewers: [],
+    fileLeases: [],
+    leaseCandidates: [],
     reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
   };
 
@@ -1551,6 +1556,9 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
       "Workflow stages",
       // Ruling 178: rendered read-only for a viewer (the rules as text).
       "Required reviewers",
+      // Ruling 396: likewise. A viewer still needs to know who owns a file
+      // before it touches one, and the write controls are the part withheld.
+      "File leases",
       "Members",
       "Repository & credentials",
     ]);
@@ -1763,5 +1771,127 @@ describe("RequiredReviewersPanel (ruling 178)", () => {
       (b) => b.textContent?.trim() === "Add rule",
     );
     expect(add).toBeUndefined();
+  });
+});
+
+/**
+ * Ruling 396 (F39-23): file leases, on a page a person can open.
+ *
+ * Ruling 245 built leases and gave them no human surface. They were written by
+ * one controller tool, read by another, injected into every specialist's
+ * prompt, and enforced at delivery — `push-workspace` refuses the push and says
+ * "clear the lease once AX-9 has landed", with nowhere to do it. Live on the
+ * ax-clone board the controller wrote into the project knowledge base every
+ * agent reads: "Current leases are on the project's settings page." There was
+ * no such panel.
+ */
+describe("FileLeasesPanel (ruling 396)", () => {
+  const LEASES = [
+    {
+      paths: ["go.mod", "go.sum"],
+      taskKey: "AX-9",
+      taskTitle: "Persistent store",
+      reason: "AX-9 pins the module graph until it merges",
+      spent: false,
+    },
+    {
+      paths: ["Makefile"],
+      taskKey: "AX-1",
+      taskTitle: "Repo skeleton",
+      reason: "AX-1 owns the gate harness",
+      spent: true,
+    },
+  ];
+  const CANDIDATES = [
+    { key: "AX-9", title: "Persistent store" },
+    { key: "AX-1", title: "Repo skeleton" },
+  ];
+
+  it("shows the paths, the holder and the reason a refusal will quote", () => {
+    const { container } = render(
+      <FileLeasesPanel
+        leases={LEASES}
+        candidates={CANDIDATES}
+        canManage={false}
+        busy={false}
+        onSave={() => {}}
+      />,
+    );
+    const panel = container.querySelector('[data-panel="file-leases"]')!;
+    // CANARY: this whole panel is the finding. Before ruling 396 nothing in
+    // app/features or app/routes read a lease at all.
+    expect(panel.textContent).toContain("go.mod go.sum");
+    expect(panel.textContent).toContain("AX-9");
+    expect(panel.textContent).toContain("AX-9 pins the module graph until it merges");
+    // Ruling 245(b): a spent lease is still a declared row, and says so.
+    expect(panel.textContent).toContain("holder finished; binds nobody");
+    // A reader without the grant still learns who owns the file.
+    expect(panel.textContent).toContain("Read-only");
+  });
+
+  it("saves the whole list, splitting a typed path line into globs", () => {
+    const saved: { paths: string[]; taskKey: string; reason: string }[][] = [];
+    const { container, getByLabelText, getByText } = render(
+      <FileLeasesPanel
+        leases={[]}
+        candidates={CANDIDATES}
+        canManage
+        busy={false}
+        onSave={(l) => saved.push(l)}
+      />,
+    );
+    fireEvent.click(getByText("Add lease"));
+    fireEvent.change(getByLabelText("Lease 1 paths"), {
+      target: { value: "  go.mod,  make/**  go.sum go.mod " },
+    });
+    fireEvent.change(getByLabelText("Lease 1 reason"), { target: { value: " pins it " } });
+    fireEvent.click(getByText("Save"));
+    expect(saved).toHaveLength(1);
+    // De-duplicated, trimmed, and split on commas AND whitespace, because a
+    // person typing a path list will use either.
+    expect(saved[0]).toEqual([
+      { paths: ["go.mod", "make/**", "go.sum"], taskKey: "AX-9", reason: "pins it" },
+    ]);
+    expect(container.querySelector('[data-lease-row="0"]')).not.toBeNull();
+  });
+
+  it("clears exactly the spent leases and keeps the binding one", () => {
+    const saved: { paths: string[]; taskKey: string; reason: string }[][] = [];
+    const { getByText } = render(
+      <FileLeasesPanel
+        leases={LEASES}
+        candidates={CANDIDATES}
+        canManage
+        busy={false}
+        onSave={(l) => saved.push(l)}
+      />,
+    );
+    // The note names them before the button offers to.
+    expect(getByText(/1 lease held by a task that has finished/)).toBeTruthy();
+    fireEvent.click(getByText("Clear finished"));
+    expect(saved[0]).toEqual([
+      {
+        paths: ["go.mod", "go.sum"],
+        taskKey: "AX-9",
+        reason: "AX-9 pins the module graph until it merges",
+      },
+    ]);
+  });
+
+  it("keeps a holder that is not on this board in the picker rather than rewriting it", () => {
+    const { getByLabelText } = render(
+      <FileLeasesPanel
+        leases={[{ paths: ["x"], taskKey: "AX-404", taskTitle: null, reason: "", spent: false }]}
+        candidates={CANDIDATES}
+        canManage
+        busy={false}
+        onSave={() => {}}
+      />,
+    );
+    // SAFETY: `Lease 1 holder` is the aria-label the panel puts on its
+    // `<select>`, so the node this query returns is that element.
+    const select = getByLabelText("Lease 1 holder") as HTMLSelectElement;
+    expect(select.value).toBe("AX-404");
+    expect(select.textContent).toContain("not on this board");
   });
 });

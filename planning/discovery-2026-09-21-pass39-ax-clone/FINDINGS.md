@@ -791,6 +791,54 @@ answering "none" is a measurement, and the fix must not swallow it.
 
 ---
 
+## F39-23 · HIGH · File leases are enforced against people who cannot see them
+
+Found by auditing what the controller wrote into the project knowledge base — the question the
+goal asks directly. Section 7 of `ax-clone-rulings/architecture.md`, added by the controller on
+2026-09-22 when the cycle chains were re-cut so several tasks build at once, is genuinely good
+work: it splits the tree between the Developer and the Surface Developer, says read across the
+line freely and never write across it, and names the enforcement:
+
+> "Viberr FILE LEASES are the enforcement, not this paragraph: a branch that changes a path
+> leased to another task is refused at delivery, by name. **Current leases are on the project's
+> settings page.**"
+
+Every clause of that is true except the last, and the last one is the one an agent acts on.
+
+Leases are real and they bite. `push-workspace.server.ts` refuses the push before anything
+reaches GitHub, and the refusal reads:
+
+> "AX-5 changes `go.mod`, which AX-9 holds (...). One task owns a shared file until it merges,
+> so AX-5 waits for AX-9 before delivering it for review. Drop the change, or **clear the lease**
+> once AX-9 has landed."
+
+There was nowhere to clear it. Grepping `app/features` and `app/routes` for any lease reader
+returns nothing. The whole feature lived between two controller tools and a prompt injection:
+
+| | |
+|---|---|
+| Declared by | `set_file_leases`, a controller tool |
+| Read by | `read_project`, a controller tool |
+| Delivered to agents | `specialist-run.server.ts:544`, into the prompt |
+| Enforced at | `push-workspace.server.ts:975`, refusing a real push |
+| Visible to a person | nowhere |
+
+Ruling 245's own docstring says a lease "is read where a person or an agent asks 'may I touch
+this'". `staleFileLeases`' says the spent ones are named "so a surface can offer to tidy them".
+Neither surface was ever built, and the module has been shipped since pass 37.
+
+So the controller did not hallucinate. It inferred, correctly, that a product which refuses a
+delivery in a named task's name must show a person that name somewhere, and it named the only
+page that could plausibly hold it. Fixed as ruling 396 by building that panel, which makes the
+controller's sentence true rather than correcting it.
+
+**Also found on the way in**: `settings-actions.server.ts` carried one raw NUL byte — a
+composite-key separator written as a literal rather than `\u0000`. grep reads the file as
+binary and answers nothing, silently, for every search anyone runs against its 1,400 lines.
+That is how this finding took five minutes longer than it should have.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

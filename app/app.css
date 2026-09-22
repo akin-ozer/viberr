@@ -6547,6 +6547,19 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .rr-row .guard-ctl select { min-width: 9rem; }
 .rr-actions { display: flex; justify-content: flex-end; gap: .5rem; padding-top: .75rem; }
 
+/* ---------- appended: ruling 396, file leases on Settings ---------- */
+/* A lease is the same `.guard-row` shape as a reviewer rule, but two of its
+   three fields are free text that has to be readable while it is typed: the
+   path globs and the reason a refusal will quote. Those two grow and the
+   holder picker stays at its natural width, so a long glob list never squeezes
+   the task key it belongs to. Below the sheet's column breakpoint the row
+   stacks, because three controls and a Remove do not fit a phone. */
+.lease-row { flex-wrap: wrap; }
+.lease-row > .btn { margin-left: auto; }
+.lease-row .guard-ctl.grow { flex: 1 1 12rem; min-width: 0; }
+.lease-row .guard-ctl.grow input { width: 100%; }
+.lease-row .guard-ctl select { min-width: 7rem; }
+
 /* ---------- appended: ruling 363, the attachment code reader ---------- */
 /* The read-only text viewer (ruling 105) grew a line-number gutter and Shiki
    tokens. Each line is a block with the number absolutely placed in its

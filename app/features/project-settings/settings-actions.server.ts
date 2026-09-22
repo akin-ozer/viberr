@@ -346,6 +346,38 @@ export function parseRequiredReviewerRulesField(raw: string): RequiredReviewerRu
 }
 
 /**
+ * Ruling 396: the lease table, posted whole as one JSON field.
+ *
+ * The shape only — every fact about the board (the holder exists, no two
+ * leases cover one glob, a lease has at least one path) is checked by
+ * `setProjectFileLeases`, so the form and the controller's `set_file_leases`
+ * are refused for the same reasons in the same words.
+ */
+const fileLeasesFieldSchema = z.array(
+  z.object({
+    paths: z.array(z.string()),
+    taskKey: z.string(),
+    reason: z.string().default(""),
+  }),
+);
+
+export function parseFileLeasesField(
+  raw: string,
+): { paths: string[]; taskKey: string; reason: string }[] {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw || "[]");
+  } catch {
+    throw AppError.validation("The lease list could not be read. Reload the page and try again.");
+  }
+  const parsed = fileLeasesFieldSchema.safeParse(decoded);
+  if (!parsed.success) {
+    throw AppError.validation("The lease list could not be read. Reload the page and try again.");
+  }
+  return parsed.data;
+}
+
+/**
  * Ruling 178 (pass 36, G36-3): check a submitted rule list against the
  * project — every stage id must be a non-terminal stage, every profile id a
  * deployed specialist that can report a validation verdict — and refuse by
@@ -394,7 +426,10 @@ export function validateRequiredReviewerRules(
         `${specialist.name} (${specialist.id}) cannot report a validation verdict, so it cannot be a required reviewer. Nothing was written. ${capableList}`,
       );
     }
-    const key = `${stageId} ${profileId}`;
+    // The separator is a NUL escape, never a literal NUL byte: one raw NUL in
+    // this file made grep read the whole 1,400 lines as "binary" and answer
+    // nothing, silently, for every search anyone ran against it.
+    const key = `${stageId}\u0000${profileId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ stageId, profileId });
