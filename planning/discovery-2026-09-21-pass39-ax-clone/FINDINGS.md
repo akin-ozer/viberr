@@ -1021,8 +1021,22 @@ It also kept the document consistent with a change it had made an hour earlier, 
 `describe`, `delete` and `ctx` OUT of the v0.2 list because they had just become goal-4
 links 6-8 ("Do not re-file them here").
 
-One flaw, and it is a copy slip rather than a reasoning one: the section headed "Two
-divergences that are decisions, not gaps" contains four bullets.
+Two flaws, neither of them reasoning errors:
+
+- The section headed "Two divergences that are decisions, not gaps" contains four bullets.
+- It **promoted a proposal without retiring it**. The operator filed a ruling proposal from
+  AX-9's evidence (the cgo/race linker misdiagnosis, ruling 378), the controller then
+  rewrote sections 1, 3 and 4 of `environment-and-gates.md` to settle exactly that question
+  and logged the amendment — and left the proposal sitting under "Proposed (not binding)".
+  The document's own header says the promoter "promotes an entry into the settled text
+  above, **or deletes it**", so the workflow is written down and was half-followed. The two
+  texts agree, so nothing contradicts; the cost is that every run on this board now reads a
+  settled fact twice, once as settled and once as explicitly not binding.
+
+  Not raised as a viberr defect: `propose_ruling` is an append, the retirement is a normal
+  KB edit the controller already has, and the instruction is already in the document. It is
+  the housekeeping half of the loop, and it is worth watching whether it accumulates on a
+  longer project than this one.
 
 ## F39-26 · HIGH · The pause that explains what happened got it backwards
 
