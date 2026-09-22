@@ -3498,7 +3498,9 @@ describe("operatorProposeRuling", () => {
         taskKey: "VIB-1",
         doc: "environment-and-gates.md",
         text: "Strike the -race requirement: this host cannot run it.",
-        evidence: "`CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
+        // A model answering a field called `evidence` writes the label too;
+        // the writer strips one rather than doubling it.
+        evidence: "Evidence: `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
       },
       authority("full"),
     );
@@ -3515,6 +3517,10 @@ describe("operatorProposeRuling", () => {
     expect(body).toContain("**[VIB-1,");
     expect(body).toContain("Strike the -race requirement");
     expect(body).toContain("exited 127");
+    // CANARY: drop the label strip and this reads "Evidence: Evidence: …" in
+    // the rulings document and again on the timeline, which is what the first
+    // live proposal wrote.
+    expect(body).not.toMatch(/Evidence:\s*Evidence:/i);
     // Filed AFTER the settled text, so a reader meets the rule first.
     expect(body.indexOf("- Every test must pass")).toBeLessThan(
       body.indexOf(PROPOSED_RULINGS_HEADING),

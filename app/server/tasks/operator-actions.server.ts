@@ -2020,7 +2020,12 @@ export async function operatorProposeRuling(
 ): Promise<OperatorActionResult> {
   const doc = input.doc.trim();
   const text = input.text.trim();
-  const evidence = input.evidence.trim();
+  // Both surfaces label the field themselves ("Evidence: …"), and a model that
+  // writes the label into the VALUE is not wrong — it is answering a field
+  // called `evidence`. Strip one leading label rather than printing
+  // "Evidence: Evidence:" into the rulings document and the timeline, which is
+  // what the first live proposal did.
+  const evidence = input.evidence.trim().replace(/^evidence\s*:\s*/i, "").trim();
   if (!doc || !text || !evidence) {
     return {
       outcome: "noop",

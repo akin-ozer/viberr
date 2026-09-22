@@ -267,3 +267,27 @@ rather than letting it finish.*
   all-Codex fleet it is nearly free — but on a six-stage board it is the dominant run count,
   and Insights' own "Coordination overhead" metric cannot measure it because Codex reports
   no cost. Worth a look if a board ever puts its fleet on a metered backend.
+
+
+---
+
+## Not a viberr finding, but the pass's own lesson twice over
+
+**Two independent agents reached the same wrong diagnosis from the same message.** After
+this pass added gcc to the image, `make gate` with cgo enabled failed while linking the
+pinned golangci-lint with `collect2: fatal error: cannot find 'ld'`. The Developer reported
+"this image lacks the `ld` linker"; the Reviewer, running its own gates a few minutes later
+and with no sight of that report at the time it ran, wrote "the pinned v2.6.0 linter build
+failed because the host linker `ld` is unavailable". Both reasonable. Both wrong:
+`/usr/bin/ld` was present the whole time (GNU ld 2.44). The real cause is that Go's external
+linker invokes `gcc -fuse-ld=gold` on linux/arm64 and Debian ships only `ld.bfd`, so gcc
+cannot find the *gold* linker and says it cannot find "ld".
+
+Recorded here for two reasons. It is the exact shape F39-1 is about — a toolchain fact
+nobody could see, guessed at instead of measured, and written into the record as fact — and
+`instance_health({ probe: ["ld.gold"] })` now answers it in one call. And it is a caution
+about agent reports generally: two careful agents agreeing is not corroboration when they
+read the same misleading string.
+
+Fixed by adding `binutils-gold` to the image; `make gate` with cgo enabled now exits 0
+including the pinned lint, and the record on AX-9 was corrected by hand.
