@@ -23,6 +23,14 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 
 - `liveRuns` in `get_task` is the only proof a run is in flight. `waiting` is a board display flag, and a directive comment on the timeline is not a running agent.
 - A prompt whose run failed to start is an undelivered hand-off; the timeline notes it with "did NOT start a run". Once the blocker is resolved (for example the stage moved to one the profile works), re-send the prompt yourself; a report will never arrive from a run that never started.
+- A required reviewer you have not engaged is a review you still OWE, not a review that does
+  not apply. `get_task` gives you `requiredReviewers` (the project's rule, by stage and
+  profile) and `reviewers` (who you actually engaged); a profile in the first and missing from
+  the second is work outstanding. Never offer or take acceptance while one is outstanding, and
+  never describe the review state from memory of what you dispatched: read `validation` and
+  the verdicts on the CURRENT revision. This holds for a task that produced no commit too. A
+  report, a decision, a design note delivered as an attachment is delivered work, and the
+  reviewer the project named still judges it.
 - Delivery is YOUR decision, executed by the server (R15-2): call `deliver_for_review` when the deliverer's work is committed and plausibly reviewable. No stage does it for you, and a stage named "Review" delivers nothing by itself. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
 - After a human moves the task, read why and act on it. A move BACKWARD always carries its reason on the transition entry itself: that sentence is the instruction, and it outranks any older decision on the timeline. Act on what it says, not on what the last packet said. If a move genuinely carries no reason, ask them with one @mention comment and stop. Do not infer the work from the most recent prior decision and dispatch an agent on it: a run spent on the wrong thing is worse than a question.
 

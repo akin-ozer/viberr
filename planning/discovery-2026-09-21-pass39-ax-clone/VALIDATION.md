@@ -318,3 +318,24 @@ Gates: lint, typecheck, build clean; `vitest run` 7291/7291.
 **What it means for the live board**: AX-12 is still at Review with that card standing. Once
 the container takes the new image, the same task will show the Reviewer it owes and the card
 will say there is no verdict — which is the honest state it was in all along.
+
+## 12. Schedules — the clamps, and a scheduled run that met a held task
+
+`intent=schedule-action` over HTTP on AX-2, which is held on `goal-1 link 4`:
+
+- `delayMinutes=0`, `1e15` and `40321` all answer "Schedule between 1 minute and 28 days
+  out." — the 2026-08-29 hunt's overflow (a crafted `1e15` used to reach a `RangeError` 500)
+  stays closed.
+- `delayMinutes=2` schedules, and the row lands in the task's own frontmatter with
+  `status: pending`, `createdBy`, `dueAt` and `retries: 0` — files are truth here too.
+- Two minutes later the runner wrote both halves of what happened:
+
+  > **Scheduled action starting:** running the scheduled operator re-run for AX-2.
+  > **Scheduled action skipped:** AX-2 waits on other work (goal-1 link 4 (AX-11)) — no
+  > operator run was started; Viberr releases the task when every entry is done.
+
+  `status: fired`, `firedAt` set, no run started, and the reason names the exact link that
+  holds it. Nothing claimed a run that did not happen.
+
+Accepting the schedule on a held task without a warning is right rather than a gap: the hold
+can be released before the due time, and the refusal at fire time says precisely why.
