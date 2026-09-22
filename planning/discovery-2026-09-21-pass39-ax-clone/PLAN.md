@@ -65,6 +65,7 @@ per item and each one was applied to the source and observed failing.
 | 52 | The controller page for the person using it (U39-1 to U39-6) | owner: "focus on UI improvements for end users, especially the controller page" (design calls made in the unattended run, marked for review) | **done**, ruling 419 |
 | 53 | A done entry in a "waits on" list never reads as the pending one before it (F39-44) | — | **done**, ruling 420 |
 | 54 | A review that puts the completeness question is recorded as its answer (F39-43) | — | **done**, ruling 421 |
+| 55 | A run may read the knowledge-base folders its index points at (F39-45) | — | **done**, ruling 422 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

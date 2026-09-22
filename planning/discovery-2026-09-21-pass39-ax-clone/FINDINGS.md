@@ -50,6 +50,24 @@ default and marked **(default, owner may revisit)**.
   task page's "Other work", the hold refusal, the run control, the operator's queue refusal and
   the skipped-schedule note. **Fixed: ruling 420.**
 
+- **F39-45 (HIGH) — viberr's own workspace contract forbids a Codex agent from reading the
+  rulings it is told bind it.** Found by the controller itself during a knowledge-base upkeep turn
+  I asked for at 23:05 ("AX-19's developer couldn't read the rulings ... It's worth checking how
+  agents get the rulings"). A Codex run has no `read_knowledge_doc` tool, so ruling 283's index
+  tells it to read each document at its folder path (`/data/kb/ax-clone-rulings`), and ruling
+  286 says the rulings bind it. The same prompt's workspace contract says "Work ONLY inside the
+  current working directory ... One deliberate exception: ... the attachments folder ...
+  Everything else outside the working directory stays off-limits." The runs are
+  `danger-full-access` (verified in the rollouts), so nothing enforces the boundary, and agents
+  split on which sentence to obey. They said so in their reports: AX-19 developer 22:13 ("the
+  workspace-only filesystem boundary prevented access outside the checkout, and no
+  knowledge-document reader was mounted"), AX-22 developer 22:44 ("I did not open the external
+  ax-clone rulings documents because the workspace contract restricts reads to this checkout"),
+  AX-24 reviewer 22:51 ("I could not open the attached rulings documents under the workspace
+  restriction"). Others in the same hour read them anyway (the AX-22 reviewer, the AX-19
+  reviewer). So every rulings upkeep (rulings 378 and 418, the controller's KB work tonight)
+  reaches the agents that break the contract and misses the ones that keep it. **Fixed: ruling 422.**
+
 ### The controller page, for the person using it (measured 2026-09-23, ax-clone, 6 chains)
 
 - **U39-1 (MED) — Conversations and New sit under every goal chain.** Desktop 1440×900: the

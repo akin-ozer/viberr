@@ -73,6 +73,7 @@ import {
   assignSpecialist,
   buildAnalyzePrompt,
   directiveRequestsDelivery,
+  knowledgeBaseReadDirs,
   listDeployedSpecialists,
   removeReviewer,
   resolveDeployedSpecialist,
@@ -2769,19 +2770,68 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       ...base,
       attachmentsDropDir: "/data/projects/p/tasks/VIB-2/attachments",
     });
-    expect(withDrop).toContain("One deliberate exception");
+    expect(withDrop).toContain("One deliberate write exception");
     expect(withDrop).toContain("`/data/projects/p/tasks/VIB-2/attachments`");
     // Ruling 159: the exception names an absolute path outside the checkout
     // and forbids creating it inside the working directory.
     expect(withDrop).toContain("never create it inside the working directory");
     expect(withDrop).toContain("never commit it");
     // The exception sits INSIDE the contract, after the confinement rule.
-    expect(withDrop.indexOf("One deliberate exception")).toBeGreaterThan(
+    expect(withDrop.indexOf("One deliberate write exception")).toBeGreaterThan(
       withDrop.indexOf("Work ONLY inside the current working directory"),
     );
     const without = buildAnalyzePrompt(base);
-    expect(without).not.toContain("One deliberate exception");
+    expect(without).not.toContain("One deliberate write exception");
     expect(without).toContain("Work ONLY inside the current working directory");
+  });
+
+  it("ruling 422: the contract lets a run READ the knowledge-base folders its index points at", () => {
+    // Live on ax-clone: a Codex run has no `read_knowledge_doc`, its index says
+    // "read the file directly" at /data/kb/..., and the contract said everything
+    // outside the checkout "stays off-limits". AX-19's and AX-22's developers
+    // and AX-24's reviewer obeyed the contract and never read the rulings.
+    // CANARY: drop the read-only exception from the contract.
+    const base = {
+      role: "Implementation",
+      taskKey: "AX-19",
+      title: "t",
+      goal: "g",
+      repo: "akin-ozer/ax-clone",
+      branch: "ax-19",
+      cloned: true,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivers: true,
+      attachmentsDropDir: "/data/projects/ax-clone/tasks/AX-19/attachments",
+    };
+    const withKb = buildAnalyzePrompt({ ...base, kbReadDirs: ["/data/kb/ax-clone-rulings"] });
+    expect(withKb).toContain(
+      "- Read-only exception: the knowledge-base folder `/data/kb/ax-clone-rulings` is yours to READ.",
+    );
+    expect(withKb).toContain("Never write, create or delete anything in it.");
+    // The write exception's closing sentence no longer forbids the reads.
+    expect(withKb).toContain(
+      "Everything else outside the working directory, apart from reading the knowledge-base folders above, stays off-limits.",
+    );
+    // Inside the contract, after the confinement rule it qualifies.
+    expect(withKb.indexOf("Read-only exception")).toBeGreaterThan(
+      withKb.indexOf("Work ONLY inside the current working directory"),
+    );
+    const twoKbs = buildAnalyzePrompt({ ...base, kbReadDirs: ["/data/kb/a", "/data/kb/b"] });
+    expect(twoKbs).toContain("folders `/data/kb/a`, `/data/kb/b` are yours to READ");
+    const without = buildAnalyzePrompt(base);
+    expect(without).not.toContain("Read-only exception");
+    expect(without).toContain("Everything else outside the working directory stays off-limits.");
+  });
+
+  it("ruling 422: knowledgeBaseReadDirs keeps real folders only, once each, in order", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "kb-read-"));
+    mkdirSync(path.join(root, "kb", "rulings"), { recursive: true });
+    mkdirSync(path.join(root, "kb", "house"), { recursive: true });
+    expect(knowledgeBaseReadDirs(["rulings", "missing", "house", "rulings", null, "../etc"], root)).toEqual([
+      path.join(root, "kb", "house"),
+      path.join(root, "kb", "rulings"),
+    ]);
+    rmSync(root, { recursive: true, force: true });
   });
 
   it("the task-files section rides the evidence grant (owner ask 2026-08-20)", () => {
@@ -5675,5 +5725,48 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
       { dataRoot: store.dataRoot },
     );
     expect(runId).toBeTruthy();
+  });
+});
+
+describe("ruling 422: a dispatched run's contract names the knowledge-base folders it may read", () => {
+  it("puts the profile's KB folder and the project's rulings folder in the read-only exception", async () => {
+    // CANARY: stop setting `promptInput.kbReadDirs` in the dispatch.
+    for (const name of ["house-rules", "project-rulings"]) {
+      mkdirSync(path.join(store.dataRoot, "kb", name), { recursive: true });
+      writeFileSync(path.join(store.dataRoot, "kb", name, "conventions.md"), "# Conventions\n\nbody");
+    }
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: "acme/widgets",
+      rulingsKb: "project-rulings",
+      agents: [
+        {
+          profileId: "critic", capabilities: [], extras: [],
+          definition: {
+            kind: "specialist", name: "critic", role: "reviewer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: ["house-rules"] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await assignReviewer(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const run = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+      actor(store.users.arda), { dataRoot: store.dataRoot });
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+      actor(store.users.arda));
+    const prompt = lastRunSpec()?.prompt ?? "";
+    const house = path.join(store.dataRoot, "kb", "house-rules");
+    const rulings = path.join(store.dataRoot, "kb", "project-rulings");
+    expect(prompt).toContain("- Read-only exception: the knowledge-base folders");
+    expect(prompt).toContain(`\`${house}\``);
+    expect(prompt).toContain(`\`${rulings}\``);
   });
 });

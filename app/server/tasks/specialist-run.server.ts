@@ -62,6 +62,7 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
+  kbDirPath,
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -1889,6 +1890,13 @@ async function dispatchAgentRun(
   };
   if (clone?.refreshed) promptInput.workspaceRefresh = clone.refreshed;
   if (anchor) promptInput.anchor = anchor;
+  // Ruling 422: the folders the persona's knowledge-base index points at, so
+  // the workspace contract permits the reads the index asks for.
+  const kbReadDirs = knowledgeBaseReadDirs(
+    [...kb, projectRulingsKb(input.projectSlug, ctx)],
+    ctx.dataRoot,
+  );
+  if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
   if (collab.evidence && realBackend) {
     promptInput.attachmentsDropDir = attachmentsDir;
   }
@@ -3111,6 +3119,17 @@ export interface AnalyzePromptInput {
    *  persona's posting-files section, and a live agent (VIB-2) correctly
    *  refused the copy twice. */
   attachmentsDropDir?: string;
+  /**
+   * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
+   * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
+   * contract. A Codex run mounts no `read_knowledge_doc` tool, so ruling 283's
+   * index tells it to read each document at its folder path, and ruling 286
+   * says the rulings bind it; the contract said "everything else outside the
+   * working directory stays off-limits". Live on ax-clone the careful runs
+   * obeyed the contract and never read the rulings (AX-19 and AX-22 developers,
+   * the AX-24 reviewer), the same shape as VIB-2's refused attachment copy.
+   */
+  kbReadDirs?: string[];
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
   /** The human who wrote `directive`, when it is a person's comment rather than
@@ -3136,6 +3155,28 @@ export interface AnalyzePromptInput {
   anchor?: string;
 }
 
+/**
+ * Ruling 422: the absolute folders of the knowledge bases a run is given (its
+ * profile's plus the project's rulings KB), deduplicated and in a stable order,
+ * keeping only those that exist, which are the ones its index can name.
+ */
+export function knowledgeBaseReadDirs(
+  names: readonly (string | null | undefined)[],
+  dataRoot?: string,
+): string[] {
+  const dirs = new Set<string>();
+  for (const name of names) {
+    if (!name) continue;
+    try {
+      const dir = kbDirPath(name, dataRoot);
+      if (existsSync(dir)) dirs.add(dir);
+    } catch {
+      // A name the store refuses (traversal) resolves to no folder at all.
+    }
+  }
+  return [...dirs].sort();
+}
+
 export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   let prompt =
     `You are the ${input.role} specialist on task ${input.taskKey}: ` +
@@ -3148,18 +3189,29 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   // This prompt is guidance, not an OS filesystem boundary.
   if (input.repo) {
     const { canBranch, canCommitPush } = input.delivery;
+    const kbDirs = (input.kbReadDirs ?? []).map((dir) => `\`${dir}\``);
     prompt +=
       `\n\n## Workspace contract (follow exactly)\n` +
       `- Work ONLY inside the current working directory — it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
+      (kbDirs.length > 0
+        ? `- Read-only exception: the knowledge-base ` +
+          (kbDirs.length === 1 ? `folder ${kbDirs[0]} is` : `folders ${kbDirs.join(", ")} are`) +
+          ` yours to READ. They hold the rulings and conventions this work is held to, ` +
+          `indexed in your instructions, and reading the documents you need there is ` +
+          `part of the task, not a step outside it. Never write, create or delete ` +
+          `anything in ${kbDirs.length === 1 ? "it" : "them"}.\n`
+        : ``) +
       (input.attachmentsDropDir
-        ? `- One deliberate exception: you may COPY files INTO the task's ` +
+        ? `- One deliberate write exception: you may COPY files INTO the task's ` +
           `attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
           `outside this checkout; never create it inside the working directory ` +
           `and never commit it) — that is how a file is posted on the task ` +
           `thread (see "Posting files on the task thread"). Everything else ` +
-          `outside the working directory stays off-limits.\n`
+          `outside the working directory` +
+          (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
+          ` stays off-limits.\n`
         : ``) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
