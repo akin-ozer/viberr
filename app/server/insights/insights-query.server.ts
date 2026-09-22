@@ -184,6 +184,19 @@ export interface OversightSummary {
 }
 
 /**
+ * The backends that report a prompt-cache WRITE figure at all (ruling 395).
+ *
+ * Claude reports `cache_creation_input_tokens` per call and it moves. Codex
+ * declares `cache_write_input_tokens` in the SDK's own types — "the number of
+ * input tokens written to the prompt cache during the turn" — and returns
+ * exactly 0 for it on every turn: 101 of 101 usage envelopes across the live
+ * ax-clone instance, against 67.2M tokens reported READ. One value, never
+ * anything else, is not a measurement, and the schema already draws this line
+ * one column over (`cache_ttl_bucket`: "NULL on Codex (no such figure)").
+ */
+export const CACHE_WRITE_REPORTING_BACKENDS = ["claude"] as const;
+
+/**
  * Ruling 369: what the prompt cache did for one group of runs — by run kind,
  * and by the kind of credential the runs billed (the TTL follows it).
  */
@@ -197,9 +210,24 @@ export interface CacheRow {
   warmStarts: number;
   /** warmStarts / firstCalls, null with no first call at all. */
   warmRate: number | null;
-  writeTokens: number;
+  /**
+   * Tokens written into the cache, or NULL when no run in this group is on a
+   * backend that reports the figure at all.
+   *
+   * Ruling 395 (F39-22): Codex declares `cache_write_input_tokens` and returns
+   * exactly 0 for it on every turn — 101 of 101 usage envelopes on the live
+   * ax-clone instance, while the sibling field reported 67.2M tokens READ. The
+   * column used to sum those zeros and print `0` with a `0.000` ratio beside a
+   * `45.0M` read, which reads as a measurement of a cache doing nothing. This
+   * panel's own docstring already holds the rule it broke — "a rate with no
+   * first call behind it prints n/a, never 0%" — and the caption already names
+   * the asymmetry for the lifetime column next door.
+   */
+  writeTokens: number | null;
   readTokens: number;
-  /** writeTokens / readTokens, null when nothing was read. */
+  /** Runs in this group on a backend that reports a write figure at all. */
+  writeReportingRuns: number;
+  /** writeTokens / readTokens, null when nothing was read or nothing reports. */
   writeReadRatio: number | null;
   /** First calls that wrote more than `FIRST_CALL_LARGE_WRITE_TOKENS` — the
    *  whole-history replay shape ruling 372 removes. */
@@ -301,6 +329,7 @@ const cacheGroupSchema = z.object({
   first_calls: z.number().nullable(),
   warm_starts: z.number().nullable(),
   write_tokens: z.number().nullable(),
+  write_reporting_runs: z.number().nullable(),
   read_tokens: z.number().nullable(),
   large_first_writes: z.number().nullable(),
   ttl_5m: z.number().nullable(),
@@ -782,6 +811,7 @@ export function getInsightsSummary(
   // credential kind the runs billed. Every figure is a plain SUM over the
   // columns the sink folded; the rates are taken over the runs that HAVE a
   // first call, so a refused run is neither warm nor cold.
+  const reportingPlaceholders = CACHE_WRITE_REPORTING_BACKENDS.map(() => "?").join(", ");
   const cacheGroup = (column: string): CacheRow[] =>
     z
       .array(cacheGroupSchema)
@@ -792,6 +822,8 @@ export function getInsightsSummary(
                     SUM(CASE WHEN first_call_warm IS NOT NULL THEN 1 ELSE 0 END) AS first_calls,
                     SUM(CASE WHEN first_call_warm = 1 THEN 1 ELSE 0 END) AS warm_starts,
                     SUM(cache_write_tokens) AS write_tokens,
+                    SUM(CASE WHEN backend IN (${reportingPlaceholders}) THEN 1 ELSE 0 END)
+                      AS write_reporting_runs,
                     SUM(cached_input_tokens) AS read_tokens,
                     SUM(CASE WHEN first_call_cache_write > ? THEN 1 ELSE 0 END) AS large_first_writes,
                     SUM(CASE WHEN cache_ttl_bucket = '5m' THEN 1 ELSE 0 END) AS ttl_5m,
@@ -800,12 +832,15 @@ export function getInsightsSummary(
              FROM agent_runs ${clause}
              GROUP BY ${column} ORDER BY runs DESC, label ASC`,
           )
-          .all(FIRST_CALL_LARGE_WRITE_TOKENS, ...params),
+          .all(...CACHE_WRITE_REPORTING_BACKENDS, FIRST_CALL_LARGE_WRITE_TOKENS, ...params),
       )
       .map((r) => {
         const firstCalls = r.first_calls ?? 0;
         const warmStarts = r.warm_starts ?? 0;
-        const writeTokens = r.write_tokens ?? 0;
+        const writeReportingRuns = r.write_reporting_runs ?? 0;
+        // Ruling 395: no reporting run behind the sum means there is no figure,
+        // not a figure of zero.
+        const writeTokens = writeReportingRuns > 0 ? (r.write_tokens ?? 0) : null;
         const readTokens = r.read_tokens ?? 0;
         return {
           label: r.label ?? "unknown",
@@ -815,7 +850,9 @@ export function getInsightsSummary(
           warmRate: firstCalls > 0 ? warmStarts / firstCalls : null,
           writeTokens,
           readTokens,
-          writeReadRatio: readTokens > 0 ? writeTokens / readTokens : null,
+          writeReportingRuns,
+          writeReadRatio:
+            writeTokens !== null && readTokens > 0 ? writeTokens / readTokens : null,
           largeFirstWrites: r.large_first_writes ?? 0,
           ttl: { fiveMinute: r.ttl_5m ?? 0, oneHour: r.ttl_1h ?? 0, mixed: r.ttl_mixed ?? 0 },
         };

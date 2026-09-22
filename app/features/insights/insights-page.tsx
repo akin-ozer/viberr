@@ -660,7 +660,20 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
           >
             {r.warmRate === null ? "n/a" : fmtPercent(r.warmRate)}
           </td>
-          <td data-write={r.writeTokens}>{fmtTokens(r.writeTokens)}</td>
+          {/* Ruling 395: a group with no run on a backend that reports the
+              figure has no figure, and the rest of this page already says
+              "not reported" rather than printing a zero it cannot vouch for. */}
+          <td
+            data-write={r.writeTokens === null ? "" : r.writeTokens}
+            className={r.writeTokens === null ? "na" : undefined}
+            title={
+              r.writeTokens === null
+                ? "No run in this group is on a backend that reports a cache-write figure."
+                : `${fmtCount(r.writeReportingRuns)} of ${fmtCount(r.runs)} runs report one`
+            }
+          >
+            {r.writeTokens === null ? "not reported" : fmtTokens(r.writeTokens)}
+          </td>
           <td data-read={r.readTokens}>{fmtTokens(r.readTokens)}</td>
           <td
             data-write-read={r.writeReadRatio === null ? "" : r.writeReadRatio}
@@ -686,7 +699,8 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
         than it wrote on its first model call; the ratio is tokens written over tokens read; a
         large first write is one above {fmtTokens(cache.largeWriteTokens)}, the whole-history
         replay a stale resume causes. The lifetime column is how many runs' writes were billed
-        under each cache TTL (Claude reports it; Codex does not).
+        under each cache TTL. Claude reports both the write figure and the lifetime; Codex
+        reports neither, so a group of Codex runs reads "not reported" rather than zero.
       </p>
       <table className="cache-table">
         <thead>

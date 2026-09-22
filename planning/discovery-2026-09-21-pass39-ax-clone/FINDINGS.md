@@ -758,6 +758,39 @@ the exact sentence ruling 389 exists to prevent, one variant of wording away.
 
 ---
 
+## F39-22 · MEDIUM · Insights printed an unreported cache figure as a measured zero
+
+The Prompt cache table, live, for the Codex half of this instance:
+
+```
+GROUP      RUNS  WARM STARTS  WRITTEN  READ    WRITE / READ  LIFETIME
+primary    21    16%          0        45.0M   0.000         not reported
+reviewer   11    0%           0        15.9M   0.000         not reported
+controller  6    0%           447.9K   6.0M    0.075         6 × 1h
+```
+
+Codex declares `cache_write_input_tokens` in the SDK's own types — "the number of input
+tokens written to the prompt cache during the turn" — and returns exactly **0** for it. Not
+sometimes: 101 of 101 usage envelopes under this data root, against 67.2M tokens reported
+read. One value and never any other is not a measurement.
+
+The page prints it as one, and then divides by it. Someone asking whether pass 39's own
+prompt-cache work (rulings 369-376, PR #315) does anything on Codex reads `0.000` on the row
+with 21 delivery runs behind it and has their answer — from a field the provider never fills.
+
+What makes it a finding rather than a rounding choice is that **every neighbour on the page
+already refuses to do this**: the cost breakdowns print "not reported" rather than `$0.00`,
+the quota panel prints "no reading yet", the lifetime column *in the same row* prints "not
+reported", the caption already says "Claude reports it; Codex does not" about that column,
+and the schema says it one column over (`cache_ttl_bucket`: "NULL on Codex (no such
+figure)"). The panel's own docstring states the rule: *"a rate with no first call behind it
+prints n/a, never 0%."* The write column is the one place the rule was not applied.
+
+Fixed as ruling 395. A genuine zero from a backend that DOES report stays a zero — Claude
+answering "none" is a measurement, and the fix must not swallow it.
+
+---
+
 ## Noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
 - **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads

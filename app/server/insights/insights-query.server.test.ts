@@ -31,6 +31,8 @@ function insertRun(
     /** Ruling 308: the two columns the task and profile breakdowns group on. */
     taskKey?: string;
     agentProfileId?: string;
+    /** Ruling 395: what the provider said it wrote into the cache. */
+    cacheWrite?: number;
   },
 ) {
   seq += 1;
@@ -39,9 +41,9 @@ function insertRun(
        (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
         started_at, finished_at, turns, input_tokens, cached_input_tokens,
         output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
-        interrupted_reason)
+        interrupted_reason, cache_write_tokens)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?)`,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?, ?)`,
   ).run(
     `run_${seq}`,
     r.taskKey ?? `VIB-${seq}`,
@@ -61,6 +63,7 @@ function insertRun(
     r.cost ?? null,
     r.agentProfileId ?? "developer",
     r.interruptedReason ?? null,
+    r.cacheWrite ?? 0,
   );
 }
 
@@ -971,5 +974,69 @@ describe("backend quota readings (pass 29)", () => {
     expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
     expect(claude.reading?.observedAt).toBe("2026-08-23T11:30:00.000Z");
     expect(after.find((q) => q.backend === "codex")!.reading).toBeNull();
+  });
+});
+
+/**
+ * Ruling 395 (F39-22) — a figure the provider never reports, printed as a
+ * measured zero, on the page built to judge the prompt-cache work.
+ *
+ * Live on the ax-clone instance the Prompt cache table read, for 21 Codex
+ * specialist runs: `WRITTEN 0 · READ 45.0M · WRITE/READ 0.000`. Codex declares
+ * `cache_write_input_tokens` in the SDK's own types and returned exactly 0 for
+ * it in 101 of 101 usage envelopes, against 67.2M tokens reported read. A
+ * reader checking whether rulings 369-376 do anything on Codex would take
+ * `0.000` for an answer.
+ *
+ * Every neighbouring column on that page already refuses to do this: the cost
+ * breakdowns print "not reported" rather than $0.00, the quota panel prints
+ * "no reading yet", the lifetime column prints "not reported", and the panel's
+ * own docstring says "a rate with no first call behind it prints n/a, never
+ * 0%".
+ */
+describe("ruling 395: a backend that reports no cache write reports no cache write", () => {
+  it("prints nothing rather than zero for an all-Codex group, and keeps the ratio out", () => {
+    const db = ctx.makeDb();
+    // 21 Codex runs, millions read, and the provider's flat zero written.
+    for (let i = 0; i < 3; i++) {
+      insertRun(db, {
+        kind: "primary",
+        backend: "codex",
+        model: "gpt-5.6-luna",
+        inTok: 2_000_000,
+        cachedTok: 1_800_000,
+        cacheWrite: 0,
+      });
+    }
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.readTokens).toBe(5_400_000);
+    // CANARY: fall back to `r.write_tokens ?? 0` and this is 0 with a 0.000
+    // ratio beside 5.4M read, which is the live defect verbatim.
+    expect(primary.writeTokens).toBeNull();
+    expect(primary.writeReadRatio).toBeNull();
+    expect(primary.writeReportingRuns).toBe(0);
+  });
+
+  it("reports the figure when a Claude run is in the group, and says how many report it", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "primary", backend: "codex", cachedTok: 1_000_000, cacheWrite: 0 });
+    insertRun(db, { kind: "primary", backend: "claude", cachedTok: 1_000_000, cacheWrite: 400_000 });
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.writeTokens).toBe(400_000);
+    expect(primary.writeReportingRuns).toBe(1);
+    expect(primary.writeReadRatio).toBeCloseTo(0.2, 5);
+  });
+
+  it("keeps a genuine zero from a reporting backend as a zero", () => {
+    // Claude answers the question and the answer is none: that IS a
+    // measurement, and this ruling must not swallow it.
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "primary", backend: "claude", cachedTok: 1_000_000, cacheWrite: 0 });
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.writeTokens).toBe(0);
+    expect(primary.writeReadRatio).toBe(0);
   });
 });
