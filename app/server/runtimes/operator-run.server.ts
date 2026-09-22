@@ -4739,8 +4739,35 @@ const operatorTurnInstruction = (
   // same channel, because this instruction is the one BOTH backends read.
   const decided = humanDecisionsInstruction(args[0]);
   const colliding = collisionsInstruction(args[0]);
-  return `${standing}${refused}${decided}${colliding}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  // Ruling 424: where the branch refresh is refused, said on every trigger,
+  // because the turn that planned it was usually a report's, which returns
+  // before the stage rules.
+  const unrefreshable = refreshBoundaryInstruction(args[0]);
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
 };
+
+/**
+ * Ruling 424 (pass 39): the branch refresh is not the operator's at the
+ * acceptance stage, said where both backends read it.
+ *
+ * The doctrine already said so ("never call it once the task stands at the
+ * acceptance stage"), next to "call it before you hand work to a reviewer".
+ * On a board whose reviews run AT the acceptance stage those two collide on
+ * every rework, and the second one won: fifteen refused refreshes across seven
+ * ax-clone tasks, each a "plan was not carried out in full" note on the task's
+ * timeline, each planned on the turn a report came in with `baseBehindBy`
+ * positive. The snapshot now carries the refusal itself; this says what it
+ * means for the plan.
+ */
+export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): string {
+  if (!snapshot.notRefreshableReason) return "";
+  return (
+    "This task stands at the acceptance stage, where `update_branch_from_base` refuses (`notRefreshableReason`). " +
+    "Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review: " +
+    "the acceptance ceremony brings the branch up to date once and merges in the same step, " +
+    "and a conflict it meets comes back to you as its own trigger.\n\n"
+  );
+}
 
 /**
  * Ruling 415 (F39-41): the decisions a person made on this task.

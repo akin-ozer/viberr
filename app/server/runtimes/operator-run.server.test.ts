@@ -1549,6 +1549,20 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(later).toContain("`completeness: true` (ruling 421");
   });
 
+  it("ruling 424: at the acceptance stage every turn says the branch refresh is not the operator's, the report's turn included", () => {
+    // CANARY: drop `refreshBoundaryInstruction` from `operatorTurnInstruction`.
+    // Live, the refused refreshes were planned on the turn a report came in,
+    // which returns before the stage rules, so the stage rules alone miss it.
+    const reason =
+      "AX-22 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.";
+    const atBoundary = snapshot({ notRefreshableReason: reason, baseBehindBy: 7 });
+    for (const trigger of ["agent-reply", "manual", "scheduled"] as const) {
+      const prompt = buildCodexOperatorPrompt(atBoundary, trigger, undefined, trigger === "agent-reply" ? "Rework committed." : undefined);
+      expect(prompt, trigger).toContain("Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review");
+    }
+    expect(buildCodexOperatorPrompt(snapshot({ baseBehindBy: 7 }), "agent-reply", undefined, "Rework committed.")).not.toContain("Never plan it here");
+  });
+
   it("ruling 418: a reviewer's defect class becomes a proposed convention, on the turn the verdict arrives and on the stage rules", () => {
     // CANARY: drop either sentence and the turn the verdict lands on, or every
     // later manual/scheduled turn, says nothing about the rulings learning.

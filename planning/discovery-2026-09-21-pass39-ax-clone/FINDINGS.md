@@ -73,6 +73,17 @@ default and marked **(default, owner may revisit)**.
   touches cli.go"), the sentence rulings 413 and 417 ask the operator to write. The task timeline
   showed a policy warning on nearly every dispatch. **Fixed: ruling 423.**
 
+- **F39-47 (LOW-MED) — the operator plans the branch refresh the acceptance stage refuses, over and
+  over.** Fifteen "The operator's plan was not carried out in full" notes across seven tasks
+  (AX-9 ×3, AX-20 ×3, AX-22 ×3, AX-19 ×2, AX-24 ×2, AX-12, AX-18). Every one was
+  `update_branch_from_base` at Review, which on this board is the acceptance stage. The doctrine said
+  both "before you hand work to a reviewer" and "never at the acceptance stage", and reviews here
+  run at the acceptance stage. The snapshot showed `baseBehindBy: 7`, and the intent quoted in the
+  note said so ("the open PR is seven base commits behind"). The refusal was a sentence the model had
+  to apply by working out which stage stands before Done, on a report's turn that returns before
+  the stage rules. Cost: a wasted plan step and a timeline note a person reads as a failure, on
+  nearly every rework. **Fixed: ruling 424.**
+
 ### The controller page, for the person using it (measured 2026-09-23, ax-clone, 6 chains)
 
 - **U39-1 (MED) — Conversations and New sit under every goal chain.** Desktop 1440×900: the

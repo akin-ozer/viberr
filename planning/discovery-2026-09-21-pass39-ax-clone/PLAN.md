@@ -67,6 +67,7 @@ per item and each one was applied to the source and observed failing.
 | 54 | A review that puts the completeness question is recorded as its answer (F39-43) | — | **done**, ruling 421 |
 | 55 | A run may read the knowledge-base folders its index points at (F39-45) | — | **done**, ruling 422 |
 | 56 | Another task's PR named with a possessive is not a delivery instruction (F39-46) | — | **done**, ruling 423 |
+| 57 | The operator reads where the branch refresh is refused before it plans (F39-47) | — | **done**, ruling 424 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

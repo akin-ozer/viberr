@@ -55,6 +55,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
 import { readGoalFile } from "~/server/files/goal-writer.server";
+import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
 import {
   activeWorkRevision,
   consecutiveRequestChanges,
@@ -2707,6 +2708,16 @@ export interface OperatorTaskSnapshot {
    *  compared this task yet. Informational: a stale or absent reading must
    *  never stop an update, it only stops the step being planned blind. */
   baseBehindBy?: number | null;
+  /** Ruling 424 (pass 39): the sentence `update_branch_from_base` refuses
+   *  with from where the task stands, or null when a refresh would run. At
+   *  the acceptance stage the ceremony refreshes the branch once and merges,
+   *  so a positive `baseBehindBy` there is the ceremony's to settle; the
+   *  operator read the doctrine and the count and planned the refresh anyway,
+   *  fifteen times across seven ax-clone tasks, each one a "plan was not
+   *  carried out in full" note on the task's timeline. Read from the same
+   *  function the tool refuses with, so the two cannot disagree. Optional only
+   *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
+  notRefreshableReason?: string | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -3399,6 +3410,7 @@ export function operatorSnapshot(
         ctx.dataRoot,
       ),
     ),
+    notRefreshableReason: acceptanceBoundaryRefusal(fm, taskKey, project.parsed.frontmatter),
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.

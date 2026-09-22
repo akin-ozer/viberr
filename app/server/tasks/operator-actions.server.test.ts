@@ -6090,6 +6090,54 @@ describe("F37-11: the operator snapshot carries the base compare", () => {
 });
 
 /**
+ * Ruling 424 (pass 39): the operator planned `update_branch_from_base` at the
+ * acceptance stage fifteen times across seven ax-clone tasks, each refused and
+ * each a "plan was not carried out in full" note. The doctrine said never; the
+ * snapshot said `baseBehindBy: 7`. The refusal itself is now a snapshot fact,
+ * read from the function the tool refuses with.
+ */
+describe("ruling 424: the operator snapshot carries the branch-refresh refusal", () => {
+  function snapOf(): ReturnType<typeof operatorSnapshot> {
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+  }
+
+  function seedAt(stage: string, mergeable: "clean" | "conflicting"): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        branch: "vib-1",
+        pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("names the refusal at the acceptance stage", () => {
+    // CANARY: drop `notRefreshableReason` from `operatorSnapshot`.
+    seedAt("review", "clean");
+    expect(snapOf().notRefreshableReason).toBe(
+      "VIB-1 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.",
+    );
+  });
+
+  it("is null before the acceptance stage, where the refresh runs", () => {
+    seedAt("impl", "clean");
+    expect(snapOf().notRefreshableReason).toBeNull();
+  });
+
+  it("is null for a pull request GitHub reports conflicting: the refresh is how the conflict packet opens", () => {
+    seedAt("review", "conflicting");
+    expect(snapOf().notRefreshableReason).toBeNull();
+  });
+});
+
+/**
  * Ruling 193 (F37-14, live): a required reviewer chartered to bring a Docker
  * stack up ran on a host with no `make` and no Docker. It said so in its own
  * words — "an environment/repository-baseline blocker, not a discovered

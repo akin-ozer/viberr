@@ -25,7 +25,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
-import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import { operatorSnapshot, type OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -651,6 +651,10 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     );
     expect(git.calls).toHaveLength(0);
     expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")).toBeUndefined();
+    // Ruling 424: the operator reads this refusal before it plans. The snapshot
+    // and the tool share one function, so they say the same thing.
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority());
+    expect(snap.notRefreshableReason).toBe(res.message);
   });
 
   it("G35-5 (d): a PR GitHub already reports conflicting is the exception: the tool records the conflict and opens the packet", async () => {
