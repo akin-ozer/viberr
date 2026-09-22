@@ -548,3 +548,25 @@ greater than, because `compactTimelineEvents` opens `if (events.length <= thresh
 so a task sitting exactly ON it is not one the fold is managing. A derived metric agreeing
 with the canonical files, at a boundary defined by the machinery rather than guessed at.
 
+## 19. Ruling 376's completion compaction, on the controller path
+
+Chased because a controller run's strip read `in 971.2k (cached 841.9k)` against a 1M window,
+which looked like a conversation about to hit its model's limit with nowhere to go. It is not:
+that figure is the run's CUMULATIVE input across twelve turns, not one context. The number
+that matters is `last_prompt_tokens`, and the compaction fired on it:
+
+```
+run compaction at completion · runId run_DjAw7UEaLiIr · backend claude
+  replaySize 129305 · compacted true · preTokens 133819 · postTokens 7507
+```
+
+and the session's own record agrees — `compact_boundary`, `trigger: "manual"`,
+`pre_tokens 133819`, `post_tokens 7507`, `cumulative_dropped_tokens 126312`,
+`compact_result: "success"`. Three Codex runs in the same window compacted the same way
+(111k, 129k, 168k replay sizes).
+
+Recorded because the prompt-cache pass (rulings 369-376) was verified on the specialist and
+operator paths and this is the first controller-path evidence: the carried session drops from
+134k to 7.5k while the prefix is still warm, which is exactly what ruling 376 promised. No
+finding — the misreading was mine, and checking it cost less than asserting it would have.
+
