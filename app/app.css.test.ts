@@ -3427,6 +3427,11 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
   });
 
+  it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {
+    // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
+    expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
   it("ruling 419(e): a packet's code observation keeps its line breaks", () => {
     // CANARY: drop `white-space: pre-wrap` from `.obs code`.
     expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);

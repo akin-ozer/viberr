@@ -102,10 +102,9 @@ what they strand, and record an optional reason.
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
-- **A full 40-character sha scrolls a task page sideways on a phone.** At 375 px two `code.mono`
-  elements holding a whole head sha run 10 px past the column, and the task page's `.detail`
-  container scrolls 24 px horizontally (measured on AX-18: scrollWidth 389 in a 365 box). The
-  agent console scrolling sideways is expected; the page doing it is not, but nothing is hidden.
+- ~~**A full 40-character sha scrolls a task page sideways on a phone.**~~ **Fixed, ruling 419(i)**
+  (2026-09-23): re-measured on AX-19 the page no longer scrolled, but inline code (the sha, long
+  file paths) still ran past the column and was clipped; inline code now breaks where it must.
 - **A resumed controller session keeps the model identity it started with until it compacts.**
   After the switch to Opus 5.5 the controller found "Opus 5 ... claude-opus-5[1m]" in its own
   context: ruling 373 records its prompt on the session's first request and replays it. It trusted

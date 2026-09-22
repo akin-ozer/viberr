@@ -4115,6 +4115,12 @@ dialog[data-closing]::backdrop {
   padding: .04rem .25rem;
   border-radius: var(--radius-small);
   font-size: .75rem;
+  /* Ruling 419(i): a 40-character sha or a long path is one unbreakable token,
+     and on a phone it ran past the column and was clipped (AX-19's timeline and
+     the controller's transcript both carry them). Break it only where it must;
+     a code BLOCK keeps its own horizontal scroll (`white-space: pre` ignores
+     this). */
+  overflow-wrap: anywhere;
 }
 .md-body pre {
   margin: .5rem 0;
