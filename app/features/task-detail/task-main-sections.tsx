@@ -257,7 +257,8 @@ export function TaskHero({
         {task.goalRef && (
           <Link
             className="pill agent sm hero-goal-chip"
-            to={`/projects/${task.projectSlug}/controller`}
+            // Ruling 419(h): straight to THIS chain, opened, on the rail.
+            to={`/projects/${task.projectSlug}/controller#${task.goalRef.goalId}`}
           >
             <Icon name="flag" />
             {task.goalRef.goalId} · link {task.goalRef.linkIndex}
@@ -274,7 +275,7 @@ export function TaskHero({
             to={
               entry.taskKey
                 ? `/projects/${task.projectSlug}/tasks/${entry.taskKey}`
-                : `/projects/${task.projectSlug}/controller`
+                : `/projects/${task.projectSlug}/controller${entry.goalId ? `#${entry.goalId}` : ""}`
             }
             title={`Waits on ${entry.label} (${entry.state})`}
           >

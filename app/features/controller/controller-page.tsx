@@ -763,6 +763,35 @@ const LINK_PILL = {
   { kind: PillKind; label: string }
 >;
 
+/** How many history entries a chain shows before "Show all". */
+const HISTORY_PREVIEW = 6;
+
+/**
+ * Ruling 419(h): open the chain a link pointed at (`#goal-4`, from the task
+ * page's chain chip) and bring it into view. Only the nearest scroller moves
+ * (the rail on a desktop, the page column on a phone): `scrollIntoView` would
+ * move the document as well, which the shell never lets a person scroll back.
+ */
+function useTargetedGoal(): void {
+  const location = useLocation();
+  useEffect(() => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id) return;
+    const card = document.getElementById(id);
+    if (!(card instanceof HTMLDetailsElement) || !card.classList.contains("ctl-goal")) return;
+    card.open = true;
+    let box = card.parentElement;
+    while (
+      box &&
+      !(box.scrollHeight > box.clientHeight && /(auto|scroll)/.test(getComputedStyle(box).overflowY))
+    ) {
+      box = box.parentElement;
+    }
+    if (box) box.scrollTop += card.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+    card.querySelector("summary")?.focus({ preventScroll: true });
+  }, [location.hash]);
+}
+
 function GoalsPanel({
   goals,
   csrf,
@@ -775,6 +804,7 @@ function GoalsPanel({
   /** Ruling 260: the viewer, so a chain's own creator gets its controls. */
   viewerId: string;
 }) {
+  useTargetedGoal();
   const running = goals.filter((g) => !isSettled(g)).length;
   return (
     <section className="panel ctl-goals" aria-label="Goal chains">
@@ -874,6 +904,7 @@ function GoalCard({
   }, [op.state, op.data, push]);
   const [confirm, setConfirm] = useState<GoalConfirm | null>(null);
   const [reason, setReason] = useState("");
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   const busy = op.state !== "idle";
   const act = (fields: Record<string, string>) => {
@@ -912,7 +943,7 @@ function GoalCard({
     // line: live on ax-clone the completed goal-1 took 479px of rail to say
     // four links were done. `open` is only the starting state; React leaves a
     // person's own toggle alone until the chain settles or reopens.
-    <details className="ctl-goal" open={!settled} data-goal={goal.id}>
+    <details className="ctl-goal" open={!settled} data-goal={goal.id} id={goal.id}>
       <summary>
         <span className="ctl-goal-line">
           <span className="ctl-goal-id mono">{goal.id}</span>
@@ -971,6 +1002,43 @@ function GoalCard({
           );
         })}
       </ol>
+      {/* Ruling 419(h): what the chain is FOR, and what has happened to it.
+          The task page sends a person here to read the whole chain, and the
+          page showed neither the outcome it serves nor its history, where a
+          pause, a skip and a cancel's reason are recorded. */}
+      {(goal.description.trim() || goal.history.length > 0) && (
+        <details className="ctl-goal-more">
+          <summary>About this chain</summary>
+          {goal.description.trim() && (
+            <div className="md-body ctl-goal-desc">
+              <Markdown text={goal.description} />
+            </div>
+          )}
+          {goal.history.length > 0 && (
+            <ol className="ctl-goal-history" aria-label={`${goal.id} history`}>
+              {(showAllHistory ? goal.history : goal.history.slice(0, HISTORY_PREVIEW)).map(
+                (entry, i) => (
+                  <li key={i}>
+                    <LocalDayDotTime iso={entry.occurredAt} />
+                    <span>{entry.text}</span>
+                  </li>
+                ),
+              )}
+            </ol>
+          )}
+          {goal.history.length > HISTORY_PREVIEW && (
+            <button
+              type="button"
+              className="linkish fine xs"
+              onClick={() => setShowAllHistory((all) => !all)}
+            >
+              {showAllHistory
+                ? "Show the latest only"
+                : `Show all ${goal.history.length} entries`}
+            </button>
+          )}
+        </details>
+      )}
       {canRedirect && !settled && (
         <footer className="ctl-goal-acts">
           {goal.status === "paused" || goal.status === "attention" ? (

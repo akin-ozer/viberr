@@ -6176,6 +6176,30 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-link-acts { display: inline-flex; gap: .25rem; margin-left: auto; }
 .ctl-link-note { flex-basis: 100%; }
 .ctl-goal-acts { display: flex; gap: .5rem; margin-top: .5rem; }
+/* Ruling 419(h): what a chain is for and what has happened to it, folded under
+   the links: the same quiet disclosure the capability list uses. */
+.ctl-goal-more { margin-top: .5rem; font-size: .75rem; }
+.ctl-goal-more > summary {
+  cursor: pointer; color: var(--muted); list-style: none;
+  display: inline-flex; align-items: center; gap: .375rem;
+  border-radius: var(--radius-small);
+}
+.ctl-goal-more > summary::-webkit-details-marker { display: none; }
+.ctl-goal-more > summary::after {
+  content: ""; width: 6px; height: 6px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+}
+.ctl-goal-more[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
+.ctl-goal-more > summary:hover { color: var(--fg); }
+.ctl-goal-desc { margin: .375rem 0 0; font-size: .75rem; }
+.ctl-goal-history {
+  list-style: none; margin: .5rem 0 .25rem; padding: 0;
+  display: flex; flex-direction: column; gap: .25rem;
+  color: var(--muted); line-height: 1.45;
+}
+.ctl-goal-history li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem; }
+.ctl-goal-history li > :first-child { color: var(--faint); white-space: nowrap; }
 /* Ruling 419(c): the reason a cancel or a skip records, under its consequence. */
 .ctl-confirm-reason { margin-top: 1rem; }
 @media (prefers-reduced-motion: reduce) {

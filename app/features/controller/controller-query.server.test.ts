@@ -207,3 +207,39 @@ describe("getControllerSurface — people are named by display name (ruling 419(
     expect(view.conversations.find((c) => c.ownerLabel === "gone@viberr.dev")).toBeDefined();
   });
 });
+
+/**
+ * Ruling 419(h): the page the task's chain chip sends a person to carries each
+ * chain's history, which the projection never held (`listGoals` returns it
+ * empty). A pause, a skip, a cancel and its reason are recorded there and
+ * nowhere a person could read them.
+ */
+describe("getControllerSurface — a chain carries its history (ruling 419(h))", () => {
+  it("reads each chain's history from its file, newest first", async () => {
+    // CANARY: return `listGoals` unchanged and `history` is empty.
+    const { createGoal, updateGoal } = await import("~/server/tasks/goal-actions.server");
+    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const ctxFiles = { dataRoot: store.dataRoot };
+    const made = await createGoal(
+      store.db,
+      { projectSlug: store.slug, title: "Chain with a past", links: [{ title: "Only link", goal: "Do it." }] },
+      actor,
+      ctxFiles,
+    );
+    await updateGoal(
+      store.db,
+      { projectSlug: store.slug, goalId: made.goalId, action: { op: "pause" } },
+      actor,
+      ctxFiles,
+    );
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: store.slug,
+      conversationId: null,
+      all: false,
+      dataRoot: store.dataRoot,
+    });
+    const chain = view.goals?.find((g) => g.id === made.goalId);
+    expect(chain?.history.length).toBeGreaterThan(0);
+    expect(chain?.history[0]!.text).toContain("Paused by");
+  });
+});

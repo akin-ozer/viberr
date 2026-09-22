@@ -19,7 +19,7 @@ import {
 } from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { listGoals, type GoalView } from "~/server/tasks/goal-actions.server";
+import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 
 /**
@@ -171,7 +171,14 @@ export function getControllerSurface(
     canInterruptTurn: conversation
       ? conversation.userId === viewer.id || admin
       : false,
-    goals: scope ? listGoals(db, scope) : null,
+    // Ruling 419(h): each chain carries its history from its own file, so the
+    // page can show why it paused and what a person said when they cancelled it.
+    goals: scope
+      ? listGoals(db, scope).map((goal) => ({
+          ...goal,
+          history: readGoalHistory(scope, goal.id, { dataRoot: input.dataRoot }),
+        }))
+      : null,
     // Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION —
     // the chain's creator, or run-agents. The page knew only the role half, so
     // it hid Pause, Resume, Cancel, Retry and Skip from the person who created

@@ -994,3 +994,46 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
     expect(example).toHaveProperty("disabled", true);
   });
 });
+
+describe("ruling 419(h): a chain says what it is for and what has happened to it", () => {
+  const history = Array.from({ length: 8 }, (_, i) => ({
+    occurredAt: `2026-09-22T2${i}:00:00.000Z`,
+    text: `Entry ${8 - i}`,
+  }));
+
+  it("folds the description and the newest history under 'About this chain', six at a time", async () => {
+    // CANARY: drop the `ctl-goal-more` disclosure.
+    const goal = goalOf({
+      id: "goal-4",
+      title: "CLI",
+      description: "Give the runtime a face.",
+      history,
+      links: [linkOf({ index: 1 })],
+    });
+    const { container } = renderPage(view({ goals: [goal] }));
+    await screen.findByText("CLI");
+    const more = container.querySelector<HTMLDetailsElement>('details[data-goal="goal-4"] details.ctl-goal-more')!;
+    expect(more.querySelector("summary")!.textContent).toBe("About this chain");
+    expect(more.textContent).toContain("Give the runtime a face.");
+    const shown = () => [...more.querySelectorAll(".ctl-goal-history li")].map((li) => li.textContent);
+    expect(shown()).toHaveLength(6);
+    expect(shown()[0]).toContain("Entry 8");
+    fireEvent.click(within(more).getByRole("button", { name: "Show all 8 entries" }));
+    expect(shown()).toHaveLength(8);
+  });
+
+  it("opens the chain a link pointed at, even a settled one", async () => {
+    // CANARY: drop `useTargetedGoal()` from the Goals panel.
+    const done = goalOf({
+      id: "goal-1",
+      title: "Foundation",
+      status: "completed",
+      links: [linkOf({ index: 1, status: "done", taskKey: "AX-1" })],
+    });
+    const { container } = renderPage(view({ goals: [done] }), "#goal-1");
+    await screen.findByText("Foundation");
+    await waitFor(() =>
+      expect(container.querySelector<HTMLDetailsElement>("details#goal-1")!.open).toBe(true),
+    );
+  });
+});

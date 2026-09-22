@@ -1775,6 +1775,21 @@ const goalProjectionRowSchema = z.object({
 });
 
 /** List a project's goals from the projection (board panel read model). */
+/**
+ * Ruling 419(h): a chain's history, newest first, straight from its canonical
+ * file. The projection carries no history (`listGoals` returns it empty), and
+ * the controller page is the surface the task page sends a person to "where the
+ * whole chain is read" — which showed neither why a chain paused nor the reason
+ * a person gave when they cancelled it. Empty when the file is gone.
+ */
+export function readGoalHistory(
+  projectSlug: string,
+  goalId: string,
+  ctx: TaskMutationContext = {},
+): GoalView["history"] {
+  return readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed.timeline ?? [];
+}
+
 export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
   const rows = db
     .prepare(

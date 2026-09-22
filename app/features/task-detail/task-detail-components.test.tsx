@@ -3487,10 +3487,26 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const chips = [...container.querySelectorAll<HTMLAnchorElement>("a[data-wait-state]")];
     expect(chips.map((a) => [a.textContent, a.getAttribute("href"), a.dataset.waitState])).toEqual([
       ["JC-3 · done", "/projects/viberr-core/tasks/JC-3", "done"],
-      ["goal-1 link 3", "/projects/viberr-core/controller", "open"],
+      // Ruling 419(h): a goal link lands on its chain, opened on the rail.
+      ["goal-1 link 3", "/projects/viberr-core/controller#goal-1", "open"],
       ["JC-6 · archived", "/projects/viberr-core/tasks/JC-6", "failed"],
     ]);
     for (const a of chips) expect(a.className).toContain("neutral");
+  });
+
+  it("ruling 419(h): the chain chip lands on THIS chain on the Controller page", () => {
+    // CANARY: link the chip to the bare Controller page again.
+    const { container } = renderWithRouter(
+      <TaskHero
+        task={heroTask({ goalRef: { goalId: "goal-2", linkIndex: 3 } })}
+        stage={undefined}
+        canEditGoal
+      />,
+    );
+    const chip = [...container.querySelectorAll<HTMLAnchorElement>("a.hero-goal-chip")].find((a) =>
+      a.textContent?.includes("goal-2 · link 3"),
+    );
+    expect(chip?.getAttribute("href")).toBe("/projects/viberr-core/controller#goal-2");
   });
 
   it("makes Save goal a primary CTA, visually distinct from Cancel", () => {
