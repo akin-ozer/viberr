@@ -3520,7 +3520,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_goal",
-      "Define a chained goal: one outcome decomposed into an ordered chain of tasks. Link 1's task is created now; each later task is created when the previous link completes, and every task's own operator does the work. Contributor or above (a chain is future task creation).",
+      "Define a goal: one outcome decomposed into links, each of which becomes a task with its own operator. Ruling 398: EVERY link whose declared wait is already satisfied gets its task NOW, so a link with no `blockedBy` starts immediately alongside link 1 \u2014 order in the list is not a dependency and does not hold anything back. Say what a link waits for or it starts at once. Within this goal, write `link 2` (the goal has no id until it is written); a wait on another goal is `goal-1 link 3`, and a wait on a task is its key. A link whose wait can never complete parks the goal for a human instead of sitting pending forever. Contributor or above (a goal is future task creation).",
       {
         projectSlug: z.string().optional(),
         title: z.string(),
@@ -3537,7 +3537,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               blockedBy: z
                 .array(z.string())
                 .optional()
-                .describe("Ruling 131(c): what this link's task waits on (task keys, or other goals' links like 'goal-1 link 3'); the task is born held when the chain creates it."),
+                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. The task is born held when the wait names work that is still open."),
             }),
           )
           .min(1)

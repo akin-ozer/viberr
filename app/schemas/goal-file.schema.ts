@@ -74,7 +74,14 @@ export const goalLinkSchema = z.object({
    *  Copied onto the task the chain creates for this link and validated then,
    *  so a link that waits on a sibling chain's link is born held instead of
    *  paying a triage turn that has to discover the wait. Spelling-checked at
-   *  write time by the goal writer; the strict parser only requires strings. */
+   *  write time by the goal writer; the strict parser only requires strings.
+   *
+   *  Ruling 398: this is now the ONLY thing that holds a link back. A goal
+   *  starts every link whose wait is already satisfied, so an empty list means
+   *  the link starts immediately, whatever its position — position in the list
+   *  is presentation, not order. The goal writer accepts `link 2` on input and
+   *  stores the absolute spelling, because the goal has no id until it is
+   *  written and a sequence has to be expressible in one call. */
   blockedBy: z.array(z.string()).default([]),
 });
 export type GoalLink = z.infer<typeof goalLinkSchema>;
@@ -143,8 +150,13 @@ export function allLinksSettled(links: readonly GoalLink[]): boolean {
   );
 }
 
-/** The 1-based index of the link the chain is currently ON — the first link
- *  that is not settled — or null when every link is settled. */
+/** The 1-based index of the FIRST unsettled link, or null when every link is
+ *  settled.
+ *
+ *  Ruling 398: no longer the link that starts next — `reconcileGoal` starts
+ *  every link whose declared wait allows it. This answers "which link does the
+ *  goal ride on", for the chip and the active-task lookup, and several links
+ *  can be live at once behind it. */
 export function currentLinkIndex(links: readonly GoalLink[]): number | null {
   const open = links.find(
     (l) => l.status !== "done" && l.status !== "skipped",

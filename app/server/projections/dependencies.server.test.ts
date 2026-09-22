@@ -70,8 +70,10 @@ describe("resolveDependencies (ruling 131)", () => {
         title: "Foundation",
         links: [
           { title: "one", goal: "first" },
-          { title: "two", goal: "second" },
-          { title: "three", goal: "third" },
+          // Ruling 398: a link with no declared wait starts at once, so a test
+          // about a link with NO TASK YET has to say what it waits for.
+          { title: "two", goal: "second", blockedBy: ["link 1"] },
+          { title: "three", goal: "third", blockedBy: ["link 2"] },
         ],
       },
       ACTOR(store),
@@ -208,7 +210,9 @@ describe("tasksReleasedBy (ruling 300)", () => {
         title: "Foundation",
         links: [
           { title: "one", goal: "first" },
-          { title: "two", goal: "second" },
+          // Ruling 398: a link with no declared wait starts at once, so a test
+          // about a link with NO TASK YET has to say what it waits for.
+          { title: "two", goal: "second", blockedBy: ["link 1"] },
         ],
       },
       ACTOR(store),

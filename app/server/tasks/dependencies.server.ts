@@ -192,7 +192,14 @@ export function validateDependencyRefs(
       if (!links) throw AppError.validation(`${ref.goal} is not a goal in this project.`);
       const link = links.find((l) => l.index === ref.link);
       if (!link) throw AppError.validation(`${ref.goal} has no link ${ref.link} (it has ${links.length}).`);
-      if (link.taskKey && taskRow(db, slug, link.taskKey)?.archived) {
+      // Ruling 398(b): a link the chain has SETTLED — `done`, or `skipped` by
+      // an onFailure=continue ride-through — is a valid thing to wait on
+      // however its task ended. The refusal below is about a live link whose
+      // work was abandoned; reading the task alone refused a wait on a link
+      // that had already completed, and refused the ride-through's own next
+      // link in the name of the failure it was riding past.
+      const settled = link.status === "done" || link.status === "skipped";
+      if (!settled && link.taskKey && taskRow(db, slug, link.taskKey)?.archived) {
         throw AppError.validation(`${spelled} (${link.taskKey}) is archived; a task cannot wait on abandoned work.`);
       }
     }

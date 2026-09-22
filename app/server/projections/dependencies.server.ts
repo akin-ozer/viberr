@@ -134,10 +134,20 @@ function resolveWithStages(
       continue;
     }
     if (link.taskKey) {
+      // Ruling 398(b): the LINK's own settlement outranks what later happened
+      // to its task. `done` and `skipped` are the chain's decisions that it has
+      // moved past this link, and `reconcileGoal` already refuses to undo them
+      // on an archive ("archiving a COMPLETED link's task does not
+      // retroactively fail the link"). This reader did undo them: it went
+      // straight to the task's state, so archiving a finished link's task — or
+      // the archive that CAUSED a ride-through skip under onFailure=continue —
+      // turned every wait declared on that link into a dead one, parking the
+      // chains behind it in the name of work that was already settled.
+      const settled = link.status === "done" || link.status === "skipped";
       out.push({
         ref: canonical,
         label: `${canonical} (${link.taskKey})`,
-        state: taskState(db, slug, link.taskKey, stages),
+        state: settled ? "done" : taskState(db, slug, link.taskKey, stages),
         taskKey: link.taskKey,
         goalId: ref.goal,
       });

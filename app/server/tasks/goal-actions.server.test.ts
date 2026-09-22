@@ -87,7 +87,7 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
     }
     const goal1 = await createGoal(
       app.db,
-      { projectSlug: SLUG, title: "Foundation", links: [{ title: "Base A", goal: "A. Done when merged." }, { title: "Base B", goal: "B. Done when merged." }] },
+      { projectSlug: SLUG, title: "Foundation", links: [{ title: "Base A", goal: "A. Done when merged." }, { title: "Base B", goal: "B. Done when merged.", blockedBy: ["link 1"] }] },
       actorOf(contributorId, "selin@viberr.dev"),
       ctx,
     );
@@ -135,7 +135,9 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
     await reconcileGoal(app.db, SLUG, goal2.goalId, ctx);
     const parked = getGoalView(SLUG, goal2.goalId, ctx)!;
     expect(parked.status).toBe("attention");
-    expect(parked.history.some((h) => /Chain paused \(attention\): creating the next link's task failed \(.*is archived/.test(h.text))).toBe(true);
+    // Ruling 398: the park now names the LINK and the reason, instead of
+    // reporting a creation attempt that fanning out never makes.
+    expect(parked.history.some((h) => /Chain paused \(attention\): link 2's wait can never complete/.test(h.text))).toBe(true);
     expect(parked.links[1]!.taskKey).toBeNull();
   });
 });
@@ -154,8 +156,8 @@ describe("chained goals", () => {
         description: "Three links.",
         links: [
           { title: "Link one", goal: "First deliverable. Done when merged." },
-          { title: "Link two", goal: "Second deliverable. Done when merged." },
-          { title: "Link three", goal: "Third deliverable. Done when merged." },
+          { title: "Link two", goal: "Second deliverable. Done when merged.", blockedBy: ["link 1"] },
+          { title: "Link three", goal: "Third deliverable. Done when merged.", blockedBy: ["link 2"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -218,7 +220,7 @@ describe("chained goals", () => {
         title: "Born on finished work",
         links: [
           { title: "First", goal: "One. Done when merged." },
-          { title: "Second", goal: "Two. Done when merged." },
+          { title: "Second", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -256,8 +258,8 @@ describe("chained goals", () => {
         title: "States ride along",
         links: [
           { title: "First", goal: "One. Done when merged." },
-          { title: "Second", goal: "Two. Done when merged." },
-          { title: "Third", goal: "Three. Done when merged." },
+          { title: "Second", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
+          { title: "Third", goal: "Three. Done when merged.", blockedBy: ["link 2"] },
         ],
       },
       actor,
@@ -383,7 +385,14 @@ describe("chained goals", () => {
       {
         projectSlug: SLUG,
         goalId,
-        action: { op: "add_link", title: "Link four", goal: "A fourth thing." },
+        // Ruling 398: a link added at the END of a chain says so, or it starts
+        // the moment it is added and can no longer be removed as pending.
+        action: {
+          op: "add_link",
+          title: "Link four",
+          goal: "A fourth thing.",
+          blockedBy: ["link 3"],
+        },
       },
       actorOf(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
@@ -476,7 +485,7 @@ describe("chained goals", () => {
         onFailure: "continue",
         links: [
           { title: "Fragile link", goal: "May fail." },
-          { title: "Sturdy link", goal: "Should still start." },
+          { title: "Sturdy link", goal: "Should still start.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -667,7 +676,7 @@ describe("chained goals", () => {
         title: "Bookkeeping chain",
         links: [
           { title: "Finished work", goal: "Completed, then tidied away." },
-          { title: "Follow-on work", goal: "Carries on regardless." },
+          { title: "Follow-on work", goal: "Carries on regardless.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -718,7 +727,7 @@ describe("chained goals", () => {
         title: "Authority chain",
         links: [
           { title: "First", goal: "Completes fine." },
-          { title: "Second", goal: "Needs the creator's authority to start." },
+          { title: "Second", goal: "Needs the creator's authority to start.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -780,7 +789,7 @@ describe("chained goals", () => {
         title: "Recovery chain",
         links: [
           { title: "Mistakenly archived", goal: "Archived by accident." },
-          { title: "Later link", goal: "Must not start early." },
+          { title: "Later link", goal: "Must not start early.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -836,7 +845,7 @@ describe("chained goals", () => {
         title: "Race chain",
         links: [
           { title: "Opening link", goal: "Closes first." },
-          { title: "Contested link", goal: "Must be started exactly once." },
+          { title: "Contested link", goal: "Must be started exactly once.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -961,7 +970,7 @@ describe("chained goals — retry re-parks when its task cannot be created", () 
         description: "Two links.",
         links: [
           { title: "One", goal: "First. Done when merged." },
-          { title: "Two", goal: "Second. Done when merged." },
+          { title: "Two", goal: "Second. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -1037,7 +1046,7 @@ describe("listGoals parses stored links instead of asserting their shape", () =>
         title: "Chain with a pre-131 projection row",
         links: [
           { title: "First", goal: "First. Done when merged." },
-          { title: "Second", goal: "Second. Done when merged." },
+          { title: "Second", goal: "Second. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -1101,7 +1110,7 @@ describe("ruling 243: a pending link adopts an existing task", () => {
         title: "Chain with work made ahead of it",
         links: [
           { title: "One", goal: "One. Done when merged." },
-          { title: "Two", goal: "Two. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1163,7 +1172,7 @@ describe("ruling 243: a pending link adopts an existing task", () => {
         // the one that can reach for an already-carried task.
         links: [
           { title: "Another link", goal: "Another. Done when merged." },
-          { title: "Reaches for a carried task", goal: "Reach. Done when merged." },
+          { title: "Reaches for a carried task", goal: "Reach. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1225,8 +1234,8 @@ describe("remove_pending_link refuses to renumber under a live reference", () =>
         title: "Chain a task waits on",
         links: [
           { title: "One", goal: "One. Done when merged." },
-          { title: "Two", goal: "Two. Done when merged." },
-          { title: "Three", goal: "Three. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
+          { title: "Three", goal: "Three. Done when merged.", blockedBy: ["link 2"] },
         ],
       },
       actor,
@@ -1255,8 +1264,8 @@ describe("remove_pending_link refuses to renumber under a live reference", () =>
         title: "Chain whose first link is free",
         links: [
           { title: "One", goal: "One. Done when merged." },
-          { title: "Two", goal: "Two. Done when merged." },
-          { title: "Three", goal: "Three. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
+          { title: "Three", goal: "Three. Done when merged.", blockedBy: ["link 2"] },
         ],
       },
       actor,
@@ -1294,7 +1303,10 @@ describe("goal link indexes stay a gapless sequence", () => {
         links: [
           { title: "Link one", goal: "First deliverable. Done when merged." },
           { title: "   ", goal: "Dropped: no title." },
-          { title: "Link three", goal: "Third deliverable. Done when merged." },
+          // Ruling 398: a relative wait is resolved AFTER the blank filter
+          // renumbers, so this names link 1 — the surviving predecessor — and
+          // not the authored position of the row that was dropped.
+          { title: "Link three", goal: "Third deliverable. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actorOf(contributorId, "selin@viberr.dev"),
@@ -1349,7 +1361,7 @@ describe("removing a link sees another goal's PENDING wait on it", () => {
         title: "Base chain",
         links: [
           { title: "Base one", goal: "One. Done when merged." },
-          { title: "Base two", goal: "Two. Done when merged." },
+          { title: "Base two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1412,7 +1424,7 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
         title: "Base for the wait edit",
         links: [
           { title: "Base one", goal: "One. Done when merged." },
-          { title: "Base two", goal: "Two. Done when merged." },
+          { title: "Base two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1480,7 +1492,7 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
         title: "Chain that must run in order",
         links: [
           { title: "Order one", goal: "One. Done when merged." },
-          { title: "Order two", goal: "Two. Done when merged." },
+          { title: "Order two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1534,7 +1546,7 @@ describe("ruling 192: a retry carries the failed task's own contract", () => {
           { title: "Drifting link", goal: "ORIGINAL-CONTRACT: this link owns packages/contracts." },
           // A pending second link: a chain whose ONLY link has failed is fully
           // settled, and a retry on one of those is swallowed (see F37-16).
-          { title: "Later link", goal: "Follows. Done when merged." },
+          { title: "Later link", goal: "Follows. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1635,7 +1647,7 @@ describe("ruling 194: a retry that starts nothing says so", () => {
         title: "Swallowed retry chain",
         links: [
           { title: "Failing link", goal: "One. Done when merged." },
-          { title: "Later link", goal: "Two. Done when merged." },
+          { title: "Later link", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1684,7 +1696,7 @@ describe("ruling 194: a retry that starts nothing says so", () => {
         title: "Interrupted retry chain",
         links: [
           { title: "Failing link", goal: "One. Done when merged." },
-          { title: "Later link", goal: "Two. Done when merged." },
+          { title: "Later link", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -1761,7 +1773,7 @@ describe("ruling 192: getGoalView carries the task's live goal beside the declar
         title: "Live contract chain",
         links: [
           { title: "Declared title", goal: "DECLARED-GOAL-9. Done when merged." },
-          { title: "Untouched link", goal: "Stays as declared." },
+          { title: "Untouched link", goal: "Stays as declared.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -2009,7 +2021,7 @@ describe("ruling 192(b): an edit to a FAILED link outranks the text the retry wo
         title: "Redeclared chain",
         links: [
           { title: "Drifting link", goal: "ORIGINAL-TEXT-2. Done when merged." },
-          { title: "Later link", goal: "Follows." },
+          { title: "Later link", goal: "Follows.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -2074,7 +2086,7 @@ describe("ruling 192(b): an edit to a FAILED link outranks the text the retry wo
         title: "Untouched chain",
         links: [
           { title: "Drifting link", goal: "ORIGINAL-TEXT-3." },
-          { title: "Later link", goal: "Follows." },
+          { title: "Later link", goal: "Follows.", blockedBy: ["link 1"] },
         ],
       },
       actor,
@@ -2162,5 +2174,132 @@ describe("ruling 192 (+335): the drift split stops claiming changes that never h
     // CANARY: derive `renamed` from `fm.title === title` again and this says
     // link tasks keep "the old name" after an edit that changed no name.
     expect(after.history[0]!.text).toBe("Goal description rewritten by arda@viberr.dev.");
+  });
+});
+
+/**
+ * Ruling 398 (F39-25): a goal starts every link whose declared wait allows it.
+ *
+ * Found by the ax-clone controller, which corrected me with it: "a chain
+ * creates link N+1's task only when link N completes, so `blockedBy` on a
+ * pending link changes nothing, because the task doesn't exist yet to be
+ * released. Concurrency equals the number of active CHAINS, not the number of
+ * links." It was right — `currentLinkIndex` returns the FIRST unsettled link
+ * and `reconcileGoal` started only that one. A person who wanted six tasks in
+ * flight had to write six goals, and the goal's shape was dictated by the
+ * scheduler rather than by the work.
+ */
+describe("ruling 398: links start together when nothing makes them wait", () => {
+  // Shares the file's one seeded app, like every describe above it.
+  const ctx = () => ({ dataRoot: app.dataRoot });
+  const actor = () => actorOf(contributorId, "selin@viberr.dev");
+
+  async function goalWith(
+    title: string,
+    links: { title: string; goal: string; blockedBy?: string[] }[],
+  ) {
+    const { createGoal, getGoalView } = await import("./goal-actions.server");
+    const created = await createGoal(
+      app.db,
+      { projectSlug: SLUG, title, links },
+      actor(),
+      ctx(),
+    );
+    return { created, view: () => getGoalView(SLUG, created.goalId, ctx())! };
+  }
+
+  it("starts every independent link at once", async () => {
+    const { view } = await goalWith("Three independent things", [
+      { title: "Alpha piece", goal: "A. Done when merged." },
+      { title: "Bravo piece", goal: "B. Done when merged." },
+      { title: "Charlie piece", goal: "C. Done when merged." },
+    ]);
+    // CANARY: restore `currentLinkIndex` as the selector and only A has a task,
+    // which is the ceiling the controller diagnosed.
+    const keys = view().links.map((l) => l.taskKey);
+    expect(keys.every((k) => k !== null && k.length > 0)).toBe(true);
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it("still runs a declared chain in order, one link at a time", async () => {
+    const { view } = await goalWith("A real chain", [
+      { title: "First", goal: "1. Done when merged." },
+      { title: "Second", goal: "2. Done when merged.", blockedBy: ["link 1"] },
+      { title: "Third", goal: "3. Done when merged.", blockedBy: ["link 2"] },
+    ]);
+    const links = view().links;
+    expect(links[0]!.taskKey).toBeTruthy();
+    // The declared wait is what holds them, and it holds them as hard as the
+    // old chain order did.
+    expect(links[1]!.taskKey).toBeNull();
+    expect(links[2]!.taskKey).toBeNull();
+    expect(links[1]!.status).toBe("pending");
+  });
+
+  it("releases the next link when its wait settles, and only that one", async () => {
+    const { created, view } = await goalWith("Diamond", [
+      { title: "Root", goal: "0. Done when merged." },
+      { title: "Left", goal: "L. Done when merged.", blockedBy: ["link 1"] },
+      { title: "Right", goal: "R. Done when merged.", blockedBy: ["link 1"] },
+      { title: "Join", goal: "J. Done when merged.", blockedBy: ["link 2", "link 3"] },
+    ]);
+    expect(view().links.map((l) => l.taskKey !== null)).toEqual([true, false, false, false]);
+    const { reconcileGoal } = await import("./goal-actions.server");
+    await closeTaskToDone(view().links[0]!.taskKey!);
+    await reconcileGoal(app.db, SLUG, created.goalId, ctx());
+    // Both arms of the diamond open together; the join stays shut.
+    expect(view().links.map((l) => l.taskKey !== null)).toEqual([true, true, true, false]);
+  });
+
+  it("a link may name a sibling before the goal has an id", async () => {
+    // Ruling 398(b): `link 1` is the only spelling available at creation time,
+    // because the goal id is minted while the goal is being written. Without it
+    // a sequential goal would take a create plus one update per link.
+    const { created, view } = await goalWith("Relative waits", [
+      { title: "First", goal: "1. Done when merged." },
+      { title: "Second", goal: "2. Done when merged.", blockedBy: ["link 1"] },
+    ]);
+    // Stored in the canonical ABSOLUTE spelling, so the file keeps the two
+    // spellings app/shared/dependencies.ts documents.
+    expect(view().links[1]!.blockedBy).toEqual([`${created.goalId} link 1`]);
+  });
+
+  it("parks the goal when a link's wait can never complete", async () => {
+    const { createGoal, getGoalView, reconcileGoal } = await import("./goal-actions.server");
+    const { setTaskArchived } = await import("./task-actions.server");
+    const first = await createGoal(
+      app.db,
+      { projectSlug: SLUG, title: "Holder", links: [{ title: "Held work", goal: "H. Done when merged." }] },
+      actor(),
+      ctx(),
+    );
+    const second = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Waiter",
+        links: [
+          { title: "Independent work", goal: "I. Done when merged." },
+          { title: "Waits on the holder", goal: "W. Done when merged.", blockedBy: [`${first.goalId} link 1`] },
+        ],
+      },
+      actor(),
+      ctx(),
+    );
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: first.activeTaskKey!, archived: true },
+      actorOf(orgAdminId, "arda@viberr.dev"),
+      ctx(),
+    );
+    await reconcileGoal(app.db, SLUG, second.goalId, ctx());
+    const parked = getGoalView(SLUG, second.goalId, ctx())!;
+    // CANARY: drop the `dead` arm and the link sits pending forever with
+    // nothing anywhere saying why — which fanning out would have made silent,
+    // because a link whose wait is dead is simply never selected.
+    expect(parked.status).toBe("attention");
+    expect(
+      parked.history.some((h) => /link 2's wait can never complete/.test(h.text)),
+    ).toBe(true);
   });
 });
