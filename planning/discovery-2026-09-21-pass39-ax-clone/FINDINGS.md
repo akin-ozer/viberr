@@ -542,7 +542,12 @@ what they strand, and record an optional reason.
   `run_agent` and `deliver_for_review` refused (ruling 186) until a person found the cycle and
   removed the wait. The operator followed its own guidance: the `create_task` option says to use
   it "for work that belongs outside this task (another owner's package …)". Nothing in that
-  guidance said a created task starts from the base branch. Resolved as the owner by declining
+  guidance said a created task starts from the base branch. **Fixed as ruling 441:** both operator
+  surfaces now say where a created task starts, that rework on files this task added stays on
+  this task (hand delivery to the owner here), and that this task never waits on a task that needs
+  its code. This is guidance, not a refusal, because which files a new task will touch is not
+  knowable when the option is written. Tests: `operator-toolkit.server.test.ts` and
+  `operator-run.server.test.ts` "F39-68". Resolved as the owner by declining
   the follow-up: Developer is re-engaged on `ax-5` for findings 2 to 4, then Surface Developer
   for finding 1, one delivery, one review. My 01:49 "Developer's part is done" decision is
   superseded for this rework only **(default, owner may revisit)**.

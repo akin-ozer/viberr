@@ -81,6 +81,7 @@ import {
   operatorResolvePacket,
   resolveOperatorAuthority,
   AGENT_REPORT_CAP_TOOLLESS,
+  CREATE_TASK_BASE_NOTE,
   OPERATOR_POLICY_SCOPE_NOTE,
   OPERATOR_TIMELINE_DEFAULT,
   type OperatorActionResult,
@@ -2312,7 +2313,9 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   type: ["object", "null"],
                   additionalProperties: false,
                   description:
-                    "create_task only (ruling 269): the task the person's confirm CREATES, under their own authority. Use it for work that belongs outside this task (another owner's package, a contract nobody produces, a gap a report named), instead of an option whose text tells the reader to create a task. Required on that kind; null on every other.",
+                    "create_task only (ruling 269): the task the person's confirm CREATES, under their own authority. Use it for work that belongs outside this task (another owner's package, a contract nobody produces, a gap a report named), instead of an option whose text tells the reader to create a task. " +
+                    CREATE_TASK_BASE_NOTE +
+                    " Required on that kind; null on every other.",
                   properties: {
                     title: { type: "string", description: "The new task's title." },
                     goal: {

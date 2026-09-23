@@ -59,6 +59,7 @@ import * as operatorPrompts from "./operator-run.server";
 import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
+  CREATE_TASK_BASE_NOTE,
   type OperatorAuthority,
   type OperatorAutonomy,
   type OperatorTaskSnapshot,
@@ -1378,6 +1379,14 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     const item = schema.properties.actions.items;
     expect(item.properties.paths.type).toEqual(["array", "null"]);
     expect(item.required).toContain("paths");
+  });
+
+  it("F39-68: the plan's create_task says a created task starts from the base branch", () => {
+    // CANARY: drop the sentence and the Codex operator is told only to use the
+    // kind for "another owner's package", which is how AX-5 was nearly made
+    // to wait on a task that could never reach its code.
+    const schema = operatorPlanSchemaFor(authority({ "generate-packets": "direct" }));
+    expect(JSON.stringify(schema)).toContain(JSON.stringify(CREATE_TASK_BASE_NOTE).slice(1, -1));
   });
 
   it("ruling 421: the plan schema carries run_agent's `completeness`, required like every other field", () => {

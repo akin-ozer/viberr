@@ -14,7 +14,7 @@ import {
   buildOperatorToolkit,
   OPERATOR_TOOLKIT_INSTRUCTIONS,
 } from "./operator-toolkit.server";
-import type { OperatorAuthority } from "./operator-actions.server";
+import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
 import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -654,6 +654,27 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const declared = JSON.stringify(published.get("open_decision_packet"));
     expect(declared).toContain('"toStage"');
     expect(declared).toContain("move_stage only");
+  });
+
+  it("F39-68: the option kinds say a created task starts from the base branch", async () => {
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    // CANARY: drop the sentence and Claude's operator is told only to use
+    // `create_task` for "another service", the guidance AX-5's operator
+    // followed into a follow-up that could not reach the code.
+    expect(JSON.stringify(published.get("open_decision_packet"))).toContain(
+      JSON.stringify(CREATE_TASK_BASE_NOTE).slice(1, -1),
+    );
   });
 
   /**

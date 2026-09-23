@@ -1067,6 +1067,22 @@ async function addRecommendation(
   }
 }
 
+/**
+ * F39-68: what a `create_task` option can and cannot reach. A task it creates
+ * starts from the base branch. Live on ax-clone AX-5 the operator recommended
+ * a core follow-up for review findings in `pty_linux.go`, a file that existed
+ * only on `ax-5`, and made AX-5 wait on it. The new task could not have
+ * reached that code, and AX-5 would have been held (ruling 186) until a
+ * person found the cycle. Its guidance said to use the kind for "another
+ * owner's package" and never said where a created task starts. Both operator
+ * surfaces say it from here, so the two never disagree.
+ */
+export const CREATE_TASK_BASE_NOTE =
+  "A created task starts from the base branch, so it cannot reach code that exists only on this " +
+  "task's unmerged branch. Rework on files this task's own commits added stays on this task, even " +
+  "when another owner's package holds them: hand delivery to that owner here instead. Never make " +
+  "this task wait on a task that needs this task's code.";
+
 /** One option the operator offers on a decision/blocking packet. */
 /** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
 export const GOAL_DRAFT_MAX_CHARS = 4000;
