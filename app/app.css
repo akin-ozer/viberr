@@ -5464,6 +5464,13 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   /* review queue rows wrap instead of crushing the title */
   .rq-row { flex-wrap: wrap; }
   .rq-main { min-width: 220px; }
+  /* U39-13: once the row wraps, the chips are a line of their own, read left
+     to right from the row's edge. They kept the one-line row's right-justified
+     52% box, so the first line hung indented and the rest fell back to the
+     left edge, and "agent working" jumped to the far right (its `margin-left:
+     auto` is for the one-line row). */
+  .rq-meta { flex: 1 1 auto; max-width: none; justify-content: flex-start; }
+  .rq-meta .wait-tag { margin-left: 0; }
   /* run console: the action group takes its own line */
   .run-actions { margin-left: 0; width: 100%; }
   /* home project rows drop the least-load-bearing stat */

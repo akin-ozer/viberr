@@ -3477,6 +3477,14 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".ctl-links li")).toMatch(/align-items:\s*baseline/);
   });
 
+  it("U39-13: a wrapped review-queue row reads its chips left to right from the row's edge", () => {
+    // CANARY: drop the `.rq-meta` override from the 1100px block.
+    const narrow = collapse();
+    expect(ruleBody(narrow, ".rq-meta")).toMatch(/justify-content:\s*flex-start/);
+    expect(ruleBody(narrow, ".rq-meta")).toMatch(/max-width:\s*none/);
+    expect(ruleBody(narrow, ".rq-meta .wait-tag")).toMatch(/margin-left:\s*0/);
+  });
+
   it("U39-12: the dock's scope pill gives way before the controller's name", () => {
     // Measured at 375px: "Contro…" beside "AX-21 · ax-cl…". CANARY: drop the
     // pill's shrink weight and the two shrink alike again.

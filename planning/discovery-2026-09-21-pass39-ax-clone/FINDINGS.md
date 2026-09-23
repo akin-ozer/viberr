@@ -165,6 +165,14 @@ what they strand, and record an optional reason.
   "Contro…" next to "AX-21 · ax-cl…". **Fixed:** the pill shrinks first (`flex: 0 100 auto`),
   because the context line under the header names the scope in full. Measured live with the rule
   injected: title 80/80px, pill 85 of 101px. Test: `app.css.test.ts` "U39-12".
+- **U39-13 (LOW) — a wrapped review-queue row scatters its chips.** Under 1100px the row wraps,
+  and the chips kept the one-line row's right-justified 52% box. The first line hung indented, the
+  rest fell back to the left edge, and "agent working" jumped to the far right. **Fixed:** once
+  wrapped, the chips read left to right from the row's edge, and "Review ›" takes the end of their
+  line. Checked with the rule injected at the pane's width and at 375px. Test: `app.css.test.ts`
+  "U39-13".
+- **Also (425(c) follow-up):** in the rail a long link title now wraps beside its pill (8rem
+  basis) with the pill on the title's first line (`align-items: baseline`).
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
