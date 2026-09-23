@@ -448,8 +448,13 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     await screen.findByText("Managing this instance with your own permissions.");
     const box = composer(container);
     expect(box.disabled).toBe(true);
-    expect(box.placeholder).toContain("your own Claude account");
-    expect(box.placeholder).toContain("Profile → Agent accounts");
+    // U39-10: the sentence is a visible note beside the box, with the place it
+    // names linked; the disabled box itself says only what it cannot do.
+    // CANARY: drop <NotConnectedNote /> from the composer.
+    const note = container.querySelector(".ctl-composer [data-not-connected]");
+    expect(note?.textContent).toContain("your own Claude account");
+    expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
+    expect(box.placeholder).toBe("Connect Claude to send a message.");
     // The pill states the same fact in the header, and neither of them blames
     // the deployment: since ruling 127 it holds no credential to blame.
     expect(container.textContent).toContain("Claude not connected");
@@ -469,6 +474,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     expect(box.disabled).toBe(false);
     expect(box.placeholder).toContain("Ask the controller");
     expect(container.textContent).not.toContain("Claude not connected");
+    expect(container.querySelector("[data-not-connected]")).toBeNull();
   });
 
   it("keeps the read-only refusal distinct from the not-connected one", async () => {

@@ -1015,11 +1015,20 @@ describe("app.css breakpoints (P16-F8)", () => {
       ".activity-cols",
       ".profile-cols",
       ".rq-row",
-      ".log-line",
       ".pj-row .pj-stats .pill",
     ]) {
       expect(block![1], `${selector} must still collapse at 1100px`).toContain(selector);
     }
+    // U39-11: the log line's collapse follows the CONSOLE's width, not the
+    // viewport's; at 1100px it only narrowed the columns and left a phone's
+    // text 89px wide. CANARY: drop the console's container query.
+    expect(block![1], "the log line collapses on its console's width now").not.toContain(".log-line");
+    expect(CODE.match(/\n\.console \{([^}]*)\}/)?.[1]).toMatch(/container-type:\s*inline-size/);
+    const narrowConsole = [...CODE.matchAll(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/g)].find((m) =>
+      m[1]!.includes(".log-line"),
+    );
+    expect(narrowConsole, "the narrow-console container query must exist").toBeTruthy();
+    expect(narrowConsole![1]).toMatch(/\.log-line \.lx\s*\{\s*grid-column:\s*1 \/ -1;\s*\}/);
     expect(block![1], "the dead `.board` duplicate must not come back").not.toMatch(
       /\.board\s*\{/,
     );
@@ -3445,9 +3454,19 @@ describe("app.css controller layout (ruling 419)", () => {
     // 375 it showed "ax log…". CANARY: drop the container query.
     expect(ruleBody(CODE, ".ctl-link-waits")).toMatch(/container-type:\s*inline-size/);
     expect(ruleBody(CODE, ".ctl-link-waits li")).toMatch(/grid-template-columns:\s*subgrid/);
-    const narrow = CODE.match(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/);
+    const narrow = [...CODE.matchAll(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/g)].find((m) =>
+      m[1]!.includes(".ctl-wait-title"),
+    );
     expect(narrow, "the narrow-list container query must exist").toBeTruthy();
     expect(narrow![1]).toMatch(/\.ctl-wait-title\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*white-space:\s*normal/);
+  });
+
+  it("U39-11: a console tool chip wraps rather than pushing its detail past a phone's edge", () => {
+    // Measured at 375px: `mcp__viberr_controller__write_knowledge_doc` is one
+    // unbreakable run, and the console scrolled sideways (285px of 271).
+    // CANARY: drop `flex-wrap: wrap` from `.log-chip`.
+    expect(ruleBody(CODE, ".log-chip")).toMatch(/flex-wrap:\s*wrap/);
+    expect(ruleBody(CODE, ".log-chip .lc-name")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
   it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {

@@ -71,6 +71,8 @@ per item and each one was applied to the source and observed failing.
 | 58 | Operator formatting renders on its cards; the packet note's example fits every packet (U39-7) | — | **done** (UI copy and rendering, no ruling) |
 | 59 | A chain link says what holds it in words a person can follow (U39-8) | owner: "focus on the controller page" (design call, marked) | **done**, ruling 425 |
 | 60 | The controller's working line reads as words, not tool ids (U39-9) | — | **done** (UI, no ruling) |
+| 61 | The not-connected remedy is a visible, linked note on both composers (U39-10) | — | **done** (UI, no ruling) |
+| 62 | The agent-log console is readable on a phone (U39-11) | — | **done** (UI, no ruling) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

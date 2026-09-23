@@ -143,6 +143,24 @@ what they strand, and record an optional reason.
   as stored, and keeps the stored text on the `title`. Tests: "U39-9" and the ruling-250 test,
   each red under its canary.
 
+- **U39-10 (LOW-MED) — a person without Claude connected is told how to fix it in a placeholder.**
+  Ruling 127's sentence ("…Connect it on your Profile → Agent accounts, then send your message
+  again.") was the placeholder of the disabled composer, on the page and in the dock: placeholder
+  grey on a disabled field, not a link, and cut after two lines on a phone, which is exactly
+  where the remedy sits. Measured in a production preview with no Claude credential. The product's
+  own rule for a disabled control is a visible note beside it (`.deny-note`). **Fixed:**
+  `NotConnectedNote` prints the same sentence over both composers with "Profile → Agent accounts"
+  linked. The box says "Connect Claude to send a message.", and the empty state's duplicate line is
+  gone. Tests: the ruling-127 page and dock tests, each red when the note is dropped.
+- **U39-11 (LOW-MED) — on a phone the agent-log console gives an agent's text 89px.** The 720px
+  collapse only narrowed the three columns (54px time, 100px tag), so a 283px console printed the
+  controller's report a word or two per line ("I didn't / touch AX- / 20, AX-22"). A long tool id
+  such as `mcp__viberr_controller__write_knowledge_doc` pushed its detail past the edge into a
+  sideways scroll (285px of 271). The same console is on every task page. **Fixed:** the console is
+  a size container; under 30rem the time and tag share a row and the text takes the next one, full
+  width (247px). A tool chip wraps, and its name may break anywhere. Tests: `app.css.test.ts`
+  "U39-11" and the 1100px-collapse test, each red under its canary.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

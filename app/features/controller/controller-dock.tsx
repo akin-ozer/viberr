@@ -9,7 +9,7 @@ import {
 } from "react-router";
 import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
-import { CLAUDE_NOT_CONNECTED } from "./controller-page";
+import { CONNECT_TO_SEND, NotConnectedNote } from "./controller-page";
 import { controllerExamples } from "./controller-examples";
 import type { loader as projectLoader } from "~/routes/project";
 import {
@@ -645,6 +645,7 @@ function DockShell({ context }: { context: DockContext }) {
           )}
           <div className="dock-composer">
             <div className="ctl-composer">
+              {current && !current.available && <NotConnectedNote />}
               <textarea
                 ref={composerRef}
                 value={text}
@@ -662,10 +663,9 @@ function DockShell({ context }: { context: DockContext }) {
                     : disabled
                       ? current.available
                         ? "Read-only: only the thread's owner can talk in it."
-                        : // Ruling 127: the dock bills the person reading it, so
-                          // it says what the page's composer and the refused
-                          // turn's transcript line say, from the one home.
-                          CLAUDE_NOT_CONNECTED
+                        : // Ruling 127: the dock bills the person reading it,
+                          // and says so in the note above the box (U39-10).
+                          CONNECT_TO_SEND
                       : "Ask the controller, or tell it what to do here…"
                 }
                 disabled={disabled}

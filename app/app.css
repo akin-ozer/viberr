@@ -3748,6 +3748,8 @@ dialog[data-closing]::backdrop {
   font-family: var(--font-mono);
   overscroll-behavior: contain;
   color-scheme: dark;
+  /* U39-11: the line layout follows the console's own width (below). */
+  container-type: inline-size;
 }
 .log-line { display: grid; grid-template-columns: 60px 126px minmax(0, 1fr); gap: .5rem; padding: .125rem .75rem; font-size: .75rem; line-height: 1.45; }
 .log-line:hover { background: rgba(255, 255, 255, .03); }
@@ -3772,6 +3774,14 @@ dialog[data-closing]::backdrop {
    hover highlight, which says "this row is a thing you can read". Had no rule
    at all before, so it did. */
 .log-line.cursor:hover { background: none; }
+/* U39-11 (pass 39): a narrow console gives the text the whole line. At 375px
+   the three columns left the text 89px of a 283px console ("I didn't / touch
+   AX- / 20, AX-22"), so a phone read an agent's log a word per line. There the
+   time and tag share a first row and the text takes the next, full width. */
+@container (max-width: 30rem) {
+  .log-line { grid-template-columns: auto minmax(0, 1fr); row-gap: 0; }
+  .log-line .lx { grid-column: 1 / -1; }
+}
 .lcaret { color: #b79dff; animation: caretBlink 1.1s steps(2) infinite; }
 @keyframes caretBlink { 50% { opacity: 0; } }
 
@@ -5454,9 +5464,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   /* review queue rows wrap instead of crushing the title */
   .rq-row { flex-wrap: wrap; }
   .rq-main { min-width: 220px; }
-  /* run console: the action group takes its own line, log columns narrow */
+  /* run console: the action group takes its own line */
   .run-actions { margin-left: 0; width: 100%; }
-  .log-line { grid-template-columns: 54px 100px minmax(0, 1fr); }
   /* home project rows drop the least-load-bearing stat */
   .pj-row .pj-stats .pill { display: none; }
   /* UXA-8: the two WIDE fr-grid tables — GitHub → Execution branches
@@ -5525,9 +5534,13 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    down the console tells the product's own tools — the agent tint and the V
    mark (`.vb`) — from a shell and an org server's tool without reading a
    name. Console-literal colours, like every rule around them. */
-.log-chip { display: inline-flex; align-items: baseline; gap: .375rem; max-width: 100%; }
+/* U39-11: a chip may wrap. A long tool id (`mcp__viberr_controller__write_
+   knowledge_doc`) is one unbreakable run, and on a phone it pushed its
+   detail past the console's edge into a sideways scroll. */
+.log-chip { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .125rem .375rem; max-width: 100%; }
 .log-chip .lc-name {
   flex: none;
+  max-width: 100%; overflow-wrap: anywhere;
   display: inline-flex; align-items: center;
   padding: .04rem .25rem;
   border: 1px solid #333a4d;
@@ -5547,7 +5560,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   background: #d9ccff; color: #1a1433;
 }
 .log-chip .lc-mark .ico { width: 9px; height: 9px; }
-.log-chip .lc-detail { color: #a9b0c4; word-break: break-word; }
+.log-chip .lc-detail { min-width: 0; color: #a9b0c4; word-break: break-word; }
 
 /* Ruling 366: one call's heartbeats folded into one wait row. The orb turns
    while the call is still open (`thinking-orbs`, pinned to its dark ink — the
@@ -6215,6 +6228,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .ctl-goal-history li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem; }
 .ctl-goal-history li > :first-child { color: var(--faint); white-space: nowrap; }
+/* U39-10: ruling 127's sentence as a note over the composer's box. */
+.ctl-unavailable { margin-bottom: .375rem; }
 /* Ruling 425(b): what a link waits on, a count that opens to its entries, in
    the chain disclosure's own quiet language. */
 .ctl-link-waits {

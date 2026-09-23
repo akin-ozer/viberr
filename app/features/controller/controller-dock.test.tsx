@@ -269,12 +269,12 @@ describe("the controller dock (ruling 121)", () => {
     // Ruling 127: the dock's refusal is the person's own, and names the one
     // place they fix it — the same sentence the page's composer and the
     // refused turn's transcript line carry.
-    expect(composer.getAttribute("placeholder")).toMatch(
-      /your own Claude account/,
-    );
-    expect(composer.getAttribute("placeholder")).toMatch(
-      /Profile → Agent accounts/,
-    );
+    // U39-10: as a visible note with the place linked, not a placeholder cut
+    // after the dock's two rows. CANARY: drop <NotConnectedNote /> from the dock.
+    const note = panel.querySelector(".ctl-composer [data-not-connected]");
+    expect(note?.textContent).toMatch(/your own Claude account/);
+    expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
+    expect(composer.getAttribute("placeholder")).toBe("Connect Claude to send a message.");
   });
 
   it("Escape inside the panel closes instantly and hands focus back to the trigger", async () => {

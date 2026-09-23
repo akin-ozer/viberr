@@ -69,6 +69,37 @@ export const CLAUDE_NOT_CONNECTED =
   "for you yet. Connect it on your Profile → Agent accounts, then send your " +
   "message again.";
 
+/** Where the sentence above sends a person, linked where it is printed. */
+const AGENT_ACCOUNTS_PLACE = "Profile → Agent accounts";
+
+/** What a composer that cannot send yet says in its own box. */
+export const CONNECT_TO_SEND = "Connect Claude to send a message.";
+
+/**
+ * U39-10 (pass 39): ruling 127's sentence where a person can read it and act
+ * on it. Both composers carried it as the PLACEHOLDER of a disabled textarea:
+ * placeholder grey on a disabled field, cut after two lines on a phone (the
+ * dock's box is two rows), and never a link. The product's own rule for a
+ * disabled control is a visible note beside it (`.deny-note`), and this is
+ * that note, with the place it names linked. Shared by the page and the dock
+ * (ruling 121), so the two still tell one story.
+ */
+export function NotConnectedNote() {
+  const [before, after] = CLAUDE_NOT_CONNECTED.split(AGENT_ACCOUNTS_PLACE);
+  return (
+    <p className="deny-note ctl-unavailable" data-not-connected>
+      <Icon name="alert" />
+      <span>
+        {before}
+        <Link className="linkish" to="/profile">
+          {AGENT_ACCOUNTS_PLACE}
+        </Link>
+        {after}
+      </span>
+    </p>
+  );
+}
+
 /**
  * U33-8: `?c=new` — the blank composer, asked for by name.
  *
@@ -553,15 +584,6 @@ function Transcript({
             agents, goal chains. Everything runs with your own permissions, and
             refusals say why.
           </p>
-          {!view.available && (
-            <p>
-              Claude isn&apos;t connected for you yet:{" "}
-              <Link className="linkish" to="/profile">
-                Profile → Agent accounts
-              </Link>
-              .
-            </p>
-          )}
           {/* Ruling 314 as the dock has it: clicking one SENDS it. */}
           {examples.length > 0 && onExample && (
             <ul className="ctl-examples">
@@ -682,6 +704,7 @@ function Composer({
   };
   return (
     <div className="ctl-composer">
+      {!view.available && <NotConnectedNote />}
       <textarea
         value={text}
         autoFocus={!disabled}
@@ -697,10 +720,8 @@ function Composer({
           disabled
             ? view.available
               ? "Read-only: only the conversation's owner can talk in it."
-              : // Ruling 127: the same sentence the refused turn records
-                // (`controllerRefusalNote`), so the composer and the transcript
-                // cannot tell two stories about one refusal.
-                CLAUDE_NOT_CONNECTED
+              : // Ruling 127's sentence is the note above the box (U39-10).
+                CONNECT_TO_SEND
             : "Ask the controller, or tell it what to do…"
         }
         disabled={disabled}
