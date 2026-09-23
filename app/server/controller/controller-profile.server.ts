@@ -9,7 +9,7 @@ import {
 import { getEnv, type Env } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
-  parseAgentProfileContent,
+  readAgentProfileFile,
   serializeAgentProfile,
   type AgentProfileFrontmatter,
 } from "~/server/files/agent-profile-file.server";
@@ -136,11 +136,9 @@ interface ParsedProfile {
 
 function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   const abs = agentProfileFilePath(CONTROLLER_PROFILE_ID, dataRoot);
-  if (!existsSync(abs)) return null;
-  const raw = readFileSync(abs, "utf8");
-  const { parsed } = parseAgentProfileContent(raw, {
-    fallbackId: CONTROLLER_PROFILE_ID,
-  });
+  const file = readAgentProfileFile(abs, CONTROLLER_PROFILE_ID);
+  if (!file) return null;
+  const { parsed, content: raw } = file;
   if (!parsed || parsed.frontmatter.kind !== "controller") return null;
   // C01-A10 (pass 32): the tolerant `effort` read (`.catch(undefined)`) turns a
   // hand-edited junk value (`effort: 3`, a blank) into "backend default", and
