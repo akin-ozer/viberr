@@ -1454,3 +1454,32 @@ not lost work.
   04:59:48: integrity check clean, and the operators of the three interrupted tasks (AX-35,
   AX-31, AX-5) re-invoked within 0.35 s. No error lines. The browser stayed signed in, and the
   open transcript carries 125 task links.
+
+## 53. Two packets, three rulings, deploy 5 (05:03 to 05:37 UTC)
+
+- AX-5's 05:03 packet read "the snapshot clips it at the start of finding 3". The operator run
+  (`run__ZWOJ-oewhrf`) was a one-turn Codex plan whose toolkit has no `read_timeline_entry`.
+  Restart recovery had re-invoked it with `trigger: "manual"` after deploy 4 cut the turn the
+  report woke. The report is 2,570 characters, and position 1,497 falls inside finding 3. Checked
+  on the host clone: `main` (`00bc520`) has no `internal/sandbox/pty_linux.go` and `ax-5` has it,
+  so the recommended follow-up could not have reached the code. I answered with my own directive at
+  05:09:46. AX-31's merge-order packet got the same treatment at 05:26: neither waits, nothing is
+  leased, and AX-31 is expected to merge first.
+- Gates at `92ca7522`: `lint`, `typecheck`, `test` (395 files, 7,551 tests) and `build`, all green.
+  Canaries: four for ruling 440, two for 441, seven for 442, each red.
+- Deploy 5: `npm run deploy` of `92ca7522` (built 05:29:35). Boot at 05:29:47: integrity check
+  clean, two interrupted runs finalized and their operators re-invoked. The browser stayed signed in.
+- **Ruling 440, live.** Run operator on AX-5 at 05:30:24, after the stall ruling 442 describes
+  (05:10:18 to 05:30:24). The operator's actual prompt is in its Codex session log
+  (`rollout-2026-09-23T05-30-22-…`). It contains the reviewer's finding 4 heading, "Bare command
+  names resolve using the control-plane PATH", which the old 1,500 cut dropped, and no "cut at …
+  chars" note anywhere. The plan moved AX-5 to Build and handed delivery to Developer for findings
+  2 to 4, finding 4 included. The prompt grew from 27,618 characters (05:10) to 34,522.
+- **Ruling 442, prevention live; the resume itself not seen.** The same prompt carries "The plan is
+  the whole turn". The backstop arm can only be seen on the next drive that refreshes and stops.
+  AX-5's own stall had settled before the deploy, so the owner's way out (Run operator) ended it.
+- **Ruling 441, not seen live:** no `create_task` option has been written since the deploy.
+- F39-70 found on the same turn and logged open (FINDINGS).
+- 05:37 to 07:10 UTC: this session was paused. The instance kept running: at 07:10 the container
+  was up and healthy, and three Codex run logs had been written within the minute.
+

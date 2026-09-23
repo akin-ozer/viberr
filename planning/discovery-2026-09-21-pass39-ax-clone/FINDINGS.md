@@ -570,6 +570,21 @@ what they strand, and record an optional reason.
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
+- **F39-70 (MED, open: the run's window closed before it could be fixed) — an agent was told to
+  act on a refusal it could not see.** AX-5, 05:35 UTC, the first operator turn after deploy 5. Its
+  plan was `transition_stage`, `lease_files` (the three paths AX-31's PR shares), then `run_agent`
+  Developer with "Do not modify any path the lease action refuses; report the refused path and any
+  resulting blocker." The lease was refused (ruling 426: AX-34 waits on AX-31). The dispatch started
+  at 05:35:19.590, and the refusal note that names the refused paths was written at 05:35:19.636,
+  because plan narration runs after the last step. Developer's prompt (its Codex session log)
+  contains the instruction and not the refusal, so it cannot tell which paths it must leave alone.
+  One of those paths, `internal/sandbox/sandbox.go`, is likely where finding 3's session limits
+  belong. The fix belongs in `executeCodexPlan`: a `run_agent` step carries the refusals the same plan
+  has already collected, as ruling 400 does for the operator's own retry. Ruling 430 pauses the acting
+  steps after a packet, but a refusal is not a packet. Related, and not a bug: my 05:26 decision on AX-31
+  ("nothing is leased") is recorded on AX-31 only, so AX-5's operator planned the lease without it.
+  A decision that governs two tasks lives on one of them.
+
 - **F39-65 (LOW) — every chain task opened by claiming a hold over work that was already done.**
   AX-35, 04:08:21: "Created waiting on AX-4, goal-2 link 2 (AX-19), … and goal-4 link 7 (AX-27).
   Held until every entry is done; Viberr releases it then." All eight were done: ruling 398(d)
