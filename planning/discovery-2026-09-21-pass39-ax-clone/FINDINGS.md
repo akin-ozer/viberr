@@ -195,6 +195,26 @@ what they strand, and record an optional reason.
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
+- **O39-a (owner's call) — an answer that routes work to ANOTHER agent summons the asking one.**
+  AX-22 23:38: the developer asked "Route the Gateway CLI and documentation follow-up?" and
+  offered "Hand off to Surface Developer (Recommended)". I picked it. `resolvePacket` summoned the
+  ASKING agent ("@developer … This is the decision you were blocked on. Continue from where you
+  stopped and act on it"), and the developer did the Surface Developer's edits itself (23:46,
+  "The Surface Developer follow-up is committed"), crossing the ownership rule it had asked about.
+  The work landed in the right PR, so nothing was lost, but the option said one thing and the
+  routing did another. Two defensible designs: the summons goes to the operator whenever the chosen
+  option names a different profile, or agent-authored options may not name another profile. Left
+  for the owner.
+- **O39-b (owner's call) — a deadlock streak writes the same canned decision into the contract
+  every round.** AX-22's goal now carries four identical "Let the rework continue — Each round has
+  found something real and the work is converging on it" blocks, each followed by the same
+  "part of the task's contract from here on" paragraph. The substance, my note each time, goes to
+  the timeline and the summon (ruling 284). Ruling 329 chose deliberately that the option's `d` is
+  contract text, and ruling 415's `humanDecisions` reads every decision from the timeline anyway.
+  Options: treat "Let the rework continue" as process-only (ruling 189's own test: it decides
+  what happens next, not what the work is), or append a repeated decision once. Not changed: it
+  re-opens a ruling the owner made.
+
 - ~~**A full 40-character sha scrolls a task page sideways on a phone.**~~ **Fixed, ruling 419(i)**
   (2026-09-23): re-measured on AX-19 the page no longer scrolled, but inline code (the sha, long
   file paths) still ran past the column and was clipped; inline code now breaks where it must.
