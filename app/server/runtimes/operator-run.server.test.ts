@@ -1561,10 +1561,9 @@ describe("pr-diverged turn instruction (both backends)", () => {
       expect(prompt, trigger).toContain("Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review");
     }
     expect(buildCodexOperatorPrompt(snapshot({ baseBehindBy: 7 }), "agent-reply", undefined, "Rework committed.")).not.toContain("Never plan it here");
-    // Ruling 424(b): and the way to the base when the work needs it.
-    // CANARY: drop the 424(b) sentence from `refreshBoundaryInstruction`.
+    // Ruling 429: and when it lifts. CANARY: drop the 429 sentence.
     expect(buildCodexOperatorPrompt(atBoundary, "agent-reply", undefined, "Needs main.")).toContain(
-      "move the task back to its work stage first (a `reworkStages` entry, offered while validation is failing) and refresh there",
+      "It lifts the moment a verdict fails or a new revision awaits its verdict",
     );
   });
 

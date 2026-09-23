@@ -6671,9 +6671,21 @@ export async function transitionStage(
     // rest of its plan: "Coordination stopped". The task sat on a human. The
     // way forward existed and nothing said so: ruling 133 lets the engaged
     // deliverer run at EVERY stage, so the rework never needed the move.
+    // Ruling 429(b): the `changed` arm read `changedReworkTarget`, which is only
+    // computed for a move flagged as rework, so an unflagged move off a task
+    // whose revision HAD changed was told "this task has neither" (AX-20, 00:47).
+    const changedTarget =
+      backward && existing.parsed.frontmatter.validation === "changed"
+        ? (changedReworkTarget ??
+          (await verdictStageOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)))
+        : null;
+    // `verdictStageFor` answers null when the re-verdict can be given where the
+    // task already stands, which is the AX-20 case exactly.
     const why = backward
-      ? existing.parsed.frontmatter.validation === "changed" && changedReworkTarget
-        ? ` The revision changed after the last verdict, so the only backward move is into ${stageName(project, changedReworkTarget)} for a re-verdict.`
+      ? existing.parsed.frontmatter.validation === "changed"
+        ? changedTarget
+          ? ` The revision changed after the last verdict, so the only backward move is into ${stageName(project, changedTarget)} for a re-verdict.`
+          : ` The revision changed after the last verdict, and its re-verdict is given at ${stageName(project, fromStageId)}, where the task already stands.`
         : existing.parsed.frontmatter.validation === "failing"
           ? ""
           : " A backward move is rework, and rework needs a failing verdict or a revision that changed after one; this task has neither."

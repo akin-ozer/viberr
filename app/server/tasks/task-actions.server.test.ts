@@ -5326,6 +5326,33 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     );
   });
 
+  it("ruling 429(b): an UNFLAGGED backward move off a changed revision is told the truth, not 'neither'", async () => {
+    // Live on AX-20 (00:47): the operator's plan moved Review to Verify without
+    // the rework flag, on a task whose revision had changed after its verdict,
+    // and was told "rework needs a failing verdict or a revision that changed
+    // after one; this task has neither". CANARY: read `changedReworkTarget`
+    // alone again.
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "review");
+    let refused = "";
+    try {
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+      );
+    } catch (thrown) {
+      refused = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    expect(refused).toContain("No allowed transition from Review to In Progress");
+    expect(refused).not.toContain("this task has neither");
+    expect(refused).toContain(
+      "The revision changed after the last verdict, and its re-verdict is given at Review, where the task already stands.",
+    );
+  });
+
   it("ruling 163 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
     // Canary: require `validation === "failing"` again in transitionStage's
     // `isReworkMove`. Live: KNC-20's operator was refused "No allowed

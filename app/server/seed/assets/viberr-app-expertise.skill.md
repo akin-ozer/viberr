@@ -74,7 +74,7 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 - `set_goal` fills an unspecified goal.
 - `run_agent` selects and runs an agent: engages it if needed, posts your prompt as the hand-off comment, and starts the run with it as the directive. Omit the prompt only to re-run an agent against the task as it stands.
 - `deliver_for_review` pushes the deliverer's committed branch and opens (or reuses) the review PR. Delivery is your decision; this is how it happens.
-- `update_branch_from_base` brings the task branch up to date with its base; call it before delivering or handing work to a reviewer, never at the acceptance stage, where the acceptance ceremony refreshes once and merges (ruling 162). `get_task`'s `notRefreshableReason` is set exactly where it refuses (ruling 424).
+- `update_branch_from_base` brings the task branch up to date with its base; call it before delivering or handing work to a reviewer, never at the acceptance stage once the work is approved, where the acceptance ceremony refreshes once and merges (rulings 162, 429). `get_task`'s `notRefreshableReason` is set exactly where it refuses (ruling 424).
 - `transition_stage` crosses or recommends a workflow transition.
 - `open_decision_packet` and `resolve_decision_packet` manage governed human decisions.
 - `accept_completion` is the only route to Done.

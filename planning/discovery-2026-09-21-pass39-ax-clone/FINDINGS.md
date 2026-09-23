@@ -220,6 +220,16 @@ what they strand, and record an optional reason.
   allow-list rework. AX-22's branch changes `internal/controller/task.go`, leased to AX-20 a minute
   earlier. The delivery push would have refused it (ruling 245). The refresh door carried the
   store-layout gate (ruling 159(b)) and not the lease gate. **Fixed: ruling 428.**
+- **F39-51 (HIGH) — the operator has no way to bring merged work into a rework at the acceptance
+  stage.** AX-20 00:41: the deliverer could not build its WorkspaceController-backed regression
+  without AX-19 (merged), and asked. I answered: move it back to Verify and refresh there. At
+  00:47 the operator's `transition_stage` was refused and its plan aborted ("Coordination
+  stopped"). The refusal read "rework needs a failing verdict or a revision that changed after
+  one; this task has neither", although the revision HAD changed after its verdict. Ruling 162
+  refused the refresh at Review, and ruling 163 licenses a changed revision only a move into
+  Review, where it already stood. Every door was shut, and the refusal lied about why.
+  **Fixed: ruling 429** (default, owner may revisit): the acceptance-stage refusal applies only to
+  approved work, and the refused move now says where the re-verdict is given.
 
 ---
 

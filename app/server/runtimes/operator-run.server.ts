@@ -4748,7 +4748,8 @@ const operatorTurnInstruction = (
 
 /**
  * Ruling 424 (pass 39): the branch refresh is not the operator's at the
- * acceptance stage, said where both backends read it.
+ * acceptance stage once the work is approved (ruling 429), said where both
+ * backends read it.
  *
  * The doctrine already said so ("never call it once the task stands at the
  * acceptance stage"), next to "call it before you hand work to a reviewer".
@@ -4766,11 +4767,9 @@ export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): stri
     "Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review: " +
     "the acceptance ceremony brings the branch up to date once and merges in the same step, " +
     "and a conflict it meets comes back to you as its own trigger. " +
-    // Ruling 424(b): live on AX-20 at 00:41 the deliverer could not build its
-    // integration test without work that had merged since (AX-19), and asked.
-    "When the WORK itself needs the base (a person asked for it, or the deliverer cannot build or " +
-    "test without work merged since), move the task back to its work stage first (a `reworkStages` " +
-    "entry, offered while validation is failing) and refresh there; never ask an agent to merge.\n\n"
+    // Ruling 429: the refusal stands only while the work is approved.
+    "It lifts the moment a verdict fails or a new revision awaits its verdict: the refresh is " +
+    "yours again then, here as at any stage.\n\n"
   );
 }
 

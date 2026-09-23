@@ -686,6 +686,20 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     expect(snap.notRefreshableReason).toBe(res.message);
   });
 
+  it("ruling 429: while the work is still in its review loop the refresh runs at the acceptance stage", async () => {
+    // Live on AX-20: validation `changed` at Review, and the deliverer needed
+    // AX-19's merged work to build its integration test. CANARY: drop the
+    // `failing`/`changed` arm from `acceptanceBoundaryRefusal`.
+    seedAt("review", {
+      validation: "failing",
+      pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "clean" },
+    });
+    const git = fakeGit({ behind: 2 });
+    const res = await act(git.exec);
+    expect(res.message).not.toContain("the acceptance boundary");
+    expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(true);
+  });
+
   it("G35-5 (d): a PR GitHub already reports conflicting is the exception: the tool records the conflict and opens the packet", async () => {
     deployDeliverer(true);
     seedAt("review", {

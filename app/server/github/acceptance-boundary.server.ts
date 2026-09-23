@@ -12,6 +12,8 @@ import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
  * only refuse, so the tool's job is to attempt the merge, record the
  * conflict list and open the conflict packet.
  *
+ * Ruling 429 narrows it to APPROVED work (see below).
+ *
  * Ruling 424: its own module so the operator's snapshot can carry the same
  * verdict as `notRefreshableReason` — the tool and the snapshot read one
  * function — without the snapshot importing the tool that imports it.
@@ -28,6 +30,14 @@ export function acceptanceBoundaryRefusal(
   if (stageIndex < 0 || reviewIndex < 0) return null;
   if (stageIndex < reviewIndex || fm.stage === roles.terminalId) return null;
   if (fm.pr?.mergeable === "conflicting") return null;
+  // Ruling 429 (pass 39): the ceremony is next only once the work is approved.
+  // While a verdict is failing or a revision awaits its verdict the task is
+  // still in its review loop, and on a board that reviews AT the acceptance
+  // stage (ax-clone: Review → Done) this refusal blocked every refresh before
+  // a re-review, and the one way to bring merged work into a rework that
+  // needed it: AX-20's deliverer could not build its integration test without
+  // AX-19, and neither the refresh nor a move back to Verify was allowed.
+  if (fm.validation === "failing" || fm.validation === "changed") return null;
   const here = stageName(project.stages, fm.stage);
   return (
     `${taskKey} is at ${here}, the acceptance boundary: the branch is brought up to date ` +
