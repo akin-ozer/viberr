@@ -673,6 +673,17 @@ describe("the open conversation's execution", () => {
     expect(readableStep("Bash · npm test")).toBe("Bash · npm test");
   });
 
+  it("U39-28: the run loading its tools says so, with their names", () => {
+    // Live on ax-clone, the first step of a controller turn. CANARY: drop the
+    // two ToolSearch replacements.
+    expect(
+      readableStep(
+        "composing · ToolSearch · query: select:mcp__viberr_controller__get_task,mcp__viberr_controller__list_decisions… answered",
+      ),
+    ).toBe("composing · loading tools · get task, list decisions… answered");
+    expect(readableStep("ToolSearch · query: slack send")).toBe("looking up tools · slack send");
+  });
+
   it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {
     // The server sends `phase: null` while it is the generic "Working" — the
     // row already says that in prose. CANARY: render `turn.phase ?? "Working"`

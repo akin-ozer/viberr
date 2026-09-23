@@ -16,6 +16,14 @@ import { z } from "zod";
  */
 export function readableStep(detail: string): string {
   return detail
+    // U39-28: the SDK loads a run's deferred tools through `ToolSearch`, and
+    // the first step of nearly every controller turn read "ToolSearch · query:
+    // select:mcp__viberr_controller__get_task,mcp__viberr_controller__list_…".
+    // It is the run loading its tools, so it says that, with the tools' names.
+    .replace(/\bToolSearch · query: select:(\S+)/g, (_m, list: string) =>
+      `loading tools · ${list.split(",").filter(Boolean).join(", ")}`,
+    )
+    .replace(/\bToolSearch · query: /g, "looking up tools · ")
     .replace(/\bmcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__([A-Za-z0-9_]+)/g, (_m, tool: string) =>
       tool.replace(/_/g, " "),
     )
