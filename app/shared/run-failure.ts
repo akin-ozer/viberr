@@ -27,7 +27,7 @@ export type RunFailureKind =
    *  from that fact first and from prose ("overloaded", "503") second. */
   | "overloaded"
   | "max_turns"
-  /** Ruling 175: the run reached the instance's spending cap (Org settings →
+  /** Ruling 175: the run reached the instance's spending cap (Instance settings →
    *  Max spend per Claude run) and the SDK ended it with
    *  `error_max_budget_usd`. Cut off, like `max_turns`, not failed by the task:
    *  the remedy is to continue it or raise the cap. Claude only; Codex has no

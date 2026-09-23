@@ -47,7 +47,7 @@ describe("describeRunFailure", () => {
     expect(d.reason).toBe(
       "The operator run was cut off by the instance's spending cap of $0.50 after spending $0.52.",
     );
-    expect(d.remedy).toContain("raise the cap in Org settings (Max spend per Claude run)");
+    expect(d.remedy).toContain("raise the cap in Instance settings (Max spend per Claude run)");
     expect(d.options.find((o) => o.recommended)?.title).toBe("Re-run the operator now");
     // A specialist's cut-off is not a backend failure: no other-backend retry.
     const spec = describe_(store, {

@@ -1960,7 +1960,7 @@ describe("ruling 176: an org MCP server's write tools", () => {
 
 /**
  * Ruling 188 (pass 37, F37-7): an MCP server created through any non-UI door
- * is governed the same way one created in the Org settings dialog is.
+ * is governed the same way one created in the Instance settings dialog is.
  *
  * Live, the controller created two filesystem servers through
  * `save_mcp_server` and both landed with a NULL tool policy — every tool,

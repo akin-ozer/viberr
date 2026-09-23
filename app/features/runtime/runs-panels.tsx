@@ -1165,7 +1165,7 @@ export function AgentLogsPanel({
                   : cur!.failureKind === "max_budget"
                     ? // Ruling 175 / ruling 350: the pill above already says "cut off ·
                       // spending cap"; the footer said "continuity error" beneath it.
-                      "cut off by the instance's spending cap (Org settings → Max spend per Claude run): not a task failure; continue the run or raise the cap"
+                      "cut off by the instance's spending cap (Instance settings → Max spend per Claude run): not a task failure; continue the run or raise the cap"
                     : cur!.failureKind === "max_turns"
                       ? "cut off at the run's turn cap: not a task failure; continue the run"
                       : cur!.failureKind === "idle_timeout"
