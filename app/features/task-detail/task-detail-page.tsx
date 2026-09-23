@@ -379,6 +379,17 @@ export function TaskDetailPage({
     acceptFetcher.submit(fd, { method: "post" });
   };
 
+  // Ruling 449 (O39-c): the dialog's "bring it up to date and re-review
+  // first". Rides the accept fetcher, so the dialog's busy state and the
+  // toast are the acceptance's own.
+  const submitRefreshFirst = () => {
+    if (acceptBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "refresh-and-review");
+    acceptFetcher.submit(fd, { method: "post" });
+  };
+
   // R15-2 safety net (b): manual delivery from the GitHub panel.
   const deliverFetcher = useFetcher<ActionResult>();
   useActionFeedback(deliverFetcher);
@@ -1103,6 +1114,16 @@ export function TaskDetailPage({
                   : acceptance.blockedReason
           }
           busy={acceptBusy || runBusy || recBusy || resolveBusy || transitionBusy}
+          // Ruling 449: only the direct Accept offers the re-review first; the
+          // other doors are answering a decision someone already framed.
+          {...(confirmAccept.mode === "accept"
+            ? {
+                onRefreshFirst: () => {
+                  setConfirmAccept(null);
+                  submitRefreshFirst();
+                },
+              }
+            : {})}
           onCancel={() => setConfirmAccept(null)}
           onConfirm={(disclosure) => {
             const pending = confirmAccept;

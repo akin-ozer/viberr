@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeRevisionDrift } from "~/shared/revision-drift";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AcceptConfirm, type AcceptConfirmTask } from "./accept-confirm";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 
@@ -532,6 +532,62 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     expect(dialogText({ pr: OPEN_PR, branch: null })).not.toContain(
       "is brought up to date with",
     );
+  });
+});
+
+/**
+ * Ruling 449 (O39-c): when the reviewed head is behind its base, the merge
+ * head would be one no review ran on. Live on ax-clone two green pull
+ * requests merged a minute apart and left main red. The dialog offers the
+ * owner's own method as one click: bring it up to date and re-review first.
+ */
+describe("ruling 449: update the branch and re-review first", () => {
+  const OPEN_PR = { number: 16, state: "review" as const, title: "[VIB-151] t" };
+  function dialog(props: { baseBehindBy: number | null; onRefreshFirst?: () => void; onConfirm?: () => void; mode?: "accept" | "force" }) {
+    return render(
+      <AcceptConfirm
+        task={detail({ pr: OPEN_PR, branch: "vib-151" })}
+        workRevisionSha={"a".repeat(40)}
+        baseBehindBy={props.baseBehindBy}
+        defaultBranch="main"
+        ceremony={{ mode: props.mode ?? "accept" }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={props.onConfirm ?? (() => {})}
+        {...(props.onRefreshFirst ? { onRefreshFirst: props.onRefreshFirst } : {})}
+      />,
+    );
+  }
+  const offer = () => screen.queryByRole("button", { name: /Update the branch and re-review first/ });
+
+  it("offers it while the branch is behind, runs it instead of accepting, and says what it does", () => {
+    const onRefreshFirst = vi.fn();
+    const onConfirm = vi.fn();
+    const { container } = dialog({ baseBehindBy: 3, onRefreshFirst, onConfirm });
+    // CANARY: drop the button and the one safe path is a separate trip.
+    fireEvent.click(offer()!);
+    expect(onRefreshFirst).toHaveBeenCalledOnce();
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(container.textContent?.replace(/\s+/g, " ")).toContain(
+      "No review has run on that combination. Update the branch and re-review first runs the review on it before anything merges.",
+    );
+  });
+
+  it("is not offered when the branch carries its base, when nothing measured it, or on force", () => {
+    const onRefreshFirst = vi.fn();
+    dialog({ baseBehindBy: 0, onRefreshFirst });
+    expect(offer()).toBeNull();
+    cleanup();
+    dialog({ baseBehindBy: null, onRefreshFirst });
+    expect(offer()).toBeNull();
+    cleanup();
+    dialog({ baseBehindBy: 3, onRefreshFirst, mode: "force" });
+    expect(offer()).toBeNull();
+    cleanup();
+    // A door that passes no handler (the board, a packet) offers nothing.
+    dialog({ baseBehindBy: 3 });
+    expect(offer()).toBeNull();
   });
 });
 

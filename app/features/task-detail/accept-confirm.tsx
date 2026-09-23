@@ -177,6 +177,7 @@ export function AcceptConfirm({
    *  never learned a question died with the acceptance. */
   openPacketTitle = null,
   baseBehindBy = null,
+  onRefreshFirst,
   busy,
   onCancel,
   onConfirm,
@@ -185,6 +186,10 @@ export function AcceptConfirm({
   /** U39-32: how many base commits the branch lacked at the reconciler's last
    *  compare, or null when that was never measured (the board door). */
   baseBehindBy?: number | null;
+  /** Ruling 449 (O39-c): bring the branch up to date and re-review it before
+   *  accepting. Offered only where the caller passes it (the task page's
+   *  direct Accept) and only while the branch is behind its base. */
+  onRefreshFirst?: () => void;
   openPacketTitle?: string | null;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
@@ -497,6 +502,9 @@ export function AcceptConfirm({
                     {baseBehindBy === 1 ? "it" : "them"} into the branch first
                     and pushes that merge commit, which becomes the merge head.
                     No review has run on that combination.
+                    {onRefreshFirst && !force && !mergeOnly
+                      ? " Update the branch and re-review first runs the review on it before anything merges."
+                      : ""}
                   </>
                 ) : (
                   <>
@@ -638,6 +646,14 @@ export function AcceptConfirm({
           <button type="button" className="btn ghost" onClick={close}>
             Not yet
           </button>
+          {onRefreshFirst && !force && !mergeOnly && baseBehindBy !== null && baseBehindBy > 0 && (
+            // Ruling 449 (O39-c): the head that merges would be one no review
+            // ran on. This runs the review on it first; acceptance comes after.
+            <button type="button" className="btn" disabled={busy} onClick={onRefreshFirst}>
+              <Icon name="refresh" />
+              Update the branch and re-review first
+            </button>
+          )}
           <button
             type="button"
             className={"btn " + (force ? "danger" : "primary")}

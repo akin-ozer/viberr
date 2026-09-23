@@ -42,6 +42,7 @@ import {
   dismissRecommendation,
   forceAcceptCompletion,
   manualDeliverForReview,
+  refreshAndReview,
   releaseOwner,
   requestPacketMaintainerDecision,
   resolveAcceptanceAffordance,
@@ -848,6 +849,17 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: completionToast("accepted", taskKey, toName),
         };
+      }
+      case "refresh-and-review": {
+        // Ruling 449 (O39-c): the accept dialog's safe answer to a reviewed
+        // head that is behind the base. The person's refresh, then the
+        // re-review of the head that will merge. A refusal of the step
+        // itself (a conflict, nothing to re-run) is the toast.
+        const result = await refreshAndReview(db, { projectSlug, taskKey }, actor);
+        if (result.status !== "refreshed") {
+          return data({ ok: false as const, error: result.message }, { status: 409 });
+        }
+        return { ok: true as const, intent, toast: result.message };
       }
       case "deliver-review": {
         // R15-2 safety net (b): a human performs delivery (push + review PR)

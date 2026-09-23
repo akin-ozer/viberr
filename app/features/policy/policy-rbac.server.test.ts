@@ -29,6 +29,7 @@ import {
   resolvePacket,
   requestPacketMaintainerDecision,
   manualDeliverForReview,
+  refreshAndReview,
 } from "~/server/tasks/task-actions.server";
 import {
   assignSpecialist,
@@ -1108,6 +1109,19 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         stage: "impl",
         run: async (taskKey, actor) => {
           await manualDeliverForReview(store.db, { projectSlug: store.slug, taskKey }, actor, {
+            dataRoot: store.dataRoot,
+          });
+        },
+      },
+    ],
+    refreshAndReview: [
+      {
+        // Ruling 449: the accept dialog's "update the branch and re-review
+        // first" holds the acceptance authority, owner exception included.
+        label: "refreshAndReview (update the branch and re-review first)",
+        stage: "review",
+        run: async (taskKey, actor) => {
+          await refreshAndReview(store.db, { projectSlug: store.slug, taskKey }, actor, {
             dataRoot: store.dataRoot,
           });
         },

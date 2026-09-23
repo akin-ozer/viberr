@@ -89,6 +89,26 @@ async function post(fields: Record<string, string>) {
   });
 }
 
+/**
+ * Ruling 449 (O39-c): the accept dialog's "update the branch and re-review
+ * first" reaches the action through the task route. A refusal of the step
+ * itself comes back as the toast's sentence.
+ */
+describe("ruling 449: the refresh-and-review intent", () => {
+  it("answers a task with no open pull request with a 409 that says so", async () => {
+    // CANARY: drop the route's `refresh-and-review` case and this is the
+    // generic unknown-intent refusal instead.
+    const result = await post({ intent: "refresh-and-review" });
+    expect(result).toMatchObject({
+      data: {
+        ok: false,
+        error: "`vib-151-timeline-compression` could not be brought up to date here (no open pull request). Nothing was started.",
+      },
+      init: { status: 409 },
+    });
+  });
+});
+
 describe("ruling 375: a prompted manual dispatch runs once", () => {
   it("records the directive before the run, so ruling 203's window never redelivers it", async () => {
     const before = developerRuns().length;

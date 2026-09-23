@@ -8800,12 +8800,45 @@ async function refreshBranchForAcceptance(
   taskKey: string,
   actor: TaskActor,
 ): Promise<AcceptanceMergeOutcome | null> {
+  return (await refreshBranchAsPerson(db, ctx, projectSlug, taskKey, actor, ACCEPTANCE_REFRESH))
+    .outcome;
+}
+
+/** What a person's branch refresh is for, in the words its record uses. */
+interface PersonRefreshPurpose {
+  /** The refresh sentence's lead (`recordBranchRefresh`). */
+  lead: string;
+  /** What the conflict note says did not happen. */
+  refused: string;
+}
+
+const ACCEPTANCE_REFRESH: PersonRefreshPurpose = {
+  lead: "Accepting the completion brought",
+  refused: "the acceptance was refused",
+};
+
+/**
+ * A person's refresh of the task branch from its base: the acceptance
+ * ceremony's, and ruling 449's "bring it up to date and re-review first".
+ * Returns the refresh's own status (null when there was nothing to refresh)
+ * and, on a conflict, the acceptance outcome that names it.
+ */
+async function refreshBranchAsPerson(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+  purpose: PersonRefreshPurpose,
+): Promise<{ status: string | null; outcome: AcceptanceMergeOutcome | null }> {
   const ref = taskRef(ctx, projectSlug, taskKey);
   const before = readTaskFile(ref)?.parsed.frontmatter ?? null;
   // Nothing to refresh without an open PR on a branch: no-change completions
   // and merged PRs never reach here with work to move.
-  if (!before?.pr || !before.branch) return null;
-  if (before.pr.state !== "review" && before.pr.state !== "accepted") return null;
+  if (!before?.pr || !before.branch) return { status: null, outcome: null };
+  if (before.pr.state !== "review" && before.pr.state !== "accepted") {
+    return { status: null, outcome: null };
+  }
   const updateBranch =
     ctx.deps?.updateBranchFromBase ??
     (await import("~/server/github/update-branch.server")).updateWorkspaceBranchFromBase;
@@ -8840,11 +8873,11 @@ async function refreshBranchForAcceptance(
     await recordBranchRefresh(db, reconcileCtx, { projectSlug, taskKey }, result, {
       timelineActor: humanActorRef(db, actor),
       reconcileActor: { userId: actor.userId, label: actor.label },
-      lead: "Accepting the completion brought",
+      lead: purpose.lead,
     });
-    return null;
+    return { status: result.status, outcome: null };
   }
-  if (result.status !== "conflict") return null;
+  if (result.status !== "conflict") return { status: result.status, outcome: null };
   await updateTaskFile(ref, (parsed) => {
     const pr = parsed.frontmatter.pr;
     if (pr && pr.number === before.pr!.number) pr.mergeable = "conflicting";
@@ -8856,7 +8889,7 @@ async function refreshBranchForAcceptance(
       text:
         `The acceptance-time refresh found \`${result.branch}\` in CONFLICT with \`${result.base}\`` +
         (result.files.length ? ` in ${result.files.join(", ")}` : "") +
-        `. The merge was aborted, the branch is untouched and the acceptance was refused.` +
+        `. The merge was aborted, the branch is untouched and ${purpose.refused}.` +
         (result.detail ? `\n\n\`\`\`\n${result.detail}\n\`\`\`` : ""),
       toAgent: false,
       evidence: null,
@@ -8901,7 +8934,7 @@ async function refreshBranchForAcceptance(
   void autoInvokeOperator(db, ctx, projectSlug, taskKey, "pr-conflicting").catch(() => {});
   const after = readTaskFile(ref)?.parsed.frontmatter ?? null;
   const reason = after ? mergeReadinessRefusal(after, taskKey) : null;
-  return {
+  return { status: result.status, outcome: {
     kind: "unmergeable",
     reason:
       reason ??
@@ -8910,7 +8943,141 @@ async function refreshBranchForAcceptance(
       `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`,
     // Ruling 291: the short cause, in the same voice as the long reason above.
     cause: "the PR conflicts with the base branch; merge the base into it, then merge",
-  };
+  } };
+}
+
+/** Ruling 449: the refresh a person asks for before a re-review. */
+const RE_REVIEW_REFRESH: PersonRefreshPurpose = {
+  lead: "Asked for a re-review before accepting, brought",
+  refused: "no re-review was started",
+};
+
+/** Ruling 449: the directive each re-run reviewer receives. */
+export function reReviewDirective(branch: string, base: string, mergeSha: string | null): string {
+  return (
+    `A person asked for a re-review before accepting. \`${branch}\` was brought up to date ` +
+    `with \`${base}\`${mergeSha ? ` (merge commit \`${mergeSha.slice(0, 7)}\`)` : ""}, so the ` +
+    "head that will merge is the reviewed work on the current base, and no review has run on " +
+    "that combination. Run the gates on the head you are given and give your verdict on it."
+  );
+}
+
+export interface RefreshAndReviewResult {
+  /** `refreshed`: reviewers started · `current`: nothing to re-review ·
+   *  `conflict`: the refresh met one · `unavailable`: it could not run. */
+  status: "refreshed" | "current" | "conflict" | "unavailable";
+  /** The reviewers whose re-review started, by display name. */
+  reviewers: string[];
+  message: string;
+}
+
+/**
+ * Ruling 449 (O39-c; default, owner may revisit): "bring it up to date and
+ * re-review first", the safe answer to U39-32's "N commits behind … No review
+ * has run on that combination".
+ *
+ * Live on ax-clone, two green pull requests merged a minute apart left main
+ * red. Each passed its gates and review on its own base; the acceptance
+ * ceremony merged the newer base into the second and merged the result, a
+ * head nobody had run. The owner's own method afterwards was to test the
+ * merged combination in a container before accepting. This is that method as
+ * one click: the branch is brought up to date as the person (the ceremony's
+ * own refresh, `refreshBranchAsPerson`), and every reviewer whose verdict
+ * stands on the revision re-reviews the refreshed head (ruling 439 keeps the
+ * revision and moves the review subject to the chain's end). Acceptance then
+ * merges the head the re-review ran on.
+ */
+export async function refreshAndReview(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskActionContext = {},
+): Promise<RefreshAndReviewResult> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
+  const existing = readTaskFile(ref);
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const fm = existing.parsed.frontmatter;
+  requireAcceptCompletion(
+    db,
+    project,
+    actor,
+    fm.ownerUserId,
+    "bring the branch up to date and re-review it before accepting",
+  );
+  const revision = activeWorkRevision(fm.workRevision);
+  const reviewers = [
+    ...new Set(
+      fm.verdicts.filter((v) => revision && v.revisionId === revision.id).map((v) => v.profileId),
+    ),
+  ];
+  if (reviewers.length === 0) {
+    return {
+      status: "unavailable",
+      reviewers: [],
+      message: `No reviewer's verdict stands on ${input.taskKey}'s delivered revision, so there is no review to run again. Nothing was changed.`,
+    };
+  }
+  const { status, outcome } = await refreshBranchAsPerson(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    actor,
+    RE_REVIEW_REFRESH,
+  );
+  if (outcome?.kind === "unmergeable") {
+    return { status: "conflict", reviewers: [], message: outcome.reason };
+  }
+  if (status === "already_current") {
+    return {
+      status: "current",
+      reviewers: [],
+      message: `\`${fm.branch}\` already carries the base branch, so the reviewed head merges as it is. Nothing was started.`,
+    };
+  }
+  if (status !== "updated") {
+    return {
+      status: "unavailable",
+      reviewers: [],
+      message: `\`${fm.branch ?? input.taskKey}\` could not be brought up to date here (${status ?? "no open pull request"}). Nothing was started.`,
+    };
+  }
+  const after = readTaskFile(ref)?.parsed.frontmatter ?? fm;
+  const refresh = after.baseRefreshes.at(-1) ?? null;
+  const base = refresh?.base ?? "the base branch";
+  const directive = reReviewDirective(after.branch ?? "", base, refresh?.mergeSha ?? null);
+  const startAgentRun =
+    ctx.deps?.startAgentRun ?? (await import("./specialist-run.server")).startAgentRun;
+  const opCtx: TaskActionContext = { ...ctx, operatorAuthorized: true };
+  const started: string[] = [];
+  const failed: string[] = [];
+  for (const profileId of reviewers) {
+    const name =
+      after.engagements.find((e) => e.profileId === profileId)?.role ?? profileId;
+    try {
+      await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId,
+          directive,
+          directiveFrom: actor.label,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+      started.push(name);
+    } catch (error) {
+      failed.push(`${name} (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  const message =
+    `Brought \`${after.branch}\` up to date with \`${base}\`` +
+    (started.length ? `; re-review started: ${started.join(", ")}.` : ".") +
+    (failed.length ? ` Could not start: ${failed.join("; ")}.` : "");
+  return { status: "refreshed", reviewers: started, message };
 }
 
 /**

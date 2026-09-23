@@ -57,6 +57,8 @@ import {
   revisionDriftNote,
   specialistReplyDirective,
   transitionStage,
+  refreshAndReview,
+  reReviewDirective,
   acceptanceDisclosureOf,
   applyRecommendation,
   commentToAgent,
@@ -5548,6 +5550,112 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.",
     );
     expect(taskFile(store).frontmatter.stage).toBe("review");
+  });
+
+  /**
+   * Ruling 449 (O39-c): the accept dialog's "update the branch and re-review
+   * first". Live on ax-clone two green pull requests merged a minute apart
+   * and left main red: the ceremony merged the newer base into the second and
+   * merged a head nobody had run.
+   */
+  describe("ruling 449: refreshAndReview", () => {
+    const approved = (store: TestStore) =>
+      seedChangedAt(store, "review", {
+        workRevision: workRev("rev_1"),
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
+        ],
+        validation: "healthy",
+        readiness: "ready",
+        waiting: "human",
+      });
+    const updated = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "updated",
+      branch: "vib-1-work",
+      base: "main",
+      commits: 3,
+      mergeSha: "m".repeat(40),
+      baseSha: "b".repeat(40),
+      onto: "a".repeat(40),
+      remoteBefore: { kind: "current", headSha: "a".repeat(40) },
+      remote: { kind: "current", headSha: "m".repeat(40) },
+    }));
+
+    it("refreshes as the person, then re-runs the reviewer on the head that will merge", async () => {
+      const store = prepared();
+      approved(store);
+      const startAgentRun = vi.fn<NonNullable<TaskActionDeps["startAgentRun"]>>(async () => ({
+        runId: "run_rr",
+        backend: "codex",
+        role: "Review & validation",
+        name: "Reviewer",
+        outcome: "started",
+        refusal: null,
+      }));
+      // CANARY: drop the reviewer dispatch and the refresh lands with nobody
+      // running the review it was for.
+      const result = await refreshAndReview(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { updateBranchFromBase: updated, startAgentRun } },
+      );
+      expect(result.status).toBe("refreshed");
+      expect(startAgentRun).toHaveBeenCalledOnce();
+      const dispatch = startAgentRun.mock.calls[0]![1];
+      expect(dispatch).toMatchObject({ profileId: "reviewer", directiveFrom: actor(store.users.arda).label });
+      expect(dispatch.directive).toBe(reReviewDirective("vib-1-work", "main", "m".repeat(40)));
+      expect(dispatch.directive).toContain("merge commit `mmmmmmm`");
+      const parsed = taskFile(store);
+      // Nothing is accepted: the task waits at Review for the new verdict.
+      expect(parsed.frontmatter.stage).toBe("review");
+      expect(parsed.frontmatter.baseRefreshes.at(-1)).toMatchObject({ mergeSha: "m".repeat(40), base: "main" });
+      expect(parsed.timeline.some((e) => e.text.startsWith("Asked for a re-review before accepting, brought `vib-1-work` up to date with `main`"))).toBe(true);
+      expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.actorLabel).toBe(actor(store.users.arda).label);
+    });
+
+    it("starts nothing when the branch already carries its base, or the refresh met a conflict", async () => {
+      const store = prepared();
+      approved(store);
+      const startAgentRun = vi.fn<NonNullable<TaskActionDeps["startAgentRun"]>>();
+      const current = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+        status: "already_current",
+        branch: "vib-1-work",
+        base: "main",
+        remote: { kind: "current", headSha: "a".repeat(40) },
+      }));
+      const deps = (updateBranchFromBase: NonNullable<TaskActionDeps["updateBranchFromBase"]>) => ({
+        dataRoot: store.dataRoot,
+        deps: { updateBranchFromBase, startAgentRun, runOperator: vi.fn() },
+      });
+      const same = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor(store.users.arda), deps(current));
+      expect(same.status).toBe("current");
+      const conflicting = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+        status: "conflict",
+        branch: "vib-1-work",
+        base: "main",
+        files: ["app/main.ts"],
+      }));
+      const clash = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor(store.users.arda), deps(conflicting));
+      expect(clash.status).toBe("conflict");
+      expect(taskFile(store).timeline.some((e) => e.text.includes("CONFLICT with `main` in app/main.ts") && e.text.includes("no re-review was started"))).toBe(true);
+      expect(startAgentRun).not.toHaveBeenCalled();
+    });
+
+    it("is the acceptance authority's: a viewer is refused before anything runs", async () => {
+      const store = prepared();
+      approved(store);
+      const refresh = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>();
+      await expect(
+        refreshAndReview(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1" },
+          actor(store.users.elif),
+          { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refresh } },
+        ),
+      ).rejects.toThrow();
+      expect(refresh).not.toHaveBeenCalled();
+    });
   });
 
   it("G35-5 (d): an accept on a behind-base branch performs exactly one refresh, then one merge, in that order", async () => {

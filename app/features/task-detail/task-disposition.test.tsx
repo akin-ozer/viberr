@@ -138,6 +138,8 @@ function renderPage(props: {
   /** Ruling 368: hold every action until the test answers it, so the
    *  in-flight state can be read. */
   held?: { reply: Promise<unknown> };
+  /** U39-32 / ruling 449: base commits the branch lacked at the last compare. */
+  baseBehindBy?: number | null;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -171,6 +173,7 @@ function renderPage(props: {
             githubHost="https://github.com"
             workRevisionSha={props.workRevisionSha ?? null}
             canDeliver={props.canDeliver ?? false}
+            baseBehindBy={props.baseBehindBy ?? null}
           />
         </ToastProvider>
       ),
@@ -237,6 +240,21 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(getByText("Accept this completion?")).toBeTruthy();
     // The confirm button is explicit that accepting merges.
     expect(findButton(container, "Accept → Done & merge")).toBeDefined();
+  });
+
+  it("ruling 449: the Accept dialog's re-review first submits refresh-and-review, and accepts nothing", async () => {
+    const { container, submitted } = renderPage({
+      task: { pr: { number: 117, state: "review", title: "[VIB-151] x" } },
+      workRevisionSha: "abcdef1234567890",
+      baseBehindBy: 2,
+    });
+    fireEvent.click(findButton(container, "Accept completion → Done")!);
+    // CANARY: stop passing `onRefreshFirst` from the page and the dialog has
+    // no safe path to offer.
+    fireEvent.click(findButton(container, "Update the branch and re-review first")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("refresh-and-review");
+    expect(submitted.some((row) => row.intent === "accept-completion")).toBe(false);
   });
 
   it("the confirm does not promise a merge on a task with no pull request", () => {

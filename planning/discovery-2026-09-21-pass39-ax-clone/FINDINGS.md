@@ -660,8 +660,13 @@ what they strand, and record an optional reason.
 - ~~**A full 40-character sha scrolls a task page sideways on a phone.**~~ **Fixed, ruling 419(i)**
   (2026-09-23): re-measured on AX-19 the page no longer scrolled, but inline code (the sha, long
   file paths) still ran past the column and was clipped; inline code now breaks where it must.
-- **O39-c (owner's call) — two green pull requests merged a minute apart left main red, and
-  nothing in Viberr can notice.** AX-22 (PR #18, 01:53:45) made a Task's Model wait on Gateway
+- ~~**O39-c (owner's call) — two green pull requests merged a minute apart left main red, and
+  nothing in Viberr can notice.**~~ **Design (1) built, ruling 449** (2026-09-23; default, owner may
+  revisit): while the reviewed head is behind its base, the accept dialog offers "Update the branch
+  and re-review first". It refreshes the branch as the person and re-runs every standing reviewer on
+  the head that will merge. Design (2), a gate run on main after every merge, stays the owner's: Viberr
+  has no runner of its own, this repo's CI checks are unreadable, and an agent run needs a task to
+  hold it. AX-22 (PR #18, 01:53:45) made a Task's Model wait on Gateway
   routes. AX-26 (PR #20, 01:54:26) and AX-20 before it ship runtime tests that create a Model with
   no Gateway. Each branch passed its own gates and review. On main (`8f449da`) `go test
   ./internal/runtime` fails: Tasks stay Pending on "waiting for dependencies: no Gateway routes to
