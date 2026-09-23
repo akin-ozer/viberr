@@ -80,6 +80,7 @@ per item and each one was applied to the source and observed failing.
 | 67 | The acceptance-stage refresh refusal applies to approved work only; a refused move says where the re-verdict is given (F39-51) | design call, marked | **done**, ruling 429 |
 | 68 | A plan stops acting at the first decision it causes (F39-52) | — | **done**, ruling 430 |
 | 69 | The operator reads the file leases that bind now (F39-53) | — | **done**, ruling 431 |
+| 70 | A successful run withdraws a stall packet and nothing else (F39-54) | — | **done**, ruling 432 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

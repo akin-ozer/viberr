@@ -3198,6 +3198,10 @@ async function openStuckLoopPacket(
         "Coordination is paused until a human chooses how to proceed.",
       observations,
       options,
+      // Ruling 432: a stall is the one premise a later successful run can
+      // disprove, so this marker is what `withdrawSupersededStuckPacket` reads.
+      // The ruling 326 fallback below spreads `open`, and keeps it.
+      stalled: true,
     };
     // Ruling 315: when the failure belongs to an ACCOUNT rather than this task,
     // the packet carries that, so the N identical siblings one quota or
@@ -3349,7 +3353,20 @@ async function noteStuckLoopEscalationFailed(
   }
 }
 
-/** Withdraw a matching stale recovery packet after successful agent work. */
+/**
+ * Withdraw a matching stale STALL packet after successful agent work (owner
+ * ruling 2026-07-18).
+ *
+ * Ruling 432: only a packet `openStuckLoopPacket` raised (`stalled: true`). This
+ * used to take any blocked packet without an acceptance option, and on AX-21 at
+ * 01:24 it took the one saying "`ax-21` conflicts with `main`". The Surface
+ * Developer had been dispatched onto that conflict, found it, changed nothing
+ * and ended its run cleanly ("Blocked on the unresolved AX-21/main conflict; no
+ * lasting changes were made"). The timeline then called the conflict "moot"
+ * because the run "completed successfully", and the question the developer
+ * asked about it was held behind a decision that no longer existed. A run
+ * finishing disproves a stall and nothing else.
+ */
 async function withdrawSupersededStuckPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3364,8 +3381,7 @@ async function withdrawSupersededStuckPacket(
   try {
     const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     const packet = existing?.parsed.packet;
-    if (!packet || packet.type !== "blocked") return;
-    if (packet.options.some((o) => o.kind === "accept_completion")) return;
+    if (!packet?.stalled) return;
     const retryOptions = packet.options.filter(
       (o) => o.kind === "retry_other_backend",
     );
@@ -3384,9 +3400,9 @@ async function withdrawSupersededStuckPacket(
     let withdrawn = false;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const p = parsed.packet;
-      // Re-check inside the write — the read above raced other writers.
-      if (!p || p.type !== "blocked") return;
-      if (p.options.some((o) => o.kind === "accept_completion")) return;
+      // Re-check inside the write — the read above raced other writers, and a
+      // different packet may stand here now.
+      if (!p?.stalled || p.id !== packet.id) return;
       parsed.packet = null;
       // A blocked packet held the readiness gate down with it (same lift as the
       // goal-edit auto-clear above).
@@ -5463,7 +5479,7 @@ export async function applyAgentCompletionEffects(
   // 1c. A SUCCESSFUL run withdraws a stale "work stalled" packet about this
   //     same agent (owner ruling 2026-07-18) — done BEFORE the operator reacts
   //     so its snapshot already sees the packet gone instead of asking a human
-  //     to dismiss it. Completion/acceptance packets are never touched.
+  //     to dismiss it. Only a stall packet is ever touched (ruling 432).
   if (finished.state === "finished") {
     // R20-3 (F20-4): a model that just RAN to completion is available, whatever
     // a stale unavailability row says. Clearing on a real success IS the

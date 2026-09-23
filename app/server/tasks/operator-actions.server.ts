@@ -1125,6 +1125,10 @@ export interface OperatorOpenPacketInput {
   /** Ruling 315: the account-level cause that raised this, when the cause is
    *  bigger than the task. Packets sharing it are resolved together. */
   cause?: string;
+  /** Ruling 432: a stall escalation (`openStuckLoopPacket`), the one family a
+   *  later successful run may withdraw. Set by the server only; the operator's
+   *  own packet tools build their input field by field and never carry it. */
+  stalled?: true;
 }
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
@@ -1184,8 +1188,9 @@ function retryOtherBackendDefaults(
     backend: failed === "codex" ? "claude" : "codex",
   };
   // Stamped so the retry re-runs the agent that failed rather than falling
-  // back to the delivering one, and so `withdrawSupersededStuckPacket` joins
-  // the packet to the right agent's success.
+  // back to the delivering one, and so a stall packet's withdrawal
+  // (`withdrawSupersededStuckPacket`, ruling 432) joins it to the right
+  // agent's success.
   if (profileId) defaults.profileId = profileId;
   return defaults;
 }
@@ -1784,6 +1789,8 @@ export async function operatorOpenPacket(
   // Ruling 315: an account-level cause travels onto the packet, so a sibling
   // raised by the same failure can be found when this one is answered.
   if (input.cause) packet.cause = input.cause;
+  // Ruling 432: what lets a later successful run withdraw it, and nothing else.
+  if (input.stalled) packet.stalled = true;
 
   let opened = false;
   // Ruling 137: a packet pauses coordination, so the standing acceptance

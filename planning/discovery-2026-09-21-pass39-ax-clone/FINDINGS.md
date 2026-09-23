@@ -267,6 +267,20 @@ what they strand, and record an optional reason.
   listed none, and `server_test.go` was one of the conflicting files. The operator's snapshot had no
   lease list, only the 23:47 timeline note. **Fixed: ruling 431.**
 
+- **F39-54 (HIGH) — a clean run withdrew a standing branch conflict as "moot".** AX-21, 01:24:31.
+  The conflict packet "`ax-21` conflicts with `main`" had opened at 01:18, and the same plan sent
+  the Surface Developer onto the branch anyway (F39-52). The developer found the conflict, changed
+  nothing, said so ("Blocked on the unresolved AX-21/main conflict; no lasting changes were made")
+  and asked "Resolve the AX-21 conflict with main", which was held because a decision was open.
+  Its run had ended without an error, so the timeline then read "**Packet withdrawn:** \"`ax-21`
+  conflicts with `main`\" is moot. The Surface Developer agent run completed successfully after it
+  was opened." The conflict stood, PR #15 was still `conflicting`, readiness went back to `ready`,
+  and the held question pointed at a decision that no longer existed. The operator spent the 01:27
+  turn reopening it ("The prior conflict packet was withdrawn after the run completed; this report
+  confirms the conflict remains"). The owner ruling of 2026-07-18 was about stall packets. The code
+  took every blocked packet without an acceptance option, which includes conflicts, lease orders,
+  agent questions and every decision the operator writes. **Fixed: ruling 432.**
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

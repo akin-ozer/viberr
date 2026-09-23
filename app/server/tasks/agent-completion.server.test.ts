@@ -1133,6 +1133,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const withheld = packet!.observations.find((o) => o.k === "Tailored options withheld");
     expect(withheld, "the packet hides that a better option set was refused").toBeTruthy();
     expect(withheld!.v).toContain("refused its own packet");
+    // Ruling 432: the fallback is still a stall, so a later clean run may
+    // still withdraw it.
+    expect(packet!.stalled).toBe(true);
   });
 
   it("ruling 325: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
@@ -1889,6 +1892,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             options: [
               { kind: "request_edit", t: "Send the agent back to continue", d: "", rec: true },
             ],
+            // Ruling 432: what `openStuckLoopPacket` writes on every stall,
+            // and what lets the run's success withdraw it below.
+            stalled: true,
           };
         },
       );
@@ -1917,7 +1923,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     it("ruling 328: the same retry runs when a PERSON clears the packet that blocked it", async () => {
       // THE PATH THE TWO LIVE MISSES TOOK. An `input` packet is never
       // auto-withdrawn (`withdrawSupersededStuckPacket` returns on anything but
-      // `blocked`), so it survives the run and a person answers it — which is
+      // a stall, ruling 432), so it survives the run and a person answers it — which is
       // what happened on SHOP-18 at 04:38:38 and on SHOP-10 — and the
       // escalation ruling 237 skipped is owed just the same.
       // CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
@@ -3656,12 +3662,17 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   /** Write a `type: "blocked"` work-stalled packet straight into the task file
-   *  (the schema shape operatorOpenPacket produces). */
-  async function openBlockedPacket(options: PacketOption[]): Promise<void> {
+   *  (the schema shape operatorOpenPacket produces). `stalled` is the ruling 432
+   *  marker `openStuckLoopPacket` writes; `false` writes the same blocked shape
+   *  without it, which is what every other blocked packet looks like. */
+  async function openBlockedPacket(
+    options: PacketOption[],
+    { stalled = true }: { stalled?: boolean } = {},
+  ): Promise<void> {
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
-        parsed.packet = {
+        const packet: NonNullable<typeof parsed.packet> = {
           type: "blocked",
           kind: "Blocked decision",
           from: "operator",
@@ -3670,9 +3681,27 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
           observations: [],
           options,
         };
+        if (stalled) packet.stalled = true;
+        parsed.packet = packet;
         parsed.frontmatter.readiness = "blocked";
       },
     );
+  }
+
+  /**
+   * Ruling 432: open a packet through the REAL writers rather than a hand-built
+   * fixture of what they are believed to write. The operator is deployed only
+   * for the write, since both writers open packets on its authority, and is
+   * removed again so the completion's react stays out of the way, exactly as
+   * in the tests that write the packet directly.
+   */
+  async function withOperatorDeployed(write: () => Promise<void>): Promise<void> {
+    const before = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    deployOperator();
+    await write();
+    writeProject(store.dataRoot, before);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const redirect: PacketOption = {
@@ -3743,10 +3772,11 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   });
 
   it("an accept_completion packet is never auto-withdrawn (completion stays human)", async () => {
-    await openBlockedPacket([
-      { kind: "accept_completion", t: "Accept & move to Done", d: "", rec: true },
-      redirect,
-    ]);
+    // Ruling 432: no acceptance packet is a stall, so none carries the marker.
+    await openBlockedPacket(
+      [{ kind: "accept_completion", t: "Accept & move to Done", d: "", rec: true }, redirect],
+      { stalled: false },
+    );
     const runId = await finishedRunWith("More work landed.");
     await runEffects(runId, { delivers: true });
     expect(taskFile().parsed.packet).not.toBeNull();
@@ -3781,10 +3811,120 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     expect(taskFile().parsed.packet).toBeNull();
   });
 
-  it("an agent-agnostic packet (no retry option) withdraws on any successful run", async () => {
+  it("an agent-agnostic stall packet (no retry option) withdraws on any successful run", async () => {
     await openBlockedPacket([redirect]);
     const runId = await finishedRunWith("Unblocked and finished.");
     await runEffects(runId, { delivers: true });
     expect(taskFile().parsed.packet).toBeNull();
+  });
+
+  it("ruling 432: a branch-conflict packet outlives a clean run that changed nothing (AX-21)", async () => {
+    /**
+     * Live on AX-21 at 01:24. `update_branch_from_base` met a conflict and
+     * opened "`ax-21` conflicts with `main`". The same plan dispatched the
+     * Surface Developer, which found the conflict, changed nothing and ended
+     * cleanly: "Blocked on the unresolved AX-21/main conflict; no lasting
+     * changes were made". Its success then withdrew the conflict as "moot",
+     * and the question it asked about the conflict was held behind a decision
+     * that no longer existed. A run finishing disproves a stall and nothing
+     * else.
+     *
+     * CANARY: in `withdrawSupersededStuckPacket`, take any blocked packet again
+     * instead of `packet.stalled`.
+     */
+    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
+      "./operator-actions.server"
+    );
+    await withOperatorDeployed(async () => {
+      const authorized = { dataRoot: store.dataRoot, operatorAuthorized: true };
+      const opened = await operatorOpenPacket(
+        store.db,
+        authorized,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "blocked",
+          title: "`vib-1-work` conflicts with `main`",
+          body:
+            "The task branch cannot be brought up to date automatically. The merge was " +
+            "aborted and the branch is exactly as it was. A person decides how this is resolved.",
+          observations: [{ k: "Conflicting files", v: "internal/cli/cli.go", code: true }],
+          options: [
+            {
+              kind: "redirect",
+              title: "Have Developer resolve the conflict",
+              detail: "Its workspace already has `origin/main` fetched: it merges and resolves the conflicting files.",
+              recommended: true,
+            },
+            {
+              kind: "custom",
+              title: "Resolve `vib-1-work` yourself",
+              detail: "Merge `main` into the branch by hand and push it.",
+            },
+            {
+              kind: "archive_task",
+              title: "Archive the task: the work is superseded",
+              detail: "Keeps the record and the branch; the task leaves the board.",
+            },
+          ],
+        },
+        resolveOperatorAuthority(authorized, store.slug, {}),
+      );
+      expect(opened.outcome, opened.message).toBe("done");
+    });
+    const conflict = taskFile().parsed.packet;
+    expect(conflict?.title).toBe("`vib-1-work` conflicts with `main`");
+    expect(conflict?.stalled, "only a stall escalation carries the marker").toBeUndefined();
+
+    const runId = await finishedRunWith(
+      "Blocked on the unresolved VIB-1/main conflict; no lasting changes were made.",
+    );
+    await runEffects(runId, { delivers: true });
+
+    const parsed = taskFile().parsed;
+    expect(parsed.packet?.id, "a clean run withdrew a standing conflict").toBe(conflict!.id);
+    expect(parsed.frontmatter.readiness).toBe("blocked");
+    expect(
+      parsed.timeline.some((e) => (e.text ?? "").includes("**Packet withdrawn:**")),
+      "the timeline called the conflict moot",
+    ).toBe(false);
+    expect(
+      listAuditEvents(store.db).some((e) => e.action === "task.packet.withdrawn_superseded"),
+    ).toBe(false);
+  });
+
+  it("ruling 432: the stall packet the server raises carries the marker, and a clean run withdraws it", async () => {
+    /**
+     * The producer half: the marker is only worth anything if the one writer
+     * of stall packets puts it there, so this drives that writer instead of
+     * writing the packet by hand.
+     *
+     * CANARY: drop `stalled: true` from `openStuckLoopPacket`'s packet.
+     */
+    await withOperatorDeployed(async () => {
+      const { openStuckLoopPacketForTest } = await import("./task-actions.server");
+      await openStuckLoopPacketForTest(
+        store.db,
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          agentHandle: "dev",
+          reason: "The agent repeated its previous report verbatim, with no forward progress.",
+        },
+      );
+    });
+    const stall = taskFile().parsed.packet;
+    expect(stall?.title).toBe("Work stalled: pick a recovery path");
+    expect(stall?.stalled).toBe(true);
+
+    const runId = await finishedRunWith("Recovered: the work is delivered.");
+    await runEffects(runId, { delivers: true });
+
+    const parsed = taskFile().parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    const note = parsed.timeline.find((e) => (e.text ?? "").includes("**Packet withdrawn:**"));
+    expect(note?.text).toContain("Work stalled: pick a recovery path");
   });
 });

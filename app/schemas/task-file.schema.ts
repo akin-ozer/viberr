@@ -1070,6 +1070,19 @@ export const taskPacketSchema = z
      * for the same reason agree on it without anything coordinating them.
      */
     cause: z.string().optional(),
+    /**
+     * Ruling 432: the packet is a STALL escalation. The server raised it
+     * because an agent's run failed or the coordination loop stopped making
+     * progress (`openStuckLoopPacket`, "Work stalled: pick a recovery path").
+     *
+     * It is the one family a later successful run can prove wrong, so it is the
+     * only one that run may withdraw (`withdrawSupersededStuckPacket`, owner
+     * ruling 2026-07-18). A branch conflict, a lease order, an agent's question
+     * and the operator's own decisions carry no marker: a run finishing says
+     * nothing about any of them, and withdrawing one called a standing conflict
+     * "moot". Written only by the server; neither operator backend can set it.
+     */
+    stalled: z.literal(true).optional(),
     /** R15-14: profileId of the AGENT that raised this question, when one did.
      *  Resolving such a packet resumes that agent's own session with the answer
      *  rather than handing it to the operator to re-engage a cold run. Absent on
