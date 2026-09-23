@@ -70,7 +70,10 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
-import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
+import {
+  createReconcileBehindByLookup,
+  latestTaskReconcileAt,
+} from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
@@ -488,6 +491,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // architecture.md. It now goes through app/server/provenance/, which owns
     // the table.
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // U39-32: how far the branch stood behind the base at the reconciler's
+    // last compare, so the accept dialog can say which of its two cases this
+    // click is. Null: never compared.
+    baseBehindBy: createReconcileBehindByLookup(db)(detail.filePath),
     // F19-22: the line above is the last pass that CHANGED something — DG-3
     // deliberately withholds the provenance row when a poller tick finds
     // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
@@ -1434,6 +1441,7 @@ export default function TaskDetailRoute({
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
+      baseBehindBy={loaderData.baseBehindBy}
       githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}

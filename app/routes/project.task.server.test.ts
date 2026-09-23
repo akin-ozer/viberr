@@ -38,6 +38,8 @@ interface TaskLoaderData {
   githubCheckedAt: string | null;
   /** U39-31. */
   taskLinks: TaskLinks;
+  /** U39-32. */
+  baseBehindBy: number | null;
 }
 
 /**
@@ -244,5 +246,19 @@ describe("U39-31: the task page's task links", () => {
     expect(data.taskLinks).toMatchObject({ "VIB-145": "/projects/viberr-core/tasks/VIB-145" });
     expect(data.taskLinks["VIB-142"]).toBeUndefined();
     expect(data.taskLinks["VIB-9999"]).toBeUndefined();
+  });
+});
+
+describe("U39-32: the accept dialog's base lag", () => {
+  it("carries the reconciler's last behind-by for the task, and null when never compared", async () => {
+    // CANARY: return `baseBehindBy: null` from the loader.
+    expect((await loadTask("VIB-145")).baseBehindBy).toBeNull();
+    const { recordProvenance } = await import("~/server/provenance/provenance-recorder.server");
+    recordProvenance(app.db, {
+      action: "github.reconcile",
+      sourcePath: "projects/viberr-core/tasks/VIB-145/task.md",
+      details: { changed: true, sync: "behind", behindBy: 3 },
+    });
+    expect((await loadTask("VIB-145")).baseBehindBy).toBe(3);
   });
 });

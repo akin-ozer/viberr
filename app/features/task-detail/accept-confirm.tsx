@@ -176,11 +176,15 @@ export function AcceptConfirm({
    *  it silently — no row here, no timeline note, no audit — so the human
    *  never learned a question died with the acceptance. */
   openPacketTitle = null,
+  baseBehindBy = null,
   busy,
   onCancel,
   onConfirm,
 }: {
   task: AcceptConfirmTask;
+  /** U39-32: how many base commits the branch lacked at the reconciler's last
+   *  compare, or null when that was never measured (the board door). */
+  baseBehindBy?: number | null;
   openPacketTitle?: string | null;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
@@ -469,10 +473,39 @@ export function AcceptConfirm({
             <div className="obs">
               <span className="k">Branch</span>
               <span>
-                <span className="mono">{task.branch}</span> is brought up to
-                date with <span className="mono">{defaultBranch}</span> first.
-                If the base has moved, that merge commit is pushed to the
-                branch and becomes the merge head.
+                {/* U39-32: the reconciler's last compare says which case this
+                    click is. Live on ax-clone the same conditional sentence
+                    sat over a branch that already carried main (AX-28) and one
+                    four commits behind it (AX-29), and the person had to go to
+                    GitHub to learn which, and whether the head that would
+                    merge had ever been reviewed. */}
+                {baseBehindBy === 0 ? (
+                  <>
+                    <span className="mono">{task.branch}</span> carried{" "}
+                    <span className="mono">{defaultBranch}</span> at the last
+                    GitHub check, so the reviewed head merges as it is. If{" "}
+                    <span className="mono">{defaultBranch}</span> moves before
+                    you confirm, the merge that brings it in is pushed to the
+                    branch first.
+                  </>
+                ) : baseBehindBy !== null && baseBehindBy > 0 ? (
+                  <>
+                    <span className="mono">{task.branch}</span> is{" "}
+                    {baseBehindBy === 1 ? "1 commit" : `${baseBehindBy} commits`}{" "}
+                    behind <span className="mono">{defaultBranch}</span> at the
+                    last GitHub check. Accepting merges{" "}
+                    {baseBehindBy === 1 ? "it" : "them"} into the branch first
+                    and pushes that merge commit, which becomes the merge head.
+                    No review has run on that combination.
+                  </>
+                ) : (
+                  <>
+                    <span className="mono">{task.branch}</span> is brought up to
+                    date with <span className="mono">{defaultBranch}</span> first.
+                    If the base has moved, that merge commit is pushed to the
+                    branch and becomes the merge head.
+                  </>
+                )}
               </span>
             </div>
           )}

@@ -475,6 +475,7 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     pr: AcceptConfirmTask["pr"];
     branch?: string | null;
     mode?: "accept" | "complete-merge";
+    baseBehindBy?: number | null;
   }): string {
     const { container } = render(
       <AcceptConfirm
@@ -483,6 +484,7 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
           branch: props.branch === undefined ? "vib-151" : props.branch,
         })}
         workRevisionSha={"a".repeat(40)}
+        baseBehindBy={props.baseBehindBy ?? null}
         defaultBranch="main"
         ceremony={{ mode: props.mode ?? "accept" }}
         blockedReason={null}
@@ -505,6 +507,19 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     expect(text).toContain(
       "vib-151 is brought up to date with main first. If the base has moved, that merge commit is pushed to the branch and becomes the merge head.",
     );
+  });
+
+  it("U39-32: says which case this click is when the last compare knows", () => {
+    // Live on ax-clone the conditional sentence sat over AX-28 (carried main)
+    // and AX-29 (four commits behind). CANARY: render the conditional sentence
+    // whatever `baseBehindBy` says.
+    expect(dialogText({ pr: OPEN_PR, baseBehindBy: 0 })).toContain(
+      "vib-151 carried main at the last GitHub check, so the reviewed head merges as it is.",
+    );
+    expect(dialogText({ pr: OPEN_PR, baseBehindBy: 4 })).toContain(
+      "vib-151 is 4 commits behind main at the last GitHub check. Accepting merges them into the branch first and pushes that merge commit, which becomes the merge head. No review has run on that combination.",
+    );
+    expect(dialogText({ pr: OPEN_PR, baseBehindBy: 1 })).toContain("is 1 commit behind main");
   });
 
   it("says nothing about a refresh on the paths that perform none", () => {

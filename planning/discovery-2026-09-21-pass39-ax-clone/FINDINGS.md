@@ -609,11 +609,13 @@ what they strand, and record an optional reason.
   The GitHub pass re-measures within five minutes, and the sentence stays true in substance
   (the new head is not on the PR either). Dropping or re-pointing the record at the mint would
   trade one stale sentence for another, so it is left.
-- **The accept dialog hedges a fact it has.** AX-28 03:31: "ax-28 is brought up to date with
-  main first. If the base has moved, that merge commit is pushed to the branch and becomes the
-  merge head." The branch already contained main (`7022aa5`), which the PR's `mergeable: clean`
-  at the reviewed head also says, so the merge head WAS the reviewed head. The sentence is
-  accurate, and naming which case applies would spare the reader a look at GitHub.
+- ~~**The accept dialog hedges a fact it has.**~~ **Fixed, U39-32** (2026-09-23): the dialog
+  reads the reconciler's last compare. At 0 behind it says the reviewed head merges as it is;
+  behind by N it says the ceremony merges N base commits first and that "No review has run on
+  that combination" (O39-c's burden, named at the click that creates it); unknown keeps the
+  conditional sentence. Live, AX-28 was the first case and AX-29 the second, and I told them
+  apart by fetching both branches and testing the merges in the container. Tests:
+  `accept-confirm.test.tsx` and `project.task.server.test.ts`, each "U39-32".
 - ~~**Insights "By task" lists controller conversations as `/cnv_…`.**~~ **Fixed, U39-22**
   (2026-09-23): controller turns are one row, "controller conversations". Test:
   `insights-query.server.test.ts` "U39-22".
