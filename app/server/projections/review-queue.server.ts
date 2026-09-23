@@ -18,7 +18,12 @@ import {
   resolveStageRoles,
   stageName,
 } from "~/shared/workflow/stage-roles";
-import { getProject, listProjectTasks } from "./board-query.server";
+import type { ProjectRecord } from "~/shared/mapping/project.server";
+import {
+  getProject,
+  listProjectTasks,
+  type TaskActivitySummary,
+} from "./board-query.server";
 import { liveMergeable } from "~/features/github/github-pills";
 
 /**
@@ -237,9 +242,19 @@ export function getReviewQueue(
     dataRoot?: string;
     /** Gap-10: the instant "has this gone quiet?" is asked against (tests only). */
     now?: Date;
+    /**
+     * Ruling 454: the project's LIVE tasks (archived ones dropped) in
+     * `listProjectTasks` order, when the caller already built them — the
+     * workspace layout passes the board's list, so each load maps every task
+     * once. Omitted, the queue lists them itself. Same rows either way, so the
+     * rail badge and this queue stay one number (U35-5).
+     */
+    tasks?: readonly TaskActivitySummary[];
+    /** Ruling 454: the project row, when the caller already read it. */
+    project?: ProjectRecord | null;
   },
 ): ReviewQueueData {
-  const project = getProject(db, slug);
+  const project = opts.project === undefined ? getProject(db, slug) : opts.project;
   // D-1 (pass 24): an ARCHIVED project is read-only (R6-3) — the server refuses
   // acceptance from any role, and `decisionsRequiring` (which feeds the home
   // dashboard, the notifications inbox and the board's "waiting on me" chip)
@@ -275,7 +290,7 @@ export function getReviewQueue(
     );
   };
   const inReview = reviewId
-    ? listProjectTasks(db, slug, opts.now ? { now: opts.now } : {}).filter(
+    ? (opts.tasks ?? listProjectTasks(db, slug, opts.now ? { now: opts.now } : {})).filter(
         isReviewWork,
       )
     : [];

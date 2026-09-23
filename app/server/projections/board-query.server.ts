@@ -193,12 +193,28 @@ export function listProjectTasks(
     dataRoot?: string;
   } = {},
 ): TaskActivitySummary[] {
-  const project = getProject(db, slug);
+  return mapProjectTasks(
+    db,
+    slug,
+    getProject(db, slug),
+    new Set(listProjectMembers(db, slug).map((m) => m.userId)),
+    opts,
+  );
+}
+
+/** {@link listProjectTasks} over a project row and member set the caller has
+ *  already read (getBoard reads both for its own header). */
+function mapProjectTasks(
+  db: DatabaseSync,
+  slug: string,
+  project: ProjectRecord | null,
+  memberIds: Set<string>,
+  opts: Parameters<typeof listProjectTasks>[2] = {},
+): TaskActivitySummary[] {
   const stages = project
     ? project.stages.map((s) => ({ id: s.id, name: s.name }))
     : [];
   const stageIds = stages.map((s) => s.id);
-  const memberIds = new Set(listProjectMembers(db, slug).map((m) => m.userId));
   // ONE actor resolver for the whole query — createActorResolver caches user
   // lookups behind a single prepared statement (its own doc: "create one per
   // request/query and map many rows through it"). Previously `resolveTaskOwner`
@@ -305,6 +321,19 @@ export function listProjectLabels(db: DatabaseSync, slug: string): string[] {
 
 /** Full board read model: columns in project stage order. */
 export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
+  return getBoardWithTasks(db, slug)?.board ?? null;
+}
+
+/**
+ * {@link getBoard} plus the flat task list the columns were built from, in
+ * {@link listProjectTasks} order and archived tasks included. Ruling 454: the
+ * workspace layout also needs the review queue, which reads the same rows, so
+ * it hands this list on instead of mapping every task a second time.
+ */
+export function getBoardWithTasks(
+  db: DatabaseSync,
+  slug: string,
+): { board: BoardData; tasks: TaskActivitySummary[] } | null {
   const project = getProject(db, slug);
   if (!project) return null;
 
@@ -326,7 +355,7 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
   // its "Archived" chip is the only way back to them (`matchesBoardFilter`
   // excludes them from every other filter). Every OTHER read model — the review
   // queue, the decisions inbox, home's counts — takes the default exclusion.
-  const tasks = listProjectTasks(db, slug, { includeArchived: true });
+  const tasks = mapProjectTasks(db, slug, project, memberIds, { includeArchived: true });
   const byStage = new Map<string, TaskActivitySummary[]>();
   for (const stage of project.stages) byStage.set(stage.id, []);
   const orphanTasks: TaskActivitySummary[] = [];
@@ -339,12 +368,15 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
   for (const bucket of byStage.values()) bucket.sort(compareBoardOrder);
 
   return {
-    project,
-    members,
-    columns: project.stages.map((stage) => ({
-      stage: { id: stage.id, name: stage.name, color: stage.color },
-      tasks: byStage.get(stage.id) ?? [],
-    })),
-    orphanTasks,
+    board: {
+      project,
+      members,
+      columns: project.stages.map((stage) => ({
+        stage: { id: stage.id, name: stage.name, color: stage.color },
+        tasks: byStage.get(stage.id) ?? [],
+      })),
+      orphanTasks,
+    },
+    tasks,
   };
 }

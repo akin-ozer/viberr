@@ -11,7 +11,7 @@ import type { loader as taskLoader } from "./project.task";
 import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { getBoard } from "~/server/projections/board-query.server";
+import { getBoardWithTasks } from "~/server/projections/board-query.server";
 import { readRepoHealth } from "~/server/github/repo-health.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import {
@@ -74,10 +74,11 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
-  const raw = getBoard(db, params.slug);
-  if (!raw) {
+  const loaded = getBoardWithTasks(db, params.slug);
+  if (!loaded) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
+  const raw = loaded.board;
   // R15-4: refuse BEFORE any viewer-scoped projection work — the decision and
   // review-queue scans below are per-viewer reads a non-member must never
   // trigger, and the message must stay byte-identical to the unknown-slug one.
@@ -110,7 +111,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // queue's `ready` list is already viewer-scoped by acceptance authority.
   // U35-5: read the queue ONCE; `ready` feeds the board's "waiting on me" and
   // `total` is the rail badge, so the badge links to a list of the same length.
-  const reviewQueue = getReviewQueue(db, params.slug, { viewerUserId: user.id });
+  // Ruling 454: from the board's own rows — archived ones dropped by the ONE
+  // predicate (F19-9), which is exactly the `archived = 0` list the queue would
+  // otherwise map a second time.
+  const reviewQueue = getReviewQueue(db, params.slug, {
+    viewerUserId: user.id,
+    tasks: loaded.tasks.filter((t) => !isArchived(t)),
+    project: raw.project,
+  });
   const myDecisions = new Set([
     ...decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
       (d) => d.taskKey,

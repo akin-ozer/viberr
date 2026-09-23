@@ -10,6 +10,9 @@ import {
 } from "../../../test-support/test-store";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { isArchived } from "~/features/board/board-filters";
+import { statementsMatching, tallyServerReads } from "../../../test-support/server-read-probe";
+import { getBoardWithTasks } from "./board-query.server";
 import { rebuildAll } from "./rebuilder.server";
 import { getReviewQueue } from "./review-queue.server";
 import { reviewRowSub } from "~/features/review/review-helpers";
@@ -128,6 +131,30 @@ describe("getReviewQueue", () => {
     expect(queue.working.find((t) => t.key === "VIB-103")?.waiting).toBe(
       "none",
     );
+  });
+
+  it("ruling 454: the board's own list gives the same queue, without a second task query", async () => {
+    const store = setup();
+    // An archived review task: on the board's list, never in the queue.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-104", { stage: "review", waiting: "human", archived: true }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const viewer = { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id };
+    const own = getReviewQueue(store.db, store.slug, viewer);
+
+    const loaded = getBoardWithTasks(store.db, store.slug)!;
+    expect(loaded.tasks.map((t) => t.key)).toContain("VIB-104");
+    const { result: shared, tally } = await tallyServerReads(store.dataRoot, () =>
+      getReviewQueue(store.db, store.slug, {
+        ...viewer,
+        tasks: loaded.tasks.filter((t) => !isArchived(t)),
+        project: loaded.board.project,
+      }),
+    );
+    expect(shared).toEqual(own);
+    expect(shared.total).toBe(3);
+    expect(statementsMatching(tally, /FROM task_projections/)).toHaveLength(0);
   });
 
   it("carries the subline sources: packet header, newest event text, or nothing", () => {

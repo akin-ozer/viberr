@@ -28,16 +28,18 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: `${TASK_REVALIDATION}, parse memo emptied first`,
   },
   // TASK-2 / SRV-1: store-file reads (each an existsSync + readFileSync pair).
+  // 35 before the layout built the task list once.
   "server-read:task-revalidation.store-reads": {
-    ceiling: 35,
+    ceiling: 31,
     unit: "count",
     journey: "task-open",
     fixture: TASK_REVALIDATION,
   },
   // SRV-7 / FL-3 / BOARD-5 / SRV-5 / TASK-7: every SQL statement execution.
   // 86 before one session resolution per Request.
+  // 76 before the layout built the task list once.
   "server-read:task-revalidation.sql": {
-    ceiling: 76,
+    ceiling: 64,
     unit: "count",
     journey: "server",
     fixture: TASK_REVALIDATION,
@@ -66,16 +68,18 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: BOARD_REVALIDATION,
   },
   // FL-3 / BOARD-5: the same four files read twice.
+  // 8 before the layout built the task list once.
   "server-read:board-revalidation.store-reads": {
-    ceiling: 8,
+    ceiling: 4,
     unit: "count",
     journey: "board-live",
     fixture: BOARD_REVALIDATION,
   },
   // FL-3 / BOARD-5 / SRV-5 / FL-8: every SQL statement execution.
   // 54 before one session resolution per Request.
+  // 49 before the layout built the task list once (getBoardWithTasks feeds the review queue).
   "server-read:board-revalidation.sql": {
-    ceiling: 49,
+    ceiling: 37,
     unit: "count",
     journey: "server",
     fixture: BOARD_REVALIDATION,
@@ -89,8 +93,9 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: BOARD_REVALIDATION,
   },
   // BOARD-5: task_projections rows mapped (2N: board, then review queue).
+  // 20 before the layout built the task list once.
   "server-read:board-revalidation.task-rows": {
-    ceiling: 20,
+    ceiling: 10,
     unit: "count",
     journey: "board-live",
     fixture: BOARD_REVALIDATION,
