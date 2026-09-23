@@ -1154,6 +1154,24 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
   });
 });
 
+describe("U39-21 on the rail: a chain's history renders its inline code", () => {
+  it("renders `code` in a history entry instead of printing the backticks", async () => {
+    // CANARY: render `entry.text` as plain text again.
+    const goal = goalOf({
+      id: "goal-4",
+      title: "CLI",
+      description: "",
+      history: [{ occurredAt: "2026-09-22T20:00:00.000Z", text: "Link 2 renamed to `ax apply -f` by Arda Kaya." }],
+      links: [linkOf({ index: 1 })],
+    });
+    const { container } = renderPage(view({ goals: [goal] }));
+    await screen.findByText("CLI");
+    const entry = container.querySelector(".ctl-goal-history li")!;
+    expect(entry.querySelector("code.mono")?.textContent).toBe("ax apply -f");
+    expect(entry.textContent).not.toContain("`");
+  });
+});
+
 describe("ruling 419(h): a chain says what it is for and what has happened to it", () => {
   const history = Array.from({ length: 8 }, (_, i) => ({
     occurredAt: `2026-09-22T2${i}:00:00.000Z`,

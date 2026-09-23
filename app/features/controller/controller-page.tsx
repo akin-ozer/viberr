@@ -21,6 +21,7 @@ import type {
 import type { GoalView } from "~/server/tasks/goal-actions.server";
 import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
+import { RichText } from "~/ui/rich-text";
 import { Pill, type PillKind } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -1137,7 +1138,11 @@ function GoalCard({
                   </button>
                 </span>
               )}
-              {l.note && <span className="fine xs dim ctl-link-note">{l.note}</span>}
+              {l.note && (
+                <span className="fine xs dim ctl-link-note">
+                  <RichText text={l.note} mentions={false} />
+                </span>
+              )}
             </li>
           );
         })}
@@ -1160,7 +1165,11 @@ function GoalCard({
                 (entry, i) => (
                   <li key={i}>
                     <LocalDayDotTime iso={entry.occurredAt} />
-                    <span>{entry.text}</span>
+                    {/* U39-21's rule here too: a chain's history is written
+                        with `code` (a reason, a link title) like the rest. */}
+                    <span>
+                      <RichText text={entry.text} mentions={false} />
+                    </span>
                   </li>
                 ),
               )}
