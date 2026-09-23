@@ -1337,3 +1337,19 @@ not lost work.
   now asks.
 - **The operators acted on it.** AX-28's operator: "Waits on AX-32 (added AX-32). Held until
   every entry is done" (02:32:16).
+
+## 48. Ruling 438 live within five minutes, and main green again (02:43 to 02:51 UTC)
+
+- **Main recovered.** I accepted AX-32 at 02:43. PR #21 merged with no base refresh, because
+  main had not moved since AX-32 branched. AX-28 and AX-29 were released on the merge ("Released:
+  everything this task waited on is done (AX-32)"). AX-29's operator brought its branch up to
+  date (02:44:06, "2 commits merged in") and sent a reviewer to run `make gate` and `make race`
+  on the refreshed head.
+- **Ruling 438, before and after, on one task.** AX-28's refresh conflicted in
+  `internal/controller/task.go`. I routed the conflict to the Developer, and at 02:45:52 the
+  operator refused: "the operator rules prohibit agent-side merges", then opened "AX-28 base
+  conflict has no supported resolution path". I changed the doctrine (seed and live copy; the
+  operator reads the live one per run) and gave the same answer. At 02:50:43 the operator
+  handed delivery to the Developer: "Resolve the authorized base conflict in your workspace:
+  merge `origin/main` into the AX-28 task branch, preserving AX-22, AX-26, and AX-32's changes
+  in `internal/controller/task.go` … Do not push or open a PR."

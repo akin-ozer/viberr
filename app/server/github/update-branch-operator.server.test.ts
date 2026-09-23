@@ -475,7 +475,24 @@ describe("the operator persona teaches the branch update", () => {
   it("names the tool and when to use it", () => {
     expect(seed).toContain("`update_branch_from_base`");
     expect(seed).toMatch(/before you deliver/i);
-    expect(seed).toMatch(/never ask an agent to rebase, merge, or force-push/i);
+    expect(seed).toMatch(/never ask an agent to rebase or force-push, never ask it to bring the branch up to date/i);
+  });
+
+  it("ruling 438: names the one merge an agent makes, the conflict a person routed to it", () => {
+    /**
+     * Live on AX-28 at 02:45: I answered the branch-conflict packet by sending
+     * the conflict to the Developer, which is what the packet's own recommended
+     * redirect does ("it merges and resolves the conflicting files"). The
+     * operator refused, "the operator rules prohibit agent-side merges", and
+     * opened "AX-28 base conflict has no supported resolution path". The
+     * doctrine forbade every agent merge; on AX-21 at 01:40 the same answer
+     * had been relayed.
+     *
+     * CANARY: restore "never ask an agent to rebase, merge, or force-push".
+     */
+    expect(seed).not.toMatch(/never ask an agent to rebase, merge/i);
+    expect(seed).toMatch(/that is the one merge an agent makes \(ruling 438\)/);
+    expect(seed).toMatch(/direct it to merge `origin\/<base>` into the task branch in its own workspace/);
   });
 
   it("ruling 134(c): says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {

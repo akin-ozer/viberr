@@ -92,6 +92,7 @@ per item and each one was applied to the source and observed failing.
 | 79 | Touch-size targets for the goal chains' controls (U39-27) | owner: "especially the controller page" | **done** (no ruling) |
 | 80 | The workspace contract says fetching is the server's (F39-59) | — | **done** (no ruling) |
 | 81 | The operator is told whose the open packet is (F39-60) | — | **done**, ruling 437 |
+| 82 | The one merge an agent makes is the conflict a person routed to it (F39-61) | — | **done**, ruling 438 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

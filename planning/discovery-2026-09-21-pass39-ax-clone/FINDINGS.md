@@ -396,6 +396,17 @@ what they strand, and record an optional reason.
   was not carried out in full" note. The snapshot handed over the packet's content "to judge
   whether the packet is now moot" and never who raised it. **Fixed: ruling 437.**
 
+- **F39-61 (HIGH) — the operator refused the conflict resolution Viberr itself recommends.** AX-28
+  02:45: after AX-32 merged, the refresh conflicted in `internal/controller/task.go` and the packet
+  recommended "Have Surface Developer resolve the conflict … it merges and resolves the
+  conflicting files". I routed it to the Developer instead (task.go is core). The operator
+  answered "the operator rules prohibit agent-side merges" and opened "AX-28 base conflict has no
+  supported resolution path", with "Provide a supported conflict-resolution path" as the
+  recommended option. Its doctrine said "never ask an agent to rebase, merge, or force-push" with
+  no exception, while the product's only in-product conflict path is an agent merge (rulings
+  133(b), 163). On AX-21 at 01:40 the same answer had gone through. The fix was live the moment
+  the persona file changed, since the operator reads it per run. **Fixed: ruling 438.**
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
