@@ -612,9 +612,15 @@ describe("ruling 134(c): the remote report", () => {
     const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
     expect(res.outcome).toBe("done");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    // Ruling 439: and the head it merged onto, which is what lets the reviewed
+    // revision be followed through the refresh. Canary: drop `onto` from the
+    // push in recordBranchRefresh.
     expect(fm.frontmatter.baseRefreshes).toEqual([
-      { mergeSha: MERGE_SHA, baseSha: BASE_SHA, base: "main", commits: 2, at: expect.any(String) },
+      { mergeSha: MERGE_SHA, baseSha: BASE_SHA, base: "main", commits: 2, at: expect.any(String), onto: PRE_SHA },
     ]);
+    // The push published the revision the merge was made onto. Canary: drop
+    // the stamp in recordBranchRefresh.
+    expect(fm.frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
     expect(fm.frontmatter.pr?.revisionDrift).toBeTruthy();
     const sentence = describeRevisionDrift(fm.frontmatter.pr?.revisionDrift).sentence;
     expect(sentence).not.toBe("");

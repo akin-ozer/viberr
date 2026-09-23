@@ -468,14 +468,18 @@ export async function reconcileWorkspaceDelivery(
       const headSha = headRes.ok ? headRes.stdout.trim() : "";
       const treeSha = treeRes.ok ? treeRes.stdout.trim() || null : null;
       if (headSha) {
-        const { revision, changed } = nextWorkRevision(fm.workRevision, {
-          id: newId("rev"),
-          headSha,
-          treeSha,
-          branch: validBranch,
-          sourceProfileId: input.profileId ?? null,
-          createdAt: new Date().toISOString(),
-        });
+        const { revision, changed } = nextWorkRevision(
+          fm.workRevision,
+          {
+            id: newId("rev"),
+            headSha,
+            treeSha,
+            branch: validBranch,
+            sourceProfileId: input.profileId ?? null,
+            createdAt: new Date().toISOString(),
+          },
+          fm.baseRefreshes,
+        );
         if (changed) workRevisionPatch = revision;
       }
     }

@@ -6,7 +6,7 @@ import {
   resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
-import { describeRevisionDrift } from "~/shared/revision-drift";
+import { describeRevisionDrift, headCarriesRevision } from "~/shared/revision-drift";
 import { reconcileTask, type GithubActionContext } from "./github-reconciler.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -28,6 +28,7 @@ import {
 import type { Exec } from "./push-workspace.server";
 import {
   DIVERGED_BRANCH_REMEDY,
+  activeWorkRevision,
   deliveringEngagement,
   type Engagement,
   type FileActorRef,
@@ -345,7 +346,18 @@ export async function recordBranchRefresh(
       base: result.base,
       commits: result.commits,
       at: new Date().toISOString(),
+      onto: result.onto,
     });
+    // Ruling 439: the push that published the merge published the revision it
+    // was made onto, the same fact a delivery push stamps (ruling 161).
+    const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+    if (
+      rev &&
+      !rev.pushedAt &&
+      headCarriesRevision(rev.headSha, result.mergeSha, parsed.frontmatter.baseRefreshes)
+    ) {
+      rev.pushedAt = new Date().toISOString();
+    }
   });
   const reconcile = await reconcileTask(db, ref, by.reconcileActor, ctx);
   const after = readTaskFile(fileRef)?.parsed.frontmatter ?? null;

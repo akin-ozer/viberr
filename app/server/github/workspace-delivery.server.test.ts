@@ -244,6 +244,56 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(unread.c).toBe(1);
   });
 
+  it("ruling 439: a delivery after Viberr's own base refresh keeps the revision and the approval on it", async () => {
+    // Live on ax-clone AX-29: revision 4e6c47d, `main` merged onto it by
+    // update_branch_from_base as 278c1ed, the reviewer approved, and the
+    // deliver_for_review reconcile 65 seconds later minted 278c1ed as a NEW
+    // revision (the merge changed the tree), so the approval went stale and the
+    // task sat at Review waiting for a verdict nobody was producing. CANARY:
+    // pass `[]` instead of `fm.baseRefreshes` to nextWorkRevision.
+    const delivered = "4e6c47d51283c3f457b040d4d685ccf1edc373d5";
+    const store = setupTask("ATL-3", {
+      stage: "review",
+      branch: BRANCH,
+      engagements: [
+        { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: false, verdictCapable: true },
+      ],
+      workRevision: {
+        id: "rev_1",
+        headSha: delivered,
+        treeSha: "01d7000000000000000000000000000000000000",
+        branch: BRANCH,
+        createdAt: "2026-09-23T02:20:00.000Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: delivered, result: "approve", reason: "ok", at: "2026-09-23T02:58:05.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      baseRefreshes: [
+        { mergeSha: HEAD_SHA, baseSha: "b".repeat(40), base: "main", commits: 2, at: "2026-09-23T02:44:06.000Z", onto: delivered },
+      ],
+    });
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir: makeWorkspaceRepo(),
+      dataRoot: store.dataRoot,
+      backend: "codex",
+      role: "Developer",
+      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
+    });
+    expect(res.status).toBe("reconciled");
+    const fm = readFm(store).frontmatter;
+    expect(fm.workRevision).toMatchObject({ id: "rev_1", headSha: delivered });
+    expect(fm.validation).toBe("healthy");
+    expect(fm.verdicts).toHaveLength(1);
+  });
+
   it("locates the repo via the conventional <taskDir>/workspace/<name> path when no workdir is given", async () => {
     const store = setupTask();
     // "akin-ozer/viberr" → repo name "viberr".

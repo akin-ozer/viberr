@@ -5559,6 +5559,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         commits: 2,
         mergeSha: "m".repeat(40),
         baseSha: "b".repeat(40),
+        onto: "a".repeat(40),
         remoteBefore: { kind: "current", headSha: "a".repeat(40) },
         remote: { kind: "current", headSha: "m".repeat(40) },
       };
@@ -5843,6 +5844,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       commits: 2,
       mergeSha: "m".repeat(40),
       baseSha: "b".repeat(40),
+      onto: "a".repeat(40),
       remoteBefore: { kind: "current", headSha: "a".repeat(40) },
       remote: { kind: "current", headSha: "m".repeat(40) },
     }));

@@ -1693,6 +1693,8 @@ async function dispatchAgentRun(
                   activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha ?? null,
                 prHeadSha: existing.parsed.frontmatter.pr?.headSha ?? null,
                 drift: existing.parsed.frontmatter.pr?.revisionDrift ?? null,
+                // Ruling 439: a refresh made before any PR exists re-pins too.
+                refreshes: existing.parsed.frontmatter.baseRefreshes,
               })
             : null,
           taskBranch: existing.parsed.frontmatter.branch ?? null,

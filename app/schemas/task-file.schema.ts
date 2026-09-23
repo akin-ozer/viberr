@@ -7,7 +7,7 @@ import {
   type FileDiagnostic,
 } from "./file-diagnostics";
 import { canonicalDependencyRef } from "~/shared/dependencies";
-import type { RevisionDrift } from "~/shared/revision-drift";
+import { headCarriesRevision, type RefreshLink, type RevisionDrift } from "~/shared/revision-drift";
 
 /**
  * Zod schemas + tolerant parser for the `task.md` frontmatter and packet
@@ -1226,6 +1226,11 @@ export const baseRefreshSchema = z
     commits: z.number().int().min(0),
     /** UTC ISO instant the refresh was pushed. */
     at: z.string().min(1),
+    /** Ruling 439: the branch head the merge was made on (its first parent,
+     *  full sha). It is what lets a revision be followed through Viberr's own
+     *  refreshes (`refreshChainFrom`). A refresh recorded without it links
+     *  nothing, so a head past it is judged by its tree, as before. */
+    onto: z.string().min(1).optional(),
   })
   .loose();
 export type BaseRefresh = z.infer<typeof baseRefreshSchema>;
@@ -1681,8 +1686,10 @@ export interface NextWorkRevision {
 /** Compute the next work revision for a freshly delivered head. A head with the
  *  SAME tree (or same head when the tree is unavailable) as the current revision
  *  is the SAME review subject — no new revision, so prior verdicts are NOT
- *  invalidated (F10-32). Otherwise a NEW revision id is minted, which makes
- *  every prior verdict stale automatically (F10-15 new-commit invalidation). */
+ *  invalidated (F10-32). So is a head the revision reaches through Viberr's own
+ *  base refreshes alone (ruling 439). Otherwise a NEW revision id is minted,
+ *  which makes every prior verdict stale automatically (F10-15 new-commit
+ *  invalidation). */
 export function nextWorkRevision(
   current: WorkRevision | null,
   input: {
@@ -1693,6 +1700,8 @@ export function nextWorkRevision(
     sourceProfileId: string | null;
     createdAt: string;
   },
+  /** Ruling 439: the base refreshes recorded on the task. */
+  refreshes: readonly RefreshLink[],
 ): NextWorkRevision {
   // Ruling 161: a discarded revision is never the same subject, whatever its
   // tree: the branch it named is gone, and a re-created head is new work.
@@ -1702,7 +1711,16 @@ export function nextWorkRevision(
     (input.treeSha != null && active.treeSha != null
       ? active.treeSha === input.treeSha
       : active.headSha === input.headSha);
-  if (sameSubject) return { revision: active, changed: false };
+  // Ruling 439 (pass 39, F39-62): a base merge changes the tree by definition,
+  // so the tree test above minted a new revision at the first delivery after
+  // every refresh and staled every verdict on the old one — the cost ruling
+  // 238 rejected when it decided a refresh mints nothing. Live on ax-clone
+  // AX-29 a reviewer approved the refreshed head and the delivery 65 seconds
+  // later threw the approval away. A head the revision reaches through
+  // Viberr's own recorded refreshes is the same deliverable on a newer base.
+  const refreshedOnly =
+    active != null && headCarriesRevision(active.headSha, input.headSha, refreshes);
+  if (active && (sameSubject || refreshedOnly)) return { revision: active, changed: false };
   return {
     revision: {
       id: input.id,

@@ -212,6 +212,8 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
       commits: 3,
       mergeSha: MERGE_SHA,
       baseSha: BASE_SHA,
+      // Ruling 439: the head the merge was made on. Canary: drop `onto: preSha`.
+      onto: PRE_SHA,
       remoteBefore: { kind: "current", headSha: PRE_SHA },
       remote: { kind: "current", headSha: MERGE_SHA },
     });

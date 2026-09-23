@@ -99,7 +99,8 @@ export type UpdateBranchResult =
    *  `baseSha` the base tip it merged (both read BEFORE the push, so a merge is
    *  never published unrecorded). Ruling 134(c): `remoteBefore` is origin's copy
    *  as it stood before this update and `remote` as the push left it
-   *  (`current` by construction: the push published HEAD). */
+   *  (`current` by construction: the push published HEAD). Ruling 439: `onto`
+   *  is the branch head the merge was made on, its first parent. */
   | {
       status: "updated";
       branch: string;
@@ -107,6 +108,7 @@ export type UpdateBranchResult =
       commits: number;
       mergeSha: string;
       baseSha: string;
+      onto: string;
       remoteBefore: RemoteBranchState;
       remote: RemoteBranchState;
     }
@@ -666,6 +668,7 @@ export async function updateWorkspaceBranchFromBase(
         commits: behind,
         mergeSha,
         baseSha,
+        onto: preSha,
         remoteBefore: remote,
         remote: { kind: "current", headSha: mergeSha },
       };

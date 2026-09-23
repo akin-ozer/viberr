@@ -328,7 +328,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
       branch: "vib-1",
       sourceProfileId: "developer",
       createdAt: "2026-07-05T00:00:00.000Z",
-    });
+    }, []);
     expect(same.changed).toBe(false);
     expect(same.revision.id).toBe("rev_1");
 
@@ -339,9 +339,33 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
       branch: "vib-1",
       sourceProfileId: "developer",
       createdAt: "2026-07-05T00:00:00.000Z",
-    });
+    }, []);
     expect(diff.changed).toBe(true);
     expect(diff.revision.id).toBe("rev_2");
+  });
+
+  it("ruling 439: a head the revision reaches by Viberr's own base refreshes is the same subject", () => {
+    // Live on ax-clone AX-29: revision 4e6c47d, `main` merged onto it as
+    // 278c1ed, the reviewer approved, and the delivery 65 seconds later minted
+    // 278c1ed as a new revision because the merge changed the tree. CANARY:
+    // drop `refreshedOnly` and the refreshed head mints `rev_2`.
+    const merged = "d".repeat(40);
+    const refreshes = [{ mergeSha: merged, onto: rev1.headSha, commits: 2 }];
+    const head = {
+      id: "rev_2",
+      headSha: merged,
+      treeSha: "t3".padEnd(40, "0"),
+      branch: "vib-1",
+      sourceProfileId: "developer",
+      createdAt: "2026-07-05T00:00:00.000Z",
+    };
+    expect(nextWorkRevision(rev1, head, refreshes)).toEqual({ revision: rev1, changed: false });
+    // Authored work on top of the refresh is a new subject.
+    const past = nextWorkRevision(rev1, { ...head, headSha: "9".repeat(40) }, refreshes);
+    expect(past.changed).toBe(true);
+    // So is a refresh made onto a commit that was never the revision's head.
+    const elsewhere = [{ mergeSha: merged, onto: "8".repeat(40), commits: 2 }];
+    expect(nextWorkRevision(rev1, head, elsewhere).changed).toBe(true);
   });
 });
 
@@ -1226,8 +1250,8 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
       sourceProfileId: "developer",
       createdAt: "2026-09-07T08:00:00.000Z",
     };
-    expect(nextWorkRevision(delivered, same)).toEqual({ revision: delivered, changed: false });
-    const minted = nextWorkRevision(discarded, same);
+    expect(nextWorkRevision(delivered, same, [])).toEqual({ revision: delivered, changed: false });
+    const minted = nextWorkRevision(discarded, same, []);
     expect(minted.changed).toBe(true);
     expect(minted.revision.id).toBe("rev_new");
     expect(minted.revision.kind).toBe("delivered");

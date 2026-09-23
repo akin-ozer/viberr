@@ -4,7 +4,10 @@ import {
 } from "~/server/files/task-attachments.server";
 import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
-import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import {
+  headCarriesRevision,
+  revisionDriftNote as sharedRevisionDriftNote,
+} from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
@@ -7877,16 +7880,27 @@ export async function performDelivery(
     // can tell a reported head from a published one without a PR to prove it.
     // A revision whose head the push did not name (a stale reconcile) is not
     // stamped: the PR that opens next is the proof for that shape.
+    // Ruling 439: a head the revision reaches through Viberr's own base
+    // refreshes carries it too, so a push of the refreshed branch publishes it.
     const pushedHead = push.headSha;
     if (pushedHead) {
       const before = readTaskFile(taskRef(ctx, projectSlug, taskKey));
       const revBefore = before
         ? activeWorkRevision(before.parsed.frontmatter.workRevision)
         : null;
-      if (revBefore && revBefore.headSha === pushedHead && !revBefore.pushedAt) {
+      if (
+        before &&
+        revBefore &&
+        !revBefore.pushedAt &&
+        headCarriesRevision(revBefore.headSha, pushedHead, before.parsed.frontmatter.baseRefreshes)
+      ) {
         await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
           const rev = activeWorkRevision(parsed.frontmatter.workRevision);
-          if (rev && rev.headSha === pushedHead && !rev.pushedAt) {
+          if (
+            rev &&
+            !rev.pushedAt &&
+            headCarriesRevision(rev.headSha, pushedHead, parsed.frontmatter.baseRefreshes)
+          ) {
             rev.pushedAt = new Date().toISOString();
           }
         });

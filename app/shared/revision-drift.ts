@@ -170,6 +170,68 @@ export function classifyRevisionDrift(input: ClassifyDriftInput): RevisionDrift 
   };
 }
 
+/** One recorded base refresh as the chain reads it (`baseRefreshes[]`). */
+export interface RefreshLink {
+  /** The merge commit the refresh made. */
+  mergeSha: string;
+  /** The branch head it merged the base onto. A record without it links
+   *  nothing. */
+  onto?: string | undefined;
+  /** How many base commits it brought in. */
+  commits: number;
+}
+
+/** Where a head leads through Viberr's own base refreshes (ruling 439). */
+export interface RefreshChain {
+  /** Each refresh merge the chain reaches, oldest first, with the base
+   *  commits it brought in. The last one is where the chain ends. */
+  links: { head: string; commits: number }[];
+}
+
+/**
+ * Ruling 439 (pass 39, F39-62): the heads a revision reaches through Viberr's
+ * own base refreshes alone.
+ *
+ * `update_branch_from_base` merges the base onto the branch head with
+ * `--no-ff` and records the head it merged onto (`onto`). A refresh made onto
+ * the revision's head, then one made onto THAT merge, and so on, carries the
+ * revision's deliverable on a newer base and nothing else, which is ruling
+ * 238's premise that a refresh does not change what was delivered. A refresh
+ * made onto any other commit sits on authored work nobody has reviewed, so it
+ * is not on the chain.
+ *
+ * Null when no recorded refresh was made onto `headSha`.
+ */
+export function refreshChainFrom(
+  headSha: string,
+  refreshes: readonly RefreshLink[],
+): RefreshChain | null {
+  const links: RefreshChain["links"] = [];
+  // Each record is followed at most once, so a malformed list cannot loop.
+  const unused = [...refreshes];
+  let at = headSha;
+  for (;;) {
+    const i = unused.findIndex((r) => r.onto === at);
+    const link = unused[i];
+    if (i < 0 || !link) break;
+    unused.splice(i, 1);
+    links.push({ head: link.mergeSha, commits: link.commits });
+    at = link.mergeSha;
+  }
+  return links.length > 0 ? { links } : null;
+}
+
+/** Ruling 439: is `headSha` the revision's own head, or one it reaches through
+ *  Viberr's base refreshes alone? */
+export function headCarriesRevision(
+  revisionHeadSha: string,
+  headSha: string,
+  refreshes: readonly RefreshLink[],
+): boolean {
+  if (headSha === revisionHeadSha) return true;
+  return refreshChainFrom(revisionHeadSha, refreshes)?.links.some((l) => l.head === headSha) ?? false;
+}
+
 /** The commit a re-review should read, and why it is not always the reviewed
  *  one (ruling 238). Client-safe: every field is a fact already on the task. */
 export interface ReviewSubject {
@@ -217,14 +279,45 @@ export function reviewSubjectSha(input: {
   prHeadSha: string | null;
   /** The drift the reconciler last measured. */
   drift: RevisionDrift | null | undefined;
+  /** Ruling 439: the base refreshes Viberr recorded on the task. */
+  refreshes: readonly RefreshLink[];
 }): ReviewSubject | null {
   const { reviewedSha, prHeadSha, drift } = input;
   if (!reviewedSha) return null;
   const stand: ReviewSubject = { sha: reviewedSha, rePinned: null };
-  if (!prHeadSha || !drift) return stand;
-  if (drift.headSha !== prHeadSha || prHeadSha === reviewedSha) return stand;
-  const refresh = drift.baseRefresh;
-  if (drift.authored !== 0 || !refresh) return stand;
-  if (refresh.merges === 0 && refresh.commits === 0) return stand;
-  return { sha: prHeadSha, rePinned: { reviewedSha, baseRefresh: refresh } };
+  if (prHeadSha === reviewedSha) return stand;
+  if (prHeadSha && drift && drift.headSha === prHeadSha) {
+    const refresh = drift.baseRefresh;
+    if (drift.authored !== 0 || !refresh) return stand;
+    if (refresh.merges === 0 && refresh.commits === 0) return stand;
+    return { sha: prHeadSha, rePinned: { reviewedSha, baseRefresh: refresh } };
+  }
+  // Ruling 439 (pass 39, F39-62): with no measurement at the head being
+  // offered, the refreshes Viberr itself recorded still say what a head is.
+  // Live on ax-clone AX-29 the operator refreshed the branch onto the reviewed
+  // revision and dispatched the reviewer before any PR existed, so there was
+  // no drift to read and the reviewer was detached at the pre-refresh commit.
+  // Its gates failed on exactly the four tests the merged base had fixed, and
+  // it approved only because it noticed on its own that the branch had moved.
+  // Without a PR the offered head is where the chain ends: the branch as
+  // Viberr's last refresh pushed it. With one, only a PR head the chain
+  // reaches is offered; anything else keeps the pin.
+  const chain = refreshChainFrom(reviewedSha, input.refreshes);
+  if (!chain) return stand;
+  const upTo = prHeadSha
+    ? chain.links.findIndex((l) => l.head === prHeadSha)
+    : chain.links.length - 1;
+  const reached = chain.links.slice(0, upTo + 1);
+  const head = reached.at(-1)?.head;
+  if (upTo < 0 || !head) return stand;
+  return {
+    sha: head,
+    rePinned: {
+      reviewedSha,
+      baseRefresh: {
+        merges: reached.length,
+        commits: reached.reduce((n, l) => n + l.commits, 0),
+      },
+    },
+  };
 }
