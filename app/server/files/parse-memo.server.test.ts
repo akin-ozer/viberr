@@ -1,8 +1,10 @@
-import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { baseTaskFrontmatter, setupTestStore, writeTask } from "../../../test-support/test-store";
+import { projectDir } from "./file-store-root.server";
 import { parseProjectFileContent } from "./project-file.server";
+import { parseTaskFileContent } from "./task-file.server";
 import {
   parseStoreFile,
   resetParseMemoForTests,
@@ -23,6 +25,13 @@ beforeEach(() => resetParseMemoForTests());
 afterEach(ctx.cleanup);
 
 const projectParses = () => storeFileParseCounts()["project-file"];
+
+/** The demo seed's viberr-core task keys, from its tasks directory. */
+function demoTaskKeys(dataRoot: string): string[] {
+  const keys = readdirSync(`${projectDir("viberr-core", dataRoot)}/tasks`);
+  expect(keys.length).toBeGreaterThanOrEqual(10);
+  return keys;
+}
 
 describe("store-file parse memo (ruling 454)", () => {
   it("parses unchanged bytes once and hands every caller its own copy", () => {
@@ -91,6 +100,24 @@ describe("store-file parse memo (ruling 454)", () => {
 
     expect(readProjectFile(ref)!.parsed.frontmatter.name).toBe(renamed);
     expect(projectParses()).toBe(2);
+  });
+
+  it("a hit equals a fresh parse for every demo file (every task field, full timelines)", async () => {
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    const { runDemoSeed } = await import("../../../test-support/demo-seed");
+    await runDemoSeed(db, { dataRoot });
+    const keys = demoTaskKeys(dataRoot);
+    for (const taskKey of keys) {
+      const ref = { projectSlug: "viberr-core", taskKey, dataRoot };
+      readTaskFile(ref);
+      const hit = readTaskFile(ref)!;
+      expect(hit.parsed).toStrictEqual(parseTaskFileContent(hit.content, { fallbackKey: taskKey }).parsed);
+      expect(hit.diagnostics).toStrictEqual(
+        parseTaskFileContent(hit.content, { fallbackKey: taskKey }).diagnostics,
+      );
+    }
+    expect(storeFileParseCounts()["task-file"]).toBe(keys.length);
   });
 
   it("keys on the parse context as well as the bytes", () => {
