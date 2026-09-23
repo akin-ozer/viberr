@@ -125,6 +125,17 @@ export function getTaskSummary(
   );
 }
 
+/** Whether the task has a projection row — exactly when {@link getTaskSummary}
+ *  answers non-null, without building the summary (ruling 454: the dock asks
+ *  this yes/no question on every load). */
+export function taskExists(db: DatabaseSync, slug: string, key: string): boolean {
+  return (
+    db
+      .prepare(`SELECT 1 FROM task_projections WHERE project_slug = ? AND task_key = ?`)
+      .get(slug, key) !== undefined
+  );
+}
+
 export function listTaskEvents(
   db: DatabaseSync,
   slug: string,

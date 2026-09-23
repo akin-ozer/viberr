@@ -144,15 +144,19 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   // hand-edited junk value (`effort: 3`, a blank) into "backend default", and
   // the next save writes that back — erasing the junk without a word. Say so
   // at the read, once, so the erasure is announced rather than silent.
-  const rawEffort = z
-    .object({ effort: z.unknown() })
-    .loose()
-    .safeParse(splitFrontmatter(raw).data).data?.effort;
-  if (rawEffort !== undefined && parsed.frontmatter.effort === undefined) {
-    logger.warn(
-      "controller profile carries an unreadable `effort:` value — it reads as the backend default and the next save will drop it",
-      { file: abs, effort: JSON.stringify(rawEffort) },
-    );
+  // Ruling 454: that check parses the frontmatter a second time, so it runs
+  // only when the typed read found no effort and the file names one at all.
+  if (parsed.frontmatter.effort === undefined && raw.includes("effort")) {
+    const rawEffort = z
+      .object({ effort: z.unknown() })
+      .loose()
+      .safeParse(splitFrontmatter(raw).data).data?.effort;
+    if (rawEffort !== undefined) {
+      logger.warn(
+        "controller profile carries an unreadable `effort:` value — it reads as the backend default and the next save will drop it",
+        { file: abs, effort: JSON.stringify(rawEffort) },
+      );
+    }
   }
   return parsed;
 }
@@ -173,12 +177,26 @@ export const NO_MODEL_PLACEHOLDER = "orchestration runtime";
  *  granted" — under a skills lock an admin could not even see the mismatch. */
 export const CONTROLLER_DEFAULT_SKILLS: readonly string[] = ["controller-guide"];
 
+/** The controller's display name: the profile's `name`, else "Controller". */
+function controllerNameOf(fm: AgentProfileFrontmatter | undefined): string {
+  return fm?.name || "Controller";
+}
+
+/**
+ * Just {@link resolveControllerConfig}'s `name`, for the surfaces that show
+ * only the name (the dock, on every load): it reads the profile and never the
+ * definition doc (ruling 454).
+ */
+export function resolveControllerName(dataRoot?: string): string {
+  return controllerNameOf(readControllerProfile(dataRoot)?.frontmatter);
+}
+
 export function resolveControllerConfig(dataRoot?: string): ControllerConfig {
   const parsed = readControllerProfile(dataRoot);
   const fm = parsed?.frontmatter;
   const storedSkills = fm?.resources.skills ?? [];
   return {
-    name: fm?.name || "Controller",
+    name: controllerNameOf(fm),
     model: fm?.model && fm.model !== NO_MODEL_PLACEHOLDER ? fm.model : "",
     effort: fm?.effort ?? "",
     skills: storedSkills.length > 0 ? storedSkills : [...CONTROLLER_DEFAULT_SKILLS],

@@ -15,7 +15,7 @@ import {
   type ControllerMessage,
   type ListConversationsInput,
 } from "~/server/controller/controller-conversations.server";
-import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
+import { resolveControllerName } from "~/server/controller/controller-profile.server";
 import {
   conversationTurnState,
   type ConversationTurnState,
@@ -136,7 +136,6 @@ export function getControllerSurface(
     markConversationSeen(db, conversation.id, viewer.id);
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
-  const config = resolveControllerConfig(input.dataRoot);
   // Ruling 419(f): a person is named on this page the way the rest of the app
   // names them. A conversation stores its owner's EMAIL at creation (the
   // controller's prompt keeps it: an address is unambiguous to a model), and
@@ -165,7 +164,7 @@ export function getControllerSurface(
     available: isBackendAvailableFor(db, viewer.id, "claude", {
       dataRoot: input.dataRoot,
     }),
-    controllerName: config.name,
+    controllerName: resolveControllerName(input.dataRoot),
     projectName: scope ? (getProject(db, scope)?.name ?? scope) : null,
     conversations: rows.map((c) => ({
       id: c.id,

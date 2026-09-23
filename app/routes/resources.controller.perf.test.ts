@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
@@ -74,6 +75,26 @@ describe("controller dock routes (ruling 454)", () => {
     expect(result.view.scope.kind).toBe("task");
     expect(result.view.controllerName).toBe("Controller");
     expectWithinBudget("server-read:dock-task-view.store-reads", tally.storeReads.length);
+    expect(tally.storeReads).not.toContain("agents/definitions/controller.md");
     expectWithinBudget("server-read:dock-task-view.sql", tally.statements.length);
+  });
+
+  it("still names the controller the way its settings resolve it", async () => {
+    const { agentProfileFilePath } = await import("~/server/files/file-store-root.server");
+    const { resolveControllerConfig } = await import("~/server/controller/controller-profile.server");
+    const file = agentProfileFilePath("controller", app.dataRoot);
+    writeFileSync(file, readFileSync(file, "utf8").replace("name: Controller", "name: Switchboard"));
+    const { loader } = await import("~/routes/resources.controller");
+    const { cookie } = await app.cookieFor(arda);
+    const { view } = await loader(
+      args(app.request(`/resources/controller?project=${SLUG}&task=VIB-142`, { cookie }), "/resources/controller"),
+    );
+    expect(view.controllerName).toBe("Switchboard");
+    expect(resolveControllerConfig(app.dataRoot).name).toBe("Switchboard");
+    // A task that does not exist is still out of scope.
+    const missing = await loader(
+      args(app.request(`/resources/controller?project=${SLUG}&task=VIB-9999`, { cookie }), "/resources/controller"),
+    );
+    expect(missing.view.unavailable).toBe(true);
   });
 });

@@ -28,16 +28,24 @@ export async function loader({ request }: Route.LoaderArgs) {
   const auth = await requireAuth(request);
   const db = getDb();
   const actor = { userId: auth.user.id, label: auth.user.email };
+  // Ruling 454: asked once per project, however many of its threads hold a
+  // reply (the gate's denial row is collapsed per minute anyway).
+  const reachableBySlug = new Map<string, boolean>();
   const reachable = (projectSlug: string | null): boolean => {
     if (!projectSlug) return true;
-    try {
-      assertProjectAction(db, "any-member", projectSlug, actor, "read a controller reply", {
-        allowArchived: true,
-      });
-      return true;
-    } catch {
-      return false;
+    let answer = reachableBySlug.get(projectSlug);
+    if (answer === undefined) {
+      try {
+        assertProjectAction(db, "any-member", projectSlug, actor, "read a controller reply", {
+          allowArchived: true,
+        });
+        answer = true;
+      } catch {
+        answer = false;
+      }
+      reachableBySlug.set(projectSlug, answer);
     }
+    return answer;
   };
   const unseen: UnseenReplyView[] = listUnseenReplies(db, auth.user.id)
     .filter((r) => reachable(r.projectSlug))
