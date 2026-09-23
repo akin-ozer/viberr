@@ -262,6 +262,9 @@ export interface RunOperatorInput {
    *  was refused in full, not because it left an auto stage idle. The two read
    *  differently to the operator and the turn instruction says which. */
   planRefusedNudge?: boolean;
+  /** F39-69: this nudge exists because the previous drive refreshed the
+   *  branch and stopped there, so its instruction names the refresh. */
+  refreshNudge?: boolean;
   /** Ruling 400: the refusal sentences the previous drive collected, quoted
    *  into this retry's instruction so it never has to go and find them. */
   refusedPlanSteps?: { tool: string; message: string }[];
@@ -1002,6 +1005,12 @@ export function operatorLeftTaskStranded(
    * wholly refused plan and this backstop could not see it.
    */
   planWhollyRefused = false,
+  /**
+   * F39-69: the drive carried out a base refresh and then stopped, which is
+   * half a step whatever the stage's boundary. The caller passes it only for
+   * a drive that was not itself the nudge, so it re-arms nothing.
+   */
+  refreshedAndStopped = false,
 ): boolean {
   if (task.archived) return false;
   if (task.packet) return false; // a decision IS pending — the human's move
@@ -1011,6 +1020,7 @@ export function operatorLeftTaskStranded(
   if (task.blockedBy.length > 0) return false;
   if (ownMoveLandedHere) return true;
   if (planWhollyRefused) return true;
+  if (refreshedAndStopped) return true;
   return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
 }
 
@@ -1101,6 +1111,9 @@ export async function maybeResumeStrandedOperator(
   const autoStage = project.parsed.frontmatter.workflow.some(
     (w) => w.from === file.parsed.frontmatter.stage && w.boundary === "auto",
   );
+  // F39-69: a drive that refreshed and stopped. Never the nudge itself: the
+  // nudge that refreshes again and stops has had its one automatic resume.
+  const refreshedAndStopped = ref.ownRun?.refreshed === true && ref.strandedResume !== true;
   const stranded = operatorLeftTaskStranded(
     {
       archived: file.parsed.frontmatter.archived,
@@ -1116,6 +1129,7 @@ export async function maybeResumeStrandedOperator(
       ref.ownRun.movedToStageId === file.parsed.frontmatter.stage,
     // Ruling 228: or it planned only steps it was not allowed to take.
     ref.ownRun?.planWhollyRefused === true,
+    refreshedAndStopped,
   );
   if (!stranded) return false;
 
@@ -1291,6 +1305,9 @@ export async function maybeResumeStrandedOperator(
     strandedResume: true,
     dataRoot: ref.dataRoot,
   };
+  if (refreshedAndStopped && ref.ownRun?.planWhollyRefused !== true) {
+    nudge.refreshNudge = true;
+  }
   if (ref.ownRun?.planWhollyRefused === true) {
     nudge.planRefusedNudge = true;
     // Ruling 400: carry the refusals into the retry's own instruction.
@@ -2622,7 +2639,11 @@ async function startCodexOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
-    input.planRefusedNudge ? "plan-refused" : input.strandedResume,
+    input.planRefusedNudge
+      ? "plan-refused"
+      : input.refreshNudge
+        ? "refresh-ended"
+        : input.strandedResume,
     input.dependencyRelease,
     input.refusedPlanSteps,
   );
@@ -3472,7 +3493,11 @@ async function startRealOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
-    input.planRefusedNudge ? "plan-refused" : input.strandedResume,
+    input.planRefusedNudge
+      ? "plan-refused"
+      : input.refreshNudge
+        ? "refresh-ended"
+        : input.strandedResume,
     input.dependencyRelease,
     input.refusedPlanSteps,
   );
@@ -4271,7 +4296,34 @@ type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
  * would be false twice over — the stage need not be auto-advance, and the run
  * did not end idle by choice. `false` for an ordinary drive.
  */
-type StrandedNudge = boolean | "idle-stage" | "plan-refused";
+type StrandedNudge = boolean | "idle-stage" | "plan-refused" | "refresh-ended";
+
+/**
+ * F39-69: the instruction for a drive resumed because the previous one
+ * refreshed the branch and stopped. It is not the idle-stage nudge's "this
+ * auto-advance stage" (a Review stage is not one), and not an accusation of
+ * holding: the previous drive acted.
+ */
+/**
+ * F39-69: a Codex plan is the whole turn. Nothing re-invokes the operator for
+ * a step of its own, and a plan may safely chain a refresh and the step it
+ * prepares because ruling 430 stops the acting steps after one that opens a
+ * packet. AX-5's operator planned the refresh alone and stopped.
+ */
+export const CODEX_PLAN_WHOLE_TURN =
+  "The plan is the whole turn: nothing re-invokes you for a step of your own, so plan every step " +
+  "this turn needs, a refresh together with the step it prepares. If a step opens a decision " +
+  "packet (a refresh that meets a conflict does), Viberr carries out none of the acting steps " +
+  "after it (ruling 430). ";
+
+export const REFRESH_ENDED_NUDGE =
+  "You are re-invoked ONCE because your previous run brought the branch up to date " +
+  "(`update_branch_from_base`) and stopped there: nothing was dispatched, delivered or asked. " +
+  "A refresh only prepares the branch for the step that follows it. Take that step now, in this " +
+  "turn: the newest person's decision in `humanDecisions` and the stage rule below say what it is. " +
+  "If a person must choose first, open a decision packet that says so. This is the only automatic " +
+  "nudge. In a plan, a refresh and the step after it can go together: if the refresh meets a " +
+  "conflict, Viberr opens the packet and does not carry out the steps after it (ruling 430). ";
 
 /** What a transition trigger carries (owner ruling 2026-07-26). */
 export interface TransitionContext {
@@ -4696,7 +4748,10 @@ function operatorTurnDoctrine(
   // re-judging the stage as abandoned).
   const resumeContext = !strandedResume
     ? ""
-    : strandedResume === "plan-refused"
+    : strandedResume === "refresh-ended"
+      ? // F39-69: the previous drive acted, and stopped halfway.
+        REFRESH_ENDED_NUDGE
+      : strandedResume === "plan-refused"
       ? // Ruling 228: this drive did not decide to wait — it was stopped.
         // Ruling 400: and the refusals are QUOTED here rather than pointed at.
         // "They are on the timeline, read them" is the instruction ruling 392
@@ -5086,6 +5141,7 @@ export function buildCodexOperatorPrompt(
     "\n```" + agentReportBlock(trigger, agentReply, { toolless: true }) +
     "\n\n# Your decision\n\n" +
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
+    CODEX_PLAN_WHOLE_TURN +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
     operatorTurnInstruction(
       snapshot,

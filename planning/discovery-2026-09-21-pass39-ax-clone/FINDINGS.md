@@ -552,6 +552,20 @@ what they strand, and record an optional reason.
   for finding 1, one delivery, one review. My 01:49 "Developer's part is done" decision is
   superseded for this rework only **(default, owner may revisit)**.
 
+- **F39-69 (MED) — the operator did step one of a three-step directive and the task stalled at
+  Review, "waiting on a human", with nothing to answer.** AX-5, after my 05:09 directive (refresh,
+  then Developer on the core findings, then Surface Developer). The Codex operator's plan was the
+  refresh alone ("First step of Arda's resolved directive"). It merged two commits at 05:10:18 and
+  the turn ended. The settle-time backstop resumes only at an `auto` stage, after the drive's own
+  move, or after a wholly refused plan. Review's way out is a person's, and a refresh counts as an
+  action (ruling 406). So the board said AX-5 was waiting on me, and the page offered "Run operator"
+  with nothing to say why. **Fixed as ruling 442:** a carried-out refresh is recorded on the drive.
+  A drive that refreshed and left the task idle is resumed once, whatever the boundary, and told a
+  refresh only prepares the step after it. The nudge itself re-arms nothing. The Codex prompt now
+  says the plan is the whole turn and a refresh goes with the step it prepares, which ruling 430
+  already makes safe. AX-5 was unstuck with Run operator, the owner's way out.
+  Tests: `operator-run.server.test.ts` and `update-branch-operator.server.test.ts` "F39-69".
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

@@ -48,6 +48,8 @@ import {
   deliveredFollowUpFor,
   executeStrandedCodexPlan,
   maybeResumeStrandedOperator,
+  CODEX_PLAN_WHOLE_TURN,
+  REFRESH_ENDED_NUDGE,
   operatorPlanToolsFor,
   ownOperatorRunForTests,
   resetOperatorLeasesForTests,
@@ -1777,6 +1779,12 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(codex).not.toContain("`read_timeline_entry` with that stamp");
   });
 
+  it("F39-69: a Codex plan is told it is the whole turn, a refresh and its next step together", () => {
+    // CANARY: drop the sentence and nothing tells a plan that stopping after
+    // the refresh leaves the task idle.
+    expect(buildCodexOperatorPrompt(snapshot(), "manual")).toContain(CODEX_PLAN_WHOLE_TURN);
+  });
+
   it("ruling 415: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
     const long = `${"finding ".repeat(1200)}`; // ~9,600 chars: past 4,000, inside 16,000
     const codex = agentReportBlock("agent-reply", long, { toolless: true });
@@ -2752,6 +2760,81 @@ describe("stranded auto-stage resume", () => {
       expect(resumedAfterAction).toBe(true);
       expect(held("VIB-9").frontmatter.heldAtStage).toBeNull();
       expect(held("VIB-9").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+    });
+
+    /**
+     * F39-69, live on ax-clone AX-5. A person's directive had three steps:
+     * bring the branch up to date, rework with one agent, then another. The
+     * Codex operator planned only the refresh. It merged two commits and the
+     * turn ended. Review's way out is a person's, so the backstop (auto stages
+     * only) did not resume it, and the board read "waiting on a human" with
+     * nothing to answer until the owner pressed Run operator.
+     */
+    it("F39-69: a drive that refreshed and stopped at Review is resumed once, and told why", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(id, taskKey, store2.slug, `t_${id}`, "2026-09-23T05:10:09.000Z", "2026-09-23T05:10:18.000Z");
+      };
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-11", {
+          title: "ax ssh",
+          stage: "review",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Rework after the refresh.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_refreshed", "VIB-11");
+      finishedRun("run_nudged", "VIB-11");
+      const ownRun = { backend: "codex" as const, autonomy: "supervised" as const, reactDepth: 0 };
+      const ref = {
+        projectSlug: store2.slug,
+        taskKey: "VIB-11",
+        dataRoot: store2.dataRoot,
+        stageAtStart: "review",
+      };
+      // A drive that acted without refreshing, at a stage a person closes,
+      // is not stranded: the refresh is the whole difference.
+      expect(
+        await maybeResumeStrandedOperator(store2.db, {
+          ...ref,
+          runId: "run_refreshed",
+          ownRun: { ...ownRun, carriedOutAction: true },
+        }),
+      ).toBe(false);
+      // The nudge itself refreshing and stopping again re-arms nothing.
+      expect(
+        await maybeResumeStrandedOperator(store2.db, {
+          ...ref,
+          runId: "run_nudged",
+          strandedResume: true,
+          ownRun: { ...ownRun, carriedOutAction: true, refreshed: true },
+        }),
+      ).toBe(false);
+      // CANARY: drop the `refreshedAndStopped` arm and AX-5 sits at Review
+      // with nobody coming.
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        ...ref,
+        runId: "run_refreshed",
+        ownRun: { ...ownRun, carriedOutAction: true, refreshed: true },
+      });
+      expect(resumed).toBe(true);
+      await eventually(() => expect(adapter2.pending).not.toBeNull());
+      const prompt = adapter2.pending!.spec.prompt;
+      // CANARY: drop the `refreshNudge` mapping and it is told the stage is an
+      // idle auto-advance one, which Review is not.
+      expect(prompt).toContain(REFRESH_ENDED_NUDGE);
+      expect(prompt).not.toContain("auto-advance stage idle");
     });
 
     /**

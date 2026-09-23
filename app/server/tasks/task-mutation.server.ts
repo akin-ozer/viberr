@@ -121,6 +121,16 @@ export interface TaskMutationContext {
      */
     carriedOutAction?: boolean;
     /**
+     * F39-69: this drive carried out a base refresh (`update_branch_from_base`
+     * answered `done`: merged, or already current). A refresh only prepares
+     * the branch for a step that follows it. Live on ax-clone AX-5 a Codex
+     * operator planned the refresh as step one of a person's three-step
+     * directive and stopped. The task sat at Review, "waiting on a human", with
+     * nothing to answer, because the settle-time backstop resumes a drive only
+     * at an `auto` stage, and Review's way out is a person's.
+     */
+    refreshed?: boolean;
+    /**
      * Ruling 400 (F39-27): the refusal sentences themselves, so the one
      * automatic retry can CARRY them instead of telling the operator to go
      * and read them.

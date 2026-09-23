@@ -417,6 +417,12 @@ export async function recordBranchRefresh(
  * operator decision. Never throws; every outcome is a typed
  * {@link OperatorActionResult} whose message says what actually happened.
  */
+/** F39-69: tell the drive it refreshed, so its settle can see a drive that
+ *  stopped right after preparing the branch. */
+function stampRefreshed(ctx: TaskActionContext): void {
+  if (ctx.operatorRun) ctx.operatorRun.refreshed = true;
+}
+
 export async function operatorUpdateBranchFromBase(
   db: DatabaseSync,
   /** The action context: `fetchImpl` (tests) reaches the post-update reconcile. */
@@ -543,6 +549,7 @@ export async function operatorUpdateBranchFromBase(
         lead: "Brought",
       },
     );
+    stampRefreshed(ctx);
     return { outcome: "done", message: sentence };
   }
 
@@ -576,6 +583,7 @@ export async function operatorUpdateBranchFromBase(
     // event three lines up — the event ruling 134(c) deliberately suppresses
     // when it would duplicate, re-added by the refusal narration with no
     // suppression and a worse headline.
+    stampRefreshed(ctx);
     return { outcome: "done", message: sentence };
   }
 
@@ -633,6 +641,7 @@ export async function operatorUpdateBranchFromBase(
   // Ruling 229: the other already-current shape — the remote is level too, so
   // there is nothing even to note. Same reasoning: the tool did its job.
   if (result.status === "already_current") {
+    stampRefreshed(ctx);
     return { outcome: "done", message: outcomeSentence(result) };
   }
 

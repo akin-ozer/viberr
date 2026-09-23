@@ -224,6 +224,27 @@ const act = (
   );
 
 describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
+  it("F39-69: a carried-out refresh is recorded on the drive, a conflict is not", async () => {
+    const drive = () => ({ backend: "codex" as const, autonomy: "supervised" as const, reactDepth: 0 });
+    const run = async (git: ReturnType<typeof fakeGit>) => {
+      const operatorRun: ReturnType<typeof drive> & { refreshed?: boolean } = drive();
+      await operatorUpdateBranchFromBase(
+        store.db,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl, operatorRun },
+        { projectSlug: store.slug, taskKey: "VIB-1", exec: git.exec },
+        authority(),
+      );
+      return operatorRun.refreshed;
+    };
+    // CANARY: drop `stampRefreshed` from either `done` arm and its case reads
+    // undefined, so the settle cannot tell a drive that stopped halfway.
+    expect(await run(fakeGit({ behind: 2 }))).toBe(true);
+    expect(await run(fakeGit({ behind: 0 }))).toBe(true);
+    // Ruling 134(c)'s arm: the workspace is current and origin lags it.
+    expect(await run(fakeGit({ behind: 0, remote: "behind" }))).toBe(true);
+    expect(await run(fakeGit({ conflict: true }))).toBeUndefined();
+  });
+
   it("updates the branch and puts it on the TIMELINE, not just in the tool result", async () => {
     const git = fakeGit({ behind: 2 });
     const res = await act(git.exec);
