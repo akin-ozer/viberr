@@ -118,6 +118,13 @@ describe("OperatorRecommendations: the acceptance gate's refusal on the card (ru
     expect(onApply).not.toHaveBeenCalled();
     // The refused click re-keys the alert: a fresh element, announced again.
     expect(container.querySelectorAll('[role="alert"]')[0]).not.toBe(alerts[0]);
+    // Ruling 451(g): a note that stands on its own does not shake; the one
+    // answering the latest refused click (the second card's) does. CANARY: put
+    // `refused` on the note unconditionally and it shakes on every page load.
+    expect(alerts[0]!.classList.contains("refused")).toBe(false);
+    const after = container.querySelectorAll('[role="alert"]');
+    expect(after[0]!.classList.contains("refused")).toBe(false);
+    expect(after[1]!.classList.contains("refused")).toBe(true);
     // The run_agent card is not an acceptance; its Apply still applies.
     fireEvent.click(applies[2]!);
     expect(onApply).toHaveBeenCalledWith("r-run");

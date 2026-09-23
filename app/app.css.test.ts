@@ -1960,7 +1960,7 @@ function sweep(): Sweep {
           target = part.slice(DARK_SCOPE.length);
         } else if (part.startsWith(":root")) continue;
         const acc = effective.get(target) ?? new Map<string, string>();
-        for (const prop of ["color", "background", "background-color", "font-size", "font-weight"]) {
+        for (const prop of ["color", "background", "background-color", "background-clip", "font-size", "font-weight"]) {
           const value = rule.decls.get(prop);
           if (value !== undefined) acc.set(prop, value);
         }
@@ -1970,6 +1970,13 @@ function sweep(): Sweep {
     for (const [part, decls] of effective) {
       const colour = decls.get("color");
       if (!colour || /^(inherit|currentcolor|unset|initial)$/i.test(colour.trim())) continue;
+      // A glyph layer whose ink IS its background (`color: transparent` +
+      // `background-clip: text`: ruling 451(a)'s shimmer band) is no
+      // text-on-backdrop pair. It lays a band over words the element already
+      // draws, and those words are measured on the element itself.
+      if (/^transparent$/i.test(colour.trim()) && /\btext\b/i.test(decls.get("background-clip") ?? "")) {
+        continue;
+      }
       const fg = resolveColor(colour, tokens);
       if (!fg) {
         unresolved.push(`${theme} ${part} { color: ${colour} }`);
@@ -3541,5 +3548,182 @@ describe("app.css controller layout (ruling 419)", () => {
       expect(coarse, selector).toContain(selector);
     }
     expect(coarse).toMatch(/\.ctl-all-toggle \.linkish\s*\{\s*padding-block:\s*\.3rem;\s*\}/);
+  });
+});
+
+/**
+ * Ruling 451 (owner, 2026-09-23): seven places move, drawn from transitions.dev.
+ * jsdom runs no animation, so the rules the motion rests on are pinned here;
+ * the components' own suites pin the keys and attributes that trigger it.
+ */
+describe("app.css ruling 451: motion from transitions.dev", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const rule = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    // What the cascade leaves the selector: later declarations win.
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+  const declared = new Set([...CODE.matchAll(/@keyframes\s+([-\w]+)/g)].map((m) => m[1]!));
+  /** The keyframes names an `animation` value plays, one per layer. */
+  const animationNames = (value: string): string[] => {
+    const KEYWORDS = new Set([
+      "none", "ease", "ease-in", "ease-out", "ease-in-out", "linear", "step-start", "step-end",
+      "infinite", "normal", "reverse", "alternate", "alternate-reverse", "forwards", "backwards",
+      "both", "running", "paused", "initial", "inherit", "unset",
+    ]);
+    return value
+      .replace(/[-\w]+\([^()]*\)/g, " ")
+      .split(",")
+      .map((layer) => layer.trim().split(/\s+/).find((t) => /^[a-z_][-\w]*$/i.test(t) && !KEYWORDS.has(t)))
+      .filter((n): n is string => n !== undefined);
+  };
+
+  it("(b) every animation in the sheet plays a @keyframes the sheet declares", () => {
+    // CANARY: delete `@keyframes reveal-down`. `.cap-mbody` named the board's
+    // `dropPreviewIn` after the drag rebuild deleted it (7c24fabc), so the
+    // capability group opened with no entrance for anyone but a reduced-motion
+    // reader, and no gate noticed.
+    const played = RULES.flatMap((r) =>
+      animationNames(r.decls.get("animation") ?? r.decls.get("animation-name") ?? "").map((n) => `${r.selector} → ${n}`),
+    );
+    expect(played.length).toBeGreaterThan(40);
+    expect(played.filter((p) => !declared.has(p.split(" → ")[1]!))).toEqual([]);
+    expect(rule(plain, ".cap-mbody").get("animation")).toMatch(/^reveal-down\b/);
+  });
+
+  it("(a) a status line's new words rise in, and the working sentence carries a band over its own words", () => {
+    // CANARY: drop `.ctl-working-step` from the swap-in rule.
+    for (const selector of [".run-phase .ph", ".run-phase .step", ".ctl-working-step"]) {
+      expect(rule(plain, selector).get("animation"), selector).toMatch(/^swap-in \.15s var\(--ease-out\)$/);
+    }
+    expect(CODE).toMatch(/@keyframes swap-in \{ from \{ opacity: 0; transform: translateY\(4px\); filter: blur\(2px\); \}/);
+    const band = rule(plain, ".ctl-working-text::before");
+    // The copy is the element's own `data-text`, silenced for assistive tech
+    // (the `/ ""` alt text) so the sentence is not read twice.
+    expect(band.get("content")).toBe('attr(data-text) / ""');
+    expect(band.get("background-clip")).toBe("text");
+    expect(band.get("color")).toBe("transparent");
+    expect(band.get("background")).toMatch(/var\(--fg\) 50%/);
+    expect(band.get("animation")).toMatch(/^shimmer 2s linear infinite$/);
+    expect(rule(plain, ".ctl-working-text").get("position")).toBe("relative");
+  });
+
+  it("(c) a copy control's two glyphs share one cell and trade places on data-copied", () => {
+    // CANARY: drop `grid-area: 1 / 1` and the check draws beside the copy mark.
+    expect(rule(plain, ".copy-glyph").get("display")).toBe("inline-grid");
+    expect(rule(plain, ".copy-glyph > .ico").get("grid-area")).toBe("1 / 1");
+    const hidden = rule(plain, ".copy-glyph[data-copied] > .ico:first-child");
+    expect(hidden.get("opacity")).toBe("0");
+    expect(hidden.get("transform")).toBe("scale(.25)");
+    expect(rule(plain, ".copy-glyph > .ico + .ico").get("opacity")).toBe("0");
+    expect(rule(plain, ".copy-glyph[data-copied] > .ico + .ico").get("opacity")).toBe("1");
+    expect(rule(plain, ".copy-done").get("animation")).toMatch(/^swap-in\b/);
+  });
+
+  it("(f) the sign-in check's dash covers the whole check path, and a check that never animates is whole", () => {
+    // The dash must be at least the drawn path's length or the tail of the
+    // check never appears; far longer and the draw spends its first frames on
+    // nothing. Measured off the icon set itself, so redrawing the glyph
+    // re-measures. CANARY: set the dash to 20.
+    const icons = readFileSync(fileURLToPath(new URL("./ui/icon.tsx", import.meta.url)), "utf8");
+    const d = icons.match(/\n\s*check: '<path d="([^"]+)"\/>'/)![1]!;
+    expect(d).toMatch(/^[MLml0-9.\s-]+$/);
+    let at: [number, number] = [0, 0];
+    let length = 0;
+    for (const [, cmd, args] of d.matchAll(/([MLml])\s*([-0-9.\s]+)/g)) {
+      const pair = args!.trim().split(/\s+/).map(Number);
+      expect(pair).toHaveLength(2);
+      const x = pair[0]!;
+      const y = pair[1]!;
+      const next: [number, number] = cmd === cmd!.toLowerCase() ? [at[0] + x, at[1] + y] : [x, y];
+      if (cmd !== "M" && cmd !== "m") length += Math.hypot(next[0] - at[0], next[1] - at[1]);
+      at = next;
+    }
+    const path = rule(plain, '.signin-step[data-state="done"] .signin-mark .ico path');
+    const dash = Number(path.get("stroke-dasharray"));
+    expect(dash).toBeGreaterThanOrEqual(length);
+    expect(dash - length).toBeLessThan(1.5);
+    // The offset lives only in the keyframe's `from`, held through the delay
+    // by `backwards`: with the animation off, the check is drawn whole.
+    expect(path.has("stroke-dashoffset")).toBe(false);
+    expect(path.get("animation")).toMatch(/^check-draw \.3s var\(--ease-out\) 80ms backwards$/);
+    expect(CODE).toMatch(new RegExp(`@keyframes check-draw \\{ from \\{ stroke-dashoffset: ${dash}; \\}`));
+  });
+
+  it("(g) .refused shakes once, and every element that carries it is keyed on its refusal", () => {
+    expect(rule(plain, ".refused").get("animation")).toMatch(/^shake \.28s linear$/);
+    // A box that stays mounted across a second refusal never replays its
+    // shake, and that repeat is the case the shake exists for. So every JSX
+    // element whose className can carry `refused` must carry a `key`.
+    // CANARY: drop the key from any of them (login.tsx's #lg-err).
+    const carriers: string[] = [];
+    const unkeyed: string[] = [];
+    for (const file of sourceFiles(APP_DIR)) {
+      if (!file.endsWith(".tsx") || file.endsWith(".test.tsx")) continue;
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/className=/g)) {
+        let expr: string;
+        let end: number;
+        const start = m.index! + "className=".length;
+        if (src[start] === '"') {
+          end = src.indexOf('"', start + 1);
+          expr = src.slice(start, end + 1);
+        } else {
+          const { body, end: close } = balanced(src, start);
+          expr = body;
+          end = close;
+        }
+        if (!/"[^"]*\brefused\b[^"]*"/.test(expr)) continue;
+        const open = src.lastIndexOf("<", m.index);
+        // The tag closes at the first `>` outside any `{…}` after the class.
+        let depth = 0;
+        let close = end + 1;
+        for (; close < src.length; close++) {
+          const c = src[close];
+          if (c === "{") depth++;
+          else if (c === "}") depth--;
+          else if (c === ">" && depth === 0 && src[close - 1] !== "=") break;
+        }
+        const tag = src.slice(open, close + 1);
+        const where = `${path.relative(APP_DIR, file)}:${src.slice(0, m.index).split("\n").length}`;
+        carriers.push(where);
+        if (!/\bkey=/.test(tag)) unkeyed.push(where);
+      }
+    }
+    // The eleven refusal boxes plus the login page's two.
+    expect(carriers.length).toBeGreaterThanOrEqual(12);
+    expect(unkeyed).toEqual([]);
+  });
+
+  it("every motion this ruling adds has a reduced-motion answer that does not move", () => {
+    // CANARY: drop `.refused` from the closing reduced-motion block.
+    const answer = (selector: string) => {
+      const hit = reduced.filter((r) => parts(r).includes(selector));
+      expect(hit.length, `${selector} needs a reduced-motion rule`).toBeGreaterThan(0);
+      return rule(reduced, selector);
+    };
+    for (const selector of [
+      ".run-phase .ph", ".run-phase .step", ".ctl-working-step", ".copy-done",
+      '.signin-step[data-state="done"] .signin-mark .ico', ".cap-mbody", ".ctl-msg[data-fresh]",
+    ]) {
+      expect(answer(selector).get("animation"), selector).toMatch(/^fade-in \.12s ease$/);
+    }
+    expect(answer(".ctl-working-text::before").get("display")).toBe("none");
+    expect(answer('.signin-step[data-state="done"] .signin-mark .ico path').get("animation")).toBe("none");
+    expect(answer(".refused").get("animation")).toBe("none");
+    for (const selector of [
+      ".copy-glyph > .ico", ".copy-glyph > .ico + .ico",
+      ".copy-glyph[data-copied] > .ico:first-child", ".copy-glyph[data-copied] > .ico + .ico",
+    ]) {
+      const decls = answer(selector);
+      expect(decls.get("transform"), selector).toBe("none");
+      expect(decls.get("filter"), selector).toBe("none");
+      expect(decls.get("transition"), selector).toBe("opacity .12s ease");
+    }
   });
 });

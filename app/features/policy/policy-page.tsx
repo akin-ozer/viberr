@@ -851,7 +851,7 @@ export function Guardrails({
                       key={`refused-${refusedCount}`}
                       id={errId}
                       role="alert"
-                      className="guard-ctl err"
+                      className="guard-ctl err refused"
                     >
                       {g.label} needs a whole number above zero.
                     </span>

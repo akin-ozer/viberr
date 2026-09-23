@@ -171,7 +171,9 @@ export function OperatorRecommendations({
               {acceptanceRefusal && reachesAcceptance(r, terminalStageId) && (
                 <p
                   key={`refusal-${r.id}-${refused?.id === r.id ? refused.n : 0}`}
-                  className="deny-note spaced"
+                  // Ruling 451(g): the note stands on its own before any click;
+                  // it shakes only as the answer to a refused one.
+                  className={"deny-note spaced" + (refused?.id === r.id ? " refused" : "")}
                   role="alert"
                 >
                   <Icon name="alert" />

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher, useRevalidator } from "react-router";
 import type { FetcherWithComponents } from "react-router";
+import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalCalendarDate, LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -195,7 +196,7 @@ function PasteForm({
         <div
           key={`refused-${refused}`}
           id={errId}
-          className="login-err"
+          className="login-err refused"
           role="alert"
         >
           <Icon name="alert" />
@@ -384,8 +385,8 @@ function SignInSteps({
                     aria-label={`Copy the ${VENDOR[backend]} sign-in link`}
                     onClick={() => void copyValue("link", url)}
                   >
-                    <Icon name={copied === "link" ? "check" : "copy"} />
-                    {copied === "link" ? "Copied" : "Copy link"}
+                    <CopyGlyph copied={copied === "link"} />
+                    {copied === "link" ? <span className="copy-done">Copied</span> : "Copy link"}
                   </button>
                 </>
               ) : (
@@ -414,8 +415,8 @@ function SignInSteps({
                       aria-label={`Copy the sign-in code ${login.userCode}`}
                       onClick={() => void copyValue("code", login.userCode ?? "")}
                     >
-                      <Icon name={copied === "code" ? "check" : "copy"} />
-                      {copied === "code" ? "Copied" : "Copy"}
+                      <CopyGlyph copied={copied === "code"} />
+                      {copied === "code" ? <span className="copy-done">Copied</span> : "Copy"}
                     </button>
                   </>
                 ) : (
@@ -458,7 +459,7 @@ function SignInSteps({
                 <div
                   key={`refused-${refused}`}
                   id={errId}
-                  className="login-err"
+                  className="login-err refused"
                   role="alert"
                 >
                   <Icon name="alert" />

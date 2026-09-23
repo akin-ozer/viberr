@@ -1354,7 +1354,7 @@ export function DecisionPacket({
               <p
                 key={`refused-${refused}`}
                 id={CUSTOM_ERR_ID}
-                className="deny-note spaced"
+                className="deny-note spaced refused"
                 role="alert"
               >
                 <Icon name="alert" />

@@ -797,7 +797,7 @@ function RunConcurrencyControl({
         )}
         {invalid && (
           <span
-            className="form-err"
+            className="form-err refused"
             role="alert"
             id={errId}
             key={`refused-${refused}`}
@@ -891,7 +891,7 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
         cap. Codex has no budget option, so a Codex run is bounded by its idle timer only.
       </span>
       {invalid && (
-        <span className="form-err" role="alert" id={errId} key={`refused-${refused}`}>
+        <span className="form-err refused" role="alert" id={errId} key={`refused-${refused}`}>
           <Icon name="alert" />
           <span>
             Enter a dollar amount above zero with at most two decimals, or leave it blank for no cap.

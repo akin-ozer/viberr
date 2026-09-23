@@ -365,7 +365,7 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
           key={`stg-refused-${refused}`}
           id={errId}
           role="alert"
-          className="stg-err"
+          className="stg-err refused"
         >
           Give the stage a name.
         </span>

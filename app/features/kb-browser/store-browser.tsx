@@ -1160,7 +1160,7 @@ export function StoreBrowser({
                 <div
                   key={`refused-${refusedDoc}`}
                   id="fm-doc-err"
-                  className="form-err"
+                  className="form-err refused"
                   role="alert"
                 >
                   <Icon name="alert" />

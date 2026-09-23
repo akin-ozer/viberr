@@ -105,7 +105,7 @@ export function MiniModal({
         {!canSave && (
           <span
             key={refused ? "alert-" + refused : "hint"}
-            className={refused ? "foot-hint err" : "fine xs dim"}
+            className={refused ? "foot-hint err refused" : "fine xs dim"}
             role={refused ? "alert" : undefined}
           >
             {unmetHint ?? "Fill the required fields (*) to continue."}

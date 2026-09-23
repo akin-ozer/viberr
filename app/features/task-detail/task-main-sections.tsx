@@ -351,7 +351,7 @@ export function TaskHero({
               <span
                 key={refused ? `alert-${refused}` : "hint"}
                 id={goalErrId}
-                className={refused ? "composer-err" : "fine xs dim"}
+                className={refused ? "composer-err refused" : "fine xs dim"}
                 role={refused ? "alert" : undefined}
               >
                 A goal needs at least 3 characters.
