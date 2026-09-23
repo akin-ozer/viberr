@@ -489,6 +489,12 @@ npm run deploy              # stamp from git, build, up -d, verify
 npm run deploy -- --no-up   # stamp and build only, nothing restarted
 ```
 
+The verify step polls `http://127.0.0.1:<port>/resources/health` on the host port
+`compose.yml` publishes, resolved the way compose resolves `${PORT:-3000}`: `PORT` from
+your shell if it is set there, otherwise `PORT` from `.env`, and `3000` when neither sets
+it or the value is empty. It prints that URL before it starts, waits up to 180 s, and if
+nothing answers it exits 1 naming the URL it polled.
+
 Note that `up -d` kills every run in flight, so check the board before deploying.
 
 Verify what is running from `/resources/health` → `build`: `version` comes from
