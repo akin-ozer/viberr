@@ -4765,7 +4765,12 @@ export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): stri
     "This task stands at the acceptance stage, where `update_branch_from_base` refuses (`notRefreshableReason`). " +
     "Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review: " +
     "the acceptance ceremony brings the branch up to date once and merges in the same step, " +
-    "and a conflict it meets comes back to you as its own trigger.\n\n"
+    "and a conflict it meets comes back to you as its own trigger. " +
+    // Ruling 424(b): live on AX-20 at 00:41 the deliverer could not build its
+    // integration test without work that had merged since (AX-19), and asked.
+    "When the WORK itself needs the base (a person asked for it, or the deliverer cannot build or " +
+    "test without work merged since), move the task back to its work stage first (a `reworkStages` " +
+    "entry, offered while validation is failing) and refresh there; never ask an agent to merge.\n\n"
   );
 }
 
