@@ -108,6 +108,29 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     expect(wrapped?.data.theme).toBeDefined();
   });
 
+  it("forwards the renewal even when a leaf loader's guard resolved the session first", async () => {
+    // Ruling 454: one session resolution per Request. Before it, whichever
+    // loader's getSession ran first slid the session, and the root's own
+    // later call saw nothing due — dropping the cookie this fix delivers.
+    const { requireUser } = await import("~/server/auth/require-user.server");
+    const { loader } = await import("~/root");
+    const { cookie, sessionId } = await app.cookieFor(ardaId);
+    ageSession(sessionId, 3);
+    const request = app.request("/projects/viberr-core/board.data", { cookie });
+
+    expect((await requireUser(request)).id).toBe(ardaId);
+    const result = await loader({
+      request,
+      url: new URL(request.url),
+      params: {},
+      pattern: "/",
+      context: new RouterContextProvider(),
+    });
+
+    const headers = "init" in result ? result.init?.headers : undefined;
+    expect(new Headers(headers).getSetCookie().join("\n")).toContain("session_token");
+  });
+
   it("a fresh session adds no headers (the common path stays a bare payload)", async () => {
     const { cookie, sessionId } = await app.cookieFor(ardaId);
     // Well inside the updateAge window — no roll is due.

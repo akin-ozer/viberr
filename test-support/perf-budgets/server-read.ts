@@ -35,15 +35,17 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: TASK_REVALIDATION,
   },
   // SRV-7 / FL-3 / BOARD-5 / SRV-5 / TASK-7: every SQL statement execution.
+  // 86 before one session resolution per Request.
   "server-read:task-revalidation.sql": {
-    ceiling: 86,
+    ceiling: 76,
     unit: "count",
     journey: "server",
     fixture: TASK_REVALIDATION,
   },
   // FL-8 / SRV-7: better-auth session reads (one getSession per loader).
+  // 3 before one session resolution per Request.
   "server-read:task-revalidation.session-lookups": {
-    ceiling: 3,
+    ceiling: 1,
     unit: "count",
     journey: "server",
     fixture: TASK_REVALIDATION,
@@ -71,15 +73,17 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: BOARD_REVALIDATION,
   },
   // FL-3 / BOARD-5 / SRV-5 / FL-8: every SQL statement execution.
+  // 54 before one session resolution per Request.
   "server-read:board-revalidation.sql": {
-    ceiling: 54,
+    ceiling: 49,
     unit: "count",
     journey: "server",
     fixture: BOARD_REVALIDATION,
   },
   // FL-8 / SRV-7: one getSession per loader.
+  // 2 before one session resolution per Request.
   "server-read:board-revalidation.session-lookups": {
-    ceiling: 2,
+    ceiling: 1,
     unit: "count",
     journey: "server",
     fixture: BOARD_REVALIDATION,

@@ -58,6 +58,28 @@ function toSessionUser(user: UserRecord): SessionUser {
   };
 }
 
+interface AuthResolution {
+  ctx: AuthContext | null;
+  renewalHeaders: Headers;
+}
+
+/**
+ * Ruling 454 (FL-8 / SRV-7): the session is resolved ONCE per request. React
+ * Router hands every loader of one request the same Request object (single
+ * fetch runs root, the layout and the leaf with it: react-router router.js
+ * `loadRouteData`), and a resource route's guards pass theirs along
+ * (`requireUser`, then `requireProjectMember`). Each used to run its own
+ * better-auth `getSession` — session and user reads, the provider fingerprint,
+ * an HMAC verify — three times per task-page revalidation.
+ *
+ * Reads only. A POST can change what its own session resolves to (sign-in,
+ * sign-out, a password reset), so a mutation resolves on every call as before;
+ * the loaders that follow an action get a fresh Request from the router.
+ * Sharing also means the root loader always sees the rolling-session renewal
+ * cookie (F10-17): whichever loader asked first, the headers are the same.
+ */
+const resolvedByRequest = new WeakMap<Request, Promise<AuthResolution>>();
+
 /**
  * Authenticates a request from its better-auth session AND captures the renewal
  * headers better-auth emits (F10-17).
@@ -74,9 +96,23 @@ function toSessionUser(user: UserRecord): SessionUser {
  * `renewalHeaders` is a Headers object that carries any `Set-Cookie` the refresh
  * produced (usually empty — most requests are within the updateAge window).
  */
-export async function authenticateWithHeaders(
+export function authenticateWithHeaders(
   request: Request,
-): Promise<{ ctx: AuthContext | null; renewalHeaders: Headers }> {
+): Promise<AuthResolution> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return resolveSession(request);
+  }
+  let pending = resolvedByRequest.get(request);
+  if (!pending) {
+    pending = resolveSession(request);
+    resolvedByRequest.set(request, pending);
+    // A failure is not remembered: the next guard asks again, as before.
+    pending.catch(() => resolvedByRequest.delete(request));
+  }
+  return pending;
+}
+
+async function resolveSession(request: Request): Promise<AuthResolution> {
   const { response: result, headers: renewalHeaders } =
     await getAuth().api.getSession({
       headers: request.headers,
