@@ -1,9 +1,4 @@
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-} from "react";
+import { useEffect, useImperativeHandle, useRef } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -70,6 +65,8 @@ interface CommentComposerProps {
   onChange: (raw: string) => void;
   /** ⌘/Ctrl+Enter — the parent decides whether a submit is possible. */
   onSubmit: () => void;
+  /** Receives the imperative handle (React 19 passes `ref` as a plain prop). */
+  ref?: React.Ref<CommentComposerHandle>;
 }
 
 /** Captures the editor instance for the imperative handle. */
@@ -181,135 +178,136 @@ function ComposerKeysPlugin({
   return null;
 }
 
-export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposerProps>(
-  function CommentComposer(
-    { mentionables, runPrincipal, onChange, onSubmit },
-    ref,
-  ) {
-    const editorRef = useRef<LexicalEditor | null>(null);
-    const onChangeRef = useRef(onChange);
-    const onSubmitRef = useRef(onSubmit);
+export function CommentComposer({
+  mentionables,
+  runPrincipal,
+  onChange,
+  onSubmit,
+  ref,
+}: CommentComposerProps) {
+  const editorRef = useRef<LexicalEditor | null>(null);
+  const onChangeRef = useRef(onChange);
+  const onSubmitRef = useRef(onSubmit);
 
-    const menu = useMentionAutocomplete(
-      mentionables,
-      (result) => {
+  const menu = useMentionAutocomplete(
+    mentionables,
+    (result) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.update(() => {
+        const paragraph = $getRoot().getFirstChild();
+        if ($isParagraphNode(paragraph)) {
+          $setParagraphPlainText(paragraph, result.text, result.caret);
+        }
+      });
+      editor.focus();
+    },
+    runPrincipal,
+  );
+  const menuRef = useRef(menu);
+  // Kept current in an effect, not during render (render must stay pure); all
+  // three are read only from deferred Lexical command / onChange handlers.
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    onSubmitRef.current = onSubmit;
+    menuRef.current = menu;
+  });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus() {
+        editorRef.current?.focus();
+      },
+      prefillIfEmpty(text: string) {
         const editor = editorRef.current;
         if (!editor) return;
         editor.update(() => {
-          const paragraph = $getRoot().getFirstChild();
-          if ($isParagraphNode(paragraph)) {
-            $setParagraphPlainText(paragraph, result.text, result.caret);
+          const root = $getRoot();
+          if (root.getTextContent().trim()) return;
+          const first = root.getFirstChild();
+          if ($isParagraphNode(first)) {
+            $setParagraphPlainText(first, text);
+            return;
           }
+          root.clear();
+          const paragraph = $createParagraphNode();
+          root.append(paragraph);
+          $setParagraphPlainText(paragraph, text);
         });
         editor.focus();
       },
-      runPrincipal,
-    );
-    const menuRef = useRef(menu);
-    // Kept current in an effect, not during render (render must stay pure); all
-    // three are read only from deferred Lexical command / onChange handlers.
-    useEffect(() => {
-      onChangeRef.current = onChange;
-      onSubmitRef.current = onSubmit;
-      menuRef.current = menu;
+      clearAfterSuccess() {
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.update(() => {
+          const root = $getRoot();
+          root.clear();
+          root.append($createParagraphNode());
+        });
+        editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+      },
+    }),
+    [],
+  );
+
+  const handleChange = (editorState: EditorState) => {
+    editorState.read(() => {
+      const root = $getRoot();
+      const text = root.getTextContent();
+      const paragraph = root.getFirstChild();
+      const caret = $isParagraphNode(paragraph) ? $caretOffsetIn(paragraph) : null;
+      onChangeRef.current(text);
+      menuRef.current.refreshFrom(text, caret);
     });
+  };
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus() {
-          editorRef.current?.focus();
+  return (
+    <LexicalComposer
+      initialConfig={{
+        namespace: "task-comment",
+        nodes: [MentionTextNode],
+        onError(error: Error) {
+          throw error;
         },
-        prefillIfEmpty(text: string) {
-          const editor = editorRef.current;
-          if (!editor) return;
-          editor.update(() => {
-            const root = $getRoot();
-            if (root.getTextContent().trim()) return;
-            const first = root.getFirstChild();
-            if ($isParagraphNode(first)) {
-              $setParagraphPlainText(first, text);
-              return;
-            }
-            root.clear();
-            const paragraph = $createParagraphNode();
-            root.append(paragraph);
-            $setParagraphPlainText(paragraph, text);
-          });
-          editor.focus();
-        },
-        clearAfterSuccess() {
-          const editor = editorRef.current;
-          if (!editor) return;
-          editor.update(() => {
-            const root = $getRoot();
-            root.clear();
-            root.append($createParagraphNode());
-          });
-          editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
-        },
-      }),
-      [],
-    );
-
-    const handleChange = (editorState: EditorState) => {
-      editorState.read(() => {
-        const root = $getRoot();
-        const text = root.getTextContent();
-        const paragraph = root.getFirstChild();
-        const caret = $isParagraphNode(paragraph) ? $caretOffsetIn(paragraph) : null;
-        onChangeRef.current(text);
-        menuRef.current.refreshFrom(text, caret);
-      });
-    };
-
-    return (
-      <LexicalComposer
-        initialConfig={{
-          namespace: "task-comment",
-          nodes: [MentionTextNode],
-          onError(error: Error) {
-            throw error;
-          },
-        }}
-      >
-        <EditorBridge editorRef={editorRef} />
-        <PlainTextPlugin
-          contentEditable={
-            <ContentEditable
-              className="composer-ce"
-              role="combobox"
-              aria-label="Add a comment"
-              aria-expanded={menu.open}
-              aria-controls={menu.open ? menu.listId : undefined}
-              aria-activedescendant={menu.activeId}
-              aria-autocomplete="list"
-              onBlur={menu.close}
-            />
-          }
-          placeholder={
-            <div className="composer-placeholder" aria-hidden="true">
-              Add a comment… type @ to tag the operator, an agent, or a teammate
-            </div>
-          }
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-        <HistoryPlugin />
-        <OnChangePlugin onChange={handleChange} ignoreSelectionChange={false} />
-        <MentionHighlightPlugin names={mentionNamesFor(mentionables)} />
-        <ComposerKeysPlugin menuRef={menuRef} onSubmitRef={onSubmitRef} />
-        <MentionMenu
-          id={menu.listId}
-          items={menu.open ? menu.items : []}
-          active={menu.active}
-          query={menu.query}
-          onPick={menu.pick}
-          onHover={menu.setActive}
-        />
-      </LexicalComposer>
-    );
-  },
-);
+      }}
+    >
+      <EditorBridge editorRef={editorRef} />
+      <PlainTextPlugin
+        contentEditable={
+          <ContentEditable
+            className="composer-ce"
+            role="combobox"
+            aria-label="Add a comment"
+            aria-expanded={menu.open}
+            aria-controls={menu.open ? menu.listId : undefined}
+            aria-activedescendant={menu.activeId}
+            aria-autocomplete="list"
+            onBlur={menu.close}
+          />
+        }
+        placeholder={
+          <div className="composer-placeholder" aria-hidden="true">
+            Add a comment… type @ to tag the operator, an agent, or a teammate
+          </div>
+        }
+        ErrorBoundary={LexicalErrorBoundary}
+      />
+      <HistoryPlugin />
+      <OnChangePlugin onChange={handleChange} ignoreSelectionChange={false} />
+      <MentionHighlightPlugin names={mentionNamesFor(mentionables)} />
+      <ComposerKeysPlugin menuRef={menuRef} onSubmitRef={onSubmitRef} />
+      <MentionMenu
+        id={menu.listId}
+        items={menu.open ? menu.items : []}
+        active={menu.active}
+        query={menu.query}
+        onPick={menu.pick}
+        onHover={menu.setActive}
+      />
+    </LexicalComposer>
+  );
+}
 
 /**
  * Every string that ACTUALLY routes, for whole-name highlight matching —
