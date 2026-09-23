@@ -129,4 +129,13 @@ export const RENDER_BUDGETS: PerfBudgetTable = {
     journey: "live-run",
     fixture: `${TICKER}; retargeted to 210`,
   },
+  // RF-9: one interval per cadence (1 s and 30 s), however many readers.
+  // 23 before (one interval per stamp and per counter).
+  "render:clock.intervals-per-page": {
+    ceiling: 2,
+    unit: "count",
+    journey: "live-run",
+    fixture:
+      "jsdom: twenty useRelativeTime stamps and three live useElapsed counters mounted by a client render on a fake clock (vi.getTimerCount())",
+  },
 };
