@@ -3927,6 +3927,36 @@ describe("failure toasts use the error kind (P13-D-10)", () => {
   });
 });
 
+describe("U39-21: a packet option renders its inline code", () => {
+  it("renders `code` in an option's title and description instead of printing the backticks", () => {
+    // Live on AX-22's deadlock packet: "It answered this on `7920943` in this
+    // streak". CANARY: render `o.d` as plain text again.
+    const { container } = render(
+      <DecisionPacket
+        packet={{
+          ...packet142,
+          options: [
+            { kind: "question_reviewer", t: "Ask `reviewer` again", d: "It answered this on `7920943` in this streak.", rec: false },
+            ...packet142.options,
+          ],
+        }}
+        busy={false}
+        canResolve={true}
+        canResolveCompletion={true}
+        canEditGoal={true}
+        canArchive={true}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const first = container.querySelector(".options .opt")!;
+    expect(first.querySelector(".od code")?.textContent).toBe("7920943");
+    expect(first.querySelector(".ot code")?.textContent).toBe("reviewer");
+    expect(first.textContent).not.toContain("`");
+  });
+});
+
 describe("DecisionPacket questionnaire custom answer (P21)", () => {
   it("offers 'Write your own directive', reveals the input, and resolves through onResolveCustom", () => {
     const onResolveCustom = vi.fn();

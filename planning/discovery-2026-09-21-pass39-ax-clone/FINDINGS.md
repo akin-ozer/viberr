@@ -212,6 +212,11 @@ what they strand, and record an optional reason.
 - **U39-20 (LOW) — the home page's project card prints the description's backticks.** "A working
   Go clone of Google's \`ax\` (github.com/google/ax)…", as the controller wrote it. **Fixed:** the
   card renders it with `RichText`. Test: `home-page.test.tsx` "U39-20".
+- **U39-21 (LOW) — a decision packet's options print their backticks.** The body already rendered
+  inline code; the options, written the same way, did not ("It answered this on \`7920943\` in
+  this streak" on every deadlock packet). **Fixed:** option titles and descriptions use the card's
+  own `renderInlineCode`, on both the live and the decided card. Test:
+  `task-detail-components.test.tsx` "U39-21".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
