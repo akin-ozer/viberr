@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
@@ -12,6 +12,7 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
+import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
 import { EVIDENCE_EMPTY_COLUMN } from "~/schemas/task-file.schema";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -181,9 +182,23 @@ function EvidenceLabel({
   );
 }
 
-export function TimelineItem({
+/** Row keys for `useStableRows` (stable, module-level). */
+const eventKeyOf = (ev: TimelineEventRender) => String(ev.id);
+
+/** A mention-free default that keeps its identity, so a bare render's memo
+ *  compares equal (an inline `= []` is a new array on every call). */
+const NO_NAMES: string[] = [];
+
+/**
+ * Ruling 454 (CS-3 / TASK-4): memoised. Its props hold still while its event
+ * does (the timeline shares the rows and the lookups it passes across
+ * revalidations), so a send's fetcher states and a live event that brings
+ * the same rows back re-render none of the items; each used to re-run its
+ * Markdown or RichText, its hooks and its icons.
+ */
+export const TimelineItem = memo(function TimelineItem({
   ev,
-  mentionNames = [],
+  mentionNames = NO_NAMES,
   attachmentNames,
   attachmentsBase,
   taskLinks,
@@ -366,7 +381,7 @@ export function TimelineItem({
       </div>
     </div>
   );
-}
+});
 
 export function Timeline({
   events,
@@ -429,13 +444,20 @@ export function Timeline({
   const sendHint = useModifierHint("↵");
   const composerRef = useRef<CommentComposerHandle>(null);
   const composerBoxRef = useRef<HTMLDivElement>(null);
+  // Ruling 454 (CS-3 / TASK-4): every revalidation decodes new objects for
+  // all of these; kept while their content is the same, so the memoised items
+  // below re-render only for an event that changed.
+  const rows = useStableRows(events, eventKeyOf);
+  const directory = useStableValue(mentionables);
+  const links = useStableValue(taskLinks);
+  const fileNames = useStableValue(attachmentNames);
   // Known mentionable names — drives whole-name @mention highlighting in the
   // composer and in rendered comment bodies.
-  const mentionNames = useMemo(() => mentionNamesFor(mentionables), [mentionables]);
+  const mentionNames = useMemo(() => mentionNamesFor(directory), [directory]);
   // R19-19: set-ify once per list — the per-token evidence lookup is O(1).
   const attachmentSet = useMemo(
-    () => (attachmentNames?.length ? new Set(attachmentNames) : null),
-    [attachmentNames],
+    () => (fileNames?.length ? new Set(fileNames) : null),
+    [fileNames],
   );
   const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
@@ -485,10 +507,10 @@ export function Timeline({
 
   const items = useMemo(
     () =>
-      events.filter((e) =>
+      rows.filter((e) =>
         f === "all" ? true : f === "comment" ? e.type === "comment" : e.type !== "comment",
       ),
-    [events, f],
+    [rows, f],
   );
 
   const send = () => {
@@ -500,6 +522,19 @@ export function Timeline({
     fd.set("text", text);
     fetcher.submit(fd, { method: "post" });
   };
+  // Ruling 454 (CS-7): the composer is memoised, so what it is handed holds
+  // still while nothing it draws changed: a revalidation or a fetcher state
+  // re-renders this timeline, not the editor. ⌘↵ reaches the latest `send`
+  // through a ref kept current in an effect.
+  const sendRef = useRef(send);
+  useEffect(() => {
+    sendRef.current = send;
+  });
+  const submitDraft = useCallback(() => sendRef.current(), []);
+  const keepDraft = useCallback((raw: string) => {
+    draftRef.current = raw;
+  }, []);
+  const principal = useStableValue(runPrincipal);
 
   const showOlder = () => {
     setSearchParams(
@@ -548,12 +583,10 @@ export function Timeline({
                 behind a same-size stand-in (ruling 454). */}
             <CommentComposer
               ref={composerRef}
-              mentionables={mentionables}
-              runPrincipal={runPrincipal}
-              onChange={(raw) => {
-                draftRef.current = raw;
-              }}
-              onSubmit={send}
+              mentionables={directory}
+              runPrincipal={principal}
+              onChange={keepDraft}
+              onSubmit={submitDraft}
             />
           </div>
           <div className="composer-foot">
@@ -623,7 +656,7 @@ export function Timeline({
               mentionNames={mentionNames}
               {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}
-              {...(taskLinks ? { taskLinks } : {})}
+              {...(links ? { taskLinks: links } : {})}
             />
           ))
         )}
