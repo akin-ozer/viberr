@@ -32,8 +32,24 @@ const resolvedNodeModules = path.join(
   "..",
 );
 
+/**
+ * Ruling 454: a font file is never inlined. Vite inlines any asset under 4 KB
+ * as a base64 `data:` URI by default, which put JetBrains Mono's cyrillic-ext
+ * and vietnamese subsets (woff2 and woff, three weights) into the root
+ * stylesheet that blocks every first paint: 20 KB of its 55.6 KB gzip, fetched
+ * again after every deploy because app.css changes that sheet's hash. As files
+ * they download only when a glyph in their `unicode-range` renders, and stay
+ * cached. Every other asset keeps Vite's default (`undefined`).
+ */
+export function inlineAsset(filePath: string): false | undefined {
+  return /\.woff2?(?:$|\?)/.test(filePath) ? false : undefined;
+}
+
 export default defineConfig({
   plugins: [reactRouter()],
+  build: {
+    assetsInlineLimit: inlineAsset,
+  },
   resolve: {
     // Vite 8 resolves the tsconfig "paths" alias (~/*) natively; the
     // vite-tsconfig-paths plugin is no longer needed.
