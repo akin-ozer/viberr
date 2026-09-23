@@ -34,7 +34,7 @@ Writers (`app/server/files/`):
 - **Parse memo** (ruling 454): `readProjectFile`, `readTaskFile` and
   `readAgentProfileFile` still read the file on every call, but skip the YAML + Zod
   parse when the bytes equal the bytes they last parsed for that path
-  (`parse-memo.server.ts`; 256 entries, 8 M characters). The key is the content, not
+  (`parse-memo.server.ts`; 256 entries, 4 M characters). The key is the content, not
   the file's stat, so any change on disk is seen by the next read and a stale
   bind-mount read is never pinned; each caller gets its own `structuredClone`.
 - **Trust guard**: `updateTaskFile` and `updateProjectFile` refuse to write a file whose

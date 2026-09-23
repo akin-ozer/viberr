@@ -55,7 +55,9 @@ interface MemoEntry {
 }
 
 const MAX_ENTRIES = 256;
-const MAX_CONTENT_CHARS = 8_000_000;
+// The hot set (project files, profile templates, the tasks people have open)
+// is far smaller; the bound caps the parsed copies a long session can hold.
+const MAX_CONTENT_CHARS = 4_000_000;
 
 const memo = new Map<string, MemoEntry>();
 let heldChars = 0;
