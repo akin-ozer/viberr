@@ -2367,7 +2367,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "run_agent_on_task",
-      "Put an agent to work on a task with a directive: the operator (coordination) or a deployed agent profile (stage work). Maintainer or above. The result reports honestly whether a run started, was queued behind the concurrent-run cap, or was refused before any process existed. The directive is also written on the task timeline as a comment addressed to the agent, so the people watching the task can read what it was asked to do.",
+      "Put an agent to work on a task with a directive: the operator (coordination) or a deployed agent profile (stage work). Maintainer or above. The result reports honestly whether a run started, was queued behind the concurrent-run cap, was refused before any process existed, or waits because the agent is already running here (the directive is then delivered when that run finishes). The directive is also written on the task timeline as a comment addressed to the agent, so the people watching the task can read what it was asked to do.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2468,9 +2468,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             }
             return `[done] Operator run started on ${key}.`;
           }
-          const { isDispatchHeld, listDeployedSpecialists, startAgentRun } = await import(
-            "~/server/tasks/specialist-run.server"
-          );
+          const {
+            directiveDeferredNote,
+            isAgentBusy,
+            isDispatchHeld,
+            listDeployedSpecialists,
+            startAgentRun,
+          } = await import("~/server/tasks/specialist-run.server");
           const profileId = args.agent.trim();
           const runInput: StartAgentRunInput = {
             projectSlug: slug,
@@ -2519,6 +2523,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           try {
             started = await startAgentRun(db, runInput, actor, { dataRoot });
           } catch (error) {
+            // Ruling 452: refused because this agent is already running, the
+            // directive recorded above sits inside that run's window, and
+            // ruling 203 delivers it when the run finishes. Said here, where
+            // "wait for it to finish … before starting another" sent the caller
+            // back to deliver the same words a second time.
+            if (args.prompt && isAgentBusy(error) && error.busyProfileId === profileId) {
+              await appendComment(
+                db,
+                { projectSlug: slug, taskKey: key, text: directiveDeferredNote(handle) },
+                actor,
+                { dataRoot },
+              );
+              return (
+                `[done] ${handle} is already running on ${key}, so no second run started. ` +
+                `Your directive is on the timeline and is delivered to ${handle} when that run finishes; do not send it again.`
+              );
+            }
             // Ruling 152(c): a hold is not a refusal. The retry is already
             // scheduled with the directive on it, and the recorded comment
             // predates that later run too.

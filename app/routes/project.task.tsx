@@ -65,8 +65,10 @@ import {
   MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
 import {
+  directiveDeferredNote,
   listDeployedSpecialists,
   removeReviewer,
+  isAgentBusy,
   isDispatchHeld,
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
@@ -1132,6 +1134,25 @@ export async function action({ request, params }: Route.ActionArgs) {
         try {
           result = await startAgentRun(db, dispatch, actor);
         } catch (error) {
+          // Ruling 452: refused because this agent is already running, the
+          // directive recorded above sits inside that run's window, and ruling
+          // 203 delivers it when the run finishes. The note and the toast say
+          // so; "No run started" beside a 409 telling the person to wait and
+          // start another was how the same words got delivered twice.
+          if (prompt && isAgentBusy(error) && error.busyProfileId === profileId) {
+            await appendComment(
+              db,
+              { projectSlug, taskKey, text: directiveDeferredNote(handle) },
+              actor,
+            );
+            return {
+              ok: true as const,
+              intent,
+              toast:
+                `${handle} is already running on this task, so no second run started. ` +
+                "Your prompt is on the timeline and is delivered to it when that run finishes.",
+            };
+          }
           // Ruling 152(c) (pass 35, G35-4): a hold is not a refusal. The
           // dispatcher already scheduled the retry for the reopen instant and
           // put the prompt on that schedule, so the person reads the hold as

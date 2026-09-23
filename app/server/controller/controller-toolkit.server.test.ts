@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 import {
@@ -1856,6 +1857,61 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
     } finally {
       await hold([]);
     }
+  });
+
+  /**
+   * Ruling 452 (owner, 2026-09-24): a prompted dispatch refused because the
+   * agent is already running here. Recorded before the start (ruling 375), the
+   * directive sits inside that live run's window, so ruling 203 delivers it
+   * when the run finishes. The note said "No run started" and the reply said to
+   * wait for the run and start another, and a caller who did delivered the
+   * words twice.
+   */
+  it("a dispatch refused because the agent is already running says the words reach it when that run finishes, and they do", async () => {
+    // Held live until released, then finished normally. VIB-151's developer
+    // runs on Codex; were that to change, nothing would hold the run, the
+    // second dispatch would start a run of its own, and this case would fail
+    // rather than pass on nothing.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    queueFakeRun({ lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }], gate }, "codex");
+    const before = (await developerRuns()).length;
+    const busy = await call(ids.maintainer, "run_agent_on_task", { taskKey: TASK, agent: "developer" });
+    expect(busy).toContain(`[done] Developer run started on ${TASK}`);
+
+    const prompt = "While you are in there, check the retention window too.";
+    const reply = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: TASK,
+      agent: "developer",
+      prompt,
+    });
+    // CANARY: drop the busy arm of the catch and this is `[error] A delivering
+    // agent run is already in progress … before starting another.`
+    expect(reply).toBe(
+      `[done] Developer is already running on ${TASK}, so no second run started. ` +
+        "Your directive is on the timeline and is delivered to Developer when that run finishes; do not send it again.",
+    );
+    const [note, directive] = await humanComments();
+    expect(directive?.text).toBe(`@Developer ${prompt}`);
+    expect(note?.text).toBe(
+      "Developer is already running on this task, so no second run started. " +
+        "These words are delivered to it when that run finishes.",
+    );
+    expect(note?.toAgent).toBe(false);
+    expect((await developerRuns()).length).toBe(before + 1);
+
+    // The promise, kept: the held run finishes and ruling 203 starts the
+    // agent on the directive, once.
+    release();
+    for (let i = 0; i < 80 && (await developerRuns()).length < before + 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    await settled();
+    expect((await developerRuns()).length, "delivered once, not twice").toBe(before + 2);
+    const delivered = startedRunSpecs()
+      .filter((spec) => spec.taskKey === TASK && spec.kind !== "operator")
+      .at(-1);
+    expect(delivered?.prompt).toContain(prompt);
   });
 });
 
