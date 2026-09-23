@@ -6,6 +6,11 @@ export default defineConfig({
     // vite-tsconfig-paths plugin is no longer needed.
     tsconfigPaths: true,
   },
+  // The runner serves nothing over the network, so Vite's fs allow-list only
+  // gets in the way: a git worktree resolves node_modules from the primary
+  // checkout, outside its own root, and jsdom tests that import an asset URL
+  // (the font preloads' `?url` imports, ruling 454) were denied it there.
+  server: { fs: { strict: false } },
   test: {
     // *.server.test.ts files (and everything else for now) run under node.
     environment: "node",

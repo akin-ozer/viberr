@@ -84,9 +84,10 @@ Intents behind `project.task.tsx` are explained in
   double-registering.
 - **Topbar**: project crumb, notifications bell (popover), and the account menu. The
   account menu is a Radix ARIA menu (arrows, typeahead, Home/End, focus back to the
-  avatar on close; ruling 166) holding "Profile & preferences", "Switch project" where
-  it applies, "Switch theme · <value>" (cycles in place without closing), "Instance
-  settings" for org admins, and Sign out.
+  avatar on close; ruling 166), fetched when the pointer or focus reaches the avatar or
+  on the first press, which opens it on arrival (ruling 454). It holds "Profile &
+  preferences", "Switch project" where it applies, "Switch theme · <value>" (cycles in
+  place without closing), "Instance settings" for org admins, and Sign out.
 - **The standalone-page header** (ruling 145) is the same header on the instance
   pages that render outside the workspace: brand → Home, a `Home › <page>` crumb,
   the ⌘K trigger, the bell and the account menu. `palette-shell` mounts it, and

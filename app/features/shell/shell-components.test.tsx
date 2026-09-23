@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState, type ComponentProps } from "react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
@@ -80,7 +80,7 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     expect(document.activeElement).toBe(button);
   });
 
-  it("the account menu no longer declares menu roles it does not implement", () => {
+  it("the account menu no longer declares menu roles it does not implement", async () => {
     const { getByLabelText, container } = renderIn(
       <UserMenu
         user={{
@@ -99,8 +99,13 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     // Ruling 166: the menu roles are BACK, and this time they are honoured.
     // UI-45 had dropped them because they were declared with no arrow-key
     // handling — a contract that promises Up/Down navigation that does not
-    // exist. Radix implements the widget, so the promise is kept.
-    const menu = container.querySelector('[role="menu"]');
+    // exist. Radix implements the widget, so the promise is kept. (Ruling 454:
+    // the menu module is lazy, so the press opens it once it has arrived.)
+    const menu = await waitFor(() => {
+      const found = container.querySelector('[role="menu"]');
+      if (!found) throw new Error("the menu has not opened yet");
+      return found;
+    });
     expect(menu, "the panel is a real menu again").not.toBeNull();
     expect(menu).toBe(container.querySelector(".user-menu"));
     expect(container.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
@@ -136,7 +141,7 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
  * and pressing outside a menu to close it is what a menu should do.
  */
 describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", () => {
-  function openMenu() {
+  async function openMenu() {
     const view = renderIn(
       <UserMenu
         user={{
@@ -150,21 +155,21 @@ describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", ()
       />,
     );
     fireEvent.pointerDown(view.getByLabelText("Account menu"), { button: 0 });
-    expect(view.container.querySelector(".user-menu")).not.toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".user-menu")).not.toBeNull());
     return view;
   }
 
-  it("the account menu cycles theme in place, without closing", () => {
+  it("the account menu cycles theme in place, without closing", async () => {
     // The behaviour the old outside-press assertion stood in for. Every other
     // item dismisses the menu; this one must not, or cycling
     // light -> dark -> system becomes three trips through the trigger.
-    const { container, getByText } = openMenu();
+    const { container, getByText } = await openMenu();
     fireEvent.click(getByText(/Switch theme/));
     expect(container.querySelector(".user-menu")).not.toBeNull();
   });
 
-  it("the account menu closes on Escape from anywhere", () => {
-    const { container } = openMenu();
+  it("the account menu closes on Escape from anywhere", async () => {
+    const { container } = await openMenu();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(container.querySelector(".user-menu")).toBeNull();
   });

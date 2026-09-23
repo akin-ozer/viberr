@@ -114,6 +114,18 @@ function initialsOf(name: string): string {
   );
 }
 
+/**
+ * Every string that ACTUALLY routes, for whole-name highlight matching —
+ * must stay exactly what the server resolves (P13-LV-12).
+ */
+export function mentionNamesFor(m: Mentionables): string[] {
+  return [
+    ...m.agents.flatMap((a) => [a.name, a.handle]),
+    ...m.users.flatMap((u) => [u.name, u.handle]),
+    ...m.reserved.map((r) => r.handle),
+  ];
+}
+
 // ------------------------------------------------------------ token detect
 
 export interface MentionToken {
