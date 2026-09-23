@@ -2,10 +2,10 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { watch, type FSWatcher } from "chokidar";
-import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { reindexKnowledgeBaseByDir } from "~/server/org/resources.server";
+import { errnoSchema } from "./atomic-file.server";
 import { getDataRoot, kbRootDir } from "./file-store-root.server";
 
 /**
@@ -30,12 +30,6 @@ import { getDataRoot, kbRootDir } from "./file-store-root.server";
  */
 
 export const KB_WATCH_DEBOUNCE_MS = 250;
-
-/** Node hangs its errno off `code`; a watcher error without one is not a
- *  condition this module branches on. */
-const errnoSchema = z.object({
-  code: z.string().optional().catch(undefined),
-});
 
 const KB_WATCHER_KEY = Symbol.for("viberr.kbWatcher");
 

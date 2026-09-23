@@ -5,9 +5,10 @@ import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 
-/** Node hangs its errno off `code`; anything else thrown by a write carries
- *  none, and a non-string `code` is not an errno we branch on. */
-const errnoSchema = z.object({
+/** Node hangs its errno off `code`; anything else thrown by a write (or
+ *  raised by a store watcher) carries none, and a non-string `code` is not an
+ *  errno anything branches on. */
+export const errnoSchema = z.object({
   code: z.string().optional().catch(undefined),
 });
 

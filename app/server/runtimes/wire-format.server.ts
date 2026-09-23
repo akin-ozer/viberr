@@ -6,6 +6,8 @@ import {
   type JsonValue,
   type LogLine,
 } from "~/features/runtime/runtime-types";
+import { formatAbsoluteUTC } from "~/shared/dates/format";
+import { wholeThousands } from "~/shared/text/thousands";
 
 /** Normalize provider wire envelopes into console lines and persisted facts. */
 
@@ -656,10 +658,9 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
         const trigger = meta?.trigger || "auto";
         const pre = meta?.pre_tokens ?? null;
         const post = meta?.post_tokens ?? null;
-        const k = (n: number) => `${(n / 1000).toFixed(0)}k`;
         const sizes =
           pre !== null
-            ? ` · ${k(pre)} → ${post !== null ? k(post) : "?"} tokens`
+            ? ` · ${wholeThousands(pre)} → ${post !== null ? wholeThousands(post) : "?"} tokens`
             : "";
         return {
           display: {
@@ -849,11 +850,12 @@ function claudeCacheFacts(e: ClaudeEnvelope): NonNullable<EnvelopeFacts["cache"]
   };
 }
 
-/** An epoch-seconds instant as absolute UTC (`2026-09-03 11:50 UTC`). */
+/** An epoch-seconds instant as absolute UTC (`2026-09-03 11:50 UTC`); the raw
+ *  number when it is not a valid instant. */
 function absoluteUtc(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
   if (Number.isNaN(d.getTime())) return String(epochSeconds);
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  return formatAbsoluteUTC(d.toISOString());
 }
 
 /** Human-readable summary of an assistant/user content array. */

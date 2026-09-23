@@ -13,6 +13,8 @@ import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd, runDidNotCompleteLead } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { escapeRegExp } from "~/shared/text/regexp";
+import { endSentence } from "~/shared/text/sentence";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -1162,11 +1164,6 @@ export async function setTaskMetadata(
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
-/** A literal, for use inside a RegExp. */
-function literalPattern(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /**
  * Ruling 447 (O39-a): the actor other than the asker that a person's answer to
  * an agent's question names, if any: another deployed agent (by name or
@@ -1205,7 +1202,7 @@ export function answerNamesAnotherActor(
   const hits: { at: number; id: string; label: string }[] = [];
   for (const candidate of candidates) {
     const re = new RegExp(
-      `(^|[^\\p{L}\\p{N}_-])(@?${literalPattern(candidate.pattern)})(?=$|[^\\p{L}\\p{N}_-])`,
+      `(^|[^\\p{L}\\p{N}_-])(@?${escapeRegExp(candidate.pattern)})(?=$|[^\\p{L}\\p{N}_-])`,
       "giu",
     );
     for (const match of text.matchAll(re)) {
@@ -3177,12 +3174,6 @@ type StuckLoopEscalation =
   /** The packet was refused or the write threw; a timeline note was left
    *  instead, and no notification was sent. */
   | { status: "failed" };
-
-/** A reason clause ends exactly once: a refusal sentence that already carries
- *  its period used to be followed by another (`..`, F34-12). */
-function endSentence(text: string): string {
-  return /[.!?…]$/.test(text) ? text : `${text}.`;
-}
 
 /** Open one recovery packet when the bounded operator loop stalls. */
 /** Ruling 326: the same function, exported under a test-only name so the
@@ -9753,7 +9744,7 @@ const CONTRACT_CLAUSE = "This decision is part of the task's contract from here 
 /** Every decision block the contract holds: the question it answered and the
  *  answer, as `resolvePacket` writes them. */
 const CONTRACT_DECISION_RE = new RegExp(
-  String.raw`answered “([^”]*)”:\*\*\n\n([\s\S]*?)\n\n` + literalPattern(CONTRACT_CLAUSE),
+  String.raw`answered “([^”]*)”:\*\*\n\n([\s\S]*?)\n\n` + escapeRegExp(CONTRACT_CLAUSE),
   "g",
 );
 

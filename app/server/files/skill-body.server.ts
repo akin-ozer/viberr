@@ -51,7 +51,10 @@ export interface SkillInjection {
   unresolved?: UnresolvedSkillGrant;
 }
 
-function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
+/** `lstatSync` (which never follows a link), or null when the path does not
+ *  stat: nothing there, or no access. Exported for the skill editor's save
+ *  guard (`resources.server.ts`). */
+export function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
   try {
     return lstatSync(target);
   } catch {

@@ -7,6 +7,7 @@ import {
   type TaskFileRef,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { wholeThousands } from "~/shared/text/thousands";
 import type { RunSpec } from "./adapter.server";
 import type { EnvelopeFacts } from "./wire-format.server";
 
@@ -23,10 +24,6 @@ import type { EnvelopeFacts } from "./wire-format.server";
  */
 export const RUN_COMPACTION_AUDIT_ACTION = "task.agent.compaction";
 
-function k(n: number): string {
-  return `${(n / 1000).toFixed(0)}k`;
-}
-
 /** The sentence the timeline carries. */
 export function compactionNoteText(
   agent: string,
@@ -38,7 +35,7 @@ export function compactionNoteText(
   // never "to 0k tokens", which is what a seeded placeholder used to print.
   const sizes =
     compaction.preTokens !== null
-      ? ` from ${k(compaction.preTokens)} to ${compaction.postTokens !== null ? `${k(compaction.postTokens)} tokens` : "a summary"}`
+      ? ` from ${wholeThousands(compaction.preTokens)} to ${compaction.postTokens !== null ? `${wholeThousands(compaction.postTokens)} tokens` : "a summary"}`
       : "";
   if (compaction.trigger === "completion") {
     // Ruling 376: the run is over; the summary is what the next resume replays.

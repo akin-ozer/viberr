@@ -2,7 +2,6 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { publishResourceUpdated } from "./resource-events.server";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -40,6 +39,7 @@ import {
 import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
 import {
   assertSkillBodyWellFormed,
+  lstatOr,
   resolveContainedSkillFile,
 } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -2159,14 +2159,6 @@ function assertSkillBodyWritable(name: string, ctx: OrgSeedContext): void {
   // still a link, and the write would CREATE the target outside the store.
   if (!lstatOr(path.join(dir, "SKILL.md"))) return;
   if ("reason" in resolveContainedSkillFile(name, ctx.dataRoot)) throw uncontained();
-}
-
-function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
-  try {
-    return lstatSync(target);
-  } catch {
-    return null;
-  }
 }
 
 /** True when the on-disk SKILL.md exceeds the editor read cap — the body the

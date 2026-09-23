@@ -100,6 +100,7 @@ import {
 import type { RunPrompt } from "./prompt-prefix.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { wholeThousands } from "~/shared/text/thousands";
 
 import { newId } from "~/shared/ids/new-id.server";
 
@@ -1355,10 +1356,6 @@ function humanDuration(ms: number): string {
   return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} minute${rest === 1 ? "" : "s"}` : ""}`;
 }
 
-function k(n: number): string {
-  return `${(n / 1000).toFixed(0)}k`;
-}
-
 /** What the user is told when a session could not be resumed. Never "review your
  *  authentication" — the credential is fine. */
 function sessionMissingMessage(
@@ -1395,7 +1392,7 @@ function recordSessionMissing(
   // under its own tag — the session is intact, nothing failed.
   const text =
     reason === "stale_large_session" && stale
-      ? `The ${label} session ${run.session_id ?? ""} was not resumed on purpose: it was ${humanDuration(stale.idleMs)} idle, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, and ${k(stale.contextTokens)} tokens large, so replaying it would have re-written the whole history as one cache write. The agent started a fresh session anchored on task.md and its last report; the transcript is intact.`
+      ? `The ${label} session ${run.session_id ?? ""} was not resumed on purpose: it was ${humanDuration(stale.idleMs)} idle, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, and ${wholeThousands(stale.contextTokens)} tokens large, so replaying it would have re-written the whole history as one cache write. The agent started a fresh session anchored on task.md and its last report; the transcript is intact.`
       : sessionMissingMessage(run.backend, run.session_id ?? "", reason);
   const raw = JSON.stringify({
     type: reason === "stale_large_session" ? "notice" : "error",
@@ -1444,7 +1441,7 @@ function continuityResetPreamble(
   if (kind === "controller") {
     return stale
       ? [
-          `[continuity notice] Your previous ${label} session for this conversation was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${k(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history. None of the earlier exchange is in your context.`,
+          `[continuity notice] Your previous ${label} session for this conversation was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${wholeThousands(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history. None of the earlier exchange is in your context.`,
           `The recent-conversation digest in the prompt below carries the last stored turns, and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
         ].join(" ")
       : [
@@ -1454,7 +1451,7 @@ function continuityResetPreamble(
   }
   if (stale) {
     return [
-      `[continuity notice] Your previous ${label} session for this task was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${k(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history as one cache write. None of that conversation is in your context.`,
+      `[continuity notice] Your previous ${label} session for this task was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${wholeThousands(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history as one cache write. None of that conversation is in your context.`,
       `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
       stale.lastReport
         ? `Your last report on this task, for orientation (the task record and the repository are the truth if they disagree):\n\n${stale.lastReport}`
@@ -1530,7 +1527,7 @@ async function noteContinuityReset(
         text:
           reason === "stale_large_session" && stale
             ? // Ruling 372: a decision, said as one — the session is intact.
-              `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${k(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
+              `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${wholeThousands(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
             : reason === "owner_changed"
             ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
             : reason === "transcript_damaged"

@@ -1,4 +1,5 @@
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
+import { escapeRegExp } from "~/shared/text/regexp";
 
 /**
  * Ruling 164 (pass 35, F35-14) — an option title is a promise the resolution
@@ -78,14 +79,10 @@ const PROFILE_EDIT =
 
 const FORCE_ACCEPT = /\bforce[\s-]*accept/i;
 
-function escapeForRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function promisesMoveTo(text: string, stage: PacketStage): boolean {
   const target = [stage.name, stage.id]
     .filter((value) => value.trim().length > 1)
-    .map(escapeForRegex)
+    .map(escapeRegExp)
     .join("|");
   if (!target) return false;
   const bound = `(?:back\\s+)?(?:to|into)\\s+(?:the\\s+)?(?:stage\\s+)?(?:${target})\\b`;

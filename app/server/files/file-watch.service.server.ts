@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildGoalFile, rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
+import { errnoSchema } from "./atomic-file.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
 
 /**
@@ -38,12 +39,6 @@ export const WATCH_DEBOUNCE_MS = 250;
 const taskKeyRowSchema = z.object({ task_key: z.string() });
 const goalIdRowSchema = z.object({ goal_id: z.string() });
 const projectSlugRowSchema = z.object({ slug: z.string() });
-
-/** Node hangs its errno off `code`; a watcher error without one is not a
- *  condition this module branches on. */
-const errnoSchema = z.object({
-  code: z.string().optional().catch(undefined),
-});
 
 const WATCHER_KEY = Symbol.for("viberr.fileWatcher");
 

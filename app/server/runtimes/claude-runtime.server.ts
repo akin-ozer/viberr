@@ -9,6 +9,7 @@ import {
   type RunFailureKind,
 } from "~/shared/run-failure";
 import { splitClaudeVariant } from "~/shared/model-ids";
+import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -816,13 +817,6 @@ function failureFacts(kind: RunFailureKind, evidence: FailureEvidence): RunFailu
   return facts;
 }
 
-/** `Sep 3, 2026 11:50 UTC`, absolute, never relative. */
-function absoluteResetLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
 /** The `code` a Node spawn failure carries (`EBADF`/`ENOENT`/…). Anything that
  *  is not an object with a string `code` decodes to "" and matches no arm — the
  *  same thing the previous property read did. */
@@ -900,7 +894,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
       // runs, so it must not say "the coordinating model" (misleads a human
       // triaging a failed delivery run toward the operator).
       message: facts.windowRejected
-        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${absoluteResetLabel(facts.resetsAt)}` : ""}. Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts.`
+        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${formatAbsoluteUTC(facts.resetsAt)}` : ""}. Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts.`
         : "The Claude account is over its usage quota. Retry after the limit resets, or connect a different Claude account or an API key on Profile → Agent accounts.",
       providerText,
       facts,

@@ -1,4 +1,5 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
+import { sha256Hex } from "~/server/files/content-hash.server";
 
 /**
  * Minimal AWS Signature Version 4 signer for a single S3 PUT — enough to stream
@@ -24,10 +25,6 @@ export interface S3Config {
 
 const SERVICE = "s3";
 const ALGORITHM = "AWS4-HMAC-SHA256";
-
-export function sha256Hex(data: string | Buffer): string {
-  return createHash("sha256").update(data).digest("hex");
-}
 
 function hmac(key: string | Buffer, data: string): Buffer {
   return createHmac("sha256", key).update(data, "utf8").digest();

@@ -15,6 +15,7 @@ import {
   providerSentence,
 } from "./backend-quota.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { findUserById } from "~/server/auth/user-store.server";
 import { controllerRunRoute } from "~/server/controller/controller-conversations.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
@@ -150,10 +151,6 @@ export const LINE_LOST_TAG = "run·line_lost";
  * would scrub every digit out of every log line.
  */
 const MIN_SECRET_VALUE_LEN = 12;
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Build the redactor ONCE per run (in `createRunSink`), not per line: the

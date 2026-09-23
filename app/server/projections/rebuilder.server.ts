@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -45,6 +44,7 @@ import {
 } from "~/server/files/goal-writer.server";
 import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import { parseProjectFileContent } from "~/server/files/project-file.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
   referenceDiagnostics,
@@ -105,10 +105,6 @@ export interface RescanSummary {
   removed: number;
   errors: number;
   durationMs: number;
-}
-
-function sha256(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function nowIso(): string {
@@ -203,7 +199,7 @@ export function rebuildProjectFile(
   }
 
   const content = readFileSync(absPath, "utf8");
-  const contentHash = sha256(content);
+  const contentHash = sha256Hex(content);
   // SAFETY: `content_hash` is a single NOT NULL column on `projects`; an
   // unprojected slug yields no row, which the union already admits.
   const existing = db
@@ -448,7 +444,7 @@ export function rebuildTaskFile(
   }
 
   const content = readFileSync(absPath, "utf8");
-  const contentHash = sha256(content);
+  const contentHash = sha256Hex(content);
   // SAFETY: `content_hash` is a single NOT NULL column on `task_projections`;
   // an unprojected task yields no row.
   const existing = db
@@ -939,7 +935,7 @@ export function rebuildGoalFile(
   }
 
   const content = readFileSync(absPath, "utf8");
-  const contentHash = sha256(content);
+  const contentHash = sha256Hex(content);
   if (!options.force) {
     // SAFETY: `content_hash` is a single NOT NULL column on `goal_projections`;
     // an absent row yields undefined.

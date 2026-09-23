@@ -58,6 +58,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { readGoalFile } from "~/server/files/goal-writer.server";
 import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
 import {
@@ -3912,8 +3913,7 @@ function annotateUngrantedMcps(
   const ungranted = listMcpServerNames(db).filter((name) => {
     const key = mcpNameKey(name);
     if (held.has(key)) return false;
-    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(^|[^a-z0-9-])${escaped}([^a-z0-9-]|$)`).test(text);
+    return new RegExp(`(^|[^a-z0-9-])${escapeRegExp(key)}([^a-z0-9-]|$)`).test(text);
   });
   if (ungranted.length === 0) return prompt;
   return (

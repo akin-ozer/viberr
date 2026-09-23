@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isAppError } from "~/server/errors/app-error.server";
-import { writeFileAtomic, type AtomicFileFsOps } from "./atomic-file.server";
+import { errnoSchema, writeFileAtomic, type AtomicFileFsOps } from "./atomic-file.server";
 
 // The failure classes writeFileAtomic must distinguish (ENOSPC/ESTALE/EIO)
 // cannot be produced by a real volume on demand — inject them through the
@@ -119,5 +119,21 @@ describe("writeFileAtomic", () => {
     // SAFETY: the mock above threw the ErrnoException this helper built, and
     // what is asserted here is that writeFileAtomic re-threw that same value.
     expect((caught as NodeJS.ErrnoException).code).toBe("EACCES");
+  });
+});
+
+describe("errnoSchema", () => {
+  it("reads a Node errno's string code", () => {
+    expect(errnoSchema.parse(errno("ENOSPC")).code).toBe("ENOSPC");
+  });
+
+  it("reads no code from an error without one, or with a non-string one", () => {
+    expect(errnoSchema.parse(new Error("plain")).code).toBeUndefined();
+    expect(errnoSchema.parse(Object.assign(new Error("numeric"), { code: 28 })).code).toBeUndefined();
+  });
+
+  it("does not parse a non-object at all", () => {
+    expect(errnoSchema.safeParse("ENOSPC").success).toBe(false);
+    expect(errnoSchema.safeParse(null).success).toBe(false);
   });
 });

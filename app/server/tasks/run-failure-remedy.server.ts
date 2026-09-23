@@ -12,6 +12,7 @@ import { formatClockUTC, utcDayKey,
 } from "~/shared/dates/format";
 import { formatUsd, localNetworkFailureCode } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { endSentence } from "~/shared/text/sentence";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
 import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.server";
@@ -78,11 +79,6 @@ export function formatResetLabel(resetsAt: string | null | undefined): string | 
   // wrong by up to a day on either side of midnight.
   const day = formatCalendarDateUTC(resetsAt) ?? utcDayKey(resetsAt);
   return `${day} · ${formatClockUTC(resetsAt)} UTC`;
-}
-
-/** A provider sentence ends exactly once, whatever the adapter wrote. */
-function terminated(text: string): string {
-  return /[.!?…]$/.test(text) ? text : `${text}.`;
 }
 
 function windowWord(window: string | null | undefined): string {
@@ -213,7 +209,7 @@ export function describeRunFailure(
       // Ruling 127: the run's own line already names the person and their
       // remedy; that sentence is the reason and the remedy.
       reason = input.failure?.text
-        ? terminated(input.failure.text)
+        ? endSentence(input.failure.text)
         : `${backend} could not run ${runWord}: no usable credential.`;
       remedy = owner
         ? `${owner.name} connects ${backend} on ${profile}${ownerHasOther ? `, or the run is retried on ${BACKEND_LABEL[other]}` : ""}.`
@@ -278,7 +274,7 @@ export function describeRunFailure(
       break;
     default:
       reason = input.failure?.text
-        ? `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete: ${terminated(input.failure.text)}`
+        ? `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete: ${endSentence(input.failure.text)}`
         : `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete.`;
       remedy = "Re-run it; if it fails the same way, read the run's console for the cause.";
   }

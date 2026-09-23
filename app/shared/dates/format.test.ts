@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  formatAbsoluteUTC,
   formatClock,
   formatClockUTC,
   formatDayBucket,
@@ -105,6 +106,21 @@ describe("UTC variants (hydration-deterministic first pass)", () => {
     );
     expect(formatDayDotTimeUTC(yesterday)).toMatch(ABSOLUTE);
     expect(formatDayDotTimeUTC(yesterday)).not.toContain("Yesterday");
+  });
+});
+
+describe("formatAbsoluteUTC (quota reset copy)", () => {
+  it("renders the UTC date and minute, whatever the host zone", () => {
+    expect(formatAbsoluteUTC("2026-09-03T11:50:42.000Z")).toBe("2026-09-03 11:50 UTC");
+    // An offset input is the same instant, printed in UTC: 23:50 at +12:00 is
+    // 11:50Z the same day, and 01:05 at +02:00 is the previous UTC day.
+    expect(formatAbsoluteUTC("2026-09-03T23:50:00+12:00")).toBe("2026-09-03 11:50 UTC");
+    expect(formatAbsoluteUTC("2026-09-04T01:05:00+02:00")).toBe("2026-09-03 23:05 UTC");
+  });
+
+  it("hands an unparseable input back unchanged rather than an empty label", () => {
+    expect(formatAbsoluteUTC("next Tuesday")).toBe("next Tuesday");
+    expect(formatAbsoluteUTC("")).toBe("");
   });
 });
 

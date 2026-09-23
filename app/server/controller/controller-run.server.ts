@@ -5,6 +5,7 @@ import {
 import path from "node:path";
 import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { formatUsd } from "~/shared/run-failure";
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
@@ -667,7 +668,7 @@ function failedTurnNote(failure: RunFailure | null): string {
   const facts = failure?.facts ?? null;
   if (failure?.kind === "quota") {
     const window = facts?.window ? facts.window.replace(/_/g, " ") : "usage";
-    const reset = facts?.resetsAt ? ` It reopens at ${absoluteUtcLabel(facts.resetsAt)}.` : "";
+    const reset = facts?.resetsAt ? ` It reopens at ${formatAbsoluteUTC(facts.resetsAt)}.` : "";
     return (
       `I could not finish this turn: your Claude account's ${window} window is spent.${reset} ` +
       "Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts, then send your message again." +
@@ -721,13 +722,6 @@ function failedTurnNote(failure: RunFailure | null): string {
     (failure?.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "") +
     " Say it again to retry."
   );
-}
-
-/** `2026-09-03 11:50 UTC`: absolute, never relative. */
-function absoluteUtcLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** Whether this run's reply is already in the transcript: posted early by

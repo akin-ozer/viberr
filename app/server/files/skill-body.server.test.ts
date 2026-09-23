@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   SKILL_INJECTION_BUDGET,
   assertSkillBodyWellFormed,
+  lstatOr,
   readSkillBodies,
   readSkillBody,
   readSkillBodyDetailed,
@@ -236,5 +237,20 @@ describe("assertSkillBodyWellFormed (ruling 183)", () => {
       assertSkillBodyWellFormed("---\nname: x\ndescription: Fine.\n---\n# Body"),
     ).not.toThrow();
     expect(() => assertSkillBodyWellFormed("# Plain\n- markdown")).not.toThrow();
+  });
+});
+
+describe("lstatOr", () => {
+  it("stats the link itself, never its target, and answers null for a missing path", () => {
+    const { skillDir } = freshSkill();
+    const file = path.join(skillDir, "SKILL.md");
+    writeFileSync(file, "# Craft", "utf8");
+    symlinkSync(file, path.join(skillDir, "linked.md"));
+    expect(lstatOr(file)?.isFile()).toBe(true);
+    expect(lstatOr(path.join(skillDir, "linked.md"))?.isSymbolicLink()).toBe(true);
+    // A dangling link is still a link: it stats, where `existsSync` says no.
+    symlinkSync(path.join(skillDir, "gone.md"), path.join(skillDir, "dangling.md"));
+    expect(lstatOr(path.join(skillDir, "dangling.md"))?.isSymbolicLink()).toBe(true);
+    expect(lstatOr(path.join(skillDir, "missing.md"))).toBeNull();
   });
 });

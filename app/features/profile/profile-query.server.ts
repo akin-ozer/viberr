@@ -24,6 +24,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { ROLE_IDS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
 import { ROLE_RANK } from "~/shared/rbac";
+import { observedAfter } from "~/shared/freshness";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import {
   mergeNotifPrefs,
@@ -131,16 +132,6 @@ export interface ProfileBackend {
    *  Optional so fixtures that predate it stay valid; the loader always sets
    *  it. */
   usage?: ProfileBackendUsage | null;
-}
-
-/** True when `iso` is a later instant than `thanIso`. Same comparison
- *  /insights makes (`insights-page.tsx`), so the two surfaces cannot disagree
- *  about which of two provider claims is the fresher one. */
-function observedAfter(iso: string | undefined, thanIso: string): boolean {
-  if (!iso) return false;
-  const a = Date.parse(iso);
-  const b = Date.parse(thanIso);
-  return Number.isFinite(a) && Number.isFinite(b) && a > b;
 }
 
 /**
