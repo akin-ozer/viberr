@@ -1569,3 +1569,65 @@ describe("the console's prompt-cache facts (ruling 369)", () => {
     expect(title(mkRun({ tokens: 1500, tokensEstimated: false, cache: NO_RUN_CACHE }))).toBeNull();
   });
 });
+
+/**
+ * Ruling 451 (motion from transitions.dev, owner 2026-09-23). The live strip's
+ * status line arrives as a new line when its words change, the Turns figure
+ * rolls with its neighbours, and a copy control trades its glyph in place.
+ */
+describe("ruling 451: the live strip's motion", () => {
+  const panel = (run: RunView) => (
+    <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />
+  );
+
+  it("(a) a new phase or step is a new line; the same one is the same node", () => {
+    // CANARY: drop the `key` on `.ph` / `.step` and React patches the text in
+    // place, so the node survives the change and `swap-in` never replays.
+    const { container, rerender } = render(panel(mkRun({})));
+    const step = container.querySelector(".run-phase .step")!;
+    const phase = container.querySelector(".run-phase .ph")!;
+    // A re-render with the same words (a new row object, as every refresh
+    // brings) keeps both nodes.
+    rerender(panel(mkRun({})));
+    expect(container.querySelector(".run-phase .step")).toBe(step);
+    expect(container.querySelector(".run-phase .ph")).toBe(phase);
+    rerender(panel(mkRun({ step: "Read · app/app.css" })));
+    expect(container.querySelector(".run-phase .step")).not.toBe(step);
+    expect(container.querySelector(".run-phase .step")!.textContent).toBe("Read · app/app.css");
+    expect(container.querySelector(".run-phase .ph")).toBe(phase);
+    rerender(panel(mkRun({ step: "Read · app/app.css", phase: "Preparing workspace" })));
+    expect(container.querySelector(".run-phase .ph")).not.toBe(phase);
+  });
+
+  it("(e) Turns rolls like Elapsed and Tokens, and carries its figure on data-turns", () => {
+    // CANARY: render `{run.turns}` bare again and there is no .lw-clock here.
+    const { container } = render(panel(mkRun({ turns: 7 })));
+    const cell = [...container.querySelectorAll(".run-cell")].find(
+      (c) => c.querySelector(".lbl")?.textContent === "Turns",
+    )!;
+    expect(cell.querySelector(".lw-clock")?.getAttribute("data-turns")).toBe("7");
+  });
+});
+
+describe("ruling 451(c): copy controls trade their glyph in place", () => {
+  it("the session id's copy button keeps both marks and flips data-copied", async () => {
+    // CANARY: render `<Icon name={copied ? "check" : "copy"} />` again and the
+    // button holds one glyph, swapped in a single frame.
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const { container, getByRole } = render(
+      <AgentLogsPanel runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{}} />,
+    );
+    const button = getByRole("button", { name: "Copy full session id" });
+    const glyph = button.querySelector(".copy-glyph")!;
+    expect(glyph.querySelectorAll(".ico")).toHaveLength(2);
+    expect(glyph.hasAttribute("data-copied")).toBe(false);
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(writeText).toHaveBeenCalledWith("51d8f0e2-3a7b");
+    expect(container.querySelector(".copy-glyph")!.getAttribute("data-copied")).toBe("true");
+    // The same element carries the change: nothing remounted.
+    expect(container.querySelector(".copy-glyph")).toBe(glyph);
+  });
+});

@@ -78,6 +78,7 @@ import {
   setOAuthProviderEnabled,
 } from "~/server/auth/oauth-providers.server";
 import {
+  declineResourceRequest,
   openResourceRequests,
   resourceRequestRemedy,
 } from "~/server/controller/controller-requests.server";
@@ -519,7 +520,7 @@ export async function action({ request }: Route.ActionArgs) {
             .split("\n")
             .map((n) => n.trim())
             .filter(Boolean);
-        saveControllerConfig(
+        const saved = saveControllerConfig(
           db,
           {
             model: field("model"),
@@ -531,7 +532,22 @@ export async function action({ request }: Route.ActionArgs) {
           },
           actor,
         );
-        return ok("Controller updated. Changes apply from its next turn");
+        // Ruling 390 (amended 2026-09-23): a save that leaves a requested
+        // resource granted answers that request. Name it, so the admin knows
+        // why the request left the list.
+        const answered = saved.answeredRequests.map((r) => `“${r.name}”`);
+        return ok(
+          answered.length === 0
+            ? "Controller updated. Changes apply from its next turn"
+            : `Controller updated, which answers its grant ${answered.length === 1 ? "request" : "requests"} for ${answered.join(", ")}. Changes apply from its next turn`,
+        );
+      }
+      case "controller-request-decline": {
+        // Ruling 390 (amended 2026-09-23): an org admin's explicit "no" to a
+        // grant the controller asked for. It declines the ask and changes no
+        // grant, so no deployment lock applies to it.
+        const declined = declineResourceRequest(db, field("requestId"), actor);
+        return ok(`Declined the controller's request for “${declined.name}”`);
       }
       case "kb-save": {
         const result = await saveKnowledgeBase(

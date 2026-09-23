@@ -177,8 +177,10 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      // The single quality specialist: reviews the diff AND authors/runs the
-      // validation suite (the former Tester role is folded in here).
+      // The single quality specialist: reviews the diff AND runs the validation
+      // suite (the former Tester role is folded in here). It holds no repo-write
+      // grant, so "Author test cases" below is advisory: it names missing tests
+      // for the deliverer rather than writing them.
       // F20-21/R20-6: a specialist acts DIRECTLY or is WITHHELD — no `recommend`.
       // "Approve the review" / "Request changes" ship `direct` (they used to ship
       // `recommend`, silently widened to `direct` at runtime), so the reviewer's
@@ -191,7 +193,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // policy actually denies (git push + git commit), not a decorative extra.
       forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
     },
-    "The task's quality specialist: authors and runs the validation suite during implementation, then reviews the diff at the review boundary. Raises typed quality flags and recommends approve or request-changes. Keeps raw validation output in evidence, not the timeline, and re-anchors on the canonical task file before each pass.",
+    "The task's quality specialist: runs the validation suite and reviews the diff at the review boundary, then records an approve or request-changes verdict that gates acceptance. Writes no code or tests of its own (a missing test is a finding for the deliverer). Cites what it checked as short evidence references, keeps raw output in the run logs, and re-anchors on the canonical task file before each pass.",
   ),
 ];
 

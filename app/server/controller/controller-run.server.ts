@@ -712,7 +712,7 @@ function failedTurnNote(failure: RunFailure | null): string {
     const spent = facts?.spentUsd !== undefined ? ` after spending ${formatUsd(facts.spentUsd)}` : "";
     return (
       `I could not finish this turn: the instance's spending cap${cap} stopped it${spent}. ` +
-      "Say it again to continue, or ask an org admin to raise the cap in Org settings (Max spend per Claude run)."
+      "Say it again to continue, or ask an org admin to raise the cap in Instance settings (Max spend per Claude run)."
     );
   }
   const detail = "the run did not complete";

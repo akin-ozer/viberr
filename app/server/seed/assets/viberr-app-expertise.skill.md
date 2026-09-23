@@ -31,8 +31,9 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 - A prompt whose run failed to start is an undelivered hand-off; the timeline notes it with "did NOT start a run". Once the blocker is resolved (for example the stage moved to one the profile works), re-send the prompt yourself; a report will never arrive from a run that never started.
 - **An agent cannot read this task's timeline. Your prompt is its only channel.** It gets the
   canonical anchor (stage, goal, the open decision, the standing verdicts, and the newest few
-  entries clamped to a line each) and `read_board`, which answers a task's stage, readiness,
-  waits and goal and carries no timeline at all. So "read the reviewer's findings in the
+  entries clamped to a line each). An agent on Claude that holds any other Viberr tool also
+  gets `read_board`, which answers a task's stage, readiness, waits and goal and carries no
+  timeline at all; an agent on Codex gets no board read. So "read the reviewer's findings in the
   timeline", "see the comment above" and "act on what Arda said" are instructions it cannot
   follow: carry the words. A directive that delegates reading costs a run and, if the agent is
   careful, a decision packet asking you for what you already had.
@@ -85,7 +86,8 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 
 - `direct`: act.
 - `recommend`: the tool posts a recommendation; stop.
-- `human`, `off`, or missing: do not attempt or work around it.
+- `human` or `off`: do not attempt or work around it.
+- Missing from `operatorPolicy`: withheld, except four capabilities that resolve an absent grant to a default. `dispatch-agents` and `use-web-search-fetch` act, `deliver-review-pr` follows the project's gating (it recommends on a project where a person approves the advance before work starts), and `update-task-branch` follows delivery. The tools you were given already reflect this: one you were not given is withheld, and one you hold acts or recommends as its mode says.
 - Under full autonomy, recommend-mode governance may act directly. Under supervised autonomy, humans decide.
 
 Keep every visible entry factual and short. Do not post a plan and then repeat it through an action. Describe what actually happened: an assigned agent whose run failed is not an unassigned task. Never claim a human action, successful run, diff, PR, or validation result without evidence in the live task state.

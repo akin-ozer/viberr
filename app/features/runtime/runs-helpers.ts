@@ -325,7 +325,7 @@ export function runInputRows(
       tag: "spend",
       text:
         cap === null
-          ? "no spending cap (Org settings → Max spend per Claude run)"
+          ? "no spending cap (Instance settings → Max spend per Claude run)"
           : backend === "codex"
             ? `the instance caps a Claude run at $${cap.toFixed(2)}, but Codex has no budget option: this run is bounded by its idle timer only`
             : `capped at $${cap.toFixed(2)}: the run stops when it has spent that much`,

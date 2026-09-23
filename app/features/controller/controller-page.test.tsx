@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRoutesStub, useLocation, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
@@ -792,10 +793,12 @@ describe("the open conversation's execution", () => {
     );
     // Ruling 366(e): Elapsed and Tokens roll their digits, and carry the plain
     // figure on the wrapper's `data-` attribute; the cell is read through it.
+    // Ruling 451(e): so does Turns.
     const plain = (c: Element) =>
       c.querySelector(".lbl")!.textContent +
       (c.querySelector(".lw-clock")?.getAttribute("data-clock") ??
         c.querySelector(".lw-clock")?.getAttribute("data-tokens") ??
+        c.querySelector(".lw-clock")?.getAttribute("data-turns") ??
         c.querySelector(".val")!.textContent);
     const cells = [...container.querySelectorAll(".run-cell")].map(plain);
     expect(cells[0]).toMatch(/^Elapsed01:0[56]$/);
@@ -1291,5 +1294,95 @@ describe("ruling 419(h): a chain says what it is for and what has happened to it
     await waitFor(() =>
       expect(container.querySelector<HTMLDetailsElement>("details#goal-1")!.open).toBe(true),
     );
+  });
+});
+
+/**
+ * Ruling 451 (motion from transitions.dev, owner 2026-09-23): the page's
+ * conversation moves as the dock's does. A reply that lands while the
+ * transcript is up rises in, and the working row's step arrives as a new line
+ * under a sentence that carries its own words for the shimmer band.
+ */
+describe("ruling 451: the page's conversation motion", () => {
+  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
+    id: "cnv_b",
+    userId: "u1",
+    userLabel: "arda@viberr.dev",
+    projectSlug: "viberr-core",
+    taskKey: null,
+    title: "Board thread",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    updatedAt: "2026-09-01T10:00:00.000Z",
+    lastMessageAt: "2026-09-01T10:00:00.000Z",
+  };
+  const message = (id: string, text: string, author: "user" | "controller") => ({
+    id,
+    conversationId: "cnv_b",
+    seq: Number(id.slice(1)),
+    author,
+    userId: author === "user" ? "u1" : null,
+    text,
+    runId: null,
+    surface: null,
+    createdAt: "2026-09-01T10:00:00.000Z",
+  });
+
+  /** The real page, handed a new view the way a revalidation hands it one. */
+  function renderLive(initial: ControllerSurfaceView) {
+    let setView: (v: ControllerSurfaceView) => void = () => {};
+    function Live() {
+      const [v, set] = useState(initial);
+      setView = set;
+      return (
+        <ToastProvider>
+          <ControllerPage view={v} projectSlug="viberr-core" canRedirectGoals={false} />
+        </ToastProvider>
+      );
+    }
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "tok", theme: "system" }),
+        children: [{ path: "projects/:slug/controller", Component: Live }],
+      },
+    ]);
+    const utils = render(<Stub initialEntries={["/projects/viberr-core/controller?c=cnv_b"]} />);
+    return { ...utils, update: (v: ControllerSurfaceView) => act(() => setView(v)) };
+  }
+
+  it("(d) a reply that lands while the transcript is up wears data-fresh; history never does", async () => {
+    // CANARY: drop `data-fresh` from the page's <article> and the reply that
+    // ends a minutes-long wait appears in one frame, as it did before.
+    const first = message("m1", "Status?", "user");
+    const reply = message("m2", "Two tasks are waiting on you.", "controller");
+    const { update } = renderLive(view({ conversation, messages: [first], viewerOwnsActive: true }));
+    await screen.findByText("Status?");
+    expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
+    update(view({ conversation, messages: [first, reply], viewerOwnsActive: true }));
+    await screen.findByText("Two tasks are waiting on you.");
+    const fresh = [...document.querySelectorAll(".ctl-msg[data-fresh]")].map((el) => el.textContent ?? "");
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0]).toContain("Two tasks are waiting on you.");
+  });
+
+  it("(a) the working sentence carries its own words, and a new step is a new line", async () => {
+    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step });
+    const { update } = renderLive(
+      view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }),
+    );
+    const row = await screen.findByRole("status");
+    // CANARY: let `data-text` drift from the words and the band sweeps a
+    // different sentence than the one on screen.
+    const sentence = row.querySelector(".ctl-working-text")!;
+    expect(sentence.textContent).toBe("Controller is working…");
+    expect(sentence.getAttribute("data-text")).toBe(sentence.textContent);
+    const step = row.querySelector(".ctl-working-step")!;
+    // CANARY: drop TurnStep's `key` and the step's words change in place.
+    update(view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }));
+    expect(row.querySelector(".ctl-working-step")).toBe(step);
+    update(view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Read · app/app.css") }));
+    expect(row.querySelector(".ctl-working-step")).not.toBe(step);
+    expect(row.querySelector(".ctl-working-step")!.textContent).toBe("Read · app/app.css");
   });
 });

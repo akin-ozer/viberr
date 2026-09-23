@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   setupAppTest,
   type AppTestContext,
@@ -634,6 +635,284 @@ describe("controller config locks (ruling 108)", () => {
         VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "1",
       }),
     ).toEqual({ skills: false, kb: false, mcps: true, instructions: true });
+  });
+});
+
+/**
+ * Ruling 390, amended 2026-09-23. Before this, a grant request never left
+ * `open`: `closeResourceRequest` had no caller outside tests. After an admin
+ * granted the resource, the request stayed on this tab and in the controller's
+ * own context, which told it that it did not have a knowledge base it was
+ * reading. Now the Controller-tab save that leaves the resource granted closes
+ * the request, and Decline closes it too. Both are audited and published.
+ */
+describe("controller grant requests are answered in the app (ruling 390)", () => {
+  const ASKER = {
+    askedByUserId: "u_controller_asker",
+    askedByLabel: "arda@viberr.dev · via controller",
+  };
+
+  const answerDetails = z.object({
+    requestId: z.string(),
+    kind: z.string(),
+    name: z.string(),
+  });
+
+  /** The newest audit row for `action`, with its details parsed. */
+  async function latestAudit(action: string) {
+    const { queryAuditEventsForExport } = await import(
+      "~/server/audit/audit-export.server"
+    );
+    const { getDb } = await import("~/server/db/sqlite.server");
+    const row = queryAuditEventsForExport(getDb(), { action })[0];
+    expect(row, action).toBeTruthy();
+    return {
+      row: row!,
+      details: answerDetails.parse(JSON.parse(row!.detailsJson ?? "{}")),
+    };
+  }
+
+  /** `body`'s result, and everything the SSE broker sent a `user`-scoped
+   *  watcher (what an open Instance settings tab holds) while it ran. */
+  async function published<T>(
+    body: () => Promise<T>,
+  ): Promise<{ result: T; wire: string }> {
+    const { connectSseClient, resetSseBrokerForTests } = await import(
+      "~/server/events/sse-broker.server"
+    );
+    resetSseBrokerForTests();
+    const writes: string[] = [];
+    connectSseClient({
+      userId: "u_watcher",
+      scopes: [{ kind: "user" }],
+      lastEventId: null,
+      write: (chunk) => writes.push(chunk),
+    });
+    try {
+      const result = await body();
+      return { result, wire: writes.join("") };
+    } finally {
+      resetSseBrokerForTests();
+    }
+  }
+
+  async function listedIds(): Promise<string[]> {
+    return (await runLoader(ids.arda)).controllerRequests.map((r) => r.id);
+  }
+
+  it("a save that grants the requested knowledge base closes the request as granted", async () => {
+    const { raiseResourceRequest, readResourceRequests, openRequestsContextLine } =
+      await import("~/server/controller/controller-requests.server");
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
+    const before = resolveControllerConfig(app.dataRoot);
+    expect(before.kb).not.toContain("architecture-notes");
+    const { request: asked } = raiseResourceRequest(
+      {
+        kind: "kb",
+        name: "architecture-notes",
+        reason: "It carries the standing rule, as its heading.",
+        ...ASKER,
+      },
+      app.dataRoot,
+    );
+    const { request: other } = raiseResourceRequest(
+      { kind: "skills", name: "developer-expertise", reason: "Not granted here.", ...ASKER },
+      app.dataRoot,
+    );
+    expect(await listedIds()).toEqual(expect.arrayContaining([asked.id, other.id]));
+
+    // The deployment unlocks the knowledge-base section (ruling 108). The
+    // restart is the env cache reset.
+    vi.stubEnv("VIBERR_UNLOCK_CONTROLLER_KB", "enabled");
+    resetEnvCacheForTests();
+    try {
+      const { result: reply, wire } = await published(() =>
+        postAction(ids.arda, {
+          intent: "controller-save",
+          model: before.model,
+          effort: before.effort,
+          definition: "",
+          skills: "",
+          mcps: "",
+          kb: [...before.kb, "architecture-notes"].join("\n"),
+        }),
+      );
+      expect(reply.ok).toBe(true);
+      expect(reply.toast).toContain(
+        "which answers its grant request for “architecture-notes”",
+      );
+      // CANARY: drop the close from `saveControllerConfig` and the request is
+      // still open here, still listed, and still in the controller's context.
+      const rows = readResourceRequests(app.dataRoot);
+      const answered = rows.find((r) => r.id === asked.id)!;
+      expect(answered.status).toBe("granted");
+      expect(answered.closedByLabel).toBe("arda@viberr.dev");
+      expect(answered.closedAt).toBeTruthy();
+      // Only the request this save answered. The skill was not granted.
+      expect(rows.find((r) => r.id === other.id)!.status).toBe("open");
+      const listed = await listedIds();
+      expect(listed).not.toContain(asked.id);
+      expect(listed).toContain(other.id);
+      expect(openRequestsContextLine(app.dataRoot)).not.toContain("architecture-notes");
+
+      const { row, details } = await latestAudit("controller.resource_grant.granted");
+      expect(details).toEqual({
+        requestId: asked.id,
+        kind: "kb",
+        name: "architecture-notes",
+      });
+      expect(row.actorLabel).toBe("arda@viberr.dev");
+      // An open settings tab in another window revalidates.
+      expect(wire).toContain("event: resource.updated");
+      expect(wire).toContain("kb:architecture-notes");
+
+      // Restore the controller's grants for the rest of the file.
+      const restored = await postAction(ids.arda, {
+        intent: "controller-save",
+        model: before.model,
+        effort: before.effort,
+        definition: "",
+        skills: "",
+        mcps: "",
+        kb: before.kb.join("\n"),
+      });
+      expect(restored.ok).toBe(true);
+      expect(resolveControllerConfig(app.dataRoot).kb).toEqual(before.kb);
+    } finally {
+      vi.unstubAllEnvs();
+      resetEnvCacheForTests();
+    }
+  });
+
+  it("a request for a resource the controller already holds is answered by the next save, locked or not", async () => {
+    const { raiseResourceRequest, readResourceRequests } = await import(
+      "~/server/controller/controller-requests.server"
+    );
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const before = resolveControllerConfig(app.dataRoot);
+    // The handbook is granted in the shipped profile (ruling 99). Nothing
+    // stopped the controller asking for it anyway, and the context line kept
+    // telling it that it did not have a base it was reading.
+    expect(before.kb).toContain("controller-handbook");
+    const { request } = raiseResourceRequest(
+      { kind: "kb", name: "controller-handbook", reason: "Already there.", ...ASKER },
+      app.dataRoot,
+    );
+    // A model-only save under the default full lock. What counts is that the
+    // controller holds the resource, not which save added it.
+    const reply = await postAction(ids.arda, {
+      intent: "controller-save",
+      model: before.model,
+      effort: before.effort,
+      definition: "",
+      skills: "",
+      kb: "",
+      mcps: "",
+    });
+    expect(reply.ok).toBe(true);
+    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
+      "granted",
+    );
+  });
+
+  it("a save that leaves the requested resource ungranted answers nothing", async () => {
+    const { raiseResourceRequest, readResourceRequests } = await import(
+      "~/server/controller/controller-requests.server"
+    );
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const before = resolveControllerConfig(app.dataRoot);
+    expect(before.skills).not.toContain("developer-expertise");
+    const { request } = raiseResourceRequest(
+      { kind: "skills", name: "developer-expertise", reason: "Not granted here.", ...ASKER },
+      app.dataRoot,
+    );
+    const reply = await postAction(ids.arda, {
+      intent: "controller-save",
+      model: before.model,
+      effort: before.effort,
+      definition: "",
+      skills: "",
+      kb: "",
+      mcps: "",
+    });
+    expect(reply.ok).toBe(true);
+    // CANARY: close every open request on any save and this goes red.
+    expect(reply.toast).toBe("Controller updated. Changes apply from its next turn");
+    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
+      "open",
+    );
+    expect(await listedIds()).toContain(request.id);
+  });
+
+  it("Decline closes the request as declined, audited and announced, and grants nothing", async () => {
+    const { raiseResourceRequest, readResourceRequests, openRequestsContextLine } =
+      await import("~/server/controller/controller-requests.server");
+    const profileFile = path.join(app.dataRoot, "agents", "profiles", "controller.md");
+    const profileBefore = readFileSync(profileFile, "utf8");
+    const { request } = raiseResourceRequest(
+      { kind: "skills", name: "developer-expertise", reason: "Not granted here.", ...ASKER },
+      app.dataRoot,
+    );
+
+    // Org admins only: the whole action is admin-gated, before any work.
+    await expect(
+      postAction(ids.selin, { intent: "controller-request-decline", requestId: request.id }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
+      "open",
+    );
+
+    const { result: reply, wire } = await published(() =>
+      postAction(ids.arda, {
+        intent: "controller-request-decline",
+        requestId: request.id,
+      }),
+    );
+    expect(reply.ok).toBe(true);
+    expect(reply.toast).toBe(
+      "Declined the controller's request for “developer-expertise”",
+    );
+    const declined = readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!;
+    expect(declined.status).toBe("declined");
+    expect(declined.closedByLabel).toBe("arda@viberr.dev");
+    expect(await listedIds()).not.toContain(request.id);
+    expect(openRequestsContextLine(app.dataRoot)).not.toContain("developer-expertise");
+    const { row, details } = await latestAudit("controller.resource_grant.declined");
+    expect(details).toEqual({
+      requestId: request.id,
+      kind: "skills",
+      name: "developer-expertise",
+    });
+    expect(row.actorLabel).toBe("arda@viberr.dev");
+    expect(wire).toContain("event: resource.updated");
+    expect(wire).toContain("skill:developer-expertise");
+    // Declining is an answer, not a grant change: the profile is untouched.
+    expect(readFileSync(profileFile, "utf8")).toBe(profileBefore);
+
+    // A second answer to the same request is refused with the stored answer,
+    // not recorded twice; an id nobody raised is refused as not found.
+    const again = await postAction(ids.arda, {
+      intent: "controller-request-decline",
+      requestId: request.id,
+    });
+    expect(again.ok).toBe(false);
+    expect(again.error).toContain("already declined by arda@viberr.dev");
+    const bogus = await postAction(ids.arda, {
+      intent: "controller-request-decline",
+      requestId: "rq_nobody_raised",
+    });
+    expect(bogus.ok).toBe(false);
+    expect(bogus.error).toContain("No grant request carries that id");
+    expect(
+      readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.closedAt,
+    ).toBe(declined.closedAt);
   });
 });
 

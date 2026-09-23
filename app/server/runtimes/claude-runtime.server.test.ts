@@ -1620,7 +1620,7 @@ describe("claude spending cap (ruling 175)", () => {
     expect(terminal?.display?.tag).toBe("run·error·max_budget");
     expect(terminal?.display?.failure).toMatchObject({ kind: "max_budget", spendCapUsd: 0.5, spentUsd: 0.51 });
     expect(terminal?.display?.text).toContain("its $0.50 spending cap after spending $0.51");
-    expect(terminal?.display?.text).toContain("Org settings (Max spend per Claude run)");
+    expect(terminal?.display?.text).toContain("Instance settings (Max spend per Claude run)");
     expect(exit).toMatchObject({ outcome: "error", sessionId: "s-b" });
   });
 });

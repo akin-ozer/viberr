@@ -157,7 +157,7 @@ export interface RunSpec {
    *  reviewer run (the report_outcome envelope — verdict/questions). */
   outputSchema?: unknown;
   /** Ruling 175: the instance's spending cap for this run in USD, when one is
-   *  set (Org settings → Max spend per Claude run). Claude hands it to the SDK
+   *  set (Instance settings → Max spend per Claude run). Claude hands it to the SDK
    *  as `maxBudgetUsd`; Codex has no budget option and ignores it, which the
    *  run-inputs disclosure states. */
   maxSpendUsd?: number;

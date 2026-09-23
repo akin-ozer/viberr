@@ -254,7 +254,7 @@ export function describeRunFailure(
         `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} was cut off by the instance's spending cap` +
         `${cap !== undefined ? ` of ${formatUsd(cap)}` : ""}${spent !== undefined ? ` after spending ${formatUsd(spent)}` : ""}.`;
       remedy =
-        "Re-run it to continue from its session, or have an org admin raise the cap in Org settings (Max spend per Claude run).";
+        "Re-run it to continue from its session, or have an org admin raise the cap in Instance settings (Max spend per Claude run).";
       break;
     }
     case "idle_timeout":

@@ -75,6 +75,7 @@ import {
 } from "~/server/org/org-users.server";
 import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import {
+  publishResourceRequestChanged,
   raiseResourceRequest,
   REQUESTABLE_KINDS,
   resourceRequestRemedy,
@@ -653,7 +654,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "request_resource_grant",
-      "Ask for a skill, knowledge base or MCP server to be attached to YOUR OWN profile, when you have created or found one your next conversation needs. Org admins only. You cannot grant it yourself (ruling 108 makes controller grants a deployment decision, with no in-app override for anyone), and this is how the ask survives the conversation: it goes on the record, it appears on Org settings for whoever runs this deployment, and it comes back in your own turn context until it is answered. Idempotent per (kind, name) while open, so re-asking never stacks duplicates on a person. Naming a resource that does not exist is refused: create it first.",
+      "Ask for a skill, knowledge base or MCP server to be attached to YOUR OWN profile, when you have created or found one your next conversation needs. Org admins only. You cannot grant it yourself (ruling 108 makes controller grants a deployment decision, with no in-app override for anyone), and this is how the ask survives the conversation: it goes on the record, it appears on the Controller tab of Instance settings for whoever runs this deployment, and it comes back in your own turn context until it is answered. Idempotent per (kind, name) while open, so re-asking never stacks duplicates on a person. Naming a resource that does not exist is refused: create it first.",
       {
         kind: z
           .enum(REQUESTABLE_KINDS)
@@ -703,11 +704,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             subjectId: "controller",
             details: { kind: request.kind, name: request.name },
           });
+          // An open Instance settings tab lists open requests; without this
+          // a new one appeared there only after a manual reload.
+          publishResourceRequestChanged(request);
         }
         return (
           `[done] ${created ? "Recorded" : "Already open"}: a grant request for the ${CONTROLLER_SECTION_LABEL[request.kind].replace(" grants", "")} ` +
           `"${request.name}" (${request.id}). ${resourceRequestRemedy(request.kind)} ` +
-          `It is on Org settings and in your own turn context until it is answered; do not say you have the resource until it is.`
+          `It is on the Controller tab of Instance settings and in your own turn context until it is answered; do not say you have the resource until it is.`
         );
       }),
     ),
@@ -1072,7 +1076,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_mcp_server",
-      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Org settings, then test the server. `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
+      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
       {
         id: z.string().optional().describe("Existing server id to update; omit to create."),
         name: z.string(),
@@ -1131,7 +1135,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
             (storeNote ? `${storeNote} ` : "") +
             "If it needs a credential, the admin adds it in " +
-            "Org settings (secrets never travel through this chat)."
+            "Instance settings → Agent resources (secrets never travel through this chat)."
           );
         },
       ),
@@ -3544,7 +3548,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               blockedBy: z
                 .array(z.string())
                 .optional()
-                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. The task is born held when the wait names work that is still open."),
+                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. While the wait names work that is still open, the link stays pending with no task; it starts when that work lands."),
             }),
           )
           .min(1)
