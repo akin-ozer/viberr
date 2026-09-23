@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
+import type { TaskLinks } from "~/shared/task-key-links";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -61,9 +62,12 @@ function CollapsibleComment({
   mentionNames,
   attachmentNames,
   attachmentsBase,
+  taskLinks,
 }: {
   text: string;
   mentionNames?: string[];
+  /** U39-31: the other tasks the text names, key to path. */
+  taskLinks?: TaskLinks;
   /** The task's real attachment filenames + serving base, so an agent-written
    *  workspace-relative attachment link in the body resolves (markdown.tsx
    *  `repairAttachmentHref`). */
@@ -104,6 +108,7 @@ function CollapsibleComment({
         <Markdown
           text={text}
           mentionNames={mentionNames}
+          {...(taskLinks ? { taskLinks } : {})}
           {...(attachmentNames ? { attachmentNames } : {})}
           {...(attachmentsBase ? { attachmentsBase } : {})}
           onAttachmentOpen={lightbox}
@@ -181,8 +186,11 @@ export function TimelineItem({
   mentionNames = [],
   attachmentNames,
   attachmentsBase,
+  taskLinks,
 }: {
   ev: TimelineEventRender;
+  /** U39-31: the other tasks the event names, key to path. */
+  taskLinks?: TaskLinks;
   /** Known mentionable names, for whole-name @mention chips in comment bodies
    *  AND in typed-event text. */
   mentionNames?: string[];
@@ -252,6 +260,7 @@ export function TimelineItem({
             <CollapsibleComment
               text={ev.text}
               mentionNames={mentionNames}
+              {...(taskLinks ? { taskLinks } : {})}
               {...(attachmentNames ? { attachmentNames } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}
             />
@@ -267,7 +276,7 @@ export function TimelineItem({
               {/* F20: typed-event text goes through the SAME known-name filter
                   the comment bodies use — a bare `@nobody` in a system-written
                   line routes nowhere, so it must not look like a live tag. */}
-              <RichText text={ev.text} names={mentionNames} />
+              <RichText text={ev.text} names={mentionNames} {...(taskLinks ? { taskLinks } : {})} />
             </div>
             {ev.evidence && (
               <div className="tl-card evidence">
@@ -373,9 +382,12 @@ export function Timeline({
   runLive,
   attachmentNames,
   attachmentsBase,
+  taskLinks,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
+  /** U39-31: the other tasks the slice names, key to path (loader). */
+  taskLinks?: TaskLinks;
   hasMore: boolean;
   remaining: number;
   nextLimit: number;
@@ -610,6 +622,7 @@ export function Timeline({
               mentionNames={mentionNames}
               {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}
+              {...(taskLinks ? { taskLinks } : {})}
             />
           ))
         )}

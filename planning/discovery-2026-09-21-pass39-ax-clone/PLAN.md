@@ -99,6 +99,7 @@ per item and each one was applied to the source and observed failing.
 | 86 | A refresh's drift sentence reads the refresh record when GitHub lags (F39-64) | — | **done**, extends ruling 439 |
 | 87 | Task keys in the controller's transcript link to the tasks the viewer can open (U39-29) | — | **done** (no ruling; default, owner may revisit) |
 | 88 | A long turn's answer shows before the completion compaction (U39-30) | — | **done** (no ruling) |
+| 89 | Task keys on a task's goal and timeline link to the other tasks (U39-31) | — | **done** (no ruling; default, owner may revisit) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

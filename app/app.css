@@ -4139,8 +4139,8 @@ dialog[data-closing]::backdrop {
 .md-body h4, .md-body h5, .md-body h6 { font-size: .88rem; }
 .md-body strong { color: var(--fg); font-weight: 700; }
 .md-body a { color: var(--blue-pressed); text-decoration: underline; }
-/* U39-29: a task key the transcript names; a key never breaks at its dash. */
-.md-body a.task-ref { white-space: nowrap; }
+/* U39-29/31: a task key a text names; a key never breaks at its dash. */
+a.task-ref { white-space: nowrap; }
 .md-body code.mono {
   background: var(--tint-press);
   padding: .04rem .25rem;

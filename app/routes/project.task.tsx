@@ -22,6 +22,7 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
+import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import {
   attachmentProducers,
@@ -287,6 +288,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // specialists, registered users, and the reserved backend/role handles —
   // the same targets the server resolves an @mention to when a comment posts.
   const mentionables = getMentionables(db, params.slug, params.key);
+  // U39-31: the other tasks this page's goal and timeline slice name, as the
+  // pages this viewer can open. The task itself is never linked to itself.
+  const taskLinks = taskKeyLinks(
+    db,
+    [detail.goal, ...slice.events.map((e) => e.text)],
+    { projectSlug: params.slug, viewerId: user.id, exclude: params.key },
+  );
 
   // Pending operator recommendations live in the task FILE (not the projection);
   // read them here so the task-detail renders them as actionable cards. The
@@ -470,6 +478,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
+    taskLinks,
     // UI-57: the task's GitHub card (branch / diff / commits / PR) is served
     // from the SAME cached projection the GitHub page labels "Updated 3m ago /
     // Not yet synced" — but here it carried no freshness cue at all, so stale
@@ -1409,6 +1418,7 @@ export default function TaskDetailRoute({
       me={{ id: layout.user.id, name: layout.user.name }}
       myRole={layout.myRole}
       mentionables={loaderData.mentionables}
+      taskLinks={loaderData.taskLinks}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
       // Ruling 320: the loader has read these since ruling 241 and the panel

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { TaskLinks } from "~/shared/task-key-links";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -127,6 +128,7 @@ export function TaskDetailPage({
   me,
   myRole,
   mentionables,
+  taskLinks = {},
   recommendations,
   schedules,
   queuedQuestions = [],
@@ -191,6 +193,8 @@ export function TaskDetailPage({
   myRole: string | null;
   /** @-mention autocomplete directory for the comment composer (loader). */
   mentionables: Mentionables;
+  /** U39-31: the other tasks the goal and the timeline name, key to path. */
+  taskLinks?: TaskLinks;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
   /** Pending scheduled runs (O-3 generalized, loader — from the task file).
@@ -750,6 +754,7 @@ export function TaskDetailPage({
           // opens with the SAME draft the decided card shows (one mapping
           // field), not the goal the decision asked to replace.
           pendingGoalDraft={task.packet?.goalDraft ?? null}
+          taskLinks={taskLinks}
         />
       </div>
 
@@ -972,6 +977,7 @@ export function TaskDetailPage({
           tlDefault={tlDefault}
           ask={ask}
           mentionables={mentionables}
+          taskLinks={taskLinks}
           runPrincipal={runPrincipal}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}

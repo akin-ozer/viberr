@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import type { TaskLinks } from "~/shared/task-key-links";
 
 /**
  * F19-22 — the task page's GitHub panel needs the last CHECK as well as the
@@ -35,6 +36,8 @@ afterAll(() => app.cleanup());
 interface TaskLoaderData {
   githubReconciledAt: string | null;
   githubCheckedAt: string | null;
+  /** U39-31. */
+  taskLinks: TaskLinks;
 }
 
 /**
@@ -213,5 +216,33 @@ describe("R19-15: GETting the task route auto-reads the viewer's notifications",
           .get(),
       );
     expect(row.read_at).toBeNull();
+  });
+});
+
+/**
+ * U39-31: the task page links the other tasks its goal and timeline name.
+ * Live on ax-clone the timeline read "Main's runtime failure is fixed by
+ * AX-32 … make AX-29 wait on AX-32" with every key as plain text.
+ */
+describe("U39-31: the task page's task links", () => {
+  it("links the other tasks the timeline names, and never the task itself", async () => {
+    // CANARY: drop `taskLinks` from the loader's return.
+    const { appendTimelineEvent, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const ref = { projectSlug: "viberr-core", taskKey: "VIB-142", dataRoot: app.dataRoot };
+    await appendTimelineEvent(ref, {
+      occurredAt: new Date().toISOString(),
+      type: "comment",
+      actor: { kind: "operator" },
+      title: null,
+      text: "VIB-142 waits on VIB-145; VIB-9999 is not a task.",
+      toAgent: false,
+      evidence: null,
+    });
+    rebuildPath(app.db, resolveTaskFilePath(ref), { dataRoot: app.dataRoot });
+    const data = await loadTask("VIB-142");
+    expect(data.taskLinks).toMatchObject({ "VIB-145": "/projects/viberr-core/tasks/VIB-145" });
+    expect(data.taskLinks["VIB-142"]).toBeUndefined();
+    expect(data.taskLinks["VIB-9999"]).toBeUndefined();
   });
 });

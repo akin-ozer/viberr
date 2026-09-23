@@ -290,16 +290,28 @@ what they strand, and record an optional reason.
   AX-34 … AX-21 now waits on AX-33 and AX-30 waits on AX-34." Five tasks, all plain text, on the
   page whose whole job is directing work on those tasks. Opening any of them meant leaving for
   the board or the search. **Fixed (default, owner may revisit):** the controller page's and the
-  dock's loaders resolve the keys the open transcript names (`controllerTaskLinks`) to the tasks
+  dock's loaders resolve the keys the open transcript names (`taskKeyLinks`) to the tasks
   this viewer can open: a project surface links its own project's tasks, the instance surface
   the projects the viewer belongs to, and every project for an org admin. A key two visible
   projects share stays text, as does any key in code or inside a link. The renderer
   (`rehypeTaskLinks`, beside the @mention pass) links only what it was given, the same "known
   names only" rule the mention chip follows. It links in the same tab with client navigation,
   because a new tab per task would also hold two more live-event streams against the browser's
-  six-per-origin limit. Tests: `markdown.test.tsx`, `controller-task-links.server.test.ts`,
+  six-per-origin limit. Tests: `markdown.test.tsx`, `task-key-links.server.test.ts`,
   `controller-query.server.test.ts`, `controller-page.test.tsx` and `controller-dock.test.tsx`,
   each "U39-29".
+
+- **U39-31 (LOW-MED) — a task's own page named its neighbours as plain text too.** The same
+  shape as U39-29, one surface over: AX-29's timeline read "Main's runtime failure is fixed by
+  AX-32 … make AX-29 wait on AX-32", release notes name what was waited on, and a chain task's
+  goal names the previous link's task. **Fixed:** the resolver is now the shared
+  `taskKeyLinks` (`app/server/projections/task-key-links.server.ts`, with an `exclude` for the
+  page's own key). The task loader resolves the keys its goal and timeline slice name, and the
+  goal, comments (Markdown) and typed events (`RichText`, which gained the same prose pass)
+  link them in the same tab. `a.task-ref` keeps a key from breaking at its dash wherever it
+  appears. Tests: `rich-text.test.tsx`, `attachments-panel.test.tsx` (a comment and a note),
+  `project.task.server.test.ts` (the loader, never the task itself) and
+  `task-key-links.server.test.ts`, each "U39-31".
 
 - **U39-30 (MED) — a long turn's answer waited for the housekeeping behind it.** 03:59, the rulings
   upkeep turn: the page said "Controller is working… Compacting context" while the last message

@@ -5,6 +5,7 @@ import type {
   TaskDetail,
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
+import type { TaskLinks } from "~/shared/task-key-links";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill, validationQuiet } from "~/ui/pill";
@@ -92,6 +93,7 @@ export function TaskHero({
   editGoalSignal = 0,
   editGoalDraft = null,
   pendingGoalDraft = null,
+  taskLinks,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
@@ -113,6 +115,8 @@ export function TaskHero({
    *  read "Goal updated" over a packet that still waits. Null when no goal
    *  edit is pending (the editor opens with the current goal). */
   pendingGoalDraft?: string | null;
+  /** U39-31: the other tasks the goal names, key to path. */
+  taskLinks?: TaskLinks;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
@@ -371,7 +375,7 @@ export function TaskHero({
           {/* Pass 30 (owner-approved): the goal renders as markdown like every
               timeline comment — literal ** and backticks read as unfinished.
               task.md on disk stays canonical; the editor still edits raw text. */}
-          <Markdown text={task.goal} />
+          <Markdown text={task.goal} {...(taskLinks ? { taskLinks } : {})} />
           {canEditGoal && (
             <button
               type="button"

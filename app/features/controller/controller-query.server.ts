@@ -22,7 +22,7 @@ import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
-import { controllerTaskLinks } from "~/server/controller/controller-task-links.server";
+import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -167,7 +167,7 @@ export function getControllerSurface(
     })),
     conversation,
     messages,
-    taskLinks: controllerTaskLinks(
+    taskLinks: taskKeyLinks(
       db,
       messages.map((m) => m.text),
       { projectSlug: scope, viewerId: viewer.id },

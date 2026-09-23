@@ -7,8 +7,9 @@ import { TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
 const MAX_KEYS = 400;
 
 /**
- * U39-29 (pass 39): the tasks a controller conversation names, as the pages a
- * person can open from the transcript.
+ * U39-29 (pass 39): the tasks a text names, as the pages a person can open
+ * from it. The controller transcript was first (U39-29); a task's own goal and
+ * timeline read the same way (U39-31), minus the task itself.
  *
  * The controller answers in task keys. Live on ax-clone at 03:30 it wrote "I
  * created two urgent core tasks for the Developer, AX-33 and AX-34 … AX-21 now
@@ -21,10 +22,15 @@ const MAX_KEYS = 400;
  * (every project for an org admin). A key two visible projects share is left
  * as text rather than guessed.
  */
-export function controllerTaskLinks(
+export function taskKeyLinks(
   db: DatabaseSync,
   texts: readonly string[],
-  scope: { projectSlug: string | null; viewerId: string },
+  scope: {
+    projectSlug: string | null;
+    viewerId: string;
+    /** A key never linked: the page's own task, which would link to itself. */
+    exclude?: string;
+  },
 ): TaskLinks {
   const keys = new Set<string>();
   for (const text of texts) {
@@ -54,6 +60,7 @@ export function controllerTaskLinks(
   const links: Record<string, string> = {};
   for (const [key, slugs] of where) {
     const [slug] = slugs;
+    if (key === scope.exclude) continue;
     if (slugs.length === 1 && slug) links[key] = `/projects/${slug}/tasks/${key}`;
   }
   return links;

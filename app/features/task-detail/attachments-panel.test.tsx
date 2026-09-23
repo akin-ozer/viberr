@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, MemoryRouter } from "react-router";
 import type { ReactNode } from "react";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { AttachmentsPanel } from "./attachments-panel";
@@ -172,6 +172,26 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(without.container.querySelector('input[type="file"]')).toBeNull();
   });
 
+});
+
+describe("U39-31: TimelineItem links the other tasks an event names", () => {
+  it("links them in a comment and in a typed event", () => {
+    // CANARY: drop `taskLinks` from TimelineItem's CollapsibleComment and
+    // RichText and neither links.
+    const links = { "AX-33": "/projects/ax-clone/tasks/AX-33" };
+    const comment: TimelineEventRender = { ...evidenceEvent("x"), type: "comment", text: "Fixed by AX-33.", evidence: null };
+    const note: TimelineEventRender = { ...evidenceEvent("x"), id: 8, type: "note", text: "Waits on AX-33.", evidence: null };
+    for (const ev of [comment, note]) {
+      const { container, unmount } = render(
+        <MemoryRouter>
+          <TimelineItem ev={ev} taskLinks={links} />
+        </MemoryRouter>,
+      );
+      const link = container.querySelector<HTMLAnchorElement>("a.task-ref");
+      expect(link?.getAttribute("href"), ev.type).toBe("/projects/ax-clone/tasks/AX-33");
+      unmount();
+    }
+  });
 });
 
 describe("TimelineItem evidence linkify", () => {

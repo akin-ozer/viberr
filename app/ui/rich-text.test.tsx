@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { RichText } from "./rich-text";
 
 afterEach(cleanup);
@@ -133,5 +134,25 @@ describe("RichText (THE shared micro-format renderer, ruling 14)", () => {
     const { container } = render(<RichText text="**a `b` c**" />);
     expect(container.querySelector("strong")!.textContent).toBe("a b c");
     expect(container.querySelector("strong code.mono")!.textContent).toBe("b");
+  });
+
+  it("U39-31: links the task keys it was given, beside mentions and code, in the same tab", () => {
+    // CANARY: push the prose unlinked (drop `pushLinked`'s key split).
+    const { container } = render(
+      <MemoryRouter>
+        <RichText
+          text={"Released: AX-32 is done. @operator, `AX-32` is code and AX-7 is not linked."}
+          names={["operator"]}
+          taskLinks={{ "AX-32": "/projects/ax-clone/tasks/AX-32" }}
+        />
+      </MemoryRouter>,
+    );
+    const refs = [...container.querySelectorAll("a.task-ref")];
+    expect(refs.map((a) => [a.textContent, a.getAttribute("href"), a.hasAttribute("target")])).toEqual([
+      ["AX-32", "/projects/ax-clone/tasks/AX-32", false],
+    ]);
+    expect(container.querySelector(".mention")!.textContent).toBe("@operator");
+    expect(container.querySelector("code")!.textContent).toBe("AX-32");
+    expect(container.textContent).toContain("AX-7 is not linked");
   });
 });

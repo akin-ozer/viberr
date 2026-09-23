@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { TaskLinks } from "~/shared/task-key-links";
-import { controllerTaskLinks } from "~/server/controller/controller-task-links.server";
+import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { getProject } from "~/server/projections/board-query.server";
@@ -200,7 +200,7 @@ export function getControllerDock(
     scope,
     conversation,
     messages,
-    taskLinks: controllerTaskLinks(
+    taskLinks: taskKeyLinks(
       db,
       messages.map((m) => m.text),
       { projectSlug: binding.projectSlug, viewerId: viewer.id },
