@@ -1483,3 +1483,28 @@ not lost work.
 - 05:37 to 07:10 UTC: this session was paused. The instance kept running: at 07:10 the container
   was up and healthy, and three Codex run logs had been written within the minute.
 
+## 54. The owner's "fix findings, go until done": rulings 443 to 450, deploy 6 (15:00 to 16:00 UTC)
+
+- Every entry left open in FINDINGS was worked. Fixed: F39-70 (446), both conflict-narration
+  nitpicks (443), the controller's recorded model identity (444), the stale "not on the PR" line
+  (445), O39-a (447), O39-d (448), O39-c design 1 (449), the auto-boundary cost (450), O39-b, the
+  rest of F39-65, and the YAML 1.1 quoting. Re-checked and kept as recorded: F39-2 (not a defect),
+  O39-c design 2 (the owner's: Viberr has no runner of its own).
+- Gates at `a1f08530`: `lint`, `typecheck`, `test` (397 files, 7,583 tests) and `build`, all green.
+  Every change's canary was applied and seen red, including three that first came back GREEN and
+  got a test they were missing: the controller's model call site, the release payload's
+  `atBirth`, and the refresh-and-review route and page wiring.
+- Deploy 6: `npm run deploy` of `a1f08530` (built 15:56:54), with no run in flight (the last Codex
+  log was written at 12:30 UTC). Boot at 15:57:03: "added a baseline column this data root
+  predated … controller_conversations.seen_seq", integrity check clean.
+- **Ruling 448's backfill, live:** a read-only query inside the container (the macOS host
+  `sqlite3` trap does not apply there) finds 14 conversations, 0 unseen, `seen_seq` 2 to 18. The
+  deploy lit no stale dots.
+- **Not verified live:** the browser pane reopened signed out at 15:10 UTC, and entering a password
+  is not mine to do. The dock's dot, the accept dialog's re-review-first button, and the three
+  decisions waiting on the owner (AX-31 approved and ready to accept, `ax-31` containing `main`;
+  AX-5's lease question; AX-35's merge-order packet) wait for a sign-in.
+- The session was paused twice (05:37 to 07:10 and 07:15 to 15:00 UTC). The board ran on: AX-5's
+  Developer fixed the command-path finding and stopped at findings 2 and 3 (F39-70's cost, exactly
+  as logged), and AX-31's reviewer approved `19dc607`.
+
