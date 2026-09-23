@@ -16,11 +16,11 @@ import { EVIDENCE_EMPTY_COLUMN } from "~/schemas/task-file.schema";
 import { eventMeta, typedKind } from "./event-meta";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TaskRunPrincipalView } from "./run-principal-view";
+import { mentionNamesFor } from "./mention-autocomplete";
 import {
   CommentComposer,
-  mentionNamesFor,
   type CommentComposerHandle,
-} from "./comment-composer";
+} from "./comment-composer-slot";
 
 /**
  * Unified timeline — 1:1 port of Timeline/TimelineItem (task.jsx §4.6/§4.7):
@@ -544,7 +544,8 @@ export function Timeline({
           <div className="composer-input" ref={composerBoxRef}>
             {/* Lexical plain-text editor: known @mentions highlight live as
                 character-editable text (no backdrop mirroring); the posted
-                value stays exactly the trimmed plain draft. */}
+                value stays exactly the trimmed plain draft. Loaded lazily
+                behind a same-size stand-in (ruling 454). */}
             <CommentComposer
               ref={composerRef}
               mentionables={mentionables}

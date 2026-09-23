@@ -2,7 +2,9 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
+  type RefObject,
 } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -15,6 +17,7 @@ import {
   $createParagraphNode,
   $getRoot,
   $isParagraphNode,
+  $setSelection,
   CLEAR_HISTORY_COMMAND,
   COMMAND_PRIORITY_HIGH,
   KEY_ARROW_DOWN_COMMAND,
@@ -26,8 +29,7 @@ import {
   type LexicalEditor,
 } from "lexical";
 import { mergeRegister } from "@lexical/utils";
-import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
-import type { TaskRunPrincipalView } from "./run-principal-view";
+import { mentionNamesFor } from "./mention-autocomplete";
 import { MentionMenu } from "./mention-menu";
 import {
   useMentionAutocomplete,
@@ -39,9 +41,16 @@ import {
   MentionTextNode,
   registerMentionHighlighting,
 } from "./lexical-mention-plugin";
+import {
+  COMPOSER_LABEL,
+  ComposerHint,
+  type CommentComposerHandle,
+  type CommentComposerProps,
+  type ComposerCarry,
+} from "./comment-composer-slot";
 
 /**
- * The task-comment composer (Lexical, plain text only).
+ * The task-comment editor (Lexical, plain text only).
  *
  * The editor owns only the DRAFT UI: one paragraph of plain text with line
  * breaks, known @mentions highlighted live as character-editable text. The
@@ -49,27 +58,47 @@ import {
  * reads the raw draft through `onChange` and submits exactly `raw.trim()`,
  * the same bytes the textarea composer produced. No rich text, Markdown,
  * HTML, or editor state ever persists.
+ *
+ * Ruling 454: nothing imports this module statically. `comment-composer-slot`
+ * loads it on idle or on the first focus, shows a same-size stand-in until
+ * then, and hands over what was typed there through `carry`.
  */
 
-export interface CommentComposerHandle {
-  focus(): void;
-  /** Ask-operator prefill: only fills a draft whose trimmed text is empty. */
-  prefillIfEmpty(text: string): void;
-  /** Success reset: clears the draft AND the undo history, so ⌘Z cannot
-   *  resurrect a posted comment. */
-  clearAfterSuccess(): void;
+/** Replaces the whole draft with `text`, caret at the end. */
+function $replaceDraft(text: string): void {
+  const root = $getRoot();
+  const first = root.getFirstChild();
+  if ($isParagraphNode(first)) {
+    $setParagraphPlainText(first, text);
+    return;
+  }
+  root.clear();
+  const paragraph = $createParagraphNode();
+  root.append(paragraph);
+  $setParagraphPlainText(paragraph, text);
 }
 
-interface CommentComposerProps {
-  mentionables: Mentionables;
-  /** Ruling 127: the task's run principal (the owner whose accounts an
-   *  `@claude` / `@codex` mention would bill), so the menu rows can name a
-   *  backend that would refuse. Absent on renders with no task behind them. */
-  runPrincipal?: TaskRunPrincipalView | null;
-  /** Fires with the raw (untrimmed) draft on every edit. */
-  onChange: (raw: string) => void;
-  /** ⌘/Ctrl+Enter — the parent decides whether a submit is possible. */
-  onSubmit: () => void;
+/** Takes over the stand-in's draft and focus, once, as the editor mounts. A
+ *  layout effect: the stand-in hands them over in the same commit, and the
+ *  first paint must already show the text in the editor. */
+function CarryInPlugin({ carry }: { carry: RefObject<ComposerCarry | null> }) {
+  const [editor] = useLexicalComposerContext();
+  useLayoutEffect(() => {
+    const draft = carry.current;
+    carry.current = null;
+    if (!draft) return;
+    if (draft.text) {
+      editor.update(() => {
+        $replaceDraft(draft.text);
+        // A selection would move the page's caret into the editor, taking
+        // the focus from wherever the person went after typing here.
+        if (!draft.focused) $setSelection(null);
+      });
+    }
+    // The caret lands at the end of the carried text.
+    if (draft.focused) editor.focus();
+  }, [editor, carry]);
+  return null;
 }
 
 /** Captures the editor instance for the imperative handle. */
@@ -181,9 +210,12 @@ function ComposerKeysPlugin({
   return null;
 }
 
-export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposerProps>(
-  function CommentComposer(
-    { mentionables, runPrincipal, onChange, onSubmit },
+export const CommentEditor = forwardRef<
+  CommentComposerHandle,
+  CommentComposerProps & { carry: RefObject<ComposerCarry | null> }
+>(
+  function CommentEditor(
+    { mentionables, runPrincipal, onChange, onSubmit, carry },
     ref,
   ) {
     const editorRef = useRef<LexicalEditor | null>(null);
@@ -224,17 +256,8 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
           const editor = editorRef.current;
           if (!editor) return;
           editor.update(() => {
-            const root = $getRoot();
-            if (root.getTextContent().trim()) return;
-            const first = root.getFirstChild();
-            if ($isParagraphNode(first)) {
-              $setParagraphPlainText(first, text);
-              return;
-            }
-            root.clear();
-            const paragraph = $createParagraphNode();
-            root.append(paragraph);
-            $setParagraphPlainText(paragraph, text);
+            if ($getRoot().getTextContent().trim()) return;
+            $replaceDraft(text);
           });
           editor.focus();
         },
@@ -279,7 +302,7 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
             <ContentEditable
               className="composer-ce"
               role="combobox"
-              aria-label="Add a comment"
+              aria-label={COMPOSER_LABEL}
               aria-expanded={menu.open}
               aria-controls={menu.open ? menu.listId : undefined}
               aria-activedescendant={menu.activeId}
@@ -287,17 +310,17 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
               onBlur={menu.close}
             />
           }
-          placeholder={
-            <div className="composer-placeholder" aria-hidden="true">
-              Add a comment… type @ to tag the operator, an agent, or a teammate
-            </div>
-          }
+          placeholder={<ComposerHint />}
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
         <OnChangePlugin onChange={handleChange} ignoreSelectionChange={false} />
         <MentionHighlightPlugin names={mentionNamesFor(mentionables)} />
         <ComposerKeysPlugin menuRef={menuRef} onSubmitRef={onSubmitRef} />
+        {/* After OnChangePlugin, whose listener (a layout effect too) must
+            exist before the carried draft lands. The mention transform needs
+            no ordering: registering it re-runs it over the existing text. */}
+        <CarryInPlugin carry={carry} />
         <MentionMenu
           id={menu.listId}
           items={menu.open ? menu.items : []}
@@ -310,15 +333,3 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
     );
   },
 );
-
-/**
- * Every string that ACTUALLY routes, for whole-name highlight matching —
- * must stay exactly what the server resolves (P13-LV-12).
- */
-export function mentionNamesFor(m: Mentionables): string[] {
-  return [
-    ...m.agents.flatMap((a) => [a.name, a.handle]),
-    ...m.users.flatMap((u) => [u.name, u.handle]),
-    ...m.reserved.map((r) => r.handle),
-  ];
-}
