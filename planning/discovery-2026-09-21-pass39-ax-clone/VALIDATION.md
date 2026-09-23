@@ -1316,3 +1316,24 @@ not lost work.
 - **Not yet seen live:** 430 (a plan stopping at a decision), 431 (a lease quoted from the live
   list), 432 (a stall withdrawn while a conflict stays), 435 (a stale conflict hidden from the
   snapshot). Each needs its situation to recur.
+
+## 47. Main went red between two green merges, and the controller took it from there (02:28 to 02:36 UTC)
+
+- **Found by running main, not by trusting the reviews.** AX-21's reviewer blamed runtime tests
+  that time out. On `8f449da` (main after PR #20), inside the container: `go test
+  ./internal/runtime/...` fails four tests, every one Pending on "waiting for dependencies: no
+  Gateway routes to Model \"model\" yet". Run alone and unloaded,
+  `TestExecutorDeleteAndRecreateTaskUsesNewUIDAndCommand` fails the same way in 5.01s, so it is
+  not load. AX-28's branch passes the same suite because it forked at `a157544`, before AX-22
+  and AX-26 merged. Recorded as O39-c.
+- **The controller's handling.** Asked for an urgent fix, it created AX-32 ("Fix main: runtime
+  test fixtures declare the Gateway route their Model now requires", urgent) at 05:30 Istanbul
+  and posted the same brief to the operators of AX-21, AX-28, AX-31, AX-5 and AX-30: the failure
+  is main's, nobody fixes it on their own branch, no reviewer blocks on it, and any other
+  failure still counts. It said it could not start AX-29's operator (a decision was open) and
+  told me which option to pick.
+- **U39-24's second half, live.** The brief on AX-28's timeline reads "(Arda, 2026-09-23 05:30
+  Europe/Istanbul, 02:30 UTC)": text written onto a task names the zone, as the turn context
+  now asks.
+- **The operators acted on it.** AX-28's operator: "Waits on AX-32 (added AX-32). Held until
+  every entry is done" (02:32:16).
