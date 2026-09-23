@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { createRoutesStub, useLocation, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, linksStrandedByCancel, surfaceLabel } from "./controller-page";
+import { readableStep } from "./turn-step";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
@@ -636,7 +637,25 @@ describe("the open conversation's execution", () => {
     // the run panel below keeps showing it — the live shape.
     const row = await screen.findByRole("status");
     expect(row.textContent).toContain("is working");
-    expect(row.textContent).toContain('get_task · {"taskKey":"SHOP-31"}');
+    // U39-9: in words, with the stored text kept on the title.
+    expect(row.textContent).toContain("get task · SHOP-31");
+    expect(row.querySelector(".ctl-working-step")?.getAttribute("title")).toBe(
+      'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+    );
+  });
+
+  it("U39-9: a step reads as words: no server prefix, no underscores, a flat input as its values", () => {
+    // CANARY: render `detail` instead of `readableStep(detail)`.
+    expect(readableStep("composing · mcp__viberr_controller__read_default_branch_file · internal/client/client.go answered")).toBe(
+      "composing · read default branch file · internal/client/client.go answered",
+    );
+    expect(readableStep('mcp__viberr_ops__read_run_log · {"runId":"run_x","tail":40}')).toBe("read run log · run_x, 40");
+    // A payload the 120-character cap cut short is not JSON, so it stays as stored.
+    expect(readableStep('mcp__viberr_controller__update_goal · {"goalId":"goal-6","links…')).toBe(
+      'update goal · {"goalId":"goal-6","links…',
+    );
+    // Built-in tools and their inputs are already words.
+    expect(readableStep("Bash · npm test")).toBe("Bash · npm test");
   });
 
   it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {

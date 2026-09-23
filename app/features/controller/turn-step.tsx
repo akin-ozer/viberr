@@ -26,7 +26,41 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   if (!detail) return null;
   return (
     <span className="ctl-working-step mono" title={detail}>
-      {detail}
+      {readableStep(detail)}
     </span>
   );
+}
+
+/**
+ * U39-9 (pass 39): the step as a person reads it. The run row stores the
+ * tool's own id and its input, which is right for the run panel, and this row
+ * is where the person who asked is looking: live on ax-clone it read
+ * "composing · mcp__viberr_controller__read_default_branch_file ·
+ * internal/client/client.go answered". A tool id loses its server prefix and
+ * its underscores, and a flat JSON input is read as its values
+ * (`{"taskKey":"SHOP-31"}` is `SHOP-31`). Anything else, including a JSON
+ * payload the 120-character cap cut short, is left exactly as stored; the
+ * `title` keeps the stored text either way.
+ */
+export function readableStep(detail: string): string {
+  return detail
+    .replace(/\bmcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__([A-Za-z0-9_]+)/g, (_m, tool: string) =>
+      tool.replace(/_/g, " "),
+    )
+    .replace(/\{[^{}]*\}/g, (json) => flatValues(json) ?? json);
+}
+
+function flatValues(json: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const values = Object.values(parsed)
+    .filter((v) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+    .map(String)
+    .filter((v) => v.trim() !== "");
+  return values.length > 0 ? values.join(", ") : null;
 }

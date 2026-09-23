@@ -134,6 +134,15 @@ what they strand, and record an optional reason.
   is a count ("waits on 6 · 4 done") that opens to state, key and title per entry; the link's own
   task sits beside its title.
 
+- **U39-9 (LOW) — the controller's working line speaks tool ids.** Live at 23:59 UTC, with a
+  person watching their own question being worked on: "Controller is working… composing ·
+  mcp__viberr_controller__read_default_branch_file · internal/client/client.go answered". The
+  stored step is right for the run panel; the conversation row (and the dock's) is the person's.
+  **Fixed:** `readableStep` drops the `mcp__server__` prefix and the underscores and reads a flat
+  JSON input as its values ("get task · SHOP-31"). It leaves a payload the cap cut short exactly
+  as stored, and keeps the stored text on the `title`. Tests: "U39-9" and the ruling-250 test,
+  each red under its canary.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
