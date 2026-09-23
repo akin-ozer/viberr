@@ -5,6 +5,7 @@ import { createRoutesStub, Outlet } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerDock } from "./controller-dock";
 import type { ControllerDockView } from "./controller-dock-query.server";
+import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 
 /**
  * Ruling 121 — the controller dock, driven through a routed stub: the trigger
@@ -60,6 +61,8 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
 interface MountOptions {
   path: string;
   view: (request: Request) => ControllerDockView;
+  /** O39-d: the viewer's unseen replies (none by default). */
+  unseen?: () => UnseenReplyView[];
   action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
 }
 
@@ -87,6 +90,11 @@ function mount(opts: MountOptions) {
             { id: "routes/project.task", path: "tasks/:key", Component: () => <div>task page</div> },
             { id: "routes/project.controller", path: "controller", Component: () => <div>controller page</div> },
           ],
+        },
+        {
+          id: "routes/resources.controller-unseen",
+          path: "resources/controller-unseen",
+          loader: () => ({ unseen: opts.unseen ? opts.unseen() : [] }),
         },
         {
           id: "routes/resources.controller",
@@ -122,6 +130,70 @@ async function restored(expected: "0" | "1" = "0") {
     expect(window.sessionStorage.getItem("viberr.dock.open")).toBe(expected),
   );
 }
+
+/**
+ * O39-d. A controller turn runs one to five minutes. Its answer reached the
+ * surfaces still open on it, and a person who moved to another page had no
+ * signal anywhere that it had landed.
+ */
+describe("the dock tells a person a reply is waiting (O39-d)", () => {
+  const BOARD_REPLY: UnseenReplyView = {
+    id: "cnv_board",
+    title: "Plan the release",
+    projectSlug: "viberr",
+    taskKey: null,
+    href: "/projects/viberr/controller?c=cnv_board",
+  };
+
+  it("marks the button, says so to a screen reader, and links to the reply from the panel", async () => {
+    mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView(), unseen: () => [BOARD_REPLY] });
+    // CANARY: drop the unseen dot from the button and nothing on this page
+    // says the board conversation has answered.
+    const fab = await screen.findByRole("button", { name: /a new reply/ });
+    await waitFor(() => expect(fab.querySelector(".unseen-dot")).not.toBeNull());
+    expect(screen.getByRole("status").textContent).toBe("Controller replied in “Plan the release”");
+    fireEvent.click(fab);
+    const link = await screen.findByRole("link", { name: "Plan the release" });
+    expect(link.getAttribute("href")).toBe("/projects/viberr/controller?c=cnv_board");
+  });
+
+  it("does not count the thread the open panel is showing", async () => {
+    const shown = { ...BOARD_REPLY, id: "cnv_a", title: "First", taskKey: "VIB-1", href: "/projects/viberr/controller?c=cnv_a" };
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: conversationFixture(),
+          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
+        }),
+      unseen: () => [shown],
+    });
+    const fab = await screen.findByRole("button", { name: /a new reply/ });
+    fireEvent.click(fab);
+    // CANARY: drop the `open && u.id === shownId` filter and the person is told
+    // about the reply they are reading.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Controller · VIB-1 · Viberr$/ })).toBeTruthy());
+    expect(screen.queryByText(/New reply in/)).toBeNull();
+  });
+
+  it("marks an unread thread in the panel's own list", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          threads: [
+            { id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false },
+            { id: "cnv_b", title: "Second", lastMessageAt: "2026-09-01T11:00:00.000Z", unread: true },
+          ],
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /^Controller · / }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Threads here/ }));
+    // CANARY: drop the unread mark from the dock's thread list.
+    expect(await screen.findByRole("button", { name: /^Second, new reply/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^First/ }).textContent).not.toContain("new reply");
+  });
+});
 
 describe("the controller dock (ruling 121)", () => {
   it("names the scope on the trigger, opens on the current place, and focuses the composer", async () => {
@@ -390,7 +462,7 @@ describe("the controller dock (ruling 121)", () => {
   it("the Threads toggle keeps one name and lets aria-pressed carry the state (finding 25)", async () => {
     mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ threads: [{ id: "cnv_a", title: "First", lastMessageAt: null }] }),
+      view: () => taskView({ threads: [{ id: "cnv_a", title: "First", lastMessageAt: null, unread: false }] }),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
     // The count only settles once the view lands; the NAME must not change
@@ -569,8 +641,8 @@ describe("the controller dock (ruling 121)", () => {
       view: () =>
         taskView({
           threads: [
-            { id: "cnv_a", title: "First thread", lastMessageAt: "2026-09-01T10:00:00.000Z" },
-            { id: "cnv_b", title: "Second thread", lastMessageAt: "2026-09-01T11:00:00.000Z" },
+            { id: "cnv_a", title: "First thread", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false },
+            { id: "cnv_b", title: "Second thread", lastMessageAt: "2026-09-01T11:00:00.000Z", unread: false },
           ],
         }),
     });
@@ -661,7 +733,7 @@ describe("the controller dock (ruling 121)", () => {
             { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
           turn: { working: true, runId: "run_2", phase: null, step: null },
-          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z" }],
+          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
     });

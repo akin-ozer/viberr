@@ -394,6 +394,52 @@ describe("conversation access", () => {
  * records that it was stopped, and the lease is released so the next message
  * starts a fresh turn instead of queueing behind a run that is gone.
  */
+/**
+ * O39-d. A controller turn runs one to five minutes, and its answer reached
+ * only the surfaces still open on it: a person who moved to another page had
+ * no signal anywhere that it had landed.
+ */
+describe("O39-d: a reply its owner has not seen", () => {
+  it("is unseen until its owner looks, and never anybody else's", async () => {
+    const { createConversation, appendMessage, markConversationSeen, listUnseenReplies } = await import(
+      "./controller-conversations.server"
+    );
+    const ids = (userId: string) => listUnseenReplies(app.db, userId).map((r) => r.id);
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: "viberr-core",
+    });
+    appendMessage(app.db, { conversationId: conversation.id, author: "user", userId: ownerId, text: "How many tasks are open?" });
+    // A person's own message is not news to them.
+    expect(ids(ownerId)).not.toContain(conversation.id);
+    appendMessage(app.db, { conversationId: conversation.id, author: "controller", text: "Four." });
+    // CANARY: drop the `m.seq > c.seen_seq` clause and a reply stays unseen
+    // after its owner has read it (or, dropping the author clause, the
+    // person's own message becomes a "reply").
+    expect(listUnseenReplies(app.db, ownerId)).toContainEqual({
+      id: conversation.id,
+      title: expect.any(String),
+      projectSlug: "viberr-core",
+      taskKey: null,
+    });
+    // Somebody else opening it (an org admin) changes nothing for the owner.
+    markConversationSeen(app.db, conversation.id, orgAdminId);
+    expect(ids(ownerId)).toContain(conversation.id);
+    markConversationSeen(app.db, conversation.id, ownerId);
+    expect(ids(ownerId)).not.toContain(conversation.id);
+    // Looking again changes nothing (the loader runs on every revalidation).
+    markConversationSeen(app.db, conversation.id, ownerId);
+    expect(ids(ownerId)).not.toContain(conversation.id);
+    // The next reply is news again.
+    appendMessage(app.db, { conversationId: conversation.id, author: "controller", text: "Five now." });
+    expect(ids(ownerId)).toContain(conversation.id);
+    // It is never another person's news.
+    expect(ids(otherMemberId)).not.toContain(conversation.id);
+    expect(ids(orgAdminId)).not.toContain(conversation.id);
+  });
+});
+
 describe("stopping a turn", () => {
   async function startWorkingTurn() {
     const { createConversation } = await import("./controller-conversations.server");

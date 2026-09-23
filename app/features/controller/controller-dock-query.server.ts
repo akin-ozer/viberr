@@ -11,6 +11,8 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  listUnseenReplies,
+  markConversationSeen,
   type ControllerConversation,
   type ControllerMessage,
   type ConversationScope,
@@ -60,6 +62,8 @@ export interface ControllerDockThread {
   id: string;
   title: string;
   lastMessageAt: string | null;
+  /** O39-d: holds a controller reply its owner has not seen. */
+  unread: boolean;
 }
 
 export interface ControllerDockView {
@@ -185,6 +189,11 @@ export function getControllerDock(
       conversation = found;
     }
   }
+  // O39-d: the open panel shows this transcript to its owner, so it is seen.
+  if (conversation && conversation.userId === viewer.id) {
+    markConversationSeen(db, conversation.id, viewer.id);
+  }
+  const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
   const config = resolveControllerConfig(input.dataRoot);
   const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
@@ -212,6 +221,7 @@ export function getControllerDock(
       id: c.id,
       title: c.title || "New conversation",
       lastMessageAt: c.lastMessageAt,
+      unread: unseen.has(c.id),
     })),
     viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
   };

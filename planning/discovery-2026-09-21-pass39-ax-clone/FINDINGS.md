@@ -700,7 +700,10 @@ what they strand, and record an optional reason.
   **Fixed** (2026-09-23): `toYaml` double-quotes every string a YAML 1.1 reader takes for a boolean,
   keys included (the guardrails' `on:` key was the one this entry missed). Test:
   `frontmatter.server.test.ts`, which reads the output as YAML 1.1.
-- **O39-d (owner question): nothing tells a person who left the page that a long answer landed.**
+- ~~**O39-d (owner question): nothing tells a person who left the page that a long answer landed.**~~
+  **Fixed, ruling 448** (2026-09-23; default, owner may revisit), without the notification row this
+  entry weighed: the dock's button carries a still dot and says "a new reply" on every page, the
+  open panel links to it, and the thread lists mark unread threads. Opening the thread clears it.
   A controller turn runs one to five minutes. Its reply reaches open surfaces by the
   owner-routed `controller.updated` revalidation and never as a notification row, by design
   (`docs/domain/controller-and-goals.md` §8, which now says so in the code comments too).

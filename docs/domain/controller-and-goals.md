@@ -230,6 +230,17 @@ characters) a USER message was sent from; controller rows carry null. The title 
 first user message clipped to 80 characters. Every appended message publishes the
 owner-routed SSE event `controller.updated`.
 
+**A reply the owner has not seen (O39-d, ruling 448).** `seen_seq` on the conversation is
+the highest message `seq` its owner has looked at. The two surfaces that show a transcript,
+the controller page and the open dock, set it when its owner is the one looking
+(`markConversationSeen`: monotonic, publishes nothing, so a revalidation can run it
+again). A controller message above it is unseen (`listUnseenReplies`). The dock's button
+carries a dot and says "a new reply" on every page. `/resources/controller-unseen` lists the
+viewer's unseen replies in any scope, with the page that opens each, and leaves out any
+thread in a project the viewer can no longer open. The open panel links to replies from
+other places and marks unread threads here, and the page's rail and phone picker mark them
+too. None of this is a notification row: replies stay out of the bell (§8).
+
 **One user message is one run** (`runControllerTurn` in `controller-run.server.ts`):
 
 1. The user message is recorded first.
@@ -687,6 +698,7 @@ currently sees no controls, and must redirect conversationally.
 - Notification kind: `controller`, created only for goal progress (started, attention,
   completed), addressed to the goal creator, from the "Controller" agent identity.
   The category has a routing toggle in the profile, default on.
+  A conversation reply is not a notification: the unseen-reply dot (§3) is its signal.
 - SSE: `controller.updated {conversationId, userId}` (owner-routed),
   `controller.log-appended {conversationId, userId, runId, threadId, seq}` (owner-routed,
   one per stored console line of a controller run; a stream event, tailed by the console

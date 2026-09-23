@@ -9,6 +9,8 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  listUnseenReplies,
+  markConversationSeen,
   type ControllerConversation,
   type ControllerMessage,
   type ListConversationsInput,
@@ -78,6 +80,9 @@ export interface ConversationListItem {
   projectSlug: string | null;
   /** Ruling 121: the task this thread is anchored to, when it is. */
   taskKey: string | null;
+  /** O39-d: the viewer's own thread holds a controller reply they have not
+   *  seen. Never set on someone else's thread (?all=1). */
+  unread: boolean;
 }
 
 export function getControllerSurface(
@@ -125,6 +130,12 @@ export function getControllerSurface(
     conversation = found;
   }
 
+  // O39-d: the transcript this page opens is seen by its owner now, before the
+  // list is marked, so the thread being read is never flagged.
+  if (conversation && conversation.userId === viewer.id) {
+    markConversationSeen(db, conversation.id, viewer.id);
+  }
+  const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
   const config = resolveControllerConfig(input.dataRoot);
   // Ruling 419(f): a person is named on this page the way the rest of the app
   // names them. A conversation stores its owner's EMAIL at creation (the
@@ -164,6 +175,7 @@ export function getControllerSurface(
       lastMessageAt: c.lastMessageAt,
       projectSlug: c.projectSlug,
       taskKey: c.taskKey,
+      unread: c.userId === viewer.id && unseen.has(c.id),
     })),
     conversation,
     messages,

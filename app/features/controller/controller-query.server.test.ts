@@ -208,6 +208,47 @@ describe("getControllerSurface — people are named by display name (ruling 419(
   });
 });
 
+/**
+ * O39-d: the page is one of the two places a transcript is read, so opening a
+ * thread there makes its replies seen, and the rail marks the viewer's other
+ * threads that hold a reply they have not opened.
+ */
+describe("getControllerSurface — replies the viewer has not seen (O39-d)", () => {
+  it("opening a thread sees it, the rail flags the others, and an admin reading someone's thread sees nothing for them", async () => {
+    const { createConversation, appendMessage, listUnseenReplies } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    const replied = (userId: string, text: string) => {
+      const c = createConversation(store.db, { userId, userLabel: "x", projectSlug: null });
+      appendMessage(store.db, { conversationId: c.id, author: "user", userId, text });
+      appendMessage(store.db, { conversationId: c.id, author: "controller", text: `Answer to ${text}` });
+      return c;
+    };
+    const read = replied(store.users.arda.id, "first");
+    const waiting = replied(store.users.arda.id, "second");
+    const murats = replied(store.users.murat.id, "his");
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: read.id,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    // CANARY: drop `markConversationSeen` from the surface and the open
+    // thread stays flagged while the person reads it.
+    const flags = Object.fromEntries(view.conversations.map((c) => [c.id, c.unread]));
+    expect(flags).toEqual({ [read.id]: false, [waiting.id]: true, [murats.id]: false });
+    expect(listUnseenReplies(store.db, store.users.arda.id).map((r) => r.id)).toEqual([waiting.id]);
+    // An org admin opening Murat's thread reads it for nobody.
+    getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: murats.id,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    expect(listUnseenReplies(store.db, store.users.murat.id).map((r) => r.id)).toEqual([murats.id]);
+  });
+});
+
 describe("getControllerSurface — the tasks a transcript names (U39-29)", () => {
   it("resolves the keys the open conversation names on this board", async () => {
     // CANARY: return `taskLinks: {}` from getControllerSurface.

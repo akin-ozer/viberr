@@ -43,6 +43,68 @@ export interface ControllerConversation {
   lastMessageAt: string | null;
 }
 
+/**
+ * O39-d: the owner has now seen this conversation up to its newest message.
+ * Called by the two surfaces that show a transcript, when its owner is the
+ * one looking. Monotonic and silent (it publishes nothing), like R19-15's
+ * task read-marking, so the revalidation a reply triggers can run it again
+ * and change nothing.
+ */
+export function markConversationSeen(
+  db: DatabaseSync,
+  conversationId: string,
+  userId: string,
+): void {
+  db.prepare(
+    `UPDATE controller_conversations
+        SET seen_seq = MAX(seen_seq, COALESCE(
+          (SELECT MAX(seq) FROM controller_messages WHERE conversation_id = ?), 0))
+      WHERE id = ? AND user_id = ?`,
+  ).run(conversationId, conversationId, userId);
+}
+
+/** O39-d: one of the viewer's conversations holding a reply they have not seen. */
+export interface UnseenReply {
+  id: string;
+  title: string;
+  projectSlug: string | null;
+  taskKey: string | null;
+}
+
+/**
+ * O39-d: the viewer's own conversations whose controller wrote after the
+ * owner last looked, newest first. A turn runs one to five minutes; a person
+ * who left the page had no way to learn its answer had landed.
+ */
+export function listUnseenReplies(db: DatabaseSync, userId: string): UnseenReply[] {
+  // SAFETY: the four columns are selected by name; `id` and `title` are NOT
+  // NULL in 0001_baseline and the two scope columns are nullable TEXT.
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.title, c.project_slug, c.task_key
+         FROM controller_conversations c
+        WHERE c.user_id = ?
+          AND EXISTS (SELECT 1 FROM controller_messages m
+                       WHERE m.conversation_id = c.id
+                         AND m.author = 'controller'
+                         AND m.seq > c.seen_seq)
+        ORDER BY c.last_message_at DESC, c.rowid DESC
+        LIMIT 20`,
+    )
+    .all(userId) as {
+    id: string;
+    title: string;
+    project_slug: string | null;
+    task_key: string | null;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title || "New conversation",
+    projectSlug: r.project_slug,
+    taskKey: r.task_key,
+  }));
+}
+
 export interface ControllerMessage {
   id: string;
   conversationId: string;

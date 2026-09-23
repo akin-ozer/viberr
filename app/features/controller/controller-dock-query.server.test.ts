@@ -340,6 +340,31 @@ describe("getControllerDock — the dock lists one place's threads", () => {
   });
 });
 
+/**
+ * O39-d: the open dock is the other place a transcript is read. Opening a
+ * thread there makes its replies seen, and the list marks the rest.
+ */
+describe("getControllerDock — replies the viewer has not seen (O39-d)", () => {
+  it("the thread the panel opens is seen, and the other threads here are flagged", async () => {
+    const { appendMessage, listUnseenReplies } = await import("~/server/controller/controller-conversations.server");
+    const store = storeWithTwoProjects();
+    const selin = store.users.selin;
+    const older = thread(store, selin, { projectSlug: SLUG, taskKey: null });
+    const newer = thread(store, selin, { projectSlug: SLUG, taskKey: null });
+    for (const c of [older, newer]) {
+      appendMessage(store.db, { conversationId: c.id, author: "controller", text: "Done." });
+    }
+    // CANARY: drop `markConversationSeen` from the dock and the thread the
+    // person is reading stays a "new reply".
+    const view = dock(store, selin, { projectSlug: SLUG, taskKey: null, conversationId: older.id });
+    expect(Object.fromEntries(view.threads.map((t) => [t.id, t.unread]))).toEqual({
+      [older.id]: false,
+      [newer.id]: true,
+    });
+    expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([newer.id]);
+  });
+});
+
 describe("unavailableDockView — the benign refusal", () => {
   /**
    * The view for a scope the route would not let this person talk in. It is

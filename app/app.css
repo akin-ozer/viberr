@@ -6393,6 +6393,14 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .dock-fab:active { transform: scale(.94); }
 /* The working dot rides the button's top-right edge while a turn is in flight. */
 .dock-fab .live-dot { position: absolute; top: 0; right: 0; }
+/* O39-d: a controller reply the viewer has not seen. Still, where the working
+   dot pulses: it is news waiting, not work going on. */
+.unseen-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); flex: none; }
+.dock-fab .unseen-dot { position: absolute; top: 1px; right: 1px; box-shadow: 0 0 0 2px var(--bg); }
+.dock-unseen { display: flex; align-items: baseline; gap: 6px; margin: 0 14px 8px; }
+.dock-unseen .unseen-dot { transform: translateY(-1px); }
+.ctl-conv .unseen-dot { margin-right: 6px; vertical-align: 1px; }
+.ctl-conv.unread .ctl-conv-title { font-weight: 600; }
 .dock-panel {
   position: fixed;
   right: 20px;

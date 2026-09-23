@@ -37,8 +37,8 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     projectName: "Viberr Core",
     viewerId: "u_arda",
     conversations: [
-      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null },
-      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142" },
+      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false },
+      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false },
     ],
     conversation: null,
     messages: [],
@@ -53,6 +53,27 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     ...over,
   };
 }
+
+/**
+ * O39-d: the rail and the phone's picker mark a thread holding a controller
+ * reply the viewer has not opened.
+ */
+describe("the page marks a reply the viewer has not seen (O39-d)", () => {
+  it("marks the unread thread on the rail and in the picker, and no other", async () => {
+    const v = view();
+    v.conversations = v.conversations.map((c) => (c.id === "cnv_t" ? { ...c, unread: true } : c));
+    renderPage(v);
+    // CANARY: drop the rail's unread mark and the thread that answered looks
+    // like every other.
+    const unread = await screen.findByRole("link", { name: /Task thread, new reply/ });
+    expect(unread.className).toContain("unread");
+    expect(screen.getByRole("link", { name: /^Board thread/ }).className).not.toContain("unread");
+    const options = Array.from(screen.getByRole("combobox", { name: "Conversation" }).querySelectorAll("option"));
+    expect(options.map((o) => o.textContent)).toEqual(
+      expect.arrayContaining(["New reply · VIB-142 · Task thread", "Board thread"]),
+    );
+  });
+});
 
 describe("ruling 131(c): the Goals panel names what a link waits on", () => {
   it("renders 'waits on …' under a link with a declared wait, and nothing under one without", async () => {

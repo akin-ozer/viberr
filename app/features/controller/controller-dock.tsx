@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TurnStep } from "./turn-step";
 import {
   Link,
@@ -12,6 +12,7 @@ import type { ControllerDockView } from "./controller-dock-query.server";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./controller-page";
 import { controllerExamples } from "./controller-examples";
 import type { loader as projectLoader } from "~/routes/project";
+import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import {
   dockContextFromMatches,
   dockScopeKey,
@@ -129,6 +130,9 @@ function emptyCopy(view: ControllerDockView): string {
   return "Ask about this instance or say what to do: projects, users, resources, agents, goal chains.";
 }
 
+/** O39-d: the viewer's unseen controller replies, for the button. */
+const UNSEEN_URL = "/resources/controller-unseen";
+
 export function ControllerDock() {
   const matches = useMatches();
   const location = useLocation();
@@ -245,6 +249,22 @@ function DockShell({ context }: { context: DockContext }) {
     }, WORKING_POLL_MS);
     return () => clearInterval(timer);
   }, [working, url, load]);
+
+  // O39-d: replies the viewer has not seen, whatever scope they were asked
+  // in. A turn runs one to five minutes, and a person who moved to another
+  // page learned nothing when its answer landed. Loaded on every navigation
+  // and after the panel shows a transcript (which marks it seen); React
+  // Router also revalidates it on the page's own live stream.
+  const unseenFetch = useFetcher<{ unseen: UnseenReplyView[] }>({ key: "controller-unseen" });
+  const loadUnseen = unseenFetch.load;
+  const { pathname } = useLocation();
+  const shownId = current?.conversation?.id ?? null;
+  const shownCount = current?.messages.length ?? 0;
+  useEffect(() => {
+    loadUnseen(UNSEEN_URL);
+  }, [loadUnseen, pathname, open, shownId, shownCount]);
+  // The transcript the open panel shows is being read.
+  const unseen = (unseenFetch.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
 
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
@@ -546,6 +566,30 @@ function DockShell({ context }: { context: DockContext }) {
           <p className="dock-context fine xs dim">
             {current?.scope.contextLine ?? "Reading where you are…"}
           </p>
+          {unseen.length > 0 && (
+            <p className="dock-unseen fine xs">
+              <span className="unseen-dot" aria-hidden="true" />
+              <span>
+                New {unseen.length === 1 ? "reply" : "replies"} in{" "}
+                {unseen.slice(0, 3).map((u, i) => (
+                  <Fragment key={u.id}>
+                    {i > 0 && ", "}
+                    {threads.some((t) => t.id === u.id) ? (
+                      // A thread of this scope opens right here.
+                      <button type="button" className="linkish" onClick={() => pick(u.id)}>
+                        {u.title}
+                      </button>
+                    ) : (
+                      <Link className="linkish" to={u.href} onClick={() => closeDock(true)}>
+                        {u.taskKey ? `${u.taskKey} · ${u.title}` : u.title}
+                      </Link>
+                    )}
+                  </Fragment>
+                ))}
+                {unseen.length > 3 && ` and ${unseen.length - 3} more`}
+              </span>
+            </p>
+          )}
           {unavailable ? (
             <section className="dock-body" aria-label="Controller unavailable here">
               <p className="empty sm">
@@ -564,11 +608,15 @@ function DockShell({ context }: { context: DockContext }) {
                     <li key={t.id}>
                       <button
                         type="button"
-                        className={`ctl-conv${t.id === conversationId ? " on" : ""}`}
+                        className={`ctl-conv${t.id === conversationId ? " on" : ""}${t.unread ? " unread" : ""}`}
                         aria-current={t.id === conversationId ? "true" : undefined}
                         onClick={() => pick(t.id)}
                       >
-                        <span className="ctl-conv-title">{t.title}</span>
+                        <span className="ctl-conv-title">
+                          {t.unread && <span className="unseen-dot" aria-hidden="true" />}
+                          {t.title}
+                          {t.unread && <span className="vh">, new reply</span>}
+                        </span>
                         <span className="fine xs dim">
                           {t.lastMessageAt ? <LocalDayDotTime iso={t.lastMessageAt} /> : "empty"}
                         </span>
@@ -698,7 +746,9 @@ function DockShell({ context }: { context: DockContext }) {
         ref={fabRef}
         type="button"
         className="dock-fab"
-        aria-label={`Controller · ${scopeLabel}`}
+        aria-label={`Controller · ${scopeLabel}${
+          unseen.length === 0 ? "" : unseen.length === 1 ? " · a new reply" : ` · ${unseen.length} new replies`
+        }`}
         aria-haspopup="dialog"
         aria-expanded={open}
         // A dangling `aria-controls` is worse than none (the repo already
@@ -716,12 +766,19 @@ function DockShell({ context }: { context: DockContext }) {
       >
         <Icon name="cpu" />
         {working && <span className="live-dot" aria-hidden="true" />}
+        {!working && unseen.length > 0 && <span className="unseen-dot" aria-hidden="true" />}
       </button>
       {/* The dot is decorative, and the panel's own status row is unmounted
           while the dock is closed — so the one programmatic form of "a turn is
           running" lives here, outside the panel (review finding 26). */}
       <span className="vh" role="status" aria-live="polite">
-        {working ? `${current?.controllerName ?? "Controller"} is working` : ""}
+        {working
+          ? `${current?.controllerName ?? "Controller"} is working`
+          : unseen.length === 1
+            ? `${current?.controllerName ?? "Controller"} replied in “${unseen[0]!.title}”`
+            : unseen.length > 1
+              ? `${current?.controllerName ?? "Controller"} replied in ${unseen.length} conversations`
+              : ""}
       </span>
     </div>
   );

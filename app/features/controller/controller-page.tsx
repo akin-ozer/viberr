@@ -476,6 +476,8 @@ function ConversationPicker({ view }: { view: ControllerSurfaceView }) {
       {!active && <option value="">New conversation</option>}
       {view.conversations.map((c) => (
         <option key={c.id} value={c.id}>
+          {/* O39-d: a native option holds text only. */}
+          {c.unread ? "New reply · " : ""}
           {c.taskKey ? `${c.taskKey} · ${c.title}` : c.title}
         </option>
       ))}
@@ -518,14 +520,17 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
           {view.conversations.map((c) => (
             <li key={c.id}>
               <Link
-                className={`ctl-conv${c.id === active ? " on" : ""}`}
+                className={`ctl-conv${c.id === active ? " on" : ""}${c.unread ? " unread" : ""}`}
                 to={href(c)}
               >
                 <span className="ctl-conv-title">
+                  {/* O39-d: a reply this person has not opened yet. */}
+                  {c.unread && <span className="unseen-dot" aria-hidden="true" />}
                   {c.taskKey && (
                     <span className="pill agent sm ctl-conv-task">{c.taskKey}</span>
                   )}
                   {c.title}
+                  {c.unread && <span className="vh">, new reply</span>}
                 </span>
                 <span className="fine xs dim">
                   {!c.own && `${c.ownerLabel} · `}
