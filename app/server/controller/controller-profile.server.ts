@@ -22,6 +22,10 @@ import {
   splitFrontmatter,
   yamlMappingSchema,
 } from "~/server/files/frontmatter.server";
+import {
+  closeRequestsAnsweredByGrants,
+  type ResourceRequest,
+} from "./controller-requests.server";
 
 /**
  * The controller's own configuration (ruling 99): ONE instance-level profile,
@@ -198,6 +202,12 @@ export interface SaveControllerConfigInput {
   definition: string;
 }
 
+/** What a save leaves behind: the resolved configuration, plus the grant
+ *  requests it answered (ruling 390), so the caller can say so. */
+export interface SavedControllerConfig extends ControllerConfig {
+  answeredRequests: ResourceRequest[];
+}
+
 /**
  * Admin edit of the controller's configuration. RBAC is the CALLER's (the
  * org-settings route gates on org admin); this trusts its caller like every
@@ -209,7 +219,7 @@ export function saveControllerConfig(
   input: SaveControllerConfigInput,
   actor: AuditActor,
   ctx: { dataRoot?: string; locks?: ControllerSectionLocks } = {},
-): ControllerConfig {
+): SavedControllerConfig {
   const existing = readControllerProfile(ctx.dataRoot);
   if (!existing) {
     throw AppError.notFound(
@@ -319,5 +329,15 @@ export function saveControllerConfig(
       definitionEdited: writeDefinition,
     },
   });
-  return resolveControllerConfig(ctx.dataRoot);
+  const saved = resolveControllerConfig(ctx.dataRoot);
+  // Ruling 390 (amended 2026-09-23): this save is the in-app grant, so it
+  // answers the controller's open requests for whatever it leaves granted.
+  // Done here, beside the lock check, so every save path closes them.
+  const answeredRequests = closeRequestsAnsweredByGrants(
+    db,
+    { skills: saved.skills, kb: saved.kb, mcps: saved.mcps },
+    actor,
+    ctx.dataRoot,
+  );
+  return { ...saved, answeredRequests };
 }

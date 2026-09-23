@@ -127,6 +127,9 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
     expect(remedy).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
     expect(remedy).toContain("restart");
     expect(remedy).toContain("no in-app grant");
+    // Amended 2026-09-23: the save that grants it is also what closes the ask,
+    // and the controller reads this same sentence in its own context.
+    expect(remedy).toContain("saving it there answers this request");
     expect(resourceRequestRemedy("skills")).toContain(
       "VIBERR_UNLOCK_CONTROLLER_SKILLS=enabled",
     );

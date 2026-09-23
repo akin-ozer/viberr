@@ -653,15 +653,34 @@ intent, `saveControllerConfig`):
   `request_resource_grant` records the ask in `agents/controller-requests.md` (beside the
   profile, never inside it): kind (`skills | kb | mcps`), name, reason, who asked and
   when, status `open | granted | declined | withdrawn`, audited
-  `controller.resource_grant.requested` when a new row is raised. The Controller tab lists
-  the open requests with one server-computed remedy sentence per kind ("… are
+  `controller.resource_grant.requested` when a new row is raised (which also publishes
+  `resource.updated`, so an open settings tab shows it without a reload). The Controller
+  tab lists the open requests with one server-computed remedy sentence per kind ("… are
   deployment-locked (ruling 108): set `VIBERR_UNLOCK_CONTROLLER_KB=enabled` and restart,
-  then add it on the Controller tab. There is no in-app grant while the section is
-  locked."), and no button, because no in-app grant exists. Every open request rides in
-  the controller's own context read in every scope (`openRequestsContextLine`), so a new
-  conversation knows it asked and does not claim the resource. Nothing in the app closes a
-  request (`closeResourceRequest` has no caller outside tests); an answered one is closed
-  by editing the file.
+  then add it on the Controller tab; saving it there answers this request. There is no
+  in-app grant while the section is locked."). Every open request rides in the
+  controller's own context read in every scope (`openRequestsContextLine`), so a new
+  conversation knows it asked and does not claim the resource.
+- **Answering a request** (ruling 390, amended 2026-09-23). A request leaves `open` in
+  one of two ways, both through `closeResourceRequest`, both org-admin only:
+  - **Granted.** `saveControllerConfig` closes, as `granted`, every open request whose
+    name its save leaves in the resolved grants of that kind
+    (`closeRequestsAnsweredByGrants`). It checks what the controller holds after the
+    save, not what the save added, so a request for a resource the controller already
+    had is answered by the next save of any kind, locked or not. The route's toast
+    names the requests it answered. There is still no Grant button: ruling 108 keeps the
+    grant itself in the unlocked grant chips and **Save controller**.
+  - **Declined.** Each listed request carries a **Decline** button (`controller-request-decline`,
+    `declineResourceRequest`). It changes no grant, so no section lock applies. A
+    request that is no longer open is never closed twice: the refusal (409) names its
+    stored status and who closed it, and an id no request carries is a 404.
+
+  Either answer stamps `closedAt` and `closedByLabel` (the admin's email), records
+  `controller.resource_grant.granted` or `controller.resource_grant.declined` (details
+  `{ requestId, kind, name }`), and publishes `resource.updated` for the resource. The
+  request drops off the tab and out of the controller's context. If the controller asks
+  again later, that raises a new request. Nothing in the app sets `withdrawn`, and a grant
+  made by hand-editing the profile file closes nothing until the next Controller-tab save.
 
 ## 7. Chained goals
 
@@ -836,8 +855,9 @@ controller-tool-only.
 ## 8. Identifiers this subsystem emits
 
 - Audit actions: `controller.authority.denied`, `controller.ops.read`,
-  `controller.repo.read`, `controller.github.read`, `controller.resource_grant.requested`,
-  `org.controller.updated`, `goal.created`, `goal.updated`, `goal.completed`, plus
+  `controller.repo.read`, `controller.github.read`,
+  `controller.resource_grant.requested|granted|declined`, `org.controller.updated`,
+  `goal.created`, `goal.updated`, `goal.completed`, plus
   `task.agent.commented` with label `controller` and every downstream row under
   `<email> · via controller`.
 - Notification kind: `controller`, created only for goal progress (a link started, the

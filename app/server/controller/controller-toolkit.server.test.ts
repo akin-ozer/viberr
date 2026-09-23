@@ -1032,15 +1032,37 @@ describe("instance scope: org-role gate on every management tool", () => {
     });
     expect(created).toContain("[done]");
 
-    const asked = await call(ids.orgAdmin, "request_resource_grant", {
-      kind: "kb",
-      name: "instance-standing-rules",
-      reason: "It carries the model rule Arda set, as its heading.",
+    // An open Instance settings tab holds a `user`-scoped stream; the new ask
+    // must reach it without a manual reload.
+    const { connectSseClient, resetSseBrokerForTests } = await import(
+      "~/server/events/sse-broker.server"
+    );
+    resetSseBrokerForTests();
+    const wire: string[] = [];
+    connectSseClient({
+      userId: "u_settings_tab",
+      scopes: [{ kind: "user" }],
+      lastEventId: null,
+      write: (chunk) => wire.push(chunk),
     });
+    let asked: string;
+    try {
+      asked = await call(ids.orgAdmin, "request_resource_grant", {
+        kind: "kb",
+        name: "instance-standing-rules",
+        reason: "It carries the model rule Arda set, as its heading.",
+      });
+    } finally {
+      resetSseBrokerForTests();
+    }
     expect(asked).toContain("[done]");
     // The remedy is the deployment change, never a button this page could own.
     expect(asked).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
     expect(asked).toContain("do not say you have the resource until it is");
+    // CANARY: drop `publishResourceRequestChanged` from the tool and the tab
+    // shows the ask only after a reload.
+    expect(wire.join("")).toContain("event: resource.updated");
+    expect(wire.join("")).toContain("kb:instance-standing-rules");
 
     // Idempotent: asking again is the same ask, not a second one on a person.
     const again = await call(ids.orgAdmin, "request_resource_grant", {

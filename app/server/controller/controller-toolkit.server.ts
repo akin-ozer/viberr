@@ -75,6 +75,7 @@ import {
 } from "~/server/org/org-users.server";
 import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import {
+  publishResourceRequestChanged,
   raiseResourceRequest,
   REQUESTABLE_KINDS,
   resourceRequestRemedy,
@@ -703,6 +704,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             subjectId: "controller",
             details: { kind: request.kind, name: request.name },
           });
+          // An open Instance settings tab lists open requests; without this
+          // a new one appeared there only after a manual reload.
+          publishResourceRequestChanged(request);
         }
         return (
           `[done] ${created ? "Recorded" : "Already open"}: a grant request for the ${CONTROLLER_SECTION_LABEL[request.kind].replace(" grants", "")} ` +

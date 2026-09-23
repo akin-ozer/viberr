@@ -1,7 +1,17 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import {
+  recordAudit,
+  type AuditActor,
+} from "~/server/audit/audit-recorder.server";
+import { AppError } from "~/server/errors/app-error.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import {
+  publishResourceUpdated,
+  type OrgResourceKind,
+} from "~/server/org/resource-events.server";
 import {
   serializeFrontmatterFile,
   splitFrontmatter,
@@ -36,10 +46,15 @@ import {
  * give the ask somewhere durable and human-visible to live instead. This is
  * that record.
  *
- * It resolves OUTSIDE the app, and says so. Ruling 108 makes controller grants
- * a deployment decision with no in-app override anywhere, so this surface never
- * offers a button that does not exist: it names the environment variable, the
- * value, and the restart, and then gets out of the way.
+ * The GRANT happens outside the app, and the record says so. Ruling 108 makes
+ * controller grants a deployment decision with no in-app override anywhere, so
+ * this surface never offers a Grant button that does not exist: it names the
+ * environment variable, the value, and the restart, and then gets out of the
+ * way. The ANSWER is recorded in the app (ruling 390, amended 2026-09-23): the
+ * Controller-tab save that leaves the resource granted closes the request as
+ * `granted`, and an admin's Decline closes it as `declined`. Until then it
+ * stays open, and the controller keeps being told it does not have the
+ * resource.
  */
 
 /** Which kind of resource a request is for — the three ruling-108 sections. */
@@ -189,19 +204,108 @@ export function closeResourceRequest(
   return closed;
 }
 
+/** `resource.updated` speaks the catalog's singular kinds; a request speaks the
+ *  controller profile's section names. */
+const RESOURCE_EVENT_KIND = {
+  skills: "skill",
+  kb: "kb",
+  mcps: "mcp",
+} as const satisfies Record<RequestableKind, OrgResourceKind>;
+
+/**
+ * Tell every open Instance settings tab that the request list changed. It is
+ * the org resource event (a broadcast the settings page already revalidates
+ * on), naming the resource the request is for.
+ */
+export function publishResourceRequestChanged(request: ResourceRequest): void {
+  publishResourceUpdated(RESOURCE_EVENT_KIND[request.kind], request.name);
+}
+
+/** Audit and announce one request an admin just answered. */
+function recordAnswer(
+  db: DatabaseSync,
+  request: ResourceRequest,
+  actor: AuditActor,
+): void {
+  recordAudit(db, {
+    action: `controller.resource_grant.${request.status}`,
+    actor,
+    subjectKind: "agent_profile",
+    subjectId: "controller",
+    details: { requestId: request.id, kind: request.kind, name: request.name },
+  });
+  publishResourceRequestChanged(request);
+}
+
+/**
+ * Ruling 390 (amended 2026-09-23): close, as `granted`, every open request
+ * the controller's grants now answer.
+ *
+ * Called by `saveControllerConfig` with the grants the save left in place, the
+ * RESOLVED ones the controller runs with. It checks that the controller has the
+ * resource now, not that this save added it. A request for something the
+ * controller already holds (granted by a hand edit, say) is answered as well,
+ * because the context line would otherwise keep telling the controller it does
+ * not have a resource it is reading.
+ */
+export function closeRequestsAnsweredByGrants(
+  db: DatabaseSync,
+  grants: Record<RequestableKind, readonly string[]>,
+  actor: AuditActor,
+  dataRoot?: string,
+): ResourceRequest[] {
+  const answered: ResourceRequest[] = [];
+  for (const request of openResourceRequests(dataRoot)) {
+    if (!grants[request.kind].includes(request.name)) continue;
+    const closed = closeResourceRequest(request.id, "granted", actor.label, dataRoot);
+    if (!closed) continue;
+    recordAnswer(db, closed, actor);
+    answered.push(closed);
+  }
+  return answered;
+}
+
+/**
+ * Ruling 390 (amended 2026-09-23): an admin's explicit "no". The request
+ * leaves the settings panel and the controller's context. If the controller
+ * asks again later, that is a new request.
+ */
+export function declineResourceRequest(
+  db: DatabaseSync,
+  id: string,
+  actor: AuditActor,
+  dataRoot?: string,
+): ResourceRequest {
+  const closed = closeResourceRequest(id, "declined", actor.label, dataRoot);
+  if (!closed) {
+    // Say which: the stored answer, or that there is no such request. A
+    // blanket "already answered" would be wrong for an id nobody raised.
+    const onFile = readResourceRequests(dataRoot).find((r) => r.id === id);
+    throw onFile
+      ? AppError.conflict(
+          `That grant request was already ${onFile.status}${onFile.closedByLabel ? ` by ${onFile.closedByLabel}` : ""}. Reload to see the current list.`,
+        )
+      : AppError.notFound("No grant request carries that id. Reload to see the current list.");
+  }
+  recordAnswer(db, closed, actor);
+  return closed;
+}
+
 /**
  * What answering this request actually takes — the whole point of the record.
  *
  * Ruling 108 put controller grants outside the app on purpose, so a surface
  * that rendered a Grant button would be promising something no code can do.
  * This sentence is what goes on the settings panel and into the controller's
- * own context instead.
+ * own context instead. It also says what closes the request, because that
+ * save is the only in-app grant there is.
  */
 export function resourceRequestRemedy(kind: RequestableKind): string {
   return (
     `${CONTROLLER_SECTION_LABEL[kind]} are deployment-locked (ruling 108): set ` +
     `${CONTROLLER_UNLOCK_ENV[kind]}=${CONTROLLER_UNLOCK_VALUE} and restart, then add it ` +
-    `on the Controller tab. There is no in-app grant while the section is locked.`
+    `on the Controller tab; saving it there answers this request. There is no in-app ` +
+    `grant while the section is locked.`
   );
 }
 

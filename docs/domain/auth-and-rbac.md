@@ -229,9 +229,11 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   row's details carry `diverged` and `propagated` project slugs), and one
   `project.agent_profile.resources_synced` row per project a propagation rewrote.
 - **Controller**: model and effort are always editable; the grant lists and the
-  doctrine body are deployment-locked (ruling 108); a read-only note lists the grants
-  the controller asked for and cannot make (`request_resource_grant`, ruling 390), each
-  naming its unlock variable and the restart. See
+  doctrine body are deployment-locked (ruling 108); a note lists the grants the
+  controller asked for and cannot make (`request_resource_grant`, ruling 390), each
+  naming its unlock variable and the restart. A save that leaves the resource granted
+  answers the request, and each one has a Decline button (`controller-request-decline`).
+  See
   [controller-and-goals.md §6](controller-and-goals.md#6-configuring-the-controller-rulings-106-and-108).
 - **Run concurrency**: `set-concurrency` writes `maxConcurrentRuns` (0 = unlimited,
   ceiling 64, `MAX_CONCURRENT_RUNS_CEILING`) and drains the queue. The control shows the
@@ -282,8 +284,8 @@ reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 `runtime.operator.plan_executed`, `run.recovery.*`, `run.completion.effects_lost`
 (ruling 207(a)), `controller.authority.denied`, the controller's audited reads
 `controller.ops.read`, `controller.repo.read` and `controller.github.read`,
-`controller.resource_grant.requested` (ruling 390), `projection.rescan|rebuild`,
-`seed.*`, `secrets.resealed`, `store.restored`.
+`controller.resource_grant.requested|granted|declined` (ruling 390),
+`projection.rescan|rebuild`, `seed.*`, `secrets.resealed`, `store.restored`.
 
 **`profile.backend.*` (ruling 127).** Connecting or dropping a personal agent account
 is governed, because it changes whose provider account this instance's runs bill. Five
