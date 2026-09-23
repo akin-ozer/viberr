@@ -18,7 +18,6 @@ import type { DatabaseSync } from "node:sqlite";
 export interface AppTestContext {
   db: DatabaseSync;
   dataRoot: string;
-  sessionSecret: string;
   /** Cookie header value for a fresh session of the given user. */
   cookieFor(userId: string): Promise<{ cookie: string; sessionId: string }>;
   /** Session-bound CSRF token (formData "_csrf" field). */
@@ -84,7 +83,6 @@ export async function setupAppTest(): Promise<AppTestContext> {
   return {
     db,
     dataRoot,
-    sessionSecret,
     async cookieFor(userId: string) {
       const user = findUserById(db, userId);
       if (!user) throw new Error(`cookieFor: no user ${userId}`);

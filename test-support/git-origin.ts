@@ -24,10 +24,8 @@ export interface LocalOrigin {
   seed: string;
   /** The root commit's full sha. */
   firstCommit: string;
-  /** Land one more commit on `branch` (default `main`) and return its sha. */
-  advance(options?: { file?: string; branch?: string; message?: string }): Promise<string>;
-  /** The sha `bare` currently holds for `refs/heads/<branch>`. */
-  head(branch?: string): Promise<string>;
+  /** Land one more commit on `main` and return its sha. */
+  advance(options?: { file?: string; message?: string }): Promise<string>;
 }
 
 export interface CreateLocalOriginOptions {
@@ -78,17 +76,12 @@ export async function createLocalOrigin(
     async advance(options = {}) {
       advanceCount += 1;
       const file = options.file ?? "CHANGELOG.md";
-      const branch = options.branch ?? "main";
       const message = options.message ?? `change ${advanceCount}`;
       writeFileSync(path.join(seed, file), `${message}\n`);
       await exec("git", ["-C", seed, "add", "-A"]);
       await exec("git", ["-C", seed, "commit", "-qm", message]);
-      await exec("git", ["-C", seed, "push", "-q", bare, `HEAD:refs/heads/${branch}`]);
+      await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
       return (await exec("git", ["-C", seed, "rev-parse", "HEAD"])).stdout.trim();
-    },
-    async head(branch = "main") {
-      const out = await exec("git", ["-C", bare, "rev-parse", "--verify", `refs/heads/${branch}`]);
-      return out.stdout.trim();
     },
   };
 }
