@@ -9,6 +9,12 @@ import { logger } from "~/server/logging/logger.server";
  *  it, so this file never restates a contract it does not own. */
 type ToolText = Awaited<ReturnType<SdkMcpToolDefinition["handler"]>>;
 
+/** Every tool answers with one text block — the SDK's tool-result shape. The
+ *  agent, operator and controller toolkits all answer through this. */
+export function textResult(text: string) {
+  return { content: [{ type: "text" as const, text }] };
+}
+
 /**
  * The SDK's `tool()` at the signature its MCP server actually honours.
  *
@@ -151,39 +157,27 @@ function guarded(
       // Once the store is closed nothing a tool can say about task state is
       // worth saying, and the run's next move is the same whatever threw.
       if (isDatabaseShuttingDown()) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `[error] \`${name}\` did not run: Viberr is shutting down and has closed its ` +
-                "store, so no Viberr tool will answer for the rest of this run. This is NOT " +
-                "transient and retrying cannot succeed — stop here, and say in your report " +
-                "that Viberr shut down mid-run rather than describing a store error. What " +
-                "happens to this task next is decided by restart recovery and recorded on the " +
-                "task itself.",
-            },
-          ],
-        };
+        return textResult(
+          `[error] \`${name}\` did not run: Viberr is shutting down and has closed its ` +
+            "store, so no Viberr tool will answer for the rest of this run. This is NOT " +
+            "transient and retrying cannot succeed — stop here, and say in your report " +
+            "that Viberr shut down mid-run rather than describing a store error. What " +
+            "happens to this task next is decided by restart recovery and recorded on the " +
+            "task itself.",
+        );
       }
       if (error instanceof AppError) {
-        return { content: [{ type: "text", text: `[error] ${error.userMessage}` }] };
+        return textResult(`[error] ${error.userMessage}`);
       }
       logger.error("mcp tool failed", {
         tool: name,
         err: error instanceof Error ? error : new Error(String(error)),
       });
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `[error] \`${name}\` failed unexpectedly and returned no answer. The details are ` +
-              "in the server log. Do not report anything as a fact about this call: you did " +
-              "not get a result, which is different from getting an empty one.",
-          },
-        ],
-      };
+      return textResult(
+        `[error] \`${name}\` failed unexpectedly and returned no answer. The details are ` +
+          "in the server log. Do not report anything as a fact about this call: you did " +
+          "not get a result, which is different from getting an empty one.",
+      );
     }
   };
 }

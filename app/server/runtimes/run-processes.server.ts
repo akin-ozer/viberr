@@ -175,7 +175,9 @@ export interface ReapDeps {
 /** The sweep as the adapters and boot recovery call it (injectable). */
 export type ReapRunProcesses = (targets: ReapTargets) => Promise<ReapReport>;
 
-const realSignal: SignalProcess = (pid, signal) => {
+/** The real signaller: the sweep here and the Claude CLI's group kill
+ *  (`claude-spawn.server.ts`) both default to it; tests inject their own. */
+export const realSignal: SignalProcess = (pid, signal) => {
   process.kill(pid, signal);
 };
 

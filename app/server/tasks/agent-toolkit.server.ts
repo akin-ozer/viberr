@@ -8,7 +8,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
-import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
+import { strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import {
   normalizeEvidenceRows,
   type FileActorRef,
@@ -120,10 +120,6 @@ interface ReportedOutcome {
   verdict?: "approve" | "request_changes";
   summary?: string;
   evidence?: { label: string; add?: string; del?: string }[];
-}
-
-function textResult(text: string) {
-  return { content: [{ type: "text" as const, text }] };
 }
 
 /** F4: cap the JSON a single `github_read` hands back, so a large tree/blob or a

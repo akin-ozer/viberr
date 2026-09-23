@@ -59,7 +59,10 @@ export type RunPrincipalResolution =
   | { ok: true; principal: RunPrincipal; health: UserBackendHealth }
   | { ok: false; refusal: RunPrincipalRefusal };
 
-const NO_PROCESS = "No agent process was started.";
+/** Every refusal sentence ends the same way, because the fact a human most
+ *  needs is that nothing was spent. The run service's own refusals end with it
+ *  too. */
+export const NO_PROCESS = "No agent process was started.";
 
 export interface RunPrincipalContext {
   /** Override the data root (tests). Defaults to env VIBERR_DATA_ROOT. */

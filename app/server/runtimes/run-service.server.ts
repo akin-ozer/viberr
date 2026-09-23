@@ -82,6 +82,7 @@ import {
   type RunCredential,
 } from "./backend-credentials.server";
 import {
+  NO_PROCESS,
   principalRefusalMessage,
   type RunPrincipalRefusal,
 } from "./run-principal.server";
@@ -1226,10 +1227,6 @@ function resolveRunCredential(
   }
   return { ok: true, credential };
 }
-
-/** Every refusal sentence ends the same way, because the fact a human most
- *  needs is that nothing was spent. */
-const NO_PROCESS = "No agent process was started.";
 
 /**
  * The fallback when a caller passed `credentialUserId: null` without saying
