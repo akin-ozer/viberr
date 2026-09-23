@@ -550,11 +550,12 @@ npm run deploy -- --no-up   # stamp and build only, nothing restarted
 It runs `git` on the host, sets `VIBERR_BUILD_VERSION` (from `package.json`),
 `VIBERR_BUILD_SHA` (`git rev-parse HEAD`) and `VIBERR_BUILD_TIME` (now) for `docker compose
 build`, warns (without refusing) when there is no git revision or the working tree is dirty,
-then `docker compose up -d` and polls `http://127.0.0.1:5173/resources/health` every 3 s for
-up to 180 s. It exits 1 if nothing answers or if the reported `build.revision` is not the
-first 12 characters of the sha it stamped. The verify URL is fixed at port 5173, so the
-check can only pass when `.env` sets `PORT=5173`; under compose's default `3000` it times
-out after the new container is already up.
+then `docker compose up -d`, prints the URL it will poll, and polls
+`http://127.0.0.1:<port>/resources/health` every 3 s for up to 180 s. `<port>` is the host
+port `compose.yml` publishes, resolved the way compose resolves `${PORT:-3000}`: `PORT` from
+your shell if it is set there, otherwise `PORT` from `.env`, and `3000` when neither sets
+it or the value is empty. It exits 1, naming that URL, if nothing answers, and exits 1 if
+the reported `build.revision` is not the first 12 characters of the sha it stamped.
 
 Note that `up -d` kills every run in flight, so check the board before deploying.
 
