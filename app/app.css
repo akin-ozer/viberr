@@ -708,31 +708,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   color: var(--muted);
 }
 
-.live {
-  display: inline-flex;
-  align-items: center;
-  gap: .375rem;
-  font-size: .75rem;
-  font-weight: 700;
-  color: var(--teal-dark);
-  padding: .375rem .5rem;
-  border-radius: var(--radius-chip);
-  /* Wash + pulsing dot carry the state; the whole .pill vocabulary is
-     borderless washes, and border-plus-background was double signalling. */
-  background: color-mix(in srgb, var(--teal-light), var(--surface) 40%);
-}
-.live .dot {
-  width: .5rem; height: .5rem; border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success), transparent 40%);
-  animation: pulse 2.4s ease-out infinite;
-}
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success), transparent 40%); }
-  70% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--success), transparent 100%); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success), transparent 100%); }
-}
-
 /* ---------- Buttons ---------- */
 .btn {
   display: inline-flex;
