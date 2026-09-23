@@ -152,7 +152,12 @@ same two publishers route there).
 the control events `stream.open {headId}` and `stream.resync`. `controller.log-appended`
 is a **stream event** (`SSE_STREAM_EVENTS` in `event-types.ts`): one frame per console
 line on the `user` scope every signed-in surface subscribes, so `useLiveUpdates` does not
-revalidate on it; only the dedicated log consumer handles it.
+revalidate on it; only the dedicated log consumer handles it. `run.log-appended` is a
+**run-line event** (`SSE_RUN_LINE_EVENTS`): the `project:` scope delivers it for every run
+of the project (to the board, the controller page and every open task page, which
+subscribes its project for the rail), but only the page whose `task:` scope names that
+task revalidates on it, at most once per `RUN_LINE_REVALIDATE_MS` (2 s), because its Live
+run strip (phase, step, turns, tokens) is loader data that moves per line.
 
 **The broker** (`sse-broker.server.ts`): one connection per browser tab on
 `/resources/events` (401 JSON when signed out, since an `EventSource` cannot render a
@@ -169,11 +174,16 @@ guard, closes the DB and releases the writer lock.
 
 **The client** (`useLiveUpdates`): subscribes the current surface to its scopes,
 revalidates the active React Router loaders on any data event or `stream.resync`
-(debounced 300 ms), revalidates once on every reconnect, backs off 2/5/15/30 s on
-close, probes the session after two failures and stops on a 401 until the user
-retries. There is no optimistic UI for governed state: revalidation is the update
-mechanism. The run-log console has its own `EventSource` (`useRunLogStream`) so a
-log line never refetches the whole task loader.
+(debounced 300 ms; a run line only on its own task's page, floored at 2 s, joining a
+pending revalidation rather than pushing it out), revalidates once on every reconnect,
+backs off 2/5/15/30 s on close, probes the session after two failures and stops on a
+401 until the user retries. There is no optimistic UI for governed state: revalidation is the update
+mechanism. The run-log console has its own `EventSource` (`useRunLogStream`), so a
+log line reaches the console at once and refetches the whole task loader at most every
+2 s. (Measured 2026-09-23 on ax-clone: before the floor, each line of any run in the
+project revalidated every open board and task page; three open pages at 2.5 revalidations
+a second pushed a trivial request's p90 from 8 ms to 157 ms on the server's one event
+loop, the one the agents run on.)
 
 ## 6. Provenance and freshness
 
