@@ -3707,6 +3707,54 @@ describe("operatorLeaseFiles (ruling 417)", () => {
     expect(leases()).toHaveLength(1);
   });
 
+  /**
+   * Ruling 426 (pass 39): live on ax-clone AX-22's operator leased
+   * `internal/controller/task.go`, which AX-20's open PR already changed, and
+   * AX-21, AX-5 and goal-6 waited on AX-20. AX-20's operator then made AX-20
+   * wait on AX-22, and the critical path sat behind AX-22's ninth review round.
+   */
+  it("ruling 426: refuses a lease that would hold work other tasks wait on, and names who waits", async () => {
+    seedBoard();
+    // VIB-4 and VIB-5 wait on VIB-2, whose open PR #13 changes the sandbox file.
+    for (const key of ["VIB-4", "VIB-5"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "triage", blockedBy: ["VIB-2"] }),
+        goal: "waits on VIB-2",
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // CANARY: drop the `stalled` check and VIB-1 takes the lease, and VIB-2
+    // (and everything behind it) waits on VIB-1.
+    const r = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toBe(
+      "`internal/sandbox/local.go` is changed by VIB-2's open PR #13, and VIB-4 and VIB-5 wait on VIB-2: " +
+        "leasing it to VIB-1 would hold all of them behind VIB-1. Which of the two lands first is a person's " +
+        "call (ruling 426). Open a decision packet that names both tasks and what waits on each, keep VIB-1's " +
+        "work off those paths, or wait for VIB-2 to merge (set_dependencies). Nothing was leased.",
+    );
+    expect(leases() ?? []).toEqual([]);
+    expect(timelineOf("VIB-2").some((e) => e.title === "Files leased by another task")).toBe(false);
+    // A path no waited-on PR changes is still the operator's to lease.
+    const docs = await lease("VIB-1", ["docs/manifests.md"], "the manifest reference");
+    expect(docs.outcome).toBe("done");
+  });
+
+  it("ruling 426: refuses a lease that would make the leaser and the other task wait on each other", async () => {
+    seedBoard();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", branch: "vib-1", blockedBy: ["VIB-2"] }),
+      goal: "the leaser itself waits on VIB-2",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // CANARY: drop the cycle arm and this reads as a stall with nobody named.
+    const r = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("VIB-1 itself waits on VIB-2");
+    expect(r.message).toContain("would make each wait for the other to merge");
+    expect(leases() ?? []).toEqual([]);
+  });
+
   it("is idempotent for what the task already holds, and refused without delivery authority", async () => {
     seedBoard();
     await lease("VIB-1", ["internal/sandbox/**"]);

@@ -161,6 +161,22 @@ what they strand, and record an optional reason.
   width (247px). A tool chip wraps, and its name may break anywhere. Tests: `app.css.test.ts`
   "U39-11" and the 1100px-collapse test, each red under its canary.
 
+- **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
+  review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
+  (following a decision that said "resolve the overlap before delivery"), although AX-20's open
+  PR #13 already changed both and AX-21, AX-5 and goal-6 waited on AX-20. AX-20's operator then
+  made AX-20 wait on AX-22 at 00:09. The finished AX-20 rework could not be delivered or reviewed
+  while AX-22 ran its ninth review round. Neither operator could see the chain. The owner had the
+  controller move the lease (00:11, it reported the side effect: AX-22 can now deliver nothing until
+  AX-20 merges). **Fixed: ruling 426.**
+- **F39-49 (HIGH) — the snapshot says a rework is on the pull request when it is not, so the
+  reviewer re-reviews the rejected head.** Right after the lease was moved, AX-20's operator
+  dispatched the reviewer to "the current delivered revision". `7ce74b2` (the rework) was only in
+  the workspace, PR #13 carried `c5001a3` (rejected at 23:11), and the snapshot said
+  `unpushedRevision: null`. Cause: the reconciler's never-pushed probe asked the 404 predicate of
+  an endpoint that answers 422 (ruling 223 fixed only the acceptance probe), and its test fixture
+  answered 404. **Fixed: ruling 427** (the live AX-20 record needs the deploy to correct itself).
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

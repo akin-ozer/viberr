@@ -1586,6 +1586,11 @@ describe("pr-diverged turn instruction (both backends)", () => {
       "names the OTHER open review PRs whose diff touches a file",
     );
     expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("names the OTHER open review PRs");
+    // Ruling 426: the refusal a lease now meets, and what to do about it.
+    // CANARY: drop the ruling-426 sentence from `collisionsInstruction`.
+    expect(buildCodexOperatorPrompt(snapshot({ collisions }), "manual")).toContain(
+      "which of the two lands first is then a person's call",
+    );
   });
 
   it("ruling 415: a tool-less operator is handed an unfinished report, not an address", () => {

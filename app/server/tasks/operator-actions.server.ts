@@ -8,7 +8,7 @@ import {
   type RevisionDrift,
 } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import { resolveDependencies } from "~/server/projections/dependencies.server";
+import { resolveDependencies, tasksWaitingOn } from "~/server/projections/dependencies.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { prPathOverlaps } from "~/server/projections/review-queue.server";
 import {
@@ -26,7 +26,7 @@ import {
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
-import type { DependencyRender } from "~/shared/dependencies";
+import { joinDependencyEntries, type DependencyRender } from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -2241,6 +2241,46 @@ export async function operatorLeaseFiles(
     };
   }
   const leaseCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
+  // Ruling 426: a lease that would park work other tasks wait on is a person's
+  // call. Live on ax-clone AX-22's operator leased `internal/controller/task.go`
+  // at 23:47, which AX-20's open PR #13 already changed; AX-20's operator then
+  // made AX-20 wait on AX-22, and AX-21, AX-5 and goal-6 waited on AX-20. The
+  // critical path sat behind AX-22's ninth review round, and AX-20's finished
+  // rework could not even be reviewed. Neither operator could see the whole
+  // chain; this check can.
+  const stalled = listProjectTasks(db, input.projectSlug, { dataRoot: ctx.dataRoot }).flatMap((t) => {
+    if (t.key === input.taskKey || !t.pr || t.pr.state !== "review") return [];
+    const hit = (t.pr.paths?.changed ?? []).find((path) => paths.some((glob) => matchesGlob(path, glob)));
+    if (!hit) return [];
+    const waiting = tasksWaitingOn(db, input.projectSlug, t.key);
+    return waiting.length > 0 ? [{ key: t.key, pr: t.pr.number, path: hit, waiting }] : [];
+  });
+  const first = stalled[0];
+  if (first) {
+    const others = first.waiting.filter((k) => k !== input.taskKey);
+    // The leaser waiting on the task it would park is a cycle: each would
+    // wait for the other to merge, and neither ever could.
+    if (others.length < first.waiting.length) {
+      return {
+        outcome: "noop",
+        message:
+          `\`${first.path}\` is changed by ${first.key}'s open PR #${first.pr}, and ${input.taskKey} ` +
+          `itself waits on ${first.key}: leasing it to ${input.taskKey} would make each wait for the ` +
+          `other to merge. Keep ${input.taskKey}'s work off those paths, or drop the wait if it is ` +
+          `wrong (ruling 426). Nothing was leased.`,
+      };
+    }
+    return {
+      outcome: "noop",
+      message:
+        `\`${first.path}\` is changed by ${first.key}'s open PR #${first.pr}, and ` +
+        `${joinDependencyEntries(others)} ${others.length === 1 ? "waits" : "wait"} on ${first.key}: ` +
+        `leasing it to ${input.taskKey} would hold all of them behind ${input.taskKey}. ` +
+        `Which of the two lands first is a person's call (ruling 426). Open a decision packet ` +
+        `that names both tasks and what waits on each, keep ${input.taskKey}'s work off those ` +
+        `paths, or wait for ${first.key} to merge (set_dependencies). Nothing was leased.`,
+    };
+  }
   let refusal: string | null = null;
   let fresh: string[] = [];
   // Checked INSIDE the project file's lock, so two operators leasing at once

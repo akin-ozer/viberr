@@ -3189,15 +3189,32 @@ describe("ruling 135: the unpushed delivered revision", () => {
   const compareRoute = `GET ${REPO_PATH}/compare/${REV}...headsha318`;
   const commitRoute = `GET ${REPO_PATH}/commits/${REV}`;
 
-  it("PRIMARY: a 404 compare plus a 404 commit read records `unknown` and the PR head", async () => {
+  it("PRIMARY: a 404 compare plus the commit read's 422 records `unknown` and the PR head", async () => {
+    // Ruling 427: this fixture used to answer the commit read with 404, which
+    // is what the code believed and not what GitHub says. Probed live on
+    // 2026-09-23 against akin-ozer/ax-clone for AX-20's never-pushed 7ce74b2:
+    // the compare answered 404 "Not Found", the commit read 422 "No commit
+    // found for SHA: 7ce74b2f…". CANARY: ask `isMissingRefAnswer` again.
     const { run } = seedOwned();
     const routes = happyRoutes();
     routes[compareRoute] = { status: 404, body: { message: "Not Found" } };
-    routes[commitRoute] = { status: 404, body: { message: "No commit found for SHA: rev0delivered" } };
+    routes[commitRoute] = { status: 422, body: { message: "No commit found for SHA: rev0delivered" } };
     const fm = await run(routes);
     expect(fm.pr?.headSha).toBe("headsha318");
     expect(fm.pr?.unpushedRevision).toEqual({ revisionSha: REV, prHeadSha: "headsha318", relation: "unknown" });
     expect(fm.pr?.revisionDrift).toBeUndefined();
+  });
+
+  it("ruling 427: a 422 that is not the missing-commit sentence measures nothing", async () => {
+    // 422 is GitHub's generic validation status (ruling 223 kept it scoped to
+    // this sentence); anything else carries the cached record forward.
+    const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
+    const { run } = seedOwned({ unpushed: cached });
+    const routes = happyRoutes();
+    routes[compareRoute] = { status: 404, body: { message: "Not Found" } };
+    routes[commitRoute] = { status: 422, body: { message: "Validation Failed" } };
+    const fm = await run(routes);
+    expect(fm.pr?.unpushedRevision).toEqual(cached);
   });
 
   it("a 404 compare whose commit read answers 200 is NOT measured: nothing is invented, nothing cached is erased", async () => {

@@ -4808,7 +4808,11 @@ export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
     // Ruling 417: the move a collision now has.
     "If this task should land first and must change a shared file, lease exactly those paths to it " +
     "with `lease_files`: first come, first served, and the other task's next delivery that changes them " +
-    "is refused until this one merges. Never lease a path this task does not need.\n\n"
+    "is refused until this one merges. Never lease a path this task does not need. " +
+    // Ruling 426: the lease that parked ax-clone's critical path.
+    "When other work waits on the task whose PR you would park, the lease is refused: which of the two " +
+    "lands first is then a person's call, so open a decision packet that names both tasks and what waits " +
+    "on each, rather than making this task wait or keeping its work off the file without saying so.\n\n"
   );
 }
 

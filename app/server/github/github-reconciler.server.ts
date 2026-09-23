@@ -46,7 +46,7 @@ import {
   encodeRefPath,
   GITHUB_API_BASE,
   githubFailureMessage,
-  isMissingRefAnswer,
+  isMissingCommitAnswer,
 } from "./github-client.server";
 import {
   prAdoptionText,
@@ -639,7 +639,14 @@ async function reconcileTaskUnlocked(
           `/repos/${gh.repo}/commits/${reviewedSha}`,
           commitShaSchema,
         );
-        if (!probe.ok && isMissingRefAnswer(probe)) {
+        // Ruling 427: the commit read answers a well-formed sha it cannot find
+        // with 422 "No commit found for SHA", not 404 (ruling 223 found it on
+        // the acceptance probe). Asking the ref predicate here meant this
+        // record could never be written on the real API: live on ax-clone
+        // AX-20's rework 7ce74b2 sat in the workspace while PR #13 carried
+        // c5001a3, `unpushedRevision` stayed null, and the operator sent the
+        // reviewer back to the head it had already rejected.
+        if (!probe.ok && isMissingCommitAnswer(probe)) {
           unpushedMeasured = true;
           if (!verifiedRevision) {
             unpushed = { revisionSha: reviewedSha, prHeadSha: pr.headSha, relation: "unknown" };

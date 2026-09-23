@@ -260,6 +260,25 @@ export function listHeldTasks(
  * warn "do not sort by it alone". A number that mixes "frees now" with "frees
  * after another human decision" is wrong for the one job it has.
  */
+/**
+ * Ruling 426: every open task that still WAITS on `taskKey`, directly or
+ * through a goal link that task answers, in key order.
+ *
+ * Not `tasksReleasedBy`: that counts only the tasks whose LAST wait this is,
+ * which is a release count. This is the question a lease asks before it holds
+ * a task back: would anything else be held with it? A wait that can never
+ * clear still counts here, because the task is still parked behind this one.
+ */
+export function tasksWaitingOn(db: DatabaseSync, slug: string, taskKey: string): string[] {
+  const out: string[] = [];
+  for (const held of listHeldTasks(db, slug)) {
+    if (held.taskKey === taskKey) continue;
+    const entries = resolveDependencies(db, slug, held.blockedBy);
+    if (entries.some((e) => e.state === "open" && e.taskKey === taskKey)) out.push(held.taskKey);
+  }
+  return out.sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+}
+
 export interface ReleasedTasks {
   /** Unblocked by this task completing, full stop. */
   direct: string[];

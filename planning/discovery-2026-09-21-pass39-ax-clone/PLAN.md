@@ -73,6 +73,8 @@ per item and each one was applied to the source and observed failing.
 | 60 | The controller's working line reads as words, not tool ids (U39-9) | — | **done** (UI, no ruling) |
 | 61 | The not-connected remedy is a visible, linked note on both composers (U39-10) | — | **done** (UI, no ruling) |
 | 62 | The agent-log console is readable on a phone (U39-11) | — | **done** (UI, no ruling) |
+| 63 | A lease that would park waited-on work is a person's call (F39-48) | — | **done**, ruling 426 |
+| 64 | The reconciler records a never-pushed revision on the real API (F39-49) | — | **done**, ruling 427 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 
