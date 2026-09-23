@@ -8,6 +8,10 @@ const BOARD_40 =
 const LOCAL_STAMPS =
   "jsdom: thirty LocalDayDotTime stamps mounted by a client render (no hydration) in Pacific/Auckland, inside a Profiler";
 
+/** The number-ticker.perf.test.tsx fixture. */
+const TICKER =
+  "jsdom: <NumberTicker end={200}> settled, retargeted, then 160 fake-clock frames of 16 ms, one act() each, inside a Profiler";
+
 /** Ruling 454 ratchet ceilings: client render work and CSS (board cards, icons, hydration). */
 export const RENDER_BUDGETS: PerfBudgetTable = {
   // TASK-8 / LIVE-6 / BOARD-4 / CTL-5: 12 before the per-glyph {__html} cache
@@ -108,5 +112,21 @@ export const RENDER_BUDGETS: PerfBudgetTable = {
     unit: "count",
     journey: "task-open",
     fixture: "app/app.css: .attach-thumb img / .tl-attach-thumb img rules with neither height nor aspect-ratio",
+  },
+  // LIVE-7 / CSS-2: the retarget's commit, then one for the digit that
+  // changes. 126 before (a new float set on every frame of the two-second
+  // count, whatever the text drew).
+  "render:number-ticker.commits-per-plus-one": {
+    ceiling: 2,
+    unit: "count",
+    journey: "live-run",
+    fixture: `${TICKER}; retargeted to 201`,
+  },
+  // LIVE-7 / CSS-2: the retarget and one per figure drawn. 126 before.
+  "render:number-ticker.commits-per-plus-ten": {
+    ceiling: 11,
+    unit: "count",
+    journey: "live-run",
+    fixture: `${TICKER}; retargeted to 210`,
   },
 };

@@ -58,18 +58,28 @@ export function NumberTicker({
     }
     let frame = 0;
     let began: number | null = null;
+    // Ruling 454 (LIVE-7): the float moves every frame, the text only when a
+    // digit does. `drawn` keeps the float, so a retarget still eases on from
+    // where the count really is; React hears only the frames that change the
+    // text, which draws the same pixels with one commit per figure instead of
+    // one per frame (126 for a +1).
+    let text = from.toFixed(decimals);
     const step = (now: number) => {
       began ??= now;
       const t = Math.min((now - began) / (duration * 1000), 1);
       const eased = 1 - (1 - t) ** 3;
       const next = t < 1 ? from + (end - from) * eased : end;
       drawn.current = next;
-      setValue(next);
+      const nextText = next.toFixed(decimals);
+      if (nextText !== text) {
+        text = nextText;
+        setValue(next);
+      }
       if (t < 1) frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [end, duration]);
+  }, [end, duration, decimals]);
 
   // Passing the class attribute straight through reads as a class named
   // "className" to app.css.test's orphan gate (which also scans comments), so
