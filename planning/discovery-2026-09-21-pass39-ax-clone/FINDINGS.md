@@ -337,6 +337,15 @@ what they strand, and record an optional reason.
   marked, so "Send back", "Redirect" and any later dispatch would all have resumed the same dead
   session. **Fixed: ruling 434.**
 
+- **F39-57 (MED) — the operator was told a resolved PR still conflicted.** AX-21, 01:57:47: the
+  refresh merged main in cleanly and pushed `5241ef1`. GitHub answers "unknown" for a while after a
+  push, so the reconciler kept the last-known `conflicting`, as designed (P14-LV-07). Ruling 405
+  pinned that value to the head it was measured on, and the acceptance gate and the pills read the
+  pin. The operator's snapshot did not: at 01:58:49 it told the reviewer to "note whether the PR's
+  current conflicting mergeability status prevents acceptance". The acceptance-stage refresh
+  boundary (my own ruling 429) and the review queue's row read the raw field too. `clean` arrived
+  at 02:01. **Fixed: ruling 435.**
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

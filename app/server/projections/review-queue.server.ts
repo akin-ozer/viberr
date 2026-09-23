@@ -19,6 +19,7 @@ import {
   stageName,
 } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
+import { liveMergeable } from "~/features/github/github-pills";
 
 /**
  * Review-queue read model (review-queue.md §1/§3, Phase 9C).
@@ -311,7 +312,11 @@ export function getReviewQueue(
       pr = { number: t.pr.number, state: t.pr.state };
       // Omitted rather than nulled when GitHub was never asked — the key's
       // absence is the "never read" signal the file format itself uses.
-      if (t.pr.mergeable) pr.mergeable = t.pr.mergeable;
+      // Ruling 435: through the head pin (ruling 405), as the GitHub page and
+      // the task page read it; raw, the row's subline called a PR conflicting
+      // after the push that resolved it.
+      const mergeable = liveMergeable(t.pr);
+      if (mergeable) pr.mergeable = mergeable;
       // Ruling 132: the whole record rides through — projecting only a count
       // here is what dropped `baseRefresh` before the row was built.
       if (t.pr.revisionDrift) pr.revisionDrift = t.pr.revisionDrift;

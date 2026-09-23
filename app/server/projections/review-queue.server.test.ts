@@ -174,6 +174,38 @@ describe("getReviewQueue", () => {
     expect(queue.working[0]!.validation).not.toBe("healthy");
   });
 
+  it("ruling 435: a conflict measured on an older head does not reach the row", () => {
+    // Live on AX-21: the refresh that resolved the conflict pushed a new head,
+    // GitHub was still computing, and the file kept the old `conflicting`.
+    // CANARY: copy `t.pr.mergeable` onto the row raw again.
+    const store = setupTestStore(ctx);
+    const seed = (mergeableAt: string) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-301", {
+          title: "Refreshed after a conflict",
+          stage: "review",
+          waiting: "human",
+          pr: {
+            number: 15,
+            state: "review",
+            title: "[VIB-301] t",
+            mergeable: "conflicting",
+            mergeableAt,
+            headSha: "5241ef1ecb39682151e01884e00fe715b246d8be",
+          },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const q = getReviewQueue(store.db, store.slug, {
+        dataRoot: store.dataRoot,
+        viewerUserId: store.users.arda.id,
+      });
+      return [...q.ready, ...q.working].find((t) => t.key === "VIB-301")!;
+    };
+    expect(seed("d20be152db4ba8b622ab3c99dd993a1375304998").pr?.mergeable).toBeUndefined();
+    expect(seed("5241ef1ecb39682151e01884e00fe715b246d8be").pr?.mergeable).toBe("conflicting");
+  });
+
   it("returns empty panels for a project with no review-stage tasks", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });

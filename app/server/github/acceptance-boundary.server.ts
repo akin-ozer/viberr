@@ -1,5 +1,6 @@
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { liveMergeable } from "~/features/github/github-pills";
 
 /**
  * Ruling 162 / G35-5(d) (pass 35): why the operator may not refresh the
@@ -29,7 +30,9 @@ export function acceptanceBoundaryRefusal(
   const reviewIndex = project.stages.findIndex((s) => s.id === roles.reviewId);
   if (stageIndex < 0 || reviewIndex < 0) return null;
   if (stageIndex < reviewIndex || fm.stage === roles.terminalId) return null;
-  if (fm.pr?.mergeable === "conflicting") return null;
+  // Ruling 435: a conflict measured on an older head says nothing about this
+  // one (ruling 405), so it does not lift the boundary.
+  if (liveMergeable(fm.pr) === "conflicting") return null;
   // Ruling 429 (pass 39): the ceremony is next only once the work is approved.
   // While a verdict is failing or a revision awaits its verdict the task is
   // still in its review loop, and on a board that reviews AT the acceptance

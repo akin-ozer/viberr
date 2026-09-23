@@ -6203,6 +6203,44 @@ describe("ruling 424: the operator snapshot carries the branch-refresh refusal",
       expect(snapOf().notRefreshableReason !== null, validation).toBe(refused);
     }
   });
+
+  it("ruling 435: a conflict measured on an older head is neither shown to the operator nor lifts the boundary", () => {
+    /**
+     * Live on AX-21: the refresh pushed `5241ef1` at 01:57:47 with the base
+     * merged in cleanly. GitHub was still computing, so the file kept the
+     * `conflicting` measured on the previous head, and at 01:58:49 the
+     * operator told the reviewer to "note whether the PR's current conflicting
+     * mergeability status prevents acceptance". The gate had already read the
+     * pin (ruling 405); the snapshot read the raw field.
+     *
+     * CANARY: read `fm.pr.mergeable` raw in either place.
+     */
+    const seed = (mergeableAt: string) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          branch: "vib-1",
+          validation: "healthy",
+          pr: {
+            number: 7,
+            state: "review",
+            title: "[VIB-1] t",
+            mergeable: "conflicting",
+            mergeableAt,
+            headSha: "5241ef1ecb39682151e01884e00fe715b246d8be",
+          },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+    seed("d20be152db4ba8b622ab3c99dd993a1375304998");
+    expect(snapOf().pr?.mergeable).toBeNull();
+    expect(snapOf().notRefreshableReason).not.toBeNull();
+    // Measured on the head that stands: it is the fact, and the boundary lifts.
+    seed("5241ef1ecb39682151e01884e00fe715b246d8be");
+    expect(snapOf().pr?.mergeable).toBe("conflicting");
+    expect(snapOf().notRefreshableReason).toBeNull();
+  });
 });
 
 /**

@@ -165,6 +165,7 @@ import {
   type RequiredReviewerView,
 } from "./required-reviewers.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
+import { liveMergeable } from "~/features/github/github-pills";
 import {
   listKnowledgeBaseNames,
   listMcpServerNames,
@@ -3441,11 +3442,14 @@ export function operatorSnapshot(
               activeWorkRevision(fm.workRevision)?.headSha ?? null,
               taskKey,
             ) ?? "",
-          // Ruling 162: the fact the acceptance gate refuses on, exposed as the
-          // reconciler recorded it (settled PRs carry none).
+          // Ruling 162: the fact the acceptance gate refuses on (settled PRs
+          // carry none). Ruling 435: read as the gate reads it, pinned to the
+          // head it was measured on (ruling 405). Raw, it said `conflicting`
+          // for three minutes after the push that resolved AX-21's conflict,
+          // and the operator told the reviewer to weigh it.
           mergeable:
             fm.pr.state === "review" || fm.pr.state === "accepted"
-              ? (fm.pr.mergeable ?? null)
+              ? liveMergeable(fm.pr)
               : null,
         }
       : null,
