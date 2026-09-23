@@ -63,4 +63,36 @@ export const WRITES_BUDGETS: PerfBudgetTable = {
     fixture:
       "jsdom Timeline fed by the real rebuilder: a 30-comment task, then one comment appended and re-projected; .tl-item nodes that are new or now show another event",
   },
+  // CS-5: a plain comment (no "@") ran the whole mention machinery (both
+  // agent resolvers, the member ladder twice, the author's name and tone for a
+  // fan-out that reaches no one) and built a task summary no caller read
+  // (29 before, already net of the CS-6 change above).
+  "writes:comment.sql": {
+    ceiling: 16,
+    unit: "count",
+    journey: "compose-send",
+    fixture:
+      "setupAppTest + runDemoSeed; commentToAgent on viberr-core/VIB-142 as arda, text with no '@'; SQL statement executions (auth not included)",
+  },
+  // CS-5: the same comment's data-root file reads: project.md and the three
+  // agent profiles three times over, and task.md parsed once more just to
+  // check it exists (18 before). The three project.md reads left are
+  // loadProjectContext and the two compression-guardrail lookups.
+  "writes:comment.file-reads": {
+    ceiling: 5,
+    unit: "count",
+    journey: "compose-send",
+    fixture:
+      "same fixture and call; fs.readFileSync calls on files under the data root",
+  },
+  // CS-4: an @member comment's notified stamp was the one task.md write
+  // nothing re-projected, so the file watcher re-projected it ~250 ms later
+  // and sent a second task.updated (1 before).
+  "writes:mention-comment.late-reprojections": {
+    ceiling: 0,
+    unit: "count",
+    journey: "compose-send",
+    fixture:
+      "same fixture; commentToAgent '@elif can you take a look at the schema?' on VIB-142, then rebuildPath(task.md) as the watcher would; 1 when it re-projected",
+  },
 };
