@@ -184,6 +184,42 @@ describe("transcriptExists (loader-path probe)", () => {
 /* ------------------- resume-time continuity probe (P13-D-2) ------------------ */
 
 describe("probeSessionContinuity", () => {
+  it("ruling 434: codex: a rollout whose head is torn is damaged, not present", () => {
+    /**
+     * Live on AX-5 at 01:49: the Developer's resume died with "rollout at … does
+     * not start with session metadata (code -32603)". Its rollout opened with a
+     * `task_started` line written over the head of `session_meta`, whose tail
+     * was left as line two. Three of 541 rollouts on this instance, all Codex
+     * CLI 0.156. The probe said `present` because the file existed.
+     *
+     * CANARY: return "present" for any located rollout again.
+     */
+    const sid = "01a0cbdd-c151-75b2-a067-e047586b9a72";
+    const dir = codexDir("23");
+    const rollout = path.join(dir, `rollout-2026-09-23T01-25-02-${sid}.jsonl`);
+    writeFileSync(
+      rollout,
+      [
+        JSON.stringify({ timestamp: "2026-09-23T01:25:02.990Z", ordinal: 1, type: "event_msg", payload: { type: "task_started" } }),
+        'e_roots":["/data/projects/ax-clone/tasks/AX-5/workspace/ax-clone"],"originator":"codex_sdk_ts","cli_version":"0.156.0"}}',
+        JSON.stringify({ type: "response_item", payload: { type: "message" } }),
+      ].join("\n") + "\n",
+    );
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("damaged");
+    // A head that is not JSON at all, and an empty file, are damaged too.
+    writeFileSync(rollout, 'e_roots":["/w"]}}\n');
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("damaged");
+    writeFileSync(rollout, "");
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("damaged");
+    // The intact shape, a long meta line included, is present.
+    writeFileSync(
+      rollout,
+      JSON.stringify({ type: "session_meta", payload: { id: sid, base_instructions: { text: "x".repeat(200_000) } } }) +
+        "\n" + JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }) + "\n",
+    );
+    expect(probeSessionContinuity("codex", OWNER, sid)).toBe("present");
+  });
+
   it("claude: unknown with no transcript store, present/missing once there is one", () => {
     const sid = "bbbb2222-ae14-41da-a8d9-f8c48b800605";
     // No `<config>/projects` dir at all → absence proves NOTHING. Answering
@@ -226,7 +262,8 @@ describe("probeSessionContinuity", () => {
     const sid = "0199a2c4-7b31-7802-abcd-00000000ff03";
     const dir = codexDir("09");
     const file = path.join(dir, `rollout-2026-07-09T12-00-00-${sid}.jsonl`);
-    writeFileSync(file, "{}\n");
+    // Ruling 434: a resumable rollout opens with its session metadata.
+    writeFileSync(file, JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n");
     expect(probeSessionContinuity("codex", OWNER, sid)).toBe("present");
     rmSync(file);
     // `transcriptExists` would still say true here (30 s TTL) — a stale `true`

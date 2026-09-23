@@ -327,6 +327,16 @@ what they strand, and record an optional reason.
   fixed exactly this on the Claude tool in pass 37. The Codex door was never touched, and on this
   board every operator is Codex. **Fixed: ruling 433.**
 
+- **F39-56 (HIGH) — a torn Codex rollout stranded AX-5, and the packet blamed the credential.**
+  01:49: I answered the Developer's question, it was resumed, and the resume died with "rollout
+  at …/rollout-2026-09-23T01-25-02-01a0cbdd….jsonl does not start with session metadata (code
+  -32603)". The file's first line was `task_started` (ordinal 1) written over the head of
+  `session_meta`, whose tail sat on line two. 3 of 541 rollouts here have that shape, all Codex
+  CLI 0.156, so the collision is inside the CLI. Viberr's part: the probe said `present`, the
+  classifier said "Review its authentication and runtime configuration", and the run was never
+  marked, so "Send back", "Redirect" and any later dispatch would all have resumed the same dead
+  session. **Fixed: ruling 434.**
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

@@ -85,6 +85,7 @@ per item and each one was applied to the source and observed failing.
 | 72 | The controller quotes times in the zone the page prints them in (U39-24) | owner: "UI improvements for end users, especially the controller page" | **done** (no ruling) |
 | 73 | The Codex plan authors every option the Claude tool does (F39-55) | — | **done**, ruling 433 |
 | 74 | The run-inputs headline names a controller turn and counts what it mounted (U39-25) | owner: "especially the controller page" | **done** (no ruling) |
+| 75 | A torn Codex rollout starts a fresh session and says why (F39-56) | — | **done**, ruling 434 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

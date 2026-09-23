@@ -1194,6 +1194,73 @@ describe("resumeRun — continuity recovery", () => {
     };
   }
 
+  it("ruling 434: a Codex rollout whose head is torn starts a fresh session, not a resume that fails", async () => {
+    /**
+     * Live on AX-5 at 01:49: the resume went to the CLI, which answered "does
+     * not start with session metadata", and Viberr called it a failed run
+     * ("Review its authentication and runtime configuration"). The dead
+     * session was never marked, so every recovery option resumed it again.
+     *
+     * CANARY: treat `damaged` as `present` in `resumeRun`.
+     */
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = (await import("node:path")).default;
+    const { userBackendHome } = await import("./user-homes.server");
+    const sid = "01a0cbdd-c151-75b2-a067-e047586b9a72";
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "codex",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "codex", sessionId: sid });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
+      kind: "primary", backend: "codex", model: "m", agentName: "dev",
+      agentProfileId: "dev", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    const dir = path.join(
+      userBackendHome(store.users.arda.id, "codex", store.dataRoot),
+      "sessions", "2026", "09", "23",
+    );
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `rollout-2026-09-23T01-25-02-${sid}.jsonl`),
+      [
+        JSON.stringify({ ordinal: 1, type: "event_msg", payload: { type: "task_started" } }),
+        'e_roots":["/data/projects/ax-clone/tasks/AX-5/workspace/ax-clone"]}}',
+      ].join("\n") + "\n",
+    );
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      credentialUserId: store.users.arda.id,
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    expect(resumed.continuityLossReason).toBe("transcript_damaged");
+    expect(specs.find((s) => s.runId === resumed.runId)!.resumeSessionId).toBeNull();
+    // Marked like a vanished session, so no later dispatch selects it again.
+    const marker = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === "run·session_missing",
+    );
+    expect(marker!.display.text).toContain("its provider transcript is damaged");
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    expect(runFailureReason(store.db, runId)?.kind).toBe("session_missing");
+    const timeline = readTaskFile({
+      projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    const note = timeline.find((e) => e.text.includes("continuity was lost"));
+    expect(note?.text).toContain("damaged provider transcript");
+    expect(note?.text).not.toContain("no longer has a provider transcript");
+  });
+
   it("retries the turn as a FRESH canonical-anchored run when the transcript is gone", async () => {
     const { specs, firstRunId, resume } = await startThenResume();
     expect(getRun(store.db, firstRunId)!.session_id).toBe("sess-gone");

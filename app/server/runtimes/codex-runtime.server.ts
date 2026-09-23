@@ -30,6 +30,7 @@ import {
 } from "./adapter.server";
 import { withProviderText } from "~/shared/provider-marker";
 import {
+  SESSION_DAMAGED_RE,
   SESSION_MISSING_RE,
   SESSION_STORE_UNREADABLE_MARK,
   SESSION_STORE_UNREADABLE_RE,
@@ -621,6 +622,20 @@ function classifyCodexFailure(
         "Nothing is wrong with the credential and no rewritten directive changes it: every resume " +
         "fails until that file is repaired or removed, while fresh runs still work. Re-run the " +
         "agent to start a fresh session anchored on task.md.",
+      providerText,
+      origin: null,
+    };
+  }
+  // Ruling 434: the rollout is there and its head is torn. The resume probe
+  // catches this before a spawn; this is the run that got there first.
+  if (SESSION_DAMAGED_RE.test(raw)) {
+    return {
+      kind: "session_missing",
+      message:
+        "The Codex session could not be resumed — its rollout is damaged: the CLI says it does not " +
+        "start with the session's metadata. Nothing is wrong with the credential and no rewritten " +
+        "directive changes it: every resume of this session fails, while fresh runs still work. " +
+        "Re-run the agent to start a fresh session anchored on task.md.",
       providerText,
       origin: null,
     };

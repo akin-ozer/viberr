@@ -807,7 +807,7 @@ type RunStartedAudit = {
   failedUnavailable?: true;
   /** Ruling 372: this is the fresh turn `resumeRun` started INSTEAD of a
    *  replay, and why (`stale_large_session`, `transcript_gone`,
-   *  `owner_changed`). */
+   *  `transcript_damaged`, `owner_changed`). */
   continuityReset?: ContinuityLossReason;
 };
 
@@ -1302,7 +1302,14 @@ const SESSION_MISSING_TAG = "run·session_missing";
  *  chose not to replay it — idle past its cache TTL and above the replay
  *  threshold, so a resume would re-write the whole history as one cache
  *  write. */
-export type ContinuityLossReason = "transcript_gone" | "owner_changed" | "stale_large_session";
+export type ContinuityLossReason =
+  | "transcript_gone"
+  /** Ruling 434: the transcript is there and the CLI refuses it (a Codex
+   *  rollout whose head is torn). A fault, like `transcript_gone`, and marked
+   *  the same way so the dead session is never selected again. */
+  | "transcript_damaged"
+  | "owner_changed"
+  | "stale_large_session";
 
 /** Ruling 372: the tag of the meta line a set-aside session's last run gets.
  *  Not `·session_missing` on purpose: `runIdsWithMissingSession` must not skip
@@ -1340,6 +1347,9 @@ function sessionMissingMessage(
   const label = backend === "claude" ? "Claude" : "Codex";
   if (reason === "owner_changed") {
     return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
+  }
+  if (reason === "transcript_damaged") {
+    return `The ${label} session ${sessionId} could not be resumed: its provider transcript is damaged. The rollout does not start with the session's metadata, and the CLI refuses to resume it without that. Nothing is wrong with the credential. The agent re-anchored on task.md and continued with a fresh session.`;
   }
   return `The ${label} session ${sessionId} no longer exists on this machine. Its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
 }
@@ -1501,6 +1511,9 @@ async function noteContinuityReset(
               `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${k(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
             : reason === "owner_changed"
             ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+            : reason === "transcript_damaged"
+            ? // Ruling 434: there, and refused. Not a sweep, and not the credential.
+              `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread has a damaged provider transcript. Its rollout does not start with the session's metadata, which the CLI needs to resume it. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`
             : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
         toAgent: false,
         evidence: null,
@@ -1814,12 +1827,14 @@ export async function resumeRun(
             : null;
         })()
       : null;
-  if (continuity === "missing" || stale) {
+  if (continuity === "missing" || continuity === "damaged" || stale) {
     const lossReason: ContinuityLossReason = stale
       ? "stale_large_session"
       : ownerChanged
         ? "owner_changed"
-        : "transcript_gone";
+        : continuity === "damaged"
+          ? "transcript_damaged"
+          : "transcript_gone";
     logger.warn(
       stale
         ? "stale large session set aside — starting fresh on task.md and the last report"

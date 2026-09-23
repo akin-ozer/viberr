@@ -936,6 +936,20 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.providerText).toContain("401 unauthorized for token [redacted]");
   });
 
+  it("ruling 434: a torn rollout classifies as 'session_missing' with its own sentence, not 'unknown'", async () => {
+    // Live on AX-5: "Codex execution failed. Review its authentication and
+    // runtime configuration", for a session whose rollout head was torn.
+    // CANARY: drop the SESSION_DAMAGED_RE branch.
+    const reason = await classifyThrownFailure(
+      "rollout at /data/runtimes/users/u_1/codex-home/sessions/2026/09/23/rollout-2026-09-23T01-25-02-01a0cbdd.jsonl does not start with session metadata (code -32603)",
+    );
+    expect(reason?.kind).toBe("session_missing");
+    expect(reason?.text).toContain("its rollout is damaged");
+    expect(reason?.text).toContain("Nothing is wrong with the credential");
+    expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
+    expect(reason?.text).not.toContain("/data/runtimes");
+  });
+
   it("a vanished rollout classifies as 'session_missing', not 'auth' (P13-D-2)", async () => {
     const reason = await classifyThrownFailure(
       "session not found: 0199a2c4-7b31-7802 (no rollout under /data/codex/sessions)",

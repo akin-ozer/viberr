@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { RealBackend } from "./runtime-registry.server";
@@ -280,8 +280,13 @@ export function transcriptExists(
  * as "session gone" and force a fresh run on every deployment whose provider
  * writes transcripts somewhere this process cannot see — degrading continuity
  * to fix a continuity bug. `unknown` resumes exactly as before.
+ *
+ * Ruling 434: `damaged` — the transcript is there and the CLI will refuse it.
+ * A Codex rollout must open with its `session_meta` line; three on this
+ * instance (Codex CLI 0.156) had a `task_started` line written over the head
+ * of it, and every resume of those sessions failed.
  */
-export type SessionContinuity = "present" | "missing" | "unknown";
+export type SessionContinuity = "present" | "missing" | "damaged" | "unknown";
 
 /**
  * How the two CLIs report a resume against a session they no longer hold —
@@ -293,6 +298,14 @@ export type SessionContinuity = "present" | "missing" | "unknown";
  */
 export const SESSION_MISSING_RE =
   /no conversation found|conversation not found|session not found|no session (?:with|found)|unknown session|no such session|rollout not found|no rollout/i;
+
+/**
+ * Ruling 434: what the Codex CLI says when a rollout's head is torn —
+ * "rollout at <path> does not start with session metadata (code -32603)".
+ * The session cannot be resumed and fresh runs still work, which is
+ * `session_missing`'s outcome; the classifier gives it its own sentence.
+ */
+export const SESSION_DAMAGED_RE = /does not start with session metadata/i;
 
 /**
  * Ruling 221 (F37-41): the same outcome by a different road — the store the
@@ -358,11 +371,55 @@ export function probeSessionContinuity(
   if (!userId) return "unknown";
   if (backend === "codex") {
     if (codexSessionDirs(userId, dataRoot).length === 0) return "unknown";
-    return locateCodex(userId, sessionId, dataRoot) ? "present" : "missing";
+    const rollout = locateCodex(userId, sessionId, dataRoot);
+    if (!rollout) return "missing";
+    // Ruling 434: found is not resumable. Asked here, before the spawn, so a
+    // torn rollout starts a fresh session instead of a run that fails.
+    return codexRolloutOpensWithMeta(rollout) ? "present" : "damaged";
   }
   const projectsDir = claudeProjectsDir(userId, dataRoot);
   if (!projectsDir || !existsSync(projectsDir)) return "unknown";
   return locateClaude(userId, sessionId, dataRoot) ? "present" : "missing";
+}
+
+/** The first line of a Codex rollout, as far as the probe needs it. */
+const rolloutHeadSchema = z.object({ type: z.string() });
+
+/** Longest first line the probe reads. The `session_meta` line carries the
+ *  base instructions, tens of kilobytes; a line past this is not one. */
+const ROLLOUT_HEAD_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Ruling 434: does this rollout open with its `session_meta` line, which the
+ * CLI needs to resume it? Reads only as far as the first newline.
+ *
+ * An unreadable file answers true: the probe's job is to catch a file it can
+ * see is torn, and a read error is not evidence of that, so the resume goes
+ * ahead as before and the CLI says what it says.
+ */
+function codexRolloutOpensWithMeta(rollout: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = openSync(rollout, "r");
+    const chunk = Buffer.alloc(64 * 1024);
+    const parts: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, total);
+      if (n === 0) break;
+      const newline = chunk.subarray(0, n).indexOf(0x0a);
+      parts.push(Buffer.from(chunk.subarray(0, newline === -1 ? n : newline)));
+      total += n;
+      if (newline !== -1 || total >= ROLLOUT_HEAD_MAX_BYTES) break;
+    }
+    const head = rolloutHeadSchema.safeParse(JSON.parse(Buffer.concat(parts).toString("utf8")));
+    return head.success && head.data.type === "session_meta";
+  } catch (error) {
+    // A torn head is often not JSON at all; any other failure is the read.
+    return error instanceof SyntaxError ? false : true;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }
 
 // ------------------------------------------------- context size readers
