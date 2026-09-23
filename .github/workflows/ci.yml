@@ -32,6 +32,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Bundle ratchet (ruling 454)
+        run: node scripts/measure-routes.mjs --check
+
   e2e:
     runs-on: ubuntu-latest
     steps:

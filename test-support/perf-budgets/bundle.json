@@ -1,0 +1,10 @@
+{
+  "bundle:root": { "ceiling": 275352, "unit": "bytes", "journey": "fresh-load", "fixture": "gzip -9 of the root route's client closure (entry + root module, imports, css) in build/client" },
+  "bundle:root.css": { "ceiling": 55592, "unit": "bytes", "journey": "fresh-load", "fixture": "gzip -9 of the root route's render-blocking stylesheets in build/client" },
+  "bundle:routes/login": { "ceiling": 278270, "unit": "bytes", "journey": "fresh-load", "fixture": "gzip -9 of the /login closure in build/client" },
+  "bundle:routes/_index": { "ceiling": 319392, "unit": "bytes", "journey": "fresh-load", "fixture": "gzip -9 of the Home closure in build/client" },
+  "bundle:routes/project.board": { "ceiling": 368729, "unit": "bytes", "journey": "fresh-load", "fixture": "gzip -9 of the board closure (root + project layout + board) in build/client" },
+  "bundle:routes/project.task": { "ceiling": 422641, "unit": "bytes", "journey": "task-open", "fixture": "gzip -9 of the task page closure (root + project layout + task) in build/client" },
+  "bundle:routes/controller": { "ceiling": 310178, "unit": "bytes", "journey": "controller", "fixture": "gzip -9 of the /controller closure in build/client" },
+  "bundle:routes/profile": { "ceiling": 324441, "unit": "bytes", "journey": "fresh-load", "fixture": "gzip -9 of the /profile closure in build/client" }
+}

@@ -1,5 +1,5 @@
 /**
- * Route-closure bundle measurement (modernization gate).
+ * Route-closure bundle measurement (modernization gate; ruling 454 ratchet).
  *
  * For each route id given on the command line (default: the three gate
  * routes), collects the full client asset closure — global entry module +
@@ -9,10 +9,19 @@
  * runs against the same build are byte-identical.
  *
  *   node scripts/measure-routes.mjs [routeId ...]
+ *   node scripts/measure-routes.mjs --check
+ *
+ * `--check` measures every `bundle:<routeId>` entry of
+ * test-support/perf-budgets/bundle.json (plus `bundle:root.css`, the root
+ * route's render-blocking stylesheets alone) and exits 1 when one exceeds its
+ * ceiling or falls below it by more than its slack: the ratchet only moves
+ * down, so a smaller closure must be recorded by lowering the ceiling. Run it
+ * after `npm run build`.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { budgetVerdict } from "../test-support/perf-verdict.ts";
 
 const CLIENT = path.resolve("build/client");
 const ASSETS = path.join(CLIENT, "assets");
@@ -26,10 +35,6 @@ if (manifestFiles.length !== 1) {
 }
 const raw = readFileSync(path.join(ASSETS, manifestFiles[0]), "utf8");
 const manifest = JSON.parse(raw.slice(raw.indexOf("=") + 1).replace(/;?\s*$/, ""));
-
-const routeIds = process.argv.slice(2).length
-  ? process.argv.slice(2)
-  : ["routes/project.board", "routes/project.task", "routes/profile"];
 
 function closureFor(routeId) {
   const files = new Set();
@@ -52,9 +57,7 @@ function closureFor(routeId) {
   return [...files].sort();
 }
 
-const result = {};
-for (const routeId of routeIds) {
-  const files = closureFor(routeId);
+function measure(files) {
   let rawTotal = 0;
   let gzipTotal = 0;
   for (const file of files) {
@@ -62,7 +65,32 @@ for (const routeId of routeIds) {
     rawTotal += bytes.length;
     gzipTotal += gzipSync(bytes, { level: 9 }).length;
   }
-  result[routeId] = { files: files.length, raw: rawTotal, gzip: gzipTotal };
+  return { files: files.length, raw: rawTotal, gzip: gzipTotal };
 }
+
+const args = process.argv.slice(2);
+
+if (args.includes("--check")) {
+  const budgets = JSON.parse(
+    readFileSync(path.resolve("test-support/perf-budgets/bundle.json"), "utf8"),
+  );
+  let failed = false;
+  for (const id of Object.keys(budgets)) {
+    const target = id.slice("bundle:".length);
+    const files =
+      target === "root.css" ? manifest.routes.root.css ?? [] : closureFor(target);
+    const verdict = budgetVerdict(id, measure(files).gzip, budgets);
+    console.log(`${verdict.ok ? "ok  " : "FAIL"} ${verdict.message}`);
+    if (!verdict.ok) failed = true;
+  }
+  process.exit(failed ? 1 : 0);
+}
+
+const routeIds = args.length
+  ? args
+  : ["routes/project.board", "routes/project.task", "routes/profile"];
+
+const result = {};
+for (const routeId of routeIds) result[routeId] = measure(closureFor(routeId));
 
 console.log(JSON.stringify(result, null, 2));
