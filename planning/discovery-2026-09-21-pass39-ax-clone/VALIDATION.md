@@ -1208,3 +1208,36 @@ the new build:
 
 **Ruling 419(f) and (h), live:** the transcript labels my messages "Arda", not the address, and
 all six chains carry "About this chain".
+
+## 43. Rulings 425 and 427 on the live instance (build `c46f3ceb`, deployed 00:26 UTC 2026-09-23)
+
+Deployed with every live task waiting on me (AX-20 round 7, AX-22 round 9, AX-21 held), so no
+run was cut.
+
+**Ruling 427, the never-pushed probe.** Before the deploy, AX-20's `pr` read
+`headSha: c5001a3, unpushedRevision: null` while `workRevision.headSha` was `7ce74b2` and the
+workspace branch held `7ce74b2` on top of `c5001a3`. Probed from the host the same hour:
+`GET /compare/7ce74b2…c5001a3` answered 404 and `GET /commits/7ce74b2…` answered **422 "No
+commit found for SHA"**. First reconcile on the new build:
+
+```
+"unpushedRevision": {"revisionSha": "7ce74b2f81ab…", "prHeadSha": "c5001a34935f…", "relation": "unknown"}
+```
+
+**Ruling 425, the Goals rail.** Read from the live DOM right after the deploy:
+
+```
+held | AX-6 | End-to-end test harness covering every n… | waits on 6 · 4 done
+pending |  | Failure semantics and admission hardening | waits on 4
+done | AX-14 | Documentation: manifest reference and a … |
+held | AX-5 | ax ssh: interactive shell into a live task | waits on 1 · 1 done
+active | AX-22 | Gateway data path: actually proxy model traffic |
+```
+
+AX-6 and AX-5 read "held", no longer "active". AX-22 reads "active" because it has no wait. Each
+wait is a count. Layout was checked before the deploy in a production preview (copy of the data)
+at 1440×900 and 375×812, light and dark: at 1440 the rail gives the list 258px and the rows
+stack; at 375 there is no horizontal overflow.
+
+**U39-7 live:** the packet note box reads "e.g. anything the operator should also know" on the
+AX-20 and AX-22 deadlock packets.
