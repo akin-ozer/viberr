@@ -116,7 +116,14 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   pill, Threads (this scope's threads, count in the name, unread ones marked), New, Open
   page (the full surface with `?c=`), Close. One context line names what the controller
   knows here; a status line says where an unseen reply is, and the panel links to replies
-  from other scopes and opens one of its own scope in place. The transcript reuses the
+  from other scopes and opens one of its own scope in place. Everything below the header
+  (`controller-dock-panel.tsx`: the context line, the transcript through the markdown
+  pipeline, the thread list and the composer) loads on demand, so root ships only the
+  button, the frame, the header and the dock's state to every page (ruling 454); the
+  button preloads it when a pointer or focus reaches it, and until it lands the frame
+  shows the same "Reading where you are…" and "Loading…" the body shows before its view
+  arrives. The shared not-connected note lives in `not-connected.tsx` for the same
+  reason. The transcript reuses the
   page's message vocabulary and the composer takes focus on open (the send hint names the
   viewer's own modifier and drops on a coarse pointer) — on a user-initiated open only, so
   a remembered-open reload never starts focus inside the textarea. Escape closes and

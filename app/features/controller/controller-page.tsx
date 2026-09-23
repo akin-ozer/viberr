@@ -34,6 +34,7 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { controllerExamples } from "./controller-examples";
+import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 
 /**
@@ -54,53 +55,6 @@ interface ActionResult {
   error?: string;
   toast?: string;
   conversationId?: string;
-}
-
-/**
- * Ruling 127: what a viewer whose Claude is not connected reads here.
- *
- * The controller bills the ASKER, so this is never "the deployment has no
- * credential" — it is one person's account, and the remedy is theirs. The
- * words are the server's own (`controllerRefusalNote` in
- * controller-run.server.ts), so the disabled composer and the refusal the
- * transcript would record say the same thing. Exported because the DOCK
- * (ruling 121) is a second composer for the same turn and must not tell a
- * second story about one refusal.
- */
-export const CLAUDE_NOT_CONNECTED =
-  "The controller runs on your own Claude account, and Claude isn't connected " +
-  "for you yet. Connect it on your Profile → Agent accounts, then send your " +
-  "message again.";
-
-/** Where the sentence above sends a person, linked where it is printed. */
-const AGENT_ACCOUNTS_PLACE = "Profile → Agent accounts";
-
-/** What a composer that cannot send yet says in its own box. */
-export const CONNECT_TO_SEND = "Connect Claude to send a message.";
-
-/**
- * U39-10 (pass 39): ruling 127's sentence where a person can read it and act
- * on it. Both composers carried it as the PLACEHOLDER of a disabled textarea:
- * placeholder grey on a disabled field, cut after two lines on a phone (the
- * dock's box is two rows), and never a link. The product's own rule for a
- * disabled control is a visible note beside it (`.deny-note`), and this is
- * that note, with the place it names linked. Shared by the page and the dock
- * (ruling 121), so the two still tell one story.
- */
-export function NotConnectedNote() {
-  const [before, after] = CLAUDE_NOT_CONNECTED.split(AGENT_ACCOUNTS_PLACE);
-  return (
-    <p className="deny-note ctl-unavailable" data-not-connected>
-      <Icon name="alert" />
-      <span>
-        {before}
-        <Link className="linkish" to="/profile">
-          {AGENT_ACCOUNTS_PLACE}
-        </Link>
-        {after}
-      </span>
-    </p>
-  );
 }
 
 /**
