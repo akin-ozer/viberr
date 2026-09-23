@@ -5,7 +5,9 @@ import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
+import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { logger } from "~/server/logging/logger.server";
+import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
 /**
  * P13 regression: the shipped agent assets must load under EVERY runtime, not
@@ -411,5 +413,181 @@ describe("ruling 437: the app skill says whose packets the operator may resolve"
     expect(skill).toContain("If a packet you raised becomes moot");
     expect(skill).toContain("`packet.yours: false` in `get_task`");
     expect(skill).not.toMatch(/If a packet becomes moot because/);
+  });
+});
+
+/**
+ * The seeded-prompt sweep (2026-09-23; `docs/validation/2026-09-23-doc-sweep.md`,
+ * "Seeded agent prompts"). Ten sentences in the shipped prompts said things the
+ * code at HEAD does not do, and every run that mounts them read them as fact:
+ * the Developer "opens the review pull request" while its own run prompt
+ * forbids `git push` and PRs; the Reviewer "raises typed quality flags" with no
+ * such tool; the operator's playbook read an absent grant as "do not attempt"
+ * while four capabilities resolve an absent grant to a default; the controller
+ * created "only the first link's task" of a goal that ruling 398 fans out; and
+ * the operator was told that "advancing a single `auto` boundary and stopping is
+ * correct", which ruling 152(a) made a paid extra turn per stage.
+ *
+ * Each rewritten asset's outgoing version is a recorded prior hash, so an
+ * unedited store copy upgrades at boot.
+ *
+ * CANARY: restore any retired sentence below, or drop an outgoing hash.
+ */
+describe("the seeded-prompt sweep: the shipped prompts say what the code does", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  const read = (file: string): string => readFileSync(path.join(assetsDir, file), "utf8");
+
+  function seededStore(): string {
+    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-prompt-sweep-"));
+    roots.push(dataRoot);
+    return dataRoot;
+  }
+
+  it("the Developer commits and reports; Viberr pushes and opens the PR; the deliverer runs at every stage", () => {
+    const definition = read("developer.definition.md");
+    const skill = read("developer-expertise.skill.md");
+    expect(definition).not.toContain("You open the review pull request");
+    expect(definition).toContain(
+      "Viberr pushes your branch and opens the review pull request when the operator delivers",
+    );
+    expect(skill).not.toContain("Open the review PR");
+    expect(skill).not.toContain("the review PR is open");
+    // Ruling 133: an engaged deliverer runs at EVERY stage.
+    expect(skill).not.toContain("You do your work at the implementation stage");
+    expect(skill).toContain("you run at EVERY stage");
+    // The run prompt prefixes a commit with the task key, never a literal `[TASK]`.
+    expect(skill).not.toContain("[TASK]");
+    expect(skill).toContain("prefixed with the task key in brackets");
+  });
+
+  it("the Reviewer records its verdict through the outcome channel, writes no tests, and keeps raw output in the run logs", () => {
+    const definition = read("reviewer.definition.md");
+    const skill = read("reviewer-expertise.skill.md");
+    expect(definition).not.toContain("typed quality flags");
+    // The verdict is the envelope's; the prose classifier is only a fallback.
+    expect(skill).not.toContain("the operator parses it");
+    for (const text of [definition, skill]) expect(text).toContain("`report_outcome`");
+    // No repo-write grant: it cannot author the suite.
+    expect(skill).not.toMatch(/you author and run the validation suite/i);
+    expect(skill).not.toContain("authors/runs");
+    expect(skill).toContain("the seeded Reviewer holds no repo-write grant");
+    // Evidence rows are short citations.
+    expect(skill).not.toMatch(/raw \w+ output in evidence/);
+    // The `desc` the operator selects agents by said the same three things.
+    const reviewer = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "reviewer");
+    expect(reviewer?.description).not.toContain("typed quality flags");
+    expect(reviewer?.description).not.toContain("authors");
+    expect(reviewer?.description).not.toMatch(/raw validation output in evidence/);
+  });
+
+  it("the operator's playbook reads an absent grant the way the gates do, and promises read_board only where it is mounted", () => {
+    const skill = read("viberr-app-expertise.skill.md");
+    expect(skill).not.toContain("`human`, `off`, or missing");
+    // `absentPolarityGate`'s four.
+    for (const id of ["dispatch-agents", "use-web-search-fetch", "deliver-review-pr", "update-task-branch"]) {
+      expect(skill).toContain(`\`${id}\``);
+    }
+    expect(skill).toContain("Missing from `operatorPolicy`: withheld, except four capabilities");
+    // `read_board` is a Claude toolkit tool, built only beside another one.
+    expect(skill).toContain("An agent on Claude that holds any other Viberr tool also");
+    expect(skill).toContain("an agent on Codex gets no board read");
+  });
+
+  it("ruling 398: the controller's doctrine, guide and handbook start every link whose wait is satisfied", async () => {
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
+    const dataRoot = seededStore();
+    seedDefaultAgentAssets(dataRoot);
+    const definition = read("controller.definition.md");
+    const skill = read("controller-guide.skill.md");
+    const handbook = readFileSync(
+      path.join(dataRoot, "kb", "controller-handbook", "handbook.md"),
+      "utf8",
+    );
+    expect(definition).not.toContain("You create only the first link's task up front");
+    expect(skill).not.toContain("the first link's task is created immediately and later links wait");
+    expect(handbook).not.toContain("as the previous link completes");
+    for (const text of [definition, skill]) {
+      // Ruling 398(d): a chain-created task is created once its wait is met.
+      expect(text).not.toContain("born held");
+      expect(text).toContain("ruling 398");
+      expect(text).toContain("`link 2`");
+    }
+    expect(handbook).toContain("holds nothing back");
+  });
+
+  it("a GitHub read needs membership, not maintainer", () => {
+    const skill = read("controller-guide.skill.md");
+    expect(skill).not.toContain("reading GitHub state at depth need maintainer");
+    expect(skill).toContain("so does every GitHub read");
+  });
+
+  it("ruling 152(a): the shipped operator definition and the system prompt around it both walk auto boundaries in one turn", async () => {
+    // The whole prompt a real operator gets: the STORE's definition (seeded)
+    // plus the non-negotiable rules appended after it. Both said the opposite.
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
+    const { buildOperatorSystemPrompt } = await import("~/server/runtimes/operator-run.server");
+    const dataRoot = seededStore();
+    seedDefaultAgentAssets(dataRoot);
+    const { prompt } = buildOperatorSystemPrompt(
+      {
+        policy: new Map<string, CapabilityMode>([["transition-to-done", "human"]]),
+        autonomy: "supervised",
+        backend: "claude",
+        model: "sonnet",
+        effort: "",
+        name: "Operator",
+        skills: [],
+        kb: [],
+        mcps: [],
+        persona: null,
+        deployed: true,
+        humanGatedBeforeWork: false,
+      },
+      dataRoot,
+    );
+    // The store copy was read, not the baked fallback.
+    expect(prompt).toContain("triage quality gate");
+    expect(prompt).not.toContain("advancing a single `auto` boundary");
+    expect(prompt).not.toContain("Every transition re-invokes you");
+    expect(prompt.match(/consecutive `auto` boundaries are walked in one turn/gi)).toHaveLength(2);
+  });
+
+  it("every rewritten asset's outgoing version is a recorded prior hash, and the shipped version is not", async () => {
+    const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const outgoing: Record<string, string> = {
+      [path.join("agents", "definitions", "controller.md")]:
+        "d7387a588a1c5425648c030293a893e6dee648bac2576231ab9386e083da1fb0",
+      [path.join("skills", "controller-guide", "SKILL.md")]:
+        "6bb9b30dcae4b9c6f6504899ab476c63c00f76b417535c113f355a1165d5195a",
+      [path.join("agents", "definitions", "operator.md")]:
+        "96d88b2c779416d83501463cf8c3023f77d05504938bd3d578eb680edea2c778",
+      [path.join("skills", "viberr-app-expertise", "SKILL.md")]:
+        "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
+      [path.join("skills", "developer-expertise", "SKILL.md")]:
+        "d22b14d8171f832b7f67e79b4899f1e84c97e6d093ed022efd970ed9b0c30cb0",
+      [path.join("skills", "reviewer-expertise", "SKILL.md")]:
+        "eb2e5ebd17f890a65377d8ce016ddc6e105d92a260d7ee4f9d1ef0262be18774",
+      [path.join("kb", "controller-handbook", "handbook.md")]:
+        "a3072990165c8cd4a67d3227d032825bdcb9f33ab82ab7752edf0d6afee9d08b",
+      [path.join("agents", "profiles", "developer.md")]:
+        "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",
+      [path.join("agents", "profiles", "reviewer.md")]:
+        "cbb114a5d3e41103ddf201f40f7e549739de05c659f40ed9b87b3c35372f3055",
+    };
+    const dataRoot = seededStore();
+    seedDefaultAgentAssets(dataRoot);
+    // What this build ships, as the store's own manifest recorded it: that
+    // covers the two templates and the handbook, which have no asset file.
+    const shipped = manifestSchema.parse(
+      JSON.parse(readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8")),
+    );
+    for (const [rel, hash] of Object.entries(outgoing)) {
+      expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
+      expect(shipped[rel], rel).toBeDefined();
+      expect(shipped[rel], `${rel} still ships its outgoing version`).not.toBe(hash);
+      expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(shipped[rel]);
+    }
   });
 });
