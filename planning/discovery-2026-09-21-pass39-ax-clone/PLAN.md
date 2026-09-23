@@ -90,6 +90,7 @@ per item and each one was applied to the source and observed failing.
 | 77 | A default-branch read comes in pages the CLI will carry (F39-58) | — | **done**, ruling 436 |
 | 78 | The Live run strip reads a tool step as words (U39-26) | owner: "especially the controller page" | **done** (no ruling; default, owner may revisit) |
 | 79 | Touch-size targets for the goal chains' controls (U39-27) | owner: "especially the controller page" | **done** (no ruling) |
+| 80 | The workspace contract says fetching is the server's (F39-59) | — | **done** (no ruling) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

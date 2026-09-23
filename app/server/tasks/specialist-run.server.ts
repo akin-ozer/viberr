@@ -3219,6 +3219,13 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           // agent never reasons from a stale `origin/*` (or from a branch
           // that shares no history with the base) without being told.
           (input.workspaceRefresh ? ` Before this run Viberr ${input.workspaceRefresh}.` : ``) +
+          // F39-59: say it before an agent finds out by failing. Live on AX-29
+          // a Surface Developer ran `git fetch origin` to bring its branch up
+          // to date, got "could not read a username", and spent the run
+          // reporting that. Fetching is the server's; so is the base merge.
+          ` This workspace holds no GitHub credentials, by design, so \`git fetch\` and ` +
+          `\`git pull\` cannot reach origin. When the branch needs the base merged in, say so in ` +
+          `your report and the operator brings it up to date on the server.` +
           `\n`
         : input.cloneFailure
           ? // The server TRIED and failed. Telling the agent to clone here is a

@@ -378,6 +378,17 @@ what they strand, and record an optional reason.
   whole lines under the CLI's limit, `fromLine` on both the controller's and the operator's tool,
   each page naming the next).
 
+- **F39-59 (LOW) — an agent learned it cannot fetch by failing, and spent the run on it.** AX-29,
+  02:34: my answer to the Surface Developer's question said the branch would be brought up to
+  date. It went to the asking agent (O39-a), which ran `git fetch origin`, got "could not read a
+  username", and reported that it "could not refresh `origin/main`". The workspace contract
+  says Viberr refreshed `origin/*` for the run and forbids `git push` ("no push credentials by
+  design"), but never says a fetch cannot work, so an agent finds out by trying. The clone-failure
+  branch of the same contract already warns that credential talk sends a person after a false
+  lead. **Fixed:** a cloned workspace's line now says it holds no GitHub credentials, so `git
+  fetch` and `git pull` cannot reach origin, and that the operator brings the branch up to date
+  on the server. Test: `specialist-run.server.test.ts` "F39-59".
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

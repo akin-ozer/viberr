@@ -2403,6 +2403,17 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("open a pull request");
   });
 
+  it("F39-59: a cloned workspace says fetching is the server's, before an agent finds out by failing", () => {
+    // Live on AX-29: `git fetch origin` failed with "could not read a
+    // username" and the run was spent reporting it. CANARY: drop the sentence.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+    });
+    expect(prompt).toContain("holds no GitHub credentials, by design, so `git fetch` and `git pull` cannot reach origin");
+    expect(prompt).toContain("the operator brings it up to date on the server");
+  });
+
   /**
    * Ruling 191 (F37-13, live): every agent discovered its own shell one
    * exit-127 at a time — `pnpm`, `corepack`, `make`, `curl`, Docker, 75
