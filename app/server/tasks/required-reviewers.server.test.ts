@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -186,10 +187,6 @@ function reportEvent(): TaskFileEvent {
   };
 }
 
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
-
 const RULE_SENTENCE =
   "Required reviewer Code Reviewer (project rule at Review) has not approved revision aaaaaaa. " +
   "Run the review at Review, or an admin can force-accept.";
@@ -216,7 +213,7 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409, message: RULE_SENTENCE });
@@ -398,7 +395,7 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });

@@ -101,6 +101,11 @@ export function setupTestStore(ctx: TestDbContext): TestStore {
   return { db, dataRoot, slug, users };
 }
 
+/** The actor a store user writes as: their id, with their email as the audit label. */
+export function actorOf(user: { id: string; email: string }) {
+  return { userId: user.id, label: user.email };
+}
+
 export function writeProject(
   dataRoot: string,
   frontmatter: ProjectFrontmatter,

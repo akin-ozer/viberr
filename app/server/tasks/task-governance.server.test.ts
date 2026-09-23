@@ -7,8 +7,8 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
+  actorOf,
   baseTaskFrontmatter,
-  setupTestStore,
   writeProject,
   writeTask,
   type TestStore,
@@ -27,6 +27,7 @@ import {
 } from "~/server/projections/notifications.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoard, listProjectTasks } from "~/server/projections/board-query.server";
@@ -52,10 +53,6 @@ const notificationReadRowSchema = z.object({
   id: z.string(),
   read_at: z.string().nullable(),
 });
-
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
 
 const PACKET: TaskPacket = {
   type: "input",
@@ -129,12 +126,6 @@ function withTask(
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
-function prepared(): TestStore {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
-  return store;
-}
-
 function seedTasks(store: TestStore, tasks: { key: string; stage: string }[]): void {
   for (const t of tasks) {
     writeTask(store.dataRoot, store.slug, {
@@ -151,7 +142,7 @@ function stageOrder(store: TestStore, stageId: string): string[] {
 
 describe("P3.7 governance & lifecycle fixes", () => {
   it("packet: the task OWNER (a contributor) may resolve a non-completion option (C3/Q2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.selin.id }, // selin = contributor
@@ -162,14 +153,14 @@ describe("P3.7 governance & lifecycle fixes", () => {
     const res = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(res.option.kind).toBe("request_edit");
   });
 
   it("P11-71: a resolution note is recorded on the decision timeline event", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);
     await resolvePacket(
       store.db,
@@ -179,7 +170,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
         optionIndex: 1, // request_edit
         note: "Gate the /health/scripts route for contributor+ only.",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const file = readTaskFile({
@@ -192,20 +183,20 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("packet: a non-owner contributor is still forbidden (C3)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.selin), // contributor, NOT the owner
+        actorOf(store.users.selin), // contributor, NOT the owner
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("packet: the contributor OWNER CAN accept_completion (R6-2 owner exception)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", ownerUserId: store.users.selin.id },
@@ -214,14 +205,14 @@ describe("P3.7 governance & lifecycle fixes", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 }, // accept_completion
-      actor(store.users.selin), // contributor who OWNS this task
+      actorOf(store.users.selin), // contributor who OWNS this task
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("done");
   });
 
   it("packet: a NON-owner contributor still cannot accept_completion (R6-2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", ownerUserId: store.users.arda.id }, // owned by admin, not selin
@@ -231,14 +222,14 @@ describe("P3.7 governance & lifecycle fixes", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.selin), // contributor, NOT the owner
+        actorOf(store.users.selin), // contributor, NOT the owner
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("packet: a viewer OWNER cannot accept_completion (owner exception needs contributor+)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", ownerUserId: store.users.elif.id }, // viewer owner
@@ -248,14 +239,14 @@ describe("P3.7 governance & lifecycle fixes", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.elif), // viewer — read+comment only, can't own or accept
+        actorOf(store.users.elif), // viewer — read+comment only, can't own or accept
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("a bare re-entry into review does NOT launder a standing failing (#9)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // failing, at impl, with NO new revision since the rejection: a live
     // request_changes verdict bound to the current work revision.
     writeTask(store.dataRoot, store.slug, {
@@ -284,7 +275,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // No rework → failing must survive the re-entry (not laundered to changed).
@@ -294,7 +285,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("acceptCompletion (via packet) refuses a failing-validation task (C2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // A required reviewer requested changes on the current revision — acceptance
     // is blocked by acceptanceBlockedReason (F10-15), which the packet honors.
     withTask(
@@ -314,14 +305,14 @@ describe("P3.7 governance & lifecycle fixes", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda), // admin
+        actorOf(store.users.arda), // admin
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
   });
 
   it("forceAcceptCompletion lets an ADMIN override a blocked task, audited (DG-2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -338,7 +329,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
     const res = await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda), // admin
+      actorOf(store.users.arda), // admin
       { dataRoot: store.dataRoot },
     );
     expect(res.task.stage).toBe("done");
@@ -378,7 +369,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("forceAcceptCompletion on a task with NO open decision records no withdrawal (F32-11)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "review",
       ownerUserId: store.users.arda.id,
@@ -391,7 +382,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(listAuditEvents(store.db, { action: "task.packet.withdrawn" })).toHaveLength(0);
@@ -403,12 +394,12 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("forceAcceptCompletion on an already-Done task is a no-op — no misleading audit (DG-2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "done", ownerUserId: store.users.arda.id, validation: "healthy" });
     const res = await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(res.task.stage).toBe("done");
@@ -417,7 +408,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("forceAcceptCompletion denies a NON-admin (maintainer) — admin-only override (DG-2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -435,19 +426,19 @@ describe("P3.7 governance & lifecycle fixes", () => {
       forceAcceptCompletion(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.murat), // maintainer, not admin
+        actorOf(store.users.murat), // maintainer, not admin
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("dragging a card into Done reports acceptance, not a bare move (C4)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", ownerUserId: store.users.arda.id, validation: "healthy" });
     const res = await reorderTask(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", beforeKey: null },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(res.acceptedIntoDone).toBe(true);
@@ -455,12 +446,12 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("updateTaskGoal edits the canonical goal + records a policy event (X11)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id });
     await updateTaskGoal(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", goal: "New acceptance criteria: must contain a test." },
-      actor(store.users.murat), // maintainer
+      actorOf(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
@@ -470,13 +461,13 @@ describe("P3.7 governance & lifecycle fixes", () => {
   });
 
   it("updateTaskGoal is forbidden for a contributor (X11 RBAC)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl" });
     await expect(
       updateTaskGoal(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", goal: "Sneaky rewrite." },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -485,13 +476,13 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
 describe("transitionStage boundary enforcement", () => {
   it("undeclared boundary (triage→impl) → validation error", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -500,13 +491,13 @@ describe("transitionStage boundary enforcement", () => {
   it("approval boundary (impl→review): low-role forbidden, maintainer ok", async () => {
     // impl → review is the `approval` human-gate boundary (triage → ready is now
     // `auto`, tested below).
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl" });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -514,7 +505,7 @@ describe("transitionStage boundary enforcement", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-      actor(store.users.murat), // maintainer
+      actorOf(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("review");
@@ -525,12 +516,12 @@ describe("transitionStage boundary enforcement", () => {
   it("auto boundary (triage→ready): any member incl. viewer; operator attaches", async () => {
     // Post-D2: triage → ready is `auto` — any project member may cross it, and
     // leaving triage attaches an operator (ruling 16 semantics).
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
@@ -546,33 +537,33 @@ describe("transitionStage boundary enforcement", () => {
   });
 
   it("auto boundary (ready→impl): any member incl. viewer; guests rejected", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "ready" });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
-        actor(store.users.deniz), // non-member
+        actorOf(store.users.deniz), // non-member
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
-      actor(store.users.elif), // viewer — auto boundary is any-member
+      actorOf(store.users.elif), // viewer — auto boundary is any-member
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("impl");
   });
 
   it("leaving triage clears the input_required gate (readiness→ready)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Default readiness is input_required (the triage quality gate).
     withTask(store, { stage: "triage", readiness: "input_required" });
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-      actor(store.users.murat), // maintainer clears the approval boundary
+      actorOf(store.users.murat), // maintainer clears the approval boundary
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
@@ -581,12 +572,12 @@ describe("transitionStage boundary enforcement", () => {
   });
 
   it("a blocked task keeps its readiness across a transition (only input_required clears)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "triage", readiness: "blocked" });
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
@@ -594,7 +585,7 @@ describe("transitionStage boundary enforcement", () => {
   });
 
   it("entering the review stage sets validation to 'changed' (FR24 live signal)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Delivered work under review with no verdicts yet → review entry derives
     // the live "changed" signal (a revision is up but unjudged).
     withTask(store, {
@@ -606,7 +597,7 @@ describe("transitionStage boundary enforcement", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-      actor(store.users.murat), // maintainer clears the approval boundary
+      actorOf(store.users.murat), // maintainer clears the approval boundary
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("review");
@@ -614,20 +605,20 @@ describe("transitionStage boundary enforcement", () => {
   });
 
   it("human boundary (review→done locked): reviewer forbidden, admin ok, waiting→none", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("done");
@@ -636,13 +627,13 @@ describe("transitionStage boundary enforcement", () => {
   });
 
   it("is idempotent — transitioning to the current stage writes nothing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "ready" });
     const before = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.length;
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(before);
@@ -656,7 +647,7 @@ describe("transitionStage boundary enforcement", () => {
    * move pays the same gate a real move would, and the refusal is audited.
    */
   it("refuses a same-stage move to a role that could not make the real move, and audits it", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "ready" });
     const denialsBefore = listAuditEvents(store.db, {
       action: "project.authority.denied",
@@ -666,7 +657,7 @@ describe("transitionStage boundary enforcement", () => {
         transitionStage(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
-          actor(who),
+          actorOf(who),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toMatchObject({ status: 403 });
@@ -679,7 +670,7 @@ describe("transitionStage boundary enforcement", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
@@ -687,7 +678,7 @@ describe("transitionStage boundary enforcement", () => {
   });
 
   it("marks the task's approval notifications read on transition", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl" });
     createNotification(store.db, {
       id: "n-test-approval",
@@ -700,7 +691,7 @@ describe("transitionStage boundary enforcement", () => {
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const row = notificationReadRowSchema
@@ -718,14 +709,14 @@ describe("transitionStage boundary enforcement", () => {
 
 describe("transitionStage manual mode (board / task-detail dropdown)", () => {
   it("moves across a NON-boundary edge (triage→impl) for a maintainer, forbidden for a reviewer", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     // triage→impl is not a declared boundary — rejected without `manual`.
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -735,7 +726,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -744,7 +735,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("impl");
@@ -763,7 +754,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
    * the work from an older decision and dispatched the wrong thing.
    */
   it("ruling 381: a BACKWARD manual move is refused without a reason, and carries it when given", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review" });
     // CANARY: drop the `movingBack` guard and this resolves — the move lands
     // with nothing on the record saying why, which is the whole defect.
@@ -771,7 +762,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -780,7 +771,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true, reason: "   " },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -798,7 +789,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
         manual: true,
         reason: "make gate does not run the race test the rulings require.\n\nAdd it.",
       },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
@@ -815,12 +806,12 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
   });
 
   it("ruling 381: a FORWARD manual move needs no reason", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("impl");
@@ -832,13 +823,13 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
   });
 
   it("rejects a manual move to an unknown stage", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "nope", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -847,7 +838,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
 
 describe("reorderTask (drag-to-reorder, persistent board order)", () => {
   it("reorders WITHIN a stage via a midpoint boardRank — persists a rebuild, no comment", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedTasks(store, [
       { key: "VIB-1", stage: "impl" },
       { key: "VIB-2", stage: "impl" },
@@ -859,7 +850,7 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     await reorderTask(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(stageOrder(store, "impl")).toEqual(["VIB-2", "VIB-3", "VIB-1"]);
@@ -880,7 +871,7 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
   });
 
   it("inserts a card immediately before another (beforeKey)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedTasks(store, [
       { key: "VIB-1", stage: "impl" },
       { key: "VIB-2", stage: "impl" },
@@ -890,14 +881,14 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     await reorderTask(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-3", toStageId: "impl", beforeKey: "VIB-2" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(stageOrder(store, "impl")).toEqual(["VIB-1", "VIB-3", "VIB-2"]);
   });
 
   it("a cross-stage drag moves the stage AND writes the transition comment", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedTasks(store, [
       { key: "VIB-1", stage: "triage" },
       { key: "VIB-2", stage: "impl" },
@@ -905,7 +896,7 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     const res = await reorderTask(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(res.movedStage).toBe(true);
@@ -915,7 +906,7 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
   });
 
   it("is admin|maintainer only — a reviewer is rejected", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedTasks(store, [
       { key: "VIB-1", stage: "impl" },
       { key: "VIB-2", stage: "impl" },
@@ -924,7 +915,7 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
       reorderTask(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: "VIB-2" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -933,13 +924,13 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
 
 describe("resolvePacket kind matrix", () => {
   it("accept_completion is human-acceptance-gated (admin|maintainer only)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human", pr: { number: 318, state: "review", title: "PR" } }, PACKET);
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.selin), // reviewer — cannot accept
+        actorOf(store.users.selin), // reviewer — cannot accept
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -947,7 +938,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("done");
@@ -978,7 +969,7 @@ describe("resolvePacket kind matrix", () => {
     // Done door that writes the terminal stage itself rather than going through
     // `applyAcceptanceWrite`. Left alone, the field names the stage two hops
     // back and the next operator turn is told the task arrived from there.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -993,7 +984,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -1007,14 +998,14 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("request_edit: contributor forbidden, maintainer ok — waiting→agent, readiness→ready, packet cleared, ev copy written", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
     // Resolving a decision packet steers agent work — admin|maintainer only.
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.selin), // contributor — cannot resolve
+        actorOf(store.users.selin), // contributor — cannot resolve
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1022,7 +1013,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.murat), // maintainer may send back
+      actorOf(store.users.murat), // maintainer may send back
       { dataRoot: store.dataRoot },
     );
     expect(task.waiting).toBe("agent");
@@ -1044,7 +1035,7 @@ describe("resolvePacket kind matrix", () => {
     // passes — so the option resolved, the dispatch was held again and the
     // stated remedy was overridden by the record it contradicts. Canary: drop
     // the `clearBackendQuotaExhaustion` call from `resolvePacket`.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const quotaPacket: TaskPacket = {
       ...PACKET,
       options: [
@@ -1078,7 +1069,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(backendDispatchHold(store.db, "codex", hold)).toBeNull();
@@ -1086,7 +1077,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("an option that asserts nothing about quota names no backend and leaves the record standing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
     const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
       "~/server/runtimes/backend-quota.server"
@@ -1105,7 +1096,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(
@@ -1114,12 +1105,12 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("R20-1 block_on_policy: UNBLOCKS (readiness→ready, waiting→agent), resolves, refuses a second confirm", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     // R20-1 (F20-5): the label promises an UNBLOCK, so this records one and the
@@ -1146,7 +1137,7 @@ describe("resolvePacket kind matrix", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -1156,7 +1147,7 @@ describe("resolvePacket kind matrix", () => {
     // Before R20-1 the hold options kept their packet open and the notification
     // stayed unread; now every recovery option RESOLVES the packet, so the
     // decision is made and the inbox item is consumed.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" }, PACKET);
     createNotification(store.db, {
       userId: store.users.murat.id,
@@ -1175,19 +1166,19 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(unreadFor()).toHaveLength(0); // …and the settled decision clears it
   });
 
   it("R20-1 hold_runtime_debug: resolves + stays blocked/waiting-human, NO run, refuses a second confirm", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", waiting: "human" }, PACKET);
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 3 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.readiness).toBe("blocked");
@@ -1203,19 +1194,19 @@ describe("resolvePacket kind matrix", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 3 },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
   });
 
   it("redirect without ev → fallback decision copy", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", waiting: "human" }, PACKET);
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 4 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
@@ -1230,7 +1221,7 @@ describe("resolvePacket kind matrix", () => {
     // Canary: reinstate the unconditional `assertStageEligible` in
     // dispatchAgentRun (the resolution's retry is refused).
     installFakeRuntime();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
@@ -1269,7 +1260,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.packet).toBeNull();
@@ -1283,7 +1274,7 @@ describe("resolvePacket kind matrix", () => {
       "~/server/runtimes/run-service.server"
     );
     installFakeRuntime();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const RETRY_PACKET: TaskPacket = {
       type: "blocked",
       kind: "Blocked decision",
@@ -1319,7 +1310,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.waiting).toBe("agent");
@@ -1337,7 +1328,7 @@ describe("resolvePacket kind matrix", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: runs[0]!.id, dataRoot: store.dataRoot },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
     );
 
     // The switch persisted to the assignment snapshot (D4 stickiness).
@@ -1377,7 +1368,7 @@ describe("resolvePacket kind matrix", () => {
       const { startAgentRun } = await import("./specialist-run.server");
       const { readProjectFile } = await import("~/server/files/project-writer.server");
       installFakeRuntime();
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       // The Developer profile is DEPLOYED ON CODEX — the backend the retry
       // exists to escape. Without a pin, every later run reverts to it.
       const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -1429,7 +1420,7 @@ describe("resolvePacket kind matrix", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       );
 
@@ -1443,7 +1434,7 @@ describe("resolvePacket kind matrix", () => {
       await interruptRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: first[0]!.id, dataRoot: store.dataRoot },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
       );
 
       // The packet's choice was recorded as a PIN, not just a snapshot refresh.
@@ -1454,13 +1445,13 @@ describe("resolvePacket kind matrix", () => {
       const later = await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       );
       await interruptRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: later.runId, dataRoot: store.dataRoot },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
       );
       expect(later.backend).toBe("claude");
     },
@@ -1489,7 +1480,7 @@ describe("resolvePacket kind matrix", () => {
   };
 
   it("archive_task: runs the real R14-3 archive (schedules cancelled, packet cleared, audited); a contributor-OWNER is refused", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -1524,7 +1515,7 @@ describe("resolvePacket kind matrix", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1532,7 +1523,7 @@ describe("resolvePacket kind matrix", () => {
     const { task, option } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.murat), // maintainer
+      actorOf(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
     expect(option.kind).toBe("archive_task");
@@ -1562,7 +1553,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("archive_task + deleteBranch: the archive stands even when GitHub is unconfigured, with an honest failure note", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -1578,7 +1569,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.packet).toBeNull();
@@ -1616,7 +1607,7 @@ describe("resolvePacket kind matrix", () => {
   };
 
   it("resolve_remote_collision: contributor-owner refused (approve-transition tier); unconfigured GitHub degrades honestly", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -1644,7 +1635,7 @@ describe("resolvePacket kind matrix", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1652,7 +1643,7 @@ describe("resolvePacket kind matrix", () => {
     const { task, option } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(option.kind).toBe("resolve_remote_collision");
@@ -1676,7 +1667,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("resolve_remote_collision: closes the unowned PR, deletes the stale remote branch, clears the R15-15 record, and reports the redelivery outcome", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     const { createPat, setProjectCredential } = await import(
       "~/server/secrets/pat-store.server"
@@ -1716,7 +1707,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
 
@@ -1822,7 +1813,7 @@ describe("resolvePacket kind matrix", () => {
   };
 
   it("resolve_remote_collision: the task's OWN open PR on the ref is no collision — nothing is closed or deleted, and the ceremony does what was asked (C05-B, ruling 136(b))", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     // GitHub confirms PR #5 open on the branch (ruling 136(c)); the DELETE
@@ -1849,7 +1840,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
     expect(task.packet).toBeNull();
@@ -1890,7 +1881,7 @@ describe("resolvePacket kind matrix", () => {
 
   it("ruling 136(b): own PR open and origin merely BEHIND: the block lifts and the delivery actually runs", async () => {
     // Canary: keep `readiness: blocked` on every refusal.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const pushed = "1".repeat(40);
@@ -1924,7 +1915,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       {
         dataRoot: store.dataRoot,
         fetchImpl: github.fetchImpl,
@@ -1954,7 +1945,7 @@ describe("resolvePacket kind matrix", () => {
 
   it("ruling 136(b): own PR open and origin DIVERGED: the block stays and the note names the history", async () => {
     // Canary: lift on every `own_pr_open`.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch({
@@ -1985,7 +1976,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       {
         dataRoot: store.dataRoot,
         fetchImpl: github.fetchImpl,
@@ -2008,7 +1999,7 @@ describe("resolvePacket kind matrix", () => {
 
   it("ruling 136: GitHub refused the delete: the block stays and the operator is handed the typed reason", async () => {
     // Canary: lift on every refusal.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch({
@@ -2029,7 +2020,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -2047,7 +2038,7 @@ describe("resolvePacket kind matrix", () => {
 
   it("ruling 136(c), the JC-3 shape: a cached open PR that GitHub reports CLOSED is re-confirmed, the ref deleted, the unowned PR closed", async () => {
     // Canary: decide from the cache and the DELETE never goes out.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch({
@@ -2071,7 +2062,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
     expect(github.callsTo("DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work")).toHaveLength(1);
@@ -2091,7 +2082,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("resolve_remote_collision: a 403 on the PR close opens the pull_request:write scope violation instead of vanishing (C05-D)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch({
@@ -2117,7 +2108,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
 
@@ -2150,7 +2141,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("resolveRemoteBranchCollision: a system actor is refused before any GitHub write (C05-C)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch({
@@ -2198,7 +2189,7 @@ describe("resolvePacket kind matrix", () => {
    * asserting the branch had been removed and the work re-delivered.
    */
   it("F33-2: the collision decision event claims no outcome — the refusal note is the only writer of one", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch(ownPrRoutes(270, "open"));
@@ -2221,7 +2212,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
 
@@ -2245,7 +2236,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("F33-2: the discard decision event claims no outcome either, and `ev` still overrides", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const packet: TaskPacket = {
       type: "input",
       kind: "Completion report",
@@ -2263,7 +2254,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
 
@@ -2281,7 +2272,7 @@ describe("resolvePacket kind matrix", () => {
     ).toBe(true);
 
     // The operator's own `ev` override is untouched by the trim.
-    const store2 = prepared();
+    const store2 = setupProjectedStore(ctx);
     const evPacket: TaskPacket = {
       ...packet,
       options: [
@@ -2298,7 +2289,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store2.db,
       { projectSlug: store2.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store2.users.murat),
+      actorOf(store2.users.murat),
       { dataRoot: store2.dataRoot },
     );
     expect(
@@ -2318,7 +2309,7 @@ describe("resolvePacket kind matrix", () => {
    * the safe path the delete-first ordering exists to produce.
    */
   it("F33-4: a refused collision remedy still leaves the task actionable — the Move-to-review card over the PR it already carries", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch(ownPrRoutes(270, "open"));
@@ -2340,7 +2331,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
 
@@ -2369,7 +2360,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("F33-4: no card is invented when the refusal leaves no open PR to move to review over", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     // No credential-free refusal here: the fake answers nothing, so the ref
@@ -2390,7 +2381,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
 
@@ -2460,7 +2451,7 @@ describe("resolvePacket kind matrix", () => {
   }
 
   it("discard_branch: a contributor-OWNER is refused (it destroys commits → approve-transition tier)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -2477,7 +2468,7 @@ describe("resolvePacket kind matrix", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -2491,7 +2482,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("discard_branch: deletes the local branch, clears fm.branch, writes the note + task.branch.discarded", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", waiting: "human", branch: "vib-1-work" },
@@ -2501,7 +2492,7 @@ describe("resolvePacket kind matrix", () => {
     const { task, option } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat), // maintainer
+      actorOf(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
     expect(option.kind).toBe("discard_branch");
@@ -2524,7 +2515,7 @@ describe("resolvePacket kind matrix", () => {
   it("ruling 161 (G35-6): the discard retires the reported revision: kind discarded, validation none, note and audit name it", async () => {
     // Canary: drop the `retires` block from the discard_branch resolution and
     // the revision stays `delivered` with its approve keeping the task healthy.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const revisionId = "rev_MBEIgNbXXyFX";
     withTask(
       store,
@@ -2569,7 +2560,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const fm = readTaskFile({
@@ -2601,7 +2592,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("discard_branch / ruling 17: refuses an on-remote branch, keeps fm.branch, still resolves the packet", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", waiting: "human", branch: "vib-1-work" },
@@ -2611,7 +2602,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     // The packet resolves in every case (the discard is best-effort after it).
@@ -2631,7 +2622,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("F20-24: archive_task + deleteBranch discards the LOCAL branch too so 'discard work' leaves nothing to re-deliver", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -2654,7 +2645,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 }, // archive + delete branch
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.packet).toBeNull();
@@ -2682,7 +2673,7 @@ describe("resolvePacket kind matrix", () => {
     // remote `knc-21` held the foreign fixture commit d5f23aa. Canary: drop
     // the pre-delete ref read in `deleteTaskRemoteBranch` (remoteSha null) or
     // write `sha` instead of `localSha`/`remoteSha` on the archive row.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     const { createPat, setProjectCredential } = await import(
       "~/server/secrets/pat-store.server"
@@ -2724,7 +2715,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
     );
     expect(
@@ -2749,12 +2740,12 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("F20-25: restore names the next step, and archive drops the false 'reopen the question' promise", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" }, RECOVERY_PACKET);
     await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const archivedNote = readTaskFile({
@@ -2770,7 +2761,7 @@ describe("resolvePacket kind matrix", () => {
     const { archived } = await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", archived: false },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(archived).toBe(false);
@@ -2802,7 +2793,7 @@ describe("resolvePacket kind matrix", () => {
   };
 
   it("F20-18: a contributor-owner routes a stranded packet to the maintainers (notify + note + audit)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", waiting: "human", ownerUserId: store.users.selin.id },
@@ -2812,7 +2803,7 @@ describe("resolvePacket kind matrix", () => {
     const res = await requestPacketMaintainerDecision(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", note: "please archive this" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     // arda (admin) + murat (maintainer) are notified; selin (the owner) is not.
@@ -2835,7 +2826,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("F20-18: a maintainer is told to resolve it themselves, not route it", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "review", waiting: "human", ownerUserId: store.users.murat.id },
@@ -2846,14 +2837,14 @@ describe("resolvePacket kind matrix", () => {
       requestPacketMaintainerDecision(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
   });
 
   it("edit_goal: packet stays (stamped awaiting goal_edit) until the edited goal lands, then clears instantly", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const SCOPE_PACKET: TaskPacket = {
       type: "blocked",
       kind: "Blocked decision",
@@ -2875,7 +2866,7 @@ describe("resolvePacket kind matrix", () => {
     const { task } = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     // The decision is recorded but the packet's ask isn't fulfilled yet.
@@ -2902,7 +2893,7 @@ describe("resolvePacket kind matrix", () => {
         taskKey: "VIB-1",
         goal: "List all files under the repo root, output as a markdown table.",
       },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const after = readTaskFile({
@@ -2919,7 +2910,7 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("R20-1: an edit_goal-stamped packet refuses a SECOND confirm (waiting for the edited goal)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const SCOPE_PACKET: TaskPacket = {
       type: "blocked",
       kind: "Blocked decision",
@@ -2940,7 +2931,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     // The packet is stamped awaiting the goal, so a second confirm — of ANY
@@ -2949,7 +2940,7 @@ describe("resolvePacket kind matrix", () => {
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -2959,26 +2950,26 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("resolving an already-resolved packet → 409 conflict, no crash", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review" }, PACKET);
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
   });
 
   it("every resolve marks the task's packet + approval notifications read", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review" }, PACKET);
     createNotification(store.db, {
       id: "n-test-packet", userId: store.users.arda.id, kind: "packet",
@@ -2991,7 +2982,7 @@ describe("resolvePacket kind matrix", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const rows = store.db
@@ -3004,12 +2995,12 @@ describe("resolvePacket kind matrix", () => {
   });
 
   it("the decision survives in the file — canonical truth check", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review" }, PACKET);
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const file = readTaskFile({
@@ -3120,7 +3111,7 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
   }
 
   it("clears accept_completion recommendations when the reviewer requests changes", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Review stage, previously clean (validation healthy) with a pending
     // accept-completion recommendation from that earlier pass.
     withTask(store, {
@@ -3148,7 +3139,7 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
   });
 
   it("keeps accept_completion when the reviewer approves (validation stays healthy)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "review",
       validation: "healthy",
@@ -3169,20 +3160,20 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
 
 describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
   it("rejects a task with no PR", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "done" });
     await expect(
       completeTaskMerge(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
   });
 
   it("rejects a PR that is not accepted/merge-pending", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "review",
       pr: { number: 7, state: "review", title: "PR" },
@@ -3191,7 +3182,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       completeTaskMerge(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -3200,7 +3191,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
   it("still refuses a CLOSED PR — the arm below relaxes only the merged one", async () => {
     // R16-3: a PR closed without merging can never be merged. The already-merged
     // no-op must not become a blanket "any settled PR is fine".
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "done",
       pr: { number: 7, state: "closed", title: "PR" },
@@ -3209,7 +3200,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       completeTaskMerge(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -3223,7 +3214,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
     // The dialog promised what the server refused.
     //
     // CANARY: restore the `pr.state === "merged"` arm of the old conflict throw.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "done",
       pr: { number: 7, state: "merged", title: "PR" },
@@ -3244,7 +3235,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
     const result = await completeTaskMerge(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: merge } },
     );
 
@@ -3268,7 +3259,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
   it("keeps the merge authority on the no-op arm (contributor still forbidden)", async () => {
     // The early return must sit BEHIND `requireAcceptCompletion`, or an
     // already-merged PR becomes a free read of the task summary for anyone.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "done",
       pr: { number: 7, state: "merged", title: "PR" },
@@ -3277,14 +3268,14 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       completeTaskMerge(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.selin), // contributor
+        actorOf(store.users.selin), // contributor
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("is admin|maintainer only (contributor forbidden)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "done",
       pr: { number: 7, state: "accepted", title: "PR" },
@@ -3293,14 +3284,14 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       completeTaskMerge(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.selin), // contributor
+        actorOf(store.users.selin), // contributor
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("reports an honest failure (not a fake merge) when no credential is configured", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, {
       stage: "done",
       pr: { number: 7, state: "accepted", title: "PR" },
@@ -3308,7 +3299,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
     const result = await completeTaskMerge(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.merged).toBe(false);
@@ -3387,13 +3378,13 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   }
 
   it("force_accept: an admin's confirm closes the task through the force path, audited", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     wedged(store, forcePacket);
 
     const res = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda), // admin: the Force accept button's own tier
+      actorOf(store.users.arda), // admin: the Force accept button's own tier
       { dataRoot: store.dataRoot },
     );
     expect(res.option.kind).toBe("force_accept");
@@ -3422,14 +3413,14 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   it("force_accept: a maintainer is refused in the Force accept button's own words, and the packet stands", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     wedged(store, forcePacket);
 
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.murat), // maintainer: may resolve packets, may not force
+        actorOf(store.users.murat), // maintainer: may resolve packets, may not force
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/force-accept past the review gate/i);
@@ -3446,7 +3437,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   it("move_stage: the confirm moves the task on the stage picker's path, with its transition record", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -3460,7 +3451,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     const res = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat), // maintainer: the stage picker's own tier
+      actorOf(store.users.murat), // maintainer: the stage picker's own tier
       { dataRoot: store.dataRoot },
     );
     expect(res.task.stage).toBe("review");
@@ -3496,7 +3487,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
    * timeline and the task stayed where it was.
    */
   it("move_stage: a BACKWARD option moves the task, with the option as the reason", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -3521,7 +3512,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     const res = await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     // CANARY: drop the move's `reason` and the task stays at review, under a
@@ -3536,7 +3527,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   it("move_stage: a person's own note is the reason when they gave one", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -3555,7 +3546,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
         optionIndex: 0,
         note: "Add the retry path first.",
       },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
@@ -3570,7 +3561,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
    * that also closed the decision.
    */
   it("wait_for_window: the confirm closes the decision and schedules the resume (ruling 224)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     withTask(
       store,
@@ -3603,7 +3594,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
 
@@ -3638,7 +3629,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   it("wait_for_window: a schedule that cannot be written says so and leaves the decision resolved (ruling 224)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     withTask(
       store,
@@ -3671,7 +3662,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
 
@@ -3702,7 +3693,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     // it and nothing a person can do — the shape this kind was created for
     // (KNC-16: the reviewer cannot run where the task stands, which arrives as
     // a `blocked` packet).
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const blockedMove: TaskPacket = { ...movePacket("review"), type: "blocked" };
     withTask(
       store,
@@ -3719,7 +3710,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
 
@@ -3735,14 +3726,14 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   it("move_stage: a stage this project does not have is refused before the packet clears", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, movePacket("nowhere"));
 
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/not a stage of this project/i);
@@ -3757,7 +3748,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   it("move_stage: a contributor owner hears the stage picker's tier, not a silent widening", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.selin.id }, // selin = contributor
@@ -3768,7 +3759,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/change the task stage/i);
@@ -3831,7 +3822,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * is conversation and does not.
    */
   it("ruling 284: a typed CUSTOM directive answers the packet and does NOT touch the goal", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     await resolvePacket(
       store.db,
@@ -3841,7 +3832,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         optionIndex: 0,
         custom: "Mock-only, behind a PaymentProvider port. No provider SDK.",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const goal = goalOf(store);
@@ -3860,12 +3851,12 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("ruling 189 still stands for a CHOSEN option: it amends the contract", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const goal = goalOf(store);
@@ -3881,7 +3872,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * copies in the goal every fresh run re-anchors on.
    */
   it("O39-b: the same decision again is written into the contract once", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     const answer = async (optionIndex: number) => {
       await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
@@ -3890,7 +3881,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
     };
@@ -3914,7 +3905,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * answer-only match dropped from the contract.
    */
   it("O39-b: the same answer to a DIFFERENT question is still written", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const ask = (title: string): TaskPacket => ({
       ...QUESTION,
       title,
@@ -3928,7 +3919,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
     };
@@ -3944,12 +3935,12 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("writes a CHOSEN option into the goal too, title and description", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const goal = goalOf(store);
@@ -3958,20 +3949,20 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("keeps the original goal above it — the amendment adds, never replaces", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     const before = goalOf(store);
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(goalOf(store).startsWith(before.trimEnd())).toBe(true);
   });
 
   it("does NOT amend for a RECOVERY choice — that decides what happens next, not what the work is", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Live on SHOP-7 the goal collected "Work stalled: pick a recovery path →
     // Redirect with sharper guidance" beside the real provider decision. A
     // recovery choice is process, and process accumulating in the text every
@@ -3992,7 +3983,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(goalOf(store)).toBe(before);
@@ -4007,7 +3998,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * will never have.
    */
   it("does NOT amend when the resolution FORCE-ACCEPTS the task closed", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       {
@@ -4040,7 +4031,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // CANARY: test only `acceptsInto !== null` again and a closed task's goal
@@ -4049,7 +4040,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("does NOT amend on block_on_policy — an unblock is what happens next, not what the work is", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },
@@ -4064,7 +4055,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // CANARY: drop `block_on_policy` from PROCESS_ONLY_OPTION_KINDS and "I
@@ -4096,7 +4087,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         blockedBy: ["VIB-2"],
       },
     ]) {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       withTask(
         store,
         { stage: "impl", ownerUserId: store.users.arda.id },
@@ -4106,7 +4097,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(goalOf(store)).toBe(before);
@@ -4132,7 +4123,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * authored is still on the board an hour after being disproved."
    */
   it("ruling 295: a rename writes the title and records BOTH, so old references still join", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
     const { updateTaskTitle } = await import("./task-actions.server");
     // CANARY: drop the writer and the board keeps a title its own goal disproved.
@@ -4144,7 +4135,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         // Whitespace is collapsed: a title is one line by construction.
         title: "  Cart   integration suite: establish whether it times out  ",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(changed).toBe(true);
@@ -4168,7 +4159,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
     const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-actions.server");
     const current = readTaskFile({
@@ -4181,7 +4172,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     const same = await updateTaskTitle(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", title: current },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(same.changed).toBe(false);
@@ -4200,7 +4191,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
           taskKey: "VIB-1",
           title: "x".repeat(TASK_TITLE_MAX_CHARS + 1),
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/Nothing was written/);
@@ -4223,7 +4214,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * nothing on SHOP-41 saying an edit was owed.
    */
   it("ruling 287: create_task makes the EXISTING task wait on the new one, and says so on both", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // The task that must not start until the new one lands.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", { stage: "triage" }),
@@ -4254,7 +4245,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
@@ -4311,7 +4302,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
      *
      * CANARY: make either sentence unconditional again.
      */
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },
@@ -4336,7 +4327,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const made = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
@@ -4367,7 +4358,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     // The counterweight — ruling 269's sentence was right for its own case and
     // stays. A fix that hedged every create_task would lose the one fact the
     // option exists to convey: the work went somewhere else.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },
@@ -4387,7 +4378,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const here = readTaskFile({
@@ -4400,7 +4391,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("ruling 287: a reverse wait that CANNOT be written says so, and never undoes the task", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },
@@ -4427,7 +4418,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // The task the person confirmed still exists: one unwritable edge must not
@@ -4449,7 +4440,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("ruling 269: a create_task resolution makes the task, joins the record, and leaves this one alone", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },
@@ -4475,7 +4466,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // CANARY: drop the post-write `createTask` hook and the decision resolves
@@ -4518,7 +4509,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("ruling 284: a directive typed on a RECOVERY packet stays out of the goal too", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Ruling 189 amended here because "a typed directive is content a person
     // wrote". Ruling 284 keeps free text out of the contract whatever packet it
     // was typed on — the channel decides, not the packet.
@@ -4539,7 +4530,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         optionIndex: 0,
         custom: "Drop the Redis dependency entirely; use Postgres advisory locks.",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(goalOf(store)).not.toContain("Postgres advisory locks");
@@ -4557,7 +4548,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("does NOT amend when the packet stays open for a human to edit the goal", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // `edit_goal` is the one kind that KEEPS its packet open: the person is
     // about to rewrite the goal themselves, so appending a line saying they
     // chose to rewrite it would be noise in the text they are editing.
@@ -4573,7 +4564,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(goalOf(store)).toBe(before);
@@ -4602,7 +4593,7 @@ describe("ruling 354: a hold refuses a retry or a collision ceremony before the 
 
   it("refuses the retry with the hold sentence and leaves the packet open", async () => {
     installFakeRuntime();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedTasks(store, [{ key: "VIB-9", stage: "impl" }]);
     withTask(
       store,
@@ -4616,7 +4607,7 @@ describe("ruling 354: a hold refuses a retry or a collision ceremony before the 
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -4627,7 +4618,7 @@ describe("ruling 354: a hold refuses a retry or a collision ceremony before the 
   });
 
   it("refuses the collision ceremony before it closes anything", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedTasks(store, [{ key: "VIB-9", stage: "impl" }]);
     withTask(
       store,
@@ -4642,7 +4633,7 @@ describe("ruling 354: a hold refuses a retry or a collision ceremony before the 
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });

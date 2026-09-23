@@ -8,8 +8,8 @@ import { describeRevisionDrift } from "~/shared/revision-drift";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
-  setupTestStore,
   writeProject,
   writeTask,
   type TestStore,
@@ -30,6 +30,7 @@ import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server"
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import {
   attachmentProducers,
@@ -116,10 +117,6 @@ function deliveryCtx(store: TestStore): TaskActionContext {
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
-
 /**
  * sqlite hands its rows back as untyped cells, so every read below names the
  * columns it expects: a drifted SELECT fails on the decode instead of reading
@@ -174,12 +171,6 @@ describe("packetIdentity (F10-09 — replacement detection)", () => {
     expect(packetIdentity(base)).not.toBe(packetIdentity({ ...base, id: "pkt_9" }));
   });
 });
-
-function prepared(): TestStore {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
-  return store;
-}
 
 /** The reviewer agent's own ref (generic-agents D8): the quality event is now
  *  attributed to the agent that judged, not the operator. */
@@ -294,14 +285,14 @@ describe("createTask", () => {
   it("ruling 131: createTask with blockedBy is born held; a bad reference refuses before a key is allocated", async () => {
     // Canary: move the `validateDependencyRefs` call below `allocateTaskKey`
     // and the refused create burns VIB-100 (the good one lands on VIB-101).
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await expect(
       createTask(
         store.db,
         { projectSlug: store.slug, title: "Waits on nothing real", blockedBy: ["VIB-999"] },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-999 is not a task in this project") });
@@ -311,7 +302,7 @@ describe("createTask", () => {
     const held = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Waits on VIB-1", blockedBy: ["VIB-1"], now: CREATED_AT },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(held.key).toBe("VIB-100");
@@ -336,7 +327,7 @@ describe("createTask", () => {
     await createTask(
       store.db,
       { projectSlug: store.slug, title: "Waits on one done and one open", blockedBy: ["VIB-1", "VIB-2"] },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const mixed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-101", dataRoot: store.dataRoot })!.parsed;
@@ -347,7 +338,7 @@ describe("createTask", () => {
     await createTask(
       store.db,
       { projectSlug: store.slug, title: "Waits on done work only", blockedBy: ["VIB-2"] },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const allDone = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-102", dataRoot: store.dataRoot })!.parsed;
@@ -378,11 +369,11 @@ describe("createTask", () => {
   });
 
   it("writes task.md with the mock create defaults and projects it", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const result = await createTask(
       store.db,
       { projectSlug: store.slug, title: "A brand new task" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -423,11 +414,11 @@ describe("createTask", () => {
    * reads the same however the seat was filled.
    */
   it("seats the CREATOR as owner, with setOwner's assign event and the audit detail", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     await createTask(
       store.db,
       { projectSlug: store.slug, title: "Mine from birth" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
 
@@ -460,14 +451,14 @@ describe("createTask", () => {
     // creates is born owned — a human takes that seat. Canary: seat
     // `actor.userId` unconditionally and the in-process operator's own actor
     // lands in `ownerUserId`, where every later run would try to bill it.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     await createTask(
       store.db,
       { projectSlug: store.slug, title: "Operator spawned" },
       // The RBAC gate still runs on the member the operator acts inside; the
       // SEAT is decided by `operatorAuthorized`, which says the mutation is the
       // operator's, not that member's.
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, operatorAuthorized: true },
     );
 
@@ -486,12 +477,12 @@ describe("createTask", () => {
   // entry stage ONLY. The pre-ruling behavior (create mid-stage, operator
   // assigned at birth) is exactly what the ruling forbids.
   it("refuses a non-entry stage and names the entry stage (R19-14)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     await expect(
       createTask(
         store.db,
         { projectSlug: store.slug, title: "Straight to ready", stageId: "ready" },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -503,11 +494,11 @@ describe("createTask", () => {
   });
 
   it("accepts an explicit entry stageId, with no operator at birth (R19-14)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const result = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Explicit triage", stageId: "triage" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(result.task.stage).toBe("triage");
@@ -515,13 +506,13 @@ describe("createTask", () => {
   });
 
   it("allocates unique keys under concurrency and persists the counter", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const results = await Promise.all(
       Array.from({ length: 8 }, (_, i) =>
         createTask(
           store.db,
           { projectSlug: store.slug, title: `Concurrent task ${i}` },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         ),
       ),
@@ -539,7 +530,7 @@ describe("createTask", () => {
   });
 
   it("falls back to a directory max-scan when the counter is stale", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // A task numbered ABOVE the stored counter (external tool created it).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-250"),
@@ -547,19 +538,19 @@ describe("createTask", () => {
     const result = await createTask(
       store.db,
       { projectSlug: store.slug, title: "After external task" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.key).toBe("VIB-251");
   });
 
   it("rejects viewers, non-members, bad stages and short titles", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     await expect(
       createTask(
         store.db,
         { projectSlug: store.slug, title: "Viewer attempt" },
-        actor(store.users.elif), // project viewer
+        actorOf(store.users.elif), // project viewer
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -567,7 +558,7 @@ describe("createTask", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "Guest attempt" },
-        actor(store.users.deniz), // not a member
+        actorOf(store.users.deniz), // not a member
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -577,7 +568,7 @@ describe("createTask", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "Done create", stageId: "done" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -588,7 +579,7 @@ describe("createTask", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "Ghost stage", stageId: "nope" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -599,7 +590,7 @@ describe("createTask", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "ab" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -615,12 +606,12 @@ describe("appendComment", () => {
   }
 
   it("appends a comment event (newest first) and reprojects", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     const result = await appendComment(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "First comment" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(result.toAgent).toBe(false);
@@ -634,12 +625,12 @@ describe("appendComment", () => {
   });
 
   it("routes @operator mentions to the agent side (toagent tint)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     const result = await appendComment(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator widen the PAT scope please" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.toAgent).toBe(true);
@@ -648,12 +639,12 @@ describe("appendComment", () => {
   });
 
   it("guests (registered non-members) may comment — app-wide commenting", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     await appendComment(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "Following from the platform team." },
-      actor(store.users.deniz),
+      actorOf(store.users.deniz),
       { dataRoot: store.dataRoot },
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
@@ -661,13 +652,13 @@ describe("appendComment", () => {
   });
 
   it("fans out mention notifications by email local-part / first name — never to self", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     const handle = store.users.selin.email.split("@")[0];
     const result = await appendComment(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: `@${handle} can you take the acceptance gate? @operator fyi` },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.mentionedUserIds).toEqual([store.users.selin.id]);
@@ -697,7 +688,7 @@ describe("appendComment", () => {
    * of being visible only in the fan-out's return value.
    */
   it("a HUMAN comment whose @handle matches two people carries the non-delivery note", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     insertUser(store.db, {
       id: "u_arda_second",
@@ -713,7 +704,7 @@ describe("appendComment", () => {
         taskKey: "VIB-1",
         text: `@${firstName} can you take the acceptance gate?`,
       },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(result.mentionedUserIds).toEqual([]);
@@ -740,7 +731,7 @@ describe("appendComment", () => {
   // notification a human comment would — otherwise the tag the agents are now
   // instructed to write pings no one. The `from` chip is the agent, not a human.
   it("an agent reply that @tags a human notifies them, attributed to the agent", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
       projectSlug: store.slug,
@@ -770,7 +761,7 @@ describe("appendComment", () => {
   // agent-reply flood — the case it exists for. It ran only on operator/human
   // comment writes, so a run of agent replies accreted with no compaction.
   it("an agent-reply flood triggers compaction when compression-threshold is on", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Turn the guardrail ON at a low threshold.
     const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
@@ -854,7 +845,7 @@ describe("appendComment", () => {
   }
 
   it("a HUMAN comment runs the same compaction pass at the configured threshold, and its own prose survives", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withCompactionGuardrail(store, 10);
     const flood = operatorFlood();
     writeTask(store.dataRoot, store.slug, {
@@ -870,7 +861,7 @@ describe("appendComment", () => {
         taskKey: "VIB-1",
         text: "Checked the staging deploy myself — the migration ran clean.",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -891,7 +882,7 @@ describe("appendComment", () => {
   });
 
   it("with the compression-threshold guardrail OFF, a human comment compacts nothing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Long enough that the built-in DEFAULT_COMPACTION (40) would fold it —
     // so "nothing happened" means the guardrail gate held, not that the
     // timeline was too short to notice.
@@ -905,7 +896,7 @@ describe("appendComment", () => {
     await appendComment(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "Still watching this one." },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -922,7 +913,7 @@ describe("appendComment", () => {
   // it answers; when that tag routes to nobody the reply itself has to say so,
   // because the agent cannot retag and nothing else reports it.
   it("an agent reply whose @tag is ambiguous discloses the non-delivery in the reply", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     insertUser(store.db, {
       id: "u_arda_second",
@@ -959,7 +950,7 @@ describe("appendComment", () => {
    * on every restart, forever).
    */
   it("an agent reply dropped by the meaningful-comment guardrail records WHY, and posts nothing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
@@ -1032,19 +1023,19 @@ describe("appendComment", () => {
     );
 
   it("dedupes a final report that duplicates this run's own mid-run comment (interrupted path)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     const finding = "Found it: the loader reads the stale engage-time snapshot.";
     seedRun(store, "run_dup", "2000-01-01T00:00:00.000Z");
 
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text: finding,
     });
-    await postAgentReplyComment(store.db, ctx, {
+    await postAgentReplyComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_dup",
@@ -1064,19 +1055,19 @@ describe("appendComment", () => {
   });
 
   it("dedupes on the FINISHED-run path too (recordAgentCompletion, the production case)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     const finding = "Root cause: the projection overlay never runs for this row.";
     seedRun(store, "run_fin", "2000-01-01T00:00:00.000Z");
 
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text: finding,
     });
-    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+    await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_fin",
       replyText: finding,
@@ -1101,19 +1092,19 @@ describe("appendComment", () => {
     // Ruling 98(c)'s cc line is appended by the PIPELINE, after the agent has
     // written its report, and its content depends on who dispatched the run.
     // Comparing agent prose against agent prose has to ignore it.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     const finding = "Root cause: the projection overlay never runs for this row.";
     seedRun(store, "run_cc", "2000-01-01T00:00:00.000Z");
 
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text: finding,
     });
-    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+    await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_cc",
       // Exactly what the dispatch-completion contract hands this function.
@@ -1132,20 +1123,20 @@ describe("appendComment", () => {
   });
 
   it("does NOT dedup a byte-identical reply from a PRIOR run (run-start scoped)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     const text = "Handing back — the API contract question is unresolved.";
     // The agent's earlier comment exists on the timeline; THIS run started AFTER
     // it, so it is not this run's mid-run copy and the reply must still post.
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text,
     });
     seedRun(store, "run_b", "2999-01-01T00:00:00.000Z");
-    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+    await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_b",
       replyText: text,
@@ -1157,19 +1148,19 @@ describe("appendComment", () => {
   });
 
   it("a deduped completion still records the run's EVIDENCE on a producing note", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     const finding = "The regression is in the compare, not the loader.";
     seedRun(store, "run_ev", "2000-01-01T00:00:00.000Z");
 
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text: finding,
     });
-    await recordAgentCompletion(store.db, ctx, store.slug, "VIB-1", {
+    await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_ev",
       replyText: finding,
@@ -1194,19 +1185,19 @@ describe("appendComment", () => {
   });
 
   it("a duplicate reply WITH attachments posts a files note (not the duplicate text)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     const finding = "Captured the failing screen.";
     seedRun(store, "run_att", "2000-01-01T00:00:00.000Z");
 
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text: finding,
     });
-    await postAgentReplyComment(store.db, ctx, {
+    await postAgentReplyComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_att",
@@ -1229,17 +1220,17 @@ describe("appendComment", () => {
   });
 
   it("a final report that ADDS to the mid-run comment still posts (exact-match only)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
-    const ctx = { dataRoot: store.dataRoot };
+    const opts = { dataRoot: store.dataRoot };
     seedRun(store, "run_more", "2000-01-01T00:00:00.000Z");
-    await postAgentComment(store.db, ctx, {
+    await postAgentComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       actorRef: REVIEWER_REF,
       text: "Investigating the flaky test.",
     });
-    await postAgentReplyComment(store.db, ctx, {
+    await postAgentReplyComment(store.db, opts, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_more",
@@ -1265,7 +1256,7 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () 
    * rule.
    */
   it("does not notify a human @tagged inside the operator's directive (ruling 232)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
     });
@@ -1327,7 +1318,7 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () 
    * hears about the hand-off, not what the operator wrote.
    */
   it("posts an ambiguous @tag with NO disclosure, because a directive notifies nobody (ruling 232)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
     });
@@ -1419,7 +1410,7 @@ describe("ownership", () => {
   }
 
   it("D32-16: an archived task refuses ownership changes (restore first)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { archived: true }),
     });
@@ -1429,14 +1420,14 @@ describe("ownership", () => {
       setOwner(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/archived — restore it before changing its owner/);
   });
 
   it("E32-9 / ruling 118: a CLOSED task refuses a contributor's take; an admin may reassign for the record", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done" }),
     });
@@ -1446,7 +1437,7 @@ describe("ownership", () => {
       setOwner(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/closed — move it back to an open stage before changing its owner/);
@@ -1455,19 +1446,19 @@ describe("ownership", () => {
     const task = await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.owner).toMatchObject({ userId: store.users.selin.id });
   });
 
   it("take (unowned) — exact assign-event copy", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store);
     const task = await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(task.owner).toMatchObject({ userId: store.users.selin.id });
@@ -1479,12 +1470,12 @@ describe("ownership", () => {
   });
 
   it("take-over (owned by other) — copy names the previous owner", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, store.users.murat.id);
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
@@ -1494,7 +1485,7 @@ describe("ownership", () => {
   });
 
   it("take-OVER of an occupied seat needs acceptance authority (owner-exception escalation)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, store.users.arda.id); // owned by admin arda
     // A contributor SEIZING an owned task would gain the owner-exception
     // (accept-completion + resolve-packet) on arda's task — the governance hole.
@@ -1504,7 +1495,7 @@ describe("ownership", () => {
       setOwner(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1518,7 +1509,7 @@ describe("ownership", () => {
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.murat.id },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.owner).toMatchObject({
@@ -1527,14 +1518,14 @@ describe("ownership", () => {
   });
 
   it("hand off requires being owner or admin; target must be a member", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, store.users.murat.id);
     // selin is neither the owner nor an admin
     await expect(
       setOwner(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1543,7 +1534,7 @@ describe("ownership", () => {
       setOwner(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.deniz.id },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1551,7 +1542,7 @@ describe("ownership", () => {
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
@@ -1561,14 +1552,14 @@ describe("ownership", () => {
   });
 
   it("self release + admin release-anyone (exact copy, audited as forced)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withTask(store, store.users.selin.id);
     // murat (maintainer, not owner, not admin) cannot release selin
     await expect(
       releaseOwner(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1577,7 +1568,7 @@ describe("ownership", () => {
     const task = await releaseOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.owner).toBeNull();
@@ -1599,7 +1590,7 @@ describe("ownership", () => {
     await releaseOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(getTaskDetail(store.db, store.slug, "VIB-1")!.timeline).toHaveLength(before);
@@ -1609,7 +1600,7 @@ describe("ownership", () => {
     await releaseOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toBe(
@@ -1628,7 +1619,7 @@ describe("releaseTasksOwnedBy (A3: member removal releases owned seats)", () => 
       .parsed.frontmatter.ownerUserId;
 
   it("clears every seat the departing member owned, with a system note + per-task audit", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.selin.id }),
     });
@@ -1683,7 +1674,7 @@ describe("releaseTasksOwnedBy (A3: member removal releases owned seats)", () => 
   });
 
   it("skips an ARCHIVED owned task — it sits off every active surface, so a ghost owner there blocks nothing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         ownerUserId: store.users.selin.id,
@@ -1707,7 +1698,7 @@ describe("releaseTasksOwnedBy (A3: member removal releases owned seats)", () => 
   });
 
   it("returns 0 when the member owned nothing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: null }),
     });
@@ -1739,7 +1730,7 @@ describe("notification routing (FIX #4)", () => {
   }
 
   it("fans a watcher notice to owner + supervisors, honoring the default opt-in", () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withOwnedTask(store);
     const notified = notifyTaskWatchers(
       store.db,
@@ -1753,7 +1744,7 @@ describe("notification routing (FIX #4)", () => {
   });
 
   it("drops a supervisor who silenced that category (opt-out)", () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withOwnedTask(store);
     // murat silences approvals; arda + selin keep the default.
     setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, { approvals: { app: false } });
@@ -1776,7 +1767,7 @@ describe("notification routing (FIX #4)", () => {
 
 describe("reviewer quality notification (FIX #6)", () => {
   it("a clear verdict flips validation, writes a quality event, and pings watchers", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -1845,7 +1836,7 @@ describe("reviewer quality notification (FIX #6)", () => {
   });
 
   it("an unclear reviewer reply emits neither quality event nor notification", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.selin.id }),
     });
@@ -1875,7 +1866,7 @@ describe("reviewer quality notification (FIX #6)", () => {
 
 describe("validation state machine (A3 — a rejection is not a life sentence)", () => {
   it("an approve on a NEW revision clears a standing failing", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -1928,7 +1919,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
   });
 
   it("a same-round approve does NOT mask another reviewer's rejection", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // TWO required reviewers on the SAME revision: an approve from one cannot
     // overwrite the other's request_changes (verdicts key on the (profileId,
     // revisionId) pair — an approve only replaces THAT reviewer's own verdict).
@@ -1963,7 +1954,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
   });
 
   it("re-entering review recomputes validation — a workRevision with no verdicts derives 'changed'", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -1979,7 +1970,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
@@ -1988,7 +1979,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
   });
 
   it("a bare re-entry does NOT launder a standing failing (no new revision)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // A live request_changes verdict on the CURRENT revision — the standing
     // failing. No new revision has been delivered.
     writeTask(store.dataRoot, store.slug, {
@@ -2017,7 +2008,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // Review entry recomputes the derived cache, but with no new revision the
@@ -2030,7 +2021,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
 
 describe("owner-assign is a clean ownership mutation — no operator side effects (F19)", () => {
   it("records ownership without flipping board state, narrating, or firing an operator run", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // operator attached + waiting on a human owner + unowned + a `**Quality
     // gate:**` operator event: the EXACT shape that used to trip the inline
     // text-pattern stand-in (synthetic narration + ready/agent flip + a
@@ -2061,7 +2052,7 @@ describe("owner-assign is a clean ownership mutation — no operator side effect
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.selin.id },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
 
@@ -2095,7 +2086,7 @@ describe("owner-assign is a clean ownership mutation — no operator side effect
 
 describe("clearWaitingToHuman", () => {
   it("settles a DONE task with nothing open to waiting:none, not human", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "done",
@@ -2118,7 +2109,7 @@ describe("clearWaitingToHuman", () => {
   });
 
   it("still settles a task that is NOT terminal to human", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -2169,7 +2160,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
   }
 
   it("appends the FULL excerpt as a fenced block to the timeline event", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     pushMock.mockResolvedValueOnce({
       status: "push_failed",
@@ -2182,7 +2173,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
       deliveryCtx(store),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome.status).toBe("push_failed");
 
@@ -2197,7 +2188,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
   });
 
   it("keeps the NOTIFICATION body the one-sentence summary (no fenced block)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     pushMock.mockResolvedValueOnce({
       status: "push_failed",
@@ -2210,7 +2201,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
       deliveryCtx(store),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     const rows = selectRows(
       store.db,
@@ -2225,7 +2216,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
   });
 
   it("adds nothing when git printed nothing — no empty fence", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     pushMock.mockResolvedValueOnce({
       status: "no_pat",
@@ -2237,7 +2228,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
       deliveryCtx(store),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     const text = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline[0]!.text;
     expect(text).toContain("no project credential");
@@ -2249,7 +2240,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
 describe("the delivery deps seam defaults to the real modules", () => {
   it("an un-injected performDelivery runs the real push-workspace (no workspace → honest failure)", async () => {
     pushMock.mockClear(); // earlier tests in this file drove the double
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -2266,7 +2257,7 @@ describe("the delivery deps seam defaults to the real modules", () => {
       { dataRoot: store.dataRoot },
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome.status).toBe("failed");
     expect(outcome.status === "failed" ? outcome.message : "").toContain(
@@ -2323,7 +2314,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
    *  `probeNothingToDeliver`). The task branch ref 404s (the transport's
    *  unrouted default), which is the probe's `no_branch` basis. */
   function okGithub(store: TestStore, sha: string = BASE_SHA): void {
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_nochange0002" },
@@ -2374,7 +2365,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       deliveryCtx(store),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
   }
 
@@ -2383,7 +2374,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   });
 
   it("records the verified zero-diff and mints the base-anchored revision", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedVerifyOnly(store);
     okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
@@ -2416,7 +2407,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     // Canary: read `parsed.frontmatter.workRevision` instead of
     // `activeWorkRevision(...)` at the verdict binding and the approve pins to
     // the retired head, re-deriving `healthy` for a branch that no longer exists.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const retiredId = "rev_MBEIgNbXXyFX";
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -2449,7 +2440,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   });
 
   it("closes to Done with no PR and no merge once the required reviewer approves", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedVerifyOnly(store);
     okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
@@ -2466,7 +2457,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       deliveryCtx(store),
     );
 
@@ -2486,7 +2477,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   });
 
   it("still refuses acceptance while the required reviewer has not approved", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedVerifyOnly(store);
     okGithub(store);
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
@@ -2499,7 +2490,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         deliveryCtx(store),
       ),
     ).rejects.toThrow("Waiting on 1 required reviewer approval of the current revision.");
@@ -2507,7 +2498,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   });
 
   it("mints nothing when GitHub cannot be read — an unverifiable base is not a revision", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedVerifyOnly(store);
     // Default mock: no credential → no default-branch head.
     pushMock.mockResolvedValueOnce(CLEAN_DEFAULT);
@@ -2520,7 +2511,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   });
 
   it("a task that DID produce work keeps the old refusal — the verdict gate is untouched", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -2544,7 +2535,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
   });
 
   it("a MISSING workspace is never a verified no-change — nothing was inspected", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedVerifyOnly(store);
     okGithub(store);
     pushMock.mockResolvedValueOnce({
@@ -2598,7 +2589,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     ];
     for (const c of cases) {
       it(`${c.name} stays a genuine delivery failure`, async () => {
-        const store = prepared();
+        const store = setupProjectedStore(ctx);
         seedVerifyOnly(store);
         okGithub(store);
         pushMock.mockResolvedValueOnce({
@@ -2630,7 +2621,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
      * work still sitting in the working tree. Both doors now need the evidence.
      */
     it("a `no_commits` push whose tree stayed DIRTY is not a verified no-change", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seedVerifyOnly(store);
       okGithub(store);
       pushMock.mockResolvedValueOnce({
@@ -2652,7 +2643,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     });
 
     it("MISSING evidence is not verified evidence — an older/other caller cannot opt in by omission", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seedVerifyOnly(store);
       okGithub(store);
       pushMock.mockResolvedValueOnce({
@@ -2705,7 +2696,7 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
     transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       deliveryCtx(store),
     );
 
@@ -2716,7 +2707,7 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
   });
 
   it("refuses a task with an OPEN PR that no verdict approved", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedNoChange(store, {
       number: 42,
       state: "review",
@@ -2734,7 +2725,7 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
   });
 
   it("still closes the no-PR shape the flag was written for (R17-2)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedNoChange(store, null);
 
     // The merge wired B's accept-time no-change probe into every writer to Done
@@ -2743,7 +2734,7 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
     // the default-branch head reads, so the probe verifies and this test keeps
     // exercising the R15-1 verdict-gate bypass it was written for.
     const BASE = "abc0123456789def0123456789abcdef01234567";
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_nochange0003" },
@@ -2844,7 +2835,7 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
   it("an ordinary stage move: one timeline entry, one audit row", async () => {
     // CANARY: move the `parsed.frontmatter.stage === input.toStageId` check back
     // out of the `updateTaskFile` callback — both counts become 2.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "triage",
@@ -2857,7 +2848,7 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
     // Both calls are issued before either is awaited — the double-submit.
@@ -2880,7 +2871,7 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
     // The same shape on the most consequential write the product has. CANARY:
     // delete the already-Done check from applyAcceptanceWrite's callback — two
     // "Completion accepted" events land on one task.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -2894,7 +2885,7 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
     const [first, second] = [accept(), accept()];
@@ -2917,7 +2908,7 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
     // The other half of the in-lock re-read: every guard above it (the boundary,
     // the RBAC tier) was evaluated against the stage the task HAD, and the
     // timeline sentence already names it.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "triage",
@@ -2929,13 +2920,13 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
     const toReady = transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const toImpl = transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await toReady;
@@ -3020,7 +3011,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   it("a bare POST — no acknowledgment at all — is refused", async () => {
     // The live F21-2 defect verbatim: skip the dialog, accept anyway. CANARY:
     // drop the `ack === null` arm from assertAcceptanceDisclosure.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
 
     const rejected = transitionStage(
@@ -3032,7 +3023,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         manual: true,
         ack: null,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await expect(rejected).rejects.toMatchObject({
@@ -3050,7 +3041,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // The dialog was rendered against an earlier head; a re-delivery landed
     // while it sat open. CANARY: drop the drift comparison — the acceptance
     // merges a revision the human never saw.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
 
     const stale: AcceptanceDisclosure = { ...live(store), revision: "9".repeat(40) };
@@ -3063,7 +3054,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         manual: true,
         ack: stale,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await expect(rejected).rejects.toMatchObject({
@@ -3075,7 +3066,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   });
 
   it("a verdict that landed after the dialog opened is refused too", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
     // The dialog was opened while the review was still pending.
     const stale: AcceptanceDisclosure = { ...live(store), verdict: "changed" };
@@ -3089,7 +3080,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           manual: true,
           ack: stale,
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ code: "accept_disclosure_stale" });
@@ -3097,7 +3088,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   });
 
   it("the ceremony's own echo accepts — exactly once", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
     const echo = live(store);
     expect(echo).toEqual({
@@ -3115,7 +3106,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         manual: true,
         ack: echo,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("done");
@@ -3132,7 +3123,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         manual: true,
         ack: echo,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(1);
@@ -3143,7 +3134,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // the run finished later and re-invoked the operator on the shipped task.
     // Canary: delete the `interruptLiveRunsOnClosure` call after
     // `applyAcceptanceWrite` — the run row stays `running`, no note, no row.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -3175,7 +3166,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("done");
@@ -3203,7 +3194,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   it("U36-9 (pass 36): the completion event names the board's terminal stage, not a literal Done", async () => {
     // Live: "HLC-10 transitioned to **Done**" on a board whose last stage is
     // Shipped. Canary: put the literal back in the acceptance event text.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...pf.parsed.frontmatter,
@@ -3227,7 +3218,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const completion = task(store).timeline.find((e) => e.type === "completion")!;
@@ -3239,7 +3230,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // Force overrides the GATES, never the record of what the human was shown.
     // CANARY: drop the check from forceAcceptCompletion — a bare force POST
     // both accepts AND leaves a `task.acceptance.forced` row behind.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -3258,7 +3249,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
       forceAcceptCompletion(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", ack: null },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ code: "accept_disclosure_missing" });
@@ -3272,7 +3263,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("done");
@@ -3327,7 +3318,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // main. Pass 19 put the ceremony in front of that click; this is the server
     // half. CANARY: drop the `"ack" in input` line from applyRecommendation's
     // accept_completion arm — the bare apply merges again.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, { recommendations: [ACCEPT_REC] });
 
     const bare = applyRecommendation(
@@ -3338,7 +3329,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         recId: ACCEPT_REC.id,
         ack: null,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await expect(bare).rejects.toMatchObject({
@@ -3362,7 +3353,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           recId: ACCEPT_REC.id,
           ack: { ...live(store), revision: "9".repeat(40) },
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409, code: "accept_disclosure_stale" });
@@ -3376,7 +3367,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         recId: ACCEPT_REC.id,
         ack: live(store),
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("done");
@@ -3391,7 +3382,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // F19-26: the gate is the card's TARGET, never its `kind`. A supervised
     // operator recommends a plain `transition` to Done; applying it runs the
     // identical acceptance contract under a label that says only "move it".
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, {
       recommendations: [
         {
@@ -3412,7 +3403,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           recId: "rec-move-done",
           ack: null,
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ code: "accept_disclosure_missing" });
@@ -3440,7 +3431,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         recId: "rec-rework",
         ack: null,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("impl");
@@ -3471,7 +3462,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
      *
      * CANARY: put `now` back on either arm of the completion event.
      */
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, {}, ACCEPT_PACKET);
     let mergedAt = "";
     const mergeMock = vi.fn<NonNullable<TaskActionDeps["mergeTaskPr"]>>(async () => {
@@ -3485,7 +3476,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: live(store) },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
     );
 
@@ -3507,7 +3498,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // "Confirm decision", whose only disclosure was the operator's freeform
     // title. CANARY: drop the `assertAcceptanceDisclosure` call from
     // resolvePacket's accept arm.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, {}, ACCEPT_PACKET);
 
     await expect(
@@ -3519,7 +3510,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           optionIndex: 0,
           ack: null,
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -3540,7 +3531,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           optionIndex: 0,
           ack: { ...live(store), verdict: "changed" },
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409, code: "accept_disclosure_stale" });
@@ -3554,7 +3545,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         optionIndex: 0,
         ack: live(store),
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("done");
@@ -3569,7 +3560,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // The scope line of ruling 88: the ceremony fronts acceptances, not
     // decisions. `hold_runtime_debug` resolves the packet, writes no Done and
     // merges nothing — a bare resolve is exactly right for it.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(
       store,
       { readiness: "blocked" },
@@ -3588,7 +3579,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).packet).toBeNull();
@@ -3600,7 +3591,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // The board's own ceremony has fronted this drop since ruling 53 (R18-7),
     // and the reorder POST carried nothing back from it. CANARY: drop the
     // `"ack" in input` line from reorderTask.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
 
     await expect(
@@ -3613,7 +3604,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           beforeKey: null,
           ack: null,
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -3632,7 +3623,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         beforeKey: null,
         ack: live(store),
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(accepted.acceptedIntoDone).toBe(true);
@@ -3656,7 +3647,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // meant to agree with. CANARY: revert `work_revision_sha` in
     // rebuilder.server.ts or its mapping — `revision` falls back to "none" and
     // this fails with `accept_disclosure_stale`.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
     const summary = listProjectTasks(store.db, store.slug).find(
       (t) => t.key === "VIB-1",
@@ -3681,7 +3672,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         beforeKey: null,
         ack: boardEcho,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(accepted.acceptedIntoDone).toBe(true);
@@ -3693,7 +3684,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // The board move is only an acceptance when it lands on the final column;
     // everywhere else it is the plain governed move it always was. (Backward, so
     // ruling 381 asks for the sentence the drop already collects.)
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store);
     await reorderTask(
       store.db,
@@ -3705,7 +3696,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         ack: null,
         reason: "the retry path is still unhandled",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("impl");
@@ -3718,7 +3709,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // writer. The merge is an external await: a human acceptance landing inside
     // it left this resolution recording a SECOND completion trail for one act.
     // CANARY: delete the `acceptsInto` check from the resolution write.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, {}, ACCEPT_PACKET);
     const echo = live(store);
 
@@ -3753,7 +3744,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: echo },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
     );
 
@@ -3770,7 +3761,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
 
   describe("resolvePacket custom directive (P21 — questionnaire packets)", () => {
   it("resolves with the human's own directive: synthetic custom kind, directive recorded, packet cleared", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, {}, {
       ...ACCEPT_PACKET,
       options: [
@@ -3786,7 +3777,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         custom: "Rebase onto main first, then re-run the reviewer on the new head.",
         ack: null,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(option.kind).toBe("custom");
@@ -3804,7 +3795,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   });
 
   it("refuses an over-long directive before anything resolves", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedReviewed(store, {}, {
       ...ACCEPT_PACKET,
       options: [
@@ -3821,7 +3812,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
           custom: "x".repeat(4001),
           ack: null,
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -3838,7 +3829,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
     rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
   it("stamps the run's files onto the reply event and the producer map attributes them", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withVib1(store);
     await recordAgentCompletion(
       store.db,
@@ -3876,7 +3867,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
   });
 
   it("a verdict outcome carries the files on the verdict event, not the reply (evidence rule)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withVib1(store);
     await recordAgentCompletion(
       store.db,
@@ -3904,7 +3895,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
   });
 
   it("files with no usable reply still get a producing note event", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withVib1(store);
     await recordAgentCompletion(
       store.db,
@@ -3931,7 +3922,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
   });
 
   it("unwritable names are dropped before they can corrupt the file format", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withVib1(store);
     await recordAgentCompletion(
       store.db,
@@ -3977,7 +3968,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   // `push_refused_scope` into the `push_failed` arm; drop the resolve.
   it("ruling 144: a refused workflow push opens the violation with the remedy, and no PR", async () => {
     pushMock.mockClear();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: ROOT } } },
@@ -3991,7 +3982,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       files: [".github/workflows/ci.yml"],
       reason: "the project's classic token has no `workflow` scope, and this push changes `.github/workflows/ci.yml`",
     });
-    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(outcome).toMatchObject({ status: "scope_violation", scope: "workflow" });
     expect(outcome.status === "scope_violation" ? outcome.message : "").toContain("Re-check on the project's GitHub view");
     expect(github.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
@@ -4011,7 +4002,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       remoteHeadBefore: null,
       workflowFiles: null,
     });
-    await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(
       listScopeViolations(store.db, store.slug, { status: "open" }).map((v) => v.scope),
     ).toEqual(["workflow"]);
@@ -4025,7 +4016,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       remoteHeadBefore: null,
       workflowFiles: [".github/workflows/ci.yml"],
     });
-    const again = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    const again = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(again.status).toBe("delivered");
     expect(listScopeViolations(store.db, store.slug, { status: "open" })).toEqual([]);
   });
@@ -4040,7 +4031,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
    */
   it("ruling 159: a push refused for the store layout names the paths, opens no PR", async () => {
     pushMock.mockClear();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: ROOT } } },
@@ -4053,7 +4044,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       files: [stray],
       reason: `the branch carries \`${stray}\`, which is Viberr's own store layout`,
     });
-    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(outcome).toMatchObject({ status: "store_layout", files: [stray] });
     const message = outcome.status === "store_layout" ? outcome.message : "";
     expect(message).toContain(`\`${stray}\``);
@@ -4081,16 +4072,16 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_bootstrap0000000000001" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actorOf(store.users.arda));
   }
 
   it("bootstraps `main` before the first push and records it (the bootstrap line is timeline[1], under the PR event)", async () => {
     // Canary: gate the bootstrap on the absence of the `pushWorkspaceBranch`
     // dep (skip it when a dep is injected) and the PUT never runs here.
     pushMock.mockClear();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     let bootstrapped = false;
     github = fakeGithubFetch({
@@ -4117,7 +4108,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       remoteHeadBefore: null,
    workflowFiles: [],
     });
-    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(outcome.status).toBe("delivered");
     expect(github.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
     // The bootstrap ran BEFORE the push.
@@ -4134,14 +4125,14 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     // Canary: route `network_unavailable` into the refusing arm and the second
     // half fails (no push, and a sentence claiming the base is missing).
     pushMock.mockClear();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 409, body: { message: "Git Repository is empty." } },
       [`GET ${REPO_PATH}/branches`]: { body: [] },
       [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
     });
-    const refused = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
+    const refused = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(refused.status).toBe("failed");
     expect(refused.status === "failed" ? refused.message : "").toContain("has no `main` branch and Viberr could not create it");
     expect(refused.status === "failed" ? refused.message : "").toContain("Nothing was pushed");
@@ -4150,7 +4141,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
 
     // The probe could not be READ: the push proceeds, and no surface claims
     // the base is missing.
-    const offline = prepared();
+    const offline = setupProjectedStore(ctx);
     seedDeliverable(offline);
     pushMock.mockClear();
     pushMock.mockResolvedValueOnce({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
@@ -4160,7 +4151,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
       { dataRoot: offline.dataRoot, deps: { pushWorkspaceBranch: pushMock }, fetchImpl: unreachableFetch() },
       offline.slug,
       "VIB-1",
-      actor(offline.users.arda),
+      actorOf(offline.users.arda),
     );
     expect(pushMock).toHaveBeenCalledTimes(1);
     expect(outcome.status).toBe("failed");
@@ -4179,7 +4170,7 @@ describe("ruling 134: the pushed-head event on a reused PR", () => {
   it("writes `Pushed <sha> to PR #N (was <old>)` attributed to the human who delivered, and records the head on the PR", async () => {
     const REPO_PATH = "/repos/akin-ozer/viberr";
     pushMock.mockClear();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -4195,8 +4186,8 @@ describe("ruling 134: the pushed-head event on a reused PR", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_pushed00000000000001" }, actor(store.users.arda));
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_pushed00000000000001" }, actorOf(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actorOf(store.users.arda));
     github = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: "c".repeat(40) } } },
       [`GET ${REPO_PATH}/pulls/4`]: {
@@ -4214,7 +4205,7 @@ describe("ruling 134: the pushed-head event on a reused PR", () => {
     const outcome = await manualDeliverForReview(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       deliveryCtx(store),
     );
     expect(outcome).toMatchObject({ status: "delivered", created: false, moved: true, headSha: "385047c".padEnd(40, "0") });
@@ -4239,7 +4230,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
   it("review → impl withdraws the accept card and the terminal transition card, on the record; the run_agent card survives", async () => {
     // Canary: drop the `transitionStage` withdrawal site — the cards still
     // vanish (the transition filter), but silently: no note, no row.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
@@ -4259,7 +4250,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true, reason: "the migration is still missing" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
@@ -4298,7 +4289,7 @@ describe("ruling 140(a): a named owner at creation", () => {
     // `runOperator` captures what the file said WHEN THE RUN STARTED.
     // Canary: write the creator into the frontmatter and apply the named owner
     // after `autoInvokeOperator` — the run reads arda, not murat.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // `autoInvokeOperator` returns early when no operator is deployed, so the
     // hand-off this case is about needs one on the project.
     const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -4348,7 +4339,7 @@ describe("ruling 140(a): a named owner at creation", () => {
     const created = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Seated at birth", ownerUserId: store.users.murat.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { runOperator } },
     );
     expect(created.task.owner).toMatchObject({ kind: "human", userId: store.users.murat.id });
@@ -4373,11 +4364,11 @@ describe("ruling 140(a): a named owner at creation", () => {
   });
 
   it("naming yourself records the creator seat with the creator text", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const created = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Mine to own", ownerUserId: store.users.arda.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const parsed = readTaskFile({
@@ -4396,13 +4387,13 @@ describe("ruling 140(a): a named owner at creation", () => {
 
   it("the hand-off refusals apply, before a key is allocated", async () => {
     // Canary: drop `requireOwnable` from createTask.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const before = listAuditEvents(store.db).length;
     await expect(
       createTask(
         store.db,
         { projectSlug: store.slug, title: "To a viewer", ownerUserId: store.users.deniz.id },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(
@@ -4412,7 +4403,7 @@ describe("ruling 140(a): a named owner at creation", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "To a non member", ownerUserId: "u_nobody" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(
@@ -4422,7 +4413,7 @@ describe("ruling 140(a): a named owner at creation", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "By the operator", ownerUserId: store.users.murat.id },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, operatorAuthorized: true },
       ),
     ).rejects.toThrow(
@@ -4448,7 +4439,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
 
   it("a hand-off tells the new owner; a takeover tells the DISPLACED owner; the actor is never told", async () => {
     // Canary: delete the notifier call in the hand-off branch of setOwner.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id }),
     });
@@ -4457,7 +4448,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.murat.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const handed = ownershipRows(store, store.users.murat.id);
@@ -4474,7 +4465,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", targetUserId: store.users.arda.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const displaced = ownershipRows(store, store.users.murat.id);
@@ -4487,7 +4478,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
   });
 
   it("an admin release tells the released owner; a self-take and a self-release tell nobody", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-2", { ownerUserId: null }),
     });
@@ -4497,7 +4488,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-2", targetUserId: store.users.murat.id },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(ownershipRows(store, store.users.murat.id)).toHaveLength(0);
@@ -4506,7 +4497,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await releaseOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-2" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const released = ownershipRows(store, store.users.murat.id);
@@ -4520,13 +4511,13 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-2", targetUserId: store.users.murat.id },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     await releaseOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-2" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(ownershipRows(store, store.users.murat.id)).toHaveLength(1);
@@ -4537,7 +4528,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
   it("a silenced category drops the row and the audit says so", async () => {
     // Canary: pass `bypassPrefs` in the notifier — the row lands and the audit
     // claims the person was told.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id }),
     });
@@ -4548,7 +4539,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-3", targetUserId: store.users.murat.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(ownershipRows(store, store.users.murat.id)).toHaveLength(0);
@@ -4560,7 +4551,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
   it("a THIRD-PARTY hand-off tells both sides: the new owner and the displaced one", async () => {
     // Canary: pick one recipient by `isTake` again — the displaced owner is
     // told nothing and the audit row names the wrong person.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-4", { ownerUserId: store.users.murat.id }),
     });
@@ -4570,7 +4561,7 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
     await setOwner(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-4", targetUserId: store.users.selin.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const gained = ownershipRows(store, store.users.selin.id);
@@ -4590,11 +4581,11 @@ describe("ruling 140(b): a seat change notifies the person whose seat it is", ()
   });
 
   it("a creation that names someone else tells them", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const created = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Yours from birth", ownerUserId: store.users.murat.id },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const rows = ownershipRows(store, store.users.murat.id);
@@ -4683,7 +4674,7 @@ describe("pass 35: operator and task actions", () => {
   describe("ruling 151 (F35-2): the boundary always wins in transitionStage", () => {
     it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
       // Canary: delete the ruling-151 throw in the `ctx.operatorAuthorized` arm.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seed(store, { stage: "impl" });
       await expect(
         transitionStage(
@@ -4704,7 +4695,7 @@ describe("pass 35: operator and task actions", () => {
       await transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(file(store).frontmatter.stage).toBe("review");
@@ -4714,7 +4705,7 @@ describe("pass 35: operator and task actions", () => {
   describe("ruling 152(a) (G35-5): a live operator run's move queues no fresh operator turn", () => {
     it("with ctx.operatorRun set the runOperator seam is never called; without it, once", async () => {
       // Canary: remove the `ctx.operatorRun` arm before the re-trigger.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       deployOperator(store);
       seed(store, { stage: "ready" });
       const live = operatorSeam();
@@ -4751,7 +4742,7 @@ describe("pass 35: operator and task actions", () => {
 
     it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
       // CANARY: drop the stamp from the `ctx.operatorRun` arm.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       deployOperator(store);
       seed(store, { stage: "ready" });
       const delivered: NonNullable<TaskMutationContext["operatorRun"]> = {
@@ -4791,14 +4782,14 @@ describe("pass 35: operator and task actions", () => {
     it("the applied move writes the accept_completion card and the operator is not re-invoked", async () => {
       // Canary: delete the fold from transitionStage's re-trigger branch (the
       // card is missing and the seam fires).
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       deployOperator(store);
       seed(store, { stage: "impl" });
       const seam = operatorSeam();
       await transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
       );
       expect(file(store).frontmatter.stage).toBe("review");
@@ -4811,7 +4802,7 @@ describe("pass 35: operator and task actions", () => {
     });
 
     it("a refused acceptance gate files no card and re-invokes the operator as before", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       deployOperator(store);
       // A closed, unmerged PR refuses acceptance by a terminal fact.
       seed(store, { stage: "impl", pr: { number: 8, state: "closed", title: "[VIB-1] work" } });
@@ -4819,7 +4810,7 @@ describe("pass 35: operator and task actions", () => {
       await transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
       );
       await Promise.race([
@@ -4834,7 +4825,7 @@ describe("pass 35: operator and task actions", () => {
   describe("U35-3: the force-accept record names every bypassed gate", () => {
     it("the audit row and the completion event list the stage skip, the failing verdict and the withdrawn packet", async () => {
       // Canary: return `[reasons[0]]` from acceptanceRefusalReasons (one gate).
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       const blocked: TaskPacket = {
         type: "blocked",
         kind: "Blocked decision",
@@ -4872,7 +4863,7 @@ describe("pass 35: operator and task actions", () => {
       await forceAcceptCompletion(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", ack },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(file(store).frontmatter.stage).toBe("done");
@@ -4940,13 +4931,13 @@ describe("pass 35: operator and task actions", () => {
       // the `operatorRefused` branch of `commentToAgent`): F36-4 — a paid
       // operator run starts on an archived task behind a page whose own
       // button refuses it, and no note says the mention went nowhere.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       deployOperatorFor(store);
       seed(store, { stage: "impl", archived: true, waiting: "none" });
       const result = await commentToAgent(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator observer probe: do you run on an archived task?" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(result.triggered).toBeNull();
@@ -4961,13 +4952,13 @@ describe("pass 35: operator and task actions", () => {
     });
 
     it("ruling 177: an @operator mention on a task at the terminal stage is refused the same way", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       deployOperatorFor(store);
       seed(store, { stage: "done", waiting: "none" });
       const result = await commentToAgent(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator anything left?" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(result.operatorRefused).toBe("closed");
@@ -4977,7 +4968,7 @@ describe("pass 35: operator and task actions", () => {
 
     it("a stage-ineligible mention writes 'Mention not started' naming the stage, and task.comment.unrouted", async () => {
       // Canary: remove the `noteMentionNotStarted` call from the catch.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
       writeProject(store.dataRoot, {
         ...projectFile.parsed.frontmatter,
@@ -5002,7 +4993,7 @@ describe("pass 35: operator and task actions", () => {
       const result = await commentToAgent(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", text: "@Rev please look" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(result.triggered).toBeNull();
@@ -5041,12 +5032,12 @@ describe("pass 35: operator and task actions", () => {
 
     it("with a decided edit_goal packet open, the unchanged goal is refused and the packet stays; the draft clears it", async () => {
       // Canary: restore the silent early return on unchanged text.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seed(store, { stage: "triage" }, editGoal);
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(file(store).packet?.awaiting).toBe("goal_edit");
@@ -5054,7 +5045,7 @@ describe("pass 35: operator and task actions", () => {
         updateTaskGoal(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser." },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toThrow(/reads exactly as before, so the requested edit has not landed/);
@@ -5062,7 +5053,7 @@ describe("pass 35: operator and task actions", () => {
       const saved = await updateTaskGoal(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser with tests." },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(saved.changed).toBe(true);
@@ -5071,13 +5062,13 @@ describe("pass 35: operator and task actions", () => {
     });
 
     it("without a packet an unchanged save reports changed: false and writes nothing", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seed(store, { stage: "impl" });
       const before = file(store).timeline.length;
       const result = await updateTaskGoal(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", goal: "Ship the parser." },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(result.changed).toBe(false);
@@ -5102,7 +5093,7 @@ describe("pass 35: operator and task actions", () => {
     }
 
     it("a person's operator run clears the stage hold, names them, and audits it", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       stageHeld(store);
       // CANARY: return true without clearing `heldAtStage` and the board keeps
       // saying coordination is paused while a person is coordinating it.
@@ -5126,7 +5117,7 @@ describe("pass 35: operator and task actions", () => {
     });
 
     it("finds nothing to lift when no stage hold stands, and writes no note", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seed(store, { stage: "review" });
       const lifted = await liftStageHoldForPerson(
         store.db,
@@ -5156,7 +5147,7 @@ describe("pass 35: operator and task actions", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(file(store).packet).toBeNull();
@@ -5165,7 +5156,7 @@ describe("pass 35: operator and task actions", () => {
 
     it("lifts a packet-less, list-less hold once: readiness ready, a 'Hold lifted' note, task.hold.lifted", async () => {
       // Canary: return true from liftHoldForRun without the write.
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       await held(store);
       const lifted = await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
         kind: "dispatch",
@@ -5195,14 +5186,14 @@ describe("pass 35: operator and task actions", () => {
     });
 
     it("an open blocked packet and a dependency list are not holds", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       seed(store, { stage: "review", readiness: "blocked" }, hold);
       expect(
         await liftHoldForRun(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
           kind: "operator-run",
           trigger: "manual",
           byName: "Arda",
-          by: actor(store.users.arda),
+          by: actorOf(store.users.arda),
         }),
       ).toBe(false);
       expect(file(store).frontmatter.readiness).toBe("blocked");
@@ -5312,7 +5303,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
    * Both the reason and the way out were in that function's own scope.
    */
   it("ruling 412: a refused backward move says WHY, and names the way forward", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge");
     const opCtx = { dataRoot: store.dataRoot, operatorAuthorized: true };
@@ -5347,7 +5338,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     // and was told "rework needs a failing verdict or a revision that changed
     // after one; this task has neither". CANARY: read `changedReworkTarget`
     // alone again.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "review");
     let refused = "";
@@ -5372,7 +5363,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     // Canary: require `validation === "failing"` again in transitionStage's
     // `isReworkMove`. Live: KNC-20's operator was refused "No allowed
     // transition from Merge to Review" after a conflict rework.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge");
     const opCtx = { dataRoot: store.dataRoot, operatorAuthorized: true };
@@ -5396,7 +5387,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
 
   it("ruling 163 (b): resolving the conflict packet's redirect at Merge returns the task to Review in the same write", async () => {
     // Canary: drop the `option.rework` branch in resolvePacket's default arm.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
     writeTask(store.dataRoot, store.slug, {
@@ -5427,7 +5418,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const parsed = taskFile(store);
@@ -5441,7 +5432,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   });
 
   it("ruling 163 (b): a redirect without the rework marker leaves the stage alone", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
     writeTask(store.dataRoot, store.slug, {
@@ -5461,7 +5452,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).frontmatter.stage).toBe("merge");
@@ -5471,7 +5462,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     // Canary: drop the `returnChangedRevisionToReview` call in performDelivery.
     const REPO_PATH = "/repos/akin-ozer/viberr";
     pushMock.mockClear();
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge", {
       pr: {
@@ -5482,8 +5473,8 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         unpushedRevision: { revisionSha: "a".repeat(40), prHeadSha: "9".repeat(40), relation: "behind" },
       },
     });
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_returns0000000000001" }, actor(store.users.arda));
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_returns0000000000001" }, actorOf(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actorOf(store.users.arda));
     github = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/main`]: { body: { object: { sha: "c".repeat(40) } } },
       [`GET ${REPO_PATH}/pulls/7`]: {
@@ -5501,7 +5492,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     const outcome = await manualDeliverForReview(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       deliveryCtx(store),
     );
     github = null;
@@ -5519,7 +5510,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     // person read a second sentence for the same fact, with no way out.
     // Canary: print `GitHub refuses to merge ...: <message>` whenever the merge
     // result carries no `mergeable` field.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
@@ -5543,7 +5534,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     const rejected = transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
     await expect(rejected).rejects.toThrow(
@@ -5582,7 +5573,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     }));
 
     it("refreshes as the person, then re-runs the reviewer on the head that will merge", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       approved(store);
       const startAgentRun = vi.fn<NonNullable<TaskActionDeps["startAgentRun"]>>(async () => ({
         runId: "run_rr",
@@ -5597,13 +5588,13 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       const result = await refreshAndReview(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { updateBranchFromBase: updated, startAgentRun } },
       );
       expect(result.status).toBe("refreshed");
       expect(startAgentRun).toHaveBeenCalledOnce();
       const dispatch = startAgentRun.mock.calls[0]![1];
-      expect(dispatch).toMatchObject({ profileId: "reviewer", directiveFrom: actor(store.users.arda).label });
+      expect(dispatch).toMatchObject({ profileId: "reviewer", directiveFrom: actorOf(store.users.arda).label });
       expect(dispatch.directive).toBe(reReviewDirective("vib-1-work", "main", "m".repeat(40)));
       expect(dispatch.directive).toContain("merge commit `mmmmmmm`");
       const parsed = taskFile(store);
@@ -5611,11 +5602,11 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       expect(parsed.frontmatter.stage).toBe("review");
       expect(parsed.frontmatter.baseRefreshes.at(-1)).toMatchObject({ mergeSha: "m".repeat(40), base: "main" });
       expect(parsed.timeline.some((e) => e.text.startsWith("Asked for a re-review before accepting, brought `vib-1-work` up to date with `main`"))).toBe(true);
-      expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.actorLabel).toBe(actor(store.users.arda).label);
+      expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.actorLabel).toBe(actorOf(store.users.arda).label);
     });
 
     it("starts nothing when the branch already carries its base, or the refresh met a conflict", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       approved(store);
       const startAgentRun = vi.fn<NonNullable<TaskActionDeps["startAgentRun"]>>();
       const current = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
@@ -5628,7 +5619,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         dataRoot: store.dataRoot,
         deps: { updateBranchFromBase, startAgentRun, runOperator: vi.fn() },
       });
-      const same = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor(store.users.arda), deps(current));
+      const same = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actorOf(store.users.arda), deps(current));
       expect(same.status).toBe("current");
       const conflicting = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
         status: "conflict",
@@ -5636,21 +5627,21 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         base: "main",
         files: ["app/main.ts"],
       }));
-      const clash = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor(store.users.arda), deps(conflicting));
+      const clash = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actorOf(store.users.arda), deps(conflicting));
       expect(clash.status).toBe("conflict");
       expect(taskFile(store).timeline.some((e) => e.text.includes("CONFLICT with `main` in app/main.ts") && e.text.includes("no re-review was started"))).toBe(true);
       expect(startAgentRun).not.toHaveBeenCalled();
     });
 
     it("is the acceptance authority's: a viewer is refused before anything runs", async () => {
-      const store = prepared();
+      const store = setupProjectedStore(ctx);
       approved(store);
       const refresh = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>();
       await expect(
         refreshAndReview(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1" },
-          actor(store.users.elif),
+          actorOf(store.users.elif),
           { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refresh } },
         ),
       ).rejects.toThrow();
@@ -5660,7 +5651,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
 
   it("G35-5 (d): an accept on a behind-base branch performs exactly one refresh, then one merge, in that order", async () => {
     // Canary: drop the `refreshBranchForAcceptance` call in attemptAcceptanceMerge.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
@@ -5692,7 +5683,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
     expect(sequence).toEqual(["refresh", "merge"]);
@@ -5733,7 +5724,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
    * is read before or after it.
    */
   it("ruling 318: the Done record names the drift the acceptance itself created", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
@@ -5771,7 +5762,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         manual: true,
         ack: acceptanceDisclosureOf(taskFile(store).frontmatter),
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
     );
     const parsed = taskFile(store);
@@ -5788,7 +5779,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   });
 
   it("G35-5 (d): a refresh that CONFLICTS refuses the acceptance with the gate's sentence and records the conflict", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
@@ -5814,7 +5805,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
     ).rejects.toThrow(/conflicts with the base branch[\s\S]*merging the base INTO it/);
@@ -5847,7 +5838,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
      *
      * CANARY: delete the `autoInvokeOperator(… "pr-conflicting")` call.
      */
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // `autoInvokeOperator` returns early with no operator deployed, and the
     // hand-off is the whole subject of this test.
     const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -5896,7 +5887,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refreshMock, runOperator } },
       ),
     ).rejects.toThrow(/conflicts with the base branch/);
@@ -5934,7 +5925,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     // Canary: call `beforeMerge?.()` only after `refreshBranchForAcceptance`
     // in attemptAcceptanceMerge — the refresh then runs and publishes first.
     const REPO_PATH = "/repos/akin-ozer/viberr";
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [
@@ -5944,8 +5935,8 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       readiness: "ready",
       waiting: "human",
     });
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_beforemerge000000001" }, actor(store.users.arda));
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor(store.users.arda));
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_beforemerge000000001" }, actorOf(store.users.arda));
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actorOf(store.users.arda));
     // The reviewer flips to request_changes during the head read — the await
     // window between the outer gate and the merge ceremony.
     const fetchImpl: typeof fetch = async (target) => {
@@ -5984,7 +5975,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot, fetchImpl, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
     ).rejects.toThrow(/requests changes on the current revision/);
@@ -6034,7 +6025,7 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
   }
 
   it("performDelivery renders closed_by_human as a refusal naming the PR and the closer, with the timeline note", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedClosedPr(store);
     pushMock.mockResolvedValueOnce({
       status: "pushed",
@@ -6053,7 +6044,7 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
       dataRoot: store.dataRoot,
       deps: { pushWorkspaceBranch: pushMock, openTaskPr: openPrMock },
     };
-    const outcome = await performDelivery(store.db, callCtx, store.slug, "VIB-1", actor(store.users.arda));
+    const outcome = await performDelivery(store.db, callCtx, store.slug, "VIB-1", actorOf(store.users.arda));
     expect(outcome).toMatchObject({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
     const message = outcome.status === "closed_by_human" ? outcome.message : "";
     expect(message).toContain("PR #10 was closed without merging by akin-ozer");
@@ -6067,7 +6058,7 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
   });
 
   it("a person resolving a packet while the PR stands closed answers the closure", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedClosedPr(store);
     const current = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
     writeTask(store.dataRoot, store.slug, {
@@ -6091,7 +6082,7 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
@@ -6109,7 +6100,7 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
     // The gate that refuses delivery keys on the STATE, so an answer with no
     // record to stamp left the task undeliverable for good. Canary: restore the
     // `closedPr.closure &&` guard on the stamp and the answer lands nowhere.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seedClosedPr(store, null);
     const current = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
     expect(current.frontmatter.pr?.closure ?? null).toBeNull();
@@ -6133,7 +6124,7 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;

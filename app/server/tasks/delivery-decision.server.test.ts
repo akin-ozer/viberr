@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
@@ -83,10 +84,6 @@ beforeEach(() => {
 });
 
 afterEach(() => ctx.cleanup());
-
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
 
 function seed(patch: Partial<TaskFrontmatter> = {}): void {
   writeTask(store.dataRoot, store.slug, {
@@ -178,7 +175,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     // The safety-net event is fire-and-forget — let it land.
@@ -201,7 +198,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     await new Promise((r) => setTimeout(r, 80));
@@ -240,7 +237,7 @@ describe("ruling 202: a delivering drive marks itself as having acted", () => {
       ctx,
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome.status).toBe("push_failed");
     // The drive ACTED. Whether GitHub accepted it is a different question, and
@@ -272,7 +269,7 @@ describe("ruling 202: a delivering drive marks itself as having acted", () => {
       ctx,
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome.status).toBe("grant_withheld");
     expect(ctx.operatorRun.delivered).toBeUndefined();
@@ -293,7 +290,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       dataCtx(),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome.status).toBe("push_conflict");
     // Fails on main: no push_conflict status existed, the PR was opened anyway
@@ -334,7 +331,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       reason:
         "the remote branch `vib-1` holds commits that are not in the local delivery (non-fast-forward)",
     });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
 
     const text = fm().timeline.find((e) => e.type === "github")!.text;
     // The fact the server had and the sentence did not use.
@@ -356,7 +353,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       branch: "vib-1",
       reason: "the remote branch `vib-1` holds commits that are not in the local delivery",
     });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
 
     const text = fm().timeline.find((e) => e.type === "github")!.text;
     expect(text).toContain("No pull request tracks `vib-1`");
@@ -375,7 +372,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       branch: "vib-1",
       reason: "the remote branch `vib-1` holds commits that are not in the local delivery",
     });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
 
     const text = fm().timeline.find((e) => e.type === "github")!.text;
     expect(text).toContain("PR #22, which VIB-1 did not open");
@@ -406,7 +403,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     // event blames a credential. Delete the `openPr` guard on a conflicted push
     // in performDelivery and the openPrMock assertion fails.
     seed({ stage: "review", branch: "vib-1" });
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_realpush0001" },
@@ -464,7 +461,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       },
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
 
     expect(outcome.status).toBe("push_conflict");
@@ -494,7 +491,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       dataCtx(),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome.status).toBe("push_failed");
     // Fails on main: the old best-effort flow still attempted the PR.
@@ -515,7 +512,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       dataCtx(),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 9, created: true });
   });
@@ -562,7 +559,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       dataCtx(),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 11 });
 
@@ -621,7 +618,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       dataCtx(),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 13 });
 
@@ -694,7 +691,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
 
@@ -741,7 +738,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       dataCtx(),
       store.slug,
       "VIB-1",
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(fm().packet?.id).toBe("pkt_reject");
   });
@@ -805,7 +802,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
         dataCtx(),
         store.slug,
         "VIB-1",
-        actor(store.users.arda),
+        actorOf(store.users.arda),
       );
       expect(openPrMock, "no PR over an unknown remote state").not.toHaveBeenCalled();
       expect(outcome.status).toBe(c.outcome);
@@ -1005,7 +1002,7 @@ describe("R15-2 safety net (b): manual delivery from the task page", () => {
     const outcome = await manualDeliverForReview(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       dataCtx(),
     );
     expect(outcome.status).toBe("delivered");
@@ -1021,14 +1018,14 @@ describe("R15-2 safety net (b): manual delivery from the task page", () => {
       manualDeliverForReview(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.elif), // viewer
+        actorOf(store.users.elif), // viewer
         dataCtx(),
       ),
     ).rejects.toMatchObject({ status: 403 });
     const outcome = await manualDeliverForReview(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.selin), // contributor OWNER
+      actorOf(store.users.selin), // contributor OWNER
       dataCtx(),
     );
     expect(outcome.status).not.toBe(undefined);
@@ -1039,7 +1036,7 @@ describe("R15-2 safety net (b): manual delivery from the task page", () => {
       manualDeliverForReview(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         dataCtx(),
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -1066,7 +1063,7 @@ describe("R15-2: an applied `delivery` recommendation performs the delivery", ()
     await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-deliver" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       dataCtx(),
     );
     expect(openPrMock).toHaveBeenCalled();
@@ -1080,7 +1077,7 @@ describe("R15-2: an applied `delivery` recommendation performs the delivery", ()
       applyRecommendation(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-deliver" },
-        actor(store.users.murat),
+        actorOf(store.users.murat),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1106,7 +1103,7 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1128,7 +1125,7 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1150,7 +1147,7 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(task.stage).toBe("done");
@@ -1161,7 +1158,7 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(task.stage).toBe("done");
@@ -1178,7 +1175,7 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(fm().frontmatter.stage).toBe("done");
@@ -1196,7 +1193,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
    *  the `/compare/` verdict below, 404 (unknown, never a refusal) for
    *  anything else. */
   function githubReportsHead(headSha: string, compareStatus = "diverged") {
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0001" },
@@ -1235,7 +1232,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1247,7 +1244,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       forceAcceptCompletion(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -1274,7 +1271,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1285,7 +1282,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({ message: expect.not.stringContaining("Rebase") });
@@ -1305,7 +1302,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     // The status below is what `gh api repos/<repo>/commits/<unknown-sha>`
     // actually answers.
     healthySeed();
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0135" }, patActor);
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
     const head = "f".repeat(40);
@@ -1321,7 +1318,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1344,7 +1341,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1361,7 +1358,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(fm().frontmatter.stage).toBe("done");
@@ -1373,7 +1370,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(fm().frontmatter.stage).toBe("done");
@@ -1424,7 +1421,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       completeTaskMerge(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1459,7 +1456,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1480,7 +1477,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     // The case where GitHub ANSWERS the pull and refuses only the comparison is
     // ruling 226's, and is tested as a refusal above.
     healthySeed();
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0009" },
@@ -1495,7 +1492,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
 
@@ -1534,7 +1531,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
         },
       });
     const withCredential = () => {
-      const patActor = actor(store.users.arda);
+      const patActor = actorOf(store.users.arda);
       const pat = createPat(
         store.db,
         { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0235" },
@@ -1546,7 +1543,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       );
     const notes = () =>
@@ -1629,7 +1626,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
         },
       });
     const withCredential = () => {
-      const patActor = actor(store.users.arda);
+      const patActor = actorOf(store.users.arda);
       const pat = createPat(
         store.db,
         { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0226" },
@@ -1641,7 +1638,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       );
 
@@ -1717,7 +1714,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       );
 
@@ -1738,7 +1735,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       );
       const waiver = fm().frontmatter.headCheckWaiver!;
@@ -1766,7 +1763,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       );
       expect(fm().frontmatter.headCheckWaiver).toBeTruthy();
@@ -1795,7 +1792,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
 
@@ -1854,7 +1851,7 @@ describe("B-WF1: the in-lock re-check after the merge await", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -1878,7 +1875,7 @@ describe("F15-13: already-merged honesty in the acceptance event", () => {
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(mergeMock).not.toHaveBeenCalled(); // nothing left to merge
@@ -1923,7 +1920,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     // operator's own acceptance packet.
     // As in githubReportsHead: a real credential + canned transport, answering
     // this packet's PR #7 with a junk head and the compare with "diverged".
-    const patActor = actor(store.users.arda);
+    const patActor = actorOf(store.users.arda);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0002" },
@@ -1955,7 +1952,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -1978,7 +1975,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         dataCtx(),
       ),
     ).rejects.toMatchObject({
@@ -2004,7 +2001,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     expect(mergeMock).not.toHaveBeenCalled();
@@ -2038,7 +2035,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       dataCtx(),
     );
     const parsed = fm();
@@ -2080,7 +2077,7 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
       workflowFiles: [],
     });
     expect(fm().frontmatter.workRevision?.pushedAt ?? null).toBeNull();
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
     const stamped = fm().frontmatter.workRevision;
     expect(stamped?.id).toBe("rev_reported");
     expect(stamped?.pushedAt).toEqual(expect.any(String));
@@ -2090,12 +2087,12 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
   it("`up_to_date` (origin already carries the head) stamps it too; a head the push did not name is left alone", async () => {
     seedReported();
     pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: "f".repeat(40) });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
     // A different head: nothing says origin holds THIS revision.
     expect(fm().frontmatter.workRevision?.pushedAt ?? null).toBeNull();
 
     pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: HEAD });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(fm().frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
   });
 
@@ -2128,7 +2125,7 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
       // CANARY: compare `rev.headSha === pushedHead` again and the revision
       // origin carries is still read as a local draft.
       seedRefreshedOnto(HEAD);
-      await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+      await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
       const stamped = fm().frontmatter.workRevision;
       expect(stamped?.id).toBe("rev_reported");
       expect(stamped?.pushedAt).toEqual(expect.any(String));
@@ -2136,7 +2133,7 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
 
     it("says nothing about a revision the refresh was not merged onto", async () => {
       seedRefreshedOnto("9".repeat(40));
-      await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+      await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
       expect(fm().frontmatter.workRevision?.pushedAt ?? null).toBeNull();
     });
   });
@@ -2174,7 +2171,7 @@ describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
       status: "network_unavailable",
       message: "fetch failed: ECONNRESET api.github.com",
     });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
 
     const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
     expect(event, "the failure was not surfaced").toBeTruthy();
@@ -2200,7 +2197,7 @@ describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
       workflowFiles: [],
     });
     openPrMock.mockResolvedValue({ status: "no_pat_configured", repo: null });
-    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
 
     const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
     expect(event.text).toContain("no GitHub credential is configured for this project");

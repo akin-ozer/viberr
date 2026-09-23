@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
-  setupTestStore,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -13,6 +13,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
@@ -44,10 +45,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   ctx.cleanup();
 });
-
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
 
 const ACCEPT_PACKET: TaskPacket = {
   id: "pkt_accept_1",
@@ -94,12 +91,6 @@ function approval() {
   };
 }
 
-function prepared(): TestStore {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
-  return store;
-}
-
 function seed(
   store: TestStore,
   patch: Parameters<typeof baseTaskFrontmatter>[1] = {},
@@ -122,7 +113,7 @@ function taskFile(store: TestStore) {
 
 describe("P14-LV-02: acceptance respects the workflow graph", () => {
   it("refuses to accept a TRIAGE task through the operator's recommendation (the live defect)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "triage",
       waiting: "human",
@@ -140,7 +131,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
       applyRecommendation(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-accept" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -152,14 +143,14 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
       applyRecommendation(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-accept" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ message: expect.stringContaining("Review") });
   });
 
   it("F18-7: an UNKNOWN recommendation id 409s with copy that does not mis-claim 'already resolved'", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "impl",
       waiting: "human",
@@ -176,7 +167,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     const rejection = applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-does-not-exist" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await expect(rejection).rejects.toMatchObject({ status: 409 });
@@ -192,7 +183,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     // and then 403'd by the inner approve-transition tier, silently. Owner
     // ruling R15-3 (2026-07-28): the owner may apply ANY recommendation on
     // their own task. This FAILED on pre-pass-15 main (the apply threw 403).
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const rec = {
       id: "r-back",
       kind: "transition" as const,
@@ -209,7 +200,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     const fm = taskFile(store).parsed.frontmatter;
@@ -218,7 +209,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
   });
 
   it("R15-3 does not widen the outer gate: a contributor who does NOT own the task still cannot apply", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     const rec = {
       id: "r-back2",
       kind: "transition" as const,
@@ -236,7 +227,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
       applyRecommendation(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back2" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -246,20 +237,20 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: "r-back2" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
   });
 
   it("refuses a manual board move from Triage straight to Done", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "triage" });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -267,12 +258,12 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
   });
 
   it("accepts from the REVIEW stage — the boundary the workflow declares", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "review", waiting: "human" });
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("done");
@@ -284,12 +275,12 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     // `heldAtStage` keeps the stranded backstop quiet while the operator's
     // recorded hold stands. Any real move re-litigates it — and a stale marker
     // for a different stage must not ambush the task if it ever returns.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "triage", waiting: "human", heldAtStage: "triage" });
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const fm = taskFile(store).parsed.frontmatter;
@@ -298,12 +289,12 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
   });
 
   it("derives 'none' for accepted work nothing was ever delivered for", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "review", waiting: "human" });
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // The old code stamped "healthy" here, which is how a task with no diff at
@@ -312,7 +303,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
   });
 
   it("derives 'healthy' when every required reviewer really approved the revision", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -326,7 +317,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).parsed.frontmatter.validation).toBe("healthy");
@@ -346,12 +337,12 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
    * the bypassed gate in the audit row — which is what this asserts.
    */
   it("an admin can still force-accept off-boundary, and the audit names the graph gate", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "triage" });
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).parsed.frontmatter.stage).toBe("done");
@@ -361,7 +352,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
   });
 
   it("at the review boundary the audited override still works, and names the gate it bypassed", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     // Delivered work with no approving verdict — the wedged process gate DG-2
     // exists for, at the boundary acceptance is exercised from.
     seed(store, {
@@ -375,7 +366,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).parsed.frontmatter.stage).toBe("done");
@@ -385,13 +376,13 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
   });
 
   it("the same gate holds on the packet path", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", waiting: "human" }, ACCEPT_PACKET);
     await expect(
       resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -402,7 +393,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
 
 describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
   it("blocks acceptance on a PR the cache knows conflicts, naming the real cause", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -413,7 +404,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -426,7 +417,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
   });
 
   it("refuses when GitHub reports the conflict only at merge time", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -444,7 +435,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -455,7 +446,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
   });
 
   it("an admin CAN force past a conflict, and the timeline says what is really pending", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -472,7 +463,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const file = taskFile(store);
@@ -494,7 +485,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
   it("ruling 135: an admin forcing past a conflict on an UNPUSHED revision is told to deliver, never to rebase", async () => {
     // Canary: keep the rebase sentence in `attemptAcceptanceMerge`'s
     // not_mergeable arm regardless of the record.
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -515,7 +506,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
     await forceAcceptCompletion(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const file = taskFile(store);
@@ -528,7 +519,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
   });
 
   it("an unreachable merge still accepts, but names the honest cause", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -546,7 +537,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const file = taskFile(store);
@@ -558,7 +549,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
 
 describe("P14-GV-05: no external merge under a stale decision", () => {
   it("re-checks the packet identity BEFORE the merge call", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(
       store,
       {
@@ -579,7 +570,7 @@ describe("P14-GV-05: no external merge under a stale decision", () => {
     const pending = resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     writeTask(store.dataRoot, store.slug, {
@@ -614,12 +605,12 @@ describe("R14-2: a task owner governs the decisions on their own task", () => {
   }
 
   it("the contributor OWNER may dismiss any recommendation on their task", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     ownedRec(store, "transition");
     const { label } = await dismissRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: "r1" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(label).toBe("Move VIB-1 to Done");
@@ -627,19 +618,19 @@ describe("R14-2: a task owner governs the decisions on their own task", () => {
   });
 
   it("the contributor OWNER may apply an accept_completion recommendation", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     ownedRec(store, "accept_completion");
     await applyRecommendation(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", recId: "r1" },
-      actor(store.users.selin),
+      actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).parsed.frontmatter.stage).toBe("done");
   });
 
   it("a contributor who does NOT own the task is still refused (403, no existence leak)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -652,7 +643,7 @@ describe("R14-2: a task owner governs the decisions on their own task", () => {
       dismissRecommendation(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", recId: "r1" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -662,7 +653,7 @@ describe("R14-2: a task owner governs the decisions on their own task", () => {
       applyRecommendation(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-404", recId: "r1" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -671,7 +662,7 @@ describe("R14-2: a task owner governs the decisions on their own task", () => {
 
 describe("R14-3: the task archive", () => {
   it("archives with a note, withdraws the open decision, and is restorable", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(
       store,
       {
@@ -686,7 +677,7 @@ describe("R14-3: the task archive", () => {
     const archived = await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
-      actor(store.users.murat), // maintainer
+      actorOf(store.users.murat), // maintainer
       { dataRoot: store.dataRoot },
     );
     expect(archived.archived).toBe(true);
@@ -706,7 +697,7 @@ describe("R14-3: the task archive", () => {
     const restored = await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", archived: false },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(restored.archived).toBe(false);
@@ -717,26 +708,26 @@ describe("R14-3: the task archive", () => {
   });
 
   it("is maintainer+ (a contributor — even the owner — cannot archive)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "review", ownerUserId: store.users.selin.id });
     await expect(
       setTaskArchived(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("is idempotent — re-archiving writes no second note or audit row", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "review", archived: true });
     const events = taskFile(store).parsed.timeline.length;
     const result = await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(result.toast).toContain("already archived");
@@ -745,13 +736,13 @@ describe("R14-3: the task archive", () => {
   });
 
   it("an archived task cannot be accepted — restore it first (GV-02 copy is now true)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "review", waiting: "none", archived: true });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -770,13 +761,13 @@ describe("R14-3: the task archive", () => {
    * animated the move. Both writers now refuse it up front.
    */
   it("an archived task cannot be moved between stages at all — not just into Done", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", waiting: "none", archived: true });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -788,13 +779,13 @@ describe("R14-3: the task archive", () => {
   });
 
   it("an archived task cannot be dragged on the board either (reorderTask)", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", waiting: "none", archived: true });
     await expect(
       reorderTask(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -805,12 +796,12 @@ describe("R14-3: the task archive", () => {
   });
 
   it("a LIVE task still moves — the guard keys off `archived`, not the stage", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", waiting: "none" });
     const moved = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(moved.stage).toBe("review");
@@ -828,13 +819,13 @@ describe("R14-3: the task archive", () => {
  */
 describe("F19-38: an archived task cannot be moved on the board", () => {
   it("refuses a MANUAL non-terminal transition (409), and the stage is untouched", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", archived: true });
     await expect(
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-        actor(store.users.arda), // admin — the widest human authority there is
+        actorOf(store.users.arda), // admin — the widest human authority there is
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -845,7 +836,7 @@ describe("F19-38: an archived task cannot be moved on the board", () => {
   });
 
   it("refuses the OPERATOR's own transition too — archive outranks agent authority", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "ready", archived: true });
     await expect(
       transitionStage(
@@ -859,13 +850,13 @@ describe("F19-38: an archived task cannot be moved on the board", () => {
   });
 
   it("refuses a cross-stage reorderTask (the drag path) — no stage move, no rank write", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", archived: true, boardRank: 100 });
     await expect(
       reorderTask(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", beforeKey: null },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -875,13 +866,13 @@ describe("F19-38: an archived task cannot be moved on the board", () => {
   });
 
   it("refuses a SAME-stage reorderTask as well — the rank write never reaches transitionStage", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", archived: true, boardRank: 100 });
     await expect(
       reorderTask(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: null },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -889,18 +880,18 @@ describe("F19-38: an archived task cannot be moved on the board", () => {
   });
 
   it("moves normally once RESTORED — the guard is a disposition gate, not a freeze", async () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, { stage: "impl", archived: true });
     await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", archived: false },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile(store).parsed.frontmatter.stage).toBe("review");
@@ -909,7 +900,7 @@ describe("F19-38: an archived task cannot be moved on the board", () => {
 
 describe("P14-LV-06: the acceptance affordance the queue promises", () => {
   it("is true for a maintainer and for the owner at the boundary — with no recommendation in sight", () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
@@ -941,7 +932,7 @@ describe("P14-LV-06: the acceptance affordance the queue promises", () => {
   });
 
   it("reports the exact blocker instead of an affordance that would 409", () => {
-    const store = prepared();
+    const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
