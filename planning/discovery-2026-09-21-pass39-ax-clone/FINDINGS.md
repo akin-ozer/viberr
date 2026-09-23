@@ -389,6 +389,13 @@ what they strand, and record an optional reason.
   fetch` and `git pull` cannot reach origin, and that the operator brings the branch up to date
   on the server. Test: `specialist-run.server.test.ts` "F39-59".
 
+- **F39-60 (LOW) — the operator could not tell which packets were its own to withdraw.** AX-28
+  02:12 and AX-31 02:39: each operator judged an agent's question already answered and planned
+  `resolve_packet` on it, and each was refused ("raised by agent:codex/developer
+  (Implementation), not by you. Only a human can resolve an agent's question"), leaving a "plan
+  was not carried out in full" note. The snapshot handed over the packet's content "to judge
+  whether the packet is now moot" and never who raised it. **Fixed: ruling 437.**
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

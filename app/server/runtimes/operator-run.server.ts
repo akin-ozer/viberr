@@ -4893,8 +4893,31 @@ const operatorTurnInstruction = (
   // because the turn that planned it was usually a report's, which returns
   // before the stage rules.
   const unrefreshable = refreshBoundaryInstruction(args[0]);
-  return `${standing}${refused}${decided}${colliding}${unrefreshable}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  // Ruling 437: whose the open packet is, for the same reason.
+  const notYours = packetAuthorInstruction(args[0]);
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${notYours}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
 };
+
+/**
+ * Ruling 437 (pass 39, F39-60): the open packet is not the operator's to
+ * withdraw.
+ *
+ * The snapshot carried the packet's content "to judge whether the packet is
+ * now moot", and several turn texts say "if it is genuinely moot,
+ * `resolve_decision_packet` it". It never said who raised it, which is all the
+ * refusal reads. Live on ax-clone the operator planned `resolve_packet` on an
+ * agent's question twice in half an hour (AX-28 02:12, AX-31 02:39), each a
+ * "plan was not carried out in full" note.
+ */
+export function packetAuthorInstruction(snapshot: OperatorTaskSnapshot): string {
+  const packet = snapshot.packet;
+  if (!packet || packet.yours) return "";
+  return (
+    `The open decision packet was raised by ${packet.raisedBy}, not by you (\`packet.yours: false\`). ` +
+    "Only a person resolves it, so `resolve_packet` is refused, however moot it looks. Leave it " +
+    "standing, and put anything you would recommend in a comment.\n\n"
+  );
+}
 
 /**
  * Ruling 424 (pass 39): the branch refresh is not the operator's at the

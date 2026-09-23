@@ -15,6 +15,7 @@ import {
   deliveringEngagement,
   supportingEngagements,
   type Recommendation,
+  type TaskPacket,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -6240,6 +6241,40 @@ describe("ruling 424: the operator snapshot carries the branch-refresh refusal",
     seed("5241ef1ecb39682151e01884e00fe715b246d8be");
     expect(snapOf().pr?.mergeable).toBe("conflicting");
     expect(snapOf().notRefreshableReason).toBeNull();
+  });
+});
+
+/**
+ * Ruling 437 (pass 39, F39-60): the snapshot says who raised the open packet,
+ * with the refusal's own predicate, so the operator can tell a packet it may
+ * withdraw from one only a person answers.
+ */
+describe("ruling 437: the operator snapshot names who raised the open packet", () => {
+  it("an operator's packet is yours, an agent's question and the policy engine's are not", () => {
+    // CANARY: answer `yours: true` for every packet.
+    const seed = (packet: TaskPacket) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+        packet,
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      return operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full")).packet;
+    };
+    const base: TaskPacket = {
+      id: "pkt_1",
+      type: "input",
+      kind: "Decision required",
+      from: "operator",
+      title: "t",
+      body: "",
+      observations: [],
+      options: [],
+    };
+    expect(seed({ ...base, from: "operator" })).toMatchObject({ raisedBy: "operator", yours: true });
+    expect(
+      seed({ ...base, kind: "Agent question", from: "agent:codex/developer (Implementation)", askedBy: "developer" }),
+    ).toMatchObject({ raisedBy: "agent:codex/developer (Implementation)", yours: false });
+    expect(seed({ ...base, from: "policy-engine" })).toMatchObject({ raisedBy: "policy-engine", yours: false });
   });
 });
 

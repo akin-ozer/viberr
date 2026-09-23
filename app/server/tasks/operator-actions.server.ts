@@ -1196,6 +1196,18 @@ function retryOtherBackendDefaults(
   return defaults;
 }
 
+/**
+ * B2 as ruling 437 exposes it: a packet the operator may withdraw is one it
+ * raised. `from` is stamped by each writer ("operator" for the operator's own,
+ * the agent's actor ref for a question, the policy engine for its escalations),
+ * and a question an agent asked through the operator still names the agent in
+ * `askedBy`. One predicate for the refusal and for the snapshot that warns
+ * about it, so the two cannot disagree.
+ */
+export function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolean {
+  return packet.from === "operator" && !packet.askedBy;
+}
+
 /** Open a typed human-decision packet and notify the task's supervisors. */
 /**
  * Ruling 161: the one sentence naming why a `discard_branch` option cannot be
@@ -1916,7 +1928,7 @@ export async function operatorResolvePacket(
   // now has no surface, and the R15-14 `askedBy` resume (which fires from the
   // human's resolution) never runs. `from` is stamped by the writer:
   // "operator" here, the agent's actor ref in `buildAgentQuestionPacket`.
-  if (packet.from !== "operator" || packet.askedBy) {
+  if (!packetIsOperators(packet)) {
     // F39-10: `noop` — WHO raised the open packet is task state, the same kind
     // of fact as "no open decision packet to resolve" one branch above, which
     // has always been a noop. `generate-packets` is granted either way.
@@ -1937,7 +1949,7 @@ export async function operatorResolvePacket(
     // (never an agent question that landed in the window), and it must be the
     // same packet this decision was made about (F10-09 ids).
     const current = parsed.packet;
-    if (!current || current.from !== "operator" || current.askedBy) return;
+    if (!current || !packetIsOperators(current)) return;
     if (packet.id && current.id !== packet.id) return;
     parsed.packet = null;
     withdrawn = true;
@@ -2511,6 +2523,13 @@ export interface OperatorTaskSnapshot {
     /** Ruling 138: `goal_edit` once an edit_goal option was confirmed — the
      *  packet is decided and waits for the edited goal, so do not re-ask. */
     awaiting: "goal_edit" | null;
+    /** Ruling 437: who raised it, as the packet records it ("operator", an
+     *  agent's ref, "policy-engine"). */
+    raisedBy: string;
+    /** Ruling 437: whether `resolve_packet` may withdraw it, read with the
+     *  refusal's own condition: only a packet the operator raised, never an
+     *  agent's question. */
+    yours: boolean;
   } | null;
   /**
    * Ruling 402 (F39-29): the CHAIN this task is one link of.
@@ -3284,6 +3303,8 @@ export function operatorSnapshot(
           body: file.parsed.packet.body,
           options: file.parsed.packet.options.map((o) => o.t),
           awaiting: file.parsed.packet.awaiting ?? null,
+          raisedBy: file.parsed.packet.from,
+          yours: packetIsOperators(file.parsed.packet),
         }
       : null,
     timelineTotal: file.parsed.timeline.length,

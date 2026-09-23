@@ -1693,6 +1693,34 @@ describe("pr-diverged turn instruction (both backends)", () => {
     );
   });
 
+  it("ruling 437: a packet the operator did not raise is named as not its own, on every trigger", () => {
+    // Live on AX-28 (02:12) and AX-31 (02:39): `resolve_packet` planned on an
+    // agent's question and refused. CANARY: drop `packetAuthorInstruction`.
+    const question = {
+      type: "input" as const,
+      title: "Choose the signal-classification contract",
+      body: "",
+      options: ["Use a wait-status supervisor"],
+      awaiting: null,
+      raisedBy: "agent:codex/developer (Implementation)",
+      yours: false,
+    };
+    for (const trigger of ["agent-reply", "manual", "scheduled"] as const) {
+      const prompt = buildCodexOperatorPrompt(
+        snapshot({ openPacket: true, packet: question }),
+        trigger,
+        undefined,
+        trigger === "agent-reply" ? "Asked the owner." : undefined,
+      );
+      expect(prompt, trigger).toContain(
+        "The open decision packet was raised by agent:codex/developer (Implementation), not by you",
+      );
+      expect(prompt, trigger).toContain("`resolve_packet` is refused, however moot it looks");
+    }
+    const own = { ...question, raisedBy: "operator", yours: true };
+    expect(buildCodexOperatorPrompt(snapshot({ openPacket: true, packet: own }), "manual")).not.toContain("not by you");
+  });
+
   it("ruling 418: a reviewer's defect class becomes a proposed convention, on the turn the verdict arrives and on the stage rules", () => {
     // CANARY: drop either sentence and the turn the verdict lands on, or every
     // later manual/scheduled turn, says nothing about the rulings learning.
