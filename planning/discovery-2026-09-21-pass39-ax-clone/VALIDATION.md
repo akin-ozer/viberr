@@ -1447,3 +1447,10 @@ not lost work.
   package passed twenty times in a row (`-count=20`, 63.8 s). The flake that the AX-31 reviewer
   hit is gone from main, and the gates-document rule the controller wrote at 04:32 is what the
   three operators were working to in the meantime.
+
+## 52. Deploy 4: the running instance is the branch (04:59 UTC)
+
+- `npm run deploy` of `ff9d0cab` (built 04:59:35) carries F39-65, the last code change. Boot at
+  04:59:48: integrity check clean, and the operators of the three interrupted tasks (AX-35,
+  AX-31, AX-5) re-invoked within 0.35 s. No error lines. The browser stayed signed in, and the
+  open transcript carries 125 task links.
