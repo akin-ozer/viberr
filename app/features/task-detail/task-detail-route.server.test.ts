@@ -1112,7 +1112,8 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
   it("a run-agent dispatch WITH a prompt records the human's own @Agent hand-off comment", async () => {
     // R21-9's law applied to the dispatch prompt: a directive that reaches an
     // agent off the record is invisible to supervision, so the route appends
-    // the dispatching human's own "@<Agent> <prompt>" comment after the start.
+    // the dispatching human's own "@<Agent> <prompt>" comment, before the start
+    // (ruling 375).
     queueFakeRun({
       lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
       keepRunning: true,
