@@ -590,6 +590,13 @@ what they strand, and record an optional reason.
   so a board conversation finishes with no signal anywhere. One option is a `controller`
   notification per reply, marked read when the conversation is opened on the page. Not built,
   because it reverses a documented design and adds a bell item to every turn.
+- **The "not on the PR" line can name a superseded revision for one reconcile pass.** AX-5,
+  04:14:40: the review queue said "PR #24 does not carry the delivered revision 509c0d1" eleven
+  seconds after the delivery reconcile minted `b82bb93`. The workspace reconcile re-measures
+  `unpushedRevision` only inside its `gh pr view` step, which a credential-less workspace skips.
+  The GitHub pass re-measures within five minutes, and the sentence stays true in substance
+  (the new head is not on the PR either). Dropping or re-pointing the record at the mint would
+  trade one stale sentence for another, so it is left.
 - **The accept dialog hedges a fact it has.** AX-28 03:31: "ax-28 is brought up to date with
   main first. If the base has moved, that merge commit is pushed to the branch and becomes the
   merge head." The branch already contained main (`7022aa5`), which the PR's `mergeable: clean`
