@@ -4160,8 +4160,18 @@ by rewriting those paragraphs:*
     Codex" with the one shared sentence. The boundary that does bind is Viberr's: the
     prompt omits every delivery step it may not take, the supporting run works in its own
     isolated checkout (P8), agents hold no credential, delivery is server-owned and
-    verdicts are revision-bound. The operator's OS-level network is no longer forced off —
-    it never had a shell tool anyway.
+    verdicts are revision-bound. The operator's OS-level network is no longer forced off.
+    *(Corrected 2026-09-24 — this sentence ended "it never had a shell tool anyway", and
+    ruling 184's parenthetical above says the operator "holds no shell tool at all and is
+    told so". Neither is true. Viberr disables no Codex command tool (the only `features`
+    `codexConfigForRun` sets are `apps`, `plugins` and `hooks`, all off), and the pinned
+    CLI (0.156.0) enables `shell_tool` and `unified_exec` by default, so a Codex operator is
+    offered a shell and told "all commands are permitted. Network access is enabled"
+    (`codex debug prompt-input` with the operator's settings). Its prompt relies on that:
+    since pass 24 (B-3) it tells the operator to run `git -C <checkout> show
+    origin/<default>:<path>`. What keeps the operator's hands off the tree is its contract
+    (ruling 207(b)), not a missing tool. On the local instance, 527 Codex operator runs
+    (2026-09-21 to 09-23) ran no command at all.)*
     (d) *What still binds on Codex.* Web SEARCH (`webSearchMode: "disabled"`) — the CLI's
     own tool, not the OS sandbox — so `use-web-search-fetch` keeps its both-backend
     enforcement; `disabled_tools` for MCP write tools (ruling 176); and every server-side

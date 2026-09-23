@@ -235,15 +235,32 @@ test("cross-stage drop onto a column body appends and the card changes column", 
     /\bdrop-preview\b/,
   );
 
+  // Triage stands before Ready, so this drop is a move BACK, and ruling 381
+  // has it ask why before anything is sent. This test predated that and waited
+  // for a request the dialog now withholds (as the Done-stage tests below once
+  // did for ruling 53): the release writes nothing, the reason is typed, and
+  // only the confirm submits it — on the same append slot.
+  let reorders = 0;
+  page.on("request", (r) => {
+    if ((r.postData() ?? "").includes("intent=reorder")) reorders += 1;
+  });
   const request = reorderPost(
     page,
     (body) => body.includes("taskKey=VIB-148") && body.includes("to=triage"),
   );
   await page.mouse.up();
+  const confirm = page.locator('dialog[data-screen-label="Move back dialog"]');
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText("VIB-148");
+  expect(reorders).toBe(0);
+  const reason = "Needs its PAT scope rules settled before it is ready.";
+  await confirm.getByLabel("Why").fill(reason);
+  await confirm.getByRole("button", { name: "Move back" }).click();
   const submitted = await request;
-  // Column-body drop is an append: the slot is empty.
-  expect(submitted.postData()).toContain("beforeKey=");
-  expect(submitted.postData()).not.toContain("beforeKey=VIB");
+  // Column-body drop is an append: the slot is empty. The reason rides along.
+  const form = new URLSearchParams(submitted.postData() ?? "");
+  expect(form.get("beforeKey")).toBe("");
+  expect(form.get("reason")).toBe(reason);
 
   // The server's answer, not the landing preview: the real card is in Triage,
   // last, and gone from Ready.
